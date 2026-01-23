@@ -1,6 +1,7 @@
 import { Button, Icon } from '@blueprintjs/core'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { flushSync } from 'react-dom'
 import {
   attachAgentSessionContextItem,
   aiIntent,
@@ -14,6 +15,7 @@ import {
   listDatasets,
   postAgentSessionMessage,
   removeAgentSessionContextItem,
+  runPipelineAgent,
   type AgentSessionContextItem,
   type AgentSessionEvent,
   type AIIntentResponse,
@@ -95,6 +97,66 @@ const resolveIntentReply = (intent: AIIntentResponse) => {
     ? safeText(intent.clarifying_question).trim()
     : safeText(intent.reply).trim()
   return text
+}
+
+const normalizeMessageText = (value: string) => value.replace(/\s+/g, ' ').trim()
+
+const areMessagesEquivalent = (left: ChatMessage, right: ChatMessage) => {
+  if (left.role !== right.role) {
+    return false
+  }
+  if (normalizeMessageText(left.text) !== normalizeMessageText(right.text)) {
+    return false
+  }
+  return true
+}
+
+const extractQuestions = (items: unknown) => {
+  const questionItems = Array.isArray(items) ? items : []
+  return questionItems
+    .map((item) => {
+      if (!item || typeof item !== 'object') {
+        return ''
+      }
+      const ref = item as Record<string, unknown>
+      return safeText(ref['question'] ?? ref['text']).trim()
+    })
+    .filter(Boolean)
+}
+
+const buildPipelineReply = (
+  response: Record<string, unknown>,
+  status: string,
+  runId: string,
+  planId: string,
+) => {
+  const summaryParts = [`Pipeline agent ${status}.`]
+  if (runId) {
+    summaryParts.push(`run_id=${runId}`)
+  }
+  if (planId) {
+    summaryParts.push(`plan_id=${planId}`)
+  }
+  const details: string[] = []
+  const intentIssues = Array.isArray(response['intent_issues']) ? response['intent_issues'] : []
+  const intentActions = Array.isArray(response['intent_actions']) ? response['intent_actions'] : []
+  const issueText = intentIssues.map((item) => safeText(item).trim()).filter((item) => item)
+  const actionText = intentActions.map((item) => safeText(item).trim()).filter((item) => item)
+  const validationErrors = Array.isArray(response['validation_errors']) ? response['validation_errors'] : []
+  const validationText = validationErrors.map((item) => safeText(item).trim()).filter((item) => item)
+  if (issueText.length > 0) {
+    details.push(`의도 검증 이슈: ${issueText.slice(0, 2).join(' | ')}`)
+  }
+  if (actionText.length > 0) {
+    details.push(`권장 조치: ${actionText.slice(0, 2).join(' | ')}`)
+  }
+  const questions = extractQuestions(response['questions'])
+  if (questions.length > 0) {
+    details.push(`재질문: ${questions.join(' ')}`)
+  } else if (validationText.length > 0) {
+    details.push(`검증 오류: ${validationText.slice(0, 2).join(' | ')}`)
+  }
+  return details.length > 0 ? `${summaryParts.join(' ')}\n${details.join('\n')}` : summaryParts.join(' ')
 }
 
 const truncatePreview = (value: unknown, maxChars = 220) => {
@@ -487,6 +549,11 @@ export const AIAgentPage = () => {
   const pipelineContext = useAppStore((state) => state.pipelineContext)
   const aiAgentContext = useAppStore((state) => state.aiAgentContext)
   const isAiAgentOpen = useAppStore((state) => state.isAiAgentOpen)
+  const pipelineAgentRequest = useAppStore((state) => state.pipelineAgentRequest)
+  const setPipelineAgentRequest = useAppStore((state) => state.setPipelineAgentRequest)
+  const pipelineAgentQuestions = useAppStore((state) => state.pipelineAgentQuestions)
+  const setPipelineAgentQuestions = useAppStore((state) => state.setPipelineAgentQuestions)
+  const setPipelineAgentRun = useAppStore((state) => state.setPipelineAgentRun)
   const queryClient = useQueryClient()
   const [extraItems, setExtraItems] = useState<ChatItem[]>([])
   const [planDetails, setPlanDetails] = useState<Record<string, { goal?: string; riskLevel?: string; requiresApproval?: boolean; steps?: PlanStepSummary[] }>>({})
@@ -497,10 +564,12 @@ export const AIAgentPage = () => {
   const [prompts] = useState(defaultPrompts)
   const [isContextOpen, setContextOpen] = useState(false)
   const [isUploadOpen, setUploadOpen] = useState(false)
+  const [pendingReplyId, setPendingReplyId] = useState<string | null>(null)
   const chatRef = useRef<HTMLDivElement | null>(null)
   const sessionIdRef = useRef('')
   const planFetchInFlightRef = useRef<Set<string>>(new Set())
   const attachedDatasetIdsRef = useRef<Set<string>>(new Set())
+  const isSendingRef = useRef(false)
   const canSend = draft.trim().length > 0 && !isSending
   const isAgentVisible = isAiAgentOpen || activeNav === 'ai-agent'
   const activeDbName = pipelineContext?.folderId ?? ''
@@ -665,7 +734,27 @@ export const AIAgentPage = () => {
       return eventItems
     }
     const seen = new Set(eventItems.map((item) => item.id))
-    return [...eventItems, ...extraItems.filter((item) => !seen.has(item.id))]
+    const eventMessages = eventItems.filter((item): item is ChatMessage & { kind: 'message' } => item.kind === 'message')
+    const matched = new Set<number>()
+    const deduped = extraItems.filter((item) => {
+      if (seen.has(item.id)) {
+        return false
+      }
+      if (item.kind === 'message') {
+        const matchIndex = eventMessages.findIndex((eventItem, index) => {
+          if (matched.has(index)) {
+            return false
+          }
+          return areMessagesEquivalent(item, eventItem)
+        })
+        if (matchIndex >= 0) {
+          matched.add(matchIndex)
+          return false
+        }
+      }
+      return true
+    })
+    return [...eventItems, ...deduped]
   }, [eventItems, extraItems])
 
   const planIdsToFetch = useMemo(() => {
@@ -736,6 +825,7 @@ export const AIAgentPage = () => {
     setExtraItems([])
     setPlanDetails({})
     setPlanActions({})
+    setPendingReplyId(null)
     planFetchInFlightRef.current = new Set()
   }, [activeDbName])
 
@@ -767,6 +857,7 @@ export const AIAgentPage = () => {
       setExtraItems([])
       setPlanDetails({})
       setPlanActions({})
+      setPendingReplyId(null)
       planFetchInFlightRef.current = new Set()
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to create agent session'
@@ -914,28 +1005,101 @@ export const AIAgentPage = () => {
     [sessionId, refreshContextItems],
   )
 
+  const resolveAssistantMessage = useCallback(
+    (text: string, pendingId?: string | null) => {
+      const reply = text.trim()
+      if (!reply) {
+        setPendingReplyId(null)
+        return
+      }
+      const timestamp = new Date().toISOString()
+      const targetId = pendingId ?? pendingReplyId
+      setExtraItems((current) => {
+        if (targetId) {
+          let updated = false
+          const next = current.map((item) => {
+            if (item.kind === 'message' && item.id === targetId) {
+              updated = true
+              return { ...item, text: reply, timestamp }
+            }
+            return item
+          })
+          if (updated) {
+            return next
+          }
+        }
+        return [...current, { kind: 'message', id: buildId(), role: 'assistant', text: reply, timestamp }]
+      })
+      setPendingReplyId(null)
+    },
+    [pendingReplyId],
+  )
+
   const handleSend = async () => {
     const text = draft.trim()
-    if (!text || isSending) {
+    if (!text || isSending || isSendingRef.current) {
       return
     }
-    setDraft('')
-    setIsSending(true)
+    isSendingRef.current = true
+    const timestamp = new Date().toISOString()
+    const pendingId = buildId()
+    flushSync(() => {
+      setDraft('')
+      setIsSending(true)
+      setExtraItems((current) => [
+        ...current,
+        { kind: 'message', id: buildId(), role: 'user', text, timestamp },
+        { kind: 'message', id: pendingId, role: 'assistant', text: '처리 중입니다...', timestamp },
+      ])
+      setPendingReplyId(pendingId)
+    })
+    const finishSend = () => {
+      isSendingRef.current = false
+      setIsSending(false)
+    }
     let activeSession: string
     try {
       activeSession = await ensureSession()
       await syncDatasetContext(activeSession)
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to create agent session'
-      const timestamp = new Date().toISOString()
-      setExtraItems((current) => [
-        ...current,
-        { kind: 'message', id: buildId(), role: 'user', text, timestamp },
-        { kind: 'message', id: buildId(), role: 'assistant', text: message, timestamp },
-      ])
-      setIsSending(false)
+      resolveAssistantMessage(message, pendingId)
+      finishSend()
       return
     }
+
+    if (pipelineAgentQuestions.length > 0 && pipelineAgentRequest) {
+      const answers: Record<string, unknown> = {}
+      if (pipelineAgentQuestions.length === 1) {
+        const question = pipelineAgentQuestions[0]
+        const questionId = safeText(question?.['id']).trim() || 'answer'
+        answers[questionId] = text
+      } else {
+        answers['freeform'] = text
+        answers['questions'] = pipelineAgentQuestions
+      }
+      try {
+        const response = await runPipelineAgent({
+          ...pipelineAgentRequest,
+          answers,
+        })
+        setPipelineAgentRun(response)
+        const status = safeText(response['status']).trim() || 'unknown'
+        const runId = safeText(response['run_id']).trim()
+        const planId = safeText(response['plan_id']).trim()
+        const questionItems = Array.isArray(response['questions']) ? response['questions'] : []
+        setPipelineAgentQuestions(questionItems)
+        const reply = buildPipelineReply(response, status, runId, planId)
+        resolveAssistantMessage(reply, pendingId)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Pipeline agent failed'
+        resolveAssistantMessage(message, pendingId)
+      } finally {
+        finishSend()
+      }
+      return
+    }
+
     const intentContext: Record<string, unknown> = {}
     if (aiAgentContext.nodes.length > 0) {
       intentContext.node_count = aiAgentContext.nodes.length
@@ -943,6 +1107,11 @@ export const AIAgentPage = () => {
     if (datasetIdsForNodes.length > 0) {
       intentContext.dataset_count = datasetIdsForNodes.length
     }
+    if (pipelineContext?.folderId) {
+      intentContext.pipeline_id = pipelineContext.folderId
+    }
+    intentContext.ui_surface = activeNav
+    intentContext.pipeline_builder_active = Boolean(pipelineContext?.folderId || aiAgentContext.nodes.length > 0)
     const preferredLanguage = typeof navigator !== 'undefined' ? navigator.language : null
     let intent: AIIntentResponse
     try {
@@ -956,51 +1125,32 @@ export const AIAgentPage = () => {
         session_id: activeSession,
       })
     } catch (error) {
-      const timestamp = new Date().toISOString()
       const message = error instanceof Error ? error.message : 'AI intent routing failed'
-      setExtraItems((current) => [
-        ...current,
-        { kind: 'message', id: buildId(), role: 'user', text, timestamp },
-        { kind: 'message', id: buildId(), role: 'assistant', text: message, timestamp },
-      ])
-      setIsSending(false)
+      resolveAssistantMessage(message, pendingId)
+      finishSend()
       return
     }
 
     if (intent.requires_clarification || intent.route === 'chat') {
-      const timestamp = new Date().toISOString()
       const reply = resolveIntentReply(intent)
       if (!reply) {
         const message = intent.requires_clarification
           ? 'LLM intent response missing clarifying_question'
           : 'LLM intent response missing reply'
-        setExtraItems((current) => [
-          ...current,
-          { kind: 'message', id: buildId(), role: 'user', text, timestamp },
-          { kind: 'message', id: buildId(), role: 'assistant', text: message, timestamp },
-        ])
-        setIsSending(false)
+        resolveAssistantMessage(message, pendingId)
+        finishSend()
         return
       }
-      setExtraItems((current) => [
-        ...current,
-        { kind: 'message', id: buildId(), role: 'user', text, timestamp },
-        { kind: 'message', id: buildId(), role: 'assistant', text: reply, timestamp },
-      ])
-      setIsSending(false)
+      resolveAssistantMessage(reply, pendingId)
+      finishSend()
       return
     }
 
     if (intent.route === 'query') {
-      const timestamp = new Date().toISOString()
-      setExtraItems((current) => [...current, { kind: 'message', id: buildId(), role: 'user', text, timestamp }])
       if (!activeDbName) {
         const reply = 'Missing active project/database for query.'
-        setExtraItems((current) => [
-          ...current,
-          { kind: 'message', id: buildId(), role: 'assistant', text: reply, timestamp },
-        ])
-        setIsSending(false)
+        resolveAssistantMessage(reply, pendingId)
+        finishSend()
         return
       }
       try {
@@ -1015,30 +1165,59 @@ export const AIAgentPage = () => {
         if (!answer) {
           throw new Error('LLM answer response missing answer')
         }
-        setExtraItems((current) => [
-          ...current,
-          {
-            kind: 'message',
-            id: buildId(),
-            role: 'assistant',
-            text: answer,
-            timestamp: new Date().toISOString(),
-          },
-        ])
+        resolveAssistantMessage(answer, pendingId)
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Query failed'
-        setExtraItems((current) => [
-          ...current,
-          {
-            kind: 'message',
-            id: buildId(),
-            role: 'assistant',
-            text: message,
-            timestamp: new Date().toISOString(),
-          },
-        ])
+        resolveAssistantMessage(message, pendingId)
       } finally {
-        setIsSending(false)
+        finishSend()
+      }
+      return
+    }
+
+    if (intent.route === 'plan' || intent.route === 'pipeline') {
+      if (!activeDbName) {
+        const reply = 'Missing active project/database for pipeline agent.'
+        resolveAssistantMessage(reply, pendingId)
+        finishSend()
+        return
+      }
+      const fallbackDatasetIds = datasets.map((dataset) => dataset.dataset_id)
+      const selectedDatasetIds = datasetIdsForNodes.length > 0 ? datasetIdsForNodes : fallbackDatasetIds
+      const uniqueDatasetIds = Array.from(new Set(selectedDatasetIds.filter(Boolean)))
+      if (uniqueDatasetIds.length === 0) {
+        const reply = 'No datasets available for pipeline agent. Select datasets or open a pipeline context first.'
+        resolveAssistantMessage(reply, pendingId)
+        finishSend()
+        return
+      }
+      const requestPayload = {
+        goal: text,
+        data_scope: {
+          db_name: activeDbName,
+          dataset_ids: uniqueDatasetIds,
+        },
+        max_transform: 2,
+        max_cleansing: 2,
+        max_repairs: 2,
+      }
+      setPipelineAgentRequest(requestPayload)
+      setPipelineAgentQuestions([])
+      try {
+        const response = await runPipelineAgent(requestPayload)
+        setPipelineAgentRun(response)
+        const status = safeText(response['status']).trim() || 'unknown'
+        const runId = safeText(response['run_id']).trim()
+        const planId = safeText(response['plan_id']).trim()
+        const questionItems = Array.isArray(response['questions']) ? response['questions'] : []
+        setPipelineAgentQuestions(questionItems)
+        const reply = buildPipelineReply(response, status, runId, planId)
+        resolveAssistantMessage(reply, pendingId)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Pipeline agent failed'
+        resolveAssistantMessage(message, pendingId)
+      } finally {
+        finishSend()
       }
       return
     }
@@ -1051,18 +1230,9 @@ export const AIAgentPage = () => {
       await refreshEvents(activeSession)
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Agent request failed'
-      setExtraItems((current) => [
-        ...current,
-        {
-          kind: 'message',
-          id: buildId(),
-          role: 'assistant',
-          text: message,
-          timestamp: new Date().toISOString(),
-        },
-      ])
+      resolveAssistantMessage(message, pendingId)
     } finally {
-      setIsSending(false)
+      finishSend()
     }
   }
 

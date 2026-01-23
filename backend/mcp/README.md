@@ -29,6 +29,15 @@ Custom MCP server exposing TerminusDB functionality:
 - Branch management
 - Query execution
 
+### 2.1 Pipeline MCP Server (`pipeline_mcp_server.py`)
+Custom MCP server exposing deterministic pipeline tools:
+- Build pipeline context packs (safe dataset/schema/sample summaries + join/pk/fk/cast/cleansing hints)
+- Assemble PipelinePlan artifacts via small plan-builder tool calls (add_input/add_join/add_cast/etc)
+- Preview a plan using the deterministic PipelineExecutor (sample-safe)
+- Inspect a preview sample to generate cleansing suggestions (preview_inspect)
+- Evaluate join quality (coverage/explosion) on sample-safe runs (plan_evaluate_joins)
+- Generate null/missing reports from context packs (context_pack_null_report)
+
 ### 3. MCP Client (`mcp_client.py`)
 Client implementation for connecting to MCP servers:
 - `MCPClientManager`: Manages multiple MCP connections

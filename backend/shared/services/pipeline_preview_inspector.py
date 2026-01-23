@@ -8,6 +8,7 @@ and propose safe cleansing actions.
 from __future__ import annotations
 
 from datetime import datetime
+import re
 from typing import Any, Dict, Iterable, List, Optional
 
 
@@ -16,6 +17,10 @@ _WHITESPACE_THRESHOLD = 0.05
 _EMPTY_THRESHOLD = 0.1
 _DUPLICATE_ROW_THRESHOLD = 0.1
 _CASE_VARIATION_THRESHOLD = 0.15
+_REGEX_CLEANSE_THRESHOLD = 0.2
+_EMAIL_HINTS = ("email", "e_mail")
+_PHONE_HINTS = ("phone", "mobile", "tel", "cell")
+_POSTAL_HINTS = ("zip", "postal", "postcode")
 
 
 def _iter_values(rows: Iterable[Dict[str, Any]], column: str) -> List[Any]:
@@ -99,6 +104,19 @@ def _looks_like_id(name: str) -> bool:
     if lowered.endswith("id") and len(lowered) <= 6:
         return True
     return False
+
+
+def _domain_hint(name: str) -> Optional[str]:
+    lowered = str(name or "").strip().lower()
+    if not lowered:
+        return None
+    if any(token in lowered for token in _EMAIL_HINTS):
+        return "email"
+    if any(token in lowered for token in _PHONE_HINTS):
+        return "phone"
+    if any(token in lowered for token in _POSTAL_HINTS):
+        return "postal"
+    return None
 
 
 def _row_key(row: Dict[str, Any], columns: List[str]) -> tuple:
@@ -244,6 +262,43 @@ def inspect_preview(preview: Dict[str, Any]) -> Dict[str, Any]:
                         "reason": "case variations detected",
                     }
                 )
+            domain = _domain_hint(col_name)
+            if domain == "phone":
+                noisy = sum(1 for value in values if re.search(r"[^0-9+]", str(value)))
+                if _ratio(noisy, len(values)) >= _REGEX_CLEANSE_THRESHOLD:
+                    suggestions.append(
+                        {
+                            "column": col_name,
+                            "operation": "regexReplace",
+                            "pattern": r"[^0-9+]+",
+                            "replacement": "",
+                            "reason": "phone formatting characters detected",
+                        }
+                    )
+            elif domain == "postal":
+                noisy = sum(1 for value in values if re.search(r"[\s-]", str(value)))
+                if _ratio(noisy, len(values)) >= _REGEX_CLEANSE_THRESHOLD:
+                    suggestions.append(
+                        {
+                            "column": col_name,
+                            "operation": "regexReplace",
+                            "pattern": r"[\s-]+",
+                            "replacement": "",
+                            "reason": "postal code separators detected",
+                        }
+                    )
+            elif domain == "email":
+                noisy = sum(1 for value in values if re.search(r"\s", str(value)))
+                if _ratio(noisy, len(values)) >= _REGEX_CLEANSE_THRESHOLD:
+                    suggestions.append(
+                        {
+                            "column": col_name,
+                            "operation": "regexReplace",
+                            "pattern": r"\s+",
+                            "replacement": "",
+                            "reason": "whitespace detected in emails",
+                        }
+                    )
 
     if rows and columns:
         column_names: List[str] = []

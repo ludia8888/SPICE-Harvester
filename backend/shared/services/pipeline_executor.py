@@ -9,6 +9,7 @@ from __future__ import annotations
 import ast
 import json
 import os
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -517,18 +518,18 @@ class PipelineExecutor:
         operation = normalize_operation(metadata.get("operation"))
         if not operation and len(inputs) >= 2:
             raise ValueError("transform has multiple inputs but no operation")
-            if operation == "join" and len(inputs) >= 2:
-                join_spec = resolve_join_spec(metadata)
-                return _join_tables(
-                    inputs[0],
-                    inputs[1],
-                    join_type=join_spec.join_type,
-                    left_key=join_spec.left_key,
-                    right_key=join_spec.right_key,
-                    left_keys=join_spec.left_keys,
-                    right_keys=join_spec.right_keys,
-                    allow_cross_join=join_spec.allow_cross_join,
-                )
+        if operation == "join" and len(inputs) >= 2:
+            join_spec = resolve_join_spec(metadata)
+            return _join_tables(
+                inputs[0],
+                inputs[1],
+                join_type=join_spec.join_type,
+                left_key=join_spec.left_key,
+                right_key=join_spec.right_key,
+                left_keys=join_spec.left_keys,
+                right_keys=join_spec.right_keys,
+                allow_cross_join=join_spec.allow_cross_join,
+            )
         if operation == "filter":
             return _filter_table(inputs[0], str(metadata.get("expression") or ""), parameters)
         if operation == "compute":
@@ -561,6 +562,10 @@ class PipelineExecutor:
                     lowercase=bool(metadata.get("lowercase", False)),
                     uppercase=bool(metadata.get("uppercase", False)),
                 )
+        if operation == "regexReplace":
+            rules = _normalize_regex_rules(metadata)
+            if rules:
+                return _regex_replace_table(inputs[0], rules)
         if operation == "cast":
             casts = metadata.get("casts") or []
             if casts:
@@ -925,12 +930,18 @@ def _cast_value_with_status(value: Any, target: str, *, cast_mode: str) -> tuple
     normalized = normalize_cast_target(target)
     if value is None:
         return None, False, False
-    text = str(value).strip() if not isinstance(value, bool) else str(value)
     if normalized == "xsd:string":
+        # Preserve structured values (lists/dicts) so downstream transforms like explode can operate.
+        if isinstance(value, (list, dict)):
+            return value, False, False
+        if isinstance(value, tuple):
+            return list(value), False, False
+        text = str(value).strip() if not isinstance(value, bool) else str(value)
         if cast_mode == "SAFE_NULL" and text == "":
             return None, False, False
         return text, False, False
 
+    text = str(value).strip() if not isinstance(value, bool) else str(value)
     if text == "":
         if cast_mode == "SAFE_NULL":
             return None, False, False
@@ -1439,6 +1450,87 @@ def _normalize_table(
                 if empty_to_null and text == "":
                     text = None
                 next_row[col] = text
+        rows.append(next_row)
+    return PipelineTable(columns=table.columns, rows=rows)
+
+
+def _regex_flags(raw: Any) -> int:
+    if raw is None:
+        return 0
+    text = str(raw or "")
+    flags = 0
+    if "i" in text:
+        flags |= re.IGNORECASE
+    if "m" in text:
+        flags |= re.MULTILINE
+    if "s" in text:
+        flags |= re.DOTALL
+    return flags
+
+
+def _normalize_regex_rules(metadata: Dict[str, Any]) -> List[Dict[str, Any]]:
+    rules: List[Dict[str, Any]] = []
+    raw_rules = metadata.get("rules")
+    if isinstance(raw_rules, list) and raw_rules:
+        for rule in raw_rules:
+            if not isinstance(rule, dict):
+                continue
+            column = str(rule.get("column") or "").strip()
+            pattern = str(rule.get("pattern") or "").strip()
+            if not column or not pattern:
+                continue
+            rules.append(
+                {
+                    "column": column,
+                    "pattern": pattern,
+                    "replacement": str(rule.get("replacement") or ""),
+                    "flags": rule.get("flags"),
+                }
+            )
+        return rules
+    pattern = str(metadata.get("pattern") or "").strip()
+    if not pattern:
+        return rules
+    columns = metadata.get("columns") or []
+    for col in columns if isinstance(columns, list) else [columns]:
+        col_name = str(col or "").strip()
+        if not col_name:
+            continue
+        rules.append(
+            {
+                "column": col_name,
+                "pattern": pattern,
+                "replacement": str(metadata.get("replacement") or ""),
+                "flags": metadata.get("flags"),
+            }
+        )
+    return rules
+
+
+def _regex_replace_table(table: PipelineTable, rules: List[Dict[str, Any]]) -> PipelineTable:
+    if not rules:
+        return table
+    compiled: List[Tuple[str, re.Pattern[str], str]] = []
+    for rule in rules:
+        column = str(rule.get("column") or "").strip()
+        pattern = str(rule.get("pattern") or "").strip()
+        if not column or not pattern:
+            continue
+        flags = _regex_flags(rule.get("flags"))
+        compiled.append((column, re.compile(pattern, flags=flags), str(rule.get("replacement") or "")))
+    if not compiled:
+        return table
+    rows: List[Dict[str, Any]] = []
+    for row in table.rows:
+        next_row = dict(row)
+        for column, regex, replacement in compiled:
+            if column not in next_row:
+                continue
+            value = next_row.get(column)
+            if value is None:
+                continue
+            text = str(value)
+            next_row[column] = regex.sub(replacement, text)
         rows.append(next_row)
     return PipelineTable(columns=table.columns, rows=rows)
 

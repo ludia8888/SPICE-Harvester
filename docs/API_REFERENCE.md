@@ -111,6 +111,9 @@ python scripts/generate_api_reference.py
 - `POST /api/v1/databases/{db_name}/actions/{action_type_id}/simulate`
 - `POST /api/v1/databases/{db_name}/actions/{action_type_id}/submit`
 
+### Admin
+- `POST /api/v1/admin/ci/ci-results`
+
 ### Admin Operations
 - `POST /api/v1/admin/cleanup-old-replays`
 - `GET /api/v1/admin/lakefs/credentials`
@@ -123,9 +126,15 @@ python scripts/generate_api_reference.py
 - `GET /api/v1/admin/system-health`
 
 ### Agent
+- `POST /api/v1/agent/pipeline-runs`
 - `POST /api/v1/agent/runs`
 - `GET /api/v1/agent/runs/{run_id}`
 - `GET /api/v1/agent/runs/{run_id}/events`
+
+### Agent Functions
+- `GET /api/v1/agent-functions`
+- `POST /api/v1/agent-functions`
+- `POST /api/v1/agent-functions/{function_id}/execute`
 
 ### Agent Model Admin
 - `GET /api/v1/admin/agent-models`
@@ -150,10 +159,15 @@ python scripts/generate_api_reference.py
 ### Agent Sessions
 - `GET /api/v1/agent-sessions`
 - `POST /api/v1/agent-sessions`
+- `GET /api/v1/agent-sessions/metrics/llm-usage`
 - `GET /api/v1/agent-sessions/{session_id}`
 - `DELETE /api/v1/agent-sessions/{session_id}`
 - `GET /api/v1/agent-sessions/{session_id}/approvals`
 - `POST /api/v1/agent-sessions/{session_id}/approvals/{approval_request_id}`
+- `GET /api/v1/agent-sessions/{session_id}/ci-results`
+- `POST /api/v1/agent-sessions/{session_id}/ci-results`
+- `POST /api/v1/agent-sessions/{session_id}/clarifications`
+- `POST /api/v1/agent-sessions/{session_id}/context/file-upload`
 - `GET /api/v1/agent-sessions/{session_id}/context/items`
 - `POST /api/v1/agent-sessions/{session_id}/context/items`
 - `DELETE /api/v1/agent-sessions/{session_id}/context/items/{item_id}`
@@ -161,13 +175,17 @@ python scripts/generate_api_reference.py
 - `GET /api/v1/agent-sessions/{session_id}/jobs`
 - `POST /api/v1/agent-sessions/{session_id}/jobs`
 - `GET /api/v1/agent-sessions/{session_id}/jobs/{job_id}`
+- `GET /api/v1/agent-sessions/{session_id}/llm-calls`
 - `POST /api/v1/agent-sessions/{session_id}/messages`
 - `POST /api/v1/agent-sessions/{session_id}/messages/remove`
 - `PUT /api/v1/agent-sessions/{session_id}/model`
 - `GET /api/v1/agent-sessions/{session_id}/models`
 - `POST /api/v1/agent-sessions/{session_id}/summarize`
+- `GET /api/v1/agent-sessions/{session_id}/token-budget`
+- `GET /api/v1/agent-sessions/{session_id}/tool-calls`
 - `GET /api/v1/agent-sessions/{session_id}/tools`
 - `PUT /api/v1/agent-sessions/{session_id}/tools`
+- `PUT /api/v1/agent-sessions/{session_id}/variables`
 
 ### Agent Tool Admin
 - `GET /api/v1/admin/agent-tools`
@@ -175,6 +193,7 @@ python scripts/generate_api_reference.py
 - `GET /api/v1/admin/agent-tools/{tool_id}`
 
 ### AI
+- `POST /api/v1/ai/intent`
 - `POST /api/v1/ai/query/{db_name}`
 - `POST /api/v1/ai/translate/query-plan/{db_name}`
 
@@ -208,6 +227,10 @@ python scripts/generate_api_reference.py
 - `GET /api/v1/config/config/report`
 - `GET /api/v1/config/config/security-audit`
 - `GET /api/v1/config/config/validation`
+
+### Context Tools
+- `POST /api/v1/context-tools/datasets/describe`
+- `POST /api/v1/context-tools/ontology/snapshot`
 
 ### context7
 - `POST /api/v1/context7/analyze/ontology`
@@ -247,6 +270,9 @@ python scripts/generate_api_reference.py
 - `GET /api/v1/databases/{db_name}/classes/{class_id}`
 - `GET /api/v1/databases/{db_name}/expected-seq`
 - `GET /api/v1/databases/{db_name}/versions`
+
+### Document Bundles
+- `POST /api/v1/document-bundles/{bundle_id}/search`
 
 ### Governance
 - `GET /api/v1/access-policies`
@@ -339,9 +365,6 @@ python scripts/generate_api_reference.py
 - `GET /api/v1/databases/{db_name}/ontology/interfaces/{resource_id}`
 - `PUT /api/v1/databases/{db_name}/ontology/interfaces/{resource_id}`
 - `DELETE /api/v1/databases/{db_name}/ontology/interfaces/{resource_id}`
-- `GET /api/v1/databases/{db_name}/ontology/link-types/{resource_id}`
-- `PUT /api/v1/databases/{db_name}/ontology/link-types/{resource_id}`
-- `DELETE /api/v1/databases/{db_name}/ontology/link-types/{resource_id}`
 - `GET /api/v1/databases/{db_name}/ontology/proposals`
 - `POST /api/v1/databases/{db_name}/ontology/proposals`
 - `POST /api/v1/databases/{db_name}/ontology/proposals/{proposal_id}/approve`
@@ -412,6 +435,7 @@ python scripts/generate_api_reference.py
 - `GET /api/v1/pipelines/datasets/ingest-requests/{ingest_request_id}`
 - `POST /api/v1/pipelines/datasets/ingest-requests/{ingest_request_id}/schema/approve`
 - `POST /api/v1/pipelines/datasets/media-upload`
+- `GET /api/v1/pipelines/datasets/{dataset_id}/raw-file`
 - `POST /api/v1/pipelines/datasets/{dataset_id}/versions`
 - `POST /api/v1/pipelines/datasets/{dataset_id}/versions/{version_id}/funnel-analysis`
 - `GET /api/v1/pipelines/proposals`
@@ -429,6 +453,21 @@ python scripts/generate_api_reference.py
 - `POST /api/v1/pipelines/{pipeline_id}/proposals/reject`
 - `GET /api/v1/pipelines/{pipeline_id}/readiness`
 - `GET /api/v1/pipelines/{pipeline_id}/runs`
+
+### Pipeline Plans
+- `POST /api/v1/pipeline-plans/compile`
+- `POST /api/v1/pipeline-plans/context-pack`
+- `POST /api/v1/pipeline-plans/join-keys`
+- `GET /api/v1/pipeline-plans/{plan_id}`
+- `POST /api/v1/pipeline-plans/{plan_id}/cleanse`
+- `POST /api/v1/pipeline-plans/{plan_id}/evaluate-joins`
+- `POST /api/v1/pipeline-plans/{plan_id}/generate-specs`
+- `POST /api/v1/pipeline-plans/{plan_id}/inspect-preview`
+- `POST /api/v1/pipeline-plans/{plan_id}/preview`
+- `POST /api/v1/pipeline-plans/{plan_id}/repair`
+- `POST /api/v1/pipeline-plans/{plan_id}/split-outputs`
+- `POST /api/v1/pipeline-plans/{plan_id}/transform`
+- `POST /api/v1/pipeline-plans/{plan_id}/verify-intent`
 
 ### Query
 - `POST /api/v1/databases/{db_name}/query`

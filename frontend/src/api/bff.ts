@@ -811,7 +811,7 @@ export type AIQueryRequest = {
   session_id?: string | null
 }
 
-export type AIIntentRoute = 'chat' | 'query' | 'plan'
+export type AIIntentRoute = 'chat' | 'query' | 'plan' | 'pipeline'
 export type AIIntentType = 'greeting' | 'small_talk' | 'help' | 'data_query' | 'plan_request' | 'unknown'
 
 export type AIIntentRequest = {
@@ -866,6 +866,56 @@ export const aiIntent = async (payload: AIIntentRequest) => {
       body: JSON.stringify(payload),
     },
     'AI intent routing failed',
+  )
+  return data
+}
+
+export const runPipelineAgent = async (payload: {
+  goal: string
+  data_scope: Record<string, unknown>
+  planner_hints?: Record<string, unknown>
+  answers?: Record<string, unknown>
+  apply_specs?: boolean
+  max_transform?: number
+  max_cleansing?: number
+  max_repairs?: number
+}) => {
+  const data = await requestApi<Record<string, unknown>>(
+    '/api/v1/agent/pipeline-runs',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': createIdempotencyKey(),
+      },
+      body: JSON.stringify(payload),
+    },
+    'Failed to run pipeline agent',
+  )
+  return data
+}
+
+export const previewPipelinePlan = async (
+  planId: string,
+  payload: {
+    node_id?: string
+    limit?: number
+    include_run_tables?: boolean
+    run_table_limit?: number
+  },
+) => {
+  const encoded = encodeURIComponent(planId)
+  const data = await requestApi<Record<string, unknown>>(
+    `/api/v1/pipeline-plans/${encoded}/preview`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': createIdempotencyKey(),
+      },
+      body: JSON.stringify(payload),
+    },
+    'Failed to preview pipeline plan',
   )
   return data
 }

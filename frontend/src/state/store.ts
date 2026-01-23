@@ -19,6 +19,14 @@ export type AiAgentContext = {
   nodes: AiAgentContextNode[]
 }
 
+export type PipelineAgentRun = Record<string, unknown>
+
+export type PipelineAgentRequest = {
+  goal: string
+  data_scope: Record<string, unknown>
+  planner_hints?: Record<string, unknown>
+}
+
 type AppState = {
   activeNav: NavKey
   setActiveNav: (nav: NavKey) => void
@@ -28,6 +36,12 @@ type AppState = {
   setAiAgentOpen: (isOpen: boolean) => void
   aiAgentContext: AiAgentContext
   setAiAgentContext: (context: AiAgentContext) => void
+  pipelineAgentRun: PipelineAgentRun | null
+  setPipelineAgentRun: (run: PipelineAgentRun | null) => void
+  pipelineAgentRequest: PipelineAgentRequest | null
+  setPipelineAgentRequest: (request: PipelineAgentRequest | null) => void
+  pipelineAgentQuestions: Array<Record<string, unknown>>
+  setPipelineAgentQuestions: (questions: Array<Record<string, unknown>>) => void
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -39,4 +53,10 @@ export const useAppStore = create<AppState>((set) => ({
   setAiAgentOpen: (isAiAgentOpen) => set({ isAiAgentOpen }),
   aiAgentContext: { projectName: '', pipelineName: '', nodes: [] },
   setAiAgentContext: (aiAgentContext) => set({ aiAgentContext }),
+  pipelineAgentRun: null,
+  setPipelineAgentRun: (pipelineAgentRun) => set({ pipelineAgentRun }),
+  pipelineAgentRequest: null,
+  setPipelineAgentRequest: (pipelineAgentRequest) => set({ pipelineAgentRequest }),
+  pipelineAgentQuestions: [],
+  setPipelineAgentQuestions: (pipelineAgentQuestions) => set({ pipelineAgentQuestions }),
 }))

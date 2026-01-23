@@ -3921,6 +3921,50 @@ class PipelineWorker:
             casts = metadata.get("casts") or []
             if casts:
                 return self._apply_casts(inputs[0], casts)
+        if operation == "regexReplace":
+            rules = metadata.get("rules") or []
+            df = inputs[0]
+            if rules:
+                for rule in rules:
+                    if not isinstance(rule, dict):
+                        continue
+                    column = str(rule.get("column") or "").strip()
+                    pattern = str(rule.get("pattern") or "").strip()
+                    if not column or not pattern:
+                        continue
+                    flags = str(rule.get("flags") or "")
+                    inline = ""
+                    if "i" in flags:
+                        inline += "i"
+                    if "m" in flags:
+                        inline += "m"
+                    if "s" in flags:
+                        inline += "s"
+                    if inline:
+                        pattern = f"(?{inline}){pattern}"
+                    replacement = str(rule.get("replacement") or "")
+                    df = df.withColumn(column, F.regexp_replace(F.col(column), pattern, replacement))
+                return df
+            pattern = str(metadata.get("pattern") or "").strip()
+            columns = metadata.get("columns") or []
+            if pattern and columns:
+                flags = str(metadata.get("flags") or "")
+                inline = ""
+                if "i" in flags:
+                    inline += "i"
+                if "m" in flags:
+                    inline += "m"
+                if "s" in flags:
+                    inline += "s"
+                if inline:
+                    pattern = f"(?{inline}){pattern}"
+                replacement = str(metadata.get("replacement") or "")
+                for col in columns:
+                    col_name = str(col).strip()
+                    if not col_name:
+                        continue
+                    df = df.withColumn(col_name, F.regexp_replace(F.col(col_name), pattern, replacement))
+                return df
         if operation == "dedupe":
             subset = metadata.get("columns") or []
             if subset:

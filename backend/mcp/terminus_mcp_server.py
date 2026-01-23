@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import sys
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from mcp import Server
@@ -16,8 +17,13 @@ from mcp.server import Request, Response
 from mcp.server.stdio import stdio_server
 from pydantic import BaseModel
 
-# Add parent directory to path for imports
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Import paths depend on whether we run from source (repo layout) or from a container image.
+_this_file = Path(__file__).resolve()
+_backend_root = _this_file.parents[1]
+_repo_root = _this_file.parents[2] if len(_this_file.parents) > 2 else _backend_root
+for _path in (str(_backend_root), str(_repo_root)):
+    if _path and _path not in sys.path:
+        sys.path.append(_path)
 
 from oms.services.async_terminus import AsyncTerminusService
 from shared.config.settings import get_settings

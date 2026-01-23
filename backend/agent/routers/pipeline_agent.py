@@ -21,6 +21,8 @@ router = APIRouter(prefix="/agent", tags=["Agent"])
 
 PIPELINE_AGENT_TOOL_IDS = [
     "pipeline_plans.context_pack",
+    "pipeline_plans.task_spec",
+    "pipeline_plans.clarify_scope",
     "pipeline_plans.join_keys",
     "pipeline_plans.compile",
     "pipeline_plans.split_outputs",
@@ -95,6 +97,7 @@ async def run_pipeline_agent(request: Request, body: PipelineAgentRunRequest) ->
         session_id=None,
         answers=body.answers,
         planner_hints=body.planner_hints,
+        task_spec=body.task_spec,
         output_bindings=(
             {key: value.model_dump(mode="json") for key, value in body.output_bindings.items()}
             if body.output_bindings
@@ -163,6 +166,8 @@ async def run_pipeline_agent(request: Request, body: PipelineAgentRunRequest) ->
         "session_id": final_state.get("session_id"),
         "plan_id": final_state.get("plan_id"),
         "plan": final_state.get("plan"),
+        "task_spec": final_state.get("task_spec"),
+        "report": final_state.get("report"),
         "preflight": final_state.get("preflight"),
         "preview": final_state.get("preview"),
         "cleansing_inspector": final_state.get("cleansing_inspector"),
@@ -204,6 +209,12 @@ async def run_pipeline_agent(request: Request, body: PipelineAgentRunRequest) ->
             data=result_payload,
             errors=errors or None,
         ).to_dict()
+    if status not in {"success"} and (
+        result_payload.get("questions")
+        or result_payload.get("intent_status") == "needs_revision"
+        or result_payload.get("validation_errors")
+    ):
+        return ApiResponse.warning(message="Pipeline agent needs clarification", data=result_payload).to_dict()
     if status not in {"success"}:
         raise HTTPException(status_code=500, detail={"message": "Pipeline agent failed", "errors": errors, "data": result_payload})
 

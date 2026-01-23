@@ -21,11 +21,11 @@
       "args": [
         "-y",
         "@modelcontextprotocol/server-filesystem",
-        "/Users/isihyeon/Desktop/SPICE HARVESTER"
+        "/Users/isihyeon/Desktop/SPICE-Harvester"
       ],
       "config": {
         "allowedPaths": [
-          "/Users/isihyeon/Desktop/SPICE HARVESTER"
+          "/Users/isihyeon/Desktop/SPICE-Harvester"
         ],
         "readOnly": false
       }
@@ -51,7 +51,7 @@
     "terminusdb": {
       "command": "python",
       "args": [
-        "/Users/isihyeon/Desktop/SPICE HARVESTER/backend/mcp/terminus_mcp_server.py"
+        "/Users/isihyeon/Desktop/SPICE-Harvester/backend/mcp/terminus_mcp_server.py"
       ],
       "env": {
         "TERMINUS_SERVER_URL": "http://localhost:6363",
@@ -65,6 +65,19 @@
           "version_control",
           "query_execution",
           "instance_management"
+        ]
+      }
+    },
+    "pipeline": {
+      "command": "python",
+      "args": [
+        "/Users/isihyeon/Desktop/SPICE-Harvester/backend/mcp/pipeline_mcp_server.py"
+      ],
+      "config": {
+        "capabilities": [
+          "pipeline_planning",
+          "plan_builder",
+          "profiling_preview"
         ]
       }
     },
@@ -93,7 +106,7 @@
         "-y",
         "@modelcontextprotocol/server-git",
         "--repository",
-        "/Users/isihyeon/Desktop/SPICE HARVESTER"
+        "/Users/isihyeon/Desktop/SPICE-Harvester"
       ],
       "config": {
         "autoFetch": true,

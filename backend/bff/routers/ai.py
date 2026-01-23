@@ -226,9 +226,16 @@ def _log_ai_event(event: str, payload: Dict[str, Any], *, max_chars: int = 800) 
 def _build_intent_prompts(*, question: str, lang: str, context: Dict[str, Any]) -> tuple[str, str]:
     system_prompt = (
         "You are the SPICE AI Agent and an intent router for a data platform assistant. "
-        "Classify the user's intent and choose a route: chat, query, or plan. "
+        "Classify the user's intent and choose a route: chat, query, plan, or pipeline. "
         "Use your judgment to handle varied phrasing and languages. "
         "Do not rely on keyword lists or rule-based patterns; infer intent from meaning. "
+        "Use route=pipeline when the user is asking the system to perform data preparation or integration "
+        "(cleanse/standardize, type casting, joins, schema mapping, canonical dataset creation, ETL transforms, "
+        "building outputs). These are execution requests and should not be handled by query. "
+        "Use route=query only when the user expects an informational answer that can be retrieved from datasets/graphs "
+        "(e.g., counts, listings, summaries) without performing transformations. "
+        "Use route=chat for conversational replies or help. "
+        "Use route=plan for general multi-step agent tasks that are not pipeline execution. "
         "If the intent is ambiguous or missing required context for the chosen route, "
         "set requires_clarification=true and provide a short clarifying_question in the user's language. "
         "When route=chat, provide a brief, friendly reply. "
@@ -238,7 +245,7 @@ def _build_intent_prompts(*, question: str, lang: str, context: Dict[str, Any]) 
         "question": question,
         "language": lang,
         "context": context,
-        "available_routes": ["chat", "query", "plan"],
+        "available_routes": ["chat", "query", "plan", "pipeline"],
         "intent_labels": [item.value for item in AIIntentType],
     }
     user_prompt = json.dumps(user_payload, ensure_ascii=True)
@@ -267,7 +274,7 @@ def _build_intent_repair_prompts(
         "context": context,
         "invalid_response": draft,
         "validation_issue": issue,
-        "available_routes": ["chat", "query", "plan"],
+        "available_routes": ["chat", "query", "plan", "pipeline"],
         "intent_labels": [item.value for item in AIIntentType],
     }
     user_prompt = json.dumps(user_payload, ensure_ascii=True)

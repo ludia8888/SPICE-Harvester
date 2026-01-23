@@ -1532,6 +1532,21 @@ class PipelinePlanSettings(BaseSettings):
         description="Enable pipeline planner LLM (PIPELINE_PLAN_LLM_ENABLED)",
     )
 
+    mcp_planner_enabled: bool = Field(
+        default=False,
+        description="Enable MCP-based pipeline planner (PIPELINE_PLAN_MCP_PLANNER_ENABLED)",
+    )
+
+    mcp_transform_enabled: bool = Field(
+        default=False,
+        description="Enable MCP-based pipeline transform agent (PIPELINE_PLAN_MCP_TRANSFORM_ENABLED)",
+    )
+
+    mcp_repair_enabled: bool = Field(
+        default=False,
+        description="Enable MCP-based pipeline repair agent (PIPELINE_PLAN_MCP_REPAIR_ENABLED)",
+    )
+
 
 class ClientSettings(BaseSettings):
     """Internal service-to-service client settings (BFF/OMS/etc)."""

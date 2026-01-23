@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import re
 from typing import Any, Dict, List, Optional
@@ -12,12 +13,15 @@ from bff.services.pipeline_context_pack import build_pipeline_context_pack
 from bff.services.pipeline_cleansing_agent import apply_cleansing_plan
 from bff.services.pipeline_join_agent import select_join_keys
 from bff.services.pipeline_join_evaluator import evaluate_pipeline_joins
-from bff.services.pipeline_transform_agent import apply_transform_plan
+from bff.services.pipeline_transform_agent import apply_transform_plan, apply_transform_plan_mcp
 from bff.services.pipeline_intent_verifier import verify_pipeline_intent
+from bff.services.pipeline_task_spec_agent import infer_pipeline_task_spec
 from bff.services.pipeline_plan_compiler import (
     PipelinePlanCompileResult,
     compile_pipeline_plan,
+    compile_pipeline_plan_mcp,
     repair_pipeline_plan,
+    repair_pipeline_plan_mcp,
 )
 from bff.services.pipeline_output_splitter import split_pipeline_outputs
 from bff.services.pipeline_plan_validation import validate_pipeline_plan
@@ -52,6 +56,8 @@ router = APIRouter(prefix="/pipeline-plans", tags=["Pipeline Plans"])
 
 _PREVIEW_SANITIZER = InputSanitizer()
 _SYS_TS_EXPR_RE = re.compile(r"^\s*(?P<col>_sys_ingested_at|_sys_valid_from)\s*=\s*to_timestamp\('.*'\)\s*$")
+_CONTEXT_PACK_CACHE_PREFIX = "pipeline-context-pack"
+_CONTEXT_PACK_CACHE_TTL_SECONDS = 120
 
 
 async def get_dataset_registry() -> DatasetRegistry:
@@ -103,6 +109,12 @@ def _resolve_actor(request: Request) -> str:
         or request.headers.get("X-Actor")
         or "system"
     )
+
+
+def _context_pack_cache_key(payload: Dict[str, Any]) -> str:
+    db_name = str(payload.get("db_name") or "default").strip() or "default"
+    digest = sha256_canonical_json_prefixed(payload)
+    return f"{_CONTEXT_PACK_CACHE_PREFIX}:{db_name}:{digest}"
 
 
 def _serialize_run_tables(run_tables: Dict[str, Any], *, limit: int) -> Dict[str, Dict[str, Any]]:
@@ -289,6 +301,7 @@ class PipelinePlanCompileRequest(BaseModel):
     data_scope: PipelinePlanDataScope | None = Field(default=None)
     answers: dict | None = Field(default=None)
     planner_hints: dict | None = Field(default=None)
+    task_spec: dict | None = Field(default=None)
 
 
 class PipelineJoinKeysRequest(BaseModel):
@@ -296,6 +309,7 @@ class PipelineJoinKeysRequest(BaseModel):
     data_scope: PipelinePlanDataScope | None = Field(default=None)
     context_pack: dict | None = Field(default=None)
     max_joins: int = Field(default=4, ge=0, le=12)
+    feedback: dict | None = Field(default=None)
 
 
 class PipelinePlanPreviewRequest(BaseModel):
@@ -349,6 +363,23 @@ class PipelinePlanGenerateSpecsRequest(BaseModel):
     dedupe_policy: str = Field(default="DEDUP")
 
 
+class PipelineTaskSpecRequest(BaseModel):
+    goal: str = Field(..., min_length=1, max_length=2000)
+    data_scope: PipelinePlanDataScope | None = Field(default=None)
+    context_pack: dict | None = Field(default=None)
+
+
+class PipelineScopeClarifyRequest(BaseModel):
+    goal: str = Field(..., min_length=1, max_length=2000)
+    data_scope: PipelinePlanDataScope | None = Field(default=None)
+    task_spec: dict | None = Field(default=None)
+    intent_status: str = Field(default="unknown", max_length=40)
+    missing_requirements: list[str] | None = Field(default=None)
+    suggested_actions: list[str] | None = Field(default=None)
+    intent_warnings: list[str] | None = Field(default=None)
+    context_pack: dict | None = Field(default=None)
+
+
 class PipelinePlanSplitOutputsRequest(BaseModel):
     output_bindings: Dict[str, PipelineOutputBinding] | None = Field(default=None)
 
@@ -363,6 +394,7 @@ class PipelinePlanCleanseRequest(BaseModel):
     preview: Dict[str, Any] | None = Field(default=None)
     inspector: Dict[str, Any] | None = Field(default=None)
     max_actions: int = Field(default=6, ge=0, le=20)
+    planner_hints: Dict[str, Any] | None = Field(default=None)
 
 
 class PipelinePlanTransformRequest(BaseModel):
@@ -437,6 +469,7 @@ async def compile_plan(
     data_scope = body.data_scope
     answers = sanitize_label_input(raw_answers) if isinstance(raw_answers, dict) else None
     planner_hints = payload.get("planner_hints") if isinstance(payload.get("planner_hints"), dict) else None
+    task_spec = payload.get("task_spec") if isinstance(payload.get("task_spec"), dict) else None
     if not data_scope or not data_scope.db_name:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="data_scope.db_name is required")
 
@@ -469,12 +502,18 @@ async def compile_plan(
         context_pack = None
 
     try:
-        result: PipelinePlanCompileResult = await compile_pipeline_plan(
+        compiler = (
+            compile_pipeline_plan_mcp
+            if bool(get_settings().pipeline_plan.mcp_planner_enabled)
+            else compile_pipeline_plan
+        )
+        result: PipelinePlanCompileResult = await compiler(
             goal=goal,
             data_scope=data_scope,
             answers=answers,
             context_pack=context_pack,
             planner_hints=planner_hints,
+            task_spec=task_spec,
             actor=actor,
             tenant_id=tenant_id,
             user_id=user_id,
@@ -498,7 +537,11 @@ async def compile_plan(
     response_status = result.status
     output_split_info: dict | None = None
 
-    if compiled_plan and response_status == "success" and _plan_outputs_need_split(compiled_plan):
+    allow_output_split = True
+    if isinstance(task_spec, dict):
+        allow_output_split = bool(task_spec.get("allow_specs"))
+
+    if compiled_plan and response_status == "success" and _plan_outputs_need_split(compiled_plan) and allow_output_split:
         try:
             split_result = await split_pipeline_outputs(
                 plan=compiled_plan,
@@ -527,6 +570,7 @@ async def compile_plan(
             db_name=db_name,
             branch=branch,
             require_output=True,
+            context_pack=context_pack,
         )
         compiled_plan = validation.plan
         validation_errors = list(validation.errors or [])
@@ -585,6 +629,186 @@ async def compile_plan(
     return ApiResponse.success(message="Pipeline plan compiled", data=response_data)
 
 
+@router.post("/task-spec", response_model=ApiResponse)
+async def infer_task_spec(
+    body: PipelineTaskSpecRequest,
+    request: Request,
+    llm: LLMGatewayDep,
+    redis_service: RedisServiceDep,
+    audit_store: AuditLogStoreDep,
+    dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
+    profile_registry: DatasetProfileRegistry = Depends(get_dataset_profile_registry),
+) -> ApiResponse:
+    payload = sanitize_input(body.model_dump(exclude_none=True))
+    goal = str(payload.get("goal") or "").strip()
+    data_scope = body.data_scope
+    context_pack = body.context_pack if isinstance(body.context_pack, dict) else None
+    if not data_scope or not data_scope.db_name:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="data_scope.db_name is required")
+
+    tenant_id = _resolve_tenant_id(request)
+    actor = _resolve_actor(request)
+    user = getattr(request.state, "user", None)
+    user_id = str(getattr(user, "id", "") or "").strip() or None
+
+    selected_model, allowed_models, data_policies = await _resolve_tenant_policy(request)
+
+    db_name = validate_db_name(str(data_scope.db_name))
+    try:
+        enforce_db_scope(request.headers, db_name=db_name)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+
+    if context_pack is None:
+        try:
+            dataset_ids = list(data_scope.dataset_ids) if data_scope else []
+            context_pack = await build_pipeline_context_pack(
+                db_name=str(data_scope.db_name) if data_scope and data_scope.db_name else "",
+                branch=str(data_scope.branch) if data_scope and data_scope.branch else None,
+                dataset_ids=dataset_ids or None,
+                dataset_registry=dataset_registry,
+                profile_registry=profile_registry,
+            )
+        except Exception as exc:
+            logger.warning("Failed to build pipeline context pack: %s", exc)
+            context_pack = {}
+
+    try:
+        result = await infer_pipeline_task_spec(
+            goal=goal,
+            data_scope=data_scope,
+            context_pack=context_pack,
+            actor=actor,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            data_policies=data_policies,
+            selected_model=selected_model,
+            allowed_models=allowed_models,
+            llm_gateway=llm,
+            redis_service=redis_service,
+            audit_store=audit_store,
+        )
+    except LLMQuotaExceededError as exc:
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.error("Pipeline task spec inference failed: %s", exc)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to infer task spec") from exc
+
+    response_data = {
+        "status": result.status,
+        "task_spec": result.task_spec.model_dump(mode="json") if result.task_spec else None,
+        "questions": list(result.questions or []),
+        "llm": (
+            {
+                "provider": result.llm_meta.provider,
+                "model": result.llm_meta.model,
+                "cache_hit": result.llm_meta.cache_hit,
+                "latency_ms": result.llm_meta.latency_ms,
+            }
+            if result.llm_meta
+            else None
+        ),
+    }
+    return ApiResponse.success(message="Pipeline task spec ready", data=response_data)
+
+
+@router.post("/clarify-scope", response_model=ApiResponse)
+async def clarify_scope(
+    body: PipelineScopeClarifyRequest,
+    request: Request,
+    llm: LLMGatewayDep,
+    redis_service: RedisServiceDep,
+    audit_store: AuditLogStoreDep,
+    dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
+    profile_registry: DatasetProfileRegistry = Depends(get_dataset_profile_registry),
+) -> ApiResponse:
+    if not bool(get_settings().pipeline_plan.llm_enabled):
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Pipeline planner is disabled")
+
+    payload = sanitize_input(body.model_dump(exclude_none=True))
+    goal = str(payload.get("goal") or "").strip()
+    task_spec = payload.get("task_spec") if isinstance(payload.get("task_spec"), dict) else None
+    intent_feedback = {
+        "status": str(payload.get("intent_status") or "").strip(),
+        "missing_requirements": payload.get("missing_requirements") if isinstance(payload.get("missing_requirements"), list) else [],
+        "suggested_actions": payload.get("suggested_actions") if isinstance(payload.get("suggested_actions"), list) else [],
+        "warnings": payload.get("intent_warnings") if isinstance(payload.get("intent_warnings"), list) else [],
+    }
+    data_scope = body.data_scope
+    context_pack = body.context_pack if isinstance(body.context_pack, dict) else None
+    if not data_scope or not data_scope.db_name:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="data_scope.db_name is required")
+
+    tenant_id = _resolve_tenant_id(request)
+    actor = _resolve_actor(request)
+    user = getattr(request.state, "user", None)
+    user_id = str(getattr(user, "id", "") or "").strip() or None
+
+    selected_model, allowed_models, data_policies = await _resolve_tenant_policy(request)
+
+    db_name = validate_db_name(str(data_scope.db_name))
+    try:
+        enforce_db_scope(request.headers, db_name=db_name)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+
+    if context_pack is None:
+        try:
+            dataset_ids = list(data_scope.dataset_ids) if data_scope else []
+            context_pack = await build_pipeline_context_pack(
+                db_name=str(data_scope.db_name) if data_scope and data_scope.db_name else "",
+                branch=str(data_scope.branch) if data_scope and data_scope.branch else None,
+                dataset_ids=dataset_ids or None,
+                dataset_registry=dataset_registry,
+                profile_registry=profile_registry,
+            )
+        except Exception as exc:
+            logger.warning("Failed to build pipeline context pack: %s", exc)
+            context_pack = None
+
+    try:
+        from bff.services.pipeline_scope_clarifier import clarify_pipeline_scope
+
+        result = await clarify_pipeline_scope(
+            goal=goal,
+            task_spec=task_spec,
+            intent_feedback=intent_feedback,
+            context_pack=context_pack,
+            actor=actor,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            data_policies=data_policies,
+            selected_model=selected_model,
+            allowed_models=allowed_models,
+            llm_gateway=llm,
+            redis_service=redis_service,
+            audit_store=audit_store,
+        )
+    except LLMQuotaExceededError as exc:
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.error("Pipeline scope clarification failed: %s", exc)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to clarify scope") from exc
+
+    response_data = {
+        "status": result.status,
+        "questions": [q.model_dump(mode="json") for q in (result.questions or [])],
+        "notes": list(result.notes or []),
+        "warnings": list(result.warnings or []),
+        "llm": (
+            {
+                "provider": result.llm_meta.provider,
+                "model": result.llm_meta.model,
+                "cache_hit": result.llm_meta.cache_hit,
+                "latency_ms": result.llm_meta.latency_ms,
+            }
+            if result.llm_meta
+            else None
+        ),
+    }
+    return ApiResponse.success(message="Pipeline scope clarification ready", data=response_data)
+
+
 @router.post("/join-keys", response_model=ApiResponse)
 async def join_keys(
     body: PipelineJoinKeysRequest,
@@ -639,10 +863,12 @@ async def join_keys(
             context_pack = {}
 
     try:
+        feedback = sanitize_input(body.feedback) if isinstance(body.feedback, dict) else None
         result = await select_join_keys(
             goal=goal,
             context_pack=context_pack or {},
             max_joins=int(payload.get("max_joins") or 0),
+            feedback=feedback,
             actor=actor,
             tenant_id=tenant_id,
             user_id=user_id,
@@ -683,6 +909,7 @@ async def join_keys(
 async def build_context_pack(
     body: PipelineContextPackRequest,
     request: Request,
+    redis_service: RedisServiceDep,
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
     profile_registry: DatasetProfileRegistry = Depends(get_dataset_profile_registry),
 ) -> ApiResponse:
@@ -692,6 +919,20 @@ async def build_context_pack(
         enforce_db_scope(request.headers, db_name=db_name)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+
+    cache_key: Optional[str] = None
+    if redis_service:
+        try:
+            cache_key = _context_pack_cache_key(payload)
+            cached = await redis_service.client.get(cache_key)
+            if cached:
+                if isinstance(cached, (bytes, bytearray)):
+                    cached = cached.decode("utf-8", "ignore")
+                cached_pack = json.loads(str(cached))
+                if isinstance(cached_pack, dict):
+                    return ApiResponse.success(message="Pipeline context pack cached", data=cached_pack)
+        except Exception as exc:
+            logger.warning("Context pack cache read failed: %s", exc)
 
     try:
         pack = await build_pipeline_context_pack(
@@ -709,6 +950,16 @@ async def build_context_pack(
     except Exception as exc:
         logger.error("Failed to build pipeline context pack: %s", exc)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to build context pack") from exc
+
+    if cache_key:
+        try:
+            await redis_service.client.set(
+                cache_key,
+                json.dumps(pack, ensure_ascii=False),
+                ex=_CONTEXT_PACK_CACHE_TTL_SECONDS,
+            )
+        except Exception as exc:
+            logger.warning("Context pack cache write failed: %s", exc)
 
     return ApiResponse.success(message="Pipeline context pack built", data=pack)
 
@@ -1048,7 +1299,8 @@ async def repair_plan(
         context_pack = None
 
     try:
-        result = await repair_pipeline_plan(
+        repairer = repair_pipeline_plan_mcp if bool(get_settings().pipeline_plan.mcp_repair_enabled) else repair_pipeline_plan
+        result = await repairer(
             plan=plan,
             validation_errors=body.validation_errors,
             validation_warnings=body.validation_warnings,
@@ -1153,6 +1405,15 @@ async def cleanse_plan(
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
 
+    if plan.task_spec is not None and not bool(plan.task_spec.allow_cleansing):
+        return ApiResponse.warning(
+            message="Task scope forbids cleansing",
+            data={
+                "plan_id": plan_id,
+                "task_spec": plan.task_spec.model_dump(mode="json"),
+            },
+        )
+
     selected_model, allowed_models, data_policies = await _resolve_tenant_policy(request)
 
     preview_payload = body.preview if isinstance(body.preview, dict) else None
@@ -1209,6 +1470,7 @@ async def cleanse_plan(
             plan=plan,
             inspector=inspector_payload,
             max_actions=int(body.max_actions or 0),
+            planner_hints=body.planner_hints,
             actor=actor,
             tenant_id=tenant_id,
             user_id=user_id,
@@ -1339,7 +1601,12 @@ async def transform_plan(
             context_pack = None
 
     try:
-        result = await apply_transform_plan(
+        transformer = (
+            apply_transform_plan_mcp
+            if bool(get_settings().pipeline_plan.mcp_transform_enabled)
+            else apply_transform_plan
+        )
+        result = await transformer(
             plan=plan,
             join_plan=join_plan,
             cleansing_hints=cleansing_hints,
@@ -1573,6 +1840,15 @@ async def split_outputs(
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
 
+    if plan.task_spec is not None and not bool(plan.task_spec.allow_specs):
+        return ApiResponse.warning(
+            message="Task scope forbids output enrichment (mapping/specs not requested)",
+            data={
+                "plan_id": plan_id,
+                "task_spec": plan.task_spec.model_dump(mode="json"),
+            },
+        )
+
     selected_model, allowed_models, data_policies = await _resolve_tenant_policy(request)
 
     context_pack = None
@@ -1699,6 +1975,15 @@ async def generate_specs(
         enforce_db_scope(request.headers, db_name=db_name)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+
+    if plan.task_spec is not None and not bool(plan.task_spec.allow_specs):
+        return ApiResponse.warning(
+            message="Task scope forbids spec generation (mapping not requested)",
+            data={
+                "plan_id": plan_id,
+                "task_spec": plan.task_spec.model_dump(mode="json"),
+            },
+        )
 
     raw_payload = body.model_dump(exclude_none=True)
     preview_payload_raw = raw_payload.pop("output_previews", None)

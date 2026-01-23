@@ -71,3 +71,23 @@ def test_preview_inspector_suggests_dedupe_for_duplicate_rows() -> None:
     dedupe = next((item for item in suggestions if item.get("operation") == "dedupe"), None)
     assert dedupe is not None
     assert "id" in (dedupe.get("columns") or [])
+
+
+@pytest.mark.unit
+def test_preview_inspector_suggests_regex_replace_for_phone() -> None:
+    columns = [{"name": "phone", "type": "xsd:string"}]
+    rows = [{"phone": "(123) 456-7890"}, {"phone": "123 456 7890"}]
+    preview = {
+        "columns": columns,
+        "rows": rows,
+        "column_stats": compute_column_stats(rows=rows, columns=columns),
+    }
+
+    inspector = inspect_preview(preview)
+    suggestions = inspector.get("suggestions") or []
+
+    assert any(
+        item.get("operation") == "regexReplace"
+        and item.get("column") == "phone"
+        for item in suggestions
+    )
