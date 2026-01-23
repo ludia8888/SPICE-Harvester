@@ -403,7 +403,7 @@ services:
       # LLM gateway (planner). Default: OpenAI-compatible (set OPENAI_API_KEY to enable calls).
       # To disable LLM features: set LLM_PROVIDER=disabled.
       - LLM_PROVIDER=${LLM_PROVIDER:-openai_compat}
-      - LLM_MODEL=${LLM_MODEL:-gpt-4o-mini}
+      - LLM_MODEL=${LLM_MODEL:-gpt-5}
       - LLM_BASE_URL=${LLM_BASE_URL:-https://api.openai.com/v1}
       - LLM_API_KEY=${LLM_API_KEY:-}
       - LLM_MAX_TOKENS=${LLM_MAX_TOKENS:-2000}
@@ -421,6 +421,7 @@ services:
       - LLM_MOCK_DIR=${LLM_MOCK_DIR:-/app/llm_mocks}
       - PIPELINE_PLAN_LLM_ENABLED=${PIPELINE_PLAN_LLM_ENABLED:-true}
       - PIPELINE_PLAN_MCP_PLANNER_ENABLED=${PIPELINE_PLAN_MCP_PLANNER_ENABLED:-false}
+      - PIPELINE_PLAN_MCP_AUTONOMOUS_ENABLED=${PIPELINE_PLAN_MCP_AUTONOMOUS_ENABLED:-false}
       - PIPELINE_PLAN_MCP_TRANSFORM_ENABLED=${PIPELINE_PLAN_MCP_TRANSFORM_ENABLED:-false}
       - PIPELINE_PLAN_MCP_REPAIR_ENABLED=${PIPELINE_PLAN_MCP_REPAIR_ENABLED:-false}
       # Infra (needed for WebSocket notifications / search / rate limiting)

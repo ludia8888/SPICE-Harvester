@@ -7,7 +7,6 @@ pipeline agent must obey (avoid overreach).
 
 from __future__ import annotations
 
-import re
 import json
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
@@ -112,73 +111,6 @@ def _clamp_task_spec(*, spec: PipelineTaskSpec, data_scope: Optional[PipelinePla
     return clamp_task_spec(spec=spec, dataset_count=dataset_count)
 
 
-def _goal_requests_advanced_transforms(goal: str) -> bool:
-    """
-    Heuristic safety valve: the LLM task spec classifier can under-authorize
-    advanced transforms (groupBy/window/pivot) even when clearly required.
-    """
-    text = (goal or "").strip()
-    if not text:
-        return False
-    lowered = text.lower()
-
-    # Strong English markers (explicit advanced ops)
-    if any(
-        marker in lowered
-        for marker in (
-            "group by",
-            "groupby",
-            "aggregate",
-            "aggregation",
-            "window",
-            "row_number",
-            "dense_rank",
-            "rank(",
-            "pivot",
-            "over(",
-            "over (",
-            "partition by",
-        )
-    ):
-        return True
-
-    # "top N" style ranking queries (including common non-English variants).
-    # Note: avoid a trailing "\b" here; it can be too strict in some locales.
-    if re.search(r"\btop\s*\d+", lowered):
-        return True
-    if re.search(r"(?:\uc0c1\uc704)\s*\d+", text):
-        return True
-
-    # Korean markers (kept ASCII via escapes).
-    # - "\uc9d1\uacc4" (jipgye), "\ud569\uacc4" (habgye), "\uc21c\uc704" (sunwi), "\ub7ad\ud0b9" (raenking)
-    if any(
-        marker in text
-        for marker in (
-            "\uc9d1\uacc4",
-            "\ud569\uacc4",
-            "\ud569\uc0b0",
-            "\ud3c9\uade0",
-            "\uac74\uc218",
-            "\uc21c\uc704",
-            "\ub7ad\ud0b9",
-            "\uc708\ub3c4\uc6b0",
-            "\ud53c\ubc97",
-        )
-    ):
-        return True
-
-    # Softer aggregation clue: sum/avg/count with a grouping indicator.
-    agg_terms = ("sum", "avg", "average", "count", "min", "max")
-    if any(term in lowered for term in agg_terms):
-        if any(clue in lowered for clue in (" by ", " per ")):
-            return True
-        # Korean grouping hints ("\ubcc4"="by", "\uae30\uc900"="based on").
-        if any(clue in text for clue in ("\ubcc4", "\uae30\uc900")):
-            return True
-
-    return False
-
-
 async def infer_pipeline_task_spec(
     *,
     goal: str,
@@ -237,19 +169,6 @@ async def infer_pipeline_task_spec(
         raise LLMOutputValidationError(str(exc)) from exc
 
     spec_model = _clamp_task_spec(spec=spec_model, data_scope=data_scope)
-
-    # Policy upgrade: if the goal explicitly requests aggregation/ranking/windowing,
-    # do not let an under-authorized spec block the planner from satisfying the request.
-    if (
-        spec_model.scope == PipelineTaskScope.pipeline
-        and not bool(spec_model.allow_advanced_transforms)
-        and _goal_requests_advanced_transforms(goal)
-    ):
-        notes = list(spec_model.notes or [])
-        marker = "policy: allow_advanced_transforms enabled by goal markers"
-        if marker not in notes:
-            notes.append(marker)
-        spec_model = spec_model.model_copy(update={"allow_advanced_transforms": True, "notes": notes})
 
     questions = [q for q in (spec_model.questions or []) if isinstance(q, dict) and str(q.get("question") or "").strip()]
     status = "clarification_required" if questions else "success"

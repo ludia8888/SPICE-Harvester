@@ -89,168 +89,6 @@ def _merge_planner_hints(current: Optional[Dict[str, Any]], updates: Dict[str, A
     return merged
 
 
-def _extract_wiring_feedback(warnings: List[str]) -> List[str]:
-    if not warnings:
-        return []
-    keywords = ("join inputs", "association", "auto-augmented", "rewired", "reordered")
-    feedback: List[str] = []
-    for warn in warnings:
-        text = str(warn).lower()
-        if any(keyword in text for keyword in keywords):
-            feedback.append(str(warn))
-    return feedback
-
-
-def _build_wiring_hints(warnings: List[str]) -> Optional[Dict[str, Any]]:
-    if not warnings:
-        return None
-    feedback = _extract_wiring_feedback(warnings)
-    if not feedback:
-        return None
-    tags: set[str] = set()
-    for warn in feedback:
-        text = str(warn).lower()
-        if "rewired" in text:
-            tags.add("rewired")
-        if "reordered" in text:
-            tags.add("reordered")
-        if "auto-augmented" in text or "auto augmented" in text:
-            tags.add("auto_augmented")
-        if "association" in text:
-            tags.add("association")
-    return {"tags": sorted(tags), "warnings": feedback, "count": len(feedback)}
-
-
-def _score_amount_candidate(
-    *,
-    column_name: str,
-    column_stats: Dict[str, Any],
-    column_profile: Dict[str, Any],
-    amount_tokens: tuple[str, ...],
-) -> tuple[float, List[str]]:
-    score = 0.0
-    reasons: List[str] = []
-    name = (column_name or "").lower()
-    if any(token in name for token in amount_tokens):
-        score += 0.15
-        reasons.append("name token match")
-
-    numeric_stats = column_stats.get("numeric") if isinstance(column_stats, dict) else None
-    if isinstance(numeric_stats, dict) and numeric_stats:
-        score += 0.45
-        reasons.append("numeric stats")
-        mean = float(abs(numeric_stats.get("mean") or 0.0))
-        max_val = float(numeric_stats.get("max") or 0.0)
-        if mean > 0 or max_val > 0:
-            score += 0.15
-            reasons.append("non-zero values")
-
-    distinct_ratio = float(column_profile.get("distinct_ratio") or 0.0) if isinstance(column_profile, dict) else 0.0
-    missing_ratio = float(column_profile.get("missing_ratio") or 0.0) if isinstance(column_profile, dict) else 0.0
-    if 0 < distinct_ratio < 0.95:
-        score += 0.1
-        reasons.append("not id-like")
-    if 0 <= missing_ratio < 0.4:
-        score += 0.1
-        reasons.append("low missingness")
-
-    fmt_profile = column_profile.get("format") if isinstance(column_profile, dict) else None
-    digit_ratio = float(fmt_profile.get("digit_ratio") or 0.0) if isinstance(fmt_profile, dict) else 0.0
-    if digit_ratio > 0.9 and distinct_ratio > 0.95:
-        score -= 0.2
-        reasons.append("likely identifier")
-
-    score = max(0.0, min(1.0, score))
-    return score, reasons
-
-
-def _numeric_column_hints(context_pack: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    if not isinstance(context_pack, dict):
-        return []
-    selected = context_pack.get("selected_datasets")
-    if not isinstance(selected, list):
-        return []
-    amount_tokens = ("amount", "value", "price", "total", "payment", "cost", "fare")
-    hints: List[Dict[str, Any]] = []
-    for item in selected:
-        if not isinstance(item, dict):
-            continue
-        dataset_id = item.get("dataset_id")
-        dataset_name = item.get("name")
-        columns = item.get("columns") if isinstance(item.get("columns"), list) else []
-        stats_by_col = {}
-        column_stats = item.get("column_stats")
-        if isinstance(column_stats, dict):
-            stats_by_col = column_stats.get("columns") if isinstance(column_stats.get("columns"), dict) else {}
-        profiles_by_col = item.get("column_profiles") if isinstance(item.get("column_profiles"), dict) else {}
-        numeric: List[str] = []
-        ranked_amount: List[Dict[str, Any]] = []
-        for col in columns:
-            if not isinstance(col, dict):
-                continue
-            col_name = str(col.get("name") or "").strip()
-            col_type = str(col.get("type") or "").lower()
-            if not col_name:
-                continue
-            col_stats = stats_by_col.get(col_name) if isinstance(stats_by_col, dict) else {}
-            numeric_stats = col_stats.get("numeric") if isinstance(col_stats, dict) else None
-            is_numeric_type = any(token in col_type for token in ("integer", "decimal", "float", "double", "number"))
-            is_numeric = is_numeric_type or (isinstance(numeric_stats, dict) and numeric_stats)
-            if is_numeric:
-                numeric.append(col_name)
-                score, reasons = _score_amount_candidate(
-                    column_name=col_name,
-                    column_stats=col_stats or {},
-                    column_profile=(profiles_by_col.get(col_name) or {}),
-                    amount_tokens=amount_tokens,
-                )
-                ranked_amount.append(
-                    {
-                        "column": col_name,
-                        "score": round(score, 3),
-                        "reasons": reasons[:3],
-                    }
-                )
-        if numeric:
-            ranked_amount.sort(key=lambda item: float(item.get("score") or 0.0), reverse=True)
-            amount_candidates = ranked_amount[:8]
-            hints.append(
-                {
-                    "dataset_id": dataset_id,
-                    "dataset_name": dataset_name,
-                    "numeric_columns": numeric[:12],
-                    "amount_candidates": amount_candidates,
-                }
-            )
-    return hints
-
-
-def _select_join_hints(context_pack: Optional[Dict[str, Any]], *, max_items: int = 5) -> List[Dict[str, Any]]:
-    if not isinstance(context_pack, dict):
-        return []
-    suggestions = context_pack.get("integration_suggestions")
-    if not isinstance(suggestions, dict):
-        return []
-    candidates = suggestions.get("join_key_candidates")
-    if not isinstance(candidates, list):
-        return []
-    trimmed: List[Dict[str, Any]] = []
-    for item in candidates[: max(0, int(max_items))]:
-        if not isinstance(item, dict):
-            continue
-        trimmed.append(
-            {
-                "left_dataset_id": item.get("left_dataset_id"),
-                "right_dataset_id": item.get("right_dataset_id"),
-                "left_column": item.get("left_column"),
-                "right_column": item.get("right_column"),
-                "score": item.get("score"),
-                "reasons": item.get("reasons"),
-            }
-        )
-    return trimmed
-
-
 def _select_cleansing_hints(context_pack: Optional[Dict[str, Any]], *, max_items: int = 12) -> List[Dict[str, Any]]:
     if not isinstance(context_pack, dict):
         return []
@@ -309,104 +147,12 @@ def _allow_specs(state: PipelineAgentState) -> bool:
     return bool(task_spec.get("allow_specs"))
 
 
-def _should_transform(state: PipelineAgentState) -> bool:
-    if int(state.get("max_transform") or 0) <= 0:
-        return False
-    hints = state.get("planner_hints") or {}
-    return (
-        bool(hints.get("validation_errors"))
-        or bool(hints.get("intent_feedback"))
-    )
-
-
 def _can_transform(state: PipelineAgentState) -> bool:
     if int(state.get("max_transform") or 0) <= 0:
         return False
     task_spec = state.get("task_spec") or {}
     scope = str(task_spec.get("scope") or "").strip().lower()
     return scope != "report_only"
-
-
-def _only_output_errors(errors: List[str]) -> bool:
-    if not errors:
-        return False
-    for err in errors:
-        if not str(err).strip().lower().startswith("output "):
-            return False
-    return True
-
-
-def _transformable_validation_errors(errors: List[str]) -> bool:
-    if not errors:
-        return False
-    fragments = (
-        "missing aggregates",
-        "missing expression",
-        "missing condition",
-        "missing join keys",
-        "missing join key",
-        "missing output",
-        "output missing",
-        "missing columns",
-        "missing column",
-        "unknown columns",
-        "unknown column",
-    )
-    for err in errors:
-        lowered = str(err or "").strip().lower()
-        if not lowered:
-            return False
-        if not any(fragment in lowered for fragment in fragments):
-            return False
-    return True
-
-
-def _needs_join_revision(join_evaluation: Any, warnings: Any) -> bool:
-    """
-    Heuristic gate to trigger a join-strategy revision loop.
-
-    We keep this conservative to avoid oscillation; the join-key selector
-    still must choose only from context_pack candidates.
-    """
-    evaluations = join_evaluation if isinstance(join_evaluation, list) else []
-    for item in evaluations:
-        if not isinstance(item, dict):
-            continue
-        try:
-            left_coverage = float(item.get("left_coverage") or 0.0)
-            right_coverage = float(item.get("right_coverage") or 0.0)
-            explosion_ratio = float(item.get("explosion_ratio") or 0.0)
-            output_row_count = int(item.get("output_row_count") or 0)
-            left_row_count = int(item.get("left_row_count") or 0)
-            right_row_count = int(item.get("right_row_count") or 0)
-        except (TypeError, ValueError):
-            continue
-        # Join evaluation runs on independently sampled inputs, so match-rate based signals are
-        # very noisy for high-cardinality keys (e.g., order_id). Avoid "fixing" correct joins.
-        #
-        # Trigger revision only when we see a strong failure signal:
-        # - zero matches in the sampled join output, or
-        # - extreme blow-up (many-to-many / wrong key).
-        # If one side is already a tiny intermediate table, zero matches is expected with independent sampling.
-        # Only treat "zero matches" as actionable when both inputs are reasonably sized.
-        if (
-            output_row_count <= 0
-            and min(left_row_count, right_row_count) >= 200
-            and min(left_coverage, right_coverage) <= 0.001
-        ):
-            return True
-        if explosion_ratio >= 10.0:
-            return True
-
-    warning_items = warnings if isinstance(warnings, list) else []
-    for warn in warning_items:
-        text = str(warn or "").strip().lower()
-        if not text:
-            continue
-        if "join input order ambiguous" in text:
-            # This can lead to a wrong join when left/right keys differ. Allow a single retry.
-            return True
-    return False
 
 
 async def _call_bff(
@@ -480,17 +226,12 @@ async def _build_context_pack(state: PipelineAgentState, runtime: AgentRuntime) 
 
     payload = result.get("payload")
     state = {**state, "context_pack": _api_data(payload)}
-    numeric_hints = _numeric_column_hints(state.get("context_pack"))
     planner_hints = _merge_planner_hints(
         state.get("planner_hints"),
         {
             "autonomy_level": "high",
-            "cardinality_strategy": "prefer_left_on_uncertain",
-            "null_strategy": "keep_as_null",
         },
     )
-    if numeric_hints:
-        planner_hints = _merge_planner_hints(planner_hints, {"numeric_columns": numeric_hints})
     state = {**state, "planner_hints": planner_hints}
     return {**state, "next_action": "route"}
 
@@ -746,9 +487,9 @@ async def _collect_join_hints(state: PipelineAgentState, runtime: AgentRuntime) 
         body=body,
     )
     if result.get("status") != "success":
-        join_hints = _select_join_hints(state.get("context_pack"))
-        planner_hints = _merge_planner_hints(state.get("planner_hints"), {"join_plan": join_hints})
-        return {**state, "next_action": "route", "join_hints": join_hints, "planner_hints": planner_hints}
+        # Avoid heuristic fallbacks that may silently choose the wrong join keys.
+        # Let the downstream planner infer/ask instead.
+        return {**state, "next_action": "route", "join_hints": [], "planner_hints": state.get("planner_hints")}
 
     payload = result.get("payload")
     data = _api_data(payload)
@@ -812,37 +553,26 @@ async def _compile_plan(state: PipelineAgentState, runtime: AgentRuntime) -> Pip
     validation_errors = list(data.get("validation_errors") or [])
     validation_warnings = list(data.get("validation_warnings") or [])
     updated_planner_hints = state.get("planner_hints")
-    wiring_hints = _build_wiring_hints(validation_warnings)
-    if wiring_hints:
-        hints = dict(updated_planner_hints or {})
-        hints["wiring_feedback"] = wiring_hints.get("warnings")
-        hints["auto_wiring"] = wiring_hints
-        updated_planner_hints = hints
-
-    state_for_decision: PipelineAgentState = {**state, "planner_hints": updated_planner_hints}
-    allow_specs = _allow_specs(state_for_decision)
-    should_transform = _should_transform(state_for_decision)
-    can_transform = _can_transform(state_for_decision)
 
     next_action = "verify_intent"
     status = "running"
     if plan_status == "clarification_required":
-        if plan and can_transform and _transformable_validation_errors(validation_errors):
-            updated_planner_hints = _merge_planner_hints(updated_planner_hints, {"validation_errors": validation_errors})
-            next_action = "transform"
-            status = "running"
-        elif allow_specs and plan and _needs_output_split(plan) and _only_output_errors(validation_errors):
-            next_action = "split_outputs"
-        else:
+        if questions:
             next_action = "clarify"
             status = "clarification_required"
+        else:
+            max_transform = int(state.get("max_transform") or 0)
+            attempts = int(state.get("transform_attempts") or 0)
+            if plan and _can_transform(state) and attempts < max_transform:
+                updated_planner_hints = _merge_planner_hints(updated_planner_hints, {"validation_errors": validation_errors})
+                next_action = "transform"
+                status = "running"
+            else:
+                next_action = "clarify"
+                status = "clarification_required"
     elif plan_status != "success":
         next_action = "end"
         status = "failed"
-    elif allow_specs and _needs_output_split(plan):
-        next_action = "split_outputs"
-    elif should_transform:
-        next_action = "transform"
 
     return {
         **state,
@@ -895,17 +625,12 @@ async def _split_outputs(state: PipelineAgentState, runtime: AgentRuntime) -> Pi
             "error": "output metadata incomplete after split",
         }
 
-    next_action = "verify_intent"
-    should_transform = _should_transform(state)
-    if should_transform:
-        next_action = "transform"
-
     return {
         **state,
         "plan": updated_plan,
         "validation_errors": list(data.get("validation_errors") or []),
         "validation_warnings": list(data.get("validation_warnings") or []),
-        "next_action": next_action,
+        "next_action": "verify_intent",
     }
 
 
@@ -937,12 +662,6 @@ async def _transform_plan(state: PipelineAgentState, runtime: AgentRuntime) -> P
     updated_plan = data.get("plan") if isinstance(data.get("plan"), dict) else state.get("plan")
     validation_warnings = list(data.get("validation_warnings") or [])
     updated_planner_hints = state.get("planner_hints")
-    wiring_hints = _build_wiring_hints(validation_warnings)
-    if wiring_hints:
-        hints = dict(updated_planner_hints or {})
-        hints["wiring_feedback"] = wiring_hints.get("warnings")
-        hints["auto_wiring"] = wiring_hints
-        updated_planner_hints = hints
 
     next_action = "verify_intent"
     if _allow_specs(state) and _needs_output_split(updated_plan):
@@ -1225,76 +944,9 @@ async def _evaluate_joins(state: PipelineAgentState, runtime: AgentRuntime) -> P
     data = _api_data(payload)
     join_evaluation = data.get("evaluations") if isinstance(data.get("evaluations"), list) else None
     join_eval_warnings = data.get("warnings") if isinstance(data.get("warnings"), list) else None
-
-    # Optional join revision loop: if join quality looks very poor, re-run join-key selection
-    # with feedback and attempt a transform pass.
-    task_spec = state.get("task_spec") or {}
-    allow_join = bool(task_spec.get("allow_join"))
-    can_transform = _can_transform(state)
-    attempts = int(state.get("transform_attempts") or 0)
-    max_transform = int(state.get("max_transform") or 0)
-    planner_hints = dict(state.get("planner_hints") or {})
-    join_revision_attempted = bool(planner_hints.get("join_revision_attempted"))
-    should_revise = (
-        allow_join
-        and can_transform
-        and (attempts < max_transform)
-        and (not join_revision_attempted)
-        and _needs_join_revision(join_evaluation, join_eval_warnings)
-    )
-
-    if should_revise:
-        dataset_ids = list((state.get("data_scope") or {}).get("dataset_ids") or [])
-        dataset_count = len(dataset_ids)
-        max_joins = min(12, max(4, dataset_count - 1)) if dataset_count > 1 else 4
-        feedback = {
-            "current_join_plan": state.get("join_hints") or [],
-            "join_evaluation": join_evaluation or [],
-            "join_warnings": join_eval_warnings or [],
-        }
-
-        join_result = await _call_bff(
-            runtime=runtime,
-            state=state,
-            step_id="pipeline_join_keys_revise",
-            method="POST",
-            path="/api/v1/pipeline-plans/join-keys",
-            tool_id="pipeline_plans.join_keys",
-            body={
-                "goal": state.get("goal"),
-                "data_scope": state.get("data_scope") or {},
-                "context_pack": state.get("context_pack") or {},
-                "max_joins": max_joins,
-                "feedback": feedback,
-            },
-        )
-        if join_result.get("status") == "success":
-            join_payload = join_result.get("payload")
-            join_data = _api_data(join_payload)
-            revised = join_data.get("joins") if isinstance(join_data.get("joins"), list) else []
-            if revised:
-                planner_hints = _merge_planner_hints(planner_hints, {"join_plan": revised})
-                planner_hints["join_revision_attempted"] = True
-                planner_hints["join_revision_feedback"] = feedback
-                return {
-                    **state,
-                    "join_eval_attempts": join_eval_attempts,
-                    "join_hints": revised,
-                    "planner_hints": planner_hints,
-                    "join_evaluation": join_evaluation,
-                    "join_evaluation_warnings": join_eval_warnings,
-                    "run_tables": None,
-                    "definition_digest": None,
-                    "next_action": "transform",
-                }
-
-        # If revision fails, fall back to inspection.
-        planner_hints["join_revision_attempted"] = True
-
     return {
         **state,
         "join_eval_attempts": join_eval_attempts,
-        "planner_hints": planner_hints,
         "join_evaluation": join_evaluation,
         "join_evaluation_warnings": join_eval_warnings,
         "run_tables": None,
@@ -1457,34 +1109,29 @@ async def _repair_plan(state: PipelineAgentState, runtime: AgentRuntime) -> Pipe
     plan = data.get("plan") if isinstance(data.get("plan"), dict) else None
     questions = data.get("questions") if isinstance(data.get("questions"), list) else []
 
-    next_action = "verify_intent"
-    status = "running"
     validation_errors = list(data.get("validation_errors") or [])
     validation_warnings = list(data.get("validation_warnings") or [])
     updated_planner_hints = state.get("planner_hints")
-    wiring_hints = _build_wiring_hints(validation_warnings)
-    if wiring_hints:
-        hints = dict(updated_planner_hints or {})
-        hints["wiring_feedback"] = wiring_hints.get("warnings")
-        hints["auto_wiring"] = wiring_hints
-        updated_planner_hints = hints
 
-    state_for_decision: PipelineAgentState = {**state, "planner_hints": updated_planner_hints}
-    allow_specs = _allow_specs(state_for_decision)
-    should_transform = _should_transform(state_for_decision)
+    next_action = "verify_intent"
+    status = "running"
     if plan_status == "clarification_required":
-        if allow_specs and plan and _needs_output_split(plan) and _only_output_errors(validation_errors):
-            next_action = "split_outputs"
-        else:
+        if questions:
             next_action = "clarify"
             status = "clarification_required"
+        else:
+            max_transform = int(state.get("max_transform") or 0)
+            attempts = int(state.get("transform_attempts") or 0)
+            if plan and _can_transform(state) and attempts < max_transform:
+                updated_planner_hints = _merge_planner_hints(updated_planner_hints, {"validation_errors": validation_errors})
+                next_action = "transform"
+                status = "running"
+            else:
+                next_action = "clarify"
+                status = "clarification_required"
     elif plan_status != "success":
         next_action = "end"
         status = "failed"
-    elif allow_specs and _needs_output_split(plan):
-        next_action = "split_outputs"
-    elif should_transform:
-        next_action = "transform"
 
     return {
         **state,

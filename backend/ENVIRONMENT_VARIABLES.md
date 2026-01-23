@@ -97,7 +97,7 @@ USER_JWT_TTL_SECONDS=3600
 # OpenAI-compatible (recommended)
 LLM_PROVIDER=openai_compat
 LLM_BASE_URL=https://api.openai.com/v1
-LLM_MODEL=gpt-4o-mini
+LLM_MODEL=gpt-5
 OPENAI_API_KEY=change_me
 
 # Alternative key name:
@@ -349,6 +349,13 @@ ONTOLOGY_DEPLOYMENTS_V2=true
 ```bash
 # Enable MCP-based pipeline plan builder / transformer / repairer.
 # Recommended: keep these in your local `.env` so docker-compose recreates don't reset them.
+PIPELINE_PLAN_LLM_ENABLED=true
+#
+# NOTE: compile planner selection order:
+# - if PIPELINE_PLAN_MCP_AUTONOMOUS_ENABLED=true  -> autonomous tool-call loop
+# - else if PIPELINE_PLAN_MCP_PLANNER_ENABLED=true -> MCP planner (non-autonomous)
+# - else -> legacy planner
+PIPELINE_PLAN_MCP_AUTONOMOUS_ENABLED=true
 PIPELINE_PLAN_MCP_PLANNER_ENABLED=true
 PIPELINE_PLAN_MCP_TRANSFORM_ENABLED=true
 PIPELINE_PLAN_MCP_REPAIR_ENABLED=true

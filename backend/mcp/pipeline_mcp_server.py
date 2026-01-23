@@ -140,6 +140,36 @@ def _coerce_context_pack(context_pack: Any) -> Dict[str, Any]:
     return context_pack if isinstance(context_pack, dict) else {}
 
 
+def _normalize_string_list(value: Any) -> List[str]:
+    if value is None:
+        return []
+    items = value if isinstance(value, list) else [value]
+    out: List[str] = []
+    for item in items:
+        text = str(item or "").strip()
+        if text:
+            out.append(text)
+    return out
+
+
+def _normalize_aggregates(value: Any) -> List[Dict[str, Any]]:
+    raw = value if isinstance(value, list) else []
+    out: List[Dict[str, Any]] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        column = str(item.get("column") or "").strip()
+        op = str(item.get("op") or item.get("function") or item.get("agg") or "").strip().lower()
+        if not column or not op:
+            continue
+        alias = str(item.get("alias") or "").strip() or None
+        payload: Dict[str, Any] = {"column": column, "op": op}
+        if alias:
+            payload["alias"] = alias
+        out.append(payload)
+    return out
+
+
 def _filter_selected_datasets(context_pack: Dict[str, Any], *, dataset_ids: Optional[List[str]]) -> List[Dict[str, Any]]:
     selected = context_pack.get("selected_datasets")
     if not isinstance(selected, list):
@@ -387,6 +417,38 @@ class PipelineMCPServer:
                             "node_id": {"type": "string"},
                         },
                         "required": ["plan", "operation", "input_node_ids"],
+                    },
+                },
+                {
+                    "name": "plan_add_group_by",
+                    "description": "Add a groupBy/aggregate transform node (group_by + aggregates). aggregates items: {column,op,alias?}.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "plan": {"type": "object"},
+                            "input_node_id": {"type": "string"},
+                            "group_by": {"type": "array", "items": {"type": "string"}},
+                            "aggregates": {"type": "array", "items": {"type": "object"}},
+                            "operation": {"type": "string", "description": "groupBy (default) or aggregate"},
+                            "node_id": {"type": "string"},
+                        },
+                        "required": ["plan", "input_node_id", "aggregates"],
+                    },
+                },
+                {
+                    "name": "plan_add_window",
+                    "description": "Add a window transform node. order_by supports ['-col'] for DESC or [{'column','direction'}].",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "plan": {"type": "object"},
+                            "input_node_id": {"type": "string"},
+                            "partition_by": {"type": "array", "items": {"type": "string"}},
+                            "order_by": {"type": "array"},
+                            "window": {"type": "object"},
+                            "node_id": {"type": "string"},
+                        },
+                        "required": ["plan", "input_node_id"],
                     },
                 },
                 {
@@ -795,24 +857,112 @@ class PipelineMCPServer:
 
                 if name == "plan_add_join":
                     plan = arguments.get("plan") or {}
+                    left_keys = (
+                        arguments.get("left_keys")
+                        or arguments.get("leftKeys")
+                        or arguments.get("left_columns")
+                        or arguments.get("leftColumns")
+                    )
+                    right_keys = (
+                        arguments.get("right_keys")
+                        or arguments.get("rightKeys")
+                        or arguments.get("right_columns")
+                        or arguments.get("rightColumns")
+                    )
+                    if not left_keys:
+                        left_keys = (
+                            arguments.get("left_column")
+                            or arguments.get("leftColumn")
+                            or arguments.get("left_key")
+                            or arguments.get("leftKey")
+                            or arguments.get("join_key")
+                            or arguments.get("joinKey")
+                        )
+                    if not right_keys:
+                        right_keys = (
+                            arguments.get("right_column")
+                            or arguments.get("rightColumn")
+                            or arguments.get("right_key")
+                            or arguments.get("rightKey")
+                            or arguments.get("join_key")
+                            or arguments.get("joinKey")
+                        )
+                    join_type = arguments.get("join_type") or arguments.get("joinType") or "inner"
                     result = add_join(
                         plan,
                         left_node_id=str(arguments.get("left_node_id") or ""),
                         right_node_id=str(arguments.get("right_node_id") or ""),
-                        left_keys=arguments.get("left_keys") or [],
-                        right_keys=arguments.get("right_keys") or [],
-                        join_type=str(arguments.get("join_type") or "inner"),
+                        left_keys=_normalize_string_list(left_keys),
+                        right_keys=_normalize_string_list(right_keys),
+                        join_type=str(join_type),
+                        node_id=arguments.get("node_id"),
+                    )
+                    return {"plan": result.plan, "node_id": result.node_id, "warnings": list(result.warnings)}
+
+                if name == "plan_add_group_by":
+                    plan = arguments.get("plan") or {}
+                    input_node_id = str(arguments.get("input_node_id") or "")
+                    group_by = _normalize_string_list(arguments.get("group_by") or arguments.get("groupBy") or [])
+                    aggregates = _normalize_aggregates(arguments.get("aggregates") or arguments.get("aggregations") or [])
+                    if not aggregates:
+                        raise PipelinePlanBuilderError("aggregates is required (items: {column,op,alias?})")
+                    op = str(arguments.get("operation") or "groupBy").strip() or "groupBy"
+                    if op not in {"groupBy", "aggregate"}:
+                        op = "groupBy"
+                    result = add_transform(
+                        plan,
+                        operation=op,
+                        input_node_ids=[input_node_id],
+                        metadata={"groupBy": group_by, "aggregates": aggregates},
+                        node_id=arguments.get("node_id"),
+                    )
+                    return {"plan": result.plan, "node_id": result.node_id, "warnings": list(result.warnings)}
+
+                if name == "plan_add_window":
+                    plan = arguments.get("plan") or {}
+                    input_node_id = str(arguments.get("input_node_id") or "")
+                    window = arguments.get("window") if isinstance(arguments.get("window"), dict) else None
+                    if window is None:
+                        partition_by = _normalize_string_list(arguments.get("partition_by") or arguments.get("partitionBy") or [])
+                        order_by_raw = arguments.get("order_by") or arguments.get("orderBy") or []
+                        order_by = order_by_raw if isinstance(order_by_raw, list) else [order_by_raw]
+                        window = {"partitionBy": partition_by, "orderBy": order_by}
+                    result = add_transform(
+                        plan,
+                        operation="window",
+                        input_node_ids=[input_node_id],
+                        metadata={"window": window},
                         node_id=arguments.get("node_id"),
                     )
                     return {"plan": result.plan, "node_id": result.node_id, "warnings": list(result.warnings)}
 
                 if name == "plan_add_transform":
                     plan = arguments.get("plan") or {}
+                    operation = str(arguments.get("operation") or "").strip()
+                    input_node_ids = arguments.get("input_node_ids")
+                    if not input_node_ids:
+                        single = arguments.get("input_node_id") or arguments.get("inputNodeId")
+                        input_node_ids = [single] if single else []
+                    metadata = arguments.get("metadata") or {}
+                    if not isinstance(metadata, dict):
+                        metadata = {}
+                    if not metadata and operation in {"groupBy", "aggregate"}:
+                        group_by = _normalize_string_list(arguments.get("group_by") or arguments.get("groupBy") or [])
+                        aggregates = _normalize_aggregates(arguments.get("aggregates") or arguments.get("aggregations") or [])
+                        metadata = {"groupBy": group_by, "aggregates": aggregates}
+                    if not metadata and operation == "window":
+                        window = arguments.get("window") if isinstance(arguments.get("window"), dict) else None
+                        if window is None:
+                            partition_by = _normalize_string_list(arguments.get("partition_by") or arguments.get("partitionBy") or [])
+                            order_by_raw = arguments.get("order_by") or arguments.get("orderBy") or []
+                            order_by = order_by_raw if isinstance(order_by_raw, list) else [order_by_raw]
+                            window = {"partitionBy": partition_by, "orderBy": order_by}
+                        metadata = {"window": window}
                     result = add_transform(
                         plan,
-                        operation=str(arguments.get("operation") or ""),
-                        input_node_ids=arguments.get("input_node_ids") or [],
-                        metadata=arguments.get("metadata") or {},
+                        operation=operation,
+                        input_node_ids=input_node_ids or [],
+                        metadata=metadata,
                         node_id=arguments.get("node_id"),
                     )
                     return {"plan": result.plan, "node_id": result.node_id, "warnings": list(result.warnings)}
@@ -829,10 +979,77 @@ class PipelineMCPServer:
 
                 if name == "plan_add_compute":
                     plan = arguments.get("plan") or {}
+                    input_node_id = str(arguments.get("input_node_id") or "")
+                    expr = str(arguments.get("expression") or "").strip()
+
+                    # Common LLM shape: {"computations":[{"alias":"x","expression":"a*b"}, ...]}
+                    # The pipeline engine supports ONE assignment per compute node, so chain them.
+                    if not expr:
+                        raw = (
+                            arguments.get("computations")
+                            or arguments.get("computes")
+                            or arguments.get("compute")
+                            or arguments.get("expressions")
+                            or []
+                        )
+                        items = raw if isinstance(raw, list) else [raw]
+                        exprs: list[str] = []
+                        for item in items:
+                            if isinstance(item, str) and item.strip():
+                                exprs.append(item.strip())
+                                continue
+                            if not isinstance(item, dict):
+                                continue
+                            alias = (
+                                item.get("alias")
+                                or item.get("new_column")
+                                or item.get("newColumn")
+                                or item.get("column")
+                                or item.get("name")
+                            )
+                            formula = item.get("expression") or item.get("formula") or item.get("expr")
+                            alias_value = str(alias or "").strip()
+                            formula_value = str(formula or "").strip()
+                            if not alias_value or not formula_value:
+                                continue
+                            exprs.append(f"{alias_value} = {formula_value}")
+
+                        if exprs:
+                            node_ids: list[str] = []
+                            warnings: list[str] = []
+                            current_input = input_node_id
+                            for idx, compute_expr in enumerate(exprs):
+                                result = add_compute(
+                                    plan,
+                                    input_node_id=current_input,
+                                    expression=compute_expr,
+                                    node_id=arguments.get("node_id") if idx == 0 else None,
+                                )
+                                plan = result.plan
+                                current_input = result.node_id
+                                node_ids.append(result.node_id)
+                                warnings.extend(list(result.warnings or []))
+                            return {
+                                "plan": plan,
+                                "node_id": node_ids[-1],
+                                "node_ids": node_ids,
+                                "warnings": warnings,
+                            }
+
+                    # Another common shape: expression="a*b", alias="x" (no assignment in expression).
+                    alias = str(
+                        arguments.get("alias")
+                        or arguments.get("new_column")
+                        or arguments.get("newColumn")
+                        or ""
+                    ).strip()
+                    if expr and alias and "=" not in expr:
+                        expr = f"{alias} = {expr}"
+
                     result = add_compute(
                         plan,
-                        input_node_id=str(arguments.get("input_node_id") or ""),
-                        expression=str(arguments.get("expression") or ""),
+                        input_node_id=input_node_id,
+                        expression=expr,
                         node_id=arguments.get("node_id"),
                     )
                     return {"plan": result.plan, "node_id": result.node_id, "warnings": list(result.warnings)}

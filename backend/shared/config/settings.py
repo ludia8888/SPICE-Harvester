@@ -1537,6 +1537,11 @@ class PipelinePlanSettings(BaseSettings):
         description="Enable MCP-based pipeline planner (PIPELINE_PLAN_MCP_PLANNER_ENABLED)",
     )
 
+    mcp_autonomous_enabled: bool = Field(
+        default=False,
+        description="Enable autonomous MCP planner loop (PIPELINE_PLAN_MCP_AUTONOMOUS_ENABLED)",
+    )
+
     mcp_transform_enabled: bool = Field(
         default=False,
         description="Enable MCP-based pipeline transform agent (PIPELINE_PLAN_MCP_TRANSFORM_ENABLED)",

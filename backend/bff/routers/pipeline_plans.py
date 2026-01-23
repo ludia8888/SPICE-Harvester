@@ -23,6 +23,7 @@ from bff.services.pipeline_plan_compiler import (
     repair_pipeline_plan,
     repair_pipeline_plan_mcp,
 )
+from bff.services.pipeline_plan_autonomous_compiler import compile_pipeline_plan_mcp_autonomous
 from bff.services.pipeline_output_splitter import split_pipeline_outputs
 from bff.services.pipeline_plan_validation import validate_pipeline_plan
 from bff.services.pipeline_spec_generator import generate_pipeline_specs
@@ -549,11 +550,12 @@ async def compile_plan(
         context_pack = None
 
     try:
-        compiler = (
-            compile_pipeline_plan_mcp
-            if bool(get_settings().pipeline_plan.mcp_planner_enabled)
-            else compile_pipeline_plan
-        )
+        if bool(get_settings().pipeline_plan.mcp_autonomous_enabled):
+            compiler = compile_pipeline_plan_mcp_autonomous
+        elif bool(get_settings().pipeline_plan.mcp_planner_enabled):
+            compiler = compile_pipeline_plan_mcp
+        else:
+            compiler = compile_pipeline_plan
         result: PipelinePlanCompileResult = await compiler(
             goal=goal,
             data_scope=data_scope,
