@@ -22,6 +22,7 @@ from shared.services.llm_gateway import (
     LLMUnavailableError,
 )
 from shared.services.llm_quota import enforce_llm_quota
+from shared.services.pipeline_relationship_inference import infer_join_plan_from_context_pack
 from shared.services.redis_service import RedisService
 
 
@@ -232,6 +233,72 @@ def _fallback_join_candidates(
     return selections
 
 
+def _dataset_ids_from_context_pack(context_pack: Dict[str, Any]) -> List[str]:
+    selected = context_pack.get("selected_datasets") if isinstance(context_pack, dict) else None
+    if not isinstance(selected, list):
+        return []
+    ids: List[str] = []
+    for item in selected:
+        if not isinstance(item, dict):
+            continue
+        ds_id = str(item.get("dataset_id") or "").strip()
+        if ds_id:
+            ids.append(ds_id)
+    return ids
+
+
+def _join_signature(join: PipelineJoinSelection) -> tuple[str, str, tuple[str, ...], tuple[str, ...]]:
+    left_id = str(join.left_dataset_id or "").strip()
+    right_id = str(join.right_dataset_id or "").strip()
+    left_keys = list(join.left_columns or []) or [str(join.left_column or "").strip()]
+    right_keys = list(join.right_columns or []) or [str(join.right_column or "").strip()]
+    left_keys_norm = tuple([str(k).strip().lower() for k in left_keys if str(k).strip()])
+    right_keys_norm = tuple([str(k).strip().lower() for k in right_keys if str(k).strip()])
+    # Canonicalize to avoid duplicates from swapped orientation.
+    if left_id <= right_id:
+        return left_id, right_id, left_keys_norm, right_keys_norm
+    return right_id, left_id, right_keys_norm, left_keys_norm
+
+
+def _dedupe_joins(joins: List[PipelineJoinSelection]) -> List[PipelineJoinSelection]:
+    seen: set[tuple[str, str, tuple[str, ...], tuple[str, ...]]] = set()
+    out: List[PipelineJoinSelection] = []
+    for join in joins:
+        sig = _join_signature(join)
+        if sig in seen:
+            continue
+        seen.add(sig)
+        out.append(join)
+    return out
+
+
+def _is_join_plan_connected(dataset_ids: List[str], joins: List[PipelineJoinSelection]) -> bool:
+    if not dataset_ids or len(dataset_ids) <= 1:
+        return True
+    wanted = {str(item).strip() for item in dataset_ids if str(item).strip()}
+    parent: Dict[str, str] = {ds: ds for ds in wanted}
+
+    def find(x: str) -> str:
+        while parent.get(x, x) != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(a: str, b: str) -> None:
+        ra = find(a)
+        rb = find(b)
+        if ra != rb:
+            parent[rb] = ra
+
+    for join in joins:
+        a = str(join.left_dataset_id or "").strip()
+        b = str(join.right_dataset_id or "").strip()
+        if a in wanted and b in wanted:
+            union(a, b)
+    roots = {find(ds) for ds in wanted}
+    return len(roots) <= 1
+
+
 def _build_join_system_prompt() -> str:
     return (
         "You are a STRICT join-key selector for SPICE-Harvester.\n"
@@ -367,6 +434,36 @@ async def select_join_keys(
         filtered = _fallback_join_candidates(candidates, max_joins=max_joins)
         if filtered:
             warnings.append("join selections invalid; using top join candidates as fallback")
+
+    # Deterministic top-up: for multi-dataset integration, ensure the join plan connects the selected datasets.
+    # Avoid doing this during revision (feedback is present) to not reintroduce joins the LLM intentionally removed.
+    if feedback is None and candidates:
+        dataset_ids = _dataset_ids_from_context_pack(context_pack)
+        if len(dataset_ids) > 2 and filtered and not _is_join_plan_connected(dataset_ids, filtered):
+            inferred = infer_join_plan_from_context_pack(
+                context_pack,
+                dataset_ids=dataset_ids,
+                max_joins=max_joins,
+                max_edges=30,
+            )
+            inferred_plan = inferred.get("join_plan") if isinstance(inferred, dict) else None
+            inferred_warnings = inferred.get("warnings") if isinstance(inferred, dict) else None
+            if isinstance(inferred_warnings, list):
+                warnings.extend([str(item) for item in inferred_warnings if str(item or "").strip()])
+            if isinstance(inferred_plan, list) and inferred_plan:
+                extra: List[PipelineJoinSelection] = []
+                for item in inferred_plan:
+                    if not isinstance(item, dict):
+                        continue
+                    try:
+                        extra.append(PipelineJoinSelection.model_validate(item))
+                    except Exception:
+                        continue
+                if extra:
+                    merged = _dedupe_joins(filtered + extra)[: max(0, int(max_joins))]
+                    merged, merge_warnings = _filter_join_selections(merged, candidates)
+                    warnings.extend(merge_warnings)
+                    filtered = _dedupe_joins(merged)[: max(0, int(max_joins))]
 
     return PipelineJoinResult(
         joins=filtered,

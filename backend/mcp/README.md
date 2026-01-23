@@ -44,6 +44,7 @@ Custom MCP server exposing deterministic pipeline tools:
 - Generate null/missing reports from context packs (context_pack_null_report)
 - Infer PK/FK candidates from context packs (context_pack_infer_keys)
 - Infer column types + join-key cast suggestions from context packs (context_pack_infer_types)
+- Infer a best-effort multi-dataset join plan (spanning tree) from context packs (context_pack_infer_join_plan)
 
 ### 3. MCP Client (`mcp_client.py`)
 Client implementation for connecting to MCP servers:
@@ -209,6 +210,8 @@ curl -X POST http://localhost:8002/api/v1/context7/analyze/ontology \
 - Verify MCP servers are running: `ps aux | grep mcp`
 - Check environment variables are set correctly
 - Review logs: `tail -f logs/mcp_*.log`
+- If you see `Unexpected MCP tool result type: CallToolResult`, your client wrapper may not be parsing `structuredContent` vs `content[text]` correctly.
+  - BFF wrappers handle this in `backend/bff/services/pipeline_plan_compiler.py` and `backend/bff/services/pipeline_transform_agent.py`.
 
 ### Context7 Issues
 - Ensure API key is valid

@@ -7,6 +7,7 @@ Generates typed PipelinePlan artifacts and validates them before preview.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Literal
 from uuid import uuid4
@@ -31,6 +32,7 @@ from shared.services.llm_gateway import (
     LLMUnavailableError,
 )
 from shared.services.llm_quota import LLMQuotaExceededError, enforce_llm_quota
+from shared.services.pipeline_plan_builder import add_input, add_join, add_output, add_select, new_plan
 from shared.services.redis_service import RedisService
 
 
@@ -369,6 +371,7 @@ def _build_mcp_script_system_prompt(*, mode: Literal["build", "repair"], allowed
         "- Do NOT invent dataset ids, node ids, or column names; use ONLY what is present in the context pack and current_plan.\n"
         "- Do NOT output definition_json directly.\n"
         "- Cross joins are forbidden.\n"
+        "- If planner_hints.join_plan is provided, use ONLY those join keys (do not invent joins/keys).\n"
         "- Prefer plan_add_join for joins. Use plan_add_transform only for advanced ops (groupBy/aggregate/window/pivot/union/sort/explode).\n"
         "- If planner_hints.key_inference provides pk/fk candidates, use them to pick stable join directions and output pkColumns.\n"
         "- If planner_hints.type_inference.join_key_cast_suggestions is provided, add ONLY the minimal casts needed for join keys.\n"
@@ -515,6 +518,357 @@ def _build_repair_user_prompt(
         f"Preview:\n{json.dumps(preview or {}, ensure_ascii=False)}\n\n"
         f"Context pack:\n{json.dumps(context_pack or {}, ensure_ascii=False)}\n"
     )
+
+
+def _extract_explicit_output_columns_from_goal(goal: str) -> List[str]:
+    """
+    Best-effort extraction of an explicit output column list from the user's goal.
+
+    We intentionally keep this aligned with the intent verifier heuristics:
+    it only triggers on patterns like "... col1, col2 columns" / "... col1, col2 컬럼".
+    """
+    text = str(goal or "")
+    matches = list(
+        re.finditer(
+            r"(?P<cols>(?:[A-Za-z_][A-Za-z0-9_]*\s*,\s*)*[A-Za-z_][A-Za-z0-9_]*)\s*(?:컬럼|columns?)",
+            text,
+            flags=re.IGNORECASE,
+        )
+    )
+    if not matches:
+        return []
+    segment = matches[-1].group("cols") or ""
+    cols = re.findall(r"[A-Za-z_][A-Za-z0-9_]*", segment)
+    seen: set[str] = set()
+    out: List[str] = []
+    for c in cols:
+        cl = c.lower()
+        if cl in seen:
+            continue
+        seen.add(cl)
+        out.append(c)
+    return out
+
+
+def _extract_explicit_output_name_from_goal(goal: str) -> Optional[str]:
+    """
+    Best-effort extraction of an output dataset name from the goal.
+
+    Examples:
+    - "... joined_orders 데이터셋 ..." -> "joined_orders"
+    - "... joined_orders dataset ..."  -> "joined_orders"
+    """
+    text = str(goal or "")
+    matches = list(
+        re.finditer(
+            r"(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*(?:데이터셋|dataset)",
+            text,
+            flags=re.IGNORECASE,
+        )
+    )
+    if not matches:
+        return None
+    name = str(matches[-1].group("name") or "").strip()
+    return name or None
+
+
+def _ensure_plan_has_output(plan_obj: Dict[str, Any], *, goal: str) -> Optional[str]:
+    """
+    Deterministically ensure the plan has at least one output node + outputs[] entry.
+
+    This protects against LLM omissions (e.g., returning steps but forgetting plan_add_output),
+    so the agent can continue without user-facing clarification loops for basic requests.
+    """
+    if not isinstance(plan_obj, dict):
+        return None
+
+    definition = plan_obj.get("definition_json")
+    if not isinstance(definition, dict):
+        return None
+    nodes = definition.get("nodes")
+    edges = definition.get("edges")
+    if not isinstance(nodes, list) or not isinstance(edges, list):
+        return None
+
+    has_output_node = any(
+        isinstance(node, dict) and str(node.get("type") or "").strip().lower() == "output" for node in nodes
+    )
+    outputs = plan_obj.get("outputs")
+    has_outputs_entry = isinstance(outputs, list) and bool(outputs)
+    if has_output_node and has_outputs_entry:
+        return None
+
+    # If we already have an output node, prefer keeping it and only backfill outputs[].
+    if has_output_node and not has_outputs_entry:
+        output_name = None
+        for node in nodes:
+            if not isinstance(node, dict):
+                continue
+            if str(node.get("type") or "").strip().lower() != "output":
+                continue
+            meta = node.get("metadata") if isinstance(node.get("metadata"), dict) else {}
+            output_name = str(meta.get("outputName") or meta.get("datasetName") or node.get("id") or "").strip() or None
+            if output_name:
+                break
+        if output_name:
+            plan_obj["outputs"] = [{"output_name": output_name, "output_kind": "unknown"}]
+            return "compiler: backfilled outputs[] from existing output node"
+        return None
+
+    if has_outputs_entry and not has_output_node:
+        # validate_pipeline_plan will create output nodes from outputs[], so keep this path minimal.
+        return None
+
+    # No outputs and no output node: add one.
+    output_name = _extract_explicit_output_name_from_goal(goal) or "output"
+
+    # Pick a sink node as the output input (prefer the terminal transform node).
+    node_by_id: Dict[str, Dict[str, Any]] = {}
+    node_ids: List[str] = []
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        node_id = str(node.get("id") or "").strip()
+        if not node_id:
+            continue
+        node_by_id[node_id] = node
+        node_ids.append(node_id)
+    if not node_ids:
+        return None
+    outgoing = {str(edge.get("from") or "").strip() for edge in edges if isinstance(edge, dict)}
+    sink_ids = [
+        node_id
+        for node_id in node_ids
+        if node_id
+        and node_id not in outgoing
+        and str(node_by_id.get(node_id, {}).get("type") or "").strip().lower() != "output"
+    ]
+    attach_to = sink_ids[0] if sink_ids else node_ids[-1]
+
+    try:
+        add_output(plan_obj, input_node_id=attach_to, output_name=output_name, output_kind="unknown")
+    except Exception:
+        return None
+    return "compiler: injected missing output node"
+
+
+def _dedupe_outputs(plan_obj: Dict[str, Any], *, goal: str) -> Optional[str]:
+    """
+    Deterministically dedupe outputs[] + output nodes by output_name/outputName.
+
+    LLM planners sometimes emit duplicate plan_add_output calls; downstream intent verification and
+    execution become ambiguous when multiple output nodes share the same outputName.
+    """
+    if not isinstance(plan_obj, dict):
+        return None
+    definition = plan_obj.get("definition_json")
+    if not isinstance(definition, dict):
+        return None
+    nodes = definition.get("nodes")
+    edges = definition.get("edges")
+    if not isinstance(nodes, list) or not isinstance(edges, list):
+        return None
+
+    changed = False
+
+    outputs_raw = plan_obj.get("outputs")
+    if isinstance(outputs_raw, list) and outputs_raw:
+        seen_names: set[str] = set()
+        deduped_outputs: List[Dict[str, Any]] = []
+        for item in outputs_raw:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("output_name") or "").strip()
+            if not name:
+                continue
+            lowered = name.lower()
+            if lowered in seen_names:
+                changed = True
+                continue
+            seen_names.add(lowered)
+            deduped_outputs.append(item)
+        if deduped_outputs and len(deduped_outputs) != len(outputs_raw):
+            plan_obj["outputs"] = deduped_outputs
+
+    required_cols = _extract_explicit_output_columns_from_goal(goal)
+
+    # Collect output nodes grouped by outputName.
+    output_nodes_by_name: Dict[str, List[str]] = {}
+    node_by_id: Dict[str, Dict[str, Any]] = {}
+    node_order: List[str] = []
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        node_id = str(node.get("id") or "").strip()
+        if not node_id:
+            continue
+        node_by_id[node_id] = node
+        node_order.append(node_id)
+        if str(node.get("type") or "").strip().lower() != "output":
+            continue
+        meta = node.get("metadata") if isinstance(node.get("metadata"), dict) else {}
+        name = str(meta.get("outputName") or "").strip()
+        if not name:
+            continue
+        output_nodes_by_name.setdefault(name, []).append(node_id)
+
+    def _incoming_parent(node_id: str) -> Optional[str]:
+        for edge in edges:
+            if not isinstance(edge, dict):
+                continue
+            if str(edge.get("to") or "").strip() != node_id:
+                continue
+            parent = str(edge.get("from") or "").strip()
+            return parent or None
+        return None
+
+    def _score_output_node(node_id: str) -> tuple[int, int]:
+        """
+        Prefer output nodes wired to a select node matching required_cols.
+        Secondary tiebreaker: later node order.
+        """
+        parent_id = _incoming_parent(node_id) or ""
+        parent = node_by_id.get(parent_id, {})
+        meta = parent.get("metadata") if isinstance(parent.get("metadata"), dict) else {}
+        op = str(meta.get("operation") or parent.get("type") or "").strip().lower()
+        cols = meta.get("columns")
+        colset = {str(c).strip().lower() for c in cols} if isinstance(cols, list) else set()
+
+        score = 0
+        if parent_id:
+            score += 1
+        if op in {"select", "project"}:
+            score += 5
+            if required_cols and all(str(c).strip().lower() in colset for c in required_cols):
+                score += 10
+        # Prefer later nodes if scores tie.
+        order_idx = node_order.index(node_id) if node_id in node_order else -1
+        return score, order_idx
+
+    # Remove duplicate output nodes per outputName.
+    to_delete: set[str] = set()
+    for name, node_ids in output_nodes_by_name.items():
+        if len(node_ids) <= 1:
+            continue
+        keep = max(node_ids, key=_score_output_node)
+        for node_id in node_ids:
+            if node_id != keep:
+                to_delete.add(node_id)
+        changed = True
+
+    if to_delete:
+        next_nodes = [
+            node
+            for node in nodes
+            if not (isinstance(node, dict) and str(node.get("id") or "").strip() in to_delete)
+        ]
+        next_edges = [
+            edge
+            for edge in edges
+            if not (
+                isinstance(edge, dict)
+                and (str(edge.get("from") or "").strip() in to_delete or str(edge.get("to") or "").strip() in to_delete)
+            )
+        ]
+        definition["nodes"] = next_nodes
+        definition["edges"] = next_edges
+        plan_obj["definition_json"] = definition
+
+    return "compiler: deduped duplicate output nodes/entries" if changed else None
+
+
+def _ensure_output_projection_for_explicit_goal_columns(plan_obj: Dict[str, Any], *, goal: str) -> Optional[str]:
+    """
+    If the goal explicitly lists output columns, ensure a select node directly feeds the (single) output node.
+
+    This is a deterministic hardening step so "simple joins" don't require transform/repair loops just to
+    make the output shape explicit for intent verification.
+    """
+    required_cols = _extract_explicit_output_columns_from_goal(goal)
+    if not required_cols:
+        return None
+
+    if not isinstance(plan_obj, dict):
+        return None
+    definition = plan_obj.get("definition_json")
+    if not isinstance(definition, dict):
+        return None
+    nodes = definition.get("nodes")
+    edges = definition.get("edges")
+    if not isinstance(nodes, list) or not isinstance(edges, list):
+        return None
+
+    output_nodes = [
+        node
+        for node in nodes
+        if isinstance(node, dict) and str(node.get("type") or "").strip().lower() == "output"
+    ]
+    if len(output_nodes) != 1:
+        return None
+
+    output_id = str(output_nodes[0].get("id") or "").strip()
+    if not output_id:
+        return None
+
+    incoming_edges = [
+        edge for edge in edges if isinstance(edge, dict) and str(edge.get("to") or "").strip() == output_id
+    ]
+    if len(incoming_edges) != 1:
+        return None
+
+    upstream_id = str(incoming_edges[0].get("from") or "").strip()
+    if not upstream_id:
+        return None
+
+    node_by_id: Dict[str, Dict[str, Any]] = {
+        str(node.get("id") or "").strip(): node
+        for node in nodes
+        if isinstance(node, dict) and str(node.get("id") or "").strip()
+    }
+    upstream_node = node_by_id.get(upstream_id)
+    if isinstance(upstream_node, dict) and str(upstream_node.get("type") or "").strip().lower() == "transform":
+        meta = upstream_node.get("metadata") if isinstance(upstream_node.get("metadata"), dict) else {}
+        op = str(meta.get("operation") or "").strip().lower()
+        if op in {"select", "project"}:
+            next_meta = dict(meta)
+            next_meta["operation"] = op
+            next_meta["columns"] = list(required_cols)
+            upstream_node["metadata"] = next_meta
+            return "compiler: updated select columns to match explicit goal output columns"
+
+    try:
+        mutation = add_select(plan_obj, input_node_id=upstream_id, columns=list(required_cols))
+    except Exception:
+        return None
+
+    select_node_id = str(mutation.node_id or "").strip()
+    if not select_node_id:
+        return None
+
+    # Rewire output to come from the select node.
+    next_edges: List[Dict[str, Any]] = []
+    seen_edges: set[tuple[str, str]] = set()
+    for edge in (definition.get("edges") or []):
+        if not isinstance(edge, dict):
+            continue
+        src = str(edge.get("from") or "").strip()
+        dst = str(edge.get("to") or "").strip()
+        if not src or not dst:
+            continue
+        if dst == output_id:
+            continue
+        key = (src, dst)
+        if key in seen_edges:
+            continue
+        seen_edges.add(key)
+        next_edges.append({"from": src, "to": dst})
+
+    key = (select_node_id, output_id)
+    if key not in seen_edges:
+        next_edges.append({"from": select_node_id, "to": output_id})
+    definition["edges"] = next_edges
+    plan_obj["definition_json"] = definition
+    return "compiler: injected select to match explicit goal output columns"
 
 
 def _fallback_questions_from_errors(errors: List[str]) -> List[PipelineClarificationQuestion]:
@@ -844,14 +1198,45 @@ async def compile_pipeline_plan_mcp(
         payload = await mcp_manager.call_tool("pipeline", tool, arguments)
         if isinstance(payload, dict):
             return payload
-        structured = getattr(payload, "structuredContent", None) or getattr(payload, "structured_content", None)
+        structured = getattr(payload, "structuredContent", None)
+        if isinstance(structured, dict):
+            return structured
+        structured = getattr(payload, "structured_content", None)
         if isinstance(structured, dict):
             return structured
         # Defensive fallback: some MCP client implementations return a wrapper object.
         data = getattr(payload, "data", None)
         if isinstance(data, dict):
             return data
-        raise RuntimeError(f"Unexpected MCP tool result type: {type(payload)}")
+        is_error = bool(getattr(payload, "isError", False) or getattr(payload, "is_error", False))
+        content = getattr(payload, "content", None)
+        if isinstance(content, list) and content:
+            if is_error:
+                texts: List[str] = []
+                for part in content:
+                    text = getattr(part, "text", None)
+                    if text is None and isinstance(part, dict):
+                        text = part.get("text")
+                    if isinstance(text, str) and text.strip():
+                        texts.append(text.strip())
+                return {"error": "\n".join(texts).strip() or f"MCP tool error: {tool}"}
+            for part in content:
+                text = getattr(part, "text", None)
+                if text is None and isinstance(part, dict):
+                    text = part.get("text")
+                if isinstance(text, str) and text.strip():
+                    try:
+                        parsed = json.loads(text)
+                    except Exception:
+                        continue
+                    if isinstance(parsed, dict):
+                        return parsed
+            # Best-effort: return raw text so callers can surface it as an error instead of 500ing.
+            if is_error:
+                first_text = getattr(content[0], "text", None) if content else None
+                if isinstance(first_text, str) and first_text.strip():
+                    return {"error": first_text.strip()}
+        raise RuntimeError(f"Unexpected MCP tool result type for {tool}: {type(payload)}")
 
     scope_db = str((data_scope.db_name if data_scope else "") or "").strip()
     scope_branch = str(data_scope.branch or "").strip() or None if data_scope else None
@@ -946,6 +1331,28 @@ async def compile_pipeline_plan_mcp(
     # Deterministic analysis helpers (PK/FK + type hints) to reduce planner guessing.
     effective_planner_hints = dict(planner_hints or {})
     if isinstance(context_pack, dict):
+        # If join_plan is missing (e.g., join-key selection skipped/failed), infer a best-effort join plan
+        # from sample-safe context pack candidates so the planner has a concrete candidate space.
+        try:
+            allow_join = True if task_spec_model is None else bool(task_spec_model.allow_join)
+            if allow_join and len(dataset_ids) > 1 and "join_plan" not in effective_planner_hints:
+                join_plan_payload = await _call_pipeline_tool(
+                    "context_pack_infer_join_plan",
+                    {
+                        "context_pack": context_pack,
+                        "dataset_ids": dataset_ids or None,
+                        "max_joins": min(12, max(4, len(dataset_ids) - 1)) if len(dataset_ids) > 1 else 4,
+                        "max_edges": 30,
+                    },
+                )
+                join_inf = join_plan_payload.get("inference") if isinstance(join_plan_payload, dict) else None
+                if isinstance(join_inf, dict):
+                    join_plan = join_inf.get("join_plan")
+                    if isinstance(join_plan, list) and join_plan:
+                        effective_planner_hints["join_plan"] = join_plan
+        except Exception:
+            pass
+
         if "key_inference" not in effective_planner_hints:
             try:
                 keys_payload = await _call_pipeline_tool(
@@ -987,6 +1394,115 @@ async def compile_pipeline_plan_mcp(
         branch = str(item.get("branch") or "").strip() or None
         return name, branch, item
 
+    # Deterministic fast-path: for simple "integrate via join" tasks with an explicit join_plan hint,
+    # build the plan without relying on the LLM to pick/track node ids correctly.
+    try:
+        allow_join = True if task_spec_model is None else bool(task_spec_model.allow_join)
+        allow_advanced = True if task_spec_model is None else bool(task_spec_model.allow_advanced_transforms)
+        join_plan_hint = effective_planner_hints.get("join_plan") if isinstance(effective_planner_hints, dict) else None
+        if allow_join and not allow_advanced and isinstance(join_plan_hint, list) and len(dataset_ids) == 2 and join_plan_hint:
+            selected = {str(item).strip() for item in dataset_ids if str(item).strip()}
+
+            chosen_edge: Optional[Dict[str, Any]] = None
+            for edge in join_plan_hint:
+                if not isinstance(edge, dict):
+                    continue
+                left_id = str(edge.get("left_dataset_id") or "").strip()
+                right_id = str(edge.get("right_dataset_id") or "").strip()
+                if left_id and right_id and {left_id, right_id} == selected:
+                    chosen_edge = edge
+                    break
+
+            if chosen_edge is not None:
+                plan_obj = new_plan(goal=goal, db_name=scope_db, branch=scope_branch, dataset_ids=dataset_ids)
+                dataset_to_node: Dict[str, str] = {}
+                for idx, dataset_id in enumerate(dataset_ids):
+                    dataset_name, dataset_branch, _dataset_obj = _dataset_info(dataset_id)
+                    node_id = f"input_{idx + 1}"
+                    add_input(
+                        plan_obj,
+                        dataset_id=dataset_id,
+                        dataset_name=dataset_name,
+                        dataset_branch=dataset_branch or scope_branch,
+                        node_id=node_id,
+                    )
+                    dataset_to_node[str(dataset_id).strip()] = node_id
+
+                left_id = str(chosen_edge.get("left_dataset_id") or "").strip()
+                right_id = str(chosen_edge.get("right_dataset_id") or "").strip()
+                left_node_id = dataset_to_node.get(left_id)
+                right_node_id = dataset_to_node.get(right_id)
+
+                left_keys = chosen_edge.get("left_keys") if isinstance(chosen_edge.get("left_keys"), list) else None
+                right_keys = chosen_edge.get("right_keys") if isinstance(chosen_edge.get("right_keys"), list) else None
+                if not left_keys:
+                    left_col = str(chosen_edge.get("left_column") or "").strip()
+                    left_keys = [left_col] if left_col else None
+                if not right_keys:
+                    right_col = str(chosen_edge.get("right_column") or "").strip()
+                    right_keys = [right_col] if right_col else None
+
+                join_type = str(chosen_edge.get("join_type") or "inner").strip().lower() or "inner"
+                if left_node_id and right_node_id and left_keys and right_keys and len(left_keys) == len(right_keys):
+                    add_join(
+                        plan_obj,
+                        left_node_id=left_node_id,
+                        right_node_id=right_node_id,
+                        left_keys=[str(k).strip() for k in left_keys if str(k).strip()],
+                        right_keys=[str(k).strip() for k in right_keys if str(k).strip()],
+                        join_type=join_type,
+                        node_id="join",
+                    )
+
+                    output_input_id = "join"
+                    required_cols = _extract_explicit_output_columns_from_goal(goal)
+                    if required_cols:
+                        add_select(plan_obj, input_node_id="join", columns=list(required_cols), node_id="select_1")
+                        output_input_id = "select_1"
+
+                    output_name = _extract_explicit_output_name_from_goal(goal) or "output"
+                    add_output(plan_obj, input_node_id=output_input_id, output_name=output_name, output_kind="unknown")
+
+                    plan_model = PipelinePlan.model_validate(plan_obj)
+                    plan_model = plan_model.model_copy(
+                        update={
+                            "plan_id": plan_model.plan_id or plan_id,
+                            "created_by": plan_model.created_by or actor,
+                            "data_scope": data_scope or plan_model.data_scope,
+                            "task_spec": task_spec_model,
+                        }
+                    )
+
+                    if not plan_model.associations and (task_spec_model is None or bool(task_spec_model.allow_join)):
+                        derived = _associations_from_join_plan([chosen_edge])
+                        if derived:
+                            plan_model = plan_model.model_copy(update={"associations": derived})
+
+                    validation = await validate_pipeline_plan(
+                        plan=plan_model,
+                        dataset_registry=dataset_registry,
+                        db_name=scope_db,
+                        branch=scope_branch,
+                        require_output=True,
+                        context_pack=context_pack,
+                    )
+                    if not validation.errors:
+                        return PipelinePlanCompileResult(
+                            status="success",
+                            plan_id=plan_id,
+                            plan=validation.plan,
+                            validation_errors=[],
+                            validation_warnings=["compiler: deterministic join fast-path"] + list(validation.warnings or []),
+                            questions=[],
+                            compilation_report=validation.compilation_report,
+                            llm_meta=None,
+                            planner_confidence=1.0,
+                            planner_notes=["deterministic join fast-path"],
+                            preflight=validation.preflight,
+                        )
+    except Exception:
+        pass
+
     last_validation_errors: list[str] = []
     last_validation_warnings: list[str] = []
     last_plan: Optional[PipelinePlan] = None
@@ -999,9 +1515,11 @@ async def compile_pipeline_plan_mcp(
     input_nodes_for_prompt: List[Dict[str, Any]] = []
 
     for attempt in range(2):
-        mode: Literal["build", "repair"] = "build" if attempt == 0 else "repair"
+        # If we couldn't even validate a plan on the first attempt (tool/schema errors),
+        # a second "repair" attempt is usually counterproductive. Re-run build instead.
+        mode: Literal["build", "repair"] = "build" if attempt == 0 or last_plan is None else "repair"
 
-        if attempt == 0:
+        if mode == "build":
             base = await _call_pipeline_tool(
                 "plan_new",
                 {
@@ -1097,8 +1615,8 @@ async def compile_pipeline_plan_mcp(
             current_plan=plan_obj if mode == "repair" else None,
             preflight=last_preflight if mode == "repair" else None,
             compilation_report=last_report.model_dump(mode="json") if (mode == "repair" and last_report) else None,
-            prior_errors=last_validation_errors if mode == "repair" else None,
-            prior_warnings=last_validation_warnings if mode == "repair" else None,
+            prior_errors=last_validation_errors if attempt > 0 else None,
+            prior_warnings=last_validation_warnings if attempt > 0 else None,
         )
 
         if data_policies and redis_service:
@@ -1116,7 +1634,7 @@ async def compile_pipeline_plan_mcp(
 
         try:
             draft, last_llm_meta = await llm_gateway.complete_json(
-                task="PIPELINE_PLAN_MCP_SCRIPT_V1" if attempt == 0 else "PIPELINE_PLAN_MCP_SCRIPT_REPAIR_V1",
+                task="PIPELINE_PLAN_MCP_SCRIPT_V1" if mode == "build" else "PIPELINE_PLAN_MCP_SCRIPT_REPAIR_V1",
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
                 response_model=PipelinePlanBuilderScriptEnvelope,
@@ -1234,6 +1752,16 @@ async def compile_pipeline_plan_mcp(
                 plan_obj = res["plan"]
 
         last_plan_obj = plan_obj if isinstance(plan_obj, dict) else last_plan_obj
+        if isinstance(plan_obj, dict):
+            output_warning = _ensure_plan_has_output(plan_obj, goal=goal)
+            if output_warning:
+                tool_warnings.append(output_warning)
+            dedupe_warning = _dedupe_outputs(plan_obj, goal=goal)
+            if dedupe_warning:
+                tool_warnings.append(dedupe_warning)
+            projection_warning = _ensure_output_projection_for_explicit_goal_columns(plan_obj, goal=goal)
+            if projection_warning:
+                tool_warnings.append(projection_warning)
         if tool_errors:
             last_validation_errors = tool_errors
             last_validation_warnings = tool_warnings
@@ -1618,13 +2146,43 @@ async def repair_pipeline_plan_mcp(
         payload = await mcp_manager.call_tool("pipeline", tool, arguments)
         if isinstance(payload, dict):
             return payload
-        structured = getattr(payload, "structuredContent", None) or getattr(payload, "structured_content", None)
+        structured = getattr(payload, "structuredContent", None)
+        if isinstance(structured, dict):
+            return structured
+        structured = getattr(payload, "structured_content", None)
         if isinstance(structured, dict):
             return structured
         data = getattr(payload, "data", None)
         if isinstance(data, dict):
             return data
-        raise RuntimeError(f"Unexpected MCP tool result type: {type(payload)}")
+        is_error = bool(getattr(payload, "isError", False) or getattr(payload, "is_error", False))
+        content = getattr(payload, "content", None)
+        if isinstance(content, list) and content:
+            if is_error:
+                texts: List[str] = []
+                for part in content:
+                    text = getattr(part, "text", None)
+                    if text is None and isinstance(part, dict):
+                        text = part.get("text")
+                    if isinstance(text, str) and text.strip():
+                        texts.append(text.strip())
+                return {"error": "\n".join(texts).strip() or f"MCP tool error: {tool}"}
+            for part in content:
+                text = getattr(part, "text", None)
+                if text is None and isinstance(part, dict):
+                    text = part.get("text")
+                if isinstance(text, str) and text.strip():
+                    try:
+                        parsed = json.loads(text)
+                    except Exception:
+                        continue
+                    if isinstance(parsed, dict):
+                        return parsed
+            if is_error:
+                first_text = getattr(content[0], "text", None) if content else None
+                if isinstance(first_text, str) and first_text.strip():
+                    return {"error": first_text.strip()}
+        raise RuntimeError(f"Unexpected MCP tool result type for {tool}: {type(payload)}")
 
     task_spec_model = getattr(plan, "task_spec", None)
     if task_spec_model is not None:

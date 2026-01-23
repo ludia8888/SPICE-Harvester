@@ -352,13 +352,43 @@ async def apply_transform_plan_mcp(
         payload = await mcp_manager.call_tool("pipeline", tool, arguments)
         if isinstance(payload, dict):
             return payload
-        structured = getattr(payload, "structuredContent", None) or getattr(payload, "structured_content", None)
+        structured = getattr(payload, "structuredContent", None)
+        if isinstance(structured, dict):
+            return structured
+        structured = getattr(payload, "structured_content", None)
         if isinstance(structured, dict):
             return structured
         data = getattr(payload, "data", None)
         if isinstance(data, dict):
             return data
-        raise RuntimeError(f"Unexpected MCP tool result type: {type(payload)}")
+        is_error = bool(getattr(payload, "isError", False) or getattr(payload, "is_error", False))
+        content = getattr(payload, "content", None)
+        if isinstance(content, list) and content:
+            if is_error:
+                texts: List[str] = []
+                for part in content:
+                    text = getattr(part, "text", None)
+                    if text is None and isinstance(part, dict):
+                        text = part.get("text")
+                    if isinstance(text, str) and text.strip():
+                        texts.append(text.strip())
+                return {"error": "\n".join(texts).strip() or f"MCP tool error: {tool}"}
+            for part in content:
+                text = getattr(part, "text", None)
+                if text is None and isinstance(part, dict):
+                    text = part.get("text")
+                if isinstance(text, str) and text.strip():
+                    try:
+                        parsed = json.loads(text)
+                    except Exception:
+                        continue
+                    if isinstance(parsed, dict):
+                        return parsed
+            if is_error:
+                first_text = getattr(content[0], "text", None) if content else None
+                if isinstance(first_text, str) and first_text.strip():
+                    return {"error": first_text.strip()}
+        raise RuntimeError(f"Unexpected MCP tool result type for {tool}: {type(payload)}")
 
     original_outputs = list(plan.outputs or [])
     original_associations = list(plan.associations or [])

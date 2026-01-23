@@ -684,19 +684,20 @@ async def _route_after_profile(state: PipelineAgentState) -> PipelineAgentState:
     if scope == "report_only":
         return {**state, "next_action": "report"}
 
+    intent = str(task_spec.get("intent") or "").strip().lower()
     allow_join = bool(task_spec.get("allow_join"))
     allow_cleansing = bool(task_spec.get("allow_cleansing"))
     dataset_count = len(list((state.get("data_scope") or {}).get("dataset_ids") or []))
 
     # Skip join selection unless explicitly needed.
     if state.get("join_hints") is None:
-        if allow_join and dataset_count > 1:
+        if allow_join and dataset_count > 1 and intent in {"integrate", "prepare_mapping"}:
             return {**state, "next_action": "join_keys"}
         state = {**state, "join_hints": []}
 
     # Skip cleansing hints unless explicitly needed.
     if state.get("cleansing_hints") is None:
-        if allow_cleansing:
+        if allow_cleansing and intent in {"cleanse", "prepare_mapping"}:
             return {**state, "next_action": "cleanse_hints"}
         state = {**state, "cleansing_hints": []}
 
