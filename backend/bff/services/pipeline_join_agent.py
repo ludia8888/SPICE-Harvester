@@ -276,12 +276,14 @@ def _build_join_user_prompt(
                     for col in (item.get("columns") or [])
                     if isinstance(col, dict) and str(col.get("name") or "").strip()
                 ]
+                pk_candidates = item.get("pk_candidates") if isinstance(item.get("pk_candidates"), list) else []
                 datasets.append(
                     {
                         "dataset_id": item.get("dataset_id"),
                         "name": item.get("name"),
                         "row_count": item.get("row_count"),
                         "columns": cols[:12],
+                        "pk_candidates": [cand for cand in pk_candidates[:3] if isinstance(cand, dict)],
                     }
                 )
     payload = {

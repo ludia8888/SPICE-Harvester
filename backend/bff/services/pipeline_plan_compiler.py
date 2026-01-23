@@ -370,6 +370,8 @@ def _build_mcp_script_system_prompt(*, mode: Literal["build", "repair"], allowed
         "- Do NOT output definition_json directly.\n"
         "- Cross joins are forbidden.\n"
         "- Prefer plan_add_join for joins. Use plan_add_transform only for advanced ops (groupBy/aggregate/window/pivot/union/sort/explode).\n"
+        "- If planner_hints.key_inference provides pk/fk candidates, use them to pick stable join directions and output pkColumns.\n"
+        "- If planner_hints.type_inference.join_key_cast_suggestions is provided, add ONLY the minimal casts needed for join keys.\n"
     )
     if mode == "build":
         rules += "- Always end with plan_add_output.\n"
@@ -836,6 +838,16 @@ async def compile_pipeline_plan_mcp(
 
     mcp_manager = get_mcp_manager()
 
+    async def _call_pipeline_tool(tool: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+        payload = await mcp_manager.call_tool("pipeline", tool, arguments)
+        if isinstance(payload, dict):
+            return payload
+        # Defensive fallback: some MCP client implementations return a wrapper object.
+        data = getattr(payload, "data", None)
+        if isinstance(data, dict):
+            return data
+        raise RuntimeError(f"Unexpected MCP tool result type: {type(payload)}")
+
     scope_db = str((data_scope.db_name if data_scope else "") or "").strip()
     scope_branch = str(data_scope.branch or "").strip() or None if data_scope else None
 
@@ -900,6 +912,68 @@ async def compile_pipeline_plan_mcp(
             planner_notes=list(task_spec_model.notes or []),
         )
 
+    def _trim_type_inference(payload: Any) -> Optional[Dict[str, Any]]:
+        if not isinstance(payload, dict):
+            return None
+        datasets = payload.get("datasets")
+        join_casts = payload.get("join_key_cast_suggestions")
+        trimmed: Dict[str, Any] = {
+            "join_key_cast_suggestions": join_casts if isinstance(join_casts, list) else [],
+        }
+        if not isinstance(datasets, list):
+            return trimmed
+        summarized: List[Dict[str, Any]] = []
+        for item in datasets[:12]:
+            if not isinstance(item, dict):
+                continue
+            cols = item.get("columns") if isinstance(item.get("columns"), list) else []
+            mismatches = [col for col in cols if isinstance(col, dict) and col.get("mismatch")]
+            summarized.append(
+                {
+                    "dataset_id": item.get("dataset_id"),
+                    "name": item.get("name"),
+                    "mismatched_columns": mismatches[:20],
+                }
+            )
+        trimmed["datasets"] = summarized
+        return trimmed
+
+    # Deterministic analysis helpers (PK/FK + type hints) to reduce planner guessing.
+    effective_planner_hints = dict(planner_hints or {})
+    if isinstance(context_pack, dict):
+        if "key_inference" not in effective_planner_hints:
+            try:
+                keys_payload = await _call_pipeline_tool(
+                    "context_pack_infer_keys",
+                    {
+                        "context_pack": context_pack,
+                        "max_pk_candidates": 4,
+                        "max_fk_candidates": 20,
+                    },
+                )
+                keys_inf = keys_payload.get("inference") if isinstance(keys_payload, dict) else None
+                if isinstance(keys_inf, dict):
+                    effective_planner_hints["key_inference"] = keys_inf
+            except Exception:
+                pass
+        if "type_inference" not in effective_planner_hints:
+            try:
+                join_plan_hint = effective_planner_hints.get("join_plan")
+                type_args: Dict[str, Any] = {
+                    "context_pack": context_pack,
+                    "max_columns": 60,
+                    "max_samples": 80,
+                }
+                if isinstance(join_plan_hint, list):
+                    type_args["join_plan"] = join_plan_hint
+                types_payload = await _call_pipeline_tool("context_pack_infer_types", type_args)
+                types_inf = types_payload.get("inference") if isinstance(types_payload, dict) else None
+                trimmed = _trim_type_inference(types_inf)
+                if trimmed is not None:
+                    effective_planner_hints["type_inference"] = trimmed
+            except Exception:
+                pass
+
     def _dataset_info(dataset_id: str) -> tuple[Optional[str], Optional[str], Dict[str, Any]]:
         item = selected_by_id.get(str(dataset_id or "").strip(), None)
         if not isinstance(item, dict):
@@ -907,16 +981,6 @@ async def compile_pipeline_plan_mcp(
         name = str(item.get("name") or "").strip() or None
         branch = str(item.get("branch") or "").strip() or None
         return name, branch, item
-
-    async def _call_pipeline_tool(tool: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
-        payload = await mcp_manager.call_tool("pipeline", tool, arguments)
-        if isinstance(payload, dict):
-            return payload
-        # Defensive fallback: some MCP client implementations return a wrapper object.
-        data = getattr(payload, "data", None)
-        if isinstance(data, dict):
-            return data
-        raise RuntimeError(f"Unexpected MCP tool result type: {type(payload)}")
 
     last_validation_errors: list[str] = []
     last_validation_warnings: list[str] = []
@@ -1023,7 +1087,7 @@ async def compile_pipeline_plan_mcp(
             data_scope=data_scope,
             answers=answers,
             context_pack=context_pack,
-            planner_hints={**(planner_hints or {}), "task_spec": (task_spec_model.model_dump(mode="json") if task_spec_model else task_spec)} if (task_spec_model or task_spec) else planner_hints,
+            planner_hints={**(effective_planner_hints or {}), "task_spec": (task_spec_model.model_dump(mode="json") if task_spec_model else task_spec)} if (task_spec_model or task_spec) else (effective_planner_hints or None),
             input_nodes=input_nodes,
             current_plan=plan_obj if mode == "repair" else None,
             preflight=last_preflight if mode == "repair" else None,

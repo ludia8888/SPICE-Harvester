@@ -1494,157 +1494,157 @@ async def _generate_specs(state: PipelineAgentState, runtime: AgentRuntime) -> P
 def build_pipeline_agent_graph(runtime: AgentRuntime):
     graph: StateGraph = StateGraph(PipelineAgentState)
 
-    async def profile(state: PipelineAgentState) -> PipelineAgentState:
+    async def profiler(state: PipelineAgentState) -> PipelineAgentState:
         return await _build_context_pack(state, runtime)
 
-    async def route(state: PipelineAgentState) -> PipelineAgentState:
+    async def orchestrator(state: PipelineAgentState) -> PipelineAgentState:
         return await _route_after_profile(state)
 
-    async def task_spec(state: PipelineAgentState) -> PipelineAgentState:
+    async def scope_guard(state: PipelineAgentState) -> PipelineAgentState:
         return await _infer_task_spec(state, runtime)
 
-    async def report(state: PipelineAgentState) -> PipelineAgentState:
+    async def reporter(state: PipelineAgentState) -> PipelineAgentState:
         return await _run_report(state)
 
-    async def join_keys(state: PipelineAgentState) -> PipelineAgentState:
+    async def join_strategist(state: PipelineAgentState) -> PipelineAgentState:
         return await _collect_join_hints(state, runtime)
 
-    async def cleanse_hints(state: PipelineAgentState) -> PipelineAgentState:
+    async def cleansing_strategist(state: PipelineAgentState) -> PipelineAgentState:
         return await _collect_cleansing_hints(state)
 
-    async def compile_plan(state: PipelineAgentState) -> PipelineAgentState:
+    async def plan_builder(state: PipelineAgentState) -> PipelineAgentState:
         return await _compile_plan(state, runtime)
 
-    async def split_outputs(state: PipelineAgentState) -> PipelineAgentState:
+    async def output_splitter(state: PipelineAgentState) -> PipelineAgentState:
         return await _split_outputs(state, runtime)
 
-    async def transform(state: PipelineAgentState) -> PipelineAgentState:
+    async def plan_transformer(state: PipelineAgentState) -> PipelineAgentState:
         return await _transform_plan(state, runtime)
 
-    async def verify_intent(state: PipelineAgentState) -> PipelineAgentState:
+    async def intent_verifier(state: PipelineAgentState) -> PipelineAgentState:
         return await _verify_intent(state, runtime)
 
-    async def preview_plan(state: PipelineAgentState) -> PipelineAgentState:
+    async def plan_previewer(state: PipelineAgentState) -> PipelineAgentState:
         return await _preview_plan(state, runtime)
 
-    async def evaluate(state: PipelineAgentState) -> PipelineAgentState:
+    async def join_evaluator(state: PipelineAgentState) -> PipelineAgentState:
         return await _evaluate_joins(state, runtime)
 
-    async def inspect(state: PipelineAgentState) -> PipelineAgentState:
+    async def preview_inspector(state: PipelineAgentState) -> PipelineAgentState:
         return await _inspect_preview(state, runtime)
 
-    async def cleanse_plan(state: PipelineAgentState) -> PipelineAgentState:
+    async def cleanser(state: PipelineAgentState) -> PipelineAgentState:
         return await _cleanse_plan(state, runtime)
 
-    async def repair(state: PipelineAgentState) -> PipelineAgentState:
+    async def repairer(state: PipelineAgentState) -> PipelineAgentState:
         return await _repair_plan(state, runtime)
 
-    async def generate_specs(state: PipelineAgentState) -> PipelineAgentState:
+    async def mapper(state: PipelineAgentState) -> PipelineAgentState:
         return await _generate_specs(state, runtime)
 
-    graph.add_node("profile", profile)
-    graph.add_node("route", route)
-    graph.add_node("task_spec", task_spec)
-    graph.add_node("report", report)
-    graph.add_node("join_keys", join_keys)
-    graph.add_node("cleanse_hints", cleanse_hints)
-    graph.add_node("compile_plan", compile_plan)
-    graph.add_node("transform", transform)
-    graph.add_node("verify_intent", verify_intent)
-    graph.add_node("split_outputs", split_outputs)
-    graph.add_node("preview_plan", preview_plan)
-    graph.add_node("evaluate", evaluate)
-    graph.add_node("inspect", inspect)
-    graph.add_node("cleanse_plan", cleanse_plan)
-    graph.add_node("repair", repair)
-    graph.add_node("generate_specs", generate_specs)
+    graph.add_node("profiler", profiler)
+    graph.add_node("orchestrator", orchestrator)
+    graph.add_node("scope_guard", scope_guard)
+    graph.add_node("reporter", reporter)
+    graph.add_node("join_strategist", join_strategist)
+    graph.add_node("cleansing_strategist", cleansing_strategist)
+    graph.add_node("plan_builder", plan_builder)
+    graph.add_node("plan_transformer", plan_transformer)
+    graph.add_node("intent_verifier", intent_verifier)
+    graph.add_node("output_splitter", output_splitter)
+    graph.add_node("plan_previewer", plan_previewer)
+    graph.add_node("join_evaluator", join_evaluator)
+    graph.add_node("preview_inspector", preview_inspector)
+    graph.add_node("cleanser", cleanser)
+    graph.add_node("repairer", repairer)
+    graph.add_node("mapper", mapper)
 
-    graph.set_entry_point("profile")
+    graph.set_entry_point("profiler")
     graph.add_conditional_edges(
-        "profile",
+        "profiler",
         lambda state: state.get("next_action", "route"),
-        {"route": "route", "end": END},
+        {"route": "orchestrator", "end": END},
     )
     graph.add_conditional_edges(
-        "route",
+        "orchestrator",
         lambda state: state.get("next_action", "compile_plan"),
         {
-            "task_spec": "task_spec",
-            "report": "report",
-            "join_keys": "join_keys",
-            "cleanse_hints": "cleanse_hints",
-            "compile_plan": "compile_plan",
+            "task_spec": "scope_guard",
+            "report": "reporter",
+            "join_keys": "join_strategist",
+            "cleanse_hints": "cleansing_strategist",
+            "compile_plan": "plan_builder",
             "end": END,
         },
     )
-    graph.add_edge("task_spec", "route")
-    graph.add_edge("join_keys", "route")
-    graph.add_edge("cleanse_hints", "route")
-    graph.add_edge("report", END)
+    graph.add_edge("scope_guard", "orchestrator")
+    graph.add_edge("join_strategist", "orchestrator")
+    graph.add_edge("cleansing_strategist", "orchestrator")
+    graph.add_edge("reporter", END)
     graph.add_conditional_edges(
-        "compile_plan",
+        "plan_builder",
         lambda state: state.get("next_action", "end"),
         {
-            "transform": "transform",
-            "split_outputs": "split_outputs",
-            "verify_intent": "verify_intent",
+            "transform": "plan_transformer",
+            "split_outputs": "output_splitter",
+            "verify_intent": "intent_verifier",
             "clarify": END,
             "end": END,
         },
     )
     graph.add_conditional_edges(
-        "transform",
+        "plan_transformer",
         lambda state: state.get("next_action", "end"),
-        {"split_outputs": "split_outputs", "verify_intent": "verify_intent", "end": END},
+        {"split_outputs": "output_splitter", "verify_intent": "intent_verifier", "end": END},
     )
     graph.add_conditional_edges(
-        "split_outputs",
+        "output_splitter",
         lambda state: state.get("next_action", "end"),
-        {"transform": "transform", "verify_intent": "verify_intent", "end": END},
+        {"transform": "plan_transformer", "verify_intent": "intent_verifier", "end": END},
     )
     graph.add_conditional_edges(
-        "verify_intent",
+        "intent_verifier",
         lambda state: state.get("next_action", "end"),
-        {"preview_plan": "preview_plan", "transform": "transform", "end": END},
+        {"preview_plan": "plan_previewer", "transform": "plan_transformer", "end": END},
     )
     graph.add_conditional_edges(
-        "preview_plan",
+        "plan_previewer",
         lambda state: state.get("next_action", "end"),
         {
-            "repair": "repair",
-            "evaluate": "evaluate",
-            "inspect": "inspect",
-            "generate_specs": "generate_specs",
+            "repair": "repairer",
+            "evaluate": "join_evaluator",
+            "inspect": "preview_inspector",
+            "generate_specs": "mapper",
             "end": END,
         },
     )
     graph.add_conditional_edges(
-        "evaluate",
+        "join_evaluator",
         lambda state: state.get("next_action", "end"),
-        {"transform": "transform", "inspect": "inspect", "generate_specs": "generate_specs", "end": END},
+        {"transform": "plan_transformer", "inspect": "preview_inspector", "generate_specs": "mapper", "end": END},
     )
     graph.add_conditional_edges(
-        "inspect",
+        "preview_inspector",
         lambda state: state.get("next_action", "end"),
-        {"cleanse": "cleanse_plan", "generate_specs": "generate_specs", "end": END},
+        {"cleanse": "cleanser", "generate_specs": "mapper", "end": END},
     )
     graph.add_conditional_edges(
-        "cleanse_plan",
+        "cleanser",
         lambda state: state.get("next_action", "end"),
-        {"preview_plan": "preview_plan", "generate_specs": "generate_specs", "end": END},
+        {"preview_plan": "plan_previewer", "generate_specs": "mapper", "end": END},
     )
     graph.add_conditional_edges(
-        "repair",
+        "repairer",
         lambda state: state.get("next_action", "end"),
         {
-            "split_outputs": "split_outputs",
-            "transform": "transform",
-            "verify_intent": "verify_intent",
+            "split_outputs": "output_splitter",
+            "transform": "plan_transformer",
+            "verify_intent": "intent_verifier",
             "clarify": END,
             "end": END,
         },
     )
-    graph.add_edge("generate_specs", END)
+    graph.add_edge("mapper", END)
     return graph.compile()
 
 

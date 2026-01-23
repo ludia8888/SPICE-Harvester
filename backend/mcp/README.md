@@ -37,6 +37,8 @@ Custom MCP server exposing deterministic pipeline tools:
 - Inspect a preview sample to generate cleansing suggestions (preview_inspect)
 - Evaluate join quality (coverage/explosion) on sample-safe runs (plan_evaluate_joins)
 - Generate null/missing reports from context packs (context_pack_null_report)
+- Infer PK/FK candidates from context packs (context_pack_infer_keys)
+- Infer column types + join-key cast suggestions from context packs (context_pack_infer_types)
 
 ### 3. MCP Client (`mcp_client.py`)
 Client implementation for connecting to MCP servers:
