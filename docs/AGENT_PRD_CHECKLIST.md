@@ -135,9 +135,12 @@
 | PIP-002 | DONE | `backend/shared/services/pipeline_preview_inspector.py`, `backend/bff/services/pipeline_cleansing_agent.py`, `backend/bff/services/pipeline_cleansing_utils.py`, `backend/tests/unit/services/test_pipeline_preview_inspector.py` | |
 | PIP-003 | DONE | `backend/bff/services/pipeline_cleansing_utils.py`, `backend/tests/unit/services/test_pipeline_cleansing_upstream_push.py` | |
 | PIP-004 | PARTIAL | `backend/bff/services/pipeline_join_agent.py`, `backend/agent/services/pipeline_agent_graph.py` | join 평가 지표 정합성 테스트 추가 필요 |
-| PIP-005 | PARTIAL | `backend/agent/services/pipeline_agent_graph.py`, `backend/bff/services/pipeline_plan_compiler.py`, `backend/bff/services/pipeline_plan_validation.py`, `docs/AGENT_PRD.md` | canonical 요청 여부 분기 테스트 필요 |
+| PIP-005 | PARTIAL | `backend/agent/services/pipeline_agent_graph.py`, `backend/bff/services/pipeline_plan_compiler.py`, `backend/bff/services/pipeline_plan_validation.py`, `docs/AGENT_PRD.md`, `docs/PIPELINE_AGENT.md` | canonical 요청 여부 분기 테스트 필요 |
 | PIP-006 | PARTIAL | `frontend/src/pages/GraphPage.tsx`, `frontend/src/api/bff.ts`, `backend/bff/routers/pipeline_plans.py` | UI 클릭 → preview 동작 e2e 확인 필요 |
 | PIP-007 | PARTIAL | `backend/bff/routers/ai.py`, `frontend/src/pages/AIAgentPage.tsx` | intent routing 정확도 지표/테스트 필요 |
+| PIP-008 | DONE | `backend/shared/models/pipeline_task_spec.py`, `backend/shared/services/pipeline_task_spec_policy.py`, `backend/bff/services/pipeline_task_spec_agent.py`, `backend/bff/services/pipeline_plan_validation.py` | |
+| PIP-009 | DONE | `backend/shared/services/pipeline_plan_builder.py`, `backend/mcp/pipeline_mcp_server.py`, `backend/bff/services/pipeline_plan_compiler.py`, `backend/shared/config/settings.py`, `docs/PIPELINE_AGENT.md` | |
+| PIP-010 | DONE | `backend/shared/services/pipeline_type_inference.py`, `backend/mcp/pipeline_mcp_server.py`, `backend/tests/unit/services/test_pipeline_type_inference.py`, `docs/PIPELINE_AGENT.md` | |
 
 ---
 
