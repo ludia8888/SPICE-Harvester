@@ -1,0 +1,23 @@
+{
+  "mcpServers": {
+    "pipeline": {
+      "command": "python",
+      "args": [
+        "backend/mcp/pipeline_mcp_server.py"
+      ],
+      "config": {
+        "capabilities": [
+          "pipeline_planning",
+          "plan_builder",
+          "profiling_preview"
+        ]
+      }
+    }
+  },
+  "globalSettings": {
+    "timeout": 30000,
+    "logLevel": "info",
+    "retryOnFailure": true,
+    "maxRetries": 3
+  }
+}

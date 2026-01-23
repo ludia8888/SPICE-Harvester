@@ -352,6 +352,28 @@
     "max_payload_bytes": 200000
   },
   {
+    "tool_id": "pipeline_plans.task_spec",
+    "method": "POST",
+    "path": "/api/v1/pipeline-plans/task-spec",
+    "risk_level": "read",
+    "requires_approval": false,
+    "requires_idempotency_key": true,
+    "status": "ACTIVE",
+    "roles": [],
+    "max_payload_bytes": 200000
+  },
+  {
+    "tool_id": "pipeline_plans.clarify_scope",
+    "method": "POST",
+    "path": "/api/v1/pipeline-plans/clarify-scope",
+    "risk_level": "read",
+    "requires_approval": false,
+    "requires_idempotency_key": true,
+    "status": "ACTIVE",
+    "roles": [],
+    "max_payload_bytes": 200000
+  },
+  {
     "tool_id": "pipeline_plans.join_keys",
     "method": "POST",
     "path": "/api/v1/pipeline-plans/join-keys",

@@ -19,8 +19,13 @@ Main configuration file defining all MCP servers:
 - **filesystem**: File system access server
 - **database**: PostgreSQL database server
 - **terminusdb**: Custom TerminusDB MCP server
+- **pipeline**: Custom Pipeline MCP server (plan-builder + deterministic analysis tools)
 - **elasticsearch**: Search and analytics server
 - **git**: Version control server
+
+Docker 환경에서는 호스트 경로/컨테이너 경로가 달라서 `mcp-config.json`을 그대로 쓰기 어렵습니다.
+이 repo는 `backend/mcp/mcp-config.docker.json`을 제공하며, `backend/docker-compose.yml`에서
+이를 `/app/mcp-config.json`로 마운트합니다.
 
 ### 2. TerminusDB MCP Server (`terminus_mcp_server.py`)
 Custom MCP server exposing TerminusDB functionality:
@@ -85,6 +90,7 @@ MCP_TIMEOUT=30000
 ```
 
 Docker 환경에서는 `MCP_CONFIG_PATH=/app/mcp-config.json` 처럼 컨테이너 내부 경로를 사용하세요.
+이 repo는 기본적으로 `backend/docker-compose.yml`에서 `backend/mcp/mcp-config.docker.json`을 `/app/mcp-config.json`로 마운트합니다.
 
 ### 3. Start MCP Servers
 

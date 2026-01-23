@@ -352,6 +352,9 @@ async def apply_transform_plan_mcp(
         payload = await mcp_manager.call_tool("pipeline", tool, arguments)
         if isinstance(payload, dict):
             return payload
+        structured = getattr(payload, "structuredContent", None) or getattr(payload, "structured_content", None)
+        if isinstance(structured, dict):
+            return structured
         data = getattr(payload, "data", None)
         if isinstance(data, dict):
             return data

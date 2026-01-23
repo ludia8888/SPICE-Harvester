@@ -310,10 +310,7 @@ def _should_transform(state: PipelineAgentState) -> bool:
         return False
     hints = state.get("planner_hints") or {}
     return (
-        bool(state.get("join_hints"))
-        or bool(state.get("cleansing_hints"))
-        or bool(hints.get("validation_errors"))
-        or bool(hints.get("wiring_feedback"))
+        bool(hints.get("validation_errors"))
         or bool(hints.get("intent_feedback"))
     )
 

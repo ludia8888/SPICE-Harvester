@@ -372,6 +372,8 @@ def _build_mcp_script_system_prompt(*, mode: Literal["build", "repair"], allowed
         "- Prefer plan_add_join for joins. Use plan_add_transform only for advanced ops (groupBy/aggregate/window/pivot/union/sort/explode).\n"
         "- If planner_hints.key_inference provides pk/fk candidates, use them to pick stable join directions and output pkColumns.\n"
         "- If planner_hints.type_inference.join_key_cast_suggestions is provided, add ONLY the minimal casts needed for join keys.\n"
+        "- When task_spec.allow_specs is false, output_kind MUST be \"unknown\" (do not emit object/link outputs).\n"
+        "- Only set output_kind to object/link when the goal explicitly requests ontology/canonical mapping AND task_spec.allow_specs is true.\n"
     )
     if mode == "build":
         rules += "- Always end with plan_add_output.\n"
@@ -842,6 +844,9 @@ async def compile_pipeline_plan_mcp(
         payload = await mcp_manager.call_tool("pipeline", tool, arguments)
         if isinstance(payload, dict):
             return payload
+        structured = getattr(payload, "structuredContent", None) or getattr(payload, "structured_content", None)
+        if isinstance(structured, dict):
+            return structured
         # Defensive fallback: some MCP client implementations return a wrapper object.
         data = getattr(payload, "data", None)
         if isinstance(data, dict):
@@ -1178,6 +1183,46 @@ async def compile_pipeline_plan_mcp(
             if policy_error:
                 tool_errors.append(f"{tool_name}: {policy_error}")
                 continue
+
+            # Guardrail: if specs/mapping are not allowed, never let the planner create ontology-backed outputs.
+            if task_spec_model is not None and not bool(task_spec_model.allow_specs):
+                if tool_name == "plan_add_output":
+                    kind = str(args.get("output_kind") or "").strip().lower()
+                    if kind and kind != "unknown":
+                        args["output_kind"] = "unknown"
+                        meta = args.get("output_metadata")
+                        if isinstance(meta, dict):
+                            for key in (
+                                "target_class_id",
+                                "source_class_id",
+                                "link_type_id",
+                                "predicate",
+                                "cardinality",
+                                "source_key_column",
+                                "target_key_column",
+                                "relationship_spec_type",
+                            ):
+                                meta.pop(key, None)
+                            args["output_metadata"] = meta
+                if tool_name == "plan_update_output":
+                    set_fields = args.get("set")
+                    if isinstance(set_fields, dict):
+                        kind = str(set_fields.get("output_kind") or "").strip().lower()
+                        if kind and kind != "unknown":
+                            set_fields["output_kind"] = "unknown"
+                        for key in (
+                            "target_class_id",
+                            "source_class_id",
+                            "link_type_id",
+                            "predicate",
+                            "cardinality",
+                            "source_key_column",
+                            "target_key_column",
+                            "relationship_spec_type",
+                        ):
+                            set_fields.pop(key, None)
+                        args["set"] = set_fields
+
             args["plan"] = plan_obj
             res = await _call_pipeline_tool(tool_name, args)
             if isinstance(res, dict) and res.get("error"):
@@ -1573,6 +1618,9 @@ async def repair_pipeline_plan_mcp(
         payload = await mcp_manager.call_tool("pipeline", tool, arguments)
         if isinstance(payload, dict):
             return payload
+        structured = getattr(payload, "structuredContent", None) or getattr(payload, "structured_content", None)
+        if isinstance(structured, dict):
+            return structured
         data = getattr(payload, "data", None)
         if isinstance(data, dict):
             return data

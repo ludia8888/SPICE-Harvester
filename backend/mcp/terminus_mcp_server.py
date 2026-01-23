@@ -12,9 +12,9 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from mcp import Server
-from mcp.server import Request, Response
+from mcp.server import InitializationOptions, Server
 from mcp.server.stdio import stdio_server
+from mcp.types import ResourcesCapability, ServerCapabilities, Tool, ToolsCapability
 from pydantic import BaseModel
 
 # Import paths depend on whether we run from source (repo layout) or from a container image.
@@ -49,9 +49,9 @@ class TerminusDBMCPServer:
         """Setup MCP request handlers"""
         
         @self.server.list_tools()
-        async def list_tools() -> List[Dict[str, Any]]:
+        async def list_tools() -> List[Tool]:
             """List available TerminusDB tools"""
-            return [
+            tool_specs: List[Dict[str, Any]] = [
                 {
                     "name": "create_database",
                     "description": "Create a new TerminusDB database",
@@ -137,6 +137,7 @@ class TerminusDBMCPServer:
                     }
                 }
             ]
+            return [Tool(**spec) for spec in tool_specs]
         
         @self.server.call_tool()
         async def call_tool(name: str, arguments: Dict[str, Any]) -> Any:
@@ -294,7 +295,15 @@ class TerminusDBMCPServer:
     async def run(self):
         """Run the MCP server"""
         async with stdio_server() as (read_stream, write_stream):
-            await self.server.run(read_stream, write_stream)
+            init = InitializationOptions(
+                server_name="terminus-mcp-server",
+                server_version=os.environ.get("SPICE_VERSION", "0.1.0"),
+                capabilities=ServerCapabilities(
+                    tools=ToolsCapability(),
+                    resources=ResourcesCapability(),
+                ),
+            )
+            await self.server.run(read_stream, write_stream, init)
 
 
 async def main():

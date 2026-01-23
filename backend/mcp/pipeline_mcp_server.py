@@ -16,8 +16,9 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from mcp import Server
+from mcp.server import InitializationOptions, Server
 from mcp.server.stdio import stdio_server
+from mcp.types import ServerCapabilities, Tool, ToolsCapability
 
 # Import paths depend on whether we run from source (repo layout) or from a container image.
 # - repo layout: <repo>/backend/mcp -> add <repo>/backend
@@ -345,8 +346,8 @@ class PipelineMCPServer:
 
     def _setup_handlers(self) -> None:
         @self.server.list_tools()
-        async def list_tools() -> List[Dict[str, Any]]:
-            return [
+        async def list_tools() -> List[Tool]:
+            tool_specs: List[Dict[str, Any]] = [
                 {
                     "name": "context_pack_build",
                     "description": "Build a safe pipeline context pack (schemas/samples + join/pk/fk/cast/cleansing hints).",
@@ -755,6 +756,7 @@ class PipelineMCPServer:
                     },
                 },
             ]
+            return [Tool(**spec) for spec in tool_specs]
 
         @self.server.call_tool()
         async def call_tool(name: str, arguments: Dict[str, Any]) -> Any:
@@ -1131,7 +1133,13 @@ class PipelineMCPServer:
 
     async def run(self) -> None:
         async with stdio_server() as (read_stream, write_stream):
-            await self.server.run(read_stream, write_stream)
+            # MCP Python SDK (>=1.0) requires explicit initialization options.
+            init = InitializationOptions(
+                server_name="pipeline-mcp-server",
+                server_version=os.environ.get("SPICE_VERSION", "0.1.0"),
+                capabilities=ServerCapabilities(tools=ToolsCapability()),
+            )
+            await self.server.run(read_stream, write_stream, init)
 
 
 async def main() -> None:
