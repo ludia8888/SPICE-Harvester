@@ -6,6 +6,7 @@ Refines pipeline definition_json using join selections and context pack guidance
 
 from __future__ import annotations
 
+import re
 import json
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
@@ -264,6 +265,16 @@ def _build_transform_mcp_system_prompt(*, allowed_tools: List[str]) -> str:
         "- plan_update_node_metadata: {node_id,set?,unset?,replace?}\n"
         "- plan_delete_node: {node_id}\n"
         "\n"
+        "Operation cookbook:\n"
+        "- compute (row-wise only): expression=\"new_col = col_a + col_b\" or \"neg = -metric\".\n"
+        "  Do NOT use SQL in compute (no SUM(), ROW_NUMBER(), OVER(), GROUP BY, AS).\n"
+        "- filter: expression=\"column <= 10\" (no AND/OR).\n"
+        "- groupBy/aggregate: use plan_add_transform with operation=\"groupBy\" and\n"
+        "  metadata={\"groupBy\":[\"col1\",...],\"aggregates\":[{\"column\":\"price\",\"op\":\"sum\",\"alias\":\"total\"}]}.\n"
+        "- window row_number: use plan_add_transform with operation=\"window\" and\n"
+        "  metadata={\"window\":{\"partitionBy\":[...],\"orderBy\":[\"col\"]}} (adds column \"row_number\").\n"
+        "  Window ordering is ascending; for descending rank, compute neg=-metric and orderBy neg.\n"
+        "\n"
         "Output schema:\n"
         "{\n"
         "  \"steps\": [{\"tool\": string, \"args\": object}],\n"
@@ -477,6 +488,245 @@ async def apply_transform_plan_mcp(
     advanced_ops = {"groupby", "aggregate", "pivot", "window", "explode", "sort", "union"}
     join_meta_keys = {"joinType", "allowCrossJoin", "leftKeys", "rightKeys", "leftKey", "rightKey", "joinKey"}
 
+    alias_map: Dict[str, str] = {}
+    node_id_counters: Dict[str, int] = {}
+    last_value_node_id: Optional[str] = None
+
+    def _node_ids_from_plan(obj: Dict[str, Any]) -> set[str]:
+        definition = obj.get("definition_json") if isinstance(obj.get("definition_json"), dict) else {}
+        nodes = definition.get("nodes") if isinstance(definition.get("nodes"), list) else []
+        ids: set[str] = set()
+        for node in nodes:
+            if not isinstance(node, dict):
+                continue
+            node_id = str(node.get("id") or "").strip()
+            if node_id:
+                ids.add(node_id)
+        return ids
+
+    def _rewrite_node_refs(args: Dict[str, Any]) -> None:
+        def _rewrite(value: Any) -> Any:
+            if not isinstance(value, str):
+                return value
+            key = value.strip()
+            if not key:
+                return value
+            return alias_map.get(key, value)
+
+        for key in ("node_id", "left_node_id", "right_node_id", "input_node_id", "from_node_id", "to_node_id"):
+            if key in args:
+                args[key] = _rewrite(args.get(key))
+        if isinstance(args.get("input_node_ids"), list):
+            args["input_node_ids"] = [_rewrite(item) for item in (args.get("input_node_ids") or [])]
+
+    def _normalize_arg_keys(args: Dict[str, Any]) -> Optional[str]:
+        # Be tolerant of malformed keys like `expression=` emitted by some models.
+        normalized: Dict[str, Any] = {}
+        changed = False
+        for raw_key, value in (args or {}).items():
+            key = str(raw_key).strip()
+            if not key:
+                continue
+            norm = key.rstrip("=").rstrip(":")
+            if norm != key:
+                changed = True
+            if norm in normalized and norm != key:
+                continue
+            normalized[norm] = value
+        if changed:
+            args.clear()
+            args.update(normalized)
+            return "transform: normalized tool args keys"
+        return None
+
+    def _reserve_node_id(base: str) -> str:
+        existing = _node_ids_from_plan(plan_obj)
+        stem = str(base or "").strip() or "node"
+        counter = int(node_id_counters.get(stem, 0))
+        while True:
+            candidate = stem if counter == 0 else f"{stem}_{counter}"
+            if candidate not in existing:
+                node_id_counters[stem] = counter + 1
+                return candidate
+            counter += 1
+
+    def _maybe_assign_node_id(tool_name: str, args: Dict[str, Any]) -> Optional[str]:
+        created = str(args.get("node_id") or "").strip() or None
+        if created:
+            return created
+        base: Optional[str] = None
+        if tool_name == "plan_add_transform":
+            base = str(args.get("operation") or "").strip() or None
+        elif tool_name == "plan_add_join":
+            base = "join"
+        elif tool_name == "plan_add_filter":
+            base = "filter"
+        elif tool_name == "plan_add_compute":
+            base = "compute"
+        elif tool_name == "plan_add_cast":
+            base = "cast"
+        elif tool_name == "plan_add_rename":
+            base = "rename"
+        elif tool_name == "plan_add_select":
+            base = "select"
+        elif tool_name == "plan_add_drop":
+            base = "drop"
+        elif tool_name == "plan_add_dedupe":
+            base = "dedupe"
+        elif tool_name == "plan_add_normalize":
+            base = "normalize"
+        elif tool_name == "plan_add_regex_replace":
+            base = "regexReplace"
+        if not base:
+            return None
+        node_id = _reserve_node_id(base)
+        args["node_id"] = node_id
+        if tool_name == "plan_add_transform" and str(args.get("operation") or "").strip():
+            alias_map[str(args.get("operation") or "").strip()] = node_id
+        else:
+            alias_map[base] = node_id
+        return node_id
+
+    def _rewire_output_to(node_id: str) -> Optional[str]:
+        definition = plan_obj.get("definition_json")
+        if not isinstance(definition, dict):
+            return None
+        nodes = definition.get("nodes")
+        edges = definition.get("edges")
+        if not isinstance(nodes, list) or not isinstance(edges, list):
+            return None
+        outputs = [
+            n
+            for n in nodes
+            if isinstance(n, dict) and str(n.get("type") or "").strip().lower() == "output"
+        ]
+        if len(outputs) != 1:
+            return None
+        out_id = str(outputs[0].get("id") or "").strip()
+        if not out_id:
+            return None
+
+        existing = _node_ids_from_plan(plan_obj)
+        src = str(node_id or "").strip()
+        if not src or src not in existing:
+            return None
+        if src == out_id:
+            return None
+
+        kept: List[Any] = []
+        changed = False
+        for edge in edges:
+            if not isinstance(edge, dict):
+                kept.append(edge)
+                continue
+            if str(edge.get("to") or "").strip() == out_id:
+                changed = True
+                continue
+            kept.append(edge)
+        kept.append({"from": src, "to": out_id})
+        definition["edges"] = kept
+        plan_obj["definition_json"] = definition
+        return "transform: rewired output node to final transform"
+
+    def _extract_top_n(goal: str) -> Optional[int]:
+        text = str(goal or "")
+        lowered = text.lower()
+        # Accept "top 10", "top10", and similar variants (unicode boundaries make "\b" too strict).
+        match = re.search(r"\btop\s*(\d+)", lowered)
+        if match:
+            try:
+                value = int(match.group(1))
+            except Exception:
+                value = None
+            if value and value > 0:
+                return value
+        match = re.search(r"(?:\uc0c1\uc704)\s*(\d+)", text)
+        if match:
+            try:
+                value = int(match.group(1))
+            except Exception:
+                value = None
+            if value and value > 0:
+                return value
+        return None
+
+    def _has_topn_filter(top_n: int) -> bool:
+        definition = plan_obj.get("definition_json") if isinstance(plan_obj.get("definition_json"), dict) else {}
+        nodes = definition.get("nodes") if isinstance(definition.get("nodes"), list) else []
+        for node in nodes:
+            if not isinstance(node, dict):
+                continue
+            meta = node.get("metadata") if isinstance(node.get("metadata"), dict) else {}
+            if str(meta.get("operation") or "").strip().lower() != "filter":
+                continue
+            expr = str(meta.get("expression") or "").strip()
+            if not expr:
+                continue
+            match = re.search(r"\brow_number\s*<=\s*(\d+)\b", expr)
+            if not match:
+                continue
+            try:
+                value = int(match.group(1))
+            except Exception:
+                continue
+            if value == int(top_n):
+                return True
+        return False
+
+    def _goal_requests_desc(goal: str, *, top_n: Optional[int]) -> bool:
+        lowered = str(goal or "").lower()
+        if top_n:
+            return True
+        if "descending" in lowered or "desc" in lowered:
+            return True
+        # Korean marker for "descending": "\ub0b4\ub9bc\ucc28\uc21c".
+        if "\ub0b4\ub9bc\ucc28\uc21c" in str(goal or ""):
+            return True
+        return False
+
+    def _patch_window_desc() -> Optional[str]:
+        definition = plan_obj.get("definition_json") if isinstance(plan_obj.get("definition_json"), dict) else {}
+        nodes = definition.get("nodes") if isinstance(definition.get("nodes"), list) else []
+        changed = False
+        for node in nodes:
+            if not isinstance(node, dict):
+                continue
+            meta = node.get("metadata") if isinstance(node.get("metadata"), dict) else {}
+            if str(meta.get("operation") or "").strip().lower() != "window":
+                continue
+            window_meta = meta.get("window") if isinstance(meta.get("window"), dict) else {}
+            order_by = window_meta.get("orderBy")
+            if not isinstance(order_by, list) or not order_by:
+                continue
+            # If orderBy already encodes direction (dict or "-col"), do nothing.
+            already_directed = False
+            for item in order_by:
+                if isinstance(item, str) and item.strip().startswith("-"):
+                    already_directed = True
+                    break
+                if isinstance(item, dict) and str(item.get("direction") or "").strip():
+                    already_directed = True
+                    break
+            if already_directed:
+                continue
+            directed = []
+            for item in order_by:
+                if isinstance(item, str) and item.strip():
+                    directed.append(f"-{item.strip()}")
+                else:
+                    directed.append(item)
+            next_window = dict(window_meta)
+            next_window["orderBy"] = directed
+            next_meta = dict(meta)
+            next_meta["window"] = next_window
+            node["metadata"] = next_meta
+            changed = True
+        if changed:
+            definition["nodes"] = nodes
+            plan_obj["definition_json"] = definition
+            return "transform: patched window.orderBy for DESC (top-N/descending request)"
+        return None
+
     def _policy_error(tool_name: str, args: Dict[str, Any]) -> Optional[str]:
         if task_spec_model is None:
             return None
@@ -514,6 +764,12 @@ async def apply_transform_plan_mcp(
             continue
         args = dict(step.args or {})
 
+        normalized_warning = _normalize_arg_keys(args)
+        if normalized_warning:
+            tool_warnings.append(normalized_warning)
+
+        _rewrite_node_refs(args)
+
         policy_error = _policy_error(tool_name, args)
         if policy_error:
             tool_errors.append(f"{tool_name}: {policy_error}")
@@ -533,6 +789,23 @@ async def apply_transform_plan_mcp(
             if _is_output_node(plan_obj, node_id):
                 tool_errors.append("plan_update_node_metadata cannot target output nodes")
                 continue
+            # Be tolerant of common LLM schema mistakes (set/unset must be objects/lists).
+            if args.get("set") is None:
+                args.pop("set", None)
+            if isinstance(args.get("set"), bool):
+                tool_warnings.append("plan_update_node_metadata: coerced boolean 'set' to empty object")
+                args["set"] = {}
+            if args.get("unset") is None:
+                args.pop("unset", None)
+            if isinstance(args.get("unset"), bool):
+                tool_warnings.append("plan_update_node_metadata: dropped boolean 'unset'")
+                args.pop("unset", None)
+
+        created_node_id = _maybe_assign_node_id(tool_name, args)
+        if created_node_id and tool_name not in {"plan_add_edge", "plan_delete_edge", "plan_set_node_inputs", "plan_update_node_metadata", "plan_delete_node"}:
+            # Use the last created node as the default output sink when a transform request
+            # adds new nodes but doesn't explicitly rewire the output.
+            last_value_node_id = created_node_id
 
         args["plan"] = plan_obj
         res = await _call_pipeline_tool(tool_name, args)
@@ -543,6 +816,65 @@ async def apply_transform_plan_mcp(
             tool_warnings.extend([str(item) for item in res.get("warnings") or [] if str(item or "").strip()])
         if isinstance(res, dict) and isinstance(res.get("plan"), dict):
             plan_obj = res["plan"]
+
+    if last_value_node_id:
+        rewired = _rewire_output_to(last_value_node_id)
+        if rewired:
+            tool_warnings.append(rewired)
+
+        # Deterministic safety: if the goal asks for "top N" and we now have a window node
+        # (row_number), ensure we actually filter to the top N.
+        top_n = _extract_top_n(str(plan.goal or ""))
+        if _goal_requests_desc(str(plan.goal or ""), top_n=top_n):
+            patched = _patch_window_desc()
+            if patched:
+                tool_warnings.append(patched)
+        if top_n and not _has_topn_filter(top_n):
+            # Only auto-insert when the last node is a window (common pattern: groupBy -> window).
+            definition = plan_obj.get("definition_json") if isinstance(plan_obj.get("definition_json"), dict) else None
+            if isinstance(definition, dict):
+                node_by_id = {
+                    str(n.get("id") or "").strip(): n
+                    for n in (definition.get("nodes") or [])
+                    if isinstance(n, dict) and str(n.get("id") or "").strip()
+                }
+                last_node = node_by_id.get(str(last_value_node_id or "").strip())
+                last_op = ""
+                if isinstance(last_node, dict):
+                    meta = last_node.get("metadata") if isinstance(last_node.get("metadata"), dict) else {}
+                    last_op = str(meta.get("operation") or "").strip().lower()
+                if last_op == "window":
+                    # Build a filter node right after the window and rewire output to it.
+                    filter_id = _reserve_node_id(f"filter_top_{int(top_n)}")
+                    definition.setdefault("nodes", []).append(
+                        {
+                            "id": filter_id,
+                            "type": "transform",
+                            "metadata": {"operation": "filter", "expression": f"row_number <= {int(top_n)}"},
+                        }
+                    )
+                    # Replace output input to (filter -> output) and connect window -> filter.
+                    output_nodes = [
+                        n
+                        for n in (definition.get("nodes") or [])
+                        if isinstance(n, dict) and str(n.get("type") or "").strip().lower() == "output"
+                    ]
+                    if len(output_nodes) == 1:
+                        out_id = str(output_nodes[0].get("id") or "").strip()
+                        edges = definition.get("edges") if isinstance(definition.get("edges"), list) else []
+                        kept_edges: List[Any] = []
+                        for edge in edges:
+                            if not isinstance(edge, dict):
+                                kept_edges.append(edge)
+                                continue
+                            if str(edge.get("to") or "").strip() == out_id:
+                                continue
+                            kept_edges.append(edge)
+                        kept_edges.append({"from": str(last_value_node_id), "to": filter_id})
+                        kept_edges.append({"from": filter_id, "to": out_id})
+                        definition["edges"] = kept_edges
+                        plan_obj["definition_json"] = definition
+                        tool_warnings.append(f"transform: inserted top-{int(top_n)} filter (row_number <= {int(top_n)})")
 
     if tool_errors:
         return PipelineTransformResult(

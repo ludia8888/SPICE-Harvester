@@ -894,13 +894,49 @@ def _window_table(table: PipelineTable, window_meta: Dict[str, Any]) -> Pipeline
     order_by = window_meta.get("orderBy") or []
     if not order_by:
         return table
+    # orderBy supports:
+    # - ["col1", "-col2"]  (prefix '-' for DESC)
+    # - [{"column":"col1","direction":"asc|desc"}, ...]
+    specs: list[tuple[str, str]] = []
+    for item in order_by:
+        if isinstance(item, str):
+            col = item.strip()
+            if not col:
+                continue
+            direction = "asc"
+            if col.startswith("-"):
+                direction = "desc"
+                col = col[1:].strip()
+            if col:
+                specs.append((col, direction))
+            continue
+        if isinstance(item, dict):
+            col = str(item.get("column") or item.get("name") or "").strip()
+            if not col:
+                continue
+            direction = str(item.get("direction") or item.get("dir") or "asc").strip().lower()
+            if direction not in {"asc", "desc"}:
+                direction = "asc"
+            specs.append((col, direction))
+    if not specs:
+        return table
     grouped: Dict[Tuple[Any, ...], List[Dict[str, Any]]] = {}
     for row in table.rows:
         key = tuple(row.get(col) for col in partition_by) if partition_by else ("__all__",)
         grouped.setdefault(key, []).append(row)
     rows: List[Dict[str, Any]] = []
     for key, bucket in grouped.items():
-        bucket_sorted = sorted(bucket, key=lambda r: tuple(r.get(col) for col in order_by))
+        bucket_sorted = list(bucket)
+        # Multi-key sort with per-column direction (stable sort from last key to first).
+        for col, direction in reversed(specs):
+            reverse = direction == "desc"
+
+            def _key(row: Dict[str, Any], *, _col: str = col) -> Any:
+                value = row.get(_col)
+                # Keep NULLs last regardless of direction.
+                return (value is None, value)
+
+            bucket_sorted.sort(key=_key, reverse=reverse)
         for idx, row in enumerate(bucket_sorted, start=1):
             next_row = dict(row)
             next_row["row_number"] = idx

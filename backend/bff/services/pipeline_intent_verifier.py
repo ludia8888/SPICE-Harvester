@@ -28,6 +28,11 @@ from shared.services.llm_quota import enforce_llm_quota
 from shared.services.redis_service import RedisService
 
 
+_KO_COLUMN_WORD = "\uceec\ub7fc"  # "column" (Korean)
+_KO_COLUMN_PARTICLE = "\uc740"  # topic particle ("is/as for")
+_KO_TOP_WORD = "\uc0c1\uc704"  # "top/upper" (Korean)
+
+
 class PipelineIntentCheckEnvelope(BaseModel):
     status: str = Field(default="pass", max_length=40)
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
@@ -53,6 +58,12 @@ def _build_intent_system_prompt() -> str:
         "You are a STRICT (but goal-literal) pipeline intent verifier for SPICE-Harvester.\n"
         "Return ONLY JSON. No markdown, no commentary.\n"
         "Evaluate whether the plan definition satisfies the goal.\n"
+        "\n"
+        "Semantics hints (important):\n"
+        "- operation=groupBy produces aggregate columns using aggregates[].alias (e.g., alias \"total_revenue\").\n"
+        "- operation=window adds a column named \"row_number\".\n"
+        "- operation=filter does not add columns; it only removes rows.\n"
+        "- operation=select restricts output columns to metadata.columns.\n"
         "\n"
         "Rules:\n"
         "- The goal is the ONLY source of hard requirements. Do NOT invent new requirements.\n"
@@ -170,14 +181,16 @@ def _extract_goal_output_columns(goal: str) -> List[str]:
     We only use this to avoid suppressing join-key requirements when the user explicitly asked for them.
     """
     text = str(goal or "")
-    # Prefer the last mention of "... 컬럼" / "... columns" as it tends to describe output shape.
-    matches = list(
-        re.finditer(
-            r"(?P<cols>(?:[A-Za-z_][A-Za-z0-9_]*\s*,\s*)*[A-Za-z_][A-Za-z0-9_]*)\s*(?:컬럼|columns?)",
-            text,
-            flags=re.IGNORECASE,
-        )
+    ko_columns_word = _KO_COLUMN_WORD
+    ko_columns_is = f"{_KO_COLUMN_WORD}{_KO_COLUMN_PARTICLE}"
+    patterns = (
+        rf"(?P<cols>(?:[A-Za-z_][A-Za-z0-9_]*\s*,\s*)*[A-Za-z_][A-Za-z0-9_]*)\s*(?:{ko_columns_word}|columns?)",
+        rf"(?:{ko_columns_is}|columns?\s*(?:are|:)?|output\s+columns?\s*(?:are|:)?)\s*"
+        rf"(?P<cols>(?:[A-Za-z_][A-Za-z0-9_]*\s*,\s*)*[A-Za-z_][A-Za-z0-9_]*)",
     )
+    matches: list[re.Match[str]] = []
+    for pattern in patterns:
+        matches.extend(list(re.finditer(pattern, text, flags=re.IGNORECASE)))
     if not matches:
         return []
     segment = matches[-1].group("cols") or ""
@@ -192,6 +205,87 @@ def _extract_goal_output_columns(goal: str) -> List[str]:
         seen.add(cl)
         out.append(c)
     return out
+
+
+def _plan_has_window(definition_json: Dict[str, Any]) -> bool:
+    nodes = definition_json.get("nodes") if isinstance(definition_json.get("nodes"), list) else []
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        meta = node.get("metadata") if isinstance(node.get("metadata"), dict) else {}
+        if str(meta.get("operation") or "").strip().lower() == "window":
+            return True
+    return False
+
+
+def _plan_groupby_aliases(definition_json: Dict[str, Any]) -> set[str]:
+    aliases: set[str] = set()
+    nodes = definition_json.get("nodes") if isinstance(definition_json.get("nodes"), list) else []
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        meta = node.get("metadata") if isinstance(node.get("metadata"), dict) else {}
+        if str(meta.get("operation") or "").strip().lower() != "groupby":
+            continue
+        aggregates = meta.get("aggregates")
+        if not isinstance(aggregates, list):
+            continue
+        for agg in aggregates:
+            if not isinstance(agg, dict):
+                continue
+            alias = str(agg.get("alias") or "").strip()
+            if alias:
+                aliases.add(alias.lower())
+    return aliases
+
+
+def _extract_top_n(goal: str) -> Optional[int]:
+    text = str(goal or "")
+    lowered = text.lower()
+    # NOTE: do not require a trailing word boundary because users often append suffix characters
+    # (e.g., "top 10 only") and unicode word boundaries make "\b" too strict in some locales.
+    match = re.search(r"\btop\s*(\d+)", lowered)
+    if match:
+        try:
+            value = int(match.group(1))
+        except Exception:
+            value = None
+        if value and value > 0:
+            return value
+    match = re.search(rf"(?:{_KO_TOP_WORD})\s*(\d+)", text)
+    if match:
+        try:
+            value = int(match.group(1))
+        except Exception:
+            value = None
+        if value and value > 0:
+            return value
+    return None
+
+
+def _plan_has_topn_filter(definition_json: Dict[str, Any], *, top_n: int) -> bool:
+    if top_n <= 0:
+        return False
+    nodes = definition_json.get("nodes") if isinstance(definition_json.get("nodes"), list) else []
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        meta = node.get("metadata") if isinstance(node.get("metadata"), dict) else {}
+        if str(meta.get("operation") or "").strip().lower() != "filter":
+            continue
+        expr = str(meta.get("expression") or "").strip()
+        if not expr:
+            continue
+        match = re.search(r"\brow_number\s*<=\s*(\d+)\b", expr)
+        if not match:
+            continue
+        try:
+            value = int(match.group(1))
+        except Exception:
+            continue
+        if value == int(top_n):
+            return True
+    return False
 
 
 def _extract_selected_columns(definition_json: Dict[str, Any]) -> List[str]:
@@ -344,7 +438,7 @@ def _extract_mentioned_columns(message: str) -> List[str]:
 
     # Fallback: parse simple comma-separated identifiers after "include" / "columns"
     lowered = text.lower()
-    has_column_word = ("column" in lowered) or ("columns" in lowered) or ("컬럼" in text)
+    has_column_word = ("column" in lowered) or ("columns" in lowered) or (_KO_COLUMN_WORD in text)
     has_output_context = any(token in lowered for token in ("output", "select", "result"))
     if not has_column_word and not has_output_context:
         return []
@@ -427,7 +521,7 @@ def _looks_like_output_column_requirement(message: str) -> bool:
     missingish = any(token in lowered for token in ("missing", "not present", "absent", "not in the output", "not in the output definition"))
     if not (includeish or containish or missingish):
         return False
-    if "column" in lowered or "columns" in lowered or "컬럼" in text:
+    if "column" in lowered or "columns" in lowered or _KO_COLUMN_WORD in text:
         return True
     # Some models return output-column requirements without explicitly saying "column(s)".
     if any(token in lowered for token in ("output", "select", "result")):
@@ -517,6 +611,10 @@ async def verify_pipeline_intent(
     warnings = list(draft.warnings or [])
 
     if status == "needs_revision" and missing_requirements:
+        definition = plan.definition_json or {}
+        has_window = _plan_has_window(definition)
+        groupby_aliases = _plan_groupby_aliases(definition)
+
         join_columns = _extract_join_columns(join_plan)
         goal_output_cols = _extract_goal_output_columns(str(plan.goal or ""))
         goal_output_cols_l = {c.lower() for c in goal_output_cols}
@@ -527,6 +625,25 @@ async def verify_pipeline_intent(
         suppressed_missing: List[str] = []
 
         for msg in missing_requirements:
+            lowered_msg = str(msg or "").lower()
+
+            # Deterministic suppression: window/groupBy semantics are known and should not
+            # be treated as missing if already present in the plan.
+            if has_window and ("row_number" in lowered_msg or "row number" in lowered_msg):
+                suppressed_missing.append(f"Verifier false-positive suppressed (window provides row_number): {msg}")
+                continue
+            is_filter_requirement = any(token in lowered_msg for token in ("filter", "limit", "top "))
+            if groupby_aliases and not is_filter_requirement:
+                for alias in groupby_aliases:
+                    if alias and (alias in lowered_msg or alias.replace("_", " ") in lowered_msg):
+                        suppressed_missing.append(
+                            f"Verifier false-positive suppressed (groupBy provides {alias}): {msg}"
+                        )
+                        lowered_msg = ""
+                        break
+                if not lowered_msg:
+                    continue
+
             # Guardrail: for simple dataset outputs (no specs/write/mapping), do not force join keys into the output
             if (
                 _allow_join_key_optional_for_goal(plan)
@@ -553,6 +670,23 @@ async def verify_pipeline_intent(
             new_actions: List[str] = []
             suppressed_actions: List[str] = []
             for msg in suggested_actions:
+                lowered_msg = str(msg or "").lower()
+                if has_window and ("row_number" in lowered_msg or "row number" in lowered_msg):
+                    suppressed_actions.append(f"Verifier false-positive suppressed (window provides row_number): {msg}")
+                    continue
+                is_filter_action = any(token in lowered_msg for token in ("filter", "limit", "top "))
+                if groupby_aliases and not is_filter_action:
+                    found_alias = None
+                    for alias in groupby_aliases:
+                        if alias and (alias in lowered_msg or alias.replace("_", " ") in lowered_msg):
+                            found_alias = alias
+                            break
+                    if found_alias:
+                        suppressed_actions.append(
+                            f"Verifier false-positive suppressed (groupBy provides {found_alias}): {msg}"
+                        )
+                        continue
+
                 if (
                     _allow_join_key_optional_for_goal(plan)
                     and not goal_explicitly_requires_join_key
@@ -572,6 +706,22 @@ async def verify_pipeline_intent(
 
         if not missing_requirements:
             status = "pass"
+
+    # Deterministic requirement: if the goal requests "top N", require a row_number-based filter.
+    # This prevents the verifier from accidentally passing a plan that produces ranks but does not
+    # actually limit the output.
+    top_n = _extract_top_n(str(plan.goal or ""))
+    if top_n:
+        has_filter = _plan_has_topn_filter(plan.definition_json or {}, top_n=top_n)
+        if not has_filter:
+            requirement = f"Missing top {top_n} filter (row_number <= {top_n})"
+            action = f"Add a filter step: row_number <= {top_n}"
+            if requirement not in missing_requirements:
+                missing_requirements.append(requirement)
+            if action not in suggested_actions:
+                suggested_actions.append(action)
+            if status == "pass":
+                status = "needs_revision"
 
     return PipelineIntentCheckResult(
         status=status,

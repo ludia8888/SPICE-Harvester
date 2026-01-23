@@ -36,6 +36,11 @@ from shared.services.pipeline_plan_builder import add_input, add_join, add_outpu
 from shared.services.redis_service import RedisService
 
 
+_KO_COLUMN_WORD = "\uceec\ub7fc"  # "column" (Korean)
+_KO_COLUMN_PARTICLE = "\uc740"  # topic particle ("is/as for")
+_KO_DATASET_WORD = "\ub370\uc774\ud130\uc14b"  # "dataset" (Korean)
+
+
 class PipelineClarificationQuestion(BaseModel):
     id: str = Field(..., min_length=1, max_length=100)
     question: str = Field(..., min_length=1, max_length=2000)
@@ -416,6 +421,16 @@ def _build_mcp_script_system_prompt(*, mode: Literal["build", "repair"], allowed
         + "- plan_delete_node: {node_id}\n"
         + "- plan_update_output: {output_name,set?,unset?,replace?}\n"
         + "\n"
+        + "Operation cookbook:\n"
+        + "- compute (row-wise only): expression=\"new_col = col_a + col_b\" or \"neg = -metric\".\n"
+        + "  Do NOT use SQL in compute (no SUM(), ROW_NUMBER(), OVER(), GROUP BY, AS).\n"
+        + "- filter: expression=\"column <= 10\" (no AND/OR).\n"
+        + "- groupBy/aggregate: use plan_add_transform with operation=\"groupBy\" and\n"
+        + "  metadata={\"groupBy\":[\"col1\",...],\"aggregates\":[{\"column\":\"price\",\"op\":\"sum\",\"alias\":\"total\"}]}.\n"
+        + "- window row_number: use plan_add_transform with operation=\"window\" and\n"
+        + "  metadata={\"window\":{\"partitionBy\":[...],\"orderBy\":[\"col\"]}} (adds column \"row_number\").\n"
+        + "  Window ordering is ascending; for descending rank, compute neg=-metric and orderBy neg.\n"
+        + "\n"
         + "Output schema:\n"
         + "{\n"
         + "  \"steps\": [{\"tool\": string, \"args\": object}],\n"
@@ -525,18 +540,24 @@ def _extract_explicit_output_columns_from_goal(goal: str) -> List[str]:
     Best-effort extraction of an explicit output column list from the user's goal.
 
     We intentionally keep this aligned with the intent verifier heuristics:
-    it only triggers on patterns like "... col1, col2 columns" / "... col1, col2 컬럼".
+    it only triggers on patterns like "... col1, col2 columns" (including common non-English variants).
     """
     text = str(goal or "")
-    matches = list(
-        re.finditer(
-            r"(?P<cols>(?:[A-Za-z_][A-Za-z0-9_]*\s*,\s*)*[A-Za-z_][A-Za-z0-9_]*)\s*(?:컬럼|columns?)",
-            text,
-            flags=re.IGNORECASE,
-        )
+    ko_columns_word = _KO_COLUMN_WORD
+    ko_columns_is = f"{_KO_COLUMN_WORD}{_KO_COLUMN_PARTICLE}"
+    patterns = (
+        # "... col1, col2 columns" (including Korean "column(s)" keyword).
+        rf"(?P<cols>(?:[A-Za-z_][A-Za-z0-9_]*\s*,\s*)*[A-Za-z_][A-Za-z0-9_]*)\s*(?:{ko_columns_word}|columns?)",
+        # "columns: col1, col2" (including Korean "as for columns ...").
+        rf"(?:{ko_columns_is}|columns?\s*(?:are|:)?|output\s+columns?\s*(?:are|:)?)\s*"
+        rf"(?P<cols>(?:[A-Za-z_][A-Za-z0-9_]*\s*,\s*)*[A-Za-z_][A-Za-z0-9_]*)",
     )
+    matches: list[re.Match[str]] = []
+    for pattern in patterns:
+        matches.extend(list(re.finditer(pattern, text, flags=re.IGNORECASE)))
     if not matches:
         return []
+    # Prefer the last match in the goal to avoid accidental early captures.
     segment = matches[-1].group("cols") or ""
     cols = re.findall(r"[A-Za-z_][A-Za-z0-9_]*", segment)
     seen: set[str] = set()
@@ -555,13 +576,13 @@ def _extract_explicit_output_name_from_goal(goal: str) -> Optional[str]:
     Best-effort extraction of an output dataset name from the goal.
 
     Examples:
-    - "... joined_orders 데이터셋 ..." -> "joined_orders"
     - "... joined_orders dataset ..."  -> "joined_orders"
     """
     text = str(goal or "")
+    ko_dataset_word = _KO_DATASET_WORD
     matches = list(
         re.finditer(
-            r"(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*(?:데이터셋|dataset)",
+            rf"(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*(?:{ko_dataset_word}|dataset)",
             text,
             flags=re.IGNORECASE,
         )
@@ -1832,12 +1853,236 @@ async def compile_pipeline_plan_mcp(
         if not steps:
             tool_errors.append("planner returned no steps")
 
+        # The MCP planner emits a single "script" (tool calls) in one shot; it does not
+        # get incremental tool results. To avoid node-id drift (e.g., assuming a node
+        # created by the server is called "groupBy" when it became "groupBy_2"),
+        # we deterministically assign node_id for node-creating tools when missing
+        # and maintain a light alias map for later references in the same script.
+        alias_map: Dict[str, str] = {}
+        node_id_counters: Dict[str, int] = {}
+        last_value_node_id: Optional[str] = None
+
+        def _node_ids_from_plan(obj: Dict[str, Any]) -> set[str]:
+            definition = obj.get("definition_json") if isinstance(obj.get("definition_json"), dict) else {}
+            nodes = definition.get("nodes") if isinstance(definition.get("nodes"), list) else []
+            ids: set[str] = set()
+            for node in nodes:
+                if not isinstance(node, dict):
+                    continue
+                node_id = str(node.get("id") or "").strip()
+                if node_id:
+                    ids.add(node_id)
+            return ids
+
+        def _rewrite_node_refs(args: Dict[str, Any]) -> None:
+            def _rewrite(value: Any) -> Any:
+                if not isinstance(value, str):
+                    return value
+                key = value.strip()
+                if not key:
+                    return value
+                return alias_map.get(key, value)
+
+            for key in ("node_id", "left_node_id", "right_node_id", "input_node_id", "from_node_id", "to_node_id"):
+                if key in args:
+                    args[key] = _rewrite(args.get(key))
+            if isinstance(args.get("input_node_ids"), list):
+                args["input_node_ids"] = [_rewrite(item) for item in (args.get("input_node_ids") or [])]
+
+        def _normalize_arg_keys(args: Dict[str, Any]) -> Optional[str]:
+            # Some models occasionally emit malformed keys like `expression=` or `node_id:`.
+            # Be tolerant by normalizing common trailing punctuation.
+            normalized: Dict[str, Any] = {}
+            changed = False
+            for raw_key, value in (args or {}).items():
+                key = str(raw_key).strip()
+                if not key:
+                    continue
+                norm = key.rstrip("=").rstrip(":")
+                if norm != key:
+                    changed = True
+                # Prefer a clean key if both exist (e.g., `expression` + `expression=`).
+                if norm in normalized and norm != key:
+                    continue
+                normalized[norm] = value
+            if changed:
+                args.clear()
+                args.update(normalized)
+                return "compiler: normalized tool args keys"
+            return None
+
+        def _reserve_node_id(base: str) -> str:
+            existing = _node_ids_from_plan(plan_obj)
+            stem = str(base or "").strip() or "node"
+            counter = int(node_id_counters.get(stem, 0))
+            while True:
+                candidate = stem if counter == 0 else f"{stem}_{counter}"
+                if candidate not in existing:
+                    node_id_counters[stem] = counter + 1
+                    return candidate
+                counter += 1
+
+        def _maybe_assign_node_id(tool_name: str, args: Dict[str, Any]) -> Optional[str]:
+            created = str(args.get("node_id") or "").strip() or None
+            if created:
+                return created
+            base: Optional[str] = None
+            if tool_name == "plan_add_transform":
+                base = str(args.get("operation") or "").strip() or None
+            elif tool_name == "plan_add_join":
+                base = "join"
+            elif tool_name == "plan_add_filter":
+                base = "filter"
+            elif tool_name == "plan_add_compute":
+                base = "compute"
+            elif tool_name == "plan_add_cast":
+                base = "cast"
+            elif tool_name == "plan_add_rename":
+                base = "rename"
+            elif tool_name == "plan_add_select":
+                base = "select"
+            elif tool_name == "plan_add_drop":
+                base = "drop"
+            elif tool_name == "plan_add_dedupe":
+                base = "dedupe"
+            elif tool_name == "plan_add_normalize":
+                base = "normalize"
+            elif tool_name == "plan_add_regex_replace":
+                base = "regexReplace"
+            elif tool_name == "plan_add_output":
+                # Default is output_<name>; keep readable + deterministic.
+                out_name = str(args.get("output_name") or "").strip() or "output"
+                base = f"output_{out_name}".replace(" ", "_")
+
+            if not base:
+                return None
+            node_id = _reserve_node_id(base)
+            args["node_id"] = node_id
+            # Keep a stable alias for follow-up references inside the script.
+            if tool_name == "plan_add_transform" and str(args.get("operation") or "").strip():
+                alias_map[str(args.get("operation") or "").strip()] = node_id
+            else:
+                alias_map[base.split("_", 1)[0]] = node_id  # join/filter/select/... convenience alias
+            return node_id
+
+        def _rewire_outputs_to(node_id: str) -> Optional[str]:
+            if not node_id:
+                return None
+            definition = plan_obj.get("definition_json")
+            if not isinstance(definition, dict):
+                return None
+            nodes = definition.get("nodes")
+            edges = definition.get("edges")
+            if not isinstance(nodes, list) or not isinstance(edges, list):
+                return None
+            output_nodes = [
+                n
+                for n in nodes
+                if isinstance(n, dict) and str(n.get("type") or "").strip().lower() == "output"
+            ]
+            if not output_nodes:
+                return None
+            target = str(node_id).strip()
+            if not target:
+                return None
+            existing = _node_ids_from_plan(plan_obj)
+            if target not in existing:
+                return None
+
+            changed = False
+            for out in output_nodes:
+                out_id = str(out.get("id") or "").strip()
+                if not out_id:
+                    continue
+                # Replace all incoming edges to the output node with (target -> output).
+                kept: List[Any] = []
+                for edge in edges:
+                    if not isinstance(edge, dict):
+                        kept.append(edge)
+                        continue
+                    if str(edge.get("to") or "").strip() == out_id:
+                        changed = True
+                        continue
+                    kept.append(edge)
+                kept.append({"from": target, "to": out_id})
+                edges = kept
+            if changed:
+                definition["edges"] = edges
+                plan_obj["definition_json"] = definition
+                return "compiler: rewired output node(s) to final transform"
+            return None
+
+        def _prune_to_outputs() -> Optional[str]:
+            definition = plan_obj.get("definition_json")
+            if not isinstance(definition, dict):
+                return None
+            nodes_raw = definition.get("nodes")
+            edges_raw = definition.get("edges")
+            if not isinstance(nodes_raw, list) or not isinstance(edges_raw, list):
+                return None
+            node_ids = {str(n.get("id") or "").strip() for n in nodes_raw if isinstance(n, dict) and str(n.get("id") or "").strip()}
+            output_ids = [
+                str(n.get("id") or "").strip()
+                for n in nodes_raw
+                if isinstance(n, dict) and str(n.get("type") or "").strip().lower() == "output" and str(n.get("id") or "").strip()
+            ]
+            if not output_ids:
+                return None
+
+            incoming: Dict[str, List[str]] = {}
+            normalized_edges: List[Dict[str, str]] = []
+            for edge in edges_raw:
+                if not isinstance(edge, dict):
+                    continue
+                src = str(edge.get("from") or "").strip()
+                dst = str(edge.get("to") or "").strip()
+                if not src or not dst:
+                    continue
+                if src not in node_ids or dst not in node_ids:
+                    continue
+                normalized_edges.append({"from": src, "to": dst})
+                incoming.setdefault(dst, []).append(src)
+
+            keep: set[str] = set()
+            stack = list(output_ids)
+            while stack:
+                dst = stack.pop()
+                if dst in keep:
+                    continue
+                keep.add(dst)
+                for src in incoming.get(dst, []):
+                    if src not in keep:
+                        stack.append(src)
+
+            if keep == node_ids:
+                return None
+
+            definition["nodes"] = [n for n in nodes_raw if isinstance(n, dict) and str(n.get("id") or "").strip() in keep]
+            definition["edges"] = [
+                e
+                for e in edges_raw
+                if isinstance(e, dict)
+                and str(e.get("from") or "").strip() in keep
+                and str(e.get("to") or "").strip() in keep
+            ]
+            plan_obj["definition_json"] = definition
+            removed = len(node_ids - keep)
+            return f"compiler: pruned {removed} unreachable nodes"
+
         for step in steps:
             tool_name = str(step.tool or "").strip()
             args = dict(step.args or {})
             if tool_name not in allowed_tool_set:
                 tool_errors.append(f"unsupported tool: {tool_name}")
                 continue
+
+            normalized_warning = _normalize_arg_keys(args)
+            if normalized_warning:
+                tool_warnings.append(normalized_warning)
+
+            # Resolve any "alias" node ids created earlier in this script.
+            _rewrite_node_refs(args)
+
             policy_error = _validate_mcp_step_against_task_spec(
                 tool_name=tool_name,
                 args=args,
@@ -1887,6 +2132,28 @@ async def compile_pipeline_plan_mcp(
                             set_fields.pop(key, None)
                         args["set"] = set_fields
 
+            # Be tolerant of common LLM schema mistakes for patch tools:
+            # - plan_update_output/set expects an object, but models sometimes emit `true`.
+            # Treat boolean set/unset/replace as a no-op instead of failing compilation.
+            if tool_name in {"plan_update_output", "plan_update_node_metadata"}:
+                if args.get("set") is None:
+                    args.pop("set", None)
+                if isinstance(args.get("set"), bool):
+                    tool_warnings.append(f"{tool_name}: coerced boolean 'set' to empty object")
+                    args["set"] = {}
+                if args.get("unset") is None:
+                    args.pop("unset", None)
+                if isinstance(args.get("unset"), bool):
+                    tool_warnings.append(f"{tool_name}: dropped boolean 'unset'")
+                    args.pop("unset", None)
+                if args.get("replace") is None:
+                    args.pop("replace", None)
+
+            created_node_id = _maybe_assign_node_id(tool_name, args)
+            # Track the last produced "value" node so we can rewire outputs to it if needed.
+            if created_node_id and tool_name not in {"plan_add_output"}:
+                last_value_node_id = created_node_id
+
             args["plan"] = plan_obj
             res = await _call_pipeline_tool(tool_name, args)
             if isinstance(res, dict) and res.get("error"):
@@ -1896,6 +2163,15 @@ async def compile_pipeline_plan_mcp(
                 tool_warnings.extend([str(item) for item in res.get("warnings") or [] if str(item or "").strip()])
             if isinstance(res, dict) and isinstance(res.get("plan"), dict):
                 plan_obj = res["plan"]
+            if created_node_id and isinstance(res, dict):
+                # Keep aliases in sync even when we assigned node_id ourselves.
+                node_id = str(res.get("node_id") or created_node_id or "").strip()
+                if tool_name == "plan_add_transform":
+                    op = str(args.get("operation") or "").strip()
+                    if op and node_id:
+                        alias_map[op] = node_id
+                elif node_id:
+                    alias_map[str(created_node_id).split("_", 1)[0]] = node_id
 
         last_plan_obj = plan_obj if isinstance(plan_obj, dict) else last_plan_obj
         if isinstance(plan_obj, dict):
@@ -1908,6 +2184,13 @@ async def compile_pipeline_plan_mcp(
             projection_warning = _ensure_output_projection_for_explicit_goal_columns(plan_obj, goal=goal)
             if projection_warning:
                 tool_warnings.append(projection_warning)
+            if last_value_node_id:
+                rewired = _rewire_outputs_to(last_value_node_id)
+                if rewired:
+                    tool_warnings.append(rewired)
+            pruned = _prune_to_outputs()
+            if pruned:
+                tool_warnings.append(pruned)
         if tool_errors:
             last_validation_errors = tool_errors
             last_validation_warnings = tool_warnings

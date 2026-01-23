@@ -37,6 +37,14 @@ PIPELINE_PLAN_MCP_TRANSFORM_ENABLED=true
 PIPELINE_PLAN_MCP_REPAIR_ENABLED=true
 ```
 
+## TaskSpec Gating (Scope Control)
+
+The agent computes a `TaskSpec` from the user goal to keep "simple requests simple".
+
+- `scope=report_only` is used for pure analysis requests (e.g., null checks).
+- `allow_advanced_transforms` is automatically enabled when the goal clearly requests operations like
+  aggregation/groupBy/window/ranking/top-N (to avoid "ask permission to go beyond scope" loops).
+
 ## Determinism Guarantees
 
 - Plan assembly uses plan-builder tool calls (`plan_add_input`, `plan_add_join`, `plan_add_select`, `plan_update_node_metadata`, ...).
@@ -45,6 +53,41 @@ PIPELINE_PLAN_MCP_REPAIR_ENABLED=true
   - Basic schema constraints (required metadata for operations)
   - Join key shape (leftKeys/rightKeys lengths)
 - Agent loops (repair/transform) must use unique idempotency keys per attempt to avoid 409 conflicts.
+
+## Goal Semantics That Are Enforced (Top-N / Window / Output)
+
+These are common sources of "looks successful but wrong result" regressions; we enforce them deterministically.
+
+- Top-N requests require an actual filter:
+  - Example intent: "top 10", "top 10 only", "top 3 per state"
+  - Required plan shape: a `window` node that produces `row_number` AND a `filter` node with `expression: "row_number <= N"`.
+  - If a plan has a window but is missing the filter, intent verification forces `needs_revision` (instead of silently passing).
+  - Transform loop may auto-insert the missing filter when safe (common pattern: `groupBy -> window -> filter`).
+
+- Descending ranking must be explicit:
+  - Window `orderBy` supports DESC using either:
+    - `["-total_revenue"]` (preferred)
+    - or `[{\"column\": \"total_revenue\", \"direction\": \"desc\"}]`
+  - If the goal implies DESC/top-N but the plan orders ascending, transform loop patches it.
+
+- Output wiring is deterministic:
+  - When a tool script creates new transforms but forgets to connect the output node, the compiler/transformer rewires outputs
+    to the last produced value node (and emits a warning like `transform: rewired output node to final transform`).
+
+## MCP Script Robustness (LLM Tool-Call Tolerance)
+
+The MCP planner/transformer emits a one-shot "script" of tool calls without incremental tool results. To keep execution stable:
+
+- Node-id drift mitigation:
+  - For node-creating tools, missing `node_id` is assigned deterministically.
+  - In-script aliases are maintained so later references can be rewritten to the actual node ids.
+
+- Malformed tool argument keys are normalized:
+  - Some models occasionally emit keys like `expression=` or `node_id:`.
+  - The compiler/transformer normalizes common trailing punctuation before tool validation.
+
+- Unreachable nodes are pruned:
+  - If a script produced transforms that are disconnected from outputs, they are removed to keep the plan minimal.
 
 ## Sampling & Preview Safety
 
@@ -64,6 +107,8 @@ Preview runs are intentionally sample-based and must avoid OOM:
   - Fixed with more robust column extraction and suppression rules.
 - Agent loops returning HTTP 409 due to idempotency key reuse:
   - Fixed by suffixing step ids with attempt counters for looping steps (verify-intent/preview/evaluate/inspect/cleanse).
+- "Top-N" requests returning bottom-N due to ascending order:
+  - Fixed by enforcing DESC window ordering when goal implies top-N/descending, and by supporting DESC orderBy in the executor.
 
 ## E2E Smoke (API)
 
@@ -84,4 +129,3 @@ Expected success signals:
 
 - Agent response: `status=success`, `data.status=success`, `intent_status=pass`
 - Preview: `preview.row_count > 0` for join-heavy plans (may be 0 if data truly has no matches)
-
