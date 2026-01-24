@@ -90,10 +90,8 @@ MCP_CONFIG_PATH=./mcp-config.json
 MCP_LOG_LEVEL=info
 MCP_TIMEOUT=30000
 
-# Pipeline planner (MCP)
-PIPELINE_PLAN_MCP_PLANNER_ENABLED=true
-PIPELINE_PLAN_MCP_TRANSFORM_ENABLED=true
-PIPELINE_PLAN_MCP_REPAIR_ENABLED=true
+# Pipeline agent / planner (single autonomous loop + MCP tools)
+PIPELINE_PLAN_LLM_ENABLED=true
 ```
 
 Docker 환경에서는 `MCP_CONFIG_PATH=/app/mcp-config.json` 처럼 컨테이너 내부 경로를 사용하세요.
@@ -217,7 +215,9 @@ curl -X POST http://localhost:8002/api/v1/context7/analyze/ontology \
 - Check environment variables are set correctly
 - Review logs: `tail -f logs/mcp_*.log`
 - If you see `Unexpected MCP tool result type: CallToolResult`, your client wrapper may not be parsing `structuredContent` vs `content[text]` correctly.
-  - BFF wrappers handle this in `backend/bff/services/pipeline_plan_compiler.py` and `backend/bff/services/pipeline_transform_agent.py`.
+  - BFF wrappers handle this in:
+    - `backend/bff/services/pipeline_plan_autonomous_compiler.py`
+    - `backend/bff/services/pipeline_agent_autonomous_loop.py`
 
 ### Context7 Issues
 - Ensure API key is valid

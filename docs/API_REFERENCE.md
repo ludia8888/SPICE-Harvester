@@ -455,21 +455,12 @@ python scripts/generate_api_reference.py
 - `GET /api/v1/pipelines/{pipeline_id}/runs`
 
 ### Pipeline Plans
-- `POST /api/v1/pipeline-plans/clarify-scope`
 - `POST /api/v1/pipeline-plans/compile`
 - `POST /api/v1/pipeline-plans/context-pack`
-- `POST /api/v1/pipeline-plans/join-keys`
-- `POST /api/v1/pipeline-plans/task-spec`
 - `GET /api/v1/pipeline-plans/{plan_id}`
-- `POST /api/v1/pipeline-plans/{plan_id}/cleanse`
 - `POST /api/v1/pipeline-plans/{plan_id}/evaluate-joins`
-- `POST /api/v1/pipeline-plans/{plan_id}/generate-specs`
 - `POST /api/v1/pipeline-plans/{plan_id}/inspect-preview`
 - `POST /api/v1/pipeline-plans/{plan_id}/preview`
-- `POST /api/v1/pipeline-plans/{plan_id}/repair`
-- `POST /api/v1/pipeline-plans/{plan_id}/split-outputs`
-- `POST /api/v1/pipeline-plans/{plan_id}/transform`
-- `POST /api/v1/pipeline-plans/{plan_id}/verify-intent`
 
 ### Query
 - `POST /api/v1/databases/{db_name}/query`

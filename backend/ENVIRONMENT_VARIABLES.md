@@ -344,21 +344,11 @@ ONTOLOGY_REQUIRE_HEALTH_GATE=true
 ONTOLOGY_DEPLOYMENTS_V2=true
 ```
 
-## Pipeline Planner (MCP)
+## Pipeline Planner
 
 ```bash
-# Enable MCP-based pipeline plan builder / transformer / repairer.
-# Recommended: keep these in your local `.env` so docker-compose recreates don't reset them.
+# Enable LLM-backed pipeline planning (single autonomous loop + MCP tools).
 PIPELINE_PLAN_LLM_ENABLED=true
-#
-# NOTE: compile planner selection order:
-# - if PIPELINE_PLAN_MCP_AUTONOMOUS_ENABLED=true  -> autonomous tool-call loop
-# - else if PIPELINE_PLAN_MCP_PLANNER_ENABLED=true -> MCP planner (non-autonomous)
-# - else -> legacy planner
-PIPELINE_PLAN_MCP_AUTONOMOUS_ENABLED=true
-PIPELINE_PLAN_MCP_PLANNER_ENABLED=true
-PIPELINE_PLAN_MCP_TRANSFORM_ENABLED=true
-PIPELINE_PLAN_MCP_REPAIR_ENABLED=true
 ```
 
 ## Lineage / Audit
