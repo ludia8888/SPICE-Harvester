@@ -797,9 +797,6 @@ class AgentRuntimeConfig:
     auto_retry_base_delay_s: float
     auto_retry_max_delay_s: float
     auto_retry_allow_writes: bool
-    parallel_execution_enabled: bool = False
-    max_concurrent_tool_calls: int = 1
-    fail_fast: bool = False
 
 
 class AgentRuntime:
@@ -850,9 +847,6 @@ class AgentRuntime:
             auto_retry_base_delay_s=agent_settings.auto_retry_base_delay_seconds,
             auto_retry_max_delay_s=agent_settings.auto_retry_max_delay_seconds,
             auto_retry_allow_writes=agent_settings.auto_retry_allow_writes,
-            parallel_execution_enabled=agent_settings.parallel_execution_enabled,
-            max_concurrent_tool_calls=agent_settings.max_concurrent_tool_calls,
-            fail_fast=agent_settings.fail_fast,
         )
         return cls(event_store=event_store, audit_store=audit_store, config=config)
 

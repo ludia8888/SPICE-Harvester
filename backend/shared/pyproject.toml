@@ -102,7 +102,6 @@ dependencies = [
     "mcp==1.25.0",
 
     # Agent orchestration
-    "langgraph==0.2.50",
 ]
 
 [project.optional-dependencies]

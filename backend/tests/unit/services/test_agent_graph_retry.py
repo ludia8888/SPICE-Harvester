@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from agent.models import AgentToolCall
-from agent.services.agent_graph import run_agent_graph
+from agent.services.agent_run_loop import run_agent_steps
 
 
 class _StubRuntime:
@@ -82,7 +82,7 @@ async def test_agent_graph_retries_transient_read_failure() -> None:
         ]
     )
 
-    final_state = await run_agent_graph(
+    final_state = await run_agent_steps(
         runtime,  # type: ignore[arg-type]
         {
             "run_id": "run-1",
@@ -126,7 +126,7 @@ async def test_agent_graph_does_not_retry_writes_by_default() -> None:
         ]
     )
 
-    final_state = await run_agent_graph(
+    final_state = await run_agent_steps(
         runtime,  # type: ignore[arg-type]
         {
             "run_id": "run-2",
@@ -188,7 +188,7 @@ async def test_agent_graph_respects_enterprise_max_attempts() -> None:
         ]
     )
 
-    final_state = await run_agent_graph(
+    final_state = await run_agent_steps(
         runtime,  # type: ignore[arg-type]
         {
             "run_id": "run-3",
@@ -251,7 +251,7 @@ async def test_agent_graph_uses_retry_after_when_allowed() -> None:
         ]
     )
 
-    final_state = await run_agent_graph(
+    final_state = await run_agent_steps(
         runtime,  # type: ignore[arg-type]
         {
             "run_id": "run-4",

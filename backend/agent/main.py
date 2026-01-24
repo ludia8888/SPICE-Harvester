@@ -1,5 +1,5 @@
 """
-Agent Service - LangGraph-based orchestration runtime.
+Agent Service - deterministic tool runner (single sequential loop).
 
 Port: 8004
 """

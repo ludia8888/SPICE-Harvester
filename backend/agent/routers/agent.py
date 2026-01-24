@@ -8,7 +8,7 @@ from uuid import UUID, uuid4
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from agent.models import AgentRunRequest, AgentToolCall
-from agent.services.agent_graph import AgentState, run_agent_graph
+from agent.services.agent_run_loop import AgentState, run_agent_steps
 from agent.services.agent_runtime import AgentRuntime
 from shared.config.settings import get_settings
 from shared.services.agent_registry import AgentRegistry
@@ -162,7 +162,7 @@ async def _execute_agent_run(
     actor = state["actor"]
     steps_total = len(state.get("steps", []))
     try:
-        final_state = await run_agent_graph(runtime, state)
+        final_state = await run_agent_steps(runtime, state)
         failed = bool(final_state.get("failed"))
         event_type = "AGENT_RUN_FAILED" if failed else "AGENT_RUN_COMPLETED"
         results_digest = digest_for_audit(final_state.get("results", []))

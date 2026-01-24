@@ -75,9 +75,6 @@ setup(
         # 🔌 MCP (Context7 integration)
         "mcp==1.25.0",
 
-        # Agent orchestration
-        "langgraph==0.2.50",
-        
         # 📊 Observability - OpenTelemetry
         "opentelemetry-api==1.23.0",
         "opentelemetry-sdk==1.23.0",
