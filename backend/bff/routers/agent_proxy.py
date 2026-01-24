@@ -7,12 +7,31 @@ Ensures the Agent service is only reachable through the BFF.
 from __future__ import annotations
 
 import logging
-from typing import Dict
+from typing import Any, Dict, Optional
 
 import httpx
-from fastapi import APIRouter, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 
+from shared.models.pipeline_agent import PipelineAgentRunRequest
+from bff.routers.pipeline_plans import (
+    PipelinePlanPreviewRequest,
+    get_dataset_registry,
+    get_pipeline_plan_registry,
+    get_pipeline_registry,
+    preview_plan,
+    _resolve_actor,
+    _resolve_tenant_id,
+    _resolve_tenant_policy,
+)
+from bff.services.pipeline_agent_autonomous_loop import run_pipeline_agent_mcp_autonomous
 from shared.config.settings import build_client_ssl_config, get_settings
+from shared.dependencies.providers import AuditLogStoreDep, LLMGatewayDep, RedisServiceDep
+from shared.models.responses import ApiResponse
+from shared.security.auth_utils import enforce_db_scope
+from shared.security.input_sanitizer import validate_db_name
+from shared.services.dataset_registry import DatasetRegistry
+from shared.services.pipeline_plan_registry import PipelinePlanRegistry
+from shared.services.pipeline_registry import PipelineRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -125,8 +144,90 @@ async def create_agent_run(request: Request) -> Response:
 
 
 @router.post("/pipeline-runs")
-async def create_pipeline_run(request: Request) -> Response:
-    return await _proxy_agent_request(request, "pipeline-runs")
+async def create_pipeline_run(
+    request: Request,
+    body: PipelineAgentRunRequest,
+    llm: LLMGatewayDep,
+    redis_service: RedisServiceDep,
+    audit_store: AuditLogStoreDep,
+    dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
+    pipeline_registry: PipelineRegistry = Depends(get_pipeline_registry),
+    plan_registry: PipelinePlanRegistry = Depends(get_pipeline_plan_registry),
+) -> ApiResponse:
+    """
+    Pipeline agent runs are handled in the BFF as a single autonomous loop + MCP tools.
+
+    We keep the `/agent/*` prefix for UI compatibility, but do NOT proxy this route
+    to the legacy Agent(LangGraph) service.
+    """
+    if not bool(get_settings().pipeline_plan.llm_enabled):
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Pipeline planner is disabled")
+
+    data_scope = body.data_scope
+    db_name = validate_db_name(str(data_scope.db_name or "").strip())
+    try:
+        enforce_db_scope(request.headers, db_name=db_name)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+
+    tenant_id = _resolve_tenant_id(request)
+    actor = _resolve_actor(request)
+    user = getattr(request.state, "user", None)
+    user_id = str(getattr(user, "id", "") or "").strip() or None
+
+    selected_model, allowed_models, data_policies = await _resolve_tenant_policy(request)
+
+    payload = await run_pipeline_agent_mcp_autonomous(
+        goal=str(body.goal or "").strip(),
+        data_scope=data_scope,
+        answers=body.answers if isinstance(body.answers, dict) else None,
+        planner_hints=body.planner_hints if isinstance(body.planner_hints, dict) else None,
+        actor=actor,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        data_policies=data_policies,
+        selected_model=selected_model,
+        allowed_models=allowed_models,
+        llm_gateway=llm,
+        redis_service=redis_service,
+        audit_store=audit_store,
+        dataset_registry=dataset_registry,
+        plan_registry=plan_registry,
+    )
+
+    # Best-effort preview to match existing UI expectations. Keep it lightweight by default.
+    plan_id = str(payload.get("plan_id") or "").strip()
+    if plan_id and payload.get("plan") and payload.get("preview") is None:
+        preview_node_id = str(getattr(body, "preview_node_id", None) or "").strip() or None
+        limit = max(1, min(int(getattr(body, "preview_limit", 200) or 200), 200))
+        try:
+            preview_resp = await preview_plan(
+                plan_id=plan_id,
+                body=PipelinePlanPreviewRequest(
+                    node_id=preview_node_id,
+                    limit=limit,
+                    include_run_tables=False,
+                    run_table_limit=limit,
+                ),
+                request=request,
+                dataset_registry=dataset_registry,
+                pipeline_registry=pipeline_registry,
+                plan_registry=plan_registry,
+            )
+            data = getattr(preview_resp, "data", None)
+            if isinstance(data, dict) and isinstance(data.get("preview"), dict):
+                payload["preview"] = data.get("preview")
+        except Exception as exc:
+            logger.warning("Pipeline agent preview failed plan_id=%s err=%s", plan_id, exc)
+
+    status_value = str(payload.get("status") or "failed").strip().lower()
+    if status_value == "clarification_required":
+        return ApiResponse.warning(message="Pipeline agent needs clarification", data=payload)
+    if status_value == "partial":
+        return ApiResponse.partial(message="Pipeline agent completed with warnings", data=payload)
+    if status_value != "success":
+        return ApiResponse.warning(message="Pipeline agent failed", data=payload)
+    return ApiResponse.success(message="Pipeline agent completed", data=payload)
 
 
 @router.get("/runs/{run_id}")

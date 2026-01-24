@@ -19,7 +19,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
-from bff.services.pipeline_plan_compiler import PipelineClarificationQuestion, PipelinePlanCompileResult
+from bff.services.pipeline_plan_models import PipelineClarificationQuestion, PipelinePlanCompileResult
 from bff.services.pipeline_plan_validation import validate_pipeline_plan
 from shared.models.pipeline_plan import PipelinePlan, PipelinePlanDataScope
 from shared.services.audit_log_store import AuditLogStore
@@ -669,11 +669,6 @@ async def compile_pipeline_plan_mcp_autonomous(
             "plan_status": _plan_status(state.plan_obj),
             "plan_summary": _summarize_plan(state.plan_obj),
             "last_observation": state.last_observation,
-            "limits": {
-                "max_steps": max_steps,
-                "remaining_steps": max_steps - step_idx,
-                "preview_row_limit_hint": 50,
-            },
         }
         user_prompt = _build_user_prompt(snapshot=snapshot)
 
@@ -804,7 +799,10 @@ async def compile_pipeline_plan_mcp_autonomous(
                 if tool_name == "context_pack_null_report":
                     requested = int(args.get("max_columns") or 20)
                     args["max_columns"] = max(1, min(requested, 30))
-                payload = await _call_pipeline_tool(tool_name, {"context_pack": state.context_pack, **args})
+                # Always use the server-side context pack. If the model provides `context_pack` in args,
+                # ignore it to prevent partial/invalid packs from overriding state.
+                args.pop("context_pack", None)
+                payload = await _call_pipeline_tool(tool_name, {**args, "context_pack": state.context_pack})
                 if tool_name == "context_pack_infer_keys":
                     state.key_inference = payload.get("inference") if isinstance(payload.get("inference"), dict) else None
                     state.last_observation = {
@@ -885,7 +883,9 @@ async def compile_pipeline_plan_mcp_autonomous(
                 requested = int(args.get("limit") or 50)
                 args["limit"] = max(1, min(requested, 50))
 
-            payload = await _call_pipeline_tool(tool_name, {"plan": state.plan_obj, **args})
+            # Always use the server-side plan. Never allow `plan` in args to override state.
+            args.pop("plan", None)
+            payload = await _call_pipeline_tool(tool_name, {**args, "plan": state.plan_obj})
             if isinstance(payload, dict) and isinstance(payload.get("plan"), dict):
                 state.plan_obj = payload["plan"]
 
