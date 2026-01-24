@@ -1,0 +1,217 @@
+[
+  {
+    "action": "call_tool",
+    "tool": "context_pack_infer_types",
+    "args": {
+      "max_columns": 80,
+      "max_samples": 80
+    },
+    "notes": [
+      "Start with deterministic type inference to decide if casts are needed before revenue math."
+    ],
+    "warnings": [],
+    "confidence": 0.7
+  },
+  {
+    "action": "call_tool",
+    "tool": "plan_new",
+    "args": {},
+    "notes": ["Create a new plan and build the join + aggregate + window pipeline."],
+    "warnings": [],
+    "confidence": 0.8
+  },
+  {
+    "action": "call_tool",
+    "tool": "plan_add_input",
+    "args": {
+      "dataset_name": "orders",
+      "node_id": "orders"
+    },
+    "notes": [],
+    "warnings": [],
+    "confidence": 0.9
+  },
+  {
+    "action": "call_tool",
+    "tool": "plan_add_input",
+    "args": {
+      "dataset_name": "order_items",
+      "node_id": "order_items"
+    },
+    "notes": [],
+    "warnings": [],
+    "confidence": 0.9
+  },
+  {
+    "action": "call_tool",
+    "tool": "plan_add_join",
+    "args": {
+      "left_node_id": "orders",
+      "right_node_id": "order_items",
+      "left_keys": ["order_id"],
+      "right_keys": ["order_id"],
+      "join_type": "inner",
+      "node_id": "join_orders_items"
+    },
+    "notes": [],
+    "warnings": [],
+    "confidence": 0.9
+  },
+  {
+    "action": "call_tool",
+    "tool": "plan_add_input",
+    "args": {
+      "dataset_name": "skus",
+      "node_id": "skus"
+    },
+    "notes": [],
+    "warnings": [],
+    "confidence": 0.9
+  },
+  {
+    "action": "call_tool",
+    "tool": "plan_add_join",
+    "args": {
+      "left_node_id": "join_orders_items",
+      "right_node_id": "skus",
+      "left_keys": ["sku_id"],
+      "right_keys": ["sku_id"],
+      "join_type": "inner",
+      "node_id": "join_with_skus"
+    },
+    "notes": [],
+    "warnings": [],
+    "confidence": 0.9
+  },
+  {
+    "action": "call_tool",
+    "tool": "plan_add_input",
+    "args": {
+      "dataset_name": "products",
+      "node_id": "products"
+    },
+    "notes": [],
+    "warnings": [],
+    "confidence": 0.9
+  },
+  {
+    "action": "call_tool",
+    "tool": "plan_add_join",
+    "args": {
+      "left_node_id": "join_with_skus",
+      "right_node_id": "products",
+      "left_keys": ["product_id"],
+      "right_keys": ["product_id"],
+      "join_type": "inner",
+      "node_id": "join_with_products"
+    },
+    "notes": [],
+    "warnings": [],
+    "confidence": 0.9
+  },
+  {
+    "action": "call_tool",
+    "tool": "plan_add_cast",
+    "args": {
+      "input_node_id": "join_with_products",
+      "casts": [
+        {"column": "qty", "type": "xsd:integer"},
+        {"column": "unit_price", "type": "xsd:decimal"}
+      ],
+      "node_id": "cast_numeric"
+    },
+    "notes": ["Cast qty/unit_price to numeric to avoid string math in compute."],
+    "warnings": [],
+    "confidence": 0.9
+  },
+  {
+    "action": "call_tool",
+    "tool": "plan_add_compute",
+    "args": {
+      "input_node_id": "cast_numeric",
+      "expression": "revenue = qty * unit_price",
+      "node_id": "compute_revenue"
+    },
+    "notes": [],
+    "warnings": [],
+    "confidence": 0.9
+  },
+  {
+    "action": "call_tool",
+    "tool": "plan_add_group_by",
+    "args": {
+      "input_node_id": "compute_revenue",
+      "group_by": ["category"],
+      "aggregates": [{"column": "revenue", "op": "sum", "alias": "total_revenue"}],
+      "node_id": "agg_by_category"
+    },
+    "notes": [],
+    "warnings": [],
+    "confidence": 0.9
+  },
+  {
+    "action": "call_tool",
+    "tool": "plan_add_window",
+    "args": {
+      "input_node_id": "agg_by_category",
+      "order_by": ["-total_revenue"],
+      "node_id": "rank_categories"
+    },
+    "notes": [],
+    "warnings": [],
+    "confidence": 0.9
+  },
+  {
+    "action": "call_tool",
+    "tool": "plan_add_filter",
+    "args": {
+      "input_node_id": "rank_categories",
+      "expression": "row_number <= 10",
+      "node_id": "top10"
+    },
+    "notes": [],
+    "warnings": [],
+    "confidence": 0.9
+  },
+  {
+    "action": "call_tool",
+    "tool": "plan_add_output",
+    "args": {
+      "input_node_id": "top10",
+      "output_name": "top_categories_revenue",
+      "output_kind": "unknown",
+      "node_id": "out_top_categories"
+    },
+    "notes": [],
+    "warnings": [],
+    "confidence": 0.9
+  },
+  {
+    "action": "call_tool",
+    "tool": "plan_validate",
+    "args": {
+      "require_output": true
+    },
+    "notes": ["Validate the plan against dataset schemas before finishing."],
+    "warnings": [],
+    "confidence": 0.9
+  },
+  {
+    "action": "call_tool",
+    "tool": "plan_preview",
+    "args": {
+      "limit": 10
+    },
+    "notes": ["Preview top 10 result rows to confirm ranking."],
+    "warnings": [],
+    "confidence": 0.9
+  },
+  {
+    "action": "finish",
+    "tool": null,
+    "args": {},
+    "notes": ["Finished: join -> cast -> compute revenue -> groupBy -> window rank -> top 10 output."],
+    "warnings": [],
+    "confidence": 0.95
+  }
+]

@@ -1084,7 +1084,10 @@ class LLMGateway:
                     if provider == "mock":
                         safe_task = re.sub(r"[^A-Z0-9]+", "_", (task or "").strip().upper()).strip("_")
                         task_key = f"LLM_MOCK_JSON_{safe_task}" if safe_task else ""
-                        cursor_key = safe_task or str(task or "").strip() or "DEFAULT"
+                        # IMPORTANT: mock sequences must not bleed across independent requests/runs.
+                        # Scope the cursor by audit_partition_key when available (pipeline_agent:<run_id>, etc).
+                        cursor_scope = str(audit_partition_key or "").strip() or "global"
+                        cursor_key = f"{cursor_scope}:{safe_task}" if safe_task else cursor_scope
                         raw = (get_settings().llm.mock_json_for_task(task) or "").strip()
                         if not raw:
                             hint = task_key or "LLM_MOCK_JSON"
