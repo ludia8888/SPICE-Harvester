@@ -56,7 +56,7 @@ graph TD
 Notes:
 - BFF runs dataset/objectify outbox workers in-process.
 - search-projection-worker is optional (`ENABLE_SEARCH_PROJECTION=false` by default).
-- Agent service is internal; it executes LangGraph runs, calls BFF for actions, and logs events/audit trails to S3/Postgres (agent-dedicated bucket, not the core Event Store).
+- Agent service is internal; it executes validated AgentPlan steps in a single sequential loop, calls BFF for actions, and logs events/audit trails to S3/Postgres (agent-dedicated bucket, not the core Event Store).
 
 ## 2) Event Sourcing Write Path
 
@@ -141,7 +141,7 @@ flowchart LR
 
 - `backend/bff/`: API gateway and orchestration
 - `backend/oms/`: TerminusDB control + async write APIs
-- `backend/agent/`: LangGraph agent runtime + audit/event logging
+- `backend/agent/`: agent tool runner (sequential) + audit/event logging
 - `backend/pipeline_worker/`: Spark pipeline execution
 - `backend/objectify_worker/`: mapping spec -> instance creation
 - `backend/connector_trigger_service/`, `backend/connector_sync_worker/`: connector ingest flow

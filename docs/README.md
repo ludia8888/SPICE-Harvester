@@ -14,7 +14,7 @@ Welcome to the SPICE HARVESTER project documentation. This directory contains al
 - **[DevOps Risk & Cost Report](DEVOPS_MSA_RISK_COST_REPORT.md)** - Senior DevOps 관점 운영 리스크/코스트 분석 및 우선순위 개선안
 - **[LLM Integration Blueprint](LLM_INTEGRATION.md)** - LLM을 Funnel/OMS/Graph/Lineage에 안전하게 결합하는 설계(도메인 중립)
 - **[LLM-Native Control Plane](LLM_NATIVE_CONTROL_PLANE.md)** - LLM을 “대화형 컴파일러”로 올리는 설계(Write Planner/Operational Memory/Policy E2E Evals)
-- **[Pipeline Agent + Pipeline Plans](PIPELINE_AGENT.md)** - 자연어 기반 데이터 ETL 오케스트레이션(LangGraph) + MCP 기반 플래너/분석 툴 가이드
+- **[Pipeline Agent + Pipeline Plans](PIPELINE_AGENT.md)** - 자연어 기반 데이터 ETL 오케스트레이션(단일 autonomous loop + MCP tools) 가이드
 - **[Security Documentation](SECURITY.md)** - Security architecture, guidelines, and compliance
 - **[Data Lineage](DATA_LINEAGE.md)** - Provenance/lineage 그래프 설계 및 운영(백필/지표 포함)
 - **[Audit Logs](AUDIT_LOGS.md)** - 감사 로그 스키마/보장(guarantees) 및 운영 가이드
@@ -59,7 +59,7 @@ docs/
 ├── frontend.md             # ✅ Frontend UI/UX spec (BFF-aligned)
 ├── FRONTEND_POLICIES.md    # Frontend policies (URL SSoT, auth, command tracking)
 ├── API_REFERENCE.md        # Complete API documentation
-├── PIPELINE_AGENT.md       # Pipeline Agent (LangGraph) + Pipeline Plans (MCP Planner) developer guide
+├── PIPELINE_AGENT.md       # Pipeline Agent (single loop + MCP tools) developer guide
 ├── OPERATIONS.md          # Operations and deployment manual
 ├── DEVOPS_MSA_RISK_COST_REPORT.md  # 🆕 DevOps 운영 리스크/코스트 보고서
 ├── LLM_INTEGRATION.md      # 🆕 LLM 결합 설계(도메인 중립/엔터프라이즈 안전)
@@ -97,7 +97,7 @@ backend/docs/              # Backend-specific documentation
 - **BFF (Backend for Frontend)** - Port 8002: API gateway, routing, async command tracking (external entrypoint)
 - **OMS (Ontology Management Service)** - Port 8000: Ontology + graph operations on TerminusDB (internal; debug ports only)
 - **Funnel (Type Inference Service)** - Port 8003: schema/type inference utilities (internal; debug ports only)
-- **Agent (LangGraph Service)** - Port 8004: internal agent runs + audit/event logging (BFF proxy only)
+- **Agent (Tool Runner)** - Port 8004: internal agent runs + audit/event logging (BFF proxy only)
 - **Pipeline/Objectify Workers** - ETL transforms + dataset → ontology instance mapping
 - **Connector Services** - Google Sheets ingest/preview/polling
 - **Shared Components** - registries, validators, security, observability

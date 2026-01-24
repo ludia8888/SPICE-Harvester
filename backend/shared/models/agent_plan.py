@@ -1,5 +1,5 @@
 """
-Agent plan schema for LangGraph planner + approval gate.
+Agent plan schema for LLM-native planner + approval gate.
 
 The plan is a JSON contract produced by a planner and validated by the server.
 Execution should only happen after allowlist/policy/approval checks.

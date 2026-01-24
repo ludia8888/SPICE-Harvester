@@ -503,7 +503,7 @@ def get_agent_service_info() -> ServiceInfo:
     return ServiceInfo(
         name="Agent",
         title="Agent Service",
-        description="LangGraph 기반 에이전트 실행 및 감사 이벤트 기록",
+        description="에이전트 도구 실행(단일 순차 루프) 및 감사 이벤트 기록",
         version="0.1.0",
         port=int(settings.services.agent_port),
         host=str(settings.services.agent_host),

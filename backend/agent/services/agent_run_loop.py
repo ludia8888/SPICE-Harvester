@@ -3,7 +3,7 @@ from __future__ import annotations
 """
 Agent Service step runner (single sequential loop).
 
-This intentionally avoids LangGraph and any parallel scheduling. Agent Plans are
+This intentionally avoids graph-based orchestration and any parallel scheduling. Agent Plans are
 validated in the BFF to ensure dependencies (templates/artifacts) only reference
 prior steps, so a simple in-order executor is sufficient and easier to audit.
 """
@@ -265,4 +265,3 @@ async def run_agent_steps(runtime: AgentRuntime, initial_state: AgentState) -> A
         "retry_delay_s": None,
         "policy": None,
     }
-

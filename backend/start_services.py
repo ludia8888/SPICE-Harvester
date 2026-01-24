@@ -206,7 +206,7 @@ def main():
         print(f"  - OMS (Ontology Management): {protocol}://localhost:8000")
         print(f"  - BFF (Backend for Frontend): {protocol}://localhost:8002")
         print(f"  - Funnel (Type Inference): {protocol}://localhost:8003")
-        print(f"  - Agent (LangGraph): {protocol}://localhost:8004")
+        print(f"  - Agent (tool runner): {protocol}://localhost:8004")
         print("\n🔍 API Documentation:")
         print(f"  - OMS Docs: {protocol}://localhost:8000/docs")
         print(f"  - BFF Docs: {protocol}://localhost:8002/docs")

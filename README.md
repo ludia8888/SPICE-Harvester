@@ -83,7 +83,7 @@ SPICE HARVESTER는 이를 위해:
 - **BFF (8002)**: 외부 진입점. 프론트 계약, 라우팅, 정책/레이트리밋, agent-plans control plane 엔드포인트
 - **OMS (8000)**: 온톨로지/그래프 관리(내부용; 필요 시 debug ports로 노출)
 - **Funnel (8003)**: 타입 추론/구조 분석(내부용)
-- **Agent**: LangGraph 기반 실행기(내부용; BFF를 통해서만 도구 호출)
+- **Agent**: 에이전트 도구 실행기(단일 순차 루프, 내부용; BFF를 통해서만 호출)
 - **Workers**: pipeline/objectify/instance/projection/action-worker 등(이벤트 기반 처리)
 - **Infra**: Kafka, Postgres, Redis, MinIO(S3), lakeFS, Elasticsearch, OTel collector, Jaeger/Prometheus/Grafana
 

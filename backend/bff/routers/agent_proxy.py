@@ -158,7 +158,7 @@ async def create_pipeline_run(
     Pipeline agent runs are handled in the BFF as a single autonomous loop + MCP tools.
 
     We keep the `/agent/*` prefix for UI compatibility, but do NOT proxy this route
-    to the legacy Agent(LangGraph) service.
+    to the legacy Agent service (tool runner).
     """
     if not bool(get_settings().pipeline_plan.llm_enabled):
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Pipeline planner is disabled")

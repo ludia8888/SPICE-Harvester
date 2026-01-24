@@ -512,7 +512,7 @@ services:
       timeout: 10s
       retries: 5
 
-  # Agent Service (LangGraph runtime)
+  # Agent Service (tool runner)
   agent:
     build:
       context: .
