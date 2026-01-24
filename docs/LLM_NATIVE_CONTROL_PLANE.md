@@ -1,4 +1,12 @@
-# LLM-Native Control Plane 설계 (Write Planner / Operational Memory / Policy E2E Evals) — SPICE-Harvester
+# LLM-Native Control Plane 설계 (Legacy) — SPICE-Harvester
+
+> 주의: 이 문서는 과거/실험적 접근(LLM이 `AgentPlan` typed plan을 생성하고 서버가 실행하는 “plan-only control plane”)을 설명합니다.
+>
+> 현재 자연어 ETL의 우선 아키텍처는 다음입니다:
+> - `docs/PIPELINE_AGENT.md`: 단일 autonomous loop + MCP tools (도구 호출 기반 plan build/repair)
+> - `docs/AGENT_PRD.md`: AGENT-RUNTIME-ARCH-001 (단일 루프 런타임 원칙)
+>
+> 신규 개발은 위 문서 기준으로 진행하세요.
 
 > 업데이트: 2026-01-13  
 > 대상: Backend/Platform, DevOps/SRE, Security, PO/PM  

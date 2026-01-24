@@ -448,7 +448,8 @@ Agent 런타임(단일 루프) 설계는 `docs/AGENT_PRD.md` Appendix A (AGENT-R
 - `/api/v1/ai/*`는 **읽기 전용 계획 생성**과 요약만 수행한다 (write 금지).
 - LLM Gateway는 JSON schema 검증을 통해 출력 안전성을 강제한다.
 - `/api/v1/context7/*`는 search/knowledge/link/ontology analyze를 제공하지만 Agent와 자동 연계는 없다.
-- 별도 LLM-native control plane으로 `POST /api/v1/agent-plans/compile`이 **typed plan(Plan-only)** 을 생성하고, 서버가 allowlist/risk/승인/시뮬레이션 규칙으로 실행을 통제한다. (상세: `docs/LLM_NATIVE_CONTROL_PLANE.md`)
+- (Legacy/대체 예정) `POST /api/v1/agent-plans/compile` 기반 LLM-native control plane(typed plan, Plan-only)이 존재한다.
+  - 현재는 Pipeline Agent의 “단일 autonomous loop + MCP tools”가 자연어 ETL의 우선 경로이다. (상세: `docs/PIPELINE_AGENT.md`)
 
 ### 12.1.10 현재 미구현/제약 (명시)
 
@@ -456,7 +457,7 @@ Agent 런타임(단일 루프) 설계는 `docs/AGENT_PRD.md` Appendix A (AGENT-R
 - Pipeline Agent는 control-plane 중심(계획/검증/샘플 preview)이며, Spark build/deploy(대규모 실행) 자동화는 별도 운영 정책/승인 흐름이 필요하다.
 - 온톨로지 자동 구축은 human-in-the-loop 없이 동작하지 않는다.
 - Agent는 planner가 생성한 계획(AgentPlan)을 실행할 수 있지만, **완전 자동 실행(무승인/무시뮬레이션)** 은 허용하지 않는다.
-- Planner/allowlist/approval/plan registry는 일부 구현되었고, 추가 고도화는 `docs/LLM_NATIVE_CONTROL_PLANE.md`에 따른다.
+- (Legacy/대체 예정) Planner/allowlist/approval/plan registry 기반의 “plan-only control plane” 고도화 문서는 `docs/LLM_NATIVE_CONTROL_PLANE.md`에 남아 있다.
 
 ### 12.1.11 코드 크로스체크 앵커 (주요 구현 위치)
 
