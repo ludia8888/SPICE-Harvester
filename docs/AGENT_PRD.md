@@ -154,15 +154,19 @@ Pipeline Agent는 역할 분해 그래프 대신, 단일 루프가 필요한 도
 - Context pack + join/pk/fk 후보: `backend/bff/services/pipeline_context_pack.py`
 - Pipeline MCP server: `backend/mcp/pipeline_mcp_server.py`
 
-에이전트 런타임 기술 문서
-“단일 에이전트 루프(single autonomous loop + tools)” 중심
-문서 ID: AGENT-RUNTIME-ARCH-001
-버전: v1.0 (초안)
-최종 수정: 2026-01-24 (KST)
-대상 독자: 백엔드/플랫폼/클라이언트 엔지니어, 보안 담당, 프로덕트 엔지니어
-범위: LLM 기반 에이전트 기능의 아키텍처, 핵심 컴포넌트, 작동 원리(루프), 성능·보안·컨텍스트 관리
+---
 
-⸻
+## Appendix A) Agent Runtime Architecture (AGENT-RUNTIME-ARCH-001)
+
+에이전트 런타임 기술 문서 (단일 에이전트 루프: single autonomous loop + tools)
+
+- 문서 ID: AGENT-RUNTIME-ARCH-001
+- 버전: v1.0 (초안)
+- 최종 수정: 2026-01-24 (KST)
+- 대상 독자: 백엔드/플랫폼/클라이언트 엔지니어, 보안 담당, 프로덕트 엔지니어
+- 범위: LLM 기반 에이전트 기능의 아키텍처, 핵심 컴포넌트, 작동 원리(루프), 성능/보안/컨텍스트 관리
+
+---
 
 1. 목적 및 설계 원칙
 
@@ -185,20 +189,20 @@ Pipeline Agent는 역할 분해 그래프 대신, 단일 루프가 필요한 도
 	•	모델은 신뢰할 수 있는 실행 주체가 아닙니다.
 	•	파일/네트워크/프로세스 실행 등 위험도가 있는 작업은 런타임이 권한·샌드박스·감사 로그로 통제해야 합니다.
 
-⸻
+---
 
 2. 용어 정의
 	•	Turn(턴): 사용자가 메시지를 보낸 시점부터, 에이전트가 최종 사용자 응답(assistant message)을 반환하기까지의 단위.
 	•	Iteration(반복/스텝): 한 턴 안에서 “추론 → 도구 호출 → 결과 반영”이 1회 수행되는 단위.
 	•	Thread(스레드/대화): 여러 턴이 누적되는 대화 컨텍스트.
-	•	Prompt Item(프롬프트 아이템): 입력 컨텍스트를 구성하는 단위 객체(예: message, function_call, function_call_output, reasoning_summary, compaction 등).
+	•	Prompt Item(프롬프트 아이템): 입력 컨텍스트를 구성하는 단위 객체(예: message, tool_call, tool_output, reasoning_summary, compaction 등).
 	•	Tool Call(도구 호출): 모델이 특정 도구 실행을 요청하는 구조화된 출력.
 	•	Observation(관측): 도구 실행 결과를 프롬프트에 다시 주입한 항목.
 	•	Context Window(컨텍스트 윈도우): 모델이 한 번의 추론에서 사용할 수 있는 최대 토큰(입력+출력).
 	•	Compaction(압축): 컨텍스트 한도 관리를 위해 이전 대화를 요약/축약하고, 필요 시 “잠재 상태(opaque state)”를 보존하는 작업.
 	•	Prompt Cache(프롬프트 캐시): 동일한 접두(prefix)가 재사용될 때 모델 추론 계산을 재사용해 비용을 절감하는 메커니즘(제공자/서버 구현에 의존).
 
-⸻
+---
 
 3. 시스템 아키텍처 개요
 
@@ -206,7 +210,8 @@ Pipeline Agent는 역할 분해 그래프 대신, 단일 루프가 필요한 도
 	1.	Client (UI/CLI/SDK)
 	•	사용자 입력 수집, 스트리밍 출력 렌더링
 	•	(선택) 로컬 환경 정보 제공(cwd, shell, 프로젝트 메타)
-	2.	Agent Orchestrator (오케스트레이터)
+	2.	Agent Runtime Controller (오케스트레이터)
+	•	역할: “멀티 에이전트 매니저”가 아니라 단일 루프 런타임 컨트롤러(추론 호출/툴 실행/관측 주입/종료 판단)
 	•	입력 아이템 리스트 관리(대화 상태)
 	•	모델 추론 요청 생성
 	•	도구 호출 감지 → 실행 위임 → 관측 주입
@@ -233,9 +238,10 @@ Pipeline Agent는 역할 분해 그래프 대신, 단일 루프가 필요한 도
 
 3.2 아키텍처 다이어그램(개념)
 
+```mermaid
 flowchart LR
   U[User] --> C[Client UI/SDK]
-  C --> O[Agent Orchestrator]
+  C --> O[Agent Runtime Controller]
   O --> MG[Model Gateway]
   MG --> M[(LLM Inference API)]
   M --> MG
@@ -245,9 +251,9 @@ flowchart LR
   O --> CM[Context Manager]
   O --> SEC[Security & Policy]
   O --> OBS[Logs/Metrics/Tracing]
+```
 
-
-⸻
+---
 
 4. 에이전트 실행 루프(Agent Loop) 작동 원리
 
@@ -255,22 +261,30 @@ flowchart LR
 
 에이전트 런타임의 기본 동작은 다음 중 하나로 수렴합니다.
 	•	종료(termination): 모델이 최종 사용자 메시지(assistant message)를 출력 → 턴 종료
-	•	지속(iterate): 모델이 도구 호출(function_call)을 출력 → 런타임이 도구 실행 → 결과를 관측으로 주입 → 재추론
+	•	지속(iterate): 모델이 도구 호출(tool_call)을 출력 → 런타임이 도구 실행 → 결과를 관측으로 주입 → 재추론
 
 4.2 상태 머신(턴 내부)
 
+```mermaid
 stateDiagram-v2
   [*] --> BuildPrompt
   BuildPrompt --> Inference
-  Inference --> ToolRequested: function_call emitted
+  Inference --> ToolRequested: tool request emitted
   Inference --> FinalAnswer: assistant message emitted
   ToolRequested --> ExecuteTool
   ExecuteTool --> AppendObservation
   AppendObservation --> BuildPrompt
   FinalAnswer --> [*]
+```
 
-4.3 오케스트레이터 의사코드(정확한 구현 골격)
+4.3 런타임 컨트롤러 의사코드(정확한 구현 골격)
 
+중요: 아래는 “단일 에이전트 루프”의 골격이며, 멀티 에이전트(서브에이전트/핸드오프/라우터/합성/병렬 실행)는 금지합니다.
+
+### Option A) Native tool calling(streaming tool_call) 패턴
+(일부 제공자/모델/SDK에서 지원)
+
+```text
 items = initial_items() + [user_message_item]
 
 loop:
@@ -290,7 +304,7 @@ loop:
       client.stream(event.delta)
       assistant_text += event.delta
 
-    if event.type == OUTPUT_ITEM_ADDED && event.item.type == FUNCTION_CALL:
+    if event.type == OUTPUT_ITEM_ADDED && event.item.type == TOOL_CALL:
       tool_call = event.item
 
     if event.type == COMPLETED:
@@ -299,18 +313,51 @@ loop:
   if tool_call != null:
     tool_result = tool_executor.run(tool_call)
     items.append(tool_call)
-    items.append(make_function_call_output(tool_call.call_id, tool_result))
+    items.append(make_tool_output(tool_call.call_id, tool_result))
     continue
 
   else:
     items.append(make_assistant_message(assistant_text))
     return assistant_text
+```
+
+### Option B) Decision JSON 패턴 (현재 SPICE Pipeline Agent에서 사용)
+모델이 매 스텝 “다음 액션”을 JSON으로 선택하고, 런타임이 MCP 도구를 실행해 관측을 주입합니다.
+
+```text
+state = {
+  goal, data_scope,
+  context_pack (server-side), plan (server-side),
+  last_observation (compact)
+}
+
+loop:
+  snapshot = build_compact_snapshot(state)  # large objects are summarized
+  decision = model.complete_json(system_prompt, snapshot, schema=Decision)
+
+  if decision.action == "call_tool":
+    # Execute deterministic tool (MCP). Never trust model-provided large objects.
+    tool_result = tool_executor.call(decision.tool, decision.args, server_side_state=state)
+    state.last_observation = compact(tool_result)
+    continue
+
+  if decision.action == "finish":
+    # Valid output must be either:
+    # - report-only (analysis), OR
+    # - a validated plan (has outputs) persisted to registry
+    return final_payload
+
+  if decision.action == "clarify":
+    # Only for missing external inputs (dataset/db/ambiguous columns, etc).
+    # Never ask to increase internal step/tool-call limits.
+    return questions
+```
 
 왜 이 구조인가?
 	•	도구 호출이 발생하면 “현재 출력”은 최종 답이 아닙니다. 도구 결과를 관측으로 넣지 않으면 모델은 같은 추론을 반복하거나, 환각 가능성이 상승합니다.
 	•	스트리밍 출력은 UI 품질을 올리지만, 도구 호출 감지 시점을 명확히 처리해야 합니다(도구 호출이 늦게 도착할 수 있음).
 
-⸻
+---
 
 5. 프롬프트(입력 컨텍스트) 구성 규칙
 
@@ -341,14 +388,14 @@ loop:
 5.3 프롬프트 아이템 타입(내부 표준 스키마 제안)
 	•	message: role + content(텍스트/이미지/파일)
 	•	reasoning_summary: 모델의 내부 요약(선택, 저장/표시 정책 필요)
-	•	function_call: name + arguments(JSON 문자열) + call_id
-	•	function_call_output: call_id + output(텍스트/구조화)
+	•	tool_call: name + arguments(JSON 문자열) + call_id
+	•	tool_output: call_id + output(텍스트/구조화)
 	•	compaction: encrypted_content(opaque) + summary(선택)
 
 설계 근거
 	•	“도구 호출”과 “도구 결과”를 메시지로 뭉개면, 멀티턴/디버깅/재현성이 급격히 악화합니다. 타입 분리는 런타임의 안정성을 올립니다.
 
-⸻
+---
 
 6. 도구 호출(Tool Call) 프로토콜
 
@@ -364,10 +411,10 @@ loop:
 	•	strict: 입력 검증 강도(가능하면 런타임에서 강제 검증 권장)
 
 6.2 도구 호출 실행 규칙
-	1.	모델이 function_call을 출력하면 오케스트레이터는 해당 도구를 레지스트리에서 조회합니다.
+	1.	모델이 tool_call을 출력하면 오케스트레이터는 해당 도구를 레지스트리에서 조회합니다.
 	2.	arguments를 JSON 파싱 및 스키마 검증합니다.
 	3.	실행 전 권한 정책을 평가합니다(예: 파일 쓰기, 프로세스 실행, 네트워크).
-	4.	실행 후 결과를 function_call_output으로 표준화해 input 리스트에 append합니다.
+	4.	실행 후 결과를 tool_output으로 표준화해 input 리스트에 append합니다.
 	5.	append 후 재추론합니다.
 
 왜 “append”인가?
@@ -379,7 +426,7 @@ loop:
 	•	외부 도구(플러그인 서버, 사내 API 게이트웨이 등): 각 도구 제공자가 자체 가드레일을 강제
 	•	단, 런타임도 최소한의 호출 전 정책(예: 데이터 유출 위험, 민감 리소스 접근) 을 적용하는 것이 안전합니다.
 
-⸻
+---
 
 7. 스트리밍(Streaming) 이벤트 처리
 
@@ -390,14 +437,14 @@ loop:
 7.2 런타임이 최소 처리해야 할 이벤트
 	•	output_text.delta: UI 스트리밍
 	•	output_text.done: 해당 출력 종료
-	•	output_item.added/done: function_call 등 구조화 출력 수집
+	•	output_item.added/done: tool_call 등 구조화 출력 수집
 	•	completed: 한 번의 추론 호출 완료
 
 주의 사항(실전 이슈)
-	•	텍스트 델타가 먼저 오고, function_call 아이템이 뒤늦게 올 수 있습니다.
+	•	텍스트 델타가 먼저 오고, tool_call 아이템이 뒤늦게 올 수 있습니다.
 	•	따라서 “텍스트가 나오니 최종 답”으로 단정하면 오작동합니다. completed 또는 “도구 호출 없음 확정” 조건이 필요합니다.
 
-⸻
+---
 
 8. 멀티턴 대화(스레드) 관리
 
@@ -420,7 +467,7 @@ loop:
 	•	보안/규정/데이터 보관 요구가 강하면 무상태를 우선 고려하고, 성능은 캐시/압축으로 보완합니다.
 	•	내부망·사내 모델처럼 보관이 허용되고 비용이 큰 환경이면 상태 참조를 고려합니다.
 
-⸻
+---
 
 9. 성능 설계: 캐시, 접두 안정화, 구성 변경 처리
 
@@ -444,7 +491,7 @@ loop:
 왜 이렇게까지 하는가?
 	•	접두가 유지되어 캐시가 살고, 로그/감사/재현성 측면에서 “언제 정책이 바뀌었는지”가 명확해집니다.
 
-⸻
+---
 
 10. 컨텍스트 윈도우 관리: 자동 압축(Compaction)
 
@@ -479,7 +526,7 @@ loop:
 	•	도구 실행으로 인해 바뀐 환경 상태(파일 생성/수정 결과, 배포 상태 등)
 	•	최근 에러와 원인(재발 방지)
 
-⸻
+---
 
 11. 보안·권한·감사(필수)
 
@@ -499,7 +546,7 @@ loop:
 	4.	비밀정보 보호
 	•	토큰/키/개인정보는 도구 결과에 섞일 수 있으므로 마스킹/레드액션 전략 필요
 
-⸻
+---
 
 12. 확장성: 플러그인 도구(외부 서버) 설계
 
@@ -514,12 +561,12 @@ loop:
 	•	즉시 반영은 캐시 미스 유발 가능
 	•	권장: 턴 경계에서 반영 또는 “도구 변경 이벤트”를 별도 append 메시지로 기록
 
-⸻
+---
 
 13. 장애/예외 처리 표준
 
 13.1 도구 실행 실패
-	•	도구 실패는 숨기지 말고 function_call_output에 오류를 구조화해 반환
+	•	도구 실패는 숨기지 말고 tool_output에 오류를 구조화해 반환
 	•	모델이 재시도/대안 선택을 할 수 있도록 오류 코드를 표준화
 
 예:
@@ -529,7 +576,7 @@ loop:
 	•	네트워크/일시 오류는 제한적 재시도(지수 백오프)
 	•	부작용이 있는 도구(배포, 결제)는 기본 재시도 금지 또는 멱등 키(idempotency key) 필수
 
-⸻
+---
 
 14. 관측성(Observability) 체크리스트
 	•	Turn ID / Step ID / Call ID 상관관계 부여
@@ -541,14 +588,14 @@ loop:
 	•	에이전트는 비결정적 요소가 있어 “현상 재현”이 어렵습니다.
 	•	구조화 로그와 상관관계 ID가 없으면 운영이 불가능합니다.
 
-⸻
+---
 
 15. 구현 체크리스트(바로 적용 가능한 수준)
 
 15.1 오케스트레이터
 	•	input 아이템 리스트를 append-only로 관리
 	•	스트리밍 이벤트 파서/정규화
-	•	function_call 감지 및 실행 분기
+	•	tool_call 감지 및 실행 분기
 	•	종료 조건: “도구 호출 없음 + 최종 메시지 완료”로 판정
 
 15.2 도구 시스템
@@ -567,7 +614,7 @@ loop:
 	•	구성 변경은 메시지 append로 표현
 	•	도구 목록 순서 결정 규칙 고정(알파벳 정렬 등)
 
-⸻
+---
 
 부록 A. 입력 아이템 예시(자체 포맷)
 
@@ -596,25 +643,25 @@ loop:
 ]
 
 
-⸻
+---
 
 부록 B. 도구 호출/관측 예시(자체 포맷)
 
 {
-  "type": "function_call",
+  "type": "tool_call",
   "name": "shell",
   "arguments": "{\"command\": [\"cat\", \"README.md\"], \"workdir\": \"/workspace/project\"}",
   "call_id": "call_001"
 }
 
 {
-  "type": "function_call_output",
+  "type": "tool_output",
   "call_id": "call_001",
   "output": "....(README content)...."
 }
 
 
-⸻
+---
 
 결론(핵심만 정리)
 	•	에이전트 기능의 본질은 루프입니다: 추론 → 도구 → 관측 → 재추론 → 종료 메시지.
