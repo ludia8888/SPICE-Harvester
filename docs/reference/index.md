@@ -7,6 +7,6 @@ This section is intended to be machine-checked and/or machine-generated wherever
 
 _generated/PIPELINE_AGENT_ALLOWED_TOOLS
 _generated/PIPELINE_MCP_TOOLS
-python_api
+_generated/REPO_FILE_INVENTORY
+autoapi/index
 ```
-

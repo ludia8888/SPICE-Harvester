@@ -5,12 +5,15 @@ from __future__ import annotations
 
 import argparse
 import ast
+import os
+import subprocess
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, List, Optional
 
 SCOPE_LINE = "backend/**/*.py (including scripts and tests, excluding __pycache__)"
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 @dataclass
@@ -121,7 +124,36 @@ def collect_file_info(root: Path, path: Path) -> FileInfo:
 
 
 def current_timestamp() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
+    """
+    Prefer a deterministic timestamp derived from git history so the generated doc
+    is stable for a given commit (avoids churn on every `sphinx-build`).
+    """
+    rev = (os.environ.get("SPICE_DOCS_GIT_REF") or "").strip()
+    if not rev:
+        try:
+            rev = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"],
+                cwd=str(REPO_ROOT),
+                stderr=subprocess.DEVNULL,
+                text=True,
+            ).strip()
+        except Exception:
+            rev = ""
+
+    if rev:
+        try:
+            ts = subprocess.check_output(
+                ["git", "show", "-s", "--format=%cI", rev],
+                cwd=str(REPO_ROOT),
+                stderr=subprocess.DEVNULL,
+                text=True,
+            ).strip()
+            if ts:
+                return ts
+        except Exception:
+            pass
+
+    return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
 def read_existing_timestamp(path: Path) -> Optional[str]:

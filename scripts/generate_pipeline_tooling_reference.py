@@ -13,7 +13,10 @@ Why AST parsing (instead of imports)?
 
 from __future__ import annotations
 
+import argparse
 import ast
+import os
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Sequence, Tuple
@@ -31,8 +34,41 @@ BEGIN = "<!-- BEGIN AUTO-GENERATED: pipeline_tooling_reference -->"
 END = "<!-- END AUTO-GENERATED: pipeline_tooling_reference -->"
 
 
-def _now_utc() -> str:
+def _run_git(args: List[str]) -> str | None:
+    try:
+        return subprocess.check_output(
+            args, cwd=str(REPO_ROOT), text=True, stderr=subprocess.DEVNULL
+        ).strip()
+    except Exception:
+        return None
+
+
+def _detect_rev() -> str | None:
+    env_rev = (os.environ.get("SPICE_DOCS_GIT_REF") or "").strip()
+    if env_rev:
+        return env_rev
+    return _run_git(["git", "rev-parse", "HEAD"])
+
+
+def _detect_commit_time(rev: str | None) -> str:
+    """
+    Prefer a deterministic timestamp derived from git history so the generated docs
+    are stable for a given commit (avoids churn on every `sphinx-build`).
+    """
+    if rev:
+        ts = _run_git(["git", "show", "-s", "--format=%cI", rev])
+        if ts:
+            return ts
     return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def _write_if_changed(path: Path, content: str) -> None:
+    if path.exists():
+        existing = path.read_text(encoding="utf-8")
+        if existing == content:
+            return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
 
 
 def _read_text(path: Path) -> str:
@@ -102,7 +138,7 @@ def _tool_category(name: str) -> str:
     return "Other"
 
 
-def _render_mcp_tools_md(tool_specs: List[Dict[str, Any]]) -> str:
+def _render_mcp_tools_md(tool_specs: List[Dict[str, Any]], *, updated_at: str, rev: str | None) -> str:
     by_cat: Dict[str, List[Dict[str, Any]]] = {}
     for tool in tool_specs:
         name = str(tool.get("name") or "").strip()
@@ -114,7 +150,9 @@ def _render_mcp_tools_md(tool_specs: List[Dict[str, Any]]) -> str:
     lines.append("# Pipeline MCP Tool Catalog")
     lines.append("")
     lines.append(BEGIN)
-    lines.append(f"> Updated: {_now_utc()}")
+    lines.append(f"> Updated: {updated_at}")
+    if rev:
+        lines.append(f"> Revision: `{rev}`")
     lines.append(
         "> Source of truth: `backend/mcp/pipeline_mcp_server.py` (parsed from the `tool_specs` literal)."
     )
@@ -142,6 +180,8 @@ def _render_agent_allowed_tools_md(
     allowed: Sequence[str],
     *,
     mcp_tool_names: Sequence[str],
+    updated_at: str,
+    rev: str | None,
 ) -> str:
     allowed_set = {str(t).strip() for t in allowed if str(t).strip()}
     mcp_set = {str(t).strip() for t in mcp_tool_names if str(t).strip()}
@@ -153,7 +193,9 @@ def _render_agent_allowed_tools_md(
     lines.append("# Pipeline Agent Tool Allowlist")
     lines.append("")
     lines.append(BEGIN)
-    lines.append(f"> Updated: {_now_utc()}")
+    lines.append(f"> Updated: {updated_at}")
+    if rev:
+        lines.append(f"> Revision: `{rev}`")
     lines.append(
         "> Source of truth: `backend/bff/services/pipeline_agent_autonomous_loop.py` (`_PIPELINE_AGENT_ALLOWED_TOOLS`)."
     )
@@ -189,21 +231,56 @@ def _render_agent_allowed_tools_md(
     return "\n".join(lines)
 
 
-def _write(path: Path, content: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8")
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--out-dir",
+        type=Path,
+        default=OUT_DIR,
+        help="Directory to write generated markdown (default: docs/reference/_generated)",
+    )
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="Exit non-zero if the output would change",
+    )
+    return parser.parse_args()
 
 
 def main() -> int:
+    args = parse_args()
+
+    out_mcp = args.out_dir / OUT_MCP.name
+    out_allowed = args.out_dir / OUT_ALLOWED.name
+
     tool_specs = _extract_mcp_tool_specs()
     allowed_tools = _extract_agent_allowed_tools()
+    rev = _detect_rev()
+    updated_at = _detect_commit_time(rev)
 
     mcp_names = [str(t.get("name") or "").strip() for t in tool_specs if isinstance(t, dict)]
-    _write(OUT_MCP, _render_mcp_tools_md(tool_specs))
-    _write(OUT_ALLOWED, _render_agent_allowed_tools_md(allowed_tools, mcp_tool_names=mcp_names))
+
+    mcp_md = _render_mcp_tools_md(tool_specs, updated_at=updated_at, rev=rev)
+    allowed_md = _render_agent_allowed_tools_md(
+        allowed_tools, mcp_tool_names=mcp_names, updated_at=updated_at, rev=rev
+    )
+
+    if args.check:
+        missing: List[Path] = []
+        for path, content in [(out_mcp, mcp_md), (out_allowed, allowed_md)]:
+            existing = path.read_text(encoding="utf-8") if path.exists() else ""
+            if existing != content:
+                missing.append(path)
+        if missing:
+            for path in missing:
+                print(f"{path} is out of date. Run: python scripts/generate_pipeline_tooling_reference.py")
+            return 1
+        return 0
+
+    _write_if_changed(out_mcp, mcp_md)
+    _write_if_changed(out_allowed, allowed_md)
     return 0
 
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

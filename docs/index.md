@@ -68,6 +68,7 @@ LLM_INTEGRATION
 :caption: Reference
 
 reference/index
+reference/autoapi/index
 ```
 
 ```{toctree}

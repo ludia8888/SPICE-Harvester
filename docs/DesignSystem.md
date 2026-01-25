@@ -1,6 +1,8 @@
 > Updated: 2026-01-08  
 > Status: external reference (Blueprint.js design system notes). Not a description of the current SPICE HARVESTER frontend.
 
+# Design System (Reference)
+
 이 문서는 특정 벤더/제품이 아니라, **엔터프라이즈 데이터 앱**에서 반복적으로 검증된 UI/UX 원칙을 정리한 레퍼런스 노트입니다. 구현은 `docs/frontend.md` 및 실제 프론트 코드/컴포넌트 기준으로 판단합니다.
 
 ## 디자인 시스템의 목표

@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
+import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -34,11 +36,35 @@ def _md_table(headers: Sequence[str], rows: Iterable[Sequence[str]]) -> str:
     return "\n".join(lines)
 
 
+def _run_git(args: List[str]) -> str | None:
+    try:
+        return subprocess.check_output(
+            args, cwd=str(_repo_root()), text=True, stderr=subprocess.DEVNULL
+        ).strip()
+    except Exception:
+        return None
+
+
+def _deterministic_updated_date() -> str:
+    """
+    Prefer a deterministic date derived from git history so the generated doc is
+    stable for a given commit (avoids drift just because "today" changed).
+    """
+    rev = (os.environ.get("SPICE_DOCS_GIT_REF") or "").strip() or _run_git(
+        ["git", "rev-parse", "HEAD"]
+    )
+    if rev:
+        ts = _run_git(["git", "show", "-s", "--format=%cI", rev])
+        if ts and "T" in ts:
+            return ts.split("T", 1)[0]
+    return datetime.now(timezone.utc).date().isoformat()
+
+
 def _render() -> str:
     catalog = _load_catalog()
     status_hint_fallback = 500
 
-    now = datetime.now(timezone.utc).date().isoformat()
+    now = _deterministic_updated_date()
     lines: List[str] = []
     lines.append("# Enterprise Error Taxonomy")
     lines.append("")
