@@ -96,6 +96,7 @@ Claim 저장 위치:
 - `CAST_SUCCESS`: cast가 실패 없이 파싱된다고 주장(파싱 실패 값 1개 반례로 HARD)
 - `CAST_LOSSLESS`: cast가 “허용된 정규화 범위 내에서” 무손실이라고 주장(HARD 가능)
   - spec에 `allowed_normalization`(예: `["trim","lowercase"]`)을 포함해야 HARD로 반증 가능
+  - 지원 normalization (v1): `trim`, `lowercase`, `uppercase`, `collapse_whitespace`, `strip_leading_zeros`, `strip_trailing_zeros`, `normalize_integer`, `normalize_decimal`, `normalize_datetime`, `normalize_date`
 - `FILTER_ONLY_NULLS`: “특정 컬럼에서 NULL만 제거했다” 주장(삭제된 row 중 non-null이 1개라도 있으면 HARD)
 - `FILTER_MIN_RETAIN_RATE`: “retain_rate >= min_rate” 주장(비율 반례로 HARD)
 - `UNION_ROW_LOSSLESS`: “union이 입력 row를 잃지 않는다” 주장(input−output 차집합이 존재하면 HARD)
