@@ -83,6 +83,17 @@ def test_apply_transform_basic_ops(worker: PipelineWorker) -> None:
     sorted_df = worker._apply_transform({"operation": "sort", "columns": ["a"]}, [df], {})
     assert [row["a"] for row in sorted_df.collect()] == [1, 2]
 
+    text_df = worker.spark.createDataFrame([("a-1",), ("b-2",)], ["code"])
+    regexed = worker._apply_transform(
+        {
+            "operation": "regexReplace",
+            "rules": [{"column": "code", "pattern": "-", "replacement": ""}],
+        },
+        [text_df],
+        {},
+    )
+    assert [row["code"] for row in regexed.collect()] == ["a1", "b2"]
+
 
 def test_apply_transform_join_union_groupby_pivot_window(worker: PipelineWorker) -> None:
     left = worker.spark.createDataFrame([(1, "x"), (2, "y")], ["id", "val"])

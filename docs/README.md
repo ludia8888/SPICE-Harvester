@@ -4,6 +4,27 @@ Welcome to the SPICE HARVESTER project documentation. This directory contains al
 
 ## Documentation Overview
 
+### Sphinx Site (Buildable)
+
+This repository ships a buildable Sphinx site that ingests the Markdown docs in this folder.
+
+- Entry: `index.md`
+- Config: `conf.py`
+- Auto-managed pages are regenerated during `sphinx-build` (see `conf.py`).
+
+Build (recommended, isolated venv):
+```bash
+python3.11 -m venv .venv-docs
+source .venv-docs/bin/activate
+pip install -r docs/requirements.txt
+make -C docs html
+```
+
+Docs QA (generators up-to-date + warnings-as-errors):
+```bash
+python scripts/check_docs.py
+```
+
 ### Core Documentation
 
 - **[System Architecture](ARCHITECTURE.md)** - Comprehensive system architecture with microservices design, implementation status, and performance metrics
@@ -13,7 +34,7 @@ Welcome to the SPICE HARVESTER project documentation. This directory contains al
 - **[Operations Manual](OPERATIONS.md)** - Deployment, maintenance, and operational procedures
 - **[DevOps Risk & Cost Report](DEVOPS_MSA_RISK_COST_REPORT.md)** - Senior DevOps 관점 운영 리스크/코스트 분석 및 우선순위 개선안
 - **[LLM Integration Blueprint](LLM_INTEGRATION.md)** - LLM을 Funnel/OMS/Graph/Lineage에 안전하게 결합하는 설계(도메인 중립)
-- **[LLM-Native Control Plane](LLM_NATIVE_CONTROL_PLANE.md)** - LLM을 “대화형 컴파일러”로 올리는 설계(Write Planner/Operational Memory/Policy E2E Evals)
+- **[Pipeline Agent + Pipeline Plans](PIPELINE_AGENT.md)** - 자연어 기반 데이터 ETL 오케스트레이션(단일 autonomous loop + MCP tools) 가이드
 - **[Security Documentation](SECURITY.md)** - Security architecture, guidelines, and compliance
 - **[Data Lineage](DATA_LINEAGE.md)** - Provenance/lineage 그래프 설계 및 운영(백필/지표 포함)
 - **[Audit Logs](AUDIT_LOGS.md)** - 감사 로그 스키마/보장(guarantees) 및 운영 가이드
@@ -26,7 +47,7 @@ Welcome to the SPICE HARVESTER project documentation. This directory contains al
 
 #### For Developers
 1. Start with the [System Architecture](ARCHITECTURE.md) to understand the system topology and data/control planes
-2. Follow the root [README](../README.md) for backend setup instructions
+2. Follow the root `README.md` for backend setup instructions
 3. Use the [Frontend UI/UX Spec](frontend.md) for frontend development
 4. Review the [API Reference](API_REFERENCE.md) for endpoint details
 5. Check [Security Documentation](SECURITY.md) for secure coding practices
@@ -45,7 +66,7 @@ Welcome to the SPICE HARVESTER project documentation. This directory contains al
 4. Check monitoring and maintenance procedures (incl. [Data Lineage](DATA_LINEAGE.md), [Audit Logs](AUDIT_LOGS.md))
 
 #### For QA Engineers
-1. Review the test structure in [Backend testing docs](../backend/docs/testing/COMPLEX_TYPES_TEST_README.md)
+1. Review the test structure in `backend/docs/testing/COMPLEX_TYPES_TEST_README.md`
 2. Check API endpoints in [API Reference](API_REFERENCE.md)
 3. Follow testing procedures in relevant sections
 
@@ -53,11 +74,14 @@ Welcome to the SPICE HARVESTER project documentation. This directory contains al
 
 ```
 docs/
+├── conf.py                 # Sphinx config (builds the repo-wide docs site)
+├── index.md                # Sphinx root document (toctree)
 ├── README.md               # This file - documentation index
 ├── ARCHITECTURE.md         # 🔄 Unified system architecture (3 docs merged)
 ├── frontend.md             # ✅ Frontend UI/UX spec (BFF-aligned)
 ├── FRONTEND_POLICIES.md    # Frontend policies (URL SSoT, auth, command tracking)
 ├── API_REFERENCE.md        # Complete API documentation
+├── PIPELINE_AGENT.md       # Pipeline Agent (single loop + MCP tools) developer guide
 ├── OPERATIONS.md          # Operations and deployment manual
 ├── DEVOPS_MSA_RISK_COST_REPORT.md  # 🆕 DevOps 운영 리스크/코스트 보고서
 ├── LLM_INTEGRATION.md      # 🆕 LLM 결합 설계(도메인 중립/엔터프라이즈 안전)
@@ -68,6 +92,12 @@ docs/
 ├── ACTION_WRITEBACK_DESIGN.md  # Action writeback 설계 (atomic patchset + ES overlay)
 ├── UIUX.md               # UI/UX guidelines
 ├── DesignSystem.md       # 🔄 Design system (renamed from DesignSysyem.md)
+├── reference/             # Sphinx reference section (mostly auto-generated)
+│   ├── index.md
+│   └── _generated/
+│       ├── PIPELINE_MCP_TOOLS.md
+│       ├── PIPELINE_AGENT_ALLOWED_TOOLS.md
+│       └── REPO_FILE_INVENTORY.md
 └── architecture/         # Architecture diagrams and details
     └── README.md
 
@@ -95,7 +125,7 @@ backend/docs/              # Backend-specific documentation
 - **BFF (Backend for Frontend)** - Port 8002: API gateway, routing, async command tracking (external entrypoint)
 - **OMS (Ontology Management Service)** - Port 8000: Ontology + graph operations on TerminusDB (internal; debug ports only)
 - **Funnel (Type Inference Service)** - Port 8003: schema/type inference utilities (internal; debug ports only)
-- **Agent (LangGraph Service)** - Port 8004: internal agent runs + audit/event logging (BFF proxy only)
+- **Agent (Tool Runner)** - Port 8004: internal agent runs + audit/event logging (BFF proxy only)
 - **Pipeline/Objectify Workers** - ETL transforms + dataset → ontology instance mapping
 - **Connector Services** - Google Sheets ingest/preview/polling
 - **Shared Components** - registries, validators, security, observability
@@ -205,6 +235,6 @@ For documentation issues or questions:
 - Submit a pull request with improvements
 
 ---
-*Last updated: 2025-12-17*
+*Last updated: 2026-01-25*
 *Documentation reorganization: Complete*
 *Version: 3.0 (Major reorganization)*

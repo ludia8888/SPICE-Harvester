@@ -1,3 +1,5 @@
+# Frontend (UI/UX Spec)
+
 > Updated: 2026-01-08  
 > Status: UI/UX **design spec** (target). Current frontend implementation is partial.  
 > Current API contract: `docs/API_REFERENCE.md`

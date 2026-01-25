@@ -7,8 +7,11 @@ Executes a pipeline definition against dataset samples to produce preview/output
 from __future__ import annotations
 
 import ast
+import csv
+import io
 import json
 import os
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -108,6 +111,9 @@ class PipelineExecutor:
         self._storage_service = storage_service
         self._cast_mode = normalize_cast_mode(get_settings().pipeline.cast_mode)
         self._cast_stats: Dict[str, Dict[str, int]] = {}
+        # Preview settings are derived from definition["__preview_meta__"] per-run.
+        self._preview_mode: bool = False
+        self._preview_max_output_rows: Optional[int] = None
 
     async def preview(
         self,
@@ -156,6 +162,15 @@ class PipelineExecutor:
         parameters = normalize_parameters(definition.get("parameters"))
         preview_meta = definition.get("__preview_meta__") or {}
         preview_branch = preview_meta.get("branch")
+        self._preview_mode = bool(definition.get("__preview_meta__"))
+        self._preview_max_output_rows = None
+        if self._preview_mode and "max_output_rows" in preview_meta:
+            try:
+                max_rows = int(preview_meta.get("max_output_rows") or 0)
+            except (TypeError, ValueError):
+                max_rows = 0
+            if max_rows > 0:
+                self._preview_max_output_rows = max_rows
         sample_limit = None
         if "sample_limit" in preview_meta:
             try:
@@ -336,10 +351,20 @@ class PipelineExecutor:
             except (TypeError, ValueError):
                 resolved_limit = 200
         try:
-            raw_bytes = await self._storage_service.load_bytes(bucket, key)
+            extension = os.path.splitext(key)[1].lower()
+            if extension == ".csv":
+                # Avoid loading the full CSV into memory; only read enough lines for the requested sample.
+                estimated_bytes = max(64 * 1024, resolved_limit * 512)
+                raw_bytes = await self._storage_service.load_bytes_lines(
+                    bucket,
+                    key,
+                    max_lines=resolved_limit + 1,  # header + rows
+                    max_bytes=estimated_bytes,
+                )
+            else:
+                raw_bytes = await self._storage_service.load_bytes(bucket, key)
         except Exception:
             return []
-        extension = os.path.splitext(key)[1].lower()
         if extension == ".csv":
             return _parse_csv_bytes(raw_bytes, max_rows=resolved_limit)
         if extension in {".xlsx", ".xlsm"}:
@@ -517,27 +542,83 @@ class PipelineExecutor:
         operation = normalize_operation(metadata.get("operation"))
         if not operation and len(inputs) >= 2:
             raise ValueError("transform has multiple inputs but no operation")
-            if operation == "join" and len(inputs) >= 2:
-                join_spec = resolve_join_spec(metadata)
-                return _join_tables(
-                    inputs[0],
-                    inputs[1],
-                    join_type=join_spec.join_type,
-                    left_key=join_spec.left_key,
-                    right_key=join_spec.right_key,
-                    left_keys=join_spec.left_keys,
-                    right_keys=join_spec.right_keys,
-                    allow_cross_join=join_spec.allow_cross_join,
-                )
+        if operation == "join" and len(inputs) >= 2:
+            join_spec = resolve_join_spec(metadata)
+            return _join_tables(
+                inputs[0],
+                inputs[1],
+                join_type=join_spec.join_type,
+                left_key=join_spec.left_key,
+                right_key=join_spec.right_key,
+                left_keys=join_spec.left_keys,
+                right_keys=join_spec.right_keys,
+                allow_cross_join=join_spec.allow_cross_join,
+                max_output_rows=self._preview_max_output_rows if self._preview_mode else None,
+            )
         if operation == "filter":
             return _filter_table(inputs[0], str(metadata.get("expression") or ""), parameters)
         if operation == "compute":
-            return _compute_table(inputs[0], str(metadata.get("expression") or ""), parameters)
+            table = inputs[0]
+            # Structured compute (preferred): {"assignments":[{"column":"c","expression":"..."}]}
+            assignments = (
+                metadata.get("assignments")
+                or metadata.get("computedColumns")
+                or metadata.get("computed_columns")
+            )
+            if isinstance(assignments, list) and assignments:
+                next_table = table
+                for item in assignments:
+                    if not isinstance(item, dict):
+                        continue
+                    target = str(item.get("column") or item.get("target") or item.get("name") or "").strip()
+                    expr = str(item.get("expression") or item.get("expr") or item.get("formula") or "").strip()
+                    if not target or not expr:
+                        continue
+                    next_table = _compute_assignment_table(next_table, target, expr, parameters)
+                return next_table
+
+            # Structured single-column compute: {"targetColumn":"c","formula":"..."}
+            target = (
+                metadata.get("targetColumn")
+                or metadata.get("target_column")
+                or metadata.get("target")
+                or metadata.get("column")
+            )
+            formula = metadata.get("formula") or metadata.get("expr")
+            if target and formula:
+                target_text = str(target).strip()
+                formula_text = str(formula).strip()
+                if target_text and formula_text:
+                    return _compute_assignment_table(table, target_text, formula_text, parameters)
+
+            return _compute_table(table, str(metadata.get("expression") or ""), parameters)
         if operation == "explode":
             columns = metadata.get("columns") or []
             if columns:
                 return _explode_table(inputs[0], str(columns[0]))
         if operation == "select":
+            expressions = metadata.get("expressions") or metadata.get("selectExpr") or metadata.get("select_expr")
+            if isinstance(expressions, list) and expressions:
+                # Preview engine only supports plain column names (or "col as alias") in selectExpr.
+                projected: list[str] = []
+                renames: dict[str, str] = {}
+                for expr in expressions:
+                    text = str(expr or "").strip()
+                    if not text:
+                        continue
+                    lower = text.lower()
+                    if " as " in lower:
+                        left, right = [part.strip() for part in text.rsplit(" as ", 1)]
+                        if left and right:
+                            projected.append(left)
+                            renames[left] = right
+                    else:
+                        projected.append(text)
+                if projected:
+                    selected = _select_columns(inputs[0], projected)
+                    if renames:
+                        selected = _rename_columns(selected, renames)
+                    return selected
             columns = metadata.get("columns") or []
             if columns:
                 return _select_columns(inputs[0], columns)
@@ -561,6 +642,10 @@ class PipelineExecutor:
                     lowercase=bool(metadata.get("lowercase", False)),
                     uppercase=bool(metadata.get("uppercase", False)),
                 )
+        if operation == "regexReplace":
+            rules = _normalize_regex_rules(metadata)
+            if rules:
+                return _regex_replace_table(inputs[0], rules)
         if operation == "cast":
             casts = metadata.get("casts") or []
             if casts:
@@ -864,13 +949,49 @@ def _window_table(table: PipelineTable, window_meta: Dict[str, Any]) -> Pipeline
     order_by = window_meta.get("orderBy") or []
     if not order_by:
         return table
+    # orderBy supports:
+    # - ["col1", "-col2"]  (prefix '-' for DESC)
+    # - [{"column":"col1","direction":"asc|desc"}, ...]
+    specs: list[tuple[str, str]] = []
+    for item in order_by:
+        if isinstance(item, str):
+            col = item.strip()
+            if not col:
+                continue
+            direction = "asc"
+            if col.startswith("-"):
+                direction = "desc"
+                col = col[1:].strip()
+            if col:
+                specs.append((col, direction))
+            continue
+        if isinstance(item, dict):
+            col = str(item.get("column") or item.get("name") or "").strip()
+            if not col:
+                continue
+            direction = str(item.get("direction") or item.get("dir") or "asc").strip().lower()
+            if direction not in {"asc", "desc"}:
+                direction = "asc"
+            specs.append((col, direction))
+    if not specs:
+        return table
     grouped: Dict[Tuple[Any, ...], List[Dict[str, Any]]] = {}
     for row in table.rows:
         key = tuple(row.get(col) for col in partition_by) if partition_by else ("__all__",)
         grouped.setdefault(key, []).append(row)
     rows: List[Dict[str, Any]] = []
     for key, bucket in grouped.items():
-        bucket_sorted = sorted(bucket, key=lambda r: tuple(r.get(col) for col in order_by))
+        bucket_sorted = list(bucket)
+        # Multi-key sort with per-column direction (stable sort from last key to first).
+        for col, direction in reversed(specs):
+            reverse = direction == "desc"
+
+            def _key(row: Dict[str, Any], *, _col: str = col) -> Any:
+                value = row.get(_col)
+                # Keep NULLs last regardless of direction.
+                return (value is None, value)
+
+            bucket_sorted.sort(key=_key, reverse=reverse)
         for idx, row in enumerate(bucket_sorted, start=1):
             next_row = dict(row)
             next_row["row_number"] = idx
@@ -925,12 +1046,18 @@ def _cast_value_with_status(value: Any, target: str, *, cast_mode: str) -> tuple
     normalized = normalize_cast_target(target)
     if value is None:
         return None, False, False
-    text = str(value).strip() if not isinstance(value, bool) else str(value)
     if normalized == "xsd:string":
+        # Preserve structured values (lists/dicts) so downstream transforms like explode can operate.
+        if isinstance(value, (list, dict)):
+            return value, False, False
+        if isinstance(value, tuple):
+            return list(value), False, False
+        text = str(value).strip() if not isinstance(value, bool) else str(value)
         if cast_mode == "SAFE_NULL" and text == "":
             return None, False, False
         return text, False, False
 
+    text = str(value).strip() if not isinstance(value, bool) else str(value)
     if text == "":
         if cast_mode == "SAFE_NULL":
             return None, False, False
@@ -1089,7 +1216,17 @@ def _join_tables(
     left_keys: Optional[List[str]] = None,
     right_keys: Optional[List[str]] = None,
     allow_cross_join: bool = False,
+    max_output_rows: Optional[int] = None,
 ) -> PipelineTable:
+    limit: Optional[int] = None
+    if max_output_rows is not None:
+        try:
+            limit = int(max_output_rows)
+        except (TypeError, ValueError):
+            limit = None
+        if limit is not None and limit <= 0:
+            limit = None
+
     def _normalize_keys(value: Any) -> List[str]:
         if isinstance(value, list):
             return [str(item).strip() for item in value if str(item).strip()]
@@ -1142,12 +1279,18 @@ def _join_tables(
                     for idx, match in matches:
                         rows.append(_merge_rows(row, match, right_column_map))
                         matched_right.add(idx)
+                        if limit is not None and len(rows) >= limit:
+                            return PipelineTable(columns=columns, rows=rows)
                 elif join_type in {"left", "full"}:
                     rows.append(_merge_rows(row, None, right_column_map))
+                    if limit is not None and len(rows) >= limit:
+                        return PipelineTable(columns=columns, rows=rows)
             if join_type in {"right", "full"}:
                 for idx, row in enumerate(right.rows):
                     if idx not in matched_right:
                         rows.append(_merge_rows(None, row, right_column_map))
+                        if limit is not None and len(rows) >= limit:
+                            return PipelineTable(columns=columns, rows=rows)
             return PipelineTable(columns=columns, rows=rows)
 
         def row_key(row: Dict[str, Any], keys: List[str]) -> Tuple[Any, ...]:
@@ -1164,17 +1307,25 @@ def _join_tables(
                 for idx, match in matches:
                     rows.append(_merge_rows(row, match, right_column_map))
                     matched_right.add(idx)
+                    if limit is not None and len(rows) >= limit:
+                        return PipelineTable(columns=columns, rows=rows)
             elif join_type in {"left", "full"}:
                 rows.append(_merge_rows(row, None, right_column_map))
+                if limit is not None and len(rows) >= limit:
+                    return PipelineTable(columns=columns, rows=rows)
         if join_type in {"right", "full"}:
             for idx, row in enumerate(right.rows):
                 if idx not in matched_right:
                     rows.append(_merge_rows(None, row, right_column_map))
+                    if limit is not None and len(rows) >= limit:
+                        return PipelineTable(columns=columns, rows=rows)
         return PipelineTable(columns=columns, rows=rows)
 
     for left_row in left.rows:
         for right_row in right.rows:
             rows.append(_merge_rows(left_row, right_row, right_column_map))
+            if limit is not None and len(rows) >= limit:
+                return PipelineTable(columns=columns, rows=rows)
     return PipelineTable(columns=columns, rows=rows)
 
 
@@ -1251,13 +1402,48 @@ def _compare(left: Any, op: str, right: Any) -> bool:
     return False
 
 
+def _compute_assignment_table(
+    table: PipelineTable,
+    target: str,
+    expression: str,
+    parameters: Dict[str, Any],
+) -> PipelineTable:
+    target = (target or "").strip()
+    if not target:
+        return table
+    expression = apply_parameters((expression or "").strip(), parameters)
+    if not expression:
+        return table
+    rows: list[dict[str, Any]] = []
+    for row in table.rows:
+        computed = _safe_eval(expression, row, parameters)
+        next_row = dict(row)
+        next_row[target] = computed
+        rows.append(next_row)
+    columns = table.columns + ([target] if target not in table.columns else [])
+    return PipelineTable(columns=columns, rows=rows)
+
+
 def _compute_table(table: PipelineTable, expression: str, parameters: Dict[str, Any]) -> PipelineTable:
     expression = apply_parameters((expression or "").strip(), parameters)
     if not expression:
         return table
-    target, expr = _parse_assignment(expression)
-    if not target:
-        return table
+    target = ""
+    expr = expression
+    if "=" in expression:
+        left, right = expression.split("=", 1)
+        candidate = left.strip()
+        # Disambiguate: if the LHS is an existing column, treat this as a comparison expression,
+        # not an assignment. (Spark SQL uses '=' for comparisons; assignments are a DSL convenience.)
+        if candidate and candidate not in table.columns:
+            target = candidate
+            expr = right.strip()
+        else:
+            target = "computed"
+            expr = expression.strip()
+    else:
+        target = "computed"
+        expr = expression.strip()
     rows = []
     for row in table.rows:
         computed = _safe_eval(expr, row, parameters)
@@ -1302,6 +1488,8 @@ def _safe_eval(expression: str, row: Dict[str, Any], parameters: Dict[str, Any])
     expression = expression.strip()
     if not expression:
         return None
+    # Make a best-effort attempt to interpret Spark-style '=' comparisons in preview mode.
+    expression = re.sub(r"(?<![<>=!])=(?![=])", "==", expression)
     lower_expr = expression.lower()
     if lower_expr.startswith("to_timestamp(") and expression.endswith(")"):
         inner = expression[len("to_timestamp(") : -1].strip()
@@ -1330,7 +1518,13 @@ def _is_safe_ast(node: ast.AST) -> bool:
     for child in ast.walk(node):
         if isinstance(child, (ast.Expression, ast.BinOp, ast.UnaryOp, ast.Name, ast.Constant, ast.Load)):
             continue
+        if isinstance(child, (ast.Compare, ast.BoolOp)):
+            continue
         if isinstance(child, (ast.Add, ast.Sub, ast.Mult, ast.Div, ast.Mod, ast.Pow, ast.USub, ast.UAdd)):
+            continue
+        if isinstance(child, (ast.And, ast.Or)):
+            continue
+        if isinstance(child, (ast.Eq, ast.NotEq, ast.Gt, ast.GtE, ast.Lt, ast.LtE)):
             continue
         return False
     return True
@@ -1365,6 +1559,36 @@ def _eval_ast(node: ast.AST, variables: Dict[str, Any]) -> Any:
                 return left ** right
         except Exception:
             return None
+    if isinstance(node, ast.Compare):
+        left = _eval_ast(node.left, variables)
+        if len(node.ops) != 1 or len(node.comparators) != 1:
+            return None
+        right = _eval_ast(node.comparators[0], variables)
+        op = node.ops[0]
+        if isinstance(op, ast.Eq):
+            return left == right
+        if isinstance(op, ast.NotEq):
+            return left != right
+        try:
+            if isinstance(op, ast.Gt):
+                return left > right
+            if isinstance(op, ast.GtE):
+                return left >= right
+            if isinstance(op, ast.Lt):
+                return left < right
+            if isinstance(op, ast.LtE):
+                return left <= right
+        except Exception:
+            return None
+        return None
+
+    if isinstance(node, ast.BoolOp):
+        values = [_eval_ast(v, variables) for v in node.values]
+        if isinstance(node.op, ast.And):
+            return all(bool(v) for v in values)
+        if isinstance(node.op, ast.Or):
+            return any(bool(v) for v in values)
+        return None
     return None
 
 
@@ -1443,28 +1667,134 @@ def _normalize_table(
     return PipelineTable(columns=table.columns, rows=rows)
 
 
+def _regex_flags(raw: Any) -> int:
+    if raw is None:
+        return 0
+    text = str(raw or "")
+    flags = 0
+    if "i" in text:
+        flags |= re.IGNORECASE
+    if "m" in text:
+        flags |= re.MULTILINE
+    if "s" in text:
+        flags |= re.DOTALL
+    return flags
+
+
+def _normalize_regex_rules(metadata: Dict[str, Any]) -> List[Dict[str, Any]]:
+    rules: List[Dict[str, Any]] = []
+    raw_rules = metadata.get("rules")
+    if isinstance(raw_rules, list) and raw_rules:
+        for rule in raw_rules:
+            if not isinstance(rule, dict):
+                continue
+            column = str(rule.get("column") or "").strip()
+            pattern = str(rule.get("pattern") or "").strip()
+            if not column or not pattern:
+                continue
+            rules.append(
+                {
+                    "column": column,
+                    "pattern": pattern,
+                    "replacement": str(rule.get("replacement") or ""),
+                    "flags": rule.get("flags"),
+                }
+            )
+        return rules
+    pattern = str(metadata.get("pattern") or "").strip()
+    if not pattern:
+        return rules
+    columns = metadata.get("columns") or []
+    for col in columns if isinstance(columns, list) else [columns]:
+        col_name = str(col or "").strip()
+        if not col_name:
+            continue
+        rules.append(
+            {
+                "column": col_name,
+                "pattern": pattern,
+                "replacement": str(metadata.get("replacement") or ""),
+                "flags": metadata.get("flags"),
+            }
+        )
+    return rules
+
+
+def _regex_replace_table(table: PipelineTable, rules: List[Dict[str, Any]]) -> PipelineTable:
+    if not rules:
+        return table
+    compiled: List[Tuple[str, re.Pattern[str], str]] = []
+    for rule in rules:
+        column = str(rule.get("column") or "").strip()
+        pattern = str(rule.get("pattern") or "").strip()
+        if not column or not pattern:
+            continue
+        flags = _regex_flags(rule.get("flags"))
+        compiled.append((column, re.compile(pattern, flags=flags), str(rule.get("replacement") or "")))
+    if not compiled:
+        return table
+    rows: List[Dict[str, Any]] = []
+    for row in table.rows:
+        next_row = dict(row)
+        for column, regex, replacement in compiled:
+            if column not in next_row:
+                continue
+            value = next_row.get(column)
+            if value is None:
+                continue
+            text = str(value)
+            next_row[column] = regex.sub(replacement, text)
+        rows.append(next_row)
+    return PipelineTable(columns=table.columns, rows=rows)
+
+
 def _parse_csv_bytes(raw_bytes: bytes, *, max_rows: int = 200) -> List[Dict[str, Any]]:
+    """
+    Parse a CSV payload into row dicts.
+
+    NOTE: Must handle quoted headers/fields (common in lakeFS-ingested CSVs),
+    otherwise join keys become missing and joins degrade into cross-joins.
+    """
     try:
         text = raw_bytes.decode("utf-8", errors="replace")
     except Exception:
         return []
-    lines = [line for line in text.splitlines() if line.strip()]
-    if not lines:
+    if not text.strip():
+        return []
+
+    # Detect delimiter from the first non-empty line.
+    first_line = next((line for line in text.splitlines() if line.strip()), "")
+    if not first_line:
         return []
     delimiter = ","
-    sample = lines[0]
-    if "\t" in sample:
+    if "\t" in first_line and first_line.count("\t") >= first_line.count(","):
         delimiter = "\t"
-    elif ";" in sample:
+    elif ";" in first_line and first_line.count(";") >= first_line.count(","):
         delimiter = ";"
-    header = [cell.strip() or f"column_{idx + 1}" for idx, cell in enumerate(sample.split(delimiter))]
+
+    reader = csv.reader(io.StringIO(text), delimiter=delimiter)
+    try:
+        raw_header = next(reader)
+    except StopIteration:
+        return []
+
+    header = []
+    for idx, cell in enumerate(raw_header):
+        name = (str(cell or "").strip() or f"column_{idx + 1}").lstrip("\ufeff")
+        header.append(name)
+
     rows: List[Dict[str, Any]] = []
     resolved_limit = max(1, int(max_rows))
-    for line in lines[1 : 1 + resolved_limit]:
-        cells = line.split(delimiter)
+    for record in reader:
+        if len(rows) >= resolved_limit:
+            break
+        if not record:
+            continue
+        if not any(str(cell or "").strip() for cell in record):
+            continue
         row: Dict[str, Any] = {}
         for idx, key in enumerate(header):
-            row[key] = cells[idx].strip() if idx < len(cells) else ""
+            row[key] = str(record[idx]).strip() if idx < len(record) else ""
         rows.append(row)
     return rows
 

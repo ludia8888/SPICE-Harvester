@@ -655,7 +655,9 @@ def _suggest_join_keys(datasets: list[dict[str, Any]], *, max_candidates: int) -
                     overlap = overlap_stats.get("overlap_ratio", 0.0)
                     left_containment = overlap_stats.get("left_containment", 0.0)
                     right_containment = overlap_stats.get("right_containment", 0.0)
-                    quality = min(left_quality.get(col_a, 0.0), right_quality.get(col_b, 0.0))
+                    # For PK->FK style joins (1:N), the join key is often unique on only one side.
+                    # Using min() here drops common fact-to-dimension candidates (e.g., order_id).
+                    quality = max(left_quality.get(col_a, 0.0), right_quality.get(col_b, 0.0))
                     right_distinct = _distinct_ratio(
                         (right_stats.get("columns") or {}).get(col_b, {}) if isinstance(right_stats.get("columns"), dict) else {},
                         right_sample_n,
@@ -701,6 +703,8 @@ def _suggest_join_keys(datasets: list[dict[str, Any]], *, max_candidates: int) -
                         {
                             "left_dataset_id": left.get("dataset_id"),
                             "right_dataset_id": right.get("dataset_id"),
+                            "left_dataset_name": left.get("name"),
+                            "right_dataset_name": right.get("name"),
                             "left_column": col_a,
                             "right_column": col_b,
                             "left_columns": [col_a],
@@ -779,7 +783,8 @@ def _suggest_join_keys(datasets: list[dict[str, Any]], *, max_candidates: int) -
                         _format_similarity(format_left.get(cols_a[0], {}).get("format", {}), format_right.get(aligned_b[0], {}).get("format", {}))
                         + _format_similarity(format_left.get(cols_a[1], {}).get("format", {}), format_right.get(aligned_b[1], {}).get("format", {}))
                     ) / 2.0
-                    quality = min(left_quality_combo, right_quality_combo)
+                    # Same rationale as the single-column case: composite PK/FK joins can be unique on only one side.
+                    quality = max(left_quality_combo, right_quality_combo)
                     type_sim = (
                         _type_compatibility(left_type_a, right_type_a) + _type_compatibility(left_type_b, right_type_b)
                     ) / 2.0
@@ -839,7 +844,74 @@ def _suggest_join_keys(datasets: list[dict[str, Any]], *, max_candidates: int) -
                     )
 
     candidates.sort(key=lambda item: float(item.get("score") or 0.0), reverse=True)
+    _annotate_composite_hints(candidates)
     return candidates[: max(0, int(max_candidates))]
+
+
+def _annotate_composite_hints(candidates: list[dict[str, Any]]) -> None:
+    if not candidates:
+        return
+    single_scores: dict[tuple[str, str, str, str], float] = {}
+    composite_groups_by_pair: dict[tuple[str, str, str, str], list[str]] = {}
+
+    for candidate in candidates:
+        left_id = str(candidate.get("left_dataset_id") or "").strip()
+        right_id = str(candidate.get("right_dataset_id") or "").strip()
+        left_cols = candidate.get("left_columns") or []
+        right_cols = candidate.get("right_columns") or []
+        if not left_id or not right_id:
+            continue
+        if len(left_cols) == 1 and len(right_cols) == 1:
+            key = (left_id, right_id, str(left_cols[0]), str(right_cols[0]))
+            single_scores[key] = float(candidate.get("score") or 0.0)
+
+    for candidate in candidates:
+        left_id = str(candidate.get("left_dataset_id") or "").strip()
+        right_id = str(candidate.get("right_dataset_id") or "").strip()
+        left_cols = candidate.get("left_columns") or []
+        right_cols = candidate.get("right_columns") or []
+        if not left_id or not right_id:
+            continue
+        if len(left_cols) > 1 or len(right_cols) > 1:
+            group_id = f"cmp:{left_id}:{right_id}:{'+'.join(left_cols)}::{'+'.join(right_cols)}"
+            candidate["composite_key"] = True
+            candidate["composite_group_id"] = group_id
+            for idx in range(min(len(left_cols), len(right_cols))):
+                pair_key = (left_id, right_id, str(left_cols[idx]), str(right_cols[idx]))
+                composite_groups_by_pair.setdefault(pair_key, []).append(group_id)
+
+    for candidate in candidates:
+        left_id = str(candidate.get("left_dataset_id") or "").strip()
+        right_id = str(candidate.get("right_dataset_id") or "").strip()
+        left_cols = candidate.get("left_columns") or []
+        right_cols = candidate.get("right_columns") or []
+        if not left_id or not right_id:
+            continue
+        if len(left_cols) == 1 and len(right_cols) == 1:
+            candidate.setdefault("composite_key", False)
+            pair_key = (left_id, right_id, str(left_cols[0]), str(right_cols[0]))
+            group_ids = composite_groups_by_pair.get(pair_key)
+            if group_ids:
+                candidate["composite_group_ids"] = group_ids
+            continue
+        if len(left_cols) > 1 or len(right_cols) > 1:
+            component_scores: list[dict[str, Any]] = []
+            for idx in range(min(len(left_cols), len(right_cols))):
+                left_col = str(left_cols[idx])
+                right_col = str(right_cols[idx])
+                key = (left_id, right_id, left_col, right_col)
+                score = single_scores.get(key)
+                if score is None:
+                    reverse_key = (right_id, left_id, right_col, left_col)
+                    score = single_scores.get(reverse_key)
+                component_scores.append(
+                    {
+                        "left_column": left_col,
+                        "right_column": right_col,
+                        "score": round(float(score), 3) if score is not None else None,
+                    }
+                )
+            candidate["component_scores"] = component_scores
 
 
 def _suggest_cleansing(dataset: dict[str, Any]) -> list[dict[str, Any]]:

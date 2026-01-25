@@ -251,6 +251,34 @@ def _artifact_value_from_response(payload: Any) -> Any:
     return payload
 
 
+def _compact_tool_payload(payload: Any) -> Any:
+    """
+    Best-effort compaction for large tool payloads.
+
+    This keeps the response envelope but drops known heavy fields so the agent
+    graph can still read essential outputs (e.g., preview/preflight) under the
+    `AGENT_TOOL_MAX_PAYLOAD_BYTES` cap.
+    """
+    if not isinstance(payload, dict):
+        return payload
+
+    # Common ApiResponse shape: {"status": "...", "message": "...", "data": {...}}
+    data = payload.get("data")
+    if isinstance(data, dict):
+        trimmed_data = dict(data)
+        # Preview endpoints can return large "run_tables" payloads.
+        trimmed_data.pop("run_tables", None)
+        trimmed_data.pop("runTables", None)
+        # Some tools may embed raw tables under other common names.
+        trimmed_data.pop("tables", None)
+        trimmed_data.pop("raw_tables", None)
+        trimmed = dict(payload)
+        trimmed["data"] = trimmed_data
+        return trimmed
+
+    return payload
+
+
 def _compact_artifact_value(obj: Any, *, depth: int = 0) -> Any:
     if depth > _ARTIFACT_MAX_DEPTH:
         return "<truncated>"
@@ -769,9 +797,6 @@ class AgentRuntimeConfig:
     auto_retry_base_delay_s: float
     auto_retry_max_delay_s: float
     auto_retry_allow_writes: bool
-    parallel_execution_enabled: bool = False
-    max_concurrent_tool_calls: int = 1
-    fail_fast: bool = False
 
 
 class AgentRuntime:
@@ -822,9 +847,6 @@ class AgentRuntime:
             auto_retry_base_delay_s=agent_settings.auto_retry_base_delay_seconds,
             auto_retry_max_delay_s=agent_settings.auto_retry_max_delay_seconds,
             auto_retry_allow_writes=agent_settings.auto_retry_allow_writes,
-            parallel_execution_enabled=agent_settings.parallel_execution_enabled,
-            max_concurrent_tool_calls=agent_settings.max_concurrent_tool_calls,
-            fail_fast=agent_settings.fail_fast,
         )
         return cls(event_store=event_store, audit_store=audit_store, config=config)
 
@@ -1788,7 +1810,12 @@ class AgentRuntime:
         error_code = _normalize_error_code(api_code or error_key or (f"HTTP_{http_status}" if http_status else None))
         payload_value: Any = response_payload
         if output_size is not None and output_size > self.config.max_payload_bytes:
-            payload_value = {"_omitted": True, "digest": output_digest, "size_bytes": output_size}
+            candidate = _compact_tool_payload(response_payload)
+            candidate_size = self._payload_size(candidate)
+            if candidate_size is not None and candidate_size <= self.config.max_payload_bytes:
+                payload_value = candidate
+            else:
+                payload_value = {"_omitted": True, "digest": output_digest, "size_bytes": output_size}
         await self.record_event(
             event_type="AGENT_TOOL_RESULT",
             run_id=run_id,

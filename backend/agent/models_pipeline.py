@@ -28,6 +28,7 @@ class PipelineAgentRunRequest(BaseModel):
     data_scope: PipelinePlanDataScope
     answers: Optional[Dict[str, Any]] = Field(default=None)
     planner_hints: Optional[Dict[str, Any]] = Field(default=None)
+    task_spec: Optional[Dict[str, Any]] = Field(default=None)
     output_bindings: Optional[Dict[str, PipelineOutputBinding]] = Field(default=None)
     preview_node_id: Optional[str] = Field(default=None, max_length=200)
     preview_limit: int = Field(default=200, ge=1, le=1000)

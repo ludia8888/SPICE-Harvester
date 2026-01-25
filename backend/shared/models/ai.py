@@ -44,6 +44,7 @@ class AIIntentRoute(str, Enum):
     chat = "chat"
     query = "query"
     plan = "plan"
+    pipeline = "pipeline"
 
 
 class AIIntentRequest(BaseModel):

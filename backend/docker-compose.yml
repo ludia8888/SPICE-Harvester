@@ -403,7 +403,7 @@ services:
       # LLM gateway (planner). Default: OpenAI-compatible (set OPENAI_API_KEY to enable calls).
       # To disable LLM features: set LLM_PROVIDER=disabled.
       - LLM_PROVIDER=${LLM_PROVIDER:-openai_compat}
-      - LLM_MODEL=${LLM_MODEL:-gpt-4o-mini}
+      - LLM_MODEL=${LLM_MODEL:-gpt-5}
       - LLM_BASE_URL=${LLM_BASE_URL:-https://api.openai.com/v1}
       - LLM_API_KEY=${LLM_API_KEY:-}
       - LLM_MAX_TOKENS=${LLM_MAX_TOKENS:-2000}
@@ -503,7 +503,8 @@ services:
       - spice_network
     volumes:
       - bff_data:/app/data
-      - ../mcp-config.json:/app/mcp-config.json:ro
+      # Use a container-safe MCP config (the repo-root mcp-config.json contains host absolute paths).
+      - ./mcp/mcp-config.docker.json:/app/mcp-config.json:ro
       - ../scripts/llm_mocks:/app/llm_mocks:ro
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8002/api/v1/health"]
@@ -511,7 +512,7 @@ services:
       timeout: 10s
       retries: 5
 
-  # Agent Service (LangGraph runtime)
+  # Agent Service (tool runner)
   agent:
     build:
       context: .

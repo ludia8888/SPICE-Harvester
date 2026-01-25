@@ -6,7 +6,7 @@
 
 ## 1) Service Topology
 
-```mermaid
+```{mermaid}
 graph TD
   UI[Clients] --> BFF[BFF :8002]
   BFF --> AGENT[Agent :8004]
@@ -56,11 +56,11 @@ graph TD
 Notes:
 - BFF runs dataset/objectify outbox workers in-process.
 - search-projection-worker is optional (`ENABLE_SEARCH_PROJECTION=false` by default).
-- Agent service is internal; it executes LangGraph runs, calls BFF for actions, and logs events/audit trails to S3/Postgres (agent-dedicated bucket, not the core Event Store).
+- Agent service is internal; it executes validated AgentPlan steps in a single sequential loop, calls BFF for actions, and logs events/audit trails to S3/Postgres (agent-dedicated bucket, not the core Event Store).
 
 ## 2) Event Sourcing Write Path
 
-```mermaid
+```{mermaid}
 sequenceDiagram
   participant Client
   participant BFF
@@ -87,7 +87,7 @@ sequenceDiagram
 
 ## 3) Data Plane (Ingest -> Pipeline -> Objectify)
 
-```mermaid
+```{mermaid}
 flowchart LR
   Upload[CSV/Excel/Media/Connector] --> BFF
   BFF --> LFS[lakeFS + MinIO]
@@ -112,7 +112,7 @@ Notes:
 
 ## 4) Connector Flow (Google Sheets)
 
-```mermaid
+```{mermaid}
 flowchart LR
   Sheets[Google Sheets] --> Trigger[connector-trigger-service]
   Trigger --> PG[(Connector Registry)]
@@ -141,7 +141,7 @@ flowchart LR
 
 - `backend/bff/`: API gateway and orchestration
 - `backend/oms/`: TerminusDB control + async write APIs
-- `backend/agent/`: LangGraph agent runtime + audit/event logging
+- `backend/agent/`: agent tool runner (sequential) + audit/event logging
 - `backend/pipeline_worker/`: Spark pipeline execution
 - `backend/objectify_worker/`: mapping spec -> instance creation
 - `backend/connector_trigger_service/`, `backend/connector_sync_worker/`: connector ingest flow

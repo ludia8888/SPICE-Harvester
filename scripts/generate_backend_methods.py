@@ -5,12 +5,15 @@ from __future__ import annotations
 
 import argparse
 import ast
+import os
+import subprocess
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, List, Optional
 
 SCOPE_LINE = "backend/**/*.py (including scripts and tests, excluding __pycache__)"
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 @dataclass
@@ -120,8 +123,49 @@ def collect_file_info(root: Path, path: Path) -> FileInfo:
     )
 
 
-def current_timestamp() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
+def current_timestamp(scope_path: Path) -> str:
+    """
+    Prefer a deterministic timestamp derived from git history so the generated doc
+    is stable across *docs-only* commits and repeated `sphinx-build` runs.
+
+    Important: do NOT use HEAD commit time directly. Sphinx runs this generator at
+    build time, and HEAD changes frequently even when the scanned backend scope did
+    not. We instead use the most recent commit that touched `scope_path`.
+    """
+    rev = (os.environ.get("SPICE_DOCS_GIT_REF") or "HEAD").strip() or "HEAD"
+
+    try:
+        rel_scope = str(scope_path.resolve().relative_to(REPO_ROOT))
+    except Exception:
+        rel_scope = str(scope_path)
+
+    # Timestamp of latest commit that touched the scope.
+    try:
+        ts = subprocess.check_output(
+            ["git", "log", "-1", "--format=%cI", rev, "--", rel_scope],
+            cwd=str(REPO_ROOT),
+            stderr=subprocess.DEVNULL,
+            text=True,
+        ).strip()
+        if ts:
+            return ts
+    except Exception:
+        pass
+
+    # Fallbacks for non-git environments / weird pathspecs.
+    try:
+        ts = subprocess.check_output(
+            ["git", "show", "-s", "--format=%cI", rev],
+            cwd=str(REPO_ROOT),
+            stderr=subprocess.DEVNULL,
+            text=True,
+        ).strip()
+        if ts:
+            return ts
+    except Exception:
+        pass
+
+    return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
 def read_existing_timestamp(path: Path) -> Optional[str]:
@@ -201,7 +245,7 @@ def main() -> int:
         collect_file_info(backend_root, path) for path in iter_python_files(backend_root)
     ]
 
-    timestamp = current_timestamp()
+    timestamp = current_timestamp(backend_root)
     if args.check:
         existing_timestamp = read_existing_timestamp(output_path)
         if existing_timestamp:

@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 from mcp.client.session import ClientSession
-from mcp.client.stdio import stdio_client
+from mcp.client.stdio import StdioServerParameters, stdio_client
 
 from shared.config.settings import get_settings
 
@@ -120,13 +120,12 @@ class MCPClientManager:
                     env[key] = os.path.expandvars(value)
             
             # Create client and connect
-            read_stream, write_stream = await stack.enter_async_context(
-                stdio_client(
-                    server_config.command,
-                    *server_config.args,
-                    env=env,
-                )
+            params = StdioServerParameters(
+                command=server_config.command,
+                args=list(server_config.args or []),
+                env=env,
             )
+            read_stream, write_stream = await stack.enter_async_context(stdio_client(params))
             client = ClientSession(read_stream, write_stream)
             await stack.enter_async_context(client)
             await client.initialize()

@@ -179,42 +179,6 @@ export type GoogleSheetPreview = {
   [key: string]: unknown
 }
 
-export type AgentClarificationQuestion = {
-  id: string
-  question: string
-  required?: boolean
-  type?: string
-  options?: string[] | null
-  default?: unknown
-}
-
-export type AgentPlanStep = {
-  step_id: string
-  tool_id: string
-  method?: string | null
-  path_params?: Record<string, unknown>
-  query?: Record<string, unknown>
-  body?: Record<string, unknown> | null
-  requires_approval?: boolean
-  idempotency_key?: string | null
-  data_scope?: Record<string, unknown>
-  description?: string | null
-  expected_output?: string | null
-}
-
-export type AgentPlan = {
-  plan_id?: string | null
-  goal?: string
-  created_at?: string | null
-  created_by?: string | null
-  risk_level?: string
-  requires_approval?: boolean
-  data_scope?: Record<string, unknown>
-  steps?: AgentPlanStep[]
-  policy_notes?: string[]
-  warnings?: string[]
-}
-
 type DatabaseListPayload = {
   databases?: Array<DatabaseRecord | string>
   count?: number
@@ -811,7 +775,7 @@ export type AIQueryRequest = {
   session_id?: string | null
 }
 
-export type AIIntentRoute = 'chat' | 'query' | 'plan'
+export type AIIntentRoute = 'chat' | 'query' | 'plan' | 'pipeline'
 export type AIIntentType = 'greeting' | 'small_talk' | 'help' | 'data_query' | 'plan_request' | 'unknown'
 
 export type AIIntentRequest = {
@@ -870,6 +834,56 @@ export const aiIntent = async (payload: AIIntentRequest) => {
   return data
 }
 
+export const runPipelineAgent = async (payload: {
+  goal: string
+  data_scope: Record<string, unknown>
+  planner_hints?: Record<string, unknown>
+  answers?: Record<string, unknown>
+  apply_specs?: boolean
+  max_transform?: number
+  max_cleansing?: number
+  max_repairs?: number
+}) => {
+  const data = await requestApi<Record<string, unknown>>(
+    '/api/v1/agent/pipeline-runs',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': createIdempotencyKey(),
+      },
+      body: JSON.stringify(payload),
+    },
+    'Failed to run pipeline agent',
+  )
+  return data
+}
+
+export const previewPipelinePlan = async (
+  planId: string,
+  payload: {
+    node_id?: string
+    limit?: number
+    include_run_tables?: boolean
+    run_table_limit?: number
+  },
+) => {
+  const encoded = encodeURIComponent(planId)
+  const data = await requestApi<Record<string, unknown>>(
+    `/api/v1/pipeline-plans/${encoded}/preview`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': createIdempotencyKey(),
+      },
+      body: JSON.stringify(payload),
+    },
+    'Failed to preview pipeline plan',
+  )
+  return data
+}
+
 export const runGraphQuery = async (dbName: string, payload: Record<string, unknown>, params?: { branch?: string }) => {
   const encoded = encodeURIComponent(dbName)
   const branch = (params?.branch ?? 'main').trim() || 'main'
@@ -886,283 +900,6 @@ export const runGraphQuery = async (dbName: string, payload: Record<string, unkn
       body: JSON.stringify(payload),
     },
     'Graph query failed',
-  )
-  return data
-}
-
-export const compileAgentPlan = async (payload: {
-  goal: string
-  data_scope?: Record<string, unknown>
-  answers?: Record<string, unknown>
-}) => {
-  const data = await requestApi<Record<string, unknown>>(
-    '/api/v1/agent-plans/compile',
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Idempotency-Key': createIdempotencyKey(),
-      },
-      body: JSON.stringify(payload),
-    },
-    'Failed to compile agent plan',
-  )
-  return data as unknown as {
-    status?: string
-    plan_id?: string
-    plan?: AgentPlan | null
-    questions?: AgentClarificationQuestion[]
-    validation_errors?: string[]
-    validation_warnings?: string[]
-    compilation_report?: Record<string, unknown> | null
-    planner?: Record<string, unknown> | null
-  }
-}
-
-export const approveAgentPlan = async (
-  planId: string,
-  payload: { decision: string; step_id?: string; comment?: string; metadata?: Record<string, unknown> },
-) => {
-  const data = await requestApi<Record<string, unknown>>(
-    `/api/v1/agent-plans/${encodeURIComponent(planId)}/approvals`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Idempotency-Key': createIdempotencyKey(),
-      },
-      body: JSON.stringify(payload),
-    },
-    'Failed to record plan approval',
-  )
-  return data
-}
-
-export const executeAgentPlan = async (planId: string) => {
-  const data = await requestApi<Record<string, unknown>>(
-    `/api/v1/agent-plans/${encodeURIComponent(planId)}/execute`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Idempotency-Key': createIdempotencyKey(),
-      },
-      body: JSON.stringify({}),
-    },
-    'Failed to execute agent plan',
-  )
-  return data
-}
-
-export const getAgentPlan = async (planId: string) => {
-  const data = await requestApi<{
-    plan?: Record<string, unknown>
-    plan_id?: string
-    status?: string
-    created_at?: string
-    updated_at?: string
-  }>(`/api/v1/agent-plans/${encodeURIComponent(planId)}`, undefined, 'Failed to load agent plan')
-  return data
-}
-
-export type AgentSessionRecord = {
-  session_id: string
-  tenant_id?: string
-  created_by?: string
-  status?: string
-  selected_model?: string | null
-  enabled_tools?: string[] | null
-  started_at?: string
-  terminated_at?: string | null
-  created_at?: string
-  updated_at?: string
-  metadata?: Record<string, unknown> | null
-}
-
-export type AgentSessionEvent = {
-  event_id: string
-  event_type: string
-  occurred_at: string
-  data?: Record<string, unknown>
-}
-
-export type AgentSessionContextItem = {
-  item_id: string
-  item_type: string
-  include_mode: string
-  ref: Record<string, unknown>
-  token_count?: number | null
-  metadata?: Record<string, unknown> | null
-  created_at: string
-  updated_at: string
-}
-
-export const createAgentSession = async (payload: {
-  selected_model?: string | null
-  enabled_tools?: string[] | null
-  metadata?: Record<string, unknown> | null
-}) => {
-  const data = await requestApi<{ session: AgentSessionRecord }>(
-    '/api/v1/agent-sessions',
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Idempotency-Key': createIdempotencyKey(),
-      },
-      body: JSON.stringify(payload),
-    },
-    'Failed to create agent session',
-  )
-  return data
-}
-
-export const postAgentSessionMessage = async (
-  sessionId: string,
-  payload: {
-    content: string
-    data_scope?: Record<string, unknown>
-    execute?: boolean
-    answers?: Record<string, unknown>
-  },
-) => {
-  const data = await requestApi<Record<string, unknown>>(
-    `/api/v1/agent-sessions/${encodeURIComponent(sessionId)}/messages`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Idempotency-Key': createIdempotencyKey(),
-      },
-      body: JSON.stringify(payload),
-    },
-    'Failed to send agent message',
-  )
-  return data
-}
-
-export const listAgentSessionEvents = async (
-  sessionId: string,
-  params?: {
-    limit?: number
-    include_messages?: boolean
-    include_jobs?: boolean
-    include_approvals?: boolean
-    include_agent_steps?: boolean
-    include_tool_calls?: boolean
-    include_llm_calls?: boolean
-    include_ci_results?: boolean
-  },
-) => {
-  const query = new URLSearchParams()
-  if (params?.limit) {
-    query.set('limit', String(params.limit))
-  }
-  if (typeof params?.include_messages === 'boolean') {
-    query.set('include_messages', String(params.include_messages))
-  }
-  if (typeof params?.include_jobs === 'boolean') {
-    query.set('include_jobs', String(params.include_jobs))
-  }
-  if (typeof params?.include_approvals === 'boolean') {
-    query.set('include_approvals', String(params.include_approvals))
-  }
-  if (typeof params?.include_agent_steps === 'boolean') {
-    query.set('include_agent_steps', String(params.include_agent_steps))
-  }
-  if (typeof params?.include_tool_calls === 'boolean') {
-    query.set('include_tool_calls', String(params.include_tool_calls))
-  }
-  if (typeof params?.include_llm_calls === 'boolean') {
-    query.set('include_llm_calls', String(params.include_llm_calls))
-  }
-  if (typeof params?.include_ci_results === 'boolean') {
-    query.set('include_ci_results', String(params.include_ci_results))
-  }
-  const suffix = query.toString()
-  const path = suffix
-    ? `/api/v1/agent-sessions/${encodeURIComponent(sessionId)}/events?${suffix}`
-    : `/api/v1/agent-sessions/${encodeURIComponent(sessionId)}/events`
-  const data = await requestApi<{ session_id: string; count: number; events: AgentSessionEvent[] }>(
-    path,
-    undefined,
-    'Failed to load agent session events',
-  )
-  return data
-}
-
-export const attachAgentSessionContextItem = async (
-  sessionId: string,
-  payload: {
-    item_type: string
-    include_mode?: string
-    ref?: Record<string, unknown>
-    metadata?: Record<string, unknown>
-    token_count?: number
-  },
-) => {
-  const data = await requestApi<Record<string, unknown>>(
-    `/api/v1/agent-sessions/${encodeURIComponent(sessionId)}/context/items`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Idempotency-Key': createIdempotencyKey(),
-      },
-      body: JSON.stringify(payload),
-    },
-    'Failed to attach agent context',
-  )
-  return data
-}
-
-export const listAgentSessionContextItems = async (
-  sessionId: string,
-  params?: { limit?: number; offset?: number },
-) => {
-  const query = new URLSearchParams()
-  if (typeof params?.limit === 'number') {
-    query.set('limit', String(params.limit))
-  }
-  if (typeof params?.offset === 'number') {
-    query.set('offset', String(params.offset))
-  }
-  const suffix = query.toString()
-  const data = await requestApi<{ context_items: AgentSessionContextItem[] }>(
-    `/api/v1/agent-sessions/${encodeURIComponent(sessionId)}/context/items${suffix ? `?${suffix}` : ''}`,
-    {},
-    'Failed to fetch agent context items',
-  )
-  return data
-}
-
-export const removeAgentSessionContextItem = async (sessionId: string, itemId: string) => {
-  const data = await requestApi<Record<string, unknown>>(
-    `/api/v1/agent-sessions/${encodeURIComponent(sessionId)}/context/items/${encodeURIComponent(itemId)}`,
-    {
-      method: 'DELETE',
-    },
-    'Failed to remove agent context item',
-  )
-  return data
-}
-
-export const decideAgentSessionApproval = async (
-  sessionId: string,
-  approvalRequestId: string,
-  payload: { decision: string; comment?: string; metadata?: Record<string, unknown> },
-) => {
-  const data = await requestApi<Record<string, unknown>>(
-    `/api/v1/agent-sessions/${encodeURIComponent(sessionId)}/approvals/${encodeURIComponent(approvalRequestId)}`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Idempotency-Key': createIdempotencyKey(),
-      },
-      body: JSON.stringify(payload),
-    },
-    'Failed to record approval',
   )
   return data
 }

@@ -576,138 +576,21 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
     if key == ("GET", "/api/v1/graph-query/health"):
         return RequestPlan(op.method, op.path, f"{BFF_URL}{op.path}", (200,))
 
-    # ---------- Agent Control Plane ----------
+    # ---------- Agent ----------
     if key == ("POST", "/api/v1/agent/runs"):
         url = f"{BFF_URL}{op.path}"
         # Intentionally invalid (no steps) -> deterministic 400 without running any tools.
         body = {"goal": "openapi smoke run", "steps": [], "context": {"source": "openapi_smoke"}, "request_id": str(uuid.uuid4())}
         return RequestPlan(op.method, op.path, url, (200, 400, 422), json_body=body, auth_mode="delegated_user")
 
-    if key == ("POST", "/api/v1/agent-functions"):
+    if key == ("POST", "/api/v1/agent/pipeline-runs"):
         url = f"{BFF_URL}{op.path}"
+        # Intentionally minimal -> clarification_required without building a plan.
         body = {
-            "function_id": f"smoke_echo_{ctx.db_name}",
-            "version": "v1",
-            "status": "ACTIVE",
-            "handler": "echo",
-            "tags": ["openapi_smoke"],
-            "roles": [],
-            "input_schema": {},
-            "output_schema": {},
-            "metadata": {"source": "openapi_smoke"},
+            "goal": "openapi smoke pipeline run",
+            "data_scope": {"db_name": ctx.db_name, "branch": "main", "dataset_ids": []},
         }
-        return RequestPlan(op.method, op.path, url, (201, 400, 401, 403, 422), json_body=body, auth_mode="delegated_user")
-
-    if key == ("POST", "/api/v1/agent-functions/{function_id}/execute"):
-        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
-        body = {"input": {"hello": "world"}}
-        return RequestPlan(op.method, op.path, url, (200, 400, 403, 404, 422), json_body=body, auth_mode="delegated_user")
-
-    if key == ("POST", "/api/v1/agent-plans/compile"):
-        url = f"{BFF_URL}{op.path}"
-        body = {"goal": "데이터 정제하고 통합해 (openapi smoke)", "data_scope": {"db_name": ctx.db_name, "branch": "main"}}
         return RequestPlan(op.method, op.path, url, (200, 400, 422, 429), json_body=body, auth_mode="delegated_user")
-
-    if key == ("POST", "/api/v1/agent-plans/context-pack"):
-        url = f"{BFF_URL}{op.path}"
-        body = {"db_name": ctx.db_name, "max_decisions": 1, "max_simulations": 1}
-        return RequestPlan(op.method, op.path, url, (200, 400, 422), json_body=body, auth_mode="delegated_user")
-
-    if key == ("POST", "/api/v1/agent-plans/validate"):
-        url = f"{BFF_URL}{op.path}"
-        # Invalid plan shape -> 422 from request validation.
-        return RequestPlan(op.method, op.path, url, (200, 400, 422), json_body={}, auth_mode="delegated_user")
-
-    if key == ("POST", "/api/v1/agent-plans/{plan_id}/apply-patch"):
-        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
-        body = {"patch": []}
-        return RequestPlan(op.method, op.path, url, (200, 400, 404, 422), json_body=body, auth_mode="delegated_user")
-
-    if key == ("POST", "/api/v1/agent-plans/{plan_id}/approvals"):
-        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
-        body = {"decision": "APPROVE", "comment": "openapi smoke approval"}
-        return RequestPlan(op.method, op.path, url, (200, 201, 400, 404, 422), json_body=body, auth_mode="delegated_user")
-
-    if key == ("POST", "/api/v1/agent-plans/{plan_id}/preview"):
-        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
-        return RequestPlan(op.method, op.path, url, (202, 400, 404, 422), json_body={}, auth_mode="delegated_user")
-
-    if key == ("POST", "/api/v1/agent-plans/{plan_id}/execute"):
-        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
-        return RequestPlan(op.method, op.path, url, (202, 400, 403, 404, 422), json_body={}, auth_mode="delegated_user")
-
-    if key == ("POST", "/api/v1/agent-sessions"):
-        url = f"{BFF_URL}{op.path}"
-        body = {"metadata": {"source": "openapi_smoke"}}
-        return RequestPlan(op.method, op.path, url, (201, 400, 401, 403, 422), json_body=body, auth_mode="delegated_user")
-
-    if key == ("POST", "/api/v1/agent-sessions/{session_id}/messages"):
-        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
-        body = {"content": "Hello from OpenAPI smoke", "execute": False}
-        return RequestPlan(op.method, op.path, url, (202, 400, 403, 404, 409, 422), json_body=body, auth_mode="delegated_user")
-
-    if key == ("POST", "/api/v1/agent-sessions/{session_id}/jobs"):
-        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
-        body = {"plan_id": ctx.agent_plan_id or "00000000-0000-0000-0000-000000000000"}
-        return RequestPlan(op.method, op.path, url, (201, 400, 403, 404, 409, 422), json_body=body, auth_mode="delegated_user")
-
-    if key == ("POST", "/api/v1/agent-sessions/{session_id}/context/items"):
-        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
-        body = {"item_type": "custom", "include_mode": "summary", "ref": {"note": "openapi smoke"}, "metadata": {"source": "openapi_smoke"}}
-        return RequestPlan(op.method, op.path, url, (201, 400, 403, 404, 409, 422), json_body=body, auth_mode="delegated_user")
-
-    if key == ("POST", "/api/v1/agent-sessions/{session_id}/context/file-upload"):
-        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
-        form = aiohttp.FormData()
-        form.add_field("file", b"hello-world", filename="openapi_smoke.txt", content_type="text/plain")
-        form.add_field("include_mode", "summary")
-        return RequestPlan(op.method, op.path, url, (201, 400, 401, 403, 404, 409, 422, 503), form=form, auth_mode="delegated_user", allow_5xx=True)
-
-    if key == ("POST", "/api/v1/agent-sessions/{session_id}/summarize"):
-        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
-        return RequestPlan(op.method, op.path, url, (200, 400, 403, 404, 409, 422), json_body={}, auth_mode="delegated_user")
-
-    if key == ("POST", "/api/v1/agent-sessions/{session_id}/messages/remove"):
-        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
-        return RequestPlan(op.method, op.path, url, (200, 400, 403, 404, 409, 422), json_body={}, auth_mode="delegated_user")
-
-    if key == ("POST", "/api/v1/agent-sessions/{session_id}/clarifications"):
-        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
-        body = {"questions": [], "reason": "openapi smoke"}
-        return RequestPlan(op.method, op.path, url, (201, 400, 403, 404, 409, 422), json_body=body, auth_mode="delegated_user")
-
-    if key == ("POST", "/api/v1/agent-sessions/{session_id}/approvals/{approval_request_id}"):
-        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
-        body = {"decision": "APPROVE", "comment": "openapi smoke"}
-        return RequestPlan(op.method, op.path, url, (200, 400, 403, 404, 409, 422), json_body=body, auth_mode="delegated_user")
-
-    if key == ("POST", "/api/v1/agent-sessions/{session_id}/ci-results"):
-        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
-        body = {"status": "success", "provider": "openapi_smoke", "summary": "ok"}
-        return RequestPlan(op.method, op.path, url, (201, 400, 403, 404, 409, 422), json_body=body, auth_mode="delegated_user")
-
-    if key == ("PUT", "/api/v1/agent-sessions/{session_id}/model"):
-        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
-        body = {"selected_model": None}
-        return RequestPlan(op.method, op.path, url, (200, 400, 403, 404, 409, 422), json_body=body, auth_mode="delegated_user")
-
-    if key == ("PUT", "/api/v1/agent-sessions/{session_id}/tools"):
-        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
-        body = {"enabled_tools": []}
-        return RequestPlan(op.method, op.path, url, (200, 400, 403, 404, 409, 422), json_body=body, auth_mode="delegated_user")
-
-    if key == ("PUT", "/api/v1/agent-sessions/{session_id}/variables"):
-        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
-        body = {"variables": {"foo": "bar"}, "replace": False}
-        return RequestPlan(op.method, op.path, url, (200, 400, 403, 404, 409, 422), json_body=body, auth_mode="delegated_user")
-
-    if key == ("DELETE", "/api/v1/agent-sessions/{session_id}"):
-        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
-        return RequestPlan(op.method, op.path, url, (200, 202, 400, 403, 404, 409), auth_mode="delegated_user")
-
-    if key == ("DELETE", "/api/v1/agent-sessions/{session_id}/context/items/{item_id}"):
-        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
-        return RequestPlan(op.method, op.path, url, (200, 400, 403, 404, 409), auth_mode="delegated_user")
 
     # ---------- Context Tools (User JWT required) ----------
     if key == ("POST", "/api/v1/context-tools/datasets/describe"):

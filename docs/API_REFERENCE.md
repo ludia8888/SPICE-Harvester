@@ -10,7 +10,7 @@
 - **BFF is the frontend contract**. Frontend clients should only call `/api/v1/...` BFF routes.
 - OMS/Funnel/Workers are internal dependencies. Their APIs are not the frontend contract.
 - Payload schemas are best read from OpenAPI. This document enumerates **current routes** and behavior.
-- Agent service (LangGraph, :8004) is reachable via the BFF `/api/v1/agent/*` proxy only; direct access is internal. Details in `docs/ARCHITECTURE.md` / `docs/LLM_INTEGRATION.md`.
+- Agent service (:8004) is reachable via the BFF `/api/v1/agent/*` proxy only; direct access is internal. Details in `docs/ARCHITECTURE.md` / `docs/LLM_INTEGRATION.md`.
 
 ## Conventions
 
@@ -111,6 +111,9 @@ python scripts/generate_api_reference.py
 - `POST /api/v1/databases/{db_name}/actions/{action_type_id}/simulate`
 - `POST /api/v1/databases/{db_name}/actions/{action_type_id}/submit`
 
+### Admin
+- `POST /api/v1/admin/ci/ci-results`
+
 ### Admin Operations
 - `POST /api/v1/admin/cleanup-old-replays`
 - `GET /api/v1/admin/lakefs/credentials`
@@ -123,58 +126,13 @@ python scripts/generate_api_reference.py
 - `GET /api/v1/admin/system-health`
 
 ### Agent
+- `POST /api/v1/agent/pipeline-runs`
 - `POST /api/v1/agent/runs`
 - `GET /api/v1/agent/runs/{run_id}`
 - `GET /api/v1/agent/runs/{run_id}/events`
 
-### Agent Model Admin
-- `GET /api/v1/admin/agent-models`
-- `POST /api/v1/admin/agent-models`
-- `GET /api/v1/admin/agent-models/{model_id}`
-
-### Agent Plans
-- `POST /api/v1/agent-plans/compile`
-- `POST /api/v1/agent-plans/context-pack`
-- `POST /api/v1/agent-plans/validate`
-- `GET /api/v1/agent-plans/{plan_id}`
-- `POST /api/v1/agent-plans/{plan_id}/apply-patch`
-- `POST /api/v1/agent-plans/{plan_id}/approvals`
-- `POST /api/v1/agent-plans/{plan_id}/execute`
-- `POST /api/v1/agent-plans/{plan_id}/preview`
-
-### Agent Policy Admin
-- `GET /api/v1/admin/agent-policies`
-- `POST /api/v1/admin/agent-policies`
-- `GET /api/v1/admin/agent-policies/{tenant_id}`
-
-### Agent Sessions
-- `GET /api/v1/agent-sessions`
-- `POST /api/v1/agent-sessions`
-- `GET /api/v1/agent-sessions/{session_id}`
-- `DELETE /api/v1/agent-sessions/{session_id}`
-- `GET /api/v1/agent-sessions/{session_id}/approvals`
-- `POST /api/v1/agent-sessions/{session_id}/approvals/{approval_request_id}`
-- `GET /api/v1/agent-sessions/{session_id}/context/items`
-- `POST /api/v1/agent-sessions/{session_id}/context/items`
-- `DELETE /api/v1/agent-sessions/{session_id}/context/items/{item_id}`
-- `GET /api/v1/agent-sessions/{session_id}/events`
-- `GET /api/v1/agent-sessions/{session_id}/jobs`
-- `POST /api/v1/agent-sessions/{session_id}/jobs`
-- `GET /api/v1/agent-sessions/{session_id}/jobs/{job_id}`
-- `POST /api/v1/agent-sessions/{session_id}/messages`
-- `POST /api/v1/agent-sessions/{session_id}/messages/remove`
-- `PUT /api/v1/agent-sessions/{session_id}/model`
-- `GET /api/v1/agent-sessions/{session_id}/models`
-- `POST /api/v1/agent-sessions/{session_id}/summarize`
-- `GET /api/v1/agent-sessions/{session_id}/tools`
-- `PUT /api/v1/agent-sessions/{session_id}/tools`
-
-### Agent Tool Admin
-- `GET /api/v1/admin/agent-tools`
-- `POST /api/v1/admin/agent-tools`
-- `GET /api/v1/admin/agent-tools/{tool_id}`
-
 ### AI
+- `POST /api/v1/ai/intent`
 - `POST /api/v1/ai/query/{db_name}`
 - `POST /api/v1/ai/translate/query-plan/{db_name}`
 
@@ -208,6 +166,10 @@ python scripts/generate_api_reference.py
 - `GET /api/v1/config/config/report`
 - `GET /api/v1/config/config/security-audit`
 - `GET /api/v1/config/config/validation`
+
+### Context Tools
+- `POST /api/v1/context-tools/datasets/describe`
+- `POST /api/v1/context-tools/ontology/snapshot`
 
 ### context7
 - `POST /api/v1/context7/analyze/ontology`
@@ -247,6 +209,9 @@ python scripts/generate_api_reference.py
 - `GET /api/v1/databases/{db_name}/classes/{class_id}`
 - `GET /api/v1/databases/{db_name}/expected-seq`
 - `GET /api/v1/databases/{db_name}/versions`
+
+### Document Bundles
+- `POST /api/v1/document-bundles/{bundle_id}/search`
 
 ### Governance
 - `GET /api/v1/access-policies`
@@ -339,9 +304,6 @@ python scripts/generate_api_reference.py
 - `GET /api/v1/databases/{db_name}/ontology/interfaces/{resource_id}`
 - `PUT /api/v1/databases/{db_name}/ontology/interfaces/{resource_id}`
 - `DELETE /api/v1/databases/{db_name}/ontology/interfaces/{resource_id}`
-- `GET /api/v1/databases/{db_name}/ontology/link-types/{resource_id}`
-- `PUT /api/v1/databases/{db_name}/ontology/link-types/{resource_id}`
-- `DELETE /api/v1/databases/{db_name}/ontology/link-types/{resource_id}`
 - `GET /api/v1/databases/{db_name}/ontology/proposals`
 - `POST /api/v1/databases/{db_name}/ontology/proposals`
 - `POST /api/v1/databases/{db_name}/ontology/proposals/{proposal_id}/approve`
@@ -412,6 +374,7 @@ python scripts/generate_api_reference.py
 - `GET /api/v1/pipelines/datasets/ingest-requests/{ingest_request_id}`
 - `POST /api/v1/pipelines/datasets/ingest-requests/{ingest_request_id}/schema/approve`
 - `POST /api/v1/pipelines/datasets/media-upload`
+- `GET /api/v1/pipelines/datasets/{dataset_id}/raw-file`
 - `POST /api/v1/pipelines/datasets/{dataset_id}/versions`
 - `POST /api/v1/pipelines/datasets/{dataset_id}/versions/{version_id}/funnel-analysis`
 - `GET /api/v1/pipelines/proposals`
@@ -429,6 +392,14 @@ python scripts/generate_api_reference.py
 - `POST /api/v1/pipelines/{pipeline_id}/proposals/reject`
 - `GET /api/v1/pipelines/{pipeline_id}/readiness`
 - `GET /api/v1/pipelines/{pipeline_id}/runs`
+
+### Pipeline Plans
+- `POST /api/v1/pipeline-plans/compile`
+- `POST /api/v1/pipeline-plans/context-pack`
+- `GET /api/v1/pipeline-plans/{plan_id}`
+- `POST /api/v1/pipeline-plans/{plan_id}/evaluate-joins`
+- `POST /api/v1/pipeline-plans/{plan_id}/inspect-preview`
+- `POST /api/v1/pipeline-plans/{plan_id}/preview`
 
 ### Query
 - `POST /api/v1/databases/{db_name}/query`

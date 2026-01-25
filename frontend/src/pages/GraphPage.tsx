@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button, Icon, Menu, MenuDivider, MenuItem, Popover } from '@blueprintjs/core'
 import type { IconName } from '@blueprintjs/icons'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
@@ -25,6 +25,7 @@ import {
   listDatasets,
   listPipelineArtifacts,
   listPipelines,
+  previewPipelinePlan,
   submitPipelineProposal,
   updatePipeline,
   type DatabaseRecord,
@@ -72,6 +73,18 @@ type FolderOption = {
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
+
+const safeText = (value: unknown) => {
+  if (typeof value === 'string') {
+    return value
+  }
+  if (value == null) {
+    return ''
+  }
+  return String(value)
+}
+
+const normalizeOutputKey = (value: unknown) => safeText(value).trim().toLowerCase()
 
 const parseTimestamp = (value?: string) => {
   if (!value) {
@@ -268,6 +281,47 @@ const buildPreviewFromDataset = (dataset: DatasetRecord | null) => {
     const formatted: PreviewRow = {}
     columns.forEach((column) => {
       formatted[column.key] = formatCellValue(row[column.key])
+    })
+    return formatted
+  })
+  return { columns, rows }
+}
+
+const buildPreviewFromPipeline = (preview: Record<string, unknown> | null) => {
+  if (!preview) {
+    return { columns: [] as PreviewColumn[], rows: [] as PreviewRow[] }
+  }
+  const rawColumns = Array.isArray(preview.columns) ? preview.columns : []
+  const rawRows = Array.isArray(preview.rows) ? preview.rows : []
+  const rowFallback = rawRows.length > 0 && isRecord(rawRows[0]) ? Object.keys(rawRows[0] as Record<string, unknown>) : []
+  const columns = (rawColumns.length > 0 ? rawColumns : rowFallback)
+    .map((column) => {
+      if (typeof column === 'string') {
+        return { name: column, type: '' }
+      }
+      if (isRecord(column)) {
+        return {
+          name: String(column.name ?? column.key ?? ''),
+          type: typeof column.type === 'string' ? column.type : '',
+        }
+      }
+      return null
+    })
+    .filter((column): column is { name: string; type: string } => Boolean(column && column.name))
+    .map((column) => {
+      const typeLabel = column.type ? normalizeTypeLabel(column.type) : inferColumnType(column.name, rawRows)
+      return {
+        key: column.name,
+        label: column.name,
+        type: typeLabel,
+        icon: selectColumnIcon(typeLabel),
+        width: estimateColumnWidth(column.name),
+      }
+    })
+  const rows = rawRows.slice(0, 25).map((row) => {
+    const formatted: PreviewRow = {}
+    columns.forEach((column) => {
+      formatted[column.key] = formatCellValue(isRecord(row) ? row[column.key] : '')
     })
     return formatted
   })
@@ -687,6 +741,7 @@ export const GraphPage = () => {
   const pipelineContext = useAppStore((state) => state.pipelineContext)
   const setPipelineContext = useAppStore((state) => state.setPipelineContext)
   const setAiAgentContext = useAppStore((state) => state.setAiAgentContext)
+  const pipelineAgentRun = useAppStore((state) => state.pipelineAgentRun)
   const [activeTab, setActiveTab] = useState<'edit' | 'proposals' | 'history'>('edit')
   const [toolMode, setToolMode] = useState<ToolMode>('pointer')
   const [isRightPanelOpen, setRightPanelOpen] = useState(false)
@@ -696,9 +751,12 @@ export const GraphPage = () => {
   const [previewColumns, setPreviewColumns] = useState<PreviewColumn[]>([])
   const [previewRows, setPreviewRows] = useState<PreviewRow[]>([])
   const [activeColumn, setActiveColumn] = useState<string>('')
+  const [pipelinePreviewOverride, setPipelinePreviewOverride] = useState<Record<string, unknown> | null>(null)
+  const [pipelinePreviewLabel, setPipelinePreviewLabel] = useState<string>('')
   const [draggedColumnKey, setDraggedColumnKey] = useState<string | null>(null)
   const [dragOverColumnKey, setDragOverColumnKey] = useState<string | null>(null)
   const [activeOutputTab, setActiveOutputTab] = useState<'datasets' | 'objectTypes' | 'linkTypes'>('datasets')
+  const [previewSource, setPreviewSource] = useState<'dataset' | 'pipeline'>('dataset')
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null)
   const [nodes, setNodes, onNodesChange] = useNodesState<FlowNode[]>([])
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge[]>([])
@@ -707,6 +765,7 @@ export const GraphPage = () => {
   const [isProposing, setIsProposing] = useState(false)
   const [isDeploying, setIsDeploying] = useState(false)
   const [isCheckingReadiness, setIsCheckingReadiness] = useState(false)
+  const lastAppliedAgentRunId = useRef<string | null>(null)
   const activeDbName = pipelineContext?.folderId ?? ''
   const { data: databases = [] } = useQuery({
     queryKey: ['databases'],
@@ -800,13 +859,73 @@ export const GraphPage = () => {
     return withSchema ?? datasets[0]
   }, [datasets, previewDatasetId])
   const previewDatasetName = previewDataset?.name ?? 'No datasets available'
-  const previewPayload = useMemo(() => buildPreviewFromDataset(previewDataset), [previewDataset])
+  const agentRunDbName = useMemo(() => {
+    if (!isRecord(pipelineAgentRun)) {
+      return ''
+    }
+    const plan = isRecord(pipelineAgentRun.plan) ? (pipelineAgentRun.plan as Record<string, unknown>) : null
+    const planScope = plan && isRecord(plan.data_scope) ? (plan.data_scope as Record<string, unknown>) : null
+    const planDbName = planScope && typeof planScope.db_name === 'string' ? planScope.db_name : ''
+    if (planDbName) {
+      return planDbName
+    }
+    const scope = isRecord(pipelineAgentRun.data_scope) ? (pipelineAgentRun.data_scope as Record<string, unknown>) : null
+    return scope && typeof scope.db_name === 'string' ? scope.db_name : ''
+  }, [pipelineAgentRun])
+  const agentRunMarker = useMemo(() => {
+    if (!isRecord(pipelineAgentRun)) {
+      return ''
+    }
+    const runId = typeof pipelineAgentRun.run_id === 'string' ? pipelineAgentRun.run_id : ''
+    const planId = typeof pipelineAgentRun.plan_id === 'string' ? pipelineAgentRun.plan_id : ''
+    return runId || planId
+  }, [pipelineAgentRun])
+  const pipelineAgentPlanId = useMemo(() => {
+    if (!isRecord(pipelineAgentRun)) {
+      return ''
+    }
+    return typeof pipelineAgentRun.plan_id === 'string' ? pipelineAgentRun.plan_id : ''
+  }, [pipelineAgentRun])
+  const pipelinePreviewPayload = useMemo(() => {
+    const override = pipelinePreviewOverride
+    const previewSourcePayload = override
+      ? override
+      : isRecord(pipelineAgentRun) && isRecord(pipelineAgentRun.preview)
+        ? (pipelineAgentRun.preview as Record<string, unknown>)
+        : null
+    if (!isRecord(previewSourcePayload)) {
+      return { columns: [] as PreviewColumn[], rows: [] as PreviewRow[] }
+    }
+    if (agentRunDbName && agentRunDbName !== activeDbName) {
+      return { columns: [] as PreviewColumn[], rows: [] as PreviewRow[] }
+    }
+    return buildPreviewFromPipeline(previewSourcePayload as Record<string, unknown>)
+  }, [pipelinePreviewOverride, pipelineAgentRun, agentRunDbName, activeDbName])
+  const hasPipelinePreview = pipelinePreviewPayload.columns.length > 0
+  const previewPayload = useMemo(() => {
+    if (previewSource === 'pipeline' && hasPipelinePreview) {
+      return pipelinePreviewPayload
+    }
+    return buildPreviewFromDataset(previewDataset)
+  }, [previewSource, hasPipelinePreview, pipelinePreviewPayload, previewDataset])
+  const previewLabel =
+    previewSource === 'pipeline' && hasPipelinePreview
+      ? pipelinePreviewLabel || 'Pipeline preview'
+      : previewDatasetName
   const previewMenu = useMemo(() => {
     const hasDatasets = datasets.length > 0
     return (
       <Menu>
-        <MenuItem icon="database" text={`Current: ${previewDatasetName}`} disabled />
+        <MenuItem icon="database" text={`Current: ${previewLabel}`} disabled />
         <MenuDivider />
+        {hasPipelinePreview ? (
+          <MenuItem
+            icon={previewSource === 'pipeline' ? 'small-tick' : 'flow-branch'}
+            text="Pipeline preview"
+            disabled={previewSource === 'pipeline'}
+            onClick={() => setPreviewSource('pipeline')}
+          />
+        ) : null}
         {hasDatasets
           ? datasets.map((dataset) => {
               const isActive = dataset.dataset_id === previewDataset?.dataset_id
@@ -818,6 +937,7 @@ export const GraphPage = () => {
                   disabled={isActive}
                   onClick={() => {
                     setPreviewDatasetId(dataset.dataset_id)
+                    setPreviewSource('dataset')
                     setColumnSearch('')
                   }}
                 />
@@ -826,7 +946,15 @@ export const GraphPage = () => {
           : <MenuItem text="No datasets available" disabled />}
       </Menu>
     )
-  }, [datasets, previewDataset, previewDatasetName, setPreviewDatasetId, setColumnSearch])
+  }, [
+    datasets,
+    previewDataset,
+    previewLabel,
+    hasPipelinePreview,
+    previewSource,
+    setPreviewDatasetId,
+    setColumnSearch,
+  ])
   const datasetOutputs = useMemo(() => {
     return datasets.map((dataset) => {
       const sampleRows = extractSampleRows(dataset.sample_json ?? {})
@@ -845,6 +973,35 @@ export const GraphPage = () => {
       }
     })
   }, [datasets])
+  const pipelineOutputs = useMemo(() => {
+    const grouped = {
+      object: [] as Array<Record<string, unknown>>,
+      link: [] as Array<Record<string, unknown>>,
+      unknown: [] as Array<Record<string, unknown>>,
+    }
+    if (!isRecord(pipelineAgentRun) || !isRecord(pipelineAgentRun.plan)) {
+      return grouped
+    }
+    if (agentRunDbName && agentRunDbName !== activeDbName) {
+      return grouped
+    }
+    const plan = pipelineAgentRun.plan as Record<string, unknown>
+    const outputs = Array.isArray(plan.outputs) ? plan.outputs : []
+    outputs.forEach((output) => {
+      if (!isRecord(output)) {
+        return
+      }
+      const kind = String(output.output_kind || 'unknown').toLowerCase()
+      if (kind === 'object') {
+        grouped.object.push(output)
+      } else if (kind === 'link') {
+        grouped.link.push(output)
+      } else {
+        grouped.unknown.push(output)
+      }
+    })
+    return grouped
+  }, [pipelineAgentRun, agentRunDbName, activeDbName])
   const datasetNodes = useMemo(() => buildDatasetInputNodes(datasets), [datasets])
   const aiAgentNodes = useMemo(
     () =>
@@ -855,10 +1012,100 @@ export const GraphPage = () => {
       }),
     [nodes],
   )
+  const agentPlanDefinition = useMemo(() => {
+    if (!isRecord(pipelineAgentRun) || !isRecord(pipelineAgentRun.plan)) {
+      return null
+    }
+    const plan = pipelineAgentRun.plan as Record<string, unknown>
+    return isRecord(plan.definition_json) ? (plan.definition_json as Record<string, unknown>) : null
+  }, [pipelineAgentRun])
+  const outputNodeIdByName = useMemo(() => {
+    const definition = agentPlanDefinition ?? pipelineDetail?.definition_json
+    const nodes = extractDefinitionNodes(definition)
+    const map = new Map<string, string>()
+    nodes.forEach((node) => {
+      const nodeType = safeText(node.type).trim().toLowerCase()
+      if (nodeType !== 'output') {
+        return
+      }
+      const nodeId = safeText(node.id).trim()
+      if (!nodeId) {
+        return
+      }
+      const metadata = isRecord(node.metadata) ? node.metadata : {}
+      const candidates = [
+        metadata.outputName,
+        metadata.output_dataset_name,
+        metadata.datasetName,
+        metadata.dataset_name,
+        metadata.name,
+        nodeId,
+      ]
+      candidates.forEach((candidate) => {
+        const key = normalizeOutputKey(candidate)
+        if (key) {
+          map.set(key, nodeId)
+        }
+      })
+    })
+    return map
+  }, [agentPlanDefinition, pipelineDetail?.definition_json])
+  const resolveOutputNodeId = useCallback(
+    (outputName: string) => {
+      const key = normalizeOutputKey(outputName)
+      return key ? outputNodeIdByName.get(key) ?? '' : ''
+    },
+    [outputNodeIdByName],
+  )
+  const handlePreviewOutput = useCallback(
+    async (outputName: string) => {
+      if (!pipelineAgentPlanId) {
+        return
+      }
+      if (agentRunDbName && agentRunDbName !== activeDbName) {
+        return
+      }
+      const nodeId = resolveOutputNodeId(outputName)
+      try {
+        const response = await previewPipelinePlan(pipelineAgentPlanId, {
+          node_id: nodeId || undefined,
+          limit: 200,
+        })
+        const preview = isRecord(response.preview) ? (response.preview as Record<string, unknown>) : null
+        if (preview) {
+          setPipelinePreviewOverride(preview)
+          setPipelinePreviewLabel(outputName)
+          setPreviewSource('pipeline')
+          setBottomPanelOpen(true)
+        }
+      } catch {
+        return
+      }
+    },
+    [
+      pipelineAgentPlanId,
+      agentRunDbName,
+      activeDbName,
+      resolveOutputNodeId,
+      setBottomPanelOpen,
+      setPreviewSource,
+    ],
+  )
 
   useEffect(() => {
     setPreviewDatasetId('')
   }, [activeDbName])
+
+  useEffect(() => {
+    if (hasPipelinePreview && previewSource !== 'pipeline') {
+      setPreviewSource('pipeline')
+    }
+  }, [hasPipelinePreview, previewSource])
+
+  useEffect(() => {
+    setPipelinePreviewOverride(null)
+    setPipelinePreviewLabel('')
+  }, [agentRunMarker, activeDbName])
 
   useEffect(() => {
     setAiAgentContext({
@@ -1222,7 +1469,47 @@ export const GraphPage = () => {
   }, [previewPayload])
 
   useEffect(() => {
+    if (!agentPlanDefinition) {
+      return
+    }
+    if (agentRunDbName && agentRunDbName !== activeDbName) {
+      return
+    }
+    if (agentRunMarker && lastAppliedAgentRunId.current === agentRunMarker) {
+      return
+    }
+    const { nodes: flowNodes, edges: flowEdges } = buildFlowFromDefinition(
+      agentPlanDefinition as PipelineDetailRecord['definition_json'],
+    )
+    if (flowNodes.length === 0) {
+      return
+    }
+    const hydratedNodes = hydrateFlowNodesWithDatasets(flowNodes, datasets)
+    const laidOutNodes = layoutFlowNodes(hydratedNodes, flowEdges)
+    setNodes(laidOutNodes)
+    setEdges(flowEdges)
+    setDefinitionDirty(true)
+    setRightPanelOpen(true)
+    setBottomPanelOpen(true)
+    lastAppliedAgentRunId.current = agentRunMarker || `agent-${Date.now()}`
+  }, [
+    agentPlanDefinition,
+    agentRunMarker,
+    agentRunDbName,
+    activeDbName,
+    datasets,
+    setNodes,
+    setEdges,
+    setDefinitionDirty,
+    setRightPanelOpen,
+    setBottomPanelOpen,
+  ])
+
+  useEffect(() => {
     if (definitionDirty) {
+      return
+    }
+    if (agentPlanDefinition && (!agentRunDbName || agentRunDbName === activeDbName)) {
       return
     }
     const { nodes: flowNodes, edges: flowEdges } = buildFlowFromDefinition(pipelineDetail?.definition_json)
@@ -1235,7 +1522,17 @@ export const GraphPage = () => {
     }
     setEdges([])
     setNodes((current) => syncDatasetNodes(current, datasetNodes))
-  }, [pipelineDetail?.definition_json, datasetNodes, datasets, definitionDirty, setNodes, setEdges])
+  }, [
+    pipelineDetail?.definition_json,
+    datasetNodes,
+    datasets,
+    definitionDirty,
+    agentPlanDefinition,
+    agentRunDbName,
+    activeDbName,
+    setNodes,
+    setEdges,
+  ])
 
   const topbar = (
     <div className="pipeline-topbar">
@@ -1613,50 +1910,81 @@ export const GraphPage = () => {
               {activeOutputTab === 'datasets' ? (
                 <div className="pipeline-output-panel">
                   <div className="pipeline-output-list">
-                    {datasetOutputs.length === 0 ? (
+                    {datasetOutputs.length === 0 && pipelineOutputs.unknown.length === 0 ? (
                       <div className="pipeline-output-empty">
                         <Icon icon="info-sign" size={14} />
                         <span>No datasets available yet.</span>
                       </div>
                     ) : (
-                      datasetOutputs.map(({ dataset, columnCount, rowCount, extraColumnsCount }) => {
-                        const statusLabel = columnCount > 0 ? `${columnCount} columns` : 'No schema yet'
-                        const rowLabel = rowCount > 0 ? `${rowCount} rows` : ''
-                        const statusText = rowLabel ? `${statusLabel} · ${rowLabel}` : statusLabel
-                        return (
-                          <div className="pipeline-output-card" key={dataset.dataset_id}>
-                            <div className="pipeline-output-header">
-                              <div className="pipeline-output-title">
-                                <Icon icon="th" size={14} />
-                                <span>{dataset.name}</span>
+                      <>
+                        {pipelineOutputs.unknown.map((output) => {
+                          const name = safeText(output.output_name || output.outputName).trim() || 'Pipeline output'
+                          return (
+                            <div
+                              className="pipeline-output-card"
+                              key={`pipeline-output-${name}`}
+                              role="button"
+                              tabIndex={0}
+                              onClick={() => handlePreviewOutput(name)}
+                            >
+                              <div className="pipeline-output-header">
+                                <div className="pipeline-output-title">
+                                  <Icon icon="th" size={14} />
+                                  <span>{name}</span>
+                                </div>
                               </div>
-                              <button type="button" className="pipeline-output-menu" aria-label="Output actions">
-                                <Icon icon="more" size={12} />
-                              </button>
-                            </div>
-                            <div className="pipeline-output-path">
-                              <Icon icon="folder-close" size={12} />
-                              <span>/{dataset.db_name || pipelineDisplayName}</span>
-                            </div>
-                            <div className="pipeline-output-row">
-                              <div className="pipeline-output-status is-success">
-                                <Icon icon="tick-circle" size={12} />
-                                <span>{statusText}</span>
+                              <div className="pipeline-output-path">
+                                <Icon icon="lab-test" size={12} />
+                                <span>Pipeline output</span>
                               </div>
-                              <button type="button" className="pipeline-output-action">
-                                <Icon icon="edit" size={12} />
-                                <span>Edit schema</span>
-                              </button>
-                            </div>
-                            {extraColumnsCount > 0 ? (
-                              <div className="pipeline-output-alert">
-                                <Icon icon="warning-sign" size={12} />
-                                <span>{extraColumnsCount} column(s) not in schema</span>
+                              <div className="pipeline-output-row">
+                                <div className="pipeline-output-status is-success">
+                                  <Icon icon="tick-circle" size={12} />
+                                  <span>Click to preview</span>
+                                </div>
                               </div>
-                            ) : null}
-                          </div>
-                        )
-                      })
+                            </div>
+                          )
+                        })}
+                        {datasetOutputs.map(({ dataset, columnCount, rowCount, extraColumnsCount }) => {
+                          const statusLabel = columnCount > 0 ? `${columnCount} columns` : 'No schema yet'
+                          const rowLabel = rowCount > 0 ? `${rowCount} rows` : ''
+                          const statusText = rowLabel ? `${statusLabel} · ${rowLabel}` : statusLabel
+                          return (
+                            <div className="pipeline-output-card" key={dataset.dataset_id}>
+                              <div className="pipeline-output-header">
+                                <div className="pipeline-output-title">
+                                  <Icon icon="th" size={14} />
+                                  <span>{dataset.name}</span>
+                                </div>
+                                <button type="button" className="pipeline-output-menu" aria-label="Output actions">
+                                  <Icon icon="more" size={12} />
+                                </button>
+                              </div>
+                              <div className="pipeline-output-path">
+                                <Icon icon="folder-close" size={12} />
+                                <span>/{dataset.db_name || pipelineDisplayName}</span>
+                              </div>
+                              <div className="pipeline-output-row">
+                                <div className="pipeline-output-status is-success">
+                                  <Icon icon="tick-circle" size={12} />
+                                  <span>{statusText}</span>
+                                </div>
+                                <button type="button" className="pipeline-output-action">
+                                  <Icon icon="edit" size={12} />
+                                  <span>Edit schema</span>
+                                </button>
+                              </div>
+                              {extraColumnsCount > 0 ? (
+                                <div className="pipeline-output-alert">
+                                  <Icon icon="warning-sign" size={12} />
+                                  <span>{extraColumnsCount} column(s) not in schema</span>
+                                </div>
+                              ) : null}
+                            </div>
+                          )
+                        })}
+                      </>
                     )}
                   </div>
                   <div className="pipeline-output-footer">
@@ -1666,10 +1994,85 @@ export const GraphPage = () => {
                     </button>
                   </div>
                 </div>
+              ) : activeOutputTab === 'objectTypes' ? (
+                <div className="pipeline-output-panel">
+                  <div className="pipeline-output-list">
+                    {pipelineOutputs.object.length === 0 ? (
+                      <div className="pipeline-output-empty">
+                        <Icon icon="info-sign" size={14} />
+                        <span>No object outputs available yet.</span>
+                      </div>
+                    ) : (
+                      pipelineOutputs.object.map((output) => {
+                        const name = safeText(output.output_name || output.outputName).trim() || 'Object output'
+                        const target = safeText(output.target_class_id || output.targetClassId).trim()
+                        return (
+                          <div
+                            className="pipeline-output-card"
+                            key={name}
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => handlePreviewOutput(name)}
+                          >
+                            <div className="pipeline-output-header">
+                              <div className="pipeline-output-title">
+                                <Icon icon="cube" size={14} />
+                                <span>{name}</span>
+                              </div>
+                            </div>
+                            <div className="pipeline-output-row">
+                              <div className="pipeline-output-status is-success">
+                                <Icon icon="tick-circle" size={12} />
+                                <span>{target ? `Target: ${target}` : 'Target class pending'}</span>
+                              </div>
+                            </div>
+                          </div>
+                        )
+                      })
+                    )}
+                  </div>
+                </div>
               ) : (
-                <div className="pipeline-output-empty">
-                  <Icon icon="info-sign" size={14} />
-                  <span>No outputs configured yet.</span>
+                <div className="pipeline-output-panel">
+                  <div className="pipeline-output-list">
+                    {pipelineOutputs.link.length === 0 ? (
+                      <div className="pipeline-output-empty">
+                        <Icon icon="info-sign" size={14} />
+                        <span>No link outputs available yet.</span>
+                      </div>
+                    ) : (
+                      pipelineOutputs.link.map((output) => {
+                        const name = safeText(output.output_name || output.outputName).trim() || 'Link output'
+                        const source = safeText(output.source_class_id || output.sourceClassId).trim()
+                        const target = safeText(output.target_class_id || output.targetClassId).trim()
+                        const predicate = safeText(output.predicate).trim()
+                        const title = predicate ? `${name} · ${predicate}` : name
+                        const relation = [source, target].filter(Boolean).join(' -> ')
+                        return (
+                          <div
+                            className="pipeline-output-card"
+                            key={name}
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => handlePreviewOutput(name)}
+                          >
+                            <div className="pipeline-output-header">
+                              <div className="pipeline-output-title">
+                                <Icon icon="link" size={14} />
+                                <span>{title}</span>
+                              </div>
+                            </div>
+                            <div className="pipeline-output-row">
+                              <div className="pipeline-output-status is-success">
+                                <Icon icon="tick-circle" size={12} />
+                                <span>{relation || 'Link metadata pending'}</span>
+                              </div>
+                            </div>
+                          </div>
+                        )
+                      })
+                    )}
+                  </div>
                 </div>
               )}
             </div>

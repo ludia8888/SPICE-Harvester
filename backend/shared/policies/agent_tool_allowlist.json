@@ -352,54 +352,10 @@
     "max_payload_bytes": 200000
   },
   {
-    "tool_id": "pipeline_plans.join_keys",
-    "method": "POST",
-    "path": "/api/v1/pipeline-plans/join-keys",
-    "risk_level": "read",
-    "requires_approval": false,
-    "requires_idempotency_key": true,
-    "status": "ACTIVE",
-    "roles": [],
-    "max_payload_bytes": 200000
-  },
-  {
     "tool_id": "pipeline_plans.compile",
     "method": "POST",
     "path": "/api/v1/pipeline-plans/compile",
     "risk_level": "write",
-    "requires_approval": false,
-    "requires_idempotency_key": true,
-    "status": "ACTIVE",
-    "roles": [],
-    "max_payload_bytes": 500000
-  },
-  {
-    "tool_id": "pipeline_plans.split_outputs",
-    "method": "POST",
-    "path": "/api/v1/pipeline-plans/{plan_id}/split-outputs",
-    "risk_level": "write",
-    "requires_approval": false,
-    "requires_idempotency_key": true,
-    "status": "ACTIVE",
-    "roles": [],
-    "max_payload_bytes": 500000
-  },
-  {
-    "tool_id": "pipeline_plans.transform",
-    "method": "POST",
-    "path": "/api/v1/pipeline-plans/{plan_id}/transform",
-    "risk_level": "write",
-    "requires_approval": false,
-    "requires_idempotency_key": true,
-    "status": "ACTIVE",
-    "roles": [],
-    "max_payload_bytes": 500000
-  },
-  {
-    "tool_id": "pipeline_plans.verify_intent",
-    "method": "POST",
-    "path": "/api/v1/pipeline-plans/{plan_id}/verify-intent",
-    "risk_level": "read",
     "requires_approval": false,
     "requires_idempotency_key": true,
     "status": "ACTIVE",
@@ -440,39 +396,6 @@
     "max_payload_bytes": 200000
   },
   {
-    "tool_id": "pipeline_plans.cleanse",
-    "method": "POST",
-    "path": "/api/v1/pipeline-plans/{plan_id}/cleanse",
-    "risk_level": "write",
-    "requires_approval": false,
-    "requires_idempotency_key": true,
-    "status": "ACTIVE",
-    "roles": [],
-    "max_payload_bytes": 500000
-  },
-  {
-    "tool_id": "pipeline_plans.repair",
-    "method": "POST",
-    "path": "/api/v1/pipeline-plans/{plan_id}/repair",
-    "risk_level": "write",
-    "requires_approval": false,
-    "requires_idempotency_key": true,
-    "status": "ACTIVE",
-    "roles": [],
-    "max_payload_bytes": 500000
-  },
-  {
-    "tool_id": "pipeline_plans.generate_specs",
-    "method": "POST",
-    "path": "/api/v1/pipeline-plans/{plan_id}/generate-specs",
-    "risk_level": "write",
-    "requires_approval": false,
-    "requires_idempotency_key": true,
-    "status": "ACTIVE",
-    "roles": [],
-    "max_payload_bytes": 500000
-  },
-  {
     "tool_id": "query.run",
     "method": "POST",
     "path": "/api/v1/databases/{db_name}/query",
@@ -493,66 +416,5 @@
     "status": "ACTIVE",
     "roles": [],
     "max_payload_bytes": 200000
-  },
-  {
-    "tool_id": "session.variables.update",
-    "method": "PUT",
-    "path": "/api/v1/agent-sessions/{session_id}/variables",
-    "risk_level": "read",
-    "requires_approval": false,
-    "requires_idempotency_key": true,
-    "status": "ACTIVE",
-    "roles": [],
-    "max_payload_bytes": 50000,
-    "input_schema": {
-      "type": "object",
-      "properties": {
-        "variables": { "type": "object" },
-        "unset_keys": { "type": "array" },
-        "replace": { "type": "boolean" }
-      },
-      "required": ["variables"]
-    },
-    "output_schema": { "type": "object" }
-  },
-  {
-    "tool_id": "clarification.request",
-    "method": "POST",
-    "path": "/api/v1/agent-sessions/{session_id}/clarifications",
-    "risk_level": "read",
-    "requires_approval": false,
-    "requires_idempotency_key": true,
-    "status": "ACTIVE",
-    "roles": [],
-    "max_payload_bytes": 200000,
-    "input_schema": {
-      "type": "object",
-      "properties": {
-        "questions": { "type": "array" },
-        "reason": { "type": "string" }
-      },
-      "required": ["questions"]
-    },
-    "output_schema": { "type": "object" }
-  },
-  {
-    "tool_id": "functions.execute",
-    "method": "POST",
-    "path": "/api/v1/agent-functions/{function_id}/execute",
-    "risk_level": "read",
-    "requires_approval": false,
-    "requires_idempotency_key": true,
-    "status": "ACTIVE",
-    "roles": [],
-    "max_payload_bytes": 200000,
-    "input_schema": {
-      "type": "object",
-      "properties": {
-        "version": { "type": "string" },
-        "tag": { "type": "string" },
-        "input": { "type": "object" }
-      }
-    },
-    "output_schema": { "type": "object" }
   }
 ]

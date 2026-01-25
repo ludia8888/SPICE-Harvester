@@ -194,6 +194,7 @@ Bring up the stack with end-user JWT enabled and an OpenAI-compatible LLM:
 USER_JWT_ENABLED=true \
 USER_JWT_HS256_SECRET=spice-dev-user-jwt-secret \
 OPENAI_API_KEY=your_openai_api_key_here \
+PIPELINE_PLAN_LLM_ENABLED=true \
 ADMIN_TOKEN=test-token \
 docker compose -f backend/docker-compose.yml up -d --build
 
@@ -204,7 +205,8 @@ AUTO_APPROVE=true \
 ```
 
 Notes:
-- Default LLM config in `backend/docker-compose.yml` is `LLM_PROVIDER=openai_compat` with `LLM_BASE_URL=https://api.openai.com/v1` and `LLM_MODEL=gpt-4o-mini` (override via env).
+- Default LLM config in `backend/docker-compose.yml` is `LLM_PROVIDER=openai_compat` with `LLM_BASE_URL=https://api.openai.com/v1` and `LLM_MODEL=gpt-5` (override via env).
+- Pipeline agent + pipeline plan compile are gated by `PIPELINE_PLAN_LLM_ENABLED`.
 - Deterministic mode (CI/offline): set `LLM_PROVIDER=mock` (Compose mounts `scripts/llm_mocks/` into the BFF container and sets `LLM_MOCK_DIR=/app/llm_mocks`).
 - Compose uses `${VAR:-default}` expansion; re-running `docker compose up` without exporting the variables will recreate containers with defaults.
 

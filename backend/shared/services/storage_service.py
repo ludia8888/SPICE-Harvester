@@ -328,6 +328,58 @@ class StorageService:
             if e.response['Error']['Code'] == 'NoSuchKey':
                 raise FileNotFoundError(f"Object not found: {bucket}/{key}")
             raise
+
+    async def load_bytes_lines(
+        self,
+        bucket: str,
+        key: str,
+        *,
+        max_lines: int,
+        max_bytes: Optional[int] = None,
+    ) -> bytes:
+        """
+        Load up to `max_lines` newline-delimited lines from the start of an object.
+
+        This is intended for "head sampling" large text objects (e.g., CSV) without
+        reading the full object into memory.
+        """
+        resolved_lines = max(0, int(max_lines))
+        if resolved_lines <= 0:
+            return b""
+        resolved_bytes = int(max_bytes) if max_bytes is not None else None
+        if resolved_bytes is not None and resolved_bytes <= 0:
+            resolved_bytes = None
+
+        def _load() -> bytes:
+            response = self.client.get_object(Bucket=bucket, Key=key)
+            body = response.get("Body")
+            if body is None:
+                return b""
+            out = bytearray()
+            count = 0
+            try:
+                # StreamingBody.iter_lines() yields lines without the line terminator.
+                for line in body.iter_lines():
+                    out.extend(line or b"")
+                    out.extend(b"\n")
+                    count += 1
+                    if count >= resolved_lines:
+                        break
+                    if resolved_bytes is not None and len(out) >= resolved_bytes:
+                        break
+            finally:
+                try:
+                    body.close()
+                except Exception:
+                    pass
+            return bytes(out)
+
+        try:
+            return await asyncio.to_thread(_load)
+        except ClientError as e:
+            if e.response["Error"]["Code"] == "NoSuchKey":
+                raise FileNotFoundError(f"Object not found: {bucket}/{key}")
+            raise
             
     async def verify_checksum(
         self,

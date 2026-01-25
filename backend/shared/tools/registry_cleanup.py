@@ -58,7 +58,7 @@ DEFAULT_TEST_NAMES = [
 
 
 def _env_list(key: str) -> list[str]:
-    raw = (os.getenv(key) or "").strip()
+    raw = (os.environ.get(key) or "").strip()
     if not raw:
         return []
     return [item.strip() for item in raw.split(",") if item.strip()]
@@ -75,8 +75,7 @@ def _is_safe_endpoint(base_url: str) -> bool:
 
 
 def _ensure_dev_only(base_url: str) -> None:
-    env = os.getenv("ENVIRONMENT", "development").strip().lower()
-    if env in {"production", "prod"}:
+    if get_settings().is_production:
         raise RuntimeError("Refusing to run registry cleanup in production environment.")
     if not _is_safe_endpoint(base_url):
         raise RuntimeError(f"Refusing to run against unsafe BFF endpoint: {base_url}")
@@ -99,10 +98,6 @@ def _resolve_admin_token() -> str:
     token = str(cfg.clients.bff_admin_token or cfg.clients.oms_client_token or cfg.auth.admin_token or "").strip()
     if token:
         return token.split(",")[0].strip()
-    for key in ("BFF_ADMIN_TOKEN", "BFF_WRITE_TOKEN", "ADMIN_API_KEY", "ADMIN_TOKEN", "OMS_ADMIN_TOKEN"):
-        value = (os.getenv(key) or "").strip()
-        if value:
-            return value.split(",")[0].strip()
     return ""
 
 
@@ -262,12 +257,12 @@ def _build_plan(args: argparse.Namespace) -> CleanupPlan:
 
     min_age_seconds = args.min_age_seconds
     if min_age_seconds is None:
-        raw = (os.getenv("REGISTRY_CLEANUP_MIN_AGE_SECONDS") or "").strip()
+        raw = (os.environ.get("REGISTRY_CLEANUP_MIN_AGE_SECONDS") or "").strip()
         min_age_seconds = int(raw) if raw.isdigit() else 300
 
     interval_seconds = args.interval_seconds
     if interval_seconds is None:
-        raw = (os.getenv("REGISTRY_CLEANUP_INTERVAL_SECONDS") or "").strip()
+        raw = (os.environ.get("REGISTRY_CLEANUP_INTERVAL_SECONDS") or "").strip()
         interval_seconds = int(raw) if raw.isdigit() else 600
 
     return CleanupPlan(
@@ -372,7 +367,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 async def _async_main(args: argparse.Namespace) -> int:
-    if (os.getenv("REGISTRY_CLEANUP_ENABLED") or "true").strip().lower() in {"0", "false", "no"}:
+    if (os.environ.get("REGISTRY_CLEANUP_ENABLED") or "true").strip().lower() in {"0", "false", "no"}:
         return 0
 
     plan = _build_plan(args)

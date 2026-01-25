@@ -17,6 +17,7 @@ SUPPORTED_TRANSFORMS = frozenset(
         "drop",
         "rename",
         "normalize",
+        "regexReplace",
         "cast",
         "dedupe",
         "sort",

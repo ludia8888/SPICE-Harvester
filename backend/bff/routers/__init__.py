@@ -3,37 +3,6 @@ API 라우터 모듈
 도메인별로 분리된 라우터들을 포함
 """
 
-# Import routers with module names that match main.py expectations
-from . import database
-from . import health
-from . import mapping
-from . import merge_conflict
-from . import ontology
-from . import ontology_extensions
-from . import query
-from . import instances
-from . import instance_async
-from . import websocket
-from . import tasks
-from . import admin
-from . import command_status
-from . import graph
-from . import lineage
-from . import audit
-from . import ai
-from . import context7
-from . import agent_proxy
-from . import agent_plans
-from . import agent_tools
-from . import summary
-from . import pipeline
-from . import pipeline_plans
-from . import objectify
-from . import governance
-from . import object_types
-from . import link_types
-from . import actions
-
 __all__ = [
     "database",
     "health", 
@@ -54,8 +23,6 @@ __all__ = [
     "ai",
     "context7",
     "agent_proxy",
-    "agent_plans",
-    "agent_tools",
     "summary",
     "pipeline",
     "pipeline_plans",

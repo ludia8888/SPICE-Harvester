@@ -611,6 +611,8 @@ async def compute_pipeline_preflight(
             schema_by_node[node_id] = _apply_cast(base, casts if isinstance(casts, list) else [])
         elif operation == "compute":
             schema_by_node[node_id] = _apply_compute(base, metadata.get("expression") or "")
+        elif operation == "regexReplace":
+            schema_by_node[node_id] = base
         elif operation in {"groupBy", "aggregate"}:
             group_by = _normalize_column_list(metadata.get("groupBy") or [])
             aggregates = metadata.get("aggregates") or []
@@ -710,3 +712,90 @@ async def compute_pipeline_preflight(
         "blocking_errors": blocking_errors,
         "has_blocking_errors": bool(blocking_errors),
     }
+
+
+async def compute_schema_by_node(
+    *,
+    definition: Dict[str, Any],
+    db_name: str,
+    dataset_registry: Any,
+    branch: Optional[str] = None,
+) -> Dict[str, SchemaInfo]:
+    nodes = normalize_nodes(definition.get("nodes"))
+    edges = normalize_edges(definition.get("edges"))
+    incoming = build_incoming(edges)
+    order = topological_sort(nodes, edges, include_unordered=True)
+
+    schema_by_node: Dict[str, SchemaInfo] = {}
+    for node_id in order:
+        node = nodes.get(node_id) or {}
+        node_type = str(node.get("type") or "transform").strip().lower()
+        metadata = node.get("metadata") or {}
+        input_ids = incoming.get(node_id, [])
+        inputs = [schema_by_node[in_id] for in_id in input_ids if in_id in schema_by_node]
+
+        if node_type == "input":
+            selection = normalize_dataset_selection(metadata, default_branch=branch or "main")
+            resolution = await resolve_dataset_version(
+                dataset_registry,
+                db_name=db_name,
+                selection=selection,
+            )
+            schema_by_node[node_id] = _schema_for_input(resolution.dataset, resolution.version)
+            continue
+
+        if node_type == "output":
+            schema_by_node[node_id] = inputs[0] if inputs else SchemaInfo(columns=[], type_map={})
+            continue
+
+        operation = normalize_operation(metadata.get("operation"))
+
+        if operation == "join" and len(inputs) >= 2:
+            schema_by_node[node_id] = _apply_join(inputs[0], inputs[1])
+            continue
+
+        if operation == "union" and len(inputs) >= 2:
+            union_mode = normalize_union_mode(metadata)
+            schema_by_node[node_id] = _apply_union(inputs[0], inputs[1], union_mode)
+            continue
+
+        if not inputs:
+            schema_by_node[node_id] = SchemaInfo(columns=[], type_map={})
+            continue
+
+        base = inputs[0]
+        if operation == "select":
+            schema_by_node[node_id] = _apply_select(base, _normalize_column_list(metadata.get("columns") or []))
+        elif operation == "drop":
+            schema_by_node[node_id] = _apply_drop(base, _normalize_column_list(metadata.get("columns") or []))
+        elif operation == "rename":
+            rename_map = metadata.get("rename") or {}
+            schema_by_node[node_id] = _apply_rename(base, rename_map if isinstance(rename_map, dict) else {})
+        elif operation == "cast":
+            casts = metadata.get("casts") or []
+            schema_by_node[node_id] = _apply_cast(base, casts if isinstance(casts, list) else [])
+        elif operation == "compute":
+            schema_by_node[node_id] = _apply_compute(base, metadata.get("expression") or "")
+        elif operation == "regexReplace":
+            schema_by_node[node_id] = base
+        elif operation in {"groupBy", "aggregate"}:
+            group_by = _normalize_column_list(metadata.get("groupBy") or [])
+            aggregates = metadata.get("aggregates") or []
+            schema_by_node[node_id] = _apply_group_by(base, group_by, aggregates if isinstance(aggregates, list) else [])
+        elif operation == "pivot":
+            pivot_meta = metadata.get("pivot") or {}
+            if isinstance(pivot_meta, dict):
+                index_cols = _normalize_column_list(pivot_meta.get("index") or [])
+            else:
+                index_cols = []
+            schema_by_node[node_id] = SchemaInfo(
+                columns=index_cols,
+                type_map={col: base.type_map.get(col) for col in index_cols},
+                dynamic_columns=True,
+            )
+        elif operation == "window":
+            schema_by_node[node_id] = _apply_window(base)
+        else:
+            schema_by_node[node_id] = base
+
+    return schema_by_node

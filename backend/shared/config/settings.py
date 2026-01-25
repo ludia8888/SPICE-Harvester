@@ -1299,7 +1299,7 @@ class OntologySettings(BaseSettings):
 
 
 class AgentRuntimeSettings(BaseSettings):
-    """Agent runtime settings (LangGraph executor)."""
+    """Agent runtime settings (agent service tool runner)."""
 
     model_config = SettingsConfigDict(
         env_prefix="AGENT_",
@@ -1329,19 +1329,6 @@ class AgentRuntimeSettings(BaseSettings):
         default=True,
         description="Require event store availability (AGENT_REQUIRE_EVENT_STORE)",
     )
-    parallel_execution_enabled: bool = Field(
-        default=False,
-        description="Enable parallel tool execution (AGENT_PARALLEL_EXECUTION_ENABLED)",
-    )
-    max_concurrent_tool_calls: int = Field(
-        default=1,
-        description="Max concurrent tool calls when parallel enabled (AGENT_MAX_CONCURRENT_TOOL_CALLS)",
-    )
-    fail_fast: bool = Field(
-        default=False,
-        description="Stop scheduling independent steps after a failure (AGENT_FAIL_FAST)",
-    )
-
     tool_timeout_seconds: float = Field(
         default=180.0,
         description="HTTP timeout for tool calls (AGENT_TOOL_TIMEOUT_SECONDS)",
@@ -1434,11 +1421,6 @@ class AgentRuntimeSettings(BaseSettings):
         default=False,
         description="Allow auto retries on write methods (AGENT_AUTO_RETRY_ALLOW_WRITES)",
     )
-
-    @field_validator("max_concurrent_tool_calls", mode="before")
-    @classmethod
-    def clamp_max_concurrent_tool_calls(cls, v):  # noqa: ANN001
-        return _clamp_int(v, default=1, min_value=1, max_value=256)
 
     @field_validator("context_upload_max_bytes", mode="before")
     @classmethod

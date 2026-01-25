@@ -97,12 +97,13 @@ def pytest_configure(config) -> None:
     )
     warnings.filterwarnings(
         "ignore",
-        message=r"Deprecated call to `pkg_resources\.declare_namespace\\('google.*",
+        # Note: this is a regex; ensure parens are escaped to avoid invalid patterns.
+        message=r"Deprecated call to `pkg_resources\.declare_namespace\('google.*",
         category=DeprecationWarning,
     )
     warnings.filterwarnings(
         "ignore",
-        message=r"Deprecated call to `pkg_resources\.declare_namespace\\('sphinxcontrib'\\).*",
+        message=r"Deprecated call to `pkg_resources\.declare_namespace\('sphinxcontrib'\).*",
         category=DeprecationWarning,
     )
 
@@ -123,9 +124,14 @@ def pytest_sessionfinish(session, exitstatus) -> None:
         return
 
     try:
-        subprocess.run(
+        proc = subprocess.run(
             [sys.executable, str(script), "--yes", "--quiet"],
             check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
         )
+        if proc.returncode != 0 and _truthy(os.getenv("TEST_OBJECT_STORE_CLEANUP_DEBUG", "false")):
+            sys.stderr.write(proc.stderr or "")
     except Exception as exc:
         sys.stderr.write(f"[cleanup] object store cleanup failed: {exc}\n")

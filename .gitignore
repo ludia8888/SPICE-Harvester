@@ -68,6 +68,8 @@ instance/
 
 # Sphinx documentation
 docs/_build/
+docs/reference/python/
+docs/reference/autoapi/
 
 # PyBuilder
 .pybuilder/

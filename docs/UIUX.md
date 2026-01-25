@@ -1,6 +1,8 @@
 > Updated: 2026-01-08  
 > Status: external reference (Ontology editor UI patterns). Not a description of the current SPICE HARVESTER frontend.
 
+# UI/UX (Reference)
+
 이 문서는 “온톨로지 편집기(모델링 UI)”를 만들 때 필요한 **화면 구성/워크플로우/안전장치**를 정리한 레퍼런스 노트입니다. 실제 구현 범위/정합성은 `docs/frontend.md`와 코드 기준으로 확인합니다.
 
 ## 목표

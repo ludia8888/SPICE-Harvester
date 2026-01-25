@@ -19,8 +19,13 @@ Main configuration file defining all MCP servers:
 - **filesystem**: File system access server
 - **database**: PostgreSQL database server
 - **terminusdb**: Custom TerminusDB MCP server
+- **pipeline**: Custom Pipeline MCP server (plan-builder + deterministic analysis tools)
 - **elasticsearch**: Search and analytics server
 - **git**: Version control server
+
+Docker 환경에서는 호스트 경로/컨테이너 경로가 달라서 `mcp-config.json`을 그대로 쓰기 어렵습니다.
+이 repo는 `backend/mcp/mcp-config.docker.json`을 제공하며, `backend/docker-compose.yml`에서
+이를 `/app/mcp-config.json`로 마운트합니다.
 
 ### 2. TerminusDB MCP Server (`terminus_mcp_server.py`)
 Custom MCP server exposing TerminusDB functionality:
@@ -28,6 +33,19 @@ Custom MCP server exposing TerminusDB functionality:
 - Ontology operations (create, read, update)
 - Branch management
 - Query execution
+
+### 2.1 Pipeline MCP Server (`pipeline_mcp_server.py`)
+Custom MCP server exposing deterministic pipeline tools:
+- Build pipeline context packs (safe dataset/schema/sample summaries + join/pk/fk/cast/cleansing hints)
+- Assemble PipelinePlan artifacts via small plan-builder tool calls (add_input/add_join/add_cast/etc)
+- Patch existing plans deterministically (update_node_metadata/set_node_inputs/delete_node/delete_edge/update_output)
+- Preview a plan using the deterministic PipelineExecutor (sample-safe)
+- Inspect a preview sample to generate cleansing suggestions (preview_inspect)
+- Evaluate join quality (coverage/explosion) on sample-safe runs (plan_evaluate_joins)
+- Generate null/missing reports from context packs (context_pack_null_report)
+- Infer PK/FK candidates from context packs (context_pack_infer_keys)
+- Infer column types + join-key cast suggestions from context packs (context_pack_infer_types)
+- Infer a best-effort multi-dataset join plan (spanning tree) from context packs (context_pack_infer_join_plan)
 
 ### 3. MCP Client (`mcp_client.py`)
 Client implementation for connecting to MCP servers:
@@ -71,9 +89,13 @@ CONTEXT7_WORKSPACE=your_workspace_name
 MCP_CONFIG_PATH=./mcp-config.json
 MCP_LOG_LEVEL=info
 MCP_TIMEOUT=30000
+
+# Pipeline agent / planner (single autonomous loop + MCP tools)
+PIPELINE_PLAN_LLM_ENABLED=true
 ```
 
 Docker 환경에서는 `MCP_CONFIG_PATH=/app/mcp-config.json` 처럼 컨테이너 내부 경로를 사용하세요.
+이 repo는 기본적으로 `backend/docker-compose.yml`에서 `backend/mcp/mcp-config.docker.json`을 `/app/mcp-config.json`로 마운트합니다.
 
 ### 3. Start MCP Servers
 
@@ -192,6 +214,10 @@ curl -X POST http://localhost:8002/api/v1/context7/analyze/ontology \
 - Verify MCP servers are running: `ps aux | grep mcp`
 - Check environment variables are set correctly
 - Review logs: `tail -f logs/mcp_*.log`
+- If you see `Unexpected MCP tool result type: CallToolResult`, your client wrapper may not be parsing `structuredContent` vs `content[text]` correctly.
+  - BFF wrappers handle this in:
+    - `backend/bff/services/pipeline_plan_autonomous_compiler.py`
+    - `backend/bff/services/pipeline_agent_autonomous_loop.py`
 
 ### Context7 Issues
 - Ensure API key is valid

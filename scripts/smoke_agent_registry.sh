@@ -12,6 +12,18 @@ RETRIES="${RETRIES:-20}"
 SLEEP_SECONDS="${SLEEP_SECONDS:-1}"
 SKIP_DB_CHECK="${SKIP_DB_CHECK:-}"
 
+# Delegated end-user auth for /api/v1/agent/* (required when USER_JWT_ENABLED=true).
+USER_JWT="${USER_JWT:-}"
+USER_JWT_HS256_SECRET="${USER_JWT_HS256_SECRET:-}"
+USER_JWT_ISSUER="${USER_JWT_ISSUER:-}"
+USER_JWT_AUDIENCE="${USER_JWT_AUDIENCE:-}"
+USER_JWT_TTL_SECONDS="${USER_JWT_TTL_SECONDS:-3600}"
+USER_ID="${USER_ID:-demo-user}"
+USER_EMAIL="${USER_EMAIL:-demo@example.com}"
+USER_TYPE="${USER_TYPE:-user}"
+TENANT_ID="${TENANT_ID:-default}"
+USER_ROLES="${USER_ROLES:-}"
+
 if ! command -v curl >/dev/null 2>&1; then
   echo "❌ curl is required" >&2
   exit 1
@@ -22,19 +34,71 @@ if ! command -v "$PYTHON_BIN" >/dev/null 2>&1; then
   exit 1
 fi
 
-plan_id="$("$PYTHON_BIN" - <<'PY'
-import uuid
-print(uuid.uuid4())
-PY
-)"
 tool_id="system.health.smoke.$("$PYTHON_BIN" - <<'PY'
 import uuid
 print(uuid.uuid4().hex[:8])
 PY
 )"
 
-echo "PLAN_ID=$plan_id"
 echo "TOOL_ID=$tool_id"
+
+if [[ -z "${USER_JWT}" && -n "${USER_JWT_HS256_SECRET}" ]]; then
+  export USER_JWT_HS256_SECRET USER_JWT_TTL_SECONDS USER_ID USER_EMAIL USER_TYPE TENANT_ID USER_ROLES USER_JWT_ISSUER USER_JWT_AUDIENCE
+  USER_JWT="$("$PYTHON_BIN" - <<'PY'
+import base64
+import hashlib
+import hmac
+import json
+import os
+import time
+
+def b64url(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
+
+def sign_hs256(message: str, secret: str) -> str:
+    digest = hmac.new(secret.encode("utf-8"), message.encode("utf-8"), hashlib.sha256).digest()
+    return b64url(digest)
+
+now = int(time.time())
+ttl = int(os.environ.get("USER_JWT_TTL_SECONDS", "3600") or "3600")
+roles_raw = (os.environ.get("USER_ROLES") or "").strip()
+roles = [r.strip() for r in roles_raw.split(",") if r.strip()] if roles_raw else []
+
+claims = {
+    "sub": (os.environ.get("USER_ID") or "demo-user").strip() or "demo-user",
+    "email": (os.environ.get("USER_EMAIL") or "").strip() or None,
+    "tenant_id": (os.environ.get("TENANT_ID") or "default").strip() or "default",
+    "org_id": (os.environ.get("TENANT_ID") or "default").strip() or "default",
+    "roles": roles,
+    "typ": (os.environ.get("USER_TYPE") or "user").strip() or "user",
+    "iat": now,
+    "exp": now + max(60, ttl),
+}
+issuer = (os.environ.get("USER_JWT_ISSUER") or "").strip()
+audience = (os.environ.get("USER_JWT_AUDIENCE") or "").strip()
+if issuer:
+    claims["iss"] = issuer
+if audience:
+    claims["aud"] = audience
+
+header = {"alg": "HS256", "typ": "JWT"}
+header_b64 = b64url(json.dumps(header, separators=(",", ":"), ensure_ascii=True).encode("utf-8"))
+claims_b64 = b64url(json.dumps(claims, separators=(",", ":"), ensure_ascii=True).encode("utf-8"))
+signing_input = f"{header_b64}.{claims_b64}"
+secret = os.environ["USER_JWT_HS256_SECRET"]
+sig_b64 = sign_hs256(signing_input, secret)
+print(f"{signing_input}.{sig_b64}")
+PY
+)"
+fi
+
+AGENT_HEADERS=(
+  -H "X-Admin-Token: ${ADMIN_TOKEN}"
+  -H "Content-Type: application/json"
+)
+if [[ -n "${USER_JWT}" ]]; then
+  AGENT_HEADERS+=(-H "X-Delegated-Authorization: Bearer ${USER_JWT}")
+fi
 
 echo "🔧 Upserting allowlist policy..."
 curl -sS -X POST "${BFF_URL}/api/v1/admin/agent-tools" \
@@ -52,35 +116,9 @@ curl -sS -X POST "${BFF_URL}/api/v1/admin/agent-tools" \
 
 echo "✅ Allowlist policy upserted"
 
-echo "🔍 Validating plan..."
-curl -sS -X POST "${BFF_URL}/api/v1/agent-plans/validate" \
-  -H "Content-Type: application/json" \
-  -d "{
-    \"plan_id\": \"${plan_id}\",
-    \"goal\": \"smoke\",
-    \"risk_level\": \"read\",
-    \"requires_approval\": false,
-    \"steps\": [
-      {
-        \"step_id\": \"step_0\",
-        \"tool_id\": \"${tool_id}\",
-        \"method\": \"GET\"
-      }
-    ]
-  }" >/dev/null
-
-echo "✅ Plan validated"
-
-echo "📝 Recording approval..."
-curl -sS -X POST "${BFF_URL}/api/v1/agent-plans/${plan_id}/approvals" \
-  -H "X-Admin-Token: ${ADMIN_TOKEN}" \
-  -H "Content-Type: application/json" \
-  -d '{"decision":"APPROVE","comment":"smoke"}' >/dev/null
-
 echo "🚀 Starting agent run..."
 run_resp="$(curl -sS -X POST "${BFF_URL}/api/v1/agent/runs" \
-  -H "X-Admin-Token: ${ADMIN_TOKEN}" \
-  -H "Content-Type: application/json" \
+  "${AGENT_HEADERS[@]}" \
   -d "{
     \"goal\": \"smoke\",
     \"steps\": [
@@ -91,7 +129,7 @@ run_resp="$(curl -sS -X POST "${BFF_URL}/api/v1/agent/runs" \
         \"path\": \"/api/v1/health\"
       }
     ],
-    \"context\": {\"plan_id\": \"${plan_id}\", \"risk_level\": \"read\"}
+    \"context\": {\"risk_level\": \"read\"}
   }")"
 
 run_id="$("$PYTHON_BIN" - <<'PY' "$run_resp"
@@ -112,7 +150,7 @@ echo "RUN_ID=$run_id"
 echo "⏳ Waiting for run completion..."
 for ((i=1; i<=RETRIES; i++)); do
   status_resp="$(curl -sS -X GET "${BFF_URL}/api/v1/agent/runs/${run_id}" \
-    -H "X-Admin-Token: ${ADMIN_TOKEN}")"
+    "${AGENT_HEADERS[@]}")"
   status="$("$PYTHON_BIN" - <<'PY' "$status_resp"
 import json
 import sys

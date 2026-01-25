@@ -70,14 +70,14 @@ ADMIN_API_KEY=
 ADMIN_TOKEN=
 ```
 
-## End-user JWT (Agent Sessions)
+## End-user JWT (Delegated Auth)
 
-Agent Sessions (`/api/v1/agent-sessions/*`) run under delegated end-user auth.
+Delegated end-user auth is used for `/api/v1/agent/*` (including the Pipeline Agent chat route) and selected AI endpoints.
 
 ```bash
 USER_JWT_ENABLED=true
 
-# Dev-only HS256 signing (the demo script can generate JWTs when this is set)
+# Dev-only HS256 signing (demo scripts can generate JWTs when this is set)
 USER_JWT_HS256_SECRET=change_me_dev_secret # comma-separated rotation supported: new_secret,old_secret
 
 # Production verification (prefer RS256 + JWKS)
@@ -97,7 +97,7 @@ USER_JWT_TTL_SECONDS=3600
 # OpenAI-compatible (recommended)
 LLM_PROVIDER=openai_compat
 LLM_BASE_URL=https://api.openai.com/v1
-LLM_MODEL=gpt-4o-mini
+LLM_MODEL=gpt-5
 OPENAI_API_KEY=change_me
 
 # Alternative key name:
@@ -342,6 +342,13 @@ ONTOLOGY_PROTECTED_BRANCHES=main
 ONTOLOGY_REQUIRE_PROPOSALS=true
 ONTOLOGY_REQUIRE_HEALTH_GATE=true
 ONTOLOGY_DEPLOYMENTS_V2=true
+```
+
+## Pipeline Planner
+
+```bash
+# Enable LLM-backed pipeline planning (single autonomous loop + MCP tools).
+PIPELINE_PLAN_LLM_ENABLED=true
 ```
 
 ## Lineage / Audit
