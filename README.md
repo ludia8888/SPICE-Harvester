@@ -1,13 +1,13 @@
 # SPICE HARVESTER
 
-> Ontology + Event Sourcing + Data Plane + LLM-native Control Plane
+> Ontology + Event Sourcing + Data Plane + Tool-using LLM Agent
 
 - English README: `README.en.md`
 - 문서 인덱스: `docs/README.md`
 - API 목록(자동 생성): `docs/API_REFERENCE.md`
 - 아키텍처(자동 생성 섹션 포함): `docs/ARCHITECTURE.md`
 - Action writeback 설계/철학: `docs/ACTION_WRITEBACK_DESIGN.md`
-- LLM-native control plane(Planner/Memory/Evals): `docs/LLM_NATIVE_CONTROL_PLANE.md`
+- Pipeline Agent(단일 autonomous loop + MCP tools): `docs/PIPELINE_AGENT.md`
 
 ---
 
@@ -19,7 +19,7 @@
 - [4) 시스템 구성(서비스/SSoT/플레인)](#4-시스템-구성서비스ssot플레인)
 - [5) 핵심 기능(현재 구현)](#5-핵심-기능현재-구현)
 - [6) Action writeback + Decision Simulation(What-if)](#6-action-writeback--decision-simulationwhat-if)
-- [7) LLM-native Control Plane(Agent Plans)](#7-llm-native-control-planeagent-plans)
+- [7) Pipeline Agent(단일 autonomous loop + MCP tools)](#7-pipeline-agent단일-autonomous-loop--mcp-tools)
 - [8) 보안/거버넌스/감사](#8-보안거버넌스감사)
 - [9) 관측/운영(OpenTelemetry)](#9-관측운영opentelemetry)
 - [10) 로컬 실행(빠른 시작)](#10-로컬-실행빠른-시작)
@@ -33,7 +33,7 @@
 ## 1) 한 줄 요약
 
 SPICE HARVESTER는 **온톨로지 기반 그래프 데이터(SSoT) + 이벤트 소싱(불변 로그) + 버전화된 데이터 플레인(lakeFS)** 위에서,  
-업무/데이터 변경을 **“시뮬레이션으로 반증 가능한 형태”** 로 만들고, 그 위에 **LLM 컨트롤 플레인(계획 컴파일러 + HITL + 정책 강제)** 을 얹어
+업무/데이터 변경을 **“시뮬레이션으로 반증 가능한 형태”** 로 만들고, 그 위에 **Tool-using LLM Agent(단일 루프 + 결정론적 도구)** 를 얹어
 **안전한 운영 자동화**와 **재현 가능한 의사결정**을 가능하게 하는 플랫폼입니다.
 
 ---
@@ -80,7 +80,7 @@ SPICE HARVESTER는 이를 위해:
 
 ### 4.1 마이크로서비스(로컬 기본 포트)
 
-- **BFF (8002)**: 외부 진입점. 프론트 계약, 라우팅, 정책/레이트리밋, agent-plans control plane 엔드포인트
+- **BFF (8002)**: 외부 진입점. 프론트 계약, 라우팅, 정책/레이트리밋, Pipeline Plans + Pipeline Agent API
 - **OMS (8000)**: 온톨로지/그래프 관리(내부용; 필요 시 debug ports로 노출)
 - **Funnel (8003)**: 타입 추론/구조 분석(내부용)
 - **Agent**: 에이전트 도구 실행기(단일 순차 루프, 내부용; BFF를 통해서만 호출)
@@ -177,42 +177,24 @@ flowchart LR
 
 ---
 
-## 7) LLM-native Control Plane(Agent Plans)
+## 7) Pipeline Agent(단일 autonomous loop + MCP tools)
 
-> LLM은 실행기가 아니라 **대화형 컴파일러(Planner)** 입니다.
+> 목표: 사용자의 자연어 요청을 **의미 변형 없이** 최대한 정확히 실행하기.
 
 ### 7.1 핵심 보장
-- LLM은 **plan JSON(typed)** 만 생성하고, 실행은 서버가 강제 검증합니다.
-- write/workflow는 항상 **simulate→approve→submit**을 서버가 강제합니다.
-- validate 결과는 단순 errors/warnings가 아니라 **PlanCompilationReport**로 “왜 reject됐는지 / 무엇을 고치면 되는지 / 서버 제안 patch”까지 제공합니다.
-- 기본은 **reject(투명성/안전)** 이고, 사용자가 patch를 명시적으로 수락해야만 plan이 수정됩니다.
+- LLM은 “DSL 문자열 생성”이 아니라, **도구 호출(MCP)로만** 분석/플랜을 조립합니다.
+- 서버는 **무음(heuristic) 수정**을 하지 않습니다. 수리는 `plan_update_node_metadata`/`plan_delete_node` 등 edit/patch 도구로만 수행합니다.
+- 성능: 한 번의 inference에 **여러 tool call을 배치**(`tool_calls`)해서 round-trip 수를 줄이고, 프롬프트는 **append-only JSONL**로 유지해 prefix caching을 최대화합니다. 필요 시 서버가 **결정론 compaction**을 수행합니다.
 
 ### 7.2 주요 엔드포인트(요약)
-- `POST /api/v1/agent-plans/compile`: 자연어 → plan draft 생성(LLM) + 서버 validate + plan registry 저장
-- `POST /api/v1/agent-plans/validate`: 정적 검증 + `compilation_report` 반환
-- `POST /api/v1/agent-plans/{plan_id}/apply-patch`: 서버 제안 patch를 사용자가 수락한 경우에만 적용(재검증 포함)
-- `POST /api/v1/agent-plans/{plan_id}/preview`: preview-safe step만 실행(시뮬레이션/GET/READ risk)
-- `POST /api/v1/agent-plans/{plan_id}/execute`: 승인 기록 없으면 403, 승인 후 Agent run 시작
-- `POST /api/v1/agent-plans/{plan_id}/approvals`: 승인 기록
-- `POST /api/v1/agent-plans/context-pack`: 운영 메모리(context pack) 안전 요약
+- `POST /api/v1/agent/pipeline-runs`: (UI Chat) 자연어 요청 → 분석/플랜 조립 → (옵션) plan validate/preview
+- `POST /api/v1/pipeline-plans/compile`: compile 전용 API(내부적으로 동일한 단일 루프 런타임 사용)
+- `POST /api/v1/pipeline-plans/context-pack`: 결정론적 데이터 요약(context pack)
+- `POST /api/v1/pipeline-plans/{plan_id}/preview`: plan preview(샘플 기반)
+- `POST /api/v1/pipeline-plans/{plan_id}/inspect-preview`: preview를 기반으로 컬럼/통계 inspect
+- `POST /api/v1/pipeline-plans/{plan_id}/evaluate-joins`: join 품질 평가(샘플링 기반)
 
 전체 목록은 `docs/API_REFERENCE.md`에서 확인할 수 있습니다.
-
-### 7.3 Step dataflow(최소 스펙): produces/consumes
-
-운영 자동화에서 중요한 것은 “다음 스텝 입력을 안전하게 연결”하는 것입니다.  
-그래서 각 step은 `produces`/`consumes`(artifact refs)를 선언하고, 서버는 다음을 기계적으로 차단합니다.
-
-- 존재하지 않는 artifact를 consume
-- simulate 결과 없이 submit 단계로 진행
-- simulation_id 링크 불일치(잘못된 결과 참조)
-
-### 7.4 정책 드리프트 방지(테스트로 강제)
-
-enterprise catalog fingerprint와 allowlist bundle hash를 테스트에 “핀”하여,  
-정책이 바뀌면 CI가 깨지도록 강제합니다.
-
-- 드리프트 가드: `backend/tests/unit/errors/test_policy_drift_guards.py`
 
 ---
 
@@ -333,4 +315,4 @@ python scripts/generate_error_taxonomy.py
   - `docs/ARCHITECTURE.md`
   - `docs/OPERATIONS.md`
   - `docs/SECURITY.md`
-  - `docs/LLM_NATIVE_CONTROL_PLANE.md`
+  - `docs/PIPELINE_AGENT.md`

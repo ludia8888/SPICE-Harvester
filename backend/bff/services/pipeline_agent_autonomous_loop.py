@@ -37,7 +37,7 @@ from shared.services.llm_gateway import (
 from shared.services.llm_quota import enforce_llm_quota
 from shared.services.pipeline_plan_registry import PipelinePlanRegistry
 from shared.services.redis_service import RedisService
-from shared.utils.llm_safety import mask_pii
+from shared.utils.llm_safety import mask_pii, stable_json_dumps
 
 logger = logging.getLogger(__name__)
 
@@ -141,6 +141,8 @@ class _AgentState:
     # Plan (optional): created only when the LLM explicitly calls plan_new.
     plan_obj: Optional[Dict[str, Any]] = None
     last_observation: Optional[Dict[str, Any]] = None
+    # Append-only JSONL prompt log to enable provider-side prefix caching.
+    prompt_items: List[str] = field(default_factory=list)
 
 
 _PIPELINE_AGENT_ALLOWED_TOOLS: tuple[str, ...] = (
@@ -458,12 +460,14 @@ def _build_system_prompt(*, allowed_tools: List[str]) -> str:
     return (
         "You are a single autonomous data-engineering agent for SPICE-Harvester.\n"
         "You can iteratively call tools to inspect datasets (profiling/nulls/keys/types) and optionally build a pipeline plan.\n"
+        "The user prompt is an append-only JSONL log (one JSON object per line). The newest lines are the most recent state/observations.\n"
         "\n"
         "Core rules:\n"
         "- Return ONLY JSON matching the schema. No markdown, no extra text.\n"
         "- Do NOT invent data; prefer tool observations over guessing.\n"
         "- Tool args MUST NOT include raw `context_pack` or `plan` objects; the server stores them.\n"
         "- Respect scope: if the user asked ONLY for analysis (e.g., null check), do NOT build a plan.\n"
+        "- If planner_hints.require_plan=true, you MUST build and validate a plan (do NOT finish with report-only).\n"
         "- If the user asked for a derived dataset/result, build a plan via plan_* tools and ensure it validates.\n"
         "- No silent server-side rewrites exist; any plan changes must be explicit tool calls.\n"
         "- Latency: prefer batching multiple tool calls in a single response via `tool_calls` (max 12 per step).\n"
@@ -500,13 +504,86 @@ def _build_system_prompt(*, allowed_tools: List[str]) -> str:
     )
 
 
-def _build_user_prompt(*, snapshot: Dict[str, Any]) -> str:
-    return (
-        "Current snapshot (authoritative):\n"
-        f"{json.dumps(snapshot or {}, ensure_ascii=False)}\n"
-        "\n"
-        "Choose the next action.\n"
-    )
+def _prompt_text(items: List[str]) -> str:
+    if not items:
+        return ""
+    # Keep a trailing newline so each next append preserves exact prefix matches.
+    return "\n".join([str(item) for item in items]) + "\n"
+
+
+def _build_prompt_header(
+    *,
+    state: _AgentState,
+    answers: Optional[Dict[str, Any]],
+    planner_hints: Optional[Dict[str, Any]],
+    task_spec: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    return {
+        "type": "header",
+        "goal": state.goal,
+        "data_scope": {"db_name": state.db_name, "branch": state.branch, "dataset_ids": state.dataset_ids},
+        "answers": answers or None,
+        "planner_hints": planner_hints or None,
+        "task_spec": task_spec or None,
+        "context_pack_summary": _summarize_context_pack(state.context_pack),
+    }
+
+
+def _build_compaction_snapshot(
+    *,
+    state: _AgentState,
+    answers: Optional[Dict[str, Any]],
+    planner_hints: Optional[Dict[str, Any]],
+    task_spec: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    # Deterministic compaction snapshot: derived from server-side state, not from model text.
+    return {
+        "goal": state.goal,
+        "data_scope": {"db_name": state.db_name, "branch": state.branch, "dataset_ids": state.dataset_ids},
+        "answers": answers or None,
+        "planner_hints": planner_hints or None,
+        "task_spec": task_spec or None,
+        "context_pack_summary": _summarize_context_pack(state.context_pack),
+        "null_report": _trim_null_report(state.null_report),
+        "key_inference": _trim_key_inference(state.key_inference),
+        "type_inference": _trim_type_inference(state.type_inference),
+        "join_plan": _trim_join_plan(state.join_plan),
+        "plan_status": _plan_status(state.plan_obj),
+        "plan_summary": _summarize_plan(state.plan_obj),
+        "last_observation": state.last_observation,
+    }
+
+
+def _maybe_compact_prompt_items(
+    *,
+    state: _AgentState,
+    answers: Optional[Dict[str, Any]],
+    planner_hints: Optional[Dict[str, Any]],
+    task_spec: Optional[Dict[str, Any]],
+    max_chars: int,
+) -> None:
+    """
+    Deterministic compaction: when the append-only log grows too large, replace it with:
+    - a fresh header, plus
+    - a compact authoritative snapshot derived from current server-side state.
+    """
+    if max_chars <= 0:
+        return
+    current = _prompt_text(state.prompt_items)
+    if len(current) <= max_chars:
+        return
+    snapshot = _build_compaction_snapshot(state=state, answers=answers, planner_hints=planner_hints, task_spec=task_spec)
+    state.prompt_items = [
+        stable_json_dumps(_build_prompt_header(state=state, answers=answers, planner_hints=planner_hints, task_spec=task_spec)),
+        stable_json_dumps(
+            {
+                "type": "compaction",
+                "reason": "prompt_too_large",
+                "snapshot": snapshot,
+                "note": "Older detailed log was compacted. Treat snapshot as authoritative and continue.",
+            }
+        ),
+    ]
 
 
 def _mask_tool_observation(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -528,6 +605,9 @@ async def run_pipeline_agent_mcp_autonomous(
     data_scope: PipelinePlanDataScope,
     answers: Optional[Dict[str, Any]],
     planner_hints: Optional[Dict[str, Any]],
+    task_spec: Optional[Dict[str, Any]] = None,
+    context_pack: Optional[Dict[str, Any]] = None,
+    persist_plan: bool = True,
     actor: str,
     tenant_id: str,
     user_id: Optional[str],
@@ -653,6 +733,9 @@ async def run_pipeline_agent_mcp_autonomous(
         dataset_ids=dataset_ids,
         goal=str(goal or "").strip(),
     )
+    if isinstance(context_pack, dict) and context_pack:
+        state.context_pack = dict(context_pack)
+        state.last_observation = {"status": "bootstrapped", "context_pack": "provided"}
 
     # Scale iteration budget by dataset count (multi-way joins take more tool calls).
     max_steps = min(60, 24 + max(0, len(state.dataset_ids) - 1) * 8)
@@ -664,6 +747,8 @@ async def run_pipeline_agent_mcp_autonomous(
     allowed_tools = list(_PIPELINE_AGENT_ALLOWED_TOOLS)
     system_prompt = _build_system_prompt(allowed_tools=allowed_tools)
     max_tool_calls_per_step = 12
+    # Keep the user prompt under the LLM gateway hard cap to avoid server-side truncation.
+    prompt_char_limit = int(max(1, int(getattr(llm_gateway, "max_prompt_chars", 20000) or 20000) * 0.9))
 
     async def _execute_tool_call(*, tool_name: str, args: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -857,7 +942,14 @@ async def run_pipeline_agent_mcp_autonomous(
                 rows = preview.get("rows")
                 if isinstance(rows, list):
                     preview["rows"] = rows[:5]
-                state.last_observation = _mask_tool_observation({"status": payload.get("status"), "preview": preview, "warnings": payload.get("warnings")})
+                state.last_observation = _mask_tool_observation(
+                    {
+                        "status": payload.get("status"),
+                        "preview": preview,
+                        "warnings": payload.get("warnings"),
+                        "plan_status": _plan_status(state.plan_obj),
+                    }
+                )
             else:
                 observation = dict(payload) if isinstance(payload, dict) else {"result": payload}
                 observation.pop("plan", None)
@@ -867,7 +959,7 @@ async def run_pipeline_agent_mcp_autonomous(
                     observation["warnings"] = observation.get("warnings")[:20]
                 if isinstance(observation.get("errors"), list):
                     observation["errors"] = observation.get("errors")[:20]
-                state.last_observation = _mask_tool_observation(observation)
+                state.last_observation = _mask_tool_observation({**observation, "plan_status": _plan_status(state.plan_obj)})
 
             return state.last_observation
 
@@ -891,30 +983,48 @@ async def run_pipeline_agent_mcp_autonomous(
         }
         if max_pairs:
             bootstrap_args["max_join_candidates"] = min(30, max(10, max_pairs))
-        pack_payload = await _call_pipeline_tool("context_pack_build", bootstrap_args)
-        pack = pack_payload.get("context_pack") if isinstance(pack_payload, dict) else None
-        if isinstance(pack, dict):
-            state.context_pack = pack
-            state.last_observation = {"status": "bootstrapped", "context_pack": "ready"}
+        if not isinstance(state.context_pack, dict):
+            pack_payload = await _call_pipeline_tool("context_pack_build", bootstrap_args)
+            pack = pack_payload.get("context_pack") if isinstance(pack_payload, dict) else None
+            if isinstance(pack, dict):
+                state.context_pack = pack
+                state.last_observation = {"status": "bootstrapped", "context_pack": "ready"}
     except Exception as exc:
         logger.warning("pipeline agent context_pack bootstrap failed err=%s", exc)
 
+    # Initialize append-only prompt log with a stable header (enables prefix caching across iterations).
+    state.prompt_items = [
+        stable_json_dumps(_build_prompt_header(state=state, answers=answers, planner_hints=planner_hints, task_spec=task_spec))
+    ]
+    if state.last_observation:
+        state.prompt_items.append(
+            stable_json_dumps({"type": "bootstrap_observation", "observation": _mask_tool_observation(state.last_observation)})
+        )
+
     for step_idx in range(max_steps):
-        snapshot: Dict[str, Any] = {
-            "goal": state.goal,
-            "data_scope": {"db_name": state.db_name, "branch": state.branch, "dataset_ids": state.dataset_ids},
-            "answers": answers or None,
-            "planner_hints": planner_hints or None,
-            "context_pack_summary": _summarize_context_pack(state.context_pack),
-            "null_report": _trim_null_report(state.null_report),
-            "key_inference": _trim_key_inference(state.key_inference),
-            "type_inference": _trim_type_inference(state.type_inference),
-            "join_plan": _trim_join_plan(state.join_plan),
+        step_state: Dict[str, Any] = {
+            "type": "state",
+            "step": step_idx + 1,
+            "analysis_status": {
+                "has_context_pack": isinstance(state.context_pack, dict),
+                "has_null_report": isinstance(state.null_report, dict),
+                "has_key_inference": isinstance(state.key_inference, dict),
+                "has_type_inference": isinstance(state.type_inference, dict),
+                "has_join_plan": isinstance(state.join_plan, list),
+            },
             "plan_status": _plan_status(state.plan_obj),
             "plan_summary": _summarize_plan(state.plan_obj),
             "last_observation": state.last_observation,
         }
-        user_prompt = _build_user_prompt(snapshot=snapshot)
+        state.prompt_items.append(stable_json_dumps(step_state))
+        _maybe_compact_prompt_items(
+            state=state,
+            answers=answers,
+            planner_hints=planner_hints,
+            task_spec=task_spec,
+            max_chars=prompt_char_limit,
+        )
+        user_prompt = _prompt_text(state.prompt_items)
 
         if data_policies and redis_service:
             model_for_quota = str(selected_model or getattr(llm_gateway, "model", "") or "").strip()
@@ -952,6 +1062,17 @@ async def run_pipeline_agent_mcp_autonomous(
         except (LLMUnavailableError, LLMRequestError, LLMOutputValidationError) as exc:
             tool_errors.append(str(exc))
             break
+
+        # Append the decision to the prompt log so the next iteration benefits from prefix caching.
+        state.prompt_items.append(
+            stable_json_dumps(
+                {
+                    "type": "decision",
+                    "step": step_idx + 1,
+                    "decision": decision.model_dump(mode="json"),
+                }
+            )
+        )
 
         notes.extend([str(n) for n in (decision.notes or []) if str(n or "").strip()])
         tool_warnings.extend([str(w) for w in (decision.warnings or []) if str(w or "").strip()])
@@ -1010,16 +1131,17 @@ async def run_pipeline_agent_mcp_autonomous(
                 # Persist the plan so the existing preview endpoint can be used from the UI.
                 if not plan_id:
                     plan_id = str(uuid4())
-                await plan_registry.upsert_plan(
-                    plan_id=plan_id,
-                    tenant_id=tenant_id,
-                    status="COMPILED",
-                    goal=str(validation.plan.goal or ""),
-                    db_name=str(validation.plan.data_scope.db_name or ""),
-                    branch=str(validation.plan.data_scope.branch or "") or None,
-                    plan=validation.plan.model_dump(mode="json"),
-                    created_by=actor,
-                )
+                if persist_plan:
+                    await plan_registry.upsert_plan(
+                        plan_id=plan_id,
+                        tenant_id=tenant_id,
+                        status="COMPILED",
+                        goal=str(validation.plan.goal or ""),
+                        db_name=str(validation.plan.data_scope.db_name or ""),
+                        branch=str(validation.plan.data_scope.branch or "") or None,
+                        plan=validation.plan.model_dump(mode="json"),
+                        created_by=actor,
+                    )
 
                 return {
                     "run_id": run_id,
@@ -1089,7 +1211,11 @@ async def run_pipeline_agent_mcp_autonomous(
                 break
 
             executed_tools.append(tool_name)
+            state.prompt_items.append(stable_json_dumps({"type": "tool_call", "step": step_idx + 1, "tool": tool_name, "args": args}))
             observation = await _execute_tool_call(tool_name=tool_name, args=args)
+            state.prompt_items.append(
+                stable_json_dumps({"type": "tool_output", "step": step_idx + 1, "tool": tool_name, "output": observation})
+            )
             if not isinstance(observation, dict):
                 stop_reason = "invalid_observation"
                 break
@@ -1111,6 +1237,16 @@ async def run_pipeline_agent_mcp_autonomous(
             if stop_reason:
                 augmented["batch_stopped"] = stop_reason
             state.last_observation = augmented
+            state.prompt_items.append(
+                stable_json_dumps(
+                    {
+                        "type": "batch_summary",
+                        "step": step_idx + 1,
+                        "executed_tools": executed_tools,
+                        "stop_reason": stop_reason,
+                    }
+                )
+            )
         continue
 
     # Loop exhausted / LLM error. Return best-effort result.
@@ -1153,16 +1289,17 @@ async def run_pipeline_agent_mcp_autonomous(
         final_status = "success" if (not validation.errors and not tool_errors) else "partial"
         if not plan_id:
             plan_id = str(uuid4())
-        await plan_registry.upsert_plan(
-            plan_id=plan_id,
-            tenant_id=tenant_id,
-            status="DRAFT" if validation.errors else "COMPILED",
-            goal=str(validation.plan.goal or ""),
-            db_name=str(validation.plan.data_scope.db_name or ""),
-            branch=str(validation.plan.data_scope.branch or "") or None,
-            plan=validation.plan.model_dump(mode="json"),
-            created_by=actor,
-        )
+        if persist_plan:
+            await plan_registry.upsert_plan(
+                plan_id=plan_id,
+                tenant_id=tenant_id,
+                status="DRAFT" if validation.errors else "COMPILED",
+                goal=str(validation.plan.goal or ""),
+                db_name=str(validation.plan.data_scope.db_name or ""),
+                branch=str(validation.plan.data_scope.branch or "") or None,
+                plan=validation.plan.model_dump(mode="json"),
+                created_by=actor,
+            )
         validation_errors_out = list(validation.errors or [])
         if not validation_errors_out and tool_errors:
             validation_errors_out = tool_errors[:1]

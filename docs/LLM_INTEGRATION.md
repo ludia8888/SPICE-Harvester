@@ -47,16 +47,11 @@ LLM 결합의 출발점은 “이미 되는 것”과 “사람이 힘든 것”
 - Pipeline Agent (ETL): `POST /api/v1/agent/pipeline-runs` + `POST /api/v1/pipeline-plans/compile`
   - 단일 autonomous loop + MCP tools로 “분석 → plan build → validate/preview → repair”를 반복
 - Agent 서비스(옵션): `/api/v1/agent/*` (내부 오케스트레이션, BFF 경유 실행, 감사 이벤트 기록)
-- Agent Plans(LLM-native control plane): `/api/v1/agent-plans/*` (Legacy/대체 예정)
-  - `POST /compile`: 자연어 → `AgentPlan`(typed) 생성(LLM) + 서버 validate + Plan registry 저장
-  - `POST /validate`: allowlist/risk/idempotency/simulate-first 검증 + `PlanCompilationReport` 반환
-  - `POST /{plan_id}/apply-patch`: 서버 제안 patch를 사용자가 수락한 경우에만 적용(재검증 포함)
-  - `POST /{plan_id}/preview` / `POST /{plan_id}/execute`: 승인/시뮬레이션 게이트를 통과해야 실행
 
 위 라우터는 “추천/보조/계획” 역할이며, 최종 반영은 항상 서버 검증/승인 흐름을 통과해야 합니다.  
 상세 설계/철학:
 - 우선(자연어 ETL): `docs/PIPELINE_AGENT.md`
-- 레거시(Plan-only): `docs/LLM_NATIVE_CONTROL_PLANE.md`
+- (Removed) legacy plan-only control plane 문서/엔드포인트는 제거되었습니다.
 
 ---
 

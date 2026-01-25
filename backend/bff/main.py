@@ -55,10 +55,7 @@ from shared.services.connector_registry import ConnectorRegistry
 from shared.services.dataset_registry import DatasetRegistry
 from shared.services.dataset_profile_registry import DatasetProfileRegistry
 from shared.services.agent_registry import AgentRegistry
-from shared.services.agent_model_registry import AgentModelRegistry
-from shared.services.agent_function_registry import AgentFunctionRegistry
 from shared.services.agent_session_registry import AgentSessionRegistry
-from shared.services.agent_plan_registry import AgentPlanRegistry
 from shared.services.agent_policy_registry import AgentPolicyRegistry
 from shared.services.agent_tool_registry import AgentToolRegistry
 from shared.services.agent_tool_allowlist import bootstrap_agent_tool_allowlist
@@ -109,12 +106,6 @@ from data_connector.google_sheets.service import GoogleSheetsService
 from bff.routers import (
     admin,
     ai,
-    agent_functions,
-    agent_plans,
-    agent_policies,
-    agent_models,
-    agent_sessions,
-    agent_tools,
     audit,
     actions,
     ci_webhooks,
@@ -220,17 +211,8 @@ class BFFServiceContainer:
         # 10c. Initialize Agent Policy Registry (tenant allowlists)
         await self._initialize_agent_policy_registry()
 
-        # 10d. Initialize Agent Model Registry (LLM model metadata/capabilities)
-        await self._initialize_agent_model_registry()
-
-        # 10e. Initialize Agent Function Registry (registered function execution)
-        await self._initialize_agent_function_registry()
-
-        # 12. Initialize Agent Tool Registry (allowlist/policy)
+        # 10d. Initialize Agent Tool Registry (internal tool allowlist/policy)
         await self._initialize_agent_tool_registry()
-
-        # 13. Initialize Agent Plan Registry (compiled plan persistence)
-        await self._initialize_agent_plan_registry()
 
         # 14. Initialize Pipeline Executor (preview/build engine)
         await self._initialize_pipeline_executor()
@@ -419,30 +401,8 @@ class BFFServiceContainer:
         except Exception as e:
             logger.error(f"Failed to initialize AgentPolicyRegistry: {e}")
 
-    async def _initialize_agent_model_registry(self) -> None:
-        """Initialize Postgres-backed agent model registry."""
-        try:
-            logger.info("Initializing AgentModelRegistry (Postgres)...")
-            registry = AgentModelRegistry()
-            await registry.initialize()
-            self._bff_services["agent_model_registry"] = registry
-            logger.info("AgentModelRegistry initialized successfully")
-        except Exception as e:
-            logger.error(f"Failed to initialize AgentModelRegistry: {e}")
-
-    async def _initialize_agent_function_registry(self) -> None:
-        """Initialize Postgres-backed agent function registry."""
-        try:
-            logger.info("Initializing AgentFunctionRegistry (Postgres)...")
-            registry = AgentFunctionRegistry()
-            await registry.initialize()
-            self._bff_services["agent_function_registry"] = registry
-            logger.info("AgentFunctionRegistry initialized successfully")
-        except Exception as e:
-            logger.error(f"Failed to initialize AgentFunctionRegistry: {e}")
-
     async def _initialize_agent_tool_registry(self) -> None:
-        """Initialize Postgres-backed agent tool registry."""
+        """Initialize Postgres-backed agent tool registry (internal allowlist/policy)."""
         try:
             logger.info("Initializing AgentToolRegistry (Postgres)...")
             registry = AgentToolRegistry()
@@ -459,17 +419,6 @@ class BFFServiceContainer:
             logger.info("AgentToolRegistry initialized successfully")
         except Exception as e:
             logger.error(f"Failed to initialize AgentToolRegistry: {e}")
-
-    async def _initialize_agent_plan_registry(self) -> None:
-        """Initialize Postgres-backed agent plan registry."""
-        try:
-            logger.info("Initializing AgentPlanRegistry (Postgres)...")
-            registry = AgentPlanRegistry()
-            await registry.initialize()
-            self._bff_services["agent_plan_registry"] = registry
-            logger.info("AgentPlanRegistry initialized successfully")
-        except Exception as e:
-            logger.error(f"Failed to initialize AgentPlanRegistry: {e}")
 
     async def _initialize_pipeline_executor(self) -> None:
         """Initialize pipeline executor (preview/build engine)."""
@@ -627,13 +576,6 @@ class BFFServiceContainer:
             except Exception as e:
                 logger.error(f"Error closing AgentToolRegistry: {e}")
 
-        if "agent_plan_registry" in self._bff_services:
-            try:
-                await self._bff_services["agent_plan_registry"].close()
-                logger.info("AgentPlanRegistry closed")
-            except Exception as e:
-                logger.error(f"Error closing AgentPlanRegistry: {e}")
-
         if "pipeline_executor" in self._bff_services:
             self._bff_services.pop("pipeline_executor", None)
         
@@ -712,29 +654,11 @@ class BFFServiceContainer:
             raise RuntimeError("AgentPolicyRegistry not initialized")
         return self._bff_services["agent_policy_registry"]
 
-    def get_agent_model_registry(self) -> AgentModelRegistry:
-        """Get agent model registry instance"""
-        if "agent_model_registry" not in self._bff_services:
-            raise RuntimeError("AgentModelRegistry not initialized")
-        return self._bff_services["agent_model_registry"]
-
-    def get_agent_function_registry(self) -> AgentFunctionRegistry:
-        """Get agent function registry instance"""
-        if "agent_function_registry" not in self._bff_services:
-            raise RuntimeError("AgentFunctionRegistry not initialized")
-        return self._bff_services["agent_function_registry"]
-
     def get_agent_tool_registry(self) -> AgentToolRegistry:
         """Get agent tool registry instance"""
         if "agent_tool_registry" not in self._bff_services:
             raise RuntimeError("AgentToolRegistry not initialized")
         return self._bff_services["agent_tool_registry"]
-
-    def get_agent_plan_registry(self) -> AgentPlanRegistry:
-        """Get agent plan registry instance"""
-        if "agent_plan_registry" not in self._bff_services:
-            raise RuntimeError("AgentPlanRegistry not initialized")
-        return self._bff_services["agent_plan_registry"]
 
     def get_pipeline_executor(self) -> PipelineExecutor:
         """Get pipeline executor instance"""
@@ -1068,29 +992,6 @@ async def get_agent_policy_registry() -> AgentPolicyRegistry:
     return _bff_container.get_agent_policy_registry()
 
 
-async def get_agent_model_registry() -> AgentModelRegistry:
-    if _bff_container is None:
-        raise RuntimeError("BFF container not initialized")
-    return _bff_container.get_agent_model_registry()
-
-async def get_agent_function_registry() -> AgentFunctionRegistry:
-    if _bff_container is None:
-        raise RuntimeError("BFF container not initialized")
-    return _bff_container.get_agent_function_registry()
-
-
-async def get_agent_tool_registry() -> AgentToolRegistry:
-    if _bff_container is None:
-        raise RuntimeError("BFF container not initialized")
-    return _bff_container.get_agent_tool_registry()
-
-
-async def get_agent_plan_registry() -> AgentPlanRegistry:
-    if _bff_container is None:
-        raise RuntimeError("BFF container not initialized")
-    return _bff_container.get_agent_plan_registry()
-
-
 async def get_pipeline_executor() -> PipelineExecutor:
     """Get PipelineExecutor from BFF container"""
     if _bff_container is None:
@@ -1130,12 +1031,6 @@ app.include_router(context7.router, prefix="/api/v1")
 app.include_router(context_tools.router, prefix="/api/v1")
 app.include_router(document_bundles.router, prefix="/api/v1")
 app.include_router(agent_proxy.router, prefix="/api/v1")
-app.include_router(agent_plans.router, prefix="/api/v1")
-app.include_router(agent_policies.router, prefix="/api/v1")
-app.include_router(agent_models.router, prefix="/api/v1")
-app.include_router(agent_functions.router, prefix="/api/v1")
-app.include_router(agent_sessions.router, prefix="/api/v1")
-app.include_router(agent_tools.router, prefix="/api/v1")
 app.include_router(summary.router, prefix="/api/v1")
 app.include_router(pipeline.router, prefix="/api/v1")
 app.include_router(pipeline_plans.router, prefix="/api/v1")

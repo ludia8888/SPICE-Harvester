@@ -1,13 +1,13 @@
 # SPICE HARVESTER
 
-> Ontology + Event Sourcing + Data Plane + LLM-native Control Plane
+> Ontology + Event Sourcing + Data Plane + Tool-using LLM Agent
 
 - Korean README (canonical): `README.md`
 - Docs index: `docs/README.md`
 - API reference (auto-generated): `docs/API_REFERENCE.md`
 - Architecture (includes auto-generated sections): `docs/ARCHITECTURE.md`
 - Action writeback design/philosophy: `docs/ACTION_WRITEBACK_DESIGN.md`
-- LLM-native control plane (Planner/Memory/Evals): `docs/LLM_NATIVE_CONTROL_PLANE.md`
+- Pipeline Agent (single autonomous loop + MCP tools): `docs/PIPELINE_AGENT.md`
 
 ---
 
@@ -19,7 +19,7 @@
 - [4) System building blocks (services / SSoT / planes)](#4-system-building-blocks-services--ssot--planes)
 - [5) Key capabilities (current implementation)](#5-key-capabilities-current-implementation)
 - [6) Action writeback + Decision Simulation (what-if)](#6-action-writeback--decision-simulation-what-if)
-- [7) LLM-native Control Plane (Agent Plans)](#7-llm-native-control-plane-agent-plans)
+- [7) Pipeline Agent (single autonomous loop + MCP tools)](#7-pipeline-agent-single-autonomous-loop--mcp-tools)
 - [8) Security / governance / audit](#8-security--governance--audit)
 - [9) Observability (OpenTelemetry)](#9-observability-opentelemetry)
 - [10) Local quickstart](#10-local-quickstart)
@@ -33,7 +33,7 @@
 
 ## 1) One-liner
 
-SPICE HARVESTER combines **ontology/graph (SSoT) + immutable event logs + a versioned data plane (lakeFS)** and adds an **LLM-native control plane (typed plans + compile/validate + HITL + policy enforcement)** so that operational/data changes become **simulation-first, auditable, and reproducible**.
+SPICE HARVESTER combines **ontology/graph (SSoT) + immutable event logs + a versioned data plane (lakeFS)** and adds a **tool-using LLM Agent (single loop + deterministic tools)** so that data/ops workflows become **auditable, reproducible, and simulation-first**.
 
 ---
 
@@ -80,7 +80,7 @@ SPICE HARVESTER addresses this by:
 
 ### 4.1 Microservices (local default ports)
 
-- **BFF (8002)**: external entrypoint (frontend contract), routing, policy/rate limits, agent-plans control plane
+- **BFF (8002)**: external entrypoint (frontend contract), routing, policy/rate limits, Pipeline Plans + Pipeline Agent API
 - **OMS (8000)**: ontology/graph management (internal; use debug ports when needed)
 - **Funnel (8003)**: type inference/profiling (internal)
 - **Agent**: tool runner (single sequential loop, internal; invoked via BFF only)
@@ -183,47 +183,26 @@ See: `docs/ACTION_WRITEBACK_DESIGN.md`
 
 ---
 
-## 7) LLM-native Control Plane (Agent Plans)
+## 7) Pipeline Agent (single autonomous loop + MCP tools)
 
-LLM is a runner only in the sense of producing a **typed plan**; the server is the executor and policy enforcer.
+Goal: execute the user’s natural-language intent **without semantic rewrites**.
 
 ### 7.1 Guarantees
 
-- LLM produces **plan JSON (typed)**, server validates and enforces policy.
-- All write plans are forced to **simulate-first** and require explicit approvals.
-- Validation returns a **PlanCompilationReport** (not just errors/warnings):
-  - why the plan was rejected,
-  - what can/should be changed,
-  - (optional) server-proposed plan patch (diff) that the user must explicitly accept.
+- The model does not emit DSL strings; it **only** composes plans via **tool calls (MCP)**.
+- The server performs **no silent heuristic rewrites**. Repairs happen only via explicit edit/patch tools.
+- Performance: the loop supports **batched tool calls per inference** and keeps the prompt as **append-only JSONL** for provider-side prefix caching; the server can perform **deterministic compaction** when the prompt grows too large.
 
 ### 7.2 Key endpoints (summary)
 
-- `POST /api/v1/agent-plans/compile`: natural language → plan draft (LLM) + server validate + plan registry
-- `POST /api/v1/agent-plans/validate`: static validation + `compilation_report`
-- `POST /api/v1/agent-plans/{plan_id}/apply-patch`: apply server-suggested patch only with explicit acceptance (re-validate included)
-- `POST /api/v1/agent-plans/{plan_id}/preview`: run preview-safe steps (simulate/GET/READ-risk)
-- `POST /api/v1/agent-plans/{plan_id}/execute`: blocked (403) until approval is recorded; starts agent run after approval
-- `POST /api/v1/agent-plans/{plan_id}/approvals`: record approvals
-- `POST /api/v1/agent-plans/context-pack`: build a safe context pack (operational memory summary)
+- `POST /api/v1/agent/pipeline-runs`: (UI Chat) natural language → analysis / plan assembly → (optional) validate/preview
+- `POST /api/v1/pipeline-plans/compile`: compile API (delegates to the same single-loop runtime)
+- `POST /api/v1/pipeline-plans/context-pack`: deterministic dataset summary (context pack)
+- `POST /api/v1/pipeline-plans/{plan_id}/preview`: plan preview (sampling-based)
+- `POST /api/v1/pipeline-plans/{plan_id}/inspect-preview`: inspect preview (columns/stats)
+- `POST /api/v1/pipeline-plans/{plan_id}/evaluate-joins`: join quality evaluation
 
 Full list: `docs/API_REFERENCE.md`
-
-### 7.3 Step dataflow (minimal spec): produces / consumes
-
-To safely wire step outputs into step inputs, each step declares:
-- `produces`: artifact keys it produces
-- `consumes`: artifact keys it depends on
-
-The server blocks:
-- consuming an artifact that has not been produced previously,
-- submitting without a preceding simulation,
-- mismatched `simulation_id` references.
-
-### 7.4 Policy drift prevention (test-enforced)
-
-Enterprise catalog fingerprint + allowlist bundle hash are pinned in tests so that policy changes break CI unless tests are updated intentionally.
-
-- Drift guard test: `backend/tests/unit/errors/test_policy_drift_guards.py`
 
 ---
 
@@ -349,7 +328,7 @@ python scripts/generate_error_taxonomy.py
 
 - The default is **simulate-first + HITL + policy enforcement**, not “fully autonomous execution”.
 - Production hardening still needs environment-specific work: authn/authz, tenant isolation, secrets, retention/partitioning, quotas, SLAs.
-- See: `docs/ARCHITECTURE.md`, `docs/OPERATIONS.md`, `docs/SECURITY.md`, `docs/LLM_NATIVE_CONTROL_PLANE.md`
+- See: `docs/ARCHITECTURE.md`, `docs/OPERATIONS.md`, `docs/SECURITY.md`, `docs/PIPELINE_AGENT.md`
 
 ---
 

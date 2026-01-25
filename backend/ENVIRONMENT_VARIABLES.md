@@ -70,14 +70,14 @@ ADMIN_API_KEY=
 ADMIN_TOKEN=
 ```
 
-## End-user JWT (Agent Sessions)
+## End-user JWT (Delegated Auth)
 
-Agent Sessions (`/api/v1/agent-sessions/*`) run under delegated end-user auth.
+Delegated end-user auth is used for `/api/v1/agent/*` (including the Pipeline Agent chat route) and selected AI endpoints.
 
 ```bash
 USER_JWT_ENABLED=true
 
-# Dev-only HS256 signing (the demo script can generate JWTs when this is set)
+# Dev-only HS256 signing (demo scripts can generate JWTs when this is set)
 USER_JWT_HS256_SECRET=change_me_dev_secret # comma-separated rotation supported: new_secret,old_secret
 
 # Production verification (prefer RS256 + JWKS)

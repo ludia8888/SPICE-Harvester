@@ -182,6 +182,7 @@ async def create_pipeline_run(
         data_scope=data_scope,
         answers=body.answers if isinstance(body.answers, dict) else None,
         planner_hints=body.planner_hints if isinstance(body.planner_hints, dict) else None,
+        task_spec=body.task_spec if isinstance(body.task_spec, dict) else None,
         actor=actor,
         tenant_id=tenant_id,
         user_id=user_id,

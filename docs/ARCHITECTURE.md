@@ -448,16 +448,15 @@ Agent 런타임(단일 루프) 설계는 `docs/AGENT_PRD.md` Appendix A (AGENT-R
 - `/api/v1/ai/*`는 **읽기 전용 계획 생성**과 요약만 수행한다 (write 금지).
 - LLM Gateway는 JSON schema 검증을 통해 출력 안전성을 강제한다.
 - `/api/v1/context7/*`는 search/knowledge/link/ontology analyze를 제공하지만 Agent와 자동 연계는 없다.
-- (Legacy/대체 예정) `POST /api/v1/agent-plans/compile` 기반 LLM-native control plane(typed plan, Plan-only)이 존재한다.
-  - 현재는 Pipeline Agent의 “단일 autonomous loop + MCP tools”가 자연어 ETL의 우선 경로이다. (상세: `docs/PIPELINE_AGENT.md`)
+- Pipeline Agent의 “단일 autonomous loop + MCP tools”가 자연어 ETL의 우선 경로이다. (상세: `docs/PIPELINE_AGENT.md`)
+- (Removed) `POST /api/v1/agent-plans/*` 기반의 legacy plan-only control plane은 제거되었다.
 
 ### 12.1.10 현재 미구현/제약 (명시)
 
 - 자연어 → 파이프라인 자동 구성/preview/repair는 Pipeline Agent로 부분 구현되어 있으나, 기본값은 feature flag에 의해 제어된다.
 - Pipeline Agent는 control-plane 중심(계획/검증/샘플 preview)이며, Spark build/deploy(대규모 실행) 자동화는 별도 운영 정책/승인 흐름이 필요하다.
 - 온톨로지 자동 구축은 human-in-the-loop 없이 동작하지 않는다.
-- Agent는 planner가 생성한 계획(AgentPlan)을 실행할 수 있지만, **완전 자동 실행(무승인/무시뮬레이션)** 은 허용하지 않는다.
-- (Legacy/대체 예정) Planner/allowlist/approval/plan registry 기반의 “plan-only control plane” 고도화 문서는 `docs/LLM_NATIVE_CONTROL_PLANE.md`에 남아 있다.
+- Agent service는 내부 step executor로 유지되지만, 자연어 ETL은 Pipeline Agent가 담당한다(단일 autonomous loop + MCP tools).
 
 ### 12.1.11 코드 크로스체크 앵커 (주요 구현 위치)
 
@@ -467,8 +466,6 @@ Agent 런타임(단일 루프) 설계는 `docs/AGENT_PRD.md` Appendix A (AGENT-R
 - Pipeline transforms: `backend/shared/services/pipeline_executor.py`, `backend/shared/services/pipeline_transform_spec.py`
 - Objectify + link indexing: `backend/objectify_worker/main.py`, `backend/instance_worker/main.py`
 - Agent runtime + proxy: `backend/agent/services/agent_runtime.py`, `backend/bff/routers/agent_proxy.py`
-- Agent plans(compile/validate/patch/execute): `backend/bff/routers/agent_plans.py`, `backend/bff/services/agent_plan_compiler.py`, `backend/bff/services/agent_plan_validation.py`
-- Agent plan registry: `backend/shared/services/agent_plan_registry.py`
 - Pipeline Agent loop: `backend/bff/services/pipeline_agent_autonomous_loop.py`, `backend/bff/routers/agent_proxy.py`
 - Pipeline Plans API: `backend/bff/routers/pipeline_plans.py`, `backend/bff/services/pipeline_plan_autonomous_compiler.py`, `backend/bff/services/pipeline_plan_validation.py`
 - Pipeline MCP server/tools: `backend/mcp/pipeline_mcp_server.py`, `backend/shared/services/pipeline_plan_builder.py`
@@ -479,7 +476,6 @@ Agent 런타임(단일 루프) 설계는 `docs/AGENT_PRD.md` Appendix A (AGENT-R
 Agent 실행(검증/승인/감사 포함)을 재현/감사하기 위한 control-plane 저장소를 Postgres에 둔다.
 아래는 현재 구현된 테이블/필드의 요약이다.
 
-- `agent_plans` (Plan Registry): `plan_id`, `status`, `goal`, `risk_level`, `requires_approval`, `plan`(JSONB), `plan_digest`, `created_by`, `created_at`, `updated_at`
 - `agent_runs`: `run_id`, `plan_id`, `status`, `risk_level`, `requester`, `delegated_actor`, `context`(JSONB), `plan_snapshot`(JSONB), `started_at`, `finished_at`
 - `agent_steps`: `run_id`, `step_id`, `tool_id`, `status`, `command_id`, `task_id`, `input_digest`, `output_digest`, `error`, `metadata`(JSONB), `started_at`, `finished_at`
 - `agent_approvals`: `approval_id`, `plan_id`, `step_id?`, `decision`, `approved_by`, `approved_at`, `comment`, `metadata`(JSONB)
@@ -714,13 +710,7 @@ graph TD
 | --- | --- | --- |
 | `actions.router` | `/api/v1` | - |
 | `admin.router` | `/api/v1` | - |
-| `agent_functions.router` | `/api/v1` | - |
-| `agent_models.router` | `/api/v1` | - |
-| `agent_plans.router` | `/api/v1` | - |
-| `agent_policies.router` | `/api/v1` | - |
 | `agent_proxy.router` | `/api/v1` | - |
-| `agent_sessions.router` | `/api/v1` | - |
-| `agent_tools.router` | `/api/v1` | - |
 | `ai.router` | `/api/v1` | - |
 | `audit.router` | `/api/v1` | - |
 | `ci_webhooks.router` | `/api/v1` | - |

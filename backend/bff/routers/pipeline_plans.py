@@ -428,6 +428,7 @@ async def compile_plan(
             redis_service=redis_service,
             audit_store=audit_store,
             dataset_registry=dataset_registry,
+            plan_registry=plan_registry,
         )
     except LLMQuotaExceededError as exc:
         raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=str(exc)) from exc

@@ -26,7 +26,7 @@
   - 라우터: `backend/bff/routers/pipeline_plans.py`
   - 주요 엔드포인트:
     - `POST /api/v1/pipeline-plans/context-pack`
-    - `POST /api/v1/pipeline-plans/compile` (autonomous MCP loop 기반 compile)
+    - `POST /api/v1/pipeline-plans/compile` (Pipeline Agent 단일 루프 런타임에 위임; API shape만 유지)
     - `POST /api/v1/pipeline-plans/{plan_id}/preview`
     - `POST /api/v1/pipeline-plans/{plan_id}/inspect-preview`
     - `POST /api/v1/pipeline-plans/{plan_id}/evaluate-joins`
@@ -38,7 +38,8 @@
 Pipeline Agent는 “여러 에이전트를 조율하는 그래프”가 아니라, 한 요청 안에서 반복적으로 도구를 호출하는 **런타임 컨트롤러**입니다.
 
 고수준 플로우:
-1) Snapshot 생성(Goal + data_scope + 현재 context/plan 요약 + 마지막 관측)
+1) Append-only JSONL 상태 로그에 “현재 상태”를 추가(Goal + data_scope + context/plan 요약 + 마지막 관측)
+   - 로그가 너무 커지면 서버가 **결정론 snapshot**으로 compaction(LLM 요약 금지)합니다.
 2) LLM이 다음 액션 선택(JSON):
    - `call_tool`: MCP tool 호출
      - latency/cost를 줄이기 위해 한 번의 inference에서 여러 tool call을 `tool_calls`로 배치 실행할 수 있습니다(서버는 순차 실행, max 12).
