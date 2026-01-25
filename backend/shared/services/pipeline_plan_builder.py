@@ -420,6 +420,131 @@ def add_compute_assignments(
     )
 
 
+def add_sort(
+    plan: Dict[str, Any],
+    *,
+    input_node_id: str,
+    columns: List[Any],
+    node_id: Optional[str] = None,
+) -> PlanMutation:
+    """
+    Add a sort transform node.
+
+    `columns` supports:
+    - ["col1", "-col2"]  (prefix '-' for DESC)
+    - [{"column":"col1","direction":"asc|desc"}, ...]
+    """
+    src = _ensure_str(input_node_id, name="input_node_id")
+    items = _ensure_list(columns, name="columns")
+    normalized: List[Any] = []
+    for item in items:
+        if isinstance(item, str):
+            col = item.strip()
+            if col:
+                normalized.append(col)
+            continue
+        if isinstance(item, dict):
+            col = str(item.get("column") or item.get("name") or "").strip()
+            if not col:
+                continue
+            direction = str(item.get("direction") or item.get("dir") or "asc").strip().lower()
+            if direction not in {"asc", "desc"}:
+                direction = "asc"
+            normalized.append({"column": col, "direction": direction})
+            continue
+    if not normalized:
+        raise PipelinePlanBuilderError("columns is required for sort")
+    return add_transform(
+        plan,
+        operation="sort",
+        input_node_ids=[src],
+        node_id=node_id,
+        metadata={"columns": normalized},
+    )
+
+
+def add_explode(
+    plan: Dict[str, Any],
+    *,
+    input_node_id: str,
+    column: str,
+    node_id: Optional[str] = None,
+) -> PlanMutation:
+    """Add an explode transform node for an array/map-like column."""
+    src = _ensure_str(input_node_id, name="input_node_id")
+    col = _ensure_str(column, name="column")
+    return add_transform(
+        plan,
+        operation="explode",
+        input_node_ids=[src],
+        node_id=node_id,
+        metadata={"columns": [col]},
+    )
+
+
+def add_union(
+    plan: Dict[str, Any],
+    *,
+    left_node_id: str,
+    right_node_id: str,
+    union_mode: str = "strict",
+    node_id: Optional[str] = None,
+) -> PlanMutation:
+    """
+    Add a union transform node for two inputs.
+
+    union_mode:
+    - strict: schemas must match (column set), unionByName
+    - common_only: keep only common columns
+    - pad_missing_nulls / pad: align to union of columns, missing -> NULL
+    """
+    left = _ensure_str(left_node_id, name="left_node_id")
+    right = _ensure_str(right_node_id, name="right_node_id")
+    if left == right:
+        raise PipelinePlanBuilderError("left_node_id and right_node_id must be different")
+    mode = str(union_mode or "strict").strip().lower() or "strict"
+    if mode not in {"strict", "common_only", "pad_missing_nulls", "pad"}:
+        raise PipelinePlanBuilderError(f"Invalid union_mode: {union_mode}")
+    return add_transform(
+        plan,
+        operation="union",
+        input_node_ids=[left, right],
+        node_id=node_id,
+        metadata={"unionMode": mode},
+    )
+
+
+def add_pivot(
+    plan: Dict[str, Any],
+    *,
+    input_node_id: str,
+    index: List[str],
+    columns: str,
+    values: str,
+    agg: str = "sum",
+    node_id: Optional[str] = None,
+) -> PlanMutation:
+    """
+    Add a pivot transform node.
+
+    This maps to Spark `groupBy(index...).pivot(columns).<agg>(values)`.
+    """
+    src = _ensure_str(input_node_id, name="input_node_id")
+    index_cols = _ensure_string_list(index, name="index")
+    pivot_col = _ensure_str(columns, name="columns")
+    value_col = _ensure_str(values, name="values")
+    agg_norm = str(agg or "sum").strip().lower() or "sum"
+    if agg_norm not in {"sum", "count", "avg", "min", "max"}:
+        raise PipelinePlanBuilderError(f"Invalid pivot agg: {agg}")
+    return add_transform(
+        plan,
+        operation="pivot",
+        input_node_ids=[src],
+        node_id=node_id,
+        metadata={"pivot": {"index": index_cols, "columns": pivot_col, "values": value_col, "agg": agg_norm}},
+    )
+
+
 def add_cast(
     plan: Dict[str, Any],
     *,

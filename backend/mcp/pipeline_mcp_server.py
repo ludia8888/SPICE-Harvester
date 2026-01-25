@@ -49,6 +49,7 @@ from shared.services.pipeline_plan_builder import (  # noqa: E402
     add_compute_column,
     add_dedupe,
     add_drop,
+    add_explode,
     add_filter,
     add_input,
     add_external_input,
@@ -56,11 +57,14 @@ from shared.services.pipeline_plan_builder import (  # noqa: E402
     add_group_by_expr,
     add_normalize,
     add_output,
+    add_pivot,
     add_rename,
     add_regex_replace,
     add_select,
     add_select_expr,
+    add_sort,
     add_transform,
+    add_union,
     add_window_expr,
     configure_input_read,
     delete_edge,
@@ -588,6 +592,66 @@ class PipelineMCPServer:
                             "node_id": {"type": "string"},
                         },
                         "required": ["plan", "operation", "input_node_ids"],
+                    },
+                },
+                {
+                    "name": "plan_add_sort",
+                    "description": "Add a sort transform node. columns supports ['col','-col2'] or [{'column','direction'}].",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "plan": {"type": "object"},
+                            "input_node_id": {"type": "string"},
+                            "columns": {"type": "array"},
+                            "node_id": {"type": "string"},
+                        },
+                        "required": ["plan", "input_node_id", "columns"],
+                    },
+                },
+                {
+                    "name": "plan_add_explode",
+                    "description": "Add an explode transform node for an array/map-like column (replaces column with exploded elements).",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "plan": {"type": "object"},
+                            "input_node_id": {"type": "string"},
+                            "column": {"type": "string"},
+                            "node_id": {"type": "string"},
+                        },
+                        "required": ["plan", "input_node_id", "column"],
+                    },
+                },
+                {
+                    "name": "plan_add_union",
+                    "description": "Add a union transform node for two inputs (unionByName). union_mode: strict|common_only|pad_missing_nulls|pad.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "plan": {"type": "object"},
+                            "left_node_id": {"type": "string"},
+                            "right_node_id": {"type": "string"},
+                            "union_mode": {"type": "string"},
+                            "node_id": {"type": "string"},
+                        },
+                        "required": ["plan", "left_node_id", "right_node_id"],
+                    },
+                },
+                {
+                    "name": "plan_add_pivot",
+                    "description": "Add a pivot transform node (groupBy(index...).pivot(columns).agg(values)).",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "plan": {"type": "object"},
+                            "input_node_id": {"type": "string"},
+                            "index": {"type": "array", "items": {"type": "string"}},
+                            "columns": {"type": "string"},
+                            "values": {"type": "string"},
+                            "agg": {"type": "string"},
+                            "node_id": {"type": "string"},
+                        },
+                        "required": ["plan", "input_node_id", "index", "columns", "values"],
                     },
                 },
                 {
@@ -1414,6 +1478,59 @@ class PipelineMCPServer:
                         operation=operation,
                         input_node_ids=input_node_ids or [],
                         metadata=metadata,
+                        node_id=arguments.get("node_id"),
+                    )
+                    return {"plan": result.plan, "node_id": result.node_id, "warnings": list(result.warnings)}
+
+                if name == "plan_add_sort":
+                    plan = arguments.get("plan") or {}
+                    input_node_id = str(arguments.get("input_node_id") or "")
+                    cols = arguments.get("columns") or []
+                    columns = cols if isinstance(cols, list) else [cols]
+                    result = add_sort(
+                        plan,
+                        input_node_id=input_node_id,
+                        columns=columns,
+                        node_id=arguments.get("node_id"),
+                    )
+                    return {"plan": result.plan, "node_id": result.node_id, "warnings": list(result.warnings)}
+
+                if name == "plan_add_explode":
+                    plan = arguments.get("plan") or {}
+                    input_node_id = str(arguments.get("input_node_id") or "")
+                    column = str(arguments.get("column") or "").strip()
+                    result = add_explode(
+                        plan,
+                        input_node_id=input_node_id,
+                        column=column,
+                        node_id=arguments.get("node_id"),
+                    )
+                    return {"plan": result.plan, "node_id": result.node_id, "warnings": list(result.warnings)}
+
+                if name == "plan_add_union":
+                    plan = arguments.get("plan") or {}
+                    result = add_union(
+                        plan,
+                        left_node_id=str(arguments.get("left_node_id") or ""),
+                        right_node_id=str(arguments.get("right_node_id") or ""),
+                        union_mode=str(arguments.get("union_mode") or "strict"),
+                        node_id=arguments.get("node_id"),
+                    )
+                    return {"plan": result.plan, "node_id": result.node_id, "warnings": list(result.warnings)}
+
+                if name == "plan_add_pivot":
+                    plan = arguments.get("plan") or {}
+                    input_node_id = str(arguments.get("input_node_id") or "")
+                    index = arguments.get("index") or []
+                    if not isinstance(index, list):
+                        index = [index]
+                    result = add_pivot(
+                        plan,
+                        input_node_id=input_node_id,
+                        index=[str(item) for item in index],
+                        columns=str(arguments.get("columns") or ""),
+                        values=str(arguments.get("values") or ""),
+                        agg=str(arguments.get("agg") or "sum"),
                         node_id=arguments.get("node_id"),
                     )
                     return {"plan": result.plan, "node_id": result.node_id, "warnings": list(result.warnings)}

@@ -161,6 +161,10 @@ _PIPELINE_AGENT_ALLOWED_TOOLS: tuple[str, ...] = (
     "plan_add_external_input",
     "plan_add_join",
     "plan_add_transform",
+    "plan_add_sort",
+    "plan_add_explode",
+    "plan_add_union",
+    "plan_add_pivot",
     "plan_add_group_by",
     "plan_add_group_by_expr",
     "plan_add_window",
@@ -515,6 +519,7 @@ def _build_system_prompt(*, allowed_tools: List[str]) -> str:
         "- infer PK/FK: context_pack_infer_keys()\n"
         "- infer casts: context_pack_infer_types(join_plan=...)\n"
         "- join: plan_add_join(left_node_id,right_node_id,left_keys=[...],right_keys=[...],join_type='left|inner')\n"
+        "- union: plan_add_union(left_node_id,right_node_id,union_mode='strict|common_only|pad')\n"
         "- ingest permissive: plan_configure_input_read(node_id, mode='PERMISSIVE', corrupt_record_column='_corrupt_record')\n"
         "- external input (jdbc/kafka): plan_add_external_input(read={\"format\":\"jdbc\",\"options\":{...},\"options_env\":{...}})\n"
         "- compute: plan_add_compute_column(input_node_id, target_column=\"revenue\", formula=\"qty * unit_price\")\n"
@@ -523,6 +528,9 @@ def _build_system_prompt(*, allowed_tools: List[str]) -> str:
         "- group by / aggregate: plan_add_group_by(input_node_id, group_by=[...], aggregates=[{\"column\":\"price\",\"op\":\"sum\",\"alias\":\"total\"}])\n"
         "- group by expr: plan_add_group_by_expr(input_node_id, group_by=[...], aggregate_expressions=[\"approx_percentile(price, 0.5) as p50\", ...])\n"
         "- window expr: plan_add_window_expr(input_node_id, expressions=[{\"column\":\"rn\",\"expr\":\"row_number() over (partition by k order by ts desc)\"}])\n"
+        "- sort: plan_add_sort(input_node_id, columns=[\"-total\", \"customer_id\"])  # prefix '-' for DESC\n"
+        "- explode: plan_add_explode(input_node_id, column=\"items\")\n"
+        "- pivot: plan_add_pivot(input_node_id, index=[\"customer_id\"], columns=\"category\", values=\"amount\", agg=\"sum\")\n"
         "- top-N: plan_add_filter(input_node_id, expression=\"row_number <= N\")\n"
         "- spark conf / cast mode: plan_update_settings(set={\"spark_conf\": {\"spark.sql.ansi.enabled\":\"true\"}, \"cast_mode\":\"STRICT\"})\n"
         "- output: plan_add_output(input_node_id, output_name=\"result\")\n"

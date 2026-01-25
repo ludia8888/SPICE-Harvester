@@ -4394,7 +4394,31 @@ class PipelineWorker:
         if operation == "sort":
             columns = metadata.get("columns") or []
             if columns:
-                return inputs[0].sort(*columns)
+                specs: list[Any] = []
+                for item in columns:
+                    if isinstance(item, str):
+                        col = item.strip()
+                        if not col:
+                            continue
+                        direction = "asc"
+                        if col.startswith("-"):
+                            direction = "desc"
+                            col = col[1:].strip()
+                        if not col:
+                            continue
+                        specs.append(F.col(col).desc() if direction == "desc" else F.col(col))
+                        continue
+                    if isinstance(item, dict):
+                        col = str(item.get("column") or item.get("name") or "").strip()
+                        if not col:
+                            continue
+                        direction = str(item.get("direction") or item.get("dir") or "asc").strip().lower()
+                        if direction not in {"asc", "desc"}:
+                            direction = "asc"
+                        specs.append(F.col(col).desc() if direction == "desc" else F.col(col))
+                        continue
+                if specs:
+                    return inputs[0].sort(*specs)
         if operation == "union" and len(inputs) >= 2:
             union_mode = normalize_union_mode(metadata)
             left = inputs[0]
@@ -4537,10 +4561,35 @@ class PipelineWorker:
             order_by = window_meta.get("orderBy") or []
             output_column = str(window_meta.get("outputColumn") or "row_number").strip() or "row_number"
             if order_by:
+                specs: list[Any] = []
+                for item in order_by:
+                    if isinstance(item, str):
+                        col = item.strip()
+                        if not col:
+                            continue
+                        direction = "asc"
+                        if col.startswith("-"):
+                            direction = "desc"
+                            col = col[1:].strip()
+                        if not col:
+                            continue
+                        specs.append(F.col(col).desc() if direction == "desc" else F.col(col))
+                        continue
+                    if isinstance(item, dict):
+                        col = str(item.get("column") or item.get("name") or "").strip()
+                        if not col:
+                            continue
+                        direction = str(item.get("direction") or item.get("dir") or "asc").strip().lower()
+                        if direction not in {"asc", "desc"}:
+                            direction = "asc"
+                        specs.append(F.col(col).desc() if direction == "desc" else F.col(col))
+                        continue
+                if not specs:
+                    return inputs[0]
                 if partition_by:
-                    window_spec = Window.partitionBy(*partition_by).orderBy(*order_by)
+                    window_spec = Window.partitionBy(*partition_by).orderBy(*specs)
                 else:
-                    window_spec = Window.orderBy(*order_by)
+                    window_spec = Window.orderBy(*specs)
                 return inputs[0].withColumn(output_column, F.row_number().over(window_spec))
         return inputs[0]
 

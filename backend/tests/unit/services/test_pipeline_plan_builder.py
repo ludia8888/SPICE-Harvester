@@ -8,12 +8,16 @@ from shared.services.pipeline_plan_builder import (
     add_cast,
     add_compute_assignments,
     add_compute_column,
+    add_explode,
     add_filter,
     add_input,
     add_external_input,
     add_join,
+    add_pivot,
     add_select_expr,
+    add_sort,
     add_output,
+    add_union,
     configure_input_read,
     delete_edge,
     delete_node,
@@ -186,6 +190,58 @@ def test_select_expr_builds_metadata():
     node = next(node for node in res.plan["definition_json"]["nodes"] if node["id"] == res.node_id)
     assert node["metadata"]["operation"] == "select"
     assert node["metadata"]["expressions"] == ["a", "b as bee"]
+
+
+def test_add_sort_supports_desc_prefix_and_dict_form():
+    plan = new_plan(goal="sort", db_name="demo")
+    plan = add_input(plan, dataset_id="ds", node_id="inp").plan
+
+    res = add_sort(plan, input_node_id="inp", columns=["a", "-b"])
+    node = next(node for node in res.plan["definition_json"]["nodes"] if node["id"] == res.node_id)
+    assert node["metadata"]["operation"] == "sort"
+    assert node["metadata"]["columns"] == ["a", "-b"]
+
+    res2 = add_sort(plan, input_node_id="inp", columns=[{"column": "a", "direction": "desc"}])
+    node2 = next(node for node in res2.plan["definition_json"]["nodes"] if node["id"] == res2.node_id)
+    assert node2["metadata"]["columns"] == [{"column": "a", "direction": "desc"}]
+
+
+def test_add_explode_builds_metadata():
+    plan = new_plan(goal="explode", db_name="demo")
+    plan = add_input(plan, dataset_id="ds", node_id="inp").plan
+    res = add_explode(plan, input_node_id="inp", column="items")
+    node = next(node for node in res.plan["definition_json"]["nodes"] if node["id"] == res.node_id)
+    assert node["metadata"]["operation"] == "explode"
+    assert node["metadata"]["columns"] == ["items"]
+
+
+def test_add_union_builds_metadata():
+    plan = new_plan(goal="union", db_name="demo")
+    plan = add_input(plan, dataset_id="left", node_id="left").plan
+    plan = add_input(plan, dataset_id="right", node_id="right").plan
+    res = add_union(plan, left_node_id="left", right_node_id="right", union_mode="pad")
+    node = next(node for node in res.plan["definition_json"]["nodes"] if node["id"] == res.node_id)
+    assert node["metadata"]["operation"] == "union"
+    assert node["metadata"]["unionMode"] == "pad"
+
+
+def test_add_pivot_builds_metadata():
+    plan = new_plan(goal="pivot", db_name="demo")
+    plan = add_input(plan, dataset_id="ds", node_id="inp").plan
+    res = add_pivot(
+        plan,
+        input_node_id="inp",
+        index=["customer_id"],
+        columns="category",
+        values="amount",
+        agg="sum",
+    )
+    node = next(node for node in res.plan["definition_json"]["nodes"] if node["id"] == res.node_id)
+    assert node["metadata"]["operation"] == "pivot"
+    assert node["metadata"]["pivot"]["index"] == ["customer_id"]
+    assert node["metadata"]["pivot"]["columns"] == "category"
+    assert node["metadata"]["pivot"]["values"] == "amount"
+    assert node["metadata"]["pivot"]["agg"] == "sum"
 
 
 def test_add_edge_is_idempotent():
