@@ -73,6 +73,44 @@ LLM이 조인 전략/키/타입을 “상상”하지 않도록 후보 공간을
 
 ---
 
+## 5.1) Claim-based Refutation Gate (반증기, witness 기반 Hard Gate)
+
+핵심 원칙:
+- Evaluator는 “정답 검증기(Verifier)”가 아니라 **반증기(Refuter)** 입니다.
+- Hard Gate는 오직 **반례(witness)가 존재하는 명백한 오답**만 차단합니다.
+- 반례를 못 찾았다고 “맞다”가 아닙니다. **PASS = not refuted** 입니다.
+
+왜 필요한가:
+- LLM에게 과도한 룰/휴리스틱을 강제하면 표현 다양성/모호성에서 오히려 품질이 떨어질 수 있습니다.
+- 대신 LLM의 자유도를 유지하되, ETL 단계별 “명백한 사고(키 중복, 캐스팅 실패, 조인 다대다 폭발 전제 위반 등)”만 데이터 기반 반례로 잡아냅니다.
+
+구현 방식(요약):
+- Agent는 각 ETL 노드(특히 join/cast 등)에 대해 **claims**를 node.metadata에 선언할 수 있습니다.
+- MCP 도구 `plan_refute_claims`가 claims를 읽고, 샘플 실행 결과에서 반례를 찾습니다.
+- Hard failure가 나오면 Agent는 tool-call 기반으로 plan을 부분 patch하여 repair 루프로 복귀합니다.
+
+Claim 예시(노드 메타데이터):
+```json
+{
+  "claims": [
+    {"id": "join_orders_customers_right_pk", "kind": "JOIN_ASSUMES_RIGHT_PK", "severity": "HARD"},
+    {"id": "join_orders_customers_n_to_1", "kind": "JOIN_FUNCTIONAL_RIGHT", "severity": "HARD"},
+    {"id": "cast_order_id_parse", "kind": "CAST_SUCCESS", "severity": "HARD", "spec": {"columns": ["order_id"]}}
+  ]
+}
+```
+
+주의(샘플 기반의 “비가역성/부정확성”):
+- PK 중복/NULL/캐스팅 실패/조인 다대다 등은 “샘플에서 발견되면 실제로 존재”하므로 **반례 기반 Hard Gate가 가능**합니다.
+- FK orphan은 “부모 샘플에 없다”가 “전체에 없다”를 의미하지 않으므로, 현재는 **SOFT로만 처리**합니다(향후 full-scan membership oracle이 있으면 HARD 승격 가능).
+
+관련 코드:
+- Refuter: `backend/shared/services/pipeline_claim_refuter.py`
+- MCP tool: `backend/mcp/pipeline_mcp_server.py` (`plan_refute_claims`)
+- Finish-time gate(자동): `backend/bff/services/pipeline_agent_autonomous_loop.py`
+
+---
+
 ## 6) Plan Builder Tools (MCP) + 부분 Repair(패치)
 
 ### Plan build

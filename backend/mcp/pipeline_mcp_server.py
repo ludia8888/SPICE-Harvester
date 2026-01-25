@@ -66,6 +66,7 @@ from shared.services.pipeline_relationship_inference import (  # noqa: E402
     infer_join_plan_from_context_pack,
     infer_keys_from_context_pack,
 )
+from shared.services.pipeline_claim_refuter import refute_pipeline_plan_claims  # noqa: E402
 from shared.services.pipeline_type_inference import (  # noqa: E402
     common_join_key_type,
     infer_xsd_type_with_confidence,
@@ -731,6 +732,22 @@ class PipelineMCPServer:
                     },
                 },
                 {
+                    "name": "plan_refute_claims",
+                    "description": "Refute plan-embedded claims with concrete counterexamples (witness-based hard gate).",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "plan": {"type": "object"},
+                            "sample_limit": {"type": "integer"},
+                            "max_output_rows": {"type": "integer"},
+                            "max_hard_failures": {"type": "integer"},
+                            "max_soft_warnings": {"type": "integer"},
+                            "run_tables": {"type": "object"},
+                        },
+                        "required": ["plan"],
+                    },
+                },
+                {
                     "name": "preview_inspect",
                     "description": "Inspect a preview sample and propose cleansing suggestions (deterministic).",
                     "inputSchema": {
@@ -1263,6 +1280,39 @@ class PipelineMCPServer:
                     preview = await executor.preview(definition=definition, db_name=db_name, node_id=node_id, limit=limit)
                     preview_masked = mask_pii(preview)
                     return {"status": "success", "preview": preview_masked, "warnings": warnings}
+
+                if name == "plan_refute_claims":
+                    plan_obj = arguments.get("plan") or {}
+                    # Validate shape early to avoid opaque executor errors.
+                    errors, warnings = validate_structure(plan_obj)
+                    if errors:
+                        return {"status": "invalid", "errors": errors, "warnings": warnings}
+
+                    try:
+                        plan = PipelinePlan.model_validate(plan_obj)
+                    except Exception as exc:
+                        return {"status": "invalid", "errors": [str(exc)], "warnings": warnings}
+
+                    db_name = str(plan.data_scope.db_name or "").strip()
+                    if not db_name:
+                        return {"status": "invalid", "errors": ["plan.data_scope.db_name is required"], "warnings": warnings}
+
+                    dataset_registry, _ = await self._ensure_registries()
+                    report = await refute_pipeline_plan_claims(
+                        plan=plan,
+                        dataset_registry=dataset_registry,
+                        run_tables=arguments.get("run_tables"),
+                        sample_limit=int(arguments.get("sample_limit") or 400),
+                        max_output_rows=int(arguments.get("max_output_rows") or 20000),
+                        max_hard_failures=int(arguments.get("max_hard_failures") or 5),
+                        max_soft_warnings=int(arguments.get("max_soft_warnings") or 20),
+                    )
+                    if warnings:
+                        merged = list(report.get("warnings") or []) if isinstance(report, dict) else []
+                        merged.extend([w for w in warnings if w])
+                        if isinstance(report, dict):
+                            report["warnings"] = merged[:40]
+                    return report
 
                 if name == "preview_inspect":
                     preview = arguments.get("preview") or {}

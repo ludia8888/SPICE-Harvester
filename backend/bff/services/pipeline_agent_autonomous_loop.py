@@ -181,6 +181,8 @@ _PIPELINE_AGENT_ALLOWED_TOOLS: tuple[str, ...] = (
     "plan_preview",
     "preview_inspect",
     "plan_evaluate_joins",
+    # Refutation gate (claim-based hard failures with witnesses only)
+    "plan_refute_claims",
 )
 
 
@@ -475,6 +477,9 @@ def _build_system_prompt(*, allowed_tools: List[str]) -> str:
         "- Do NOT ask the user to increase internal step/tool-call limits. If you're close to finishing, use the most direct remaining tool calls to complete.\n"
         "- There is NO SQL execution tool. Do NOT pass `sql` fields. `plan_add_transform` is operation+metadata (NOT SQL).\n"
         "- This flow is read-only analysis + plan/preview (no deploy/write).\n"
+        "- Deterministic inference tools (keys/types/join-plan) produce hypotheses. Treat them as evidence/suggestions, not ground truth.\n"
+        "- If you want hard gating on ETL assumptions, attach `claims` to node.metadata (list of {id, kind, severity, spec}).\n"
+        "  You can call `plan_refute_claims` to find counterexamples (witness-based). A PASS means 'not refuted', never 'proven correct'.\n"
         "\n"
         "Common patterns:\n"
         "- null check: context_pack_null_report(dataset_ids=[...])\n"
@@ -486,6 +491,7 @@ def _build_system_prompt(*, allowed_tools: List[str]) -> str:
         "- window rank: plan_add_window(input_node_id, partition_by=[...], order_by=[\"-total\"])  # adds row_number\n"
         "- top-N: plan_add_filter(input_node_id, expression=\"row_number <= N\")\n"
         "- output: plan_add_output(input_node_id, output_name=\"result\")\n"
+        "- refute claims: plan_refute_claims()  # optional; server will also run it on finish when a plan exists\n"
         "\n"
         "Available tools:\n"
         f"{tool_lines}\n"
@@ -1127,6 +1133,38 @@ async def run_pipeline_agent_mcp_autonomous(
                         "warnings": list(validation.warnings or []),
                     }
                     continue
+
+                # Refutation gate: only blocks on concrete counterexamples (witnesses).
+                # PASS means "not refuted", never "proven correct".
+                state.prompt_items.append(
+                    stable_json_dumps(
+                        {
+                            "type": "tool_call",
+                            "step": step_idx + 1,
+                            "tool": "plan_refute_claims",
+                            "args": {"sample_limit": 400},
+                        }
+                    )
+                )
+                refute_observation = await _execute_tool_call(tool_name="plan_refute_claims", args={"sample_limit": 400})
+                state.prompt_items.append(
+                    stable_json_dumps(
+                        {
+                            "type": "tool_output",
+                            "step": step_idx + 1,
+                            "tool": "plan_refute_claims",
+                            "output": refute_observation,
+                        }
+                    )
+                )
+                if isinstance(refute_observation, dict):
+                    refute_errors = refute_observation.get("errors")
+                    if refute_observation.get("status") == "invalid" or (isinstance(refute_errors, list) and refute_errors):
+                        state.last_observation = refute_observation
+                        continue
+                    refute_warnings = refute_observation.get("warnings")
+                    if isinstance(refute_warnings, list):
+                        tool_warnings.extend([str(w) for w in refute_warnings if str(w or "").strip()])
 
                 # Persist the plan so the existing preview endpoint can be used from the UI.
                 if not plan_id:
