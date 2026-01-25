@@ -809,16 +809,33 @@ class PipelineMCPServer:
                 },
                 {
                     "name": "plan_add_rename",
-                    "description": "Add a rename transform node. rename={src:dst}.",
+                    "description": "Add a rename transform node. Prefer rename={src:dst}, but renames/mappings as [{from,to}] are also accepted.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
                             "plan": {"type": "object"},
                             "input_node_id": {"type": "string"},
-                            "rename": {"type": "object"},
+                            # Accept common LLM shapes:
+                            # - rename={"old":"new"}
+                            # - rename=[{"from":"old","to":"new"}]
+                            # - renames/mappings=[{"from":"old","to":"new"}]
+                            "rename": {
+                                "oneOf": [
+                                    {"type": "object"},
+                                    {"type": "array", "items": {"type": "object"}},
+                                ]
+                            },
+                            "renames": {"type": "array", "items": {"type": "object"}},
+                            "mappings": {"type": "array", "items": {"type": "object"}},
                             "node_id": {"type": "string"},
                         },
-                        "required": ["plan", "input_node_id", "rename"],
+                        # Require at least one mapping field; `plan` and `input_node_id` are always required.
+                        "required": ["plan", "input_node_id"],
+                        "anyOf": [
+                            {"required": ["rename"]},
+                            {"required": ["renames"]},
+                            {"required": ["mappings"]},
+                        ],
                     },
                 },
                 {
@@ -967,7 +984,7 @@ class PipelineMCPServer:
                 },
                 {
                     "name": "plan_update_node_metadata",
-                    "description": "Patch node.metadata (merge by default, replace if requested).",
+                    "description": "Patch node.metadata (merge by default, replace if requested). Use `set` (aliases: `metadata`, `meta`).",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -982,7 +999,7 @@ class PipelineMCPServer:
                 },
                 {
                     "name": "plan_update_settings",
-                    "description": "Patch plan.definition_json.settings (merge by default, replace if requested).",
+                    "description": "Patch plan.definition_json.settings (merge by default, replace if requested). Use `set` (alias: `settings`).",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -1652,10 +1669,52 @@ class PipelineMCPServer:
 
                 if name == "plan_add_rename":
                     plan = arguments.get("plan") or {}
+                    # Be forgiving: LLMs often pass rename maps as a list of {from,to} objects or
+                    # use alternate field names like `mappings` / `renames`.
+                    raw_rename = arguments.get("rename")
+                    if raw_rename is None:
+                        raw_rename = arguments.get("renames")
+                    if raw_rename is None:
+                        raw_rename = arguments.get("mappings")
+
+                    rename_map: Dict[str, str] = {}
+                    if isinstance(raw_rename, dict):
+                        # Accept both mapping-form {"old":"new"} and single-pair form {"from":"old","to":"new"}.
+                        keys = {str(k) for k in raw_rename.keys() if k is not None}
+                        if ({"from", "to"} <= keys) or ({"src", "dst"} <= keys) or ({"source", "target"} <= keys):
+                            src = str(
+                                raw_rename.get("from")
+                                or raw_rename.get("src")
+                                or raw_rename.get("source")
+                                or ""
+                            ).strip()
+                            dst = str(
+                                raw_rename.get("to")
+                                or raw_rename.get("dst")
+                                or raw_rename.get("target")
+                                or ""
+                            ).strip()
+                            if src and dst:
+                                rename_map[src] = dst
+                        else:
+                            for k, v in raw_rename.items():
+                                src = str(k or "").strip()
+                                dst = str(v or "").strip()
+                                if src and dst:
+                                    rename_map[src] = dst
+                    elif isinstance(raw_rename, list):
+                        for item in raw_rename:
+                            if not isinstance(item, dict):
+                                continue
+                            src = str(item.get("from") or item.get("src") or item.get("source") or "").strip()
+                            dst = str(item.get("to") or item.get("dst") or item.get("target") or "").strip()
+                            if src and dst:
+                                rename_map[src] = dst
+
                     result = add_rename(
                         plan,
                         input_node_id=str(arguments.get("input_node_id") or ""),
-                        rename=arguments.get("rename") or {},
+                        rename=rename_map,
                         node_id=arguments.get("node_id"),
                     )
                     return {"plan": result.plan, "node_id": result.node_id, "warnings": list(result.warnings)}
@@ -1766,10 +1825,20 @@ class PipelineMCPServer:
 
                 if name == "plan_update_node_metadata":
                     plan = arguments.get("plan") or {}
+                    # Models often guess "metadata"/"meta" instead of the canonical "set" param.
+                    set_fields = arguments.get("set")
+                    if set_fields is None:
+                        candidate = arguments.get("metadata")
+                        if isinstance(candidate, dict):
+                            set_fields = candidate
+                    if set_fields is None:
+                        candidate = arguments.get("meta")
+                        if isinstance(candidate, dict):
+                            set_fields = candidate
                     result = update_node_metadata(
                         plan,
                         node_id=str(arguments.get("node_id") or ""),
-                        set_fields=arguments.get("set"),
+                        set_fields=set_fields,
                         unset_fields=arguments.get("unset"),
                         replace=bool(arguments.get("replace", False)),
                     )
@@ -1777,9 +1846,14 @@ class PipelineMCPServer:
 
                 if name == "plan_update_settings":
                     plan = arguments.get("plan") or {}
+                    set_fields = arguments.get("set")
+                    if set_fields is None:
+                        candidate = arguments.get("settings")
+                        if isinstance(candidate, dict):
+                            set_fields = candidate
                     result = update_settings(
                         plan,
-                        set_fields=arguments.get("set"),
+                        set_fields=set_fields,
                         unset_fields=arguments.get("unset"),
                         replace=bool(arguments.get("replace", False)),
                     )
@@ -1866,7 +1940,25 @@ class PipelineMCPServer:
                     preview_meta["sample_limit"] = max(1, min(limit, 200))
                     definition["__preview_meta__"] = preview_meta
 
-                    preview = await executor.preview(definition=definition, db_name=db_name, node_id=node_id, limit=limit)
+                    try:
+                        preview = await executor.preview(definition=definition, db_name=db_name, node_id=node_id, limit=limit)
+                    except Exception as exc:
+                        # Plan preview runs in a lightweight Python executor that cannot support all Spark SQL
+                        # expressions. This tool is best-effort and must not block execution steps.
+                        merged_warnings = list(warnings or [])
+                        merged_warnings.append(f"plan_preview_failed: {exc}")
+                        return {
+                            "status": "warning",
+                            "preview": {
+                                "row_count": 0,
+                                "columns": [],
+                                "rows": [],
+                                "note": "Plan preview is best-effort and may fail for complex Spark SQL expressions. Use pipeline_preview_wait for Spark-backed truth.",
+                                "preview_error": str(exc),
+                            },
+                            "warnings": merged_warnings[:40],
+                        }
+
                     preview_masked = mask_pii(preview)
                     return {"status": "success", "preview": preview_masked, "warnings": warnings}
 

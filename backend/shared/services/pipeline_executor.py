@@ -865,11 +865,18 @@ def _group_by_table(
                     agg_state["count"] += 1
             elif spec["op"] == "sum":
                 if value is not None:
-                    agg_state["sum"] += float(value)
+                    try:
+                        agg_state["sum"] += float(value)
+                    except (TypeError, ValueError):
+                        # Preview engine is best-effort: ignore non-numeric values rather than crashing.
+                        continue
             elif spec["op"] == "avg":
                 if value is not None:
-                    agg_state["sum"] += float(value)
-                    agg_state["count"] += 1
+                    try:
+                        agg_state["sum"] += float(value)
+                        agg_state["count"] += 1
+                    except (TypeError, ValueError):
+                        continue
             elif spec["op"] == "min":
                 if value is not None:
                     agg_state["min"] = value if agg_state["min"] is None else min(agg_state["min"], value)
@@ -1543,10 +1550,16 @@ def _safe_eval(expression: str, row: Dict[str, Any], parameters: Dict[str, Any])
     try:
         tree = ast.parse(expression, mode="eval")
     except Exception:
-        return expression
+        # Spark SQL expressions (e.g. CAST/TRY_CAST/date_trunc) are not Python.
+        # In preview mode, treat unsupported expressions as NULL rather than leaking the raw expression
+        # into downstream ops (e.g. groupBy(sum) would crash on float("cast(...)")).
+        return None
     if not _is_safe_ast(tree):
-        return expression
-    return _eval_ast(tree.body, variables)
+        return None
+    try:
+        return _eval_ast(tree.body, variables)
+    except Exception:
+        return None
 
 
 def _is_safe_ast(node: ast.AST) -> bool:

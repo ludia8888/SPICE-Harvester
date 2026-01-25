@@ -897,9 +897,36 @@ def validate_structure(plan: Dict[str, Any]) -> Tuple[List[str], List[str]]:
             continue
         incoming.setdefault(dst, []).append(src)
 
+    # Agent iteration often creates "scratch" nodes that are not yet wired into an output.
+    # Those nodes should not block structural validation. We only enforce operation-specific
+    # requirements (e.g. select must have columns, groupBy must have aggregates) for nodes
+    # that are reachable from at least one output node.
+    output_ids: List[str] = []
+    for node_id, node in node_by_id.items():
+        node_type = str(node.get("type") or "").strip().lower() or "transform"
+        if node_type == "output":
+            output_ids.append(node_id)
+
+    validate_op_nodes: set[str] = set()
+    if output_ids:
+        stack = list(output_ids)
+        validate_op_nodes = set(output_ids)
+        while stack:
+            current = stack.pop()
+            for src in incoming.get(current, []):
+                if src in validate_op_nodes:
+                    continue
+                validate_op_nodes.add(src)
+                stack.append(src)
+
     for node_id, node in node_by_id.items():
         node_type = str(node.get("type") or "").strip().lower() or "transform"
         if node_type == "transform":
+            # If there are no outputs yet, skip operation-specific validation to allow
+            # incremental plan construction. If outputs exist, validate only nodes that
+            # contribute to at least one output.
+            if not validate_op_nodes or node_id not in validate_op_nodes:
+                continue
             metadata = node.get("metadata") if isinstance(node.get("metadata"), dict) else {}
             op = str(metadata.get("operation") or "").strip()
             if not op:
@@ -909,12 +936,38 @@ def validate_structure(plan: Dict[str, Any]) -> Tuple[List[str], List[str]]:
             if op not in SUPPORTED_TRANSFORMS:
                 errors.append(f"Unsupported operation '{op}' on node {node_id}")
                 continue
-            if op in {"filter", "compute"} and not str(metadata.get("expression") or "").strip():
+            if op == "filter" and not str(metadata.get("expression") or "").strip():
                 errors.append(f"{op} missing expression on node {node_id}")
-            if op in {"select", "drop", "sort", "dedupe", "explode"}:
+            if op == "compute":
+                has_expression = bool(str(metadata.get("expression") or "").strip())
+                target = metadata.get("targetColumn") or metadata.get("target_column") or metadata.get("target")
+                formula = metadata.get("formula") or metadata.get("expr")
+                has_target_formula = bool(str(target or "").strip()) and bool(str(formula or "").strip())
+                assignments = (
+                    metadata.get("assignments")
+                    or metadata.get("computedColumns")
+                    or metadata.get("computed_columns")
+                )
+                has_assignments = (
+                    isinstance(assignments, list)
+                    and any(
+                        isinstance(item, dict)
+                        and str(item.get("column") or item.get("target") or item.get("name") or "").strip()
+                        and str(item.get("expression") or item.get("expr") or item.get("formula") or "").strip()
+                        for item in assignments
+                    )
+                )
+                if not (has_expression or has_target_formula or has_assignments):
+                    errors.append(f"compute missing expression/targetColumn/formula/assignments on node {node_id}")
+            if op in {"select", "drop", "sort", "dedupe", "explode", "normalize"}:
                 cols = metadata.get("columns") or []
-                if not cols:
-                    errors.append(f"{op} missing columns on node {node_id}")
+                exprs = metadata.get("expressions") or metadata.get("selectExpr") or metadata.get("select_expr")
+                if op == "select":
+                    if not cols and not (isinstance(exprs, list) and exprs):
+                        errors.append(f"{op} missing columns/expressions on node {node_id}")
+                else:
+                    if not cols:
+                        errors.append(f"{op} missing columns on node {node_id}")
             if op == "rename":
                 rename_map = metadata.get("rename") or {}
                 if not rename_map:
@@ -925,10 +978,17 @@ def validate_structure(plan: Dict[str, Any]) -> Tuple[List[str], List[str]]:
                     errors.append(f"cast missing columns on node {node_id}")
             if op in {"groupBy", "aggregate"}:
                 aggregates = metadata.get("aggregates") or []
-                if not isinstance(aggregates, list) or not any(
+                expr_items = (
+                    metadata.get("aggregateExpressions")
+                    or metadata.get("aggExpressions")
+                    or metadata.get("aggregate_expressions")
+                )
+                has_exprs = isinstance(expr_items, list) and len(expr_items) > 0
+                has_aggs = isinstance(aggregates, list) and any(
                     isinstance(item, dict) and item.get("column") and item.get("op") for item in aggregates
-                ):
-                    errors.append(f"{op} missing aggregates on node {node_id}")
+                )
+                if not (has_aggs or has_exprs):
+                    errors.append(f"{op} missing aggregates/aggregateExpressions on node {node_id}")
             if op == "join":
                 inc = incoming.get(node_id, [])
                 if len(inc) < 2:

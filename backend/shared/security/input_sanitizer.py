@@ -359,6 +359,26 @@ class InputSanitizer:
         sanitized = re.sub(r"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]", "", value)
         return sanitized
 
+    def sanitize_sql_expression(self, value: str, max_length: int = 20000) -> str:
+        """
+        Sanitize a SQL *expression* (Spark SQL / ETL compute predicate / select expr).
+
+        Important: unlike `sanitize_string`, this MUST NOT run SQL-injection keyword heuristics.
+        In the pipeline domain, strings like `cast(...)`, `substring(...)`, `union`, etc. are normal and
+        blocking them breaks legitimate ETL and agent tool usage.
+
+        We only enforce:
+        - string type
+        - max length (DoS guard)
+        - removal of control characters
+        """
+        if not isinstance(value, str):
+            raise SecurityViolationError(f"Expected string, got {type(value)}")
+        if len(value) > max_length:
+            raise SecurityViolationError(f"SQL expression too long: {len(value)} > {max_length}")
+        # Keep user intent intact; only strip control chars.
+        return re.sub(r"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]", "", value)
+
     def sanitize_shell_command(self, value: str) -> str:
         """Shell 명령어 컨텍스트의 문자열 정화 (모든 보안 체크 적용)"""
         if not isinstance(value, str):
@@ -399,7 +419,38 @@ class InputSanitizer:
                 clean_key = self.sanitize_any(key, max_depth, current_depth + 1)
 
             # 값은 컨텍스트에 따라 처리
-            if isinstance(value, str) and key in ["description", "comment", "note", "label"]:
+            key_lower = key.lower() if isinstance(key, str) else ""
+            sql_expr_keys = {
+                # Common Spark SQL expression fields
+                "expression",
+                "expr",
+                "sql",
+                "query",
+                "predicate",
+                "condition",
+                "where",
+                "having",
+            }
+            sql_expr_list_keys = {
+                # Lists of Spark SQL expressions (select expr / agg expr / group-by expr)
+                "expressions",
+                "aggregate_expressions",
+                "aggregateexpressions",
+                "group_by",
+                "groupby",
+            }
+
+            if isinstance(value, str) and key_lower in sql_expr_keys:
+                clean_value = self.sanitize_sql_expression(value)
+            elif isinstance(value, list) and key_lower in sql_expr_list_keys:
+                cleaned_items: list[Any] = []
+                for item in value:
+                    if isinstance(item, str):
+                        cleaned_items.append(self.sanitize_sql_expression(item))
+                    else:
+                        cleaned_items.append(self.sanitize_any(item, max_depth, current_depth + 1))
+                clean_value = cleaned_items
+            elif isinstance(value, str) and key in ["description", "comment", "note", "label"]:
                 # 설명 필드는 description sanitizer 사용
                 clean_value = self.sanitize_description(value)
             elif isinstance(value, str) and key in ["command", "script", "exec"]:

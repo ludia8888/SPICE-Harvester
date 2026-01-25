@@ -56,7 +56,8 @@ class AutonomousPipelineAgentToolCall(BaseModel):
 class AutonomousPipelineAgentDecision(BaseModel):
     action: Literal["call_tool", "finish", "clarify"] = Field(default="call_tool")
     # Preferred: multiple tool calls per inference to reduce round-trips.
-    tool_calls: List[AutonomousPipelineAgentToolCall] = Field(default_factory=list, max_length=12)
+    # Keep this high enough for complex ETL edits (many plan_* ops) to fit in one inference.
+    tool_calls: List[AutonomousPipelineAgentToolCall] = Field(default_factory=list, max_length=50)
     # Legacy single-call shape (kept for backward compatibility with older mocks/models).
     tool: Optional[str] = Field(default=None, max_length=200)
     args: Dict[str, Any] = Field(default_factory=dict)
@@ -133,6 +134,8 @@ class _AgentState:
     principal_id: str
     principal_type: str
     pipeline_id: Optional[str] = None
+    last_build_job_id: Optional[str] = None
+    last_build_artifact_id: Optional[str] = None
 
     # Deterministic (tool-produced) context.
     context_pack: Optional[Dict[str, Any]] = None
@@ -494,8 +497,9 @@ def _build_system_prompt(*, allowed_tools: List[str]) -> str:
         "- If planner_hints.require_plan=true, you MUST build and validate a plan (do NOT finish with report-only).\n"
         "- If the user asked for a derived dataset/result, build a plan via plan_* tools and ensure it validates.\n"
         "- No silent server-side rewrites exist; any plan changes must be explicit tool calls.\n"
-        "- Latency: prefer batching multiple tool calls in a single response via `tool_calls` (max 12 per step).\n"
+        "- Latency: prefer batching multiple tool calls in a single response via `tool_calls` (max 50 per step).\n"
         "- If batching plan edits, use deterministic `node_id` for every node you will reference later in the same batch.\n"
+        "- Do NOT use placeholders like `$last.node_id` / `$last.*`; they will be treated as literal strings.\n"
         "- Do NOT ask the user to increase internal step/tool-call limits. If you're close to finishing, use the most direct remaining tool calls to complete.\n"
         "- Do NOT write full SQL queries. Spark SQL *expressions* are allowed inside these tools:\n"
         "  - plan_add_filter(expression=...)\n"
@@ -533,10 +537,12 @@ def _build_system_prompt(*, allowed_tools: List[str]) -> str:
         "- pivot: plan_add_pivot(input_node_id, index=[\"customer_id\"], columns=\"category\", values=\"amount\", agg=\"sum\")\n"
         "- top-N: plan_add_filter(input_node_id, expression=\"row_number <= N\")\n"
         "- spark conf / cast mode: plan_update_settings(set={\"spark_conf\": {\"spark.sql.ansi.enabled\":\"true\"}, \"cast_mode\":\"STRICT\"})\n"
+        "- patch node metadata: plan_update_node_metadata(node_id=\"...\", set={...})\n"
         "- output: plan_add_output(input_node_id, output_name=\"result\")\n"
         "- refute claims: plan_refute_claims()  # optional; server will also run it on finish when a plan exists\n"
         "- materialize pipeline: pipeline_create_from_plan(name=\"...\", location=\"team/...\"), then pipeline_preview_wait(...), pipeline_build_wait(...)\n"
         "- deploy from build: pipeline_deploy_promote_build(pipeline_id, build_job_id, node_id, db_name, dataset_name)  # requires approve\n"
+        "  (runtime convenience: after a successful create/build in this run, omitting pipeline_id/build_job_id will use the latest values)\n"
         "\n"
         "Available tools:\n"
         f"{tool_lines}\n"
@@ -801,7 +807,7 @@ async def run_pipeline_agent_mcp_autonomous(
 
     allowed_tools = list(_PIPELINE_AGENT_ALLOWED_TOOLS)
     system_prompt = _build_system_prompt(allowed_tools=allowed_tools)
-    max_tool_calls_per_step = 12
+    max_tool_calls_per_step = 50
     # Keep the user prompt under the LLM gateway hard cap to avoid server-side truncation.
     prompt_char_limit = int(max(1, int(getattr(llm_gateway, "max_prompt_chars", 20000) or 20000) * 0.9))
 
@@ -996,6 +1002,18 @@ async def run_pipeline_agent_mcp_autonomous(
                 else:
                     # These tools should not receive the full plan object.
                     args.pop("plan", None)
+                    # Convenience: bind pipeline execution tools to the most recently-created pipeline/build
+                    # in this run when the model omits identifiers.
+                    pipeline_id_arg = str(args.get("pipeline_id") or "").strip()
+                    if not pipeline_id_arg and state.pipeline_id:
+                        args["pipeline_id"] = state.pipeline_id
+                    if tool_name == "pipeline_deploy_promote_build":
+                        build_job_id_arg = str(args.get("build_job_id") or "").strip()
+                        if not build_job_id_arg and state.last_build_job_id:
+                            args["build_job_id"] = state.last_build_job_id
+                        artifact_id_arg = str(args.get("artifact_id") or "").strip()
+                        if not artifact_id_arg and state.last_build_artifact_id:
+                            args["artifact_id"] = state.last_build_artifact_id
                     payload = await _call_pipeline_tool(
                         tool_name,
                         {
@@ -1016,6 +1034,13 @@ async def run_pipeline_agent_mcp_autonomous(
                         pipeline_id = str(payload.get("pipeline_id") or "").strip() or None
                     if pipeline_id:
                         state.pipeline_id = pipeline_id
+                    if tool_name == "pipeline_build_wait":
+                        job_id = str(payload.get("job_id") or "").strip()
+                        if job_id:
+                            state.last_build_job_id = job_id
+                        artifact_id = str(payload.get("artifact_id") or "").strip()
+                        if artifact_id:
+                            state.last_build_artifact_id = artifact_id
 
                 # Keep observations small; do not embed definition_json.
                 state.last_observation = _mask_tool_observation(payload if isinstance(payload, dict) else {"result": payload})
@@ -1353,12 +1378,31 @@ async def run_pipeline_agent_mcp_autonomous(
                 break
             errors = observation.get("errors")
             if observation.get("error"):
+                logger.info(
+                    "pipeline agent batch stopping: tool_error tool=%s step=%s observation=%s",
+                    tool_name,
+                    step_idx + 1,
+                    _mask_tool_observation(dict(observation)),
+                )
                 stop_reason = "tool_error"
                 break
             if observation.get("status") == "invalid":
+                logger.info(
+                    "pipeline agent batch stopping: invalid_status tool=%s step=%s errors=%s warnings=%s",
+                    tool_name,
+                    step_idx + 1,
+                    (observation.get("errors") if isinstance(observation.get("errors"), list) else None),
+                    (observation.get("warnings") if isinstance(observation.get("warnings"), list) else None),
+                )
                 stop_reason = "invalid_status"
                 break
             if isinstance(errors, list) and errors:
+                logger.info(
+                    "pipeline agent batch stopping: validation_errors tool=%s step=%s errors=%s",
+                    tool_name,
+                    step_idx + 1,
+                    errors[:20],
+                )
                 stop_reason = "validation_errors"
                 break
 
