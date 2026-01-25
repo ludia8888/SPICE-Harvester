@@ -1,3 +1,5 @@
+# Ontology
+
 > Updated: 2026-01-08  
 > Status: external reference notes. 이 문서는 SPICE HARVESTER의 현재 구현을 설명하지 않습니다.
 

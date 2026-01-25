@@ -19,7 +19,7 @@
 
 ## 1) 서비스 토폴로지
 
-```mermaid
+```{mermaid}
 graph TD
   UI[Web UI / Clients]
 
@@ -156,7 +156,7 @@ graph TD
 
 ## 2) Event Sourcing Write Flow (실제 코드 기준)
 
-```mermaid
+```{mermaid}
 sequenceDiagram
   participant Client
   participant BFF
@@ -205,7 +205,7 @@ Action writeback은 `docs/ACTION_WRITEBACK_DESIGN.md` 철학을 따르는 별도
 - overlay/writeback branch: `writeback-{db_name}` (`ONTOLOGY_WRITEBACK_BRANCH_PREFIX`)
 - datasets: `writeback_patchsets`, `writeback_edits_queue`, `writeback_merged_snapshot`
 
-```mermaid
+```{mermaid}
 sequenceDiagram
   participant Client
   participant BFF
@@ -538,7 +538,7 @@ Source: `docker-compose.full.yml` (with extends resolved).
 ### Compose Dependency Graph (docker-compose.full.yml)
 
 <!-- BEGIN AUTO-GENERATED ARCH: COMPOSE_GRAPH -->
-```mermaid
+```{mermaid}
 graph TD
   svc_action_outbox_worker[action-outbox-worker]
   svc_action_worker[action-worker]

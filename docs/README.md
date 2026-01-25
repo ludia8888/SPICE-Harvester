@@ -4,6 +4,22 @@ Welcome to the SPICE HARVESTER project documentation. This directory contains al
 
 ## Documentation Overview
 
+### Sphinx Site (Buildable)
+
+This repository ships a buildable Sphinx site that ingests the Markdown docs in this folder.
+
+- Entry: `index.md`
+- Config: `conf.py`
+- Auto-managed pages are regenerated during `sphinx-build` (see `conf.py`).
+
+Build (recommended, isolated venv):
+```bash
+python3.11 -m venv .venv-docs
+source .venv-docs/bin/activate
+pip install -r docs/requirements.txt
+make -C docs html
+```
+
 ### Core Documentation
 
 - **[System Architecture](ARCHITECTURE.md)** - Comprehensive system architecture with microservices design, implementation status, and performance metrics
@@ -53,6 +69,8 @@ Welcome to the SPICE HARVESTER project documentation. This directory contains al
 
 ```
 docs/
+├── conf.py                 # Sphinx config (builds the repo-wide docs site)
+├── index.md                # Sphinx root document (toctree)
 ├── README.md               # This file - documentation index
 ├── ARCHITECTURE.md         # 🔄 Unified system architecture (3 docs merged)
 ├── frontend.md             # ✅ Frontend UI/UX spec (BFF-aligned)
@@ -69,6 +87,12 @@ docs/
 ├── ACTION_WRITEBACK_DESIGN.md  # Action writeback 설계 (atomic patchset + ES overlay)
 ├── UIUX.md               # UI/UX guidelines
 ├── DesignSystem.md       # 🔄 Design system (renamed from DesignSysyem.md)
+├── reference/             # Sphinx reference section (mostly auto-generated)
+│   ├── index.md
+│   ├── python_api.rst
+│   └── _generated/
+│       ├── PIPELINE_MCP_TOOLS.md
+│       └── PIPELINE_AGENT_ALLOWED_TOOLS.md
 └── architecture/         # Architecture diagrams and details
     └── README.md
 
@@ -206,6 +230,6 @@ For documentation issues or questions:
 - Submit a pull request with improvements
 
 ---
-*Last updated: 2025-12-17*
+*Last updated: 2026-01-25*
 *Documentation reorganization: Complete*
 *Version: 3.0 (Major reorganization)*

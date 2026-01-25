@@ -6,7 +6,7 @@
 
 ## 1) Service Topology
 
-```mermaid
+```{mermaid}
 graph TD
   UI[Clients] --> BFF[BFF :8002]
   BFF --> AGENT[Agent :8004]
@@ -60,7 +60,7 @@ Notes:
 
 ## 2) Event Sourcing Write Path
 
-```mermaid
+```{mermaid}
 sequenceDiagram
   participant Client
   participant BFF
@@ -87,7 +87,7 @@ sequenceDiagram
 
 ## 3) Data Plane (Ingest -> Pipeline -> Objectify)
 
-```mermaid
+```{mermaid}
 flowchart LR
   Upload[CSV/Excel/Media/Connector] --> BFF
   BFF --> LFS[lakeFS + MinIO]
@@ -112,7 +112,7 @@ Notes:
 
 ## 4) Connector Flow (Google Sheets)
 
-```mermaid
+```{mermaid}
 flowchart LR
   Sheets[Google Sheets] --> Trigger[connector-trigger-service]
   Trigger --> PG[(Connector Registry)]

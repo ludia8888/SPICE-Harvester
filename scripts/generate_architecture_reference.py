@@ -199,7 +199,7 @@ def _compose_inventory() -> Tuple[str, str]:
         lines.append(f"| `{svc.name}` | {ports} | {deps} |")
 
     graph_lines = []
-    graph_lines.append("```mermaid")
+    graph_lines.append("```{mermaid}")
     graph_lines.append("graph TD")
     node_ids = {svc.name: f"svc_{svc.name.replace('-', '_')}" for svc in resolved_sorted}
     for svc in resolved_sorted:

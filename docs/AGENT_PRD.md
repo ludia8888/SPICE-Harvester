@@ -194,6 +194,8 @@ Pipeline Agent는 역할 분해 그래프 대신, 단일 루프가 필요한 도
 - Plan validation/preflight: `backend/bff/services/pipeline_plan_validation.py`
 - Context pack + join/pk/fk 후보: `backend/bff/services/pipeline_context_pack.py`
 - Pipeline MCP server: `backend/mcp/pipeline_mcp_server.py`
+- MCP tool catalog (auto-generated): `docs/reference/_generated/PIPELINE_MCP_TOOLS.md`
+- Agent tool allowlist (auto-generated): `docs/reference/_generated/PIPELINE_AGENT_ALLOWED_TOOLS.md`
 
 ---
 
@@ -279,7 +281,7 @@ Pipeline Agent는 역할 분해 그래프 대신, 단일 루프가 필요한 도
 
 3.2 아키텍처 다이어그램(개념)
 
-```mermaid
+```{mermaid}
 flowchart LR
   U[User] --> C[Client UI/SDK]
   C --> O[Agent Runtime Controller]
@@ -306,7 +308,7 @@ flowchart LR
 
 4.2 상태 머신(턴 내부)
 
-```mermaid
+```{mermaid}
 stateDiagram-v2
   [*] --> BuildPrompt
   BuildPrompt --> Inference

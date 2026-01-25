@@ -46,6 +46,8 @@ LLM 결합의 출발점은 “이미 되는 것”과 “사람이 힘든 것”
 - Context7 라우터: `/api/v1/context7/*` (검색/컨텍스트/지식/링크/온톨로지 분석)
 - Pipeline Agent (ETL): `POST /api/v1/agent/pipeline-runs` + `POST /api/v1/pipeline-plans/compile`
   - 단일 autonomous loop + MCP tools로 “분석 → plan build → validate/preview → repair”를 반복
+  - MCP tool catalog(자동 생성): `docs/reference/_generated/PIPELINE_MCP_TOOLS.md`
+  - Agent tool allowlist(자동 생성): `docs/reference/_generated/PIPELINE_AGENT_ALLOWED_TOOLS.md`
 - Agent 서비스(옵션): `/api/v1/agent/*` (내부 오케스트레이션, BFF 경유 실행, 감사 이벤트 기록)
 
 위 라우터는 “추천/보조/계획” 역할이며, 최종 반영은 항상 서버 검증/승인 흐름을 통과해야 합니다.  

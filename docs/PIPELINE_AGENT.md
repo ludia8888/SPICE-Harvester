@@ -20,6 +20,8 @@
 - Pipeline MCP server: plan-builder + 분석(키/타입/preview/eval/inspect) 도구 제공
   - 코드: `backend/mcp/pipeline_mcp_server.py`
   - 결정론 plan builder: `backend/shared/services/pipeline_plan_builder.py`
+  - 도구 목록(코드에서 자동 생성): `docs/reference/_generated/PIPELINE_MCP_TOOLS.md`
+  - 에이전트 allowlist(코드에서 자동 생성): `docs/reference/_generated/PIPELINE_AGENT_ALLOWED_TOOLS.md`
 
 ### Pipeline Plans API (BFF, deterministic helpers)
 - Plan registry/preview/eval/context pack
@@ -91,6 +93,39 @@ input node에 `metadata.read`를 설정해 Spark reader 옵션을 제어할 수 
 주의:
 - `read.options`는 Spark DataFrameReader option에 그대로 전달됩니다(문자열로 전달).
 - `read.schema`를 주면 schema DDL로 적용됩니다(예: `xsd:integer` → `bigint`).
+
+### 2.3) External Inputs (JDBC/Kafka/File URI)
+
+DatasetRegistry에 저장된 artifact가 아닌, Spark가 직접 읽는 소스도 input node로 표현할 수 있습니다.
+
+- 생성: `plan_add_external_input(read=..., source_name?=...)`
+- 보안: 비밀번호/토큰은 plan에 넣지 말고 `read.options_env`로 환경변수에서 주입하세요.
+
+예시(JDBC, password는 env var로 주입):
+```json
+{
+  "format": "jdbc",
+  "options": {
+    "url": "jdbc:postgresql://host:5432/db",
+    "dbtable": "public.orders",
+    "user": "readonly"
+  },
+  "options_env": {
+    "password": "JDBC_PASSWORD"
+  }
+}
+```
+
+예시(Kafka batch read):
+```json
+{
+  "format": "kafka",
+  "options": {
+    "kafka.bootstrap.servers": "broker:9092",
+    "subscribe": "orders"
+  }
+}
+```
 
 ---
 
@@ -238,6 +273,7 @@ Spark에서 자주 쓰는 고급 표현식을 “문자열 DSL”이 아니라 t
 - `plan_add_group_by_expr`: Spark aggregate expressions 기반 groupBy/aggregate (예: approx_percentile)
 - `plan_add_window_expr`: Spark window expressions 기반 파생 컬럼 생성
 - `plan_configure_input_read`: input.read 설정(ingestion/parsing 옵션)
+- `plan_add_external_input`: DatasetRegistry 없이 Spark-native source(JDBC/Kafka/URI) input 추가
 - `plan_update_settings`: plan.definition_json.settings 패치 (Spark conf / cast mode / AQE 등)
 
 예: ANSI + AQE 활성화 + STRICT cast mode
