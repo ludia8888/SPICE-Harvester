@@ -503,6 +503,65 @@ class PipelineWorker:
             .getOrCreate()
         )
 
+    def _extract_job_settings(self, definition: Dict[str, Any]) -> Dict[str, Any]:
+        settings = definition.get("settings")
+        return dict(settings) if isinstance(settings, dict) else {}
+
+    def _extract_job_spark_conf(self, definition: Dict[str, Any]) -> Dict[str, Any]:
+        settings = self._extract_job_settings(definition)
+        raw = settings.get("spark_conf") or settings.get("sparkConf") or settings.get("spark_conf_overrides")
+        spark_conf = dict(raw) if isinstance(raw, dict) else {}
+
+        # Convenience aliases so planners can use booleans without remembering config keys.
+        if "ansi_enabled" in settings and "spark.sql.ansi.enabled" not in spark_conf:
+            spark_conf["spark.sql.ansi.enabled"] = "true" if bool(settings.get("ansi_enabled")) else "false"
+        if "aqe_enabled" in settings and "spark.sql.adaptive.enabled" not in spark_conf:
+            spark_conf["spark.sql.adaptive.enabled"] = "true" if bool(settings.get("aqe_enabled")) else "false"
+        if "timezone" in settings and "spark.sql.session.timeZone" not in spark_conf:
+            tz = str(settings.get("timezone") or "").strip()
+            if tz:
+                spark_conf["spark.sql.session.timeZone"] = tz
+        return spark_conf
+
+    def _apply_job_overrides(self, definition: Dict[str, Any]) -> tuple[Dict[str, Optional[str]], str]:
+        """
+        Apply per-job Spark/cast overrides from definition.settings.
+
+        Returns:
+        - previous Spark conf values for keys we changed
+        - previous cast_mode so it can be restored
+        """
+        prev_conf: Dict[str, Optional[str]] = {}
+        prev_cast_mode = self.cast_mode
+
+        if self.spark:
+            spark_conf = self._extract_job_spark_conf(definition)
+            for key, value in spark_conf.items():
+                conf_key = str(key or "").strip()
+                if not conf_key:
+                    continue
+                if _is_sensitive_conf_key(conf_key):
+                    # Avoid accidentally persisting secrets into Spark conf/log snapshots.
+                    continue
+                try:
+                    prev_conf[conf_key] = self.spark.conf.get(conf_key)
+                except Exception:
+                    prev_conf[conf_key] = None
+                try:
+                    self.spark.conf.set(conf_key, str(value))
+                except Exception as exc:
+                    logger.warning("Failed to set Spark conf %s: %s", conf_key, exc)
+
+        settings = self._extract_job_settings(definition)
+        for cast_key in ("cast_mode", "castMode"):
+            if cast_key in settings and settings.get(cast_key) is not None:
+                raw = str(settings.get(cast_key) or "").strip()
+                if raw:
+                    self.cast_mode = normalize_cast_mode(raw)
+                break
+
+        return prev_conf, prev_cast_mode
+
     def _restart_spark_session(self) -> None:
         if self.spark:
             try:
@@ -846,6 +905,8 @@ class PipelineWorker:
             raise RuntimeError("Storage service not available")
 
         definition = job.definition_json or {}
+        # Apply per-pipeline Spark/cast configuration overrides before we record spark_conf in the run output.
+        prev_spark_conf, prev_cast_mode = self._apply_job_overrides(definition)
         preview_meta = definition.get("__preview_meta__") or {}
         tables: Dict[str, DataFrame] = {}
         nodes = normalize_nodes(definition.get("nodes"))
@@ -2318,6 +2379,18 @@ class PipelineWorker:
                 await lock.release()
             for path in temp_dirs:
                 shutil.rmtree(path, ignore_errors=True)
+            # Restore any per-job overrides so the next run starts from the worker defaults.
+            if self.spark and prev_spark_conf:
+                for key, value in prev_spark_conf.items():
+                    try:
+                        if value is None:
+                            self.spark.conf.unset(key)
+                        else:
+                            self.spark.conf.set(key, value)
+                    except Exception:
+                        # Best-effort restore; some conf keys may be non-modifiable.
+                        pass
+            self.cast_mode = prev_cast_mode
 
     async def _maybe_enqueue_objectify_job(self, *, dataset, version) -> Optional[str]:
         if not self.objectify_registry:
@@ -3902,6 +3975,9 @@ class PipelineWorker:
             return reader.csv(temp_dir)
         if forced_format in {"excel", "xlsx"} or (not forced_format and has_excel):
             return self._load_excel_path(next(path for path in local_paths if path.endswith((".xlsx", ".xlsm"))))
+        if forced_format:
+            # Best-effort generic reader for formats provided by the Spark runtime (orc/text/avro/etc).
+            return reader.format(forced_format).load(temp_dir)
 
         extensions = sorted({os.path.splitext(path)[1] for path in local_paths if os.path.splitext(path)[1]})
         raise ValueError(
@@ -3955,6 +4031,9 @@ class PipelineWorker:
             return self._load_excel_path(path)
         if fmt == "json":
             return self._load_json_path(path, reader=reader)
+        if fmt:
+            # Best-effort generic reader for formats provided by the Spark runtime (orc/text/avro/etc).
+            return reader.format(fmt).load(path)
         raise ValueError(f"Unsupported dataset file type: {path}")
 
     def _load_excel_path(self, path: str) -> DataFrame:

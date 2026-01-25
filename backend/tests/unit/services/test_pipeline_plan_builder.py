@@ -19,6 +19,7 @@ from shared.services.pipeline_plan_builder import (
     new_plan,
     set_node_inputs,
     update_node_metadata,
+    update_settings,
     update_output,
     validate_structure,
 )
@@ -226,6 +227,18 @@ def test_update_node_metadata_merges_and_unsets():
 
     with pytest.raises(PipelinePlanBuilderError):
         update_node_metadata(plan, node_id="f1", set_fields={"operation": "not_a_real_op"})
+
+
+def test_update_settings_patches_definition_settings():
+    plan = new_plan(goal="settings", db_name="demo")
+    updated = update_settings(plan, set_fields={"spark_conf": {"spark.sql.ansi.enabled": "true"}})
+    settings = updated.plan["definition_json"].get("settings")
+    assert isinstance(settings, dict)
+    assert settings["spark_conf"]["spark.sql.ansi.enabled"] == "true"
+
+    removed = update_settings(updated.plan, unset_fields=["spark_conf"])
+    settings2 = removed.plan["definition_json"].get("settings") or {}
+    assert "spark_conf" not in settings2
 
 
 def test_delete_node_removes_outputs_entry():

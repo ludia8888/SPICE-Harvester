@@ -66,6 +66,7 @@ from shared.services.pipeline_plan_builder import (  # noqa: E402
     delete_node,
     new_plan,
     set_node_inputs,
+    update_settings,
     update_node_metadata,
     update_output,
     validate_structure,
@@ -894,6 +895,20 @@ class PipelineMCPServer:
                     },
                 },
                 {
+                    "name": "plan_update_settings",
+                    "description": "Patch plan.definition_json.settings (merge by default, replace if requested).",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "plan": {"type": "object"},
+                            "set": {"type": "object"},
+                            "unset": {"type": "array", "items": {"type": "string"}},
+                            "replace": {"type": "boolean"},
+                        },
+                        "required": ["plan"],
+                    },
+                },
+                {
                     "name": "plan_delete_node",
                     "description": "Delete a node and any incident edges; for output nodes also removes outputs[] entry.",
                     "inputSchema": {
@@ -1599,6 +1614,16 @@ class PipelineMCPServer:
                     result = update_node_metadata(
                         plan,
                         node_id=str(arguments.get("node_id") or ""),
+                        set_fields=arguments.get("set"),
+                        unset_fields=arguments.get("unset"),
+                        replace=bool(arguments.get("replace", False)),
+                    )
+                    return {"plan": result.plan, "node_id": result.node_id, "warnings": list(result.warnings)}
+
+                if name == "plan_update_settings":
+                    plan = arguments.get("plan") or {}
+                    result = update_settings(
+                        plan,
                         set_fields=arguments.get("set"),
                         unset_fields=arguments.get("unset"),
                         replace=bool(arguments.get("replace", False)),

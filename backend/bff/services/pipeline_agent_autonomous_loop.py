@@ -181,6 +181,7 @@ _PIPELINE_AGENT_ALLOWED_TOOLS: tuple[str, ...] = (
     "plan_delete_edge",
     "plan_set_node_inputs",
     "plan_update_node_metadata",
+    "plan_update_settings",
     "plan_configure_input_read",
     "plan_delete_node",
     "plan_update_output",
@@ -521,6 +522,7 @@ def _build_system_prompt(*, allowed_tools: List[str]) -> str:
         "- group by expr: plan_add_group_by_expr(input_node_id, group_by=[...], aggregate_expressions=[\"approx_percentile(price, 0.5) as p50\", ...])\n"
         "- window expr: plan_add_window_expr(input_node_id, expressions=[{\"column\":\"rn\",\"expr\":\"row_number() over (partition by k order by ts desc)\"}])\n"
         "- top-N: plan_add_filter(input_node_id, expression=\"row_number <= N\")\n"
+        "- spark conf / cast mode: plan_update_settings(set={\"spark_conf\": {\"spark.sql.ansi.enabled\":\"true\"}, \"cast_mode\":\"STRICT\"})\n"
         "- output: plan_add_output(input_node_id, output_name=\"result\")\n"
         "- refute claims: plan_refute_claims()  # optional; server will also run it on finish when a plan exists\n"
         "- materialize pipeline: pipeline_create_from_plan(name=\"...\", location=\"team/...\"), then pipeline_preview_wait(...), pipeline_build_wait(...)\n"

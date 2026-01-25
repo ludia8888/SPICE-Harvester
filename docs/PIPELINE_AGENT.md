@@ -238,6 +238,18 @@ Spark에서 자주 쓰는 고급 표현식을 “문자열 DSL”이 아니라 t
 - `plan_add_group_by_expr`: Spark aggregate expressions 기반 groupBy/aggregate (예: approx_percentile)
 - `plan_add_window_expr`: Spark window expressions 기반 파생 컬럼 생성
 - `plan_configure_input_read`: input.read 설정(ingestion/parsing 옵션)
+- `plan_update_settings`: plan.definition_json.settings 패치 (Spark conf / cast mode / AQE 등)
+
+예: ANSI + AQE 활성화 + STRICT cast mode
+```json
+{
+  "spark_conf": {
+    "spark.sql.ansi.enabled": "true",
+    "spark.sql.adaptive.enabled": "true"
+  },
+  "cast_mode": "STRICT"
+}
+```
 
 
 ---

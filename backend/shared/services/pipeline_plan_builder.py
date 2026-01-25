@@ -70,6 +70,31 @@ def _definition(plan: Dict[str, Any]) -> Dict[str, Any]:
     return definition
 
 
+def update_settings(
+    plan: Dict[str, Any],
+    *,
+    set_fields: Optional[Dict[str, Any]] = None,
+    unset_fields: Optional[List[str]] = None,
+    replace: bool = False,
+) -> PlanMutation:
+    """
+    Patch plan.definition_json.settings (merge by default, replace if requested).
+
+    This is used to control Spark-level behavior (e.g. spark_conf, cast_mode, AQE) without editing per-node metadata.
+    """
+    definition = _definition(plan)
+    existing = definition.get("settings") if isinstance(definition.get("settings"), dict) else {}
+    patch = _ensure_dict(set_fields or {}, name="set_fields") if (set_fields is not None) else {}
+    next_settings = dict(patch) if replace else dict(existing)
+    next_settings.update(patch)
+    for key in _ensure_list(unset_fields, name="unset_fields"):
+        k = str(key or "").strip()
+        if k:
+            next_settings.pop(k, None)
+    definition["settings"] = next_settings
+    return PlanMutation(plan=plan, node_id=None)
+
+
 def _node_ids(definition: Dict[str, Any]) -> set[str]:
     ids: set[str] = set()
     for node in _ensure_list(definition.get("nodes"), name="definition_json.nodes"):
