@@ -20,7 +20,7 @@ from shared.services.dataset_registry import DatasetRegistry
 from shared.services.pipeline_executor import PipelineExecutor, PipelineTable, _cast_value_with_status  # type: ignore
 from shared.services.pipeline_graph_utils import build_incoming, normalize_edges, normalize_nodes
 from shared.services.pipeline_transform_spec import normalize_operation, resolve_join_spec
-from shared.utils.llm_safety import mask_pii
+from shared.utils.llm_safety import mask_pii, stable_json_dumps, sha256_hex
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +92,12 @@ def _row_ref(
     include_columns: List[str],
 ) -> Dict[str, Any]:
     values = {col: row.get(col) for col in include_columns}
-    return {"row_index": row_index, "values": values}
+    return {
+        "row_index": row_index,
+        # Deterministic digest to help reproduce/minimize counterexamples without leaking raw rows.
+        "row_digest": f"sha256:{sha256_hex(stable_json_dumps(values))}",
+        "values": values,
+    }
 
 
 def _refute_pk(
