@@ -10,6 +10,7 @@ from shared.services.pipeline_plan_builder import (
     add_compute_column,
     add_filter,
     add_input,
+    add_external_input,
     add_join,
     add_select_expr,
     add_output,
@@ -63,6 +64,22 @@ def test_add_input_supports_read_config():
     node = next(node for node in res.plan["definition_json"]["nodes"] if node["id"] == "in_1")
     assert node["metadata"]["read"]["format"] == "csv"
     assert node["metadata"]["read"]["mode"] == "PERMISSIVE"
+
+
+def test_add_external_input_creates_input_node_without_dataset_selection():
+    plan = new_plan(goal="read jdbc", db_name="demo")
+    res = add_external_input(
+        plan,
+        node_id="in_jdbc",
+        source_name="orders_db",
+        read={"format": "jdbc", "options": {"url": "jdbc:postgresql://db", "dbtable": "public.orders"}},
+    )
+    node = next(node for node in res.plan["definition_json"]["nodes"] if node["id"] == "in_jdbc")
+    assert node["type"] == "input"
+    assert "datasetId" not in node["metadata"]
+    assert "datasetName" not in node["metadata"]
+    assert node["metadata"]["sourceName"] == "orders_db"
+    assert node["metadata"]["read"]["format"] == "jdbc"
 
 
 def test_configure_input_read_patches_input_nodes_only():

@@ -2766,13 +2766,31 @@ class PipelineWorker:
         watermark_after: Optional[Any] = None,
         watermark_keys: Optional[list[str]] = None,
     ) -> DataFrame:
-        if not self.dataset_registry:
-            raise RuntimeError("Dataset registry not initialized")
         selection = normalize_dataset_selection(metadata, default_branch=branch or "main")
         dataset_id = selection.dataset_id
         dataset_name = selection.dataset_name
         requested_branch = selection.requested_branch
 
+        read_config = metadata.get("read") if isinstance(metadata.get("read"), dict) else {}
+
+        # External inputs (no DatasetRegistry selection) are loaded directly via Spark read config.
+        if not dataset_id and not dataset_name:
+            df = self._load_external_input_dataframe(read_config, node_id=node_id)
+            if input_snapshots is not None:
+                fmt = str(read_config.get("format") or read_config.get("file_format") or read_config.get("fileFormat") or "").strip().lower() or None
+                options = self._normalize_read_options(read_config)
+                input_snapshots.append(
+                    {
+                        "node_id": node_id,
+                        "source_type": "external",
+                        "format": fmt,
+                        "options": self._mask_sensitive_options(options),
+                    }
+                )
+            return df
+
+        if not self.dataset_registry:
+            raise RuntimeError("Dataset registry not initialized")
         if not dataset_id and not dataset_name:
             raise ValueError(f"Input node {node_id} is missing dataset selection")
         resolution = await resolve_dataset_version(
@@ -3847,6 +3865,19 @@ class PipelineWorker:
             if v is None:
                 continue
             options[key] = str(v)
+
+        # Option values can be sourced from environment variables to avoid embedding secrets in pipeline definitions.
+        # Example: {"options_env": {"password": "JDBC_PASSWORD"}}.
+        env_raw = read_config.get("options_env") or read_config.get("optionsEnv")
+        if isinstance(env_raw, dict):
+            for opt_key, env_name in env_raw.items():
+                key = str(opt_key or "").strip()
+                env_key = str(env_name or "").strip()
+                if not key or not env_key:
+                    continue
+                env_val = os.environ.get(env_key)
+                if env_val is not None:
+                    options[key] = str(env_val)
         # Convenience aliases (so the planner doesn't need to remember Spark option keys).
         mode = read_config.get("mode")
         if mode is not None and "mode" not in options:
@@ -3859,6 +3890,27 @@ class PipelineWorker:
         if "inferSchema" not in options and "infer_schema" in read_config:
             options["inferSchema"] = "true" if bool(read_config.get("infer_schema")) else "false"
         return options
+
+    def _mask_sensitive_options(self, options: Dict[str, str]) -> Dict[str, str]:
+        masked: Dict[str, str] = {}
+        sensitive_markers = (
+            "password",
+            "secret",
+            "token",
+            "apikey",
+            "api_key",
+            "access_key",
+            "secret_key",
+            "private_key",
+            "client_secret",
+        )
+        for key, value in (options or {}).items():
+            lower = str(key or "").lower()
+            if any(marker in lower for marker in sensitive_markers):
+                masked[str(key)] = "***"
+            else:
+                masked[str(key)] = str(value)
+        return masked
 
     def _schema_ddl_from_read_config(self, read_config: Dict[str, Any]) -> Optional[str]:
         raw = read_config.get("schema")
@@ -3897,6 +3949,86 @@ class PipelineWorker:
         if ext == ".json":
             return "json"
         return ""
+
+    def _load_external_input_dataframe(self, read_config: Dict[str, Any], *, node_id: str) -> DataFrame:
+        """
+        Load an input DataFrame directly from Spark using metadata.read (no DatasetRegistry artifact).
+
+        Supported (initial):
+        - jdbc: requires options.url + options.dbtable (or options.query)
+        - kafka (batch): requires Spark kafka options (e.g., kafka.bootstrap.servers + subscribe)
+        - file formats: requires read.path/paths and a Spark data source for read.format
+        """
+        if not self.spark:
+            raise RuntimeError("Spark session not initialized")
+
+        read_config = dict(read_config or {})
+        fmt = str(read_config.get("format") or read_config.get("file_format") or read_config.get("fileFormat") or "").strip().lower()
+        if not fmt:
+            raise ValueError(f"Input node {node_id} external source requires metadata.read.format")
+
+        options = self._normalize_read_options(read_config)
+        schema_ddl = self._schema_ddl_from_read_config(read_config)
+
+        if fmt == "jdbc":
+            opts = dict(options)
+            # Spark JDBC prefers dbtable; translate query -> dbtable if provided.
+            query = opts.pop("query", None)
+            if query and "dbtable" not in opts:
+                opts["dbtable"] = f"({query}) AS t"
+            if not str(opts.get("url") or "").strip():
+                raise ValueError(f"Input node {node_id} JDBC read requires options.url")
+            if not str(opts.get("dbtable") or "").strip():
+                raise ValueError(f"Input node {node_id} JDBC read requires options.dbtable (or options.query)")
+            reader = self.spark.read.format("jdbc")
+            for k, v in opts.items():
+                reader = reader.option(k, v)
+            return reader.load()
+
+        reader = self.spark.read
+        for k, v in options.items():
+            reader = reader.option(k, v)
+        if schema_ddl and fmt not in {"kafka"}:
+            try:
+                reader = reader.schema(schema_ddl)
+            except Exception:
+                # Some sources ignore/forbid schema(); best-effort only.
+                pass
+
+        if fmt == "kafka":
+            return reader.format("kafka").load()
+
+        # File/data-source paths.
+        path_value = read_config.get("path")
+        if path_value is None:
+            path_value = read_config.get("paths")
+        if path_value is None:
+            path_value = options.get("path")
+        if path_value is None:
+            path_value = read_config.get("uri")
+
+        paths: list[str] = []
+        if isinstance(path_value, list):
+            paths = [str(p).strip() for p in path_value if str(p or "").strip()]
+        else:
+            text = str(path_value or "").strip()
+            if text:
+                paths = [text]
+
+        if not paths:
+            raise ValueError(f"Input node {node_id} external {fmt} read requires read.path/paths")
+
+        if fmt == "csv":
+            if "header" not in options:
+                reader = reader.option("header", "true")
+            return reader.csv(paths if len(paths) != 1 else paths[0])
+        if fmt == "json":
+            return reader.json(paths if len(paths) != 1 else paths[0])
+        if fmt == "parquet":
+            return reader.parquet(*paths)
+
+        # Best-effort generic reader for formats provided by the Spark runtime (orc/text/avro/xml/etc).
+        return reader.format(fmt).load(paths if len(paths) != 1 else paths[0])
 
     async def _load_artifact_dataframe(
         self,

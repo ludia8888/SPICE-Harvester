@@ -51,6 +51,7 @@ from shared.services.pipeline_plan_builder import (  # noqa: E402
     add_drop,
     add_filter,
     add_input,
+    add_external_input,
     add_join,
     add_group_by_expr,
     add_normalize,
@@ -533,6 +534,23 @@ class PipelineMCPServer:
                     },
                 },
                 {
+                    "name": "plan_add_external_input",
+                    "description": "Add an input node backed by a Spark-native source (jdbc/kafka/file URI) via metadata.read.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "plan": {"type": "object"},
+                            "read": {
+                                "type": "object",
+                                "description": "Spark read config (must include format + options/path).",
+                            },
+                            "source_name": {"type": "string"},
+                            "node_id": {"type": "string"},
+                        },
+                        "required": ["plan", "read"],
+                    },
+                },
+                {
                     "name": "plan_configure_input_read",
                     "description": "Patch an input node's Spark read config (format/options/schema, permissive parsing, corrupt record capture).",
                     "inputSchema": {
@@ -543,6 +561,10 @@ class PipelineMCPServer:
                             "read": {"type": "object"},
                             "format": {"type": "string"},
                             "options": {"type": "object"},
+                            "options_env": {
+                                "type": "object",
+                                "description": "Map Spark option key -> env var name (avoid embedding secrets in the plan).",
+                            },
                             "schema": {"type": "array", "items": {"type": "object"}},
                             "mode": {"type": "string", "description": "Spark reader mode: PERMISSIVE | DROPMALFORMED | FAILFAST"},
                             "corrupt_record_column": {"type": "string", "description": "Sets columnNameOfCorruptRecord to capture malformed rows"},
@@ -1205,6 +1227,19 @@ class PipelineMCPServer:
                     )
                     return {"plan": result.plan, "node_id": result.node_id, "warnings": list(result.warnings)}
 
+                if name == "plan_add_external_input":
+                    plan = arguments.get("plan") or {}
+                    read_obj = arguments.get("read")
+                    if not isinstance(read_obj, dict) or not read_obj:
+                        return {"status": "invalid", "errors": ["read must be a non-empty object"]}
+                    result = add_external_input(
+                        plan,
+                        read=read_obj,
+                        source_name=arguments.get("source_name") or arguments.get("sourceName"),
+                        node_id=arguments.get("node_id"),
+                    )
+                    return {"plan": result.plan, "node_id": result.node_id, "warnings": list(result.warnings)}
+
                 if name == "plan_configure_input_read":
                     plan = arguments.get("plan") or {}
                     patch: Dict[str, Any] = {}
@@ -1216,6 +1251,9 @@ class PipelineMCPServer:
                     options_obj = arguments.get("options")
                     if isinstance(options_obj, dict) and options_obj:
                         patch["options"] = dict(options_obj)
+                    options_env_obj = arguments.get("options_env")
+                    if isinstance(options_env_obj, dict) and options_env_obj:
+                        patch["options_env"] = dict(options_env_obj)
                     schema_obj = arguments.get("schema")
                     if isinstance(schema_obj, list) and schema_obj:
                         patch["schema"] = schema_obj

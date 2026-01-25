@@ -193,6 +193,40 @@ def add_input(
     return PlanMutation(plan=plan, node_id=resolved_id)
 
 
+def add_external_input(
+    plan: Dict[str, Any],
+    *,
+    read: Dict[str, Any],
+    source_name: Optional[str] = None,
+    node_id: Optional[str] = None,
+) -> PlanMutation:
+    """
+    Add an input node that is NOT backed by a DatasetRegistry artifact.
+
+    This enables Spark-native sources like JDBC/Kafka or direct file URIs, controlled by `metadata.read`.
+    """
+    definition = _definition(plan)
+    existing = _node_ids(definition)
+
+    read_cfg = _ensure_dict(read, name="read")
+    fmt = str(read_cfg.get("format") or read_cfg.get("file_format") or read_cfg.get("fileFormat") or "").strip().lower()
+    if not fmt:
+        raise PipelinePlanBuilderError("read.format is required for external inputs")
+
+    resolved_id = str(node_id or "").strip() or None
+    if not resolved_id:
+        resolved_id = _unique_node_id(f"input_{fmt}", existing)
+    if resolved_id in existing:
+        raise PipelinePlanBuilderError(f"node_id already exists: {resolved_id}")
+
+    metadata: Dict[str, Any] = {"read": dict(read_cfg)}
+    if source_name:
+        metadata["sourceName"] = str(source_name).strip() or None
+
+    definition["nodes"].append({"id": resolved_id, "type": "input", "metadata": metadata})
+    return PlanMutation(plan=plan, node_id=resolved_id)
+
+
 def configure_input_read(
     plan: Dict[str, Any],
     *,

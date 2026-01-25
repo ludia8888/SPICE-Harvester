@@ -158,6 +158,7 @@ _PIPELINE_AGENT_ALLOWED_TOOLS: tuple[str, ...] = (
     # Plan builder (mutating, but in-memory only)
     "plan_new",
     "plan_add_input",
+    "plan_add_external_input",
     "plan_add_join",
     "plan_add_transform",
     "plan_add_group_by",
@@ -515,6 +516,7 @@ def _build_system_prompt(*, allowed_tools: List[str]) -> str:
         "- infer casts: context_pack_infer_types(join_plan=...)\n"
         "- join: plan_add_join(left_node_id,right_node_id,left_keys=[...],right_keys=[...],join_type='left|inner')\n"
         "- ingest permissive: plan_configure_input_read(node_id, mode='PERMISSIVE', corrupt_record_column='_corrupt_record')\n"
+        "- external input (jdbc/kafka): plan_add_external_input(read={\"format\":\"jdbc\",\"options\":{...},\"options_env\":{...}})\n"
         "- compute: plan_add_compute_column(input_node_id, target_column=\"revenue\", formula=\"qty * unit_price\")\n"
         "- compute many: plan_add_compute_assignments(input_node_id, assignments=[{\"column\":\"x\",\"expression\":\"...\"}, ...])\n"
         "- select expr: plan_add_select_expr(input_node_id, expressions=[\"col\", \"sum(price) as total\"])  # Spark selectExpr\n"

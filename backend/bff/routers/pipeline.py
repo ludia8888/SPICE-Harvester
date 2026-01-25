@@ -2978,12 +2978,59 @@ async def get_pipeline_readiness(
             metadata = node.get("metadata") if isinstance(node.get("metadata"), dict) else {}
             selection = normalize_dataset_selection(metadata, default_branch=resolved_branch)
             if not selection.dataset_id and not selection.dataset_name:
+                read_cfg = metadata.get("read") if isinstance(metadata.get("read"), dict) else {}
+                fmt = str(read_cfg.get("format") or read_cfg.get("file_format") or read_cfg.get("fileFormat") or "").strip().lower()
+                if fmt:
+                    options = read_cfg.get("options") if isinstance(read_cfg.get("options"), dict) else {}
+
+                    def _opt(key: str) -> str:
+                        return str(options.get(key) or "").strip()
+
+                    if fmt == "jdbc":
+                        if not _opt("url") or (not _opt("dbtable") and not _opt("query")):
+                            overall_blocked = True
+                            inputs.append(
+                                {
+                                    "node_id": node_id,
+                                    "status": "INVALID_CONFIG",
+                                    "detail": "external JDBC input requires read.options.url and read.options.dbtable (or read.options.query)",
+                                    "source_type": "external",
+                                    "format": fmt,
+                                }
+                            )
+                            continue
+                    if fmt == "kafka":
+                        bootstrap = _opt("kafka.bootstrap.servers")
+                        topic_spec = _opt("subscribe") or _opt("subscribePattern") or _opt("assign")
+                        if not bootstrap or not topic_spec:
+                            overall_blocked = True
+                            inputs.append(
+                                {
+                                    "node_id": node_id,
+                                    "status": "INVALID_CONFIG",
+                                    "detail": "external Kafka input requires read.options.kafka.bootstrap.servers and one of subscribe/subscribePattern/assign",
+                                    "source_type": "external",
+                                    "format": fmt,
+                                }
+                            )
+                            continue
+
+                    inputs.append(
+                        {
+                            "node_id": node_id,
+                            "status": "READY",
+                            "source_type": "external",
+                            "format": fmt,
+                        }
+                    )
+                    continue
+
                 overall_blocked = True
                 inputs.append(
                     {
                         "node_id": node_id,
                         "status": "INVALID_CONFIG",
-                        "detail": "datasetId or datasetName is required",
+                        "detail": "datasetId/datasetName or metadata.read.format is required",
                     }
                 )
                 continue

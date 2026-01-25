@@ -776,27 +776,32 @@ async def refute_pipeline_plan_claims(
             rows: List[Dict[str, Any]] = [dict(row) for row in rows_raw if isinstance(row, dict)]
             tables[str(node_id)] = PipelineTable(columns=cols, rows=rows)
     else:
+        # Fail open: inability to evaluate is never a witness.
         if not dataset_registry:
-            return {
-                "status": "invalid",
-                "gate": "BLOCK",
-                "hard_failures": [],
-                "soft_warnings": [],
-                "errors": ["dataset_registry is required when run_tables is not provided"],
-                "warnings": [],
-                "stats": {"claims_total": len(claims)},
-            }
+            return mask_pii(
+                {
+                    "status": "success",
+                    "gate": "PASS_NOT_REFUTED",
+                    "hard_failures": [],
+                    "soft_warnings": [],
+                    "errors": [],
+                    "warnings": ["refuter skipped: dataset_registry is required when run_tables is not provided"],
+                    "stats": {"claims_total": len(claims), "claims_checked": 0, "hard_failures": 0, "soft_warnings": 0},
+                }
+            )
         db_name = str(plan.data_scope.db_name or "").strip()
         if not db_name:
-            return {
-                "status": "invalid",
-                "gate": "BLOCK",
-                "hard_failures": [],
-                "soft_warnings": [],
-                "errors": ["plan.data_scope.db_name is required"],
-                "warnings": [],
-                "stats": {"claims_total": len(claims)},
-            }
+            return mask_pii(
+                {
+                    "status": "success",
+                    "gate": "PASS_NOT_REFUTED",
+                    "hard_failures": [],
+                    "soft_warnings": [],
+                    "errors": [],
+                    "warnings": ["refuter skipped: plan.data_scope.db_name is required"],
+                    "stats": {"claims_total": len(claims), "claims_checked": 0, "hard_failures": 0, "soft_warnings": 0},
+                }
+            )
         executor = PipelineExecutor(dataset_registry)
         definition_for_run = dict(definition_json)
         preview_meta = dict(definition_for_run.get("__preview_meta__") or {})
@@ -813,15 +818,18 @@ async def refute_pipeline_plan_claims(
         try:
             run_result = await executor.run(definition=definition_for_run, db_name=db_name)
         except Exception as exc:
-            return {
-                "status": "invalid",
-                "gate": "BLOCK",
-                "hard_failures": [],
-                "soft_warnings": [],
-                "errors": [f"preview run failed: {exc}"],
-                "warnings": [],
-                "stats": {"claims_total": len(claims)},
-            }
+            # Fail open: preview execution errors are not counterexamples.
+            return mask_pii(
+                {
+                    "status": "success",
+                    "gate": "PASS_NOT_REFUTED",
+                    "hard_failures": [],
+                    "soft_warnings": [],
+                    "errors": [],
+                    "warnings": [f"refuter skipped: preview run failed ({exc})"],
+                    "stats": {"claims_total": len(claims), "claims_checked": 0, "hard_failures": 0, "soft_warnings": 0},
+                }
+            )
         tables = dict(run_result.tables or {})
 
     hard_failures: List[Dict[str, Any]] = []

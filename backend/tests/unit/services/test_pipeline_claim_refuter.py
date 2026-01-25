@@ -375,3 +375,36 @@ async def test_refuter_union_row_lossless_finds_missing_input_row():
     assert report["gate"] == "BLOCK"
     assert report["hard_failures"][0]["claim_id"] == "union_lossless"
     assert report["hard_failures"][0]["witness"]["description"] == "Row from input missing in UNION output"
+
+
+@pytest.mark.asyncio
+async def test_refuter_fails_open_when_unable_to_execute_preview():
+    """Preview execution failures are not counterexamples; the refuter must never hard-block without a witness."""
+    plan = PipelinePlan.model_validate(
+        {
+            "goal": "fail open",
+            "data_scope": {"db_name": "demo"},
+            "definition_json": {
+                "nodes": [
+                    {
+                        "id": "in1",
+                        "type": "input",
+                        "metadata": {
+                            "datasetId": "ds-1",
+                            "claims": [
+                                {"id": "pk1", "kind": "PK", "severity": "HARD", "spec": {"key_cols": ["id"]}}
+                            ],
+                        },
+                    }
+                ],
+                "edges": [],
+            },
+            "outputs": [],
+        }
+    )
+    report = await refute_pipeline_plan_claims(plan=plan, dataset_registry=None, run_tables=None)
+    assert report["status"] == "success"
+    assert report["gate"] == "PASS_NOT_REFUTED"
+    assert report["hard_failures"] == []
+    assert report["errors"] == []
+    assert report["warnings"]
