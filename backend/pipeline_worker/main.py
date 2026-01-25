@@ -2867,10 +2867,11 @@ class PipelineWorker:
                 )
 
         source_type = str(getattr(dataset, "source_type", "") or "").strip().lower()
+        read_config = metadata.get("read") if isinstance(metadata.get("read"), dict) else {}
         if source_type == "media":
             df = await self._load_media_prefix_dataframe(bucket, key, node_id=node_id)
         else:
-            df = await self._load_artifact_dataframe(bucket, key, temp_dirs)
+            df = await self._load_artifact_dataframe(bucket, key, temp_dirs, read_config=read_config)
         df = self._apply_schema_casts(df, dataset=dataset, version=version)
 
         resolved_watermark_column = str(watermark_column or "").strip()
@@ -3304,12 +3305,38 @@ class PipelineWorker:
             if operation not in supported_ops:
                 errors.append(f"Unsupported operation '{operation}' on node {node_id}")
                 continue
-            if operation in {"filter", "compute"} and not str(metadata.get("expression") or "").strip():
+            if operation == "filter" and not str(metadata.get("expression") or "").strip():
                 errors.append(f"{operation} missing expression on node {node_id}")
+            if operation == "compute":
+                has_expression = bool(str(metadata.get("expression") or "").strip())
+                target = metadata.get("targetColumn") or metadata.get("target_column") or metadata.get("target")
+                formula = metadata.get("formula") or metadata.get("expr")
+                has_target_formula = bool(str(target or "").strip()) and bool(str(formula or "").strip())
+                assignments = (
+                    metadata.get("assignments")
+                    or metadata.get("computedColumns")
+                    or metadata.get("computed_columns")
+                )
+                has_assignments = (
+                    isinstance(assignments, list)
+                    and any(
+                        isinstance(item, dict)
+                        and str(item.get("column") or item.get("target") or item.get("name") or "").strip()
+                        and str(item.get("expression") or item.get("expr") or item.get("formula") or "").strip()
+                        for item in assignments
+                    )
+                )
+                if not (has_expression or has_target_formula or has_assignments):
+                    errors.append(f"compute missing expression/targetColumn/formula/assignments on node {node_id}")
             if operation in {"select", "drop", "sort", "dedupe", "explode"}:
                 columns = metadata.get("columns") or []
-                if not columns:
-                    errors.append(f"{operation} missing columns on node {node_id}")
+                expressions = metadata.get("expressions") or metadata.get("selectExpr") or metadata.get("select_expr")
+                if operation == "select":
+                    if not columns and not (isinstance(expressions, list) and expressions):
+                        errors.append(f"{operation} missing columns/expressions on node {node_id}")
+                else:
+                    if not columns:
+                        errors.append(f"{operation} missing columns on node {node_id}")
             if operation == "rename":
                 rename_map = metadata.get("rename") or {}
                 if not rename_map:
@@ -3320,11 +3347,18 @@ class PipelineWorker:
                     errors.append(f"cast missing columns on node {node_id}")
             if operation in {"groupBy", "aggregate"}:
                 aggregates = metadata.get("aggregates") or []
-                if not isinstance(aggregates, list) or not any(
+                expr_items = (
+                    metadata.get("aggregateExpressions")
+                    or metadata.get("aggExpressions")
+                    or metadata.get("aggregate_expressions")
+                )
+                has_exprs = isinstance(expr_items, list) and len(expr_items) > 0
+                has_aggs = isinstance(aggregates, list) and any(
                     isinstance(item, dict) and item.get("column") and item.get("op")
                     for item in aggregates
-                ):
-                    errors.append(f"{operation} missing aggregates on node {node_id}")
+                )
+                if not (has_aggs or has_exprs):
+                    errors.append(f"{operation} missing aggregates/aggregateExpressions on node {node_id}")
             if operation == "join":
                 if len(incoming.get(node_id, [])) < 2:
                     errors.append(f"join requires two inputs on node {node_id}")
@@ -3358,8 +3392,9 @@ class PipelineWorker:
             if operation == "window":
                 window_meta = metadata.get("window") or {}
                 order_by = window_meta.get("orderBy") or []
-                if not order_by:
-                    errors.append(f"window missing orderBy on node {node_id}")
+                expressions = window_meta.get("expressions") if isinstance(window_meta.get("expressions"), list) else None
+                if not order_by and not (isinstance(expressions, list) and expressions):
+                    errors.append(f"window missing orderBy/expressions on node {node_id}")
 
             checks = metadata.get("schemaChecks") or []
             if checks:
@@ -3729,18 +3764,95 @@ class PipelineWorker:
                 )
         return errors
 
-    async def _load_artifact_dataframe(self, bucket: str, key: str, temp_dirs: list[str]) -> DataFrame:
+    def _normalize_read_options(self, read_config: Dict[str, Any]) -> Dict[str, str]:
+        options_raw = read_config.get("options") if isinstance(read_config.get("options"), dict) else {}
+        options: Dict[str, str] = {}
+        for k, v in options_raw.items():
+            key = str(k or "").strip()
+            if not key:
+                continue
+            if v is None:
+                continue
+            options[key] = str(v)
+        # Convenience aliases (so the planner doesn't need to remember Spark option keys).
+        mode = read_config.get("mode")
+        if mode is not None and "mode" not in options:
+            options["mode"] = str(mode)
+        corrupt_col = read_config.get("corrupt_record_column") or read_config.get("corruptRecordColumn")
+        if corrupt_col is not None and "columnNameOfCorruptRecord" not in options:
+            options["columnNameOfCorruptRecord"] = str(corrupt_col)
+        if "header" not in options and "header" in read_config:
+            options["header"] = "true" if bool(read_config.get("header")) else "false"
+        if "inferSchema" not in options and "infer_schema" in read_config:
+            options["inferSchema"] = "true" if bool(read_config.get("infer_schema")) else "false"
+        return options
+
+    def _schema_ddl_from_read_config(self, read_config: Dict[str, Any]) -> Optional[str]:
+        raw = read_config.get("schema")
+        if raw is None:
+            raw = read_config.get("schema_columns") or read_config.get("schemaColumns")
+        if isinstance(raw, dict):
+            raw = raw.get("columns") or raw.get("fields") or raw.get("schema")
+        if not isinstance(raw, list):
+            return None
+        parts: list[str] = []
+        for item in raw:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name") or item.get("column") or "").strip()
+            if not name:
+                continue
+            raw_type = item.get("type") or item.get("data_type") or item.get("datatype") or "xsd:string"
+            normalized = normalize_schema_type(raw_type) or str(raw_type or "").strip().lower()
+            spark_type = xsd_to_spark_type(normalized) if normalized.startswith("xsd:") else str(normalized or "string")
+            safe_name = name.replace("`", "``")
+            parts.append(f"`{safe_name}` {spark_type}")
+        ddl = ", ".join(parts).strip()
+        return ddl or None
+
+    def _resolve_read_format(self, *, path: str, read_config: Dict[str, Any]) -> str:
+        fmt = str(read_config.get("format") or read_config.get("file_format") or read_config.get("fileFormat") or "").strip().lower()
+        if fmt:
+            return fmt
+        ext = os.path.splitext(path)[1].lower()
+        if ext == ".csv":
+            return "csv"
+        if ext == ".parquet":
+            return "parquet"
+        if ext in {".xlsx", ".xlsm"}:
+            return "excel"
+        if ext == ".json":
+            return "json"
+        return ""
+
+    async def _load_artifact_dataframe(
+        self,
+        bucket: str,
+        key: str,
+        temp_dirs: list[str],
+        *,
+        read_config: Optional[Dict[str, Any]] = None,
+    ) -> DataFrame:
+        read_config = dict(read_config or {})
         prefix = key.rstrip("/")
         has_extension = os.path.splitext(prefix)[1] != ""
         if not has_extension:
-            return await self._load_prefix_dataframe(bucket, f"{prefix}/", temp_dirs)
+            return await self._load_prefix_dataframe(bucket, f"{prefix}/", temp_dirs, read_config=read_config)
         if key.endswith("/"):
-            return await self._load_prefix_dataframe(bucket, key, temp_dirs)
+            return await self._load_prefix_dataframe(bucket, key, temp_dirs, read_config=read_config)
 
         file_path = await self._download_object(bucket, key, temp_dirs)
-        return self._read_local_file(file_path)
+        return self._read_local_file(file_path, read_config=read_config)
 
-    async def _load_prefix_dataframe(self, bucket: str, prefix: str, temp_dirs: list[str]) -> DataFrame:
+    async def _load_prefix_dataframe(
+        self,
+        bucket: str,
+        prefix: str,
+        temp_dirs: list[str],
+        *,
+        read_config: Optional[Dict[str, Any]] = None,
+    ) -> DataFrame:
+        read_config = dict(read_config or {})
         objects = await self.storage.list_objects(bucket, prefix=prefix)
         keys = [obj.get("Key") for obj in objects or [] if obj.get("Key")]
         data_keys = [key for key in keys if _is_data_object(key)]
@@ -3766,13 +3878,29 @@ class PipelineWorker:
             await self._download_object_to_path(bucket, key, local_path)
             local_paths.append(local_path)
 
-        if any(path.endswith(".parquet") for path in local_paths):
-            return self.spark.read.parquet(temp_dir)
-        if any(path.endswith(".json") for path in local_paths):
-            return self.spark.read.json(temp_dir)
-        if any(path.endswith(".csv") for path in local_paths):
-            return self.spark.read.option("header", "true").csv(temp_dir)
-        if any(path.endswith((".xlsx", ".xlsm")) for path in local_paths):
+        reader = self.spark.read
+        options = self._normalize_read_options(read_config)
+        schema_ddl = self._schema_ddl_from_read_config(read_config)
+        for k, v in options.items():
+            reader = reader.option(k, v)
+        if schema_ddl:
+            reader = reader.schema(schema_ddl)
+
+        forced_format = str(read_config.get("format") or "").strip().lower() or None
+        has_parquet = any(path.endswith(".parquet") for path in local_paths)
+        has_json = any(path.endswith(".json") for path in local_paths)
+        has_csv = any(path.endswith(".csv") for path in local_paths)
+        has_excel = any(path.endswith((".xlsx", ".xlsm")) for path in local_paths)
+
+        if forced_format == "parquet" or (not forced_format and has_parquet):
+            return reader.parquet(temp_dir)
+        if forced_format == "json" or (not forced_format and has_json):
+            return reader.json(temp_dir)
+        if forced_format == "csv" or (not forced_format and has_csv):
+            if "header" not in options:
+                reader = reader.option("header", "true")
+            return reader.csv(temp_dir)
+        if forced_format in {"excel", "xlsx"} or (not forced_format and has_excel):
             return self._load_excel_path(next(path for path in local_paths if path.endswith((".xlsx", ".xlsm"))))
 
         extensions = sorted({os.path.splitext(path)[1] for path in local_paths if os.path.splitext(path)[1]})
@@ -3805,15 +3933,28 @@ class PipelineWorker:
         await self._download_object_to_path(bucket, key, local_path)
         return local_path
 
-    def _read_local_file(self, path: str) -> DataFrame:
-        if path.endswith(".csv"):
-            return self.spark.read.option("header", "true").csv(path)
-        if path.endswith(".parquet"):
-            return self.spark.read.parquet(path)
+    def _read_local_file(self, path: str, *, read_config: Optional[Dict[str, Any]] = None) -> DataFrame:
+        read_config = dict(read_config or {})
+        fmt = self._resolve_read_format(path=path, read_config=read_config)
+        options = self._normalize_read_options(read_config)
+        schema_ddl = self._schema_ddl_from_read_config(read_config)
+
+        reader = self.spark.read
+        for k, v in options.items():
+            reader = reader.option(k, v)
+        if schema_ddl:
+            reader = reader.schema(schema_ddl)
+
+        if fmt == "csv":
+            if "header" not in options:
+                reader = reader.option("header", "true")
+            return reader.csv(path)
+        if fmt == "parquet":
+            return reader.parquet(path)
         if path.endswith((".xlsx", ".xlsm")):
             return self._load_excel_path(path)
-        if path.endswith(".json"):
-            return self._load_json_path(path)
+        if fmt == "json":
+            return self._load_json_path(path, reader=reader)
         raise ValueError(f"Unsupported dataset file type: {path}")
 
     def _load_excel_path(self, path: str) -> DataFrame:
@@ -3822,7 +3963,9 @@ class PipelineWorker:
         frame = pd.read_excel(path)
         return self.spark.createDataFrame(frame)
 
-    def _load_json_path(self, path: str) -> DataFrame:
+    def _load_json_path(self, path: str, *, reader: Optional[Any] = None) -> DataFrame:
+        if reader is None:
+            reader = self.spark.read
         try:
             with open(path, "r", encoding="utf-8") as handle:
                 head = handle.read(2048)
@@ -3835,7 +3978,7 @@ class PipelineWorker:
                     return self._empty_dataframe()
         except Exception:
             pass
-        return self.spark.read.json(path)
+        return reader.json(path)
 
     def _empty_dataframe(self) -> DataFrame:
         return self.spark.createDataFrame([], schema=StructType([]))
@@ -3863,6 +4006,24 @@ class PipelineWorker:
                 right_keys = [right_key]
             left = inputs[0]
             right = inputs[1]
+            # Optional join hints (Spark will ignore unknown hints).
+            hints = (
+                metadata.get("joinHints")
+                or metadata.get("join_hints")
+                or metadata.get("hints")
+                or {}
+            )
+            if isinstance(hints, dict):
+                left_hint = hints.get("left") or hints.get("leftHint") or hints.get("left_hint")
+                right_hint = hints.get("right") or hints.get("rightHint") or hints.get("right_hint")
+                if left_hint:
+                    left = left.hint(str(left_hint))
+                if right_hint:
+                    right = right.hint(str(right_hint))
+            if metadata.get("broadcastLeft") or metadata.get("broadcast_left"):
+                left = left.hint("broadcast")
+            if metadata.get("broadcastRight") or metadata.get("broadcast_right"):
+                right = right.hint("broadcast")
             if left_keys and right_keys:
                 if len(left_keys) != len(right_keys):
                     raise ValueError("Join requires leftKeys/rightKeys of the same length.")
@@ -3890,12 +4051,52 @@ class PipelineWorker:
             if expr:
                 return inputs[0].filter(expr)
         if operation == "compute":
-            expr = apply_parameters(str(metadata.get("expression") or ""), parameters)
-            if expr:
-                if "=" in expr:
-                    target, formula = [part.strip() for part in expr.split("=", 1)]
-                    return inputs[0].withColumn(target, F.expr(formula))
-                return inputs[0].withColumn("computed", F.expr(expr))
+            df = inputs[0]
+            # Preferred structured form: {"assignments":[{"column":"c","expression":"..."}]}
+            assignments = (
+                metadata.get("assignments")
+                or metadata.get("computedColumns")
+                or metadata.get("computed_columns")
+            )
+            if isinstance(assignments, list) and assignments:
+                out = df
+                for item in assignments:
+                    if not isinstance(item, dict):
+                        continue
+                    target = str(item.get("column") or item.get("target") or item.get("name") or "").strip()
+                    formula = str(item.get("expression") or item.get("expr") or item.get("formula") or "").strip()
+                    if not target or not formula:
+                        continue
+                    formula = apply_parameters(formula, parameters)
+                    out = out.withColumn(target, F.expr(formula))
+                return out
+
+            # Structured single-column form: {"targetColumn":"c","formula":"..."}
+            target = (
+                metadata.get("targetColumn")
+                or metadata.get("target_column")
+                or metadata.get("target")
+                or metadata.get("column")
+            )
+            formula = metadata.get("formula") or metadata.get("expr")
+            if target and formula:
+                target_text = str(target).strip()
+                formula_text = apply_parameters(str(formula).strip(), parameters)
+                if target_text and formula_text:
+                    return df.withColumn(target_text, F.expr(formula_text))
+
+            # Back-compat fallback: "col = expr" OR "expr" (avoid mis-parsing `a = b` comparisons).
+            expr = apply_parameters(str(metadata.get("expression") or ""), parameters).strip()
+            if not expr:
+                return df
+            if "=" in expr:
+                target_candidate, formula_candidate = [part.strip() for part in expr.split("=", 1)]
+                target_clean = target_candidate.strip()
+                if target_clean.startswith("`") and target_clean.endswith("`") and len(target_clean) > 1:
+                    target_clean = target_clean[1:-1].replace("``", "`")
+                if target_clean and target_clean not in df.columns:
+                    return df.withColumn(target_clean, F.expr(formula_candidate))
+            return df.withColumn("computed", F.expr(expr))
         if operation == "explode":
             columns = metadata.get("columns") or []
             if columns:
@@ -3903,6 +4104,15 @@ class PipelineWorker:
                 if column:
                     return inputs[0].withColumn(column, F.explode(F.col(column)))
         if operation == "select":
+            expressions = metadata.get("expressions") or metadata.get("selectExpr") or metadata.get("select_expr")
+            if isinstance(expressions, list) and expressions:
+                resolved = [
+                    apply_parameters(str(item), parameters)
+                    for item in expressions
+                    if str(item or "").strip()
+                ]
+                if resolved:
+                    return inputs[0].selectExpr(*resolved)
             columns = metadata.get("columns") or []
             if columns:
                 return inputs[0].select(*[F.col(col) for col in columns])
@@ -4011,26 +4221,66 @@ class PipelineWorker:
             raise ValueError(f"Invalid unionMode: {union_mode}")
         if operation in {"groupBy", "aggregate"}:
             group_by = metadata.get("groupBy") or []
-            aggregates = metadata.get("aggregates") or []
             group_cols = [F.col(col) for col in group_by] if group_by else []
-            agg_exprs = []
-            for agg in aggregates:
-                col_name = agg.get("column")
-                op = str(agg.get("op") or "").lower()
-                alias = agg.get("alias") or f"{op}_{col_name}"
-                if not col_name or not op:
-                    continue
-                base_col = F.col(col_name)
-                if op == "count":
-                    agg_exprs.append(F.count(base_col).alias(alias))
-                elif op == "sum":
-                    agg_exprs.append(F.sum(base_col).alias(alias))
-                elif op == "avg":
-                    agg_exprs.append(F.avg(base_col).alias(alias))
-                elif op == "min":
-                    agg_exprs.append(F.min(base_col).alias(alias))
-                elif op == "max":
-                    agg_exprs.append(F.max(base_col).alias(alias))
+
+            agg_exprs: list[Any] = []
+            expr_items = (
+                metadata.get("aggregateExpressions")
+                or metadata.get("aggExpressions")
+                or metadata.get("aggregate_expressions")
+            )
+            if isinstance(expr_items, list) and expr_items:
+                for item in expr_items:
+                    if isinstance(item, str):
+                        expr_text = apply_parameters(item, parameters).strip()
+                        if not expr_text:
+                            continue
+                        alias = None
+                        lower = expr_text.lower()
+                        if " as " in lower:
+                            parts = lower.rsplit(" as ", 1)
+                            if len(parts) == 2 and parts[1].strip():
+                                alias = expr_text[len(parts[0]) + 4 :].strip()
+                                expr_text = expr_text[: len(parts[0])].strip()
+                        col_expr = F.expr(expr_text)
+                        if alias:
+                            col_expr = col_expr.alias(alias)
+                        agg_exprs.append(col_expr)
+                        continue
+                    if not isinstance(item, dict):
+                        continue
+                    expr_text = str(item.get("expr") or item.get("expression") or "").strip()
+                    if not expr_text:
+                        continue
+                    expr_text = apply_parameters(expr_text, parameters)
+                    alias = str(item.get("alias") or item.get("as") or "").strip() or None
+                    col_expr = F.expr(expr_text)
+                    if alias:
+                        col_expr = col_expr.alias(alias)
+                    agg_exprs.append(col_expr)
+
+            if not agg_exprs:
+                aggregates = metadata.get("aggregates") or []
+                for agg in aggregates:
+                    if not isinstance(agg, dict):
+                        continue
+                    col_name = agg.get("column")
+                    op = str(agg.get("op") or "").lower()
+                    alias = agg.get("alias") or f"{op}_{col_name}"
+                    if not col_name or not op:
+                        continue
+                    base_col = F.col(col_name)
+                    if op == "count":
+                        agg_exprs.append(F.count(base_col).alias(alias))
+                    elif op == "sum":
+                        agg_exprs.append(F.sum(base_col).alias(alias))
+                    elif op == "avg":
+                        agg_exprs.append(F.avg(base_col).alias(alias))
+                    elif op == "min":
+                        agg_exprs.append(F.min(base_col).alias(alias))
+                    elif op == "max":
+                        agg_exprs.append(F.max(base_col).alias(alias))
+
             if group_cols and agg_exprs:
                 return inputs[0].groupBy(*group_cols).agg(*agg_exprs)
             if agg_exprs:
@@ -4054,14 +4304,33 @@ class PipelineWorker:
                 return base.sum(values_col)
         if operation == "window":
             window_meta = metadata.get("window") or {}
+            expressions = (
+                window_meta.get("expressions")
+                if isinstance(window_meta.get("expressions"), list)
+                else metadata.get("expressions")
+            )
+            if isinstance(expressions, list) and expressions:
+                df = inputs[0]
+                for item in expressions:
+                    if not isinstance(item, dict):
+                        continue
+                    name = str(item.get("column") or item.get("name") or "").strip()
+                    expr_text = str(item.get("expr") or item.get("expression") or "").strip()
+                    if not name or not expr_text:
+                        continue
+                    expr_text = apply_parameters(expr_text, parameters)
+                    df = df.withColumn(name, F.expr(expr_text))
+                return df
+
             partition_by = window_meta.get("partitionBy") or []
             order_by = window_meta.get("orderBy") or []
+            output_column = str(window_meta.get("outputColumn") or "row_number").strip() or "row_number"
             if order_by:
                 if partition_by:
                     window_spec = Window.partitionBy(*partition_by).orderBy(*order_by)
                 else:
                     window_spec = Window.orderBy(*order_by)
-                return inputs[0].withColumn("row_number", F.row_number().over(window_spec))
+                return inputs[0].withColumn(output_column, F.row_number().over(window_spec))
         return inputs[0]
 
 def _is_data_object(key: str) -> bool:

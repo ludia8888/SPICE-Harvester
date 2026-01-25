@@ -133,6 +133,7 @@ def add_input(
     dataset_id: Optional[str] = None,
     dataset_name: Optional[str] = None,
     dataset_branch: Optional[str] = None,
+    read: Optional[Dict[str, Any]] = None,
     node_id: Optional[str] = None,
 ) -> PlanMutation:
     definition = _definition(plan)
@@ -159,9 +160,46 @@ def add_input(
         metadata["datasetName"] = ds_name
     if dataset_branch:
         metadata["datasetBranch"] = str(dataset_branch).strip() or None
+    if isinstance(read, dict) and read:
+        # `read` config is interpreted by the Spark pipeline worker to control parsing (csv/json options, schema, etc).
+        metadata["read"] = dict(read)
 
     definition["nodes"].append({"id": resolved_id, "type": "input", "metadata": metadata})
     return PlanMutation(plan=plan, node_id=resolved_id)
+
+
+def configure_input_read(
+    plan: Dict[str, Any],
+    *,
+    node_id: str,
+    read: Dict[str, Any],
+    replace: bool = False,
+) -> PlanMutation:
+    """
+    Patch input node read configuration.
+
+    The `read` object is passed through to the Spark worker to control parsing/ingestion behavior.
+    """
+    definition = _definition(plan)
+    target = _ensure_str(node_id, name="node_id")
+    node = _find_node(definition, target)
+    if not node:
+        raise PipelinePlanBuilderError(f"node_id missing node: {target}")
+    if str(node.get("type") or "").strip().lower() != "input":
+        raise PipelinePlanBuilderError("configure_input_read is only valid for input nodes")
+    patch = _ensure_dict(read, name="read")
+    if not patch:
+        raise PipelinePlanBuilderError("read must be a non-empty object")
+
+    existing_meta = node.get("metadata") if isinstance(node.get("metadata"), dict) else {}
+    existing_read = existing_meta.get("read") if isinstance(existing_meta.get("read"), dict) else {}
+    next_read = dict(patch) if replace else dict(existing_read)
+    next_read.update(patch)
+
+    next_meta = dict(existing_meta)
+    next_meta["read"] = next_read
+    node["metadata"] = next_meta
+    return PlanMutation(plan=plan, node_id=target)
 
 
 def add_transform(
@@ -208,6 +246,9 @@ def add_join(
     left_keys: List[str],
     right_keys: List[str],
     join_type: str = "inner",
+    join_hints: Optional[Dict[str, Any]] = None,
+    broadcast_left: bool = False,
+    broadcast_right: bool = False,
     node_id: Optional[str] = None,
 ) -> PlanMutation:
     join_type_norm = str(join_type or "inner").strip().lower()
@@ -221,6 +262,10 @@ def add_join(
     rk = _ensure_string_list(right_keys, name="right_keys")
     if len(lk) != len(rk):
         raise PipelinePlanBuilderError("left_keys/right_keys must have the same length")
+
+    hints = None
+    if join_hints is not None:
+        hints = _ensure_dict(join_hints, name="join_hints")
     return add_transform(
         plan,
         operation="join",
@@ -231,6 +276,9 @@ def add_join(
             "allowCrossJoin": False,
             "leftKeys": lk,
             "rightKeys": rk,
+            **({"joinHints": hints} if hints else {}),
+            **({"broadcastLeft": True} if broadcast_left else {}),
+            **({"broadcastRight": True} if broadcast_right else {}),
         },
     )
 
@@ -256,6 +304,60 @@ def add_compute(plan: Dict[str, Any], *, input_node_id: str, expression: str, no
         input_node_ids=[src],
         node_id=node_id,
         metadata={"expression": expr},
+    )
+
+
+def add_compute_column(
+    plan: Dict[str, Any],
+    *,
+    input_node_id: str,
+    target_column: str,
+    formula: str,
+    node_id: Optional[str] = None,
+) -> PlanMutation:
+    """
+    Add a compute transform that writes a single column.
+
+    Prefer this over `add_compute(expression="a = b")` to avoid ambiguity with Spark comparisons.
+    """
+    src = _ensure_str(input_node_id, name="input_node_id")
+    target = _ensure_str(target_column, name="target_column")
+    expr = _ensure_str(formula, name="formula")
+    return add_transform(
+        plan,
+        operation="compute",
+        input_node_ids=[src],
+        node_id=node_id,
+        metadata={"targetColumn": target, "formula": expr},
+    )
+
+
+def add_compute_assignments(
+    plan: Dict[str, Any],
+    *,
+    input_node_id: str,
+    assignments: List[Dict[str, Any]],
+    node_id: Optional[str] = None,
+) -> PlanMutation:
+    """Add a compute transform that writes multiple columns (assignments)."""
+    src = _ensure_str(input_node_id, name="input_node_id")
+    items = _ensure_list(assignments, name="assignments")
+    normalized: List[Dict[str, Any]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        col = str(item.get("column") or item.get("target") or item.get("name") or "").strip()
+        expr = str(item.get("expression") or item.get("expr") or item.get("formula") or "").strip()
+        if col and expr:
+            normalized.append({"column": col, "expression": expr})
+    if not normalized:
+        raise PipelinePlanBuilderError("assignments must include at least one {column,expression}")
+    return add_transform(
+        plan,
+        operation="compute",
+        input_node_ids=[src],
+        node_id=node_id,
+        metadata={"assignments": normalized},
     )
 
 
@@ -332,6 +434,24 @@ def add_select(
     )
 
 
+def add_select_expr(
+    plan: Dict[str, Any],
+    *,
+    input_node_id: str,
+    expressions: List[str],
+    node_id: Optional[str] = None,
+) -> PlanMutation:
+    """Add a select transform using Spark SQL selectExpr-style expressions."""
+    src = _ensure_str(input_node_id, name="input_node_id")
+    exprs = _ensure_string_list(expressions, name="expressions")
+    return add_transform(
+        plan,
+        operation="select",
+        input_node_ids=[src],
+        node_id=node_id,
+        metadata={"expressions": exprs},
+    )
+
 def add_drop(
     plan: Dict[str, Any],
     *,
@@ -365,6 +485,78 @@ def add_dedupe(
         input_node_ids=[src],
         node_id=node_id,
         metadata={"columns": cols},
+    )
+
+
+def add_group_by_expr(
+    plan: Dict[str, Any],
+    *,
+    input_node_id: str,
+    group_by: Optional[List[str]] = None,
+    aggregate_expressions: Optional[List[Any]] = None,
+    operation: str = "groupBy",
+    node_id: Optional[str] = None,
+) -> PlanMutation:
+    """
+    Add a groupBy/aggregate node using Spark SQL aggregate expressions.
+
+    aggregate_expressions items:
+    - string: "approx_percentile(price, 0.5) as p50"
+    - object: {"expr": "sum(price)", "alias": "total_price"}
+    """
+    src = _ensure_str(input_node_id, name="input_node_id")
+    op = _ensure_str(operation, name="operation")
+    if op not in {"groupBy", "aggregate"}:
+        raise PipelinePlanBuilderError("operation must be groupBy or aggregate")
+    group_cols = []
+    if group_by:
+        group_cols = [str(item).strip() for item in group_by if str(item).strip()]
+    expr_items = _ensure_list(aggregate_expressions, name="aggregate_expressions")
+    if not expr_items:
+        raise PipelinePlanBuilderError("aggregate_expressions is required")
+    normalized: List[Any] = []
+    for item in expr_items:
+        if isinstance(item, str) and item.strip():
+            normalized.append(item.strip())
+        elif isinstance(item, dict) and (item.get("expr") or item.get("expression")):
+            normalized.append(dict(item))
+    if not normalized:
+        raise PipelinePlanBuilderError("aggregate_expressions must include at least one expression")
+    return add_transform(
+        plan,
+        operation=op,
+        input_node_ids=[src],
+        node_id=node_id,
+        metadata={"groupBy": group_cols, "aggregateExpressions": normalized},
+    )
+
+
+def add_window_expr(
+    plan: Dict[str, Any],
+    *,
+    input_node_id: str,
+    expressions: List[Dict[str, Any]],
+    node_id: Optional[str] = None,
+) -> PlanMutation:
+    """Add a window transform that computes one or more Spark SQL window expressions."""
+    src = _ensure_str(input_node_id, name="input_node_id")
+    items = _ensure_list(expressions, name="expressions")
+    normalized: List[Dict[str, Any]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        col = str(item.get("column") or item.get("name") or "").strip()
+        expr = str(item.get("expr") or item.get("expression") or "").strip()
+        if col and expr:
+            normalized.append({"column": col, "expr": expr})
+    if not normalized:
+        raise PipelinePlanBuilderError("expressions must include at least one {column,expr}")
+    return add_transform(
+        plan,
+        operation="window",
+        input_node_ids=[src],
+        node_id=node_id,
+        metadata={"window": {"expressions": normalized}},
     )
 
 

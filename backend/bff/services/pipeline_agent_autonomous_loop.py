@@ -130,6 +130,9 @@ class _AgentState:
     branch: Optional[str]
     dataset_ids: List[str]
     goal: str
+    principal_id: str
+    principal_type: str
+    pipeline_id: Optional[str] = None
 
     # Deterministic (tool-produced) context.
     context_pack: Optional[Dict[str, Any]] = None
@@ -158,12 +161,17 @@ _PIPELINE_AGENT_ALLOWED_TOOLS: tuple[str, ...] = (
     "plan_add_join",
     "plan_add_transform",
     "plan_add_group_by",
+    "plan_add_group_by_expr",
     "plan_add_window",
+    "plan_add_window_expr",
     "plan_add_filter",
     "plan_add_compute",
+    "plan_add_compute_column",
+    "plan_add_compute_assignments",
     "plan_add_cast",
     "plan_add_rename",
     "plan_add_select",
+    "plan_add_select_expr",
     "plan_add_drop",
     "plan_add_dedupe",
     "plan_add_normalize",
@@ -173,6 +181,7 @@ _PIPELINE_AGENT_ALLOWED_TOOLS: tuple[str, ...] = (
     "plan_delete_edge",
     "plan_set_node_inputs",
     "plan_update_node_metadata",
+    "plan_configure_input_read",
     "plan_delete_node",
     "plan_update_output",
     # Validation / preview
@@ -183,6 +192,13 @@ _PIPELINE_AGENT_ALLOWED_TOOLS: tuple[str, ...] = (
     "plan_evaluate_joins",
     # Refutation gate (claim-based hard failures with witnesses only)
     "plan_refute_claims",
+    # Pipeline execution (Spark worker via control plane). Use only when the user explicitly asked
+    # to materialize outputs/build/deploy (these can write to storage / create datasets).
+    "pipeline_create_from_plan",
+    "pipeline_update_from_plan",
+    "pipeline_preview_wait",
+    "pipeline_build_wait",
+    "pipeline_deploy_promote_build",
 )
 
 
@@ -475,8 +491,18 @@ def _build_system_prompt(*, allowed_tools: List[str]) -> str:
         "- Latency: prefer batching multiple tool calls in a single response via `tool_calls` (max 12 per step).\n"
         "- If batching plan edits, use deterministic `node_id` for every node you will reference later in the same batch.\n"
         "- Do NOT ask the user to increase internal step/tool-call limits. If you're close to finishing, use the most direct remaining tool calls to complete.\n"
-        "- There is NO SQL execution tool. Do NOT pass `sql` fields. `plan_add_transform` is operation+metadata (NOT SQL).\n"
-        "- This flow is read-only analysis + plan/preview (no deploy/write).\n"
+        "- Do NOT write full SQL queries. Spark SQL *expressions* are allowed inside these tools:\n"
+        "  - plan_add_filter(expression=...)\n"
+        "  - plan_add_compute(expression=...) (legacy)\n"
+        "  - plan_add_compute_column(target_column=..., formula=...)\n"
+        "  - plan_add_compute_assignments(assignments=[{column,expression}, ...])\n"
+        "  - plan_add_select_expr(expressions=[...])\n"
+        "  - plan_add_group_by_expr(aggregate_expressions=[...])\n"
+        "  - plan_add_window_expr(expressions=[{column,expr}, ...])\n"
+        "- `plan_add_transform` is operation+metadata (NOT SQL).\n"
+        "- `plan_preview` runs a lightweight deterministic executor and does NOT match full Spark SQL semantics.\n"
+        "  If you use non-trivial Spark SQL (cast/case/regexp/date funcs/etc), validate with Spark via `pipeline_preview_wait` after materializing the pipeline.\n"
+        "- Default to read-only (analysis + plan + preview). Only if the user explicitly asked to materialize outputs/build/deploy should you call `pipeline_*` tools.\n"
         "- Deterministic inference tools (keys/types/join-plan) produce hypotheses. Treat them as evidence/suggestions, not ground truth.\n"
         "- If you want hard gating on ETL assumptions, attach `claims` to node.metadata (list of {id, kind, severity, spec}).\n"
         "  For CAST_LOSSLESS claims, include spec.allowed_normalization (e.g., [\"trim\",\"lowercase\"]).\n"
@@ -487,12 +513,18 @@ def _build_system_prompt(*, allowed_tools: List[str]) -> str:
         "- infer PK/FK: context_pack_infer_keys()\n"
         "- infer casts: context_pack_infer_types(join_plan=...)\n"
         "- join: plan_add_join(left_node_id,right_node_id,left_keys=[...],right_keys=[...],join_type='left|inner')\n"
-        "- compute: plan_add_compute(input_node_id, expression=\"revenue = qty * unit_price\")  # one assignment per node; chain if needed\n"
+        "- ingest permissive: plan_configure_input_read(node_id, mode='PERMISSIVE', corrupt_record_column='_corrupt_record')\n"
+        "- compute: plan_add_compute_column(input_node_id, target_column=\"revenue\", formula=\"qty * unit_price\")\n"
+        "- compute many: plan_add_compute_assignments(input_node_id, assignments=[{\"column\":\"x\",\"expression\":\"...\"}, ...])\n"
+        "- select expr: plan_add_select_expr(input_node_id, expressions=[\"col\", \"sum(price) as total\"])  # Spark selectExpr\n"
         "- group by / aggregate: plan_add_group_by(input_node_id, group_by=[...], aggregates=[{\"column\":\"price\",\"op\":\"sum\",\"alias\":\"total\"}])\n"
-        "- window rank: plan_add_window(input_node_id, partition_by=[...], order_by=[\"-total\"])  # adds row_number\n"
+        "- group by expr: plan_add_group_by_expr(input_node_id, group_by=[...], aggregate_expressions=[\"approx_percentile(price, 0.5) as p50\", ...])\n"
+        "- window expr: plan_add_window_expr(input_node_id, expressions=[{\"column\":\"rn\",\"expr\":\"row_number() over (partition by k order by ts desc)\"}])\n"
         "- top-N: plan_add_filter(input_node_id, expression=\"row_number <= N\")\n"
         "- output: plan_add_output(input_node_id, output_name=\"result\")\n"
         "- refute claims: plan_refute_claims()  # optional; server will also run it on finish when a plan exists\n"
+        "- materialize pipeline: pipeline_create_from_plan(name=\"...\", location=\"team/...\"), then pipeline_preview_wait(...), pipeline_build_wait(...)\n"
+        "- deploy from build: pipeline_deploy_promote_build(pipeline_id, build_job_id, node_id, db_name, dataset_name)  # requires approve\n"
         "\n"
         "Available tools:\n"
         f"{tool_lines}\n"
@@ -734,11 +766,15 @@ async def run_pipeline_agent_mcp_autonomous(
                 return {"result": texts[0]}
         raise RuntimeError(f"Unexpected MCP tool result type for {tool}: {type(payload)}")
 
+    principal_id = str(user_id or actor or "system").strip() or "system"
+    principal_type = "user"
     state = _AgentState(
         db_name=db_name,
         branch=str(data_scope.branch or "").strip() or None,
         dataset_ids=dataset_ids,
         goal=str(goal or "").strip(),
+        principal_id=principal_id,
+        principal_type=principal_type,
     )
     if isinstance(context_pack, dict) and context_pack:
         state.context_pack = dict(context_pack)
@@ -926,6 +962,51 @@ async def run_pipeline_agent_mcp_autonomous(
                         "next_suggested_tools": ["plan_add_input", "plan_add_join", "plan_add_transform", "plan_add_output"],
                     }
                 )
+                return state.last_observation
+
+            if tool_name.startswith("pipeline_"):
+                # Pipeline execution tools (Spark worker via control plane). These can write/build/deploy,
+                # so the model should only call them when the user explicitly requested materialization.
+                if tool_name in {"pipeline_create_from_plan", "pipeline_update_from_plan"}:
+                    if not isinstance(state.plan_obj, dict):
+                        state.last_observation = {"error": "plan is not initialized; call plan_new first"}
+                        return state.last_observation
+                    args.pop("plan", None)
+                    payload = await _call_pipeline_tool(
+                        tool_name,
+                        {
+                            **args,
+                            "plan": state.plan_obj,
+                            "principal_id": state.principal_id,
+                            "principal_type": state.principal_type,
+                        },
+                    )
+                else:
+                    # These tools should not receive the full plan object.
+                    args.pop("plan", None)
+                    payload = await _call_pipeline_tool(
+                        tool_name,
+                        {
+                            **args,
+                            "principal_id": state.principal_id,
+                            "principal_type": state.principal_type,
+                            # Helpful for audit/logging; endpoints don't require it for pipeline_id-based ops.
+                            "db_name": state.db_name,
+                        },
+                    )
+
+                # Capture pipeline_id if tool returned it, so subsequent steps can reference it without re-parsing.
+                if isinstance(payload, dict):
+                    pipeline_id = None
+                    if isinstance(payload.get("pipeline"), dict):
+                        pipeline_id = str((payload.get("pipeline") or {}).get("pipeline_id") or "").strip() or None
+                    if not pipeline_id:
+                        pipeline_id = str(payload.get("pipeline_id") or "").strip() or None
+                    if pipeline_id:
+                        state.pipeline_id = pipeline_id
+
+                # Keep observations small; do not embed definition_json.
+                state.last_observation = _mask_tool_observation(payload if isinstance(payload, dict) else {"result": payload})
                 return state.last_observation
 
             # Plan tools require a plan.

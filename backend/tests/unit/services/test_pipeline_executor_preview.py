@@ -88,3 +88,83 @@ async def test_executor_preview_supports_node_level_preview_and_row_count() -> N
     transform_preview = await executor.preview(definition=definition, db_name=db_name, node_id="t1", limit=10)
     assert transform_preview["row_count"] == 2
     assert {col["name"]: col["type"] for col in transform_preview["columns"]} == {"id": "xsd:integer"}
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_executor_compute_structured_target_column_overwrites_existing() -> None:
+    db_name = "demo"
+    dataset_name = "ds1"
+    dataset_id = "ds-demo-ds1-main"
+
+    registry = _DatasetRegistry()
+    registry.datasets_by_name[(db_name, dataset_name, "main")] = _Dataset(
+        dataset_id=dataset_id,
+        db_name=db_name,
+        name=dataset_name,
+        branch="main",
+        schema_json={"columns": [{"name": "amount", "type": "xsd:integer"}]},
+    )
+    registry.versions_by_dataset_id[dataset_id] = _Version(
+        dataset_id=dataset_id,
+        artifact_key=None,
+        sample_json={"rows": [{"amount": 1}, {"amount": 2}]},
+    )
+
+    executor = PipelineExecutor(dataset_registry=registry)
+
+    definition = {
+        "nodes": [
+            {"id": "in1", "type": "input", "metadata": {"datasetName": dataset_name}},
+            {
+                "id": "t1",
+                "type": "transform",
+                "metadata": {"operation": "compute", "targetColumn": "amount", "formula": "amount + 1"},
+            },
+            {"id": "out1", "type": "output"},
+        ],
+        "edges": [{"from": "in1", "to": "t1"}, {"from": "t1", "to": "out1"}],
+        "parameters": [],
+    }
+
+    preview = await executor.preview(definition=definition, db_name=db_name, node_id="t1", limit=10)
+    amounts = [row.get("amount") for row in preview.get("rows") or []]
+    assert amounts == [2, 3]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_executor_compute_equals_is_treated_as_comparison_when_lhs_exists() -> None:
+    db_name = "demo"
+    dataset_name = "ds1"
+    dataset_id = "ds-demo-ds1-main"
+
+    registry = _DatasetRegistry()
+    registry.datasets_by_name[(db_name, dataset_name, "main")] = _Dataset(
+        dataset_id=dataset_id,
+        db_name=db_name,
+        name=dataset_name,
+        branch="main",
+        schema_json={"columns": [{"name": "amount", "type": "xsd:integer"}]},
+    )
+    registry.versions_by_dataset_id[dataset_id] = _Version(
+        dataset_id=dataset_id,
+        artifact_key=None,
+        sample_json={"rows": [{"amount": 1}, {"amount": 2}]},
+    )
+
+    executor = PipelineExecutor(dataset_registry=registry)
+
+    definition = {
+        "nodes": [
+            {"id": "in1", "type": "input", "metadata": {"datasetName": dataset_name}},
+            {"id": "t1", "type": "transform", "metadata": {"operation": "compute", "expression": "amount = 1"}},
+            {"id": "out1", "type": "output"},
+        ],
+        "edges": [{"from": "in1", "to": "t1"}, {"from": "t1", "to": "out1"}],
+        "parameters": [],
+    }
+
+    preview = await executor.preview(definition=definition, db_name=db_name, node_id="t1", limit=10)
+    values = [row.get("computed") for row in preview.get("rows") or []]
+    assert values == [True, False]

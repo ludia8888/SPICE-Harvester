@@ -16,6 +16,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import httpx
 from mcp.server import InitializationOptions, Server
 from mcp.server.stdio import stdio_server
 from mcp.types import ServerCapabilities, Tool, ToolsCapability
@@ -34,6 +35,7 @@ from bff.services.pipeline_context_pack import build_pipeline_context_pack  # no
 from bff.services.pipeline_join_evaluator import evaluate_pipeline_joins  # noqa: E402
 from bff.services.pipeline_plan_validation import validate_pipeline_plan  # noqa: E402
 from shared.models.pipeline_plan import PipelinePlan  # noqa: E402
+from shared.config.settings import get_settings  # noqa: E402
 from shared.services.dataset_profile_registry import DatasetProfileRegistry  # noqa: E402
 from shared.services.dataset_registry import DatasetRegistry  # noqa: E402
 from shared.services.pipeline_executor import PipelineExecutor  # noqa: E402
@@ -43,17 +45,23 @@ from shared.services.pipeline_plan_builder import (  # noqa: E402
     add_edge,
     add_cast,
     add_compute,
+    add_compute_assignments,
+    add_compute_column,
     add_dedupe,
     add_drop,
     add_filter,
     add_input,
     add_join,
+    add_group_by_expr,
     add_normalize,
     add_output,
     add_rename,
     add_regex_replace,
     add_select,
+    add_select_expr,
     add_transform,
+    add_window_expr,
+    configure_input_read,
     delete_edge,
     delete_node,
     new_plan,
@@ -76,6 +84,123 @@ from shared.utils.llm_safety import mask_pii  # noqa: E402
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
+
+
+def _bff_api_base_url() -> str:
+    """
+    Internal helper for MCP tools that need to call the BFF's REST API.
+
+    In docker-compose, `services.bff_base_url` typically resolves to `http://bff:8002`.
+    In local dev, it resolves to `http://127.0.0.1:8002`.
+    """
+    base = get_settings().services.bff_base_url.rstrip("/")
+    return f"{base}/api/v1"
+
+
+def _bff_admin_token() -> Optional[str]:
+    # Reuse the same fallback chain as other internal clients.
+    return (get_settings().clients.bff_admin_token or "").strip() or None
+
+
+def _bff_headers(
+    *,
+    db_name: str,
+    principal_id: Optional[str],
+    principal_type: Optional[str],
+) -> Dict[str, str]:
+    token = _bff_admin_token()
+    if not token:
+        raise RuntimeError("BFF admin token unavailable (set BFF_ADMIN_TOKEN or ADMIN_TOKEN)")
+
+    headers: Dict[str, str] = {
+        "X-Admin-Token": token,
+        "Content-Type": "application/json",
+    }
+    db_name = str(db_name or "").strip()
+    if db_name:
+        headers["X-DB-Name"] = db_name
+        headers["X-Project"] = db_name
+
+    pid = (principal_id or "").strip() or None
+    ptype = (principal_type or "").strip().lower() or None
+    if pid:
+        headers["X-Principal-Id"] = pid
+        headers["X-User-ID"] = pid
+        headers["X-Actor"] = pid
+    if ptype in {"user", "service"}:
+        headers["X-Principal-Type"] = ptype
+        headers["X-Actor-Type"] = ptype
+    return headers
+
+
+async def _bff_json(
+    method: str,
+    path: str,
+    *,
+    db_name: str,
+    principal_id: Optional[str],
+    principal_type: Optional[str],
+    json_body: Optional[Dict[str, Any]] = None,
+    params: Optional[Dict[str, Any]] = None,
+    timeout_seconds: float = 30.0,
+) -> Dict[str, Any]:
+    base = _bff_api_base_url()
+    url = f"{base}{path}"
+    headers = _bff_headers(db_name=db_name, principal_id=principal_id, principal_type=principal_type)
+    async with httpx.AsyncClient(timeout=timeout_seconds) as client:
+        resp = await client.request(method, url, headers=headers, json=json_body, params=params)
+    try:
+        payload = resp.json()
+    except Exception:
+        payload = {"raw": (resp.text or "").strip()}
+    if resp.status_code >= 400:
+        detail = payload.get("detail") if isinstance(payload, dict) else None
+        message = payload.get("message") if isinstance(payload, dict) else None
+        return {
+            "error": message or detail or f"BFF {method} {path} failed ({resp.status_code})",
+            "status_code": resp.status_code,
+            "response": payload,
+        }
+    return payload if isinstance(payload, dict) else {"response": payload}
+
+
+def _trim_preview_payload(preview: Dict[str, Any], *, max_rows: int = 8) -> Dict[str, Any]:
+    if not isinstance(preview, dict):
+        return {}
+    output = dict(preview)
+    rows = output.get("rows")
+    if isinstance(rows, list):
+        output["rows"] = rows[: max(0, int(max_rows))]
+    return output
+
+
+def _trim_build_output(output_json: Dict[str, Any], *, max_rows: int = 6) -> Dict[str, Any]:
+    if not isinstance(output_json, dict):
+        return {}
+    out: Dict[str, Any] = {k: v for k, v in output_json.items() if k not in {"outputs"}}
+    outputs = output_json.get("outputs")
+    if not isinstance(outputs, list):
+        return out
+    trimmed_outputs: List[Dict[str, Any]] = []
+    for item in outputs[:8]:
+        if not isinstance(item, dict):
+            continue
+        rows = item.get("rows")
+        trimmed = {
+            "node_id": item.get("node_id"),
+            "dataset_name": item.get("dataset_name") or item.get("datasetName"),
+            "row_count": item.get("row_count"),
+            "delta_row_count": item.get("delta_row_count") or item.get("deltaRowCount"),
+            "columns": item.get("columns"),
+            "sample_row_count": item.get("sample_row_count") or item.get("sampleRowCount"),
+            "artifact_key": item.get("artifact_key") or item.get("artifactKey"),
+            "artifact_prefix": item.get("artifact_prefix") or item.get("artifactPrefix"),
+        }
+        if isinstance(rows, list):
+            trimmed["rows"] = rows[: max(0, int(max_rows))]
+        trimmed_outputs.append(trimmed)
+    out["outputs"] = trimmed_outputs
+    return out
 
 
 def _build_null_report_from_context_pack(
@@ -400,9 +525,31 @@ class PipelineMCPServer:
                             "dataset_id": {"type": "string"},
                             "dataset_name": {"type": "string"},
                             "dataset_branch": {"type": "string"},
+                            "read": {"type": "object", "description": "Spark read config for this input (format/options/schema)."},
                             "node_id": {"type": "string"},
                         },
                         "required": ["plan"],
+                    },
+                },
+                {
+                    "name": "plan_configure_input_read",
+                    "description": "Patch an input node's Spark read config (format/options/schema, permissive parsing, corrupt record capture).",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "plan": {"type": "object"},
+                            "node_id": {"type": "string"},
+                            "read": {"type": "object"},
+                            "format": {"type": "string"},
+                            "options": {"type": "object"},
+                            "schema": {"type": "array", "items": {"type": "object"}},
+                            "mode": {"type": "string", "description": "Spark reader mode: PERMISSIVE | DROPMALFORMED | FAILFAST"},
+                            "corrupt_record_column": {"type": "string", "description": "Sets columnNameOfCorruptRecord to capture malformed rows"},
+                            "header": {"type": "boolean"},
+                            "infer_schema": {"type": "boolean"},
+                            "replace": {"type": "boolean"},
+                        },
+                        "required": ["plan", "node_id"],
                     },
                 },
                 {
@@ -437,6 +584,22 @@ class PipelineMCPServer:
                     },
                 },
                 {
+                    "name": "plan_add_group_by_expr",
+                    "description": "Add a groupBy/aggregate node using Spark SQL aggregate expressions (supports approx_percentile, etc).",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "plan": {"type": "object"},
+                            "input_node_id": {"type": "string"},
+                            "group_by": {"type": "array", "items": {"type": "string"}},
+                            "aggregate_expressions": {"type": "array", "items": {}},
+                            "operation": {"type": "string", "description": "groupBy (default) or aggregate"},
+                            "node_id": {"type": "string"},
+                        },
+                        "required": ["plan", "input_node_id", "aggregate_expressions"],
+                    },
+                },
+                {
                     "name": "plan_add_window",
                     "description": "Add a window transform node. order_by supports ['-col'] for DESC or [{'column','direction'}].",
                     "inputSchema": {
@@ -453,6 +616,20 @@ class PipelineMCPServer:
                     },
                 },
                 {
+                    "name": "plan_add_window_expr",
+                    "description": "Add a window transform node computing one or more Spark SQL window expressions.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "plan": {"type": "object"},
+                            "input_node_id": {"type": "string"},
+                            "expressions": {"type": "array", "items": {"type": "object"}},
+                            "node_id": {"type": "string"},
+                        },
+                        "required": ["plan", "input_node_id", "expressions"],
+                    },
+                },
+                {
                     "name": "plan_add_join",
                     "description": "Add a join transform node (LEFT then RIGHT edge order). Cross joins are rejected.",
                     "inputSchema": {
@@ -464,6 +641,9 @@ class PipelineMCPServer:
                             "left_keys": {"type": "array", "items": {"type": "string"}},
                             "right_keys": {"type": "array", "items": {"type": "string"}},
                             "join_type": {"type": "string"},
+                            "join_hints": {"type": "object", "description": "Optional Spark join hints: {left: 'broadcast', right: 'broadcast'}"},
+                            "broadcast_left": {"type": "boolean"},
+                            "broadcast_right": {"type": "boolean"},
                             "node_id": {"type": "string"},
                         },
                         "required": ["plan", "left_node_id", "right_node_id", "left_keys", "right_keys"],
@@ -495,6 +675,35 @@ class PipelineMCPServer:
                             "node_id": {"type": "string"},
                         },
                         "required": ["plan", "input_node_id", "expression"],
+                    },
+                },
+                {
+                    "name": "plan_add_compute_column",
+                    "description": "Add a compute transform node that writes target_column = formula (avoids '=' ambiguity).",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "plan": {"type": "object"},
+                            "input_node_id": {"type": "string"},
+                            "target_column": {"type": "string"},
+                            "formula": {"type": "string"},
+                            "node_id": {"type": "string"},
+                        },
+                        "required": ["plan", "input_node_id", "target_column", "formula"],
+                    },
+                },
+                {
+                    "name": "plan_add_compute_assignments",
+                    "description": "Add a compute transform node that writes multiple columns. assignments=[{column,expression}].",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "plan": {"type": "object"},
+                            "input_node_id": {"type": "string"},
+                            "assignments": {"type": "array", "items": {"type": "object"}},
+                            "node_id": {"type": "string"},
+                        },
+                        "required": ["plan", "input_node_id", "assignments"],
                     },
                 },
                 {
@@ -537,6 +746,20 @@ class PipelineMCPServer:
                             "node_id": {"type": "string"},
                         },
                         "required": ["plan", "input_node_id", "columns"],
+                    },
+                },
+                {
+                    "name": "plan_add_select_expr",
+                    "description": "Add a select transform node using Spark selectExpr expressions.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "plan": {"type": "object"},
+                            "input_node_id": {"type": "string"},
+                            "expressions": {"type": "array", "items": {"type": "string"}},
+                            "node_id": {"type": "string"},
+                        },
+                        "required": ["plan", "input_node_id", "expressions"],
                     },
                 },
                 {
@@ -827,6 +1050,100 @@ class PipelineMCPServer:
                         "required": ["context_pack"],
                     },
                 },
+                {
+                    "name": "pipeline_create_from_plan",
+                    "description": "Create a Pipeline (control plane) from a PipelinePlan.definition_json. Requires admin token; respects principal headers for permissions.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "plan": {"type": "object"},
+                            "name": {"type": "string"},
+                            "location": {"type": "string"},
+                            "description": {"type": "string"},
+                            "pipeline_type": {"type": "string"},
+                            "branch": {"type": "string"},
+                            "pipeline_id": {"type": "string"},
+                            "principal_id": {"type": "string"},
+                            "principal_type": {"type": "string"},
+                        },
+                        "required": ["plan", "name", "location"],
+                    },
+                },
+                {
+                    "name": "pipeline_update_from_plan",
+                    "description": "Update an existing Pipeline definition from a PipelinePlan.definition_json.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "pipeline_id": {"type": "string"},
+                            "plan": {"type": "object"},
+                            "branch": {"type": "string"},
+                            "principal_id": {"type": "string"},
+                            "principal_type": {"type": "string"},
+                        },
+                        "required": ["pipeline_id", "plan"],
+                    },
+                },
+                {
+                    "name": "pipeline_preview_wait",
+                    "description": "Queue a Spark preview for a Pipeline and wait (poll) until completion; returns masked preview sample.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "pipeline_id": {"type": "string"},
+                            "db_name": {"type": "string"},
+                            "node_id": {"type": "string"},
+                            "limit": {"type": "integer"},
+                            "branch": {"type": "string"},
+                            "wait": {"type": "boolean"},
+                            "timeout_seconds": {"type": "number"},
+                            "poll_interval_seconds": {"type": "number"},
+                            "principal_id": {"type": "string"},
+                            "principal_type": {"type": "string"},
+                        },
+                        "required": ["pipeline_id"],
+                    },
+                },
+                {
+                    "name": "pipeline_build_wait",
+                    "description": "Queue a Spark build for a Pipeline and wait (poll) until completion; returns masked build output summary.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "pipeline_id": {"type": "string"},
+                            "db_name": {"type": "string"},
+                            "node_id": {"type": "string"},
+                            "limit": {"type": "integer"},
+                            "branch": {"type": "string"},
+                            "wait": {"type": "boolean"},
+                            "timeout_seconds": {"type": "number"},
+                            "poll_interval_seconds": {"type": "number"},
+                            "principal_id": {"type": "string"},
+                            "principal_type": {"type": "string"},
+                        },
+                        "required": ["pipeline_id"],
+                    },
+                },
+                {
+                    "name": "pipeline_deploy_promote_build",
+                    "description": "Promote a successful build to a deployed dataset (requires approve permission).",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "pipeline_id": {"type": "string"},
+                            "build_job_id": {"type": "string"},
+                            "artifact_id": {"type": "string"},
+                            "node_id": {"type": "string"},
+                            "db_name": {"type": "string"},
+                            "dataset_name": {"type": "string"},
+                            "branch": {"type": "string"},
+                            "replay_on_deploy": {"type": "boolean"},
+                            "principal_id": {"type": "string"},
+                            "principal_type": {"type": "string"},
+                        },
+                        "required": ["pipeline_id", "build_job_id", "node_id", "db_name", "dataset_name"],
+                    },
+                },
             ]
             return [Tool(**spec) for spec in tool_specs]
 
@@ -868,7 +1185,38 @@ class PipelineMCPServer:
                         dataset_id=arguments.get("dataset_id"),
                         dataset_name=arguments.get("dataset_name"),
                         dataset_branch=arguments.get("dataset_branch"),
+                        read=arguments.get("read") if isinstance(arguments.get("read"), dict) else None,
                         node_id=arguments.get("node_id"),
+                    )
+                    return {"plan": result.plan, "node_id": result.node_id, "warnings": list(result.warnings)}
+
+                if name == "plan_configure_input_read":
+                    plan = arguments.get("plan") or {}
+                    patch: Dict[str, Any] = {}
+                    read_obj = arguments.get("read")
+                    if isinstance(read_obj, dict):
+                        patch.update(read_obj)
+                    if arguments.get("format"):
+                        patch["format"] = str(arguments.get("format")).strip()
+                    options_obj = arguments.get("options")
+                    if isinstance(options_obj, dict) and options_obj:
+                        patch["options"] = dict(options_obj)
+                    schema_obj = arguments.get("schema")
+                    if isinstance(schema_obj, list) and schema_obj:
+                        patch["schema"] = schema_obj
+                    if arguments.get("mode") is not None:
+                        patch["mode"] = str(arguments.get("mode"))
+                    if arguments.get("corrupt_record_column") is not None:
+                        patch["corrupt_record_column"] = str(arguments.get("corrupt_record_column"))
+                    if "header" in arguments:
+                        patch["header"] = bool(arguments.get("header"))
+                    if "infer_schema" in arguments:
+                        patch["infer_schema"] = bool(arguments.get("infer_schema"))
+                    result = configure_input_read(
+                        plan,
+                        node_id=str(arguments.get("node_id") or ""),
+                        read=patch,
+                        replace=bool(arguments.get("replace") or False),
                     )
                     return {"plan": result.plan, "node_id": result.node_id, "warnings": list(result.warnings)}
 
@@ -912,6 +1260,9 @@ class PipelineMCPServer:
                         left_keys=_normalize_string_list(left_keys),
                         right_keys=_normalize_string_list(right_keys),
                         join_type=str(join_type),
+                        join_hints=arguments.get("join_hints") if isinstance(arguments.get("join_hints"), dict) else None,
+                        broadcast_left=bool(arguments.get("broadcast_left") or False),
+                        broadcast_right=bool(arguments.get("broadcast_right") or False),
                         node_id=arguments.get("node_id"),
                     )
                     return {"plan": result.plan, "node_id": result.node_id, "warnings": list(result.warnings)}
@@ -935,6 +1286,24 @@ class PipelineMCPServer:
                     )
                     return {"plan": result.plan, "node_id": result.node_id, "warnings": list(result.warnings)}
 
+                if name == "plan_add_group_by_expr":
+                    plan = arguments.get("plan") or {}
+                    input_node_id = str(arguments.get("input_node_id") or "")
+                    group_by = _normalize_string_list(arguments.get("group_by") or arguments.get("groupBy") or [])
+                    exprs = arguments.get("aggregate_expressions") or arguments.get("aggregateExpressions") or []
+                    op = str(arguments.get("operation") or "groupBy").strip() or "groupBy"
+                    if op not in {"groupBy", "aggregate"}:
+                        op = "groupBy"
+                    result = add_group_by_expr(
+                        plan,
+                        input_node_id=input_node_id,
+                        group_by=group_by,
+                        aggregate_expressions=exprs if isinstance(exprs, list) else [exprs],
+                        operation=op,
+                        node_id=arguments.get("node_id"),
+                    )
+                    return {"plan": result.plan, "node_id": result.node_id, "warnings": list(result.warnings)}
+
                 if name == "plan_add_window":
                     plan = arguments.get("plan") or {}
                     input_node_id = str(arguments.get("input_node_id") or "")
@@ -949,6 +1318,18 @@ class PipelineMCPServer:
                         operation="window",
                         input_node_ids=[input_node_id],
                         metadata={"window": window},
+                        node_id=arguments.get("node_id"),
+                    )
+                    return {"plan": result.plan, "node_id": result.node_id, "warnings": list(result.warnings)}
+
+                if name == "plan_add_window_expr":
+                    plan = arguments.get("plan") or {}
+                    input_node_id = str(arguments.get("input_node_id") or "")
+                    expressions = arguments.get("expressions") or []
+                    result = add_window_expr(
+                        plan,
+                        input_node_id=input_node_id,
+                        expressions=expressions if isinstance(expressions, list) else [expressions],
                         node_id=arguments.get("node_id"),
                     )
                     return {"plan": result.plan, "node_id": result.node_id, "warnings": list(result.warnings)}
@@ -1000,7 +1381,6 @@ class PipelineMCPServer:
                     expr = str(arguments.get("expression") or "").strip()
 
                     # Common LLM shape: {"computations":[{"alias":"x","expression":"a*b"}, ...]}
-                    # The pipeline engine supports ONE assignment per compute node, so chain them.
                     if not expr:
                         raw = (
                             arguments.get("computations")
@@ -1010,10 +1390,14 @@ class PipelineMCPServer:
                             or []
                         )
                         items = raw if isinstance(raw, list) else [raw]
-                        exprs: list[str] = []
+                        assignments: list[dict[str, Any]] = []
                         for item in items:
                             if isinstance(item, str) and item.strip():
-                                exprs.append(item.strip())
+                                text = item.strip()
+                                if "=" in text:
+                                    left, right = [part.strip() for part in text.split("=", 1)]
+                                    if left and right:
+                                        assignments.append({"column": left, "expression": right})
                                 continue
                             if not isinstance(item, dict):
                                 continue
@@ -1029,29 +1413,16 @@ class PipelineMCPServer:
                             formula_value = str(formula or "").strip()
                             if not alias_value or not formula_value:
                                 continue
-                            exprs.append(f"{alias_value} = {formula_value}")
+                            assignments.append({"column": alias_value, "expression": formula_value})
 
-                        if exprs:
-                            node_ids: list[str] = []
-                            warnings: list[str] = []
-                            current_input = input_node_id
-                            for idx, compute_expr in enumerate(exprs):
-                                result = add_compute(
-                                    plan,
-                                    input_node_id=current_input,
-                                    expression=compute_expr,
-                                    node_id=arguments.get("node_id") if idx == 0 else None,
-                                )
-                                plan = result.plan
-                                current_input = result.node_id
-                                node_ids.append(result.node_id)
-                                warnings.extend(list(result.warnings or []))
-                            return {
-                                "plan": plan,
-                                "node_id": node_ids[-1],
-                                "node_ids": node_ids,
-                                "warnings": warnings,
-                            }
+                        if assignments:
+                            result = add_compute_assignments(
+                                plan,
+                                input_node_id=input_node_id,
+                                assignments=assignments,
+                                node_id=arguments.get("node_id"),
+                            )
+                            return {"plan": result.plan, "node_id": result.node_id, "warnings": list(result.warnings)}
 
                     # Another common shape: expression="a*b", alias="x" (no assignment in expression).
                     alias = str(
@@ -1061,12 +1432,40 @@ class PipelineMCPServer:
                         or ""
                     ).strip()
                     if expr and alias and "=" not in expr:
-                        expr = f"{alias} = {expr}"
+                        result = add_compute_column(
+                            plan,
+                            input_node_id=input_node_id,
+                            target_column=alias,
+                            formula=expr,
+                            node_id=arguments.get("node_id"),
+                        )
+                        return {"plan": result.plan, "node_id": result.node_id, "warnings": list(result.warnings)}
 
                     result = add_compute(
                         plan,
                         input_node_id=input_node_id,
                         expression=expr,
+                        node_id=arguments.get("node_id"),
+                    )
+                    return {"plan": result.plan, "node_id": result.node_id, "warnings": list(result.warnings)}
+
+                if name == "plan_add_compute_column":
+                    plan = arguments.get("plan") or {}
+                    result = add_compute_column(
+                        plan,
+                        input_node_id=str(arguments.get("input_node_id") or ""),
+                        target_column=str(arguments.get("target_column") or ""),
+                        formula=str(arguments.get("formula") or ""),
+                        node_id=arguments.get("node_id"),
+                    )
+                    return {"plan": result.plan, "node_id": result.node_id, "warnings": list(result.warnings)}
+
+                if name == "plan_add_compute_assignments":
+                    plan = arguments.get("plan") or {}
+                    result = add_compute_assignments(
+                        plan,
+                        input_node_id=str(arguments.get("input_node_id") or ""),
+                        assignments=arguments.get("assignments") or [],
                         node_id=arguments.get("node_id"),
                     )
                     return {"plan": result.plan, "node_id": result.node_id, "warnings": list(result.warnings)}
@@ -1097,6 +1496,16 @@ class PipelineMCPServer:
                         plan,
                         input_node_id=str(arguments.get("input_node_id") or ""),
                         columns=arguments.get("columns") or [],
+                        node_id=arguments.get("node_id"),
+                    )
+                    return {"plan": result.plan, "node_id": result.node_id, "warnings": list(result.warnings)}
+
+                if name == "plan_add_select_expr":
+                    plan = arguments.get("plan") or {}
+                    result = add_select_expr(
+                        plan,
+                        input_node_id=str(arguments.get("input_node_id") or ""),
+                        expressions=arguments.get("expressions") or [],
                         node_id=arguments.get("node_id"),
                     )
                     return {"plan": result.plan, "node_id": result.node_id, "warnings": list(result.warnings)}
@@ -1394,6 +1803,300 @@ class PipelineMCPServer:
                         max_edges=int(arguments.get("max_edges") or 30),
                     )
                     return {"status": "success", "inference": inference}
+
+                if name == "pipeline_create_from_plan":
+                    plan_obj = arguments.get("plan") or {}
+                    try:
+                        plan = PipelinePlan.model_validate(plan_obj)
+                    except Exception as exc:
+                        return {"status": "invalid", "errors": [str(exc)]}
+                    db_name = str(plan.data_scope.db_name or "").strip()
+                    if not db_name:
+                        return {"status": "invalid", "errors": ["plan.data_scope.db_name is required"]}
+
+                    pipeline_name = str(arguments.get("name") or "").strip()
+                    if not pipeline_name:
+                        return {"status": "invalid", "errors": ["name is required"]}
+                    location = str(arguments.get("location") or "").strip()
+                    if not location:
+                        return {"status": "invalid", "errors": ["location is required"]}
+
+                    payload: Dict[str, Any] = {
+                        "db_name": db_name,
+                        "name": pipeline_name,
+                        "location": location,
+                        "branch": str(arguments.get("branch") or plan.data_scope.branch or "main").strip() or "main",
+                        "pipeline_type": str(arguments.get("pipeline_type") or "batch").strip() or "batch",
+                        "definition_json": dict(plan.definition_json or {}),
+                    }
+                    description = str(arguments.get("description") or "").strip() or None
+                    if description:
+                        payload["description"] = description
+                    pipeline_id = str(arguments.get("pipeline_id") or "").strip() or None
+                    if pipeline_id:
+                        payload["pipeline_id"] = pipeline_id
+
+                    resp = await _bff_json(
+                        "POST",
+                        "/pipelines",
+                        db_name=db_name,
+                        principal_id=str(arguments.get("principal_id") or "").strip() or None,
+                        principal_type=str(arguments.get("principal_type") or "").strip() or None,
+                        json_body=payload,
+                        timeout_seconds=30.0,
+                    )
+                    if resp.get("error"):
+                        return resp
+                    data = resp.get("data") if isinstance(resp.get("data"), dict) else {}
+                    pipeline = data.get("pipeline") if isinstance(data.get("pipeline"), dict) else {}
+                    return {
+                        "status": "success",
+                        "pipeline": {
+                            "pipeline_id": pipeline.get("pipeline_id") or pipeline.get("pipelineId"),
+                            "db_name": pipeline.get("db_name"),
+                            "name": pipeline.get("name"),
+                            "branch": pipeline.get("branch"),
+                            "location": pipeline.get("location"),
+                            "version": pipeline.get("version") or pipeline.get("commit_id") or pipeline.get("commitId"),
+                        },
+                    }
+
+                if name == "pipeline_update_from_plan":
+                    pipeline_id = str(arguments.get("pipeline_id") or "").strip()
+                    if not pipeline_id:
+                        return {"status": "invalid", "errors": ["pipeline_id is required"]}
+                    plan_obj = arguments.get("plan") or {}
+                    try:
+                        plan = PipelinePlan.model_validate(plan_obj)
+                    except Exception as exc:
+                        return {"status": "invalid", "errors": [str(exc)]}
+                    db_name = str(plan.data_scope.db_name or "").strip()
+                    if not db_name:
+                        return {"status": "invalid", "errors": ["plan.data_scope.db_name is required"]}
+                    payload: Dict[str, Any] = {
+                        "definition_json": dict(plan.definition_json or {}),
+                    }
+                    branch = str(arguments.get("branch") or "").strip() or None
+                    if branch:
+                        payload["branch"] = branch
+                    resp = await _bff_json(
+                        "PUT",
+                        f"/pipelines/{pipeline_id}",
+                        db_name=db_name,
+                        principal_id=str(arguments.get("principal_id") or "").strip() or None,
+                        principal_type=str(arguments.get("principal_type") or "").strip() or None,
+                        json_body=payload,
+                        timeout_seconds=30.0,
+                    )
+                    if resp.get("error"):
+                        return resp
+                    data = resp.get("data") if isinstance(resp.get("data"), dict) else {}
+                    pipeline = data.get("pipeline") if isinstance(data.get("pipeline"), dict) else {}
+                    return {
+                        "status": "success",
+                        "pipeline": {
+                            "pipeline_id": pipeline.get("pipeline_id") or pipeline.get("pipelineId"),
+                            "db_name": pipeline.get("db_name"),
+                            "name": pipeline.get("name"),
+                            "branch": pipeline.get("branch"),
+                            "location": pipeline.get("location"),
+                            "version": pipeline.get("version") or pipeline.get("commit_id") or pipeline.get("commitId"),
+                        },
+                    }
+
+                if name == "pipeline_preview_wait":
+                    pipeline_id = str(arguments.get("pipeline_id") or "").strip()
+                    if not pipeline_id:
+                        return {"status": "invalid", "errors": ["pipeline_id is required"]}
+                    limit = int(arguments.get("limit") or 200)
+                    limit = max(1, min(limit, 500))
+                    node_id = str(arguments.get("node_id") or "").strip() or None
+                    branch = str(arguments.get("branch") or "").strip() or None
+                    wait = bool(arguments.get("wait", True))
+                    timeout_seconds = float(arguments.get("timeout_seconds") or 60.0)
+                    poll_s = float(arguments.get("poll_interval_seconds") or 2.0)
+
+                    # Enqueue preview on the Spark worker via BFF.
+                    enqueue_body: Dict[str, Any] = {"limit": limit}
+                    if node_id:
+                        enqueue_body["node_id"] = node_id
+                    if branch:
+                        enqueue_body["branch"] = branch
+                    resp = await _bff_json(
+                        "POST",
+                        f"/pipelines/{pipeline_id}/preview",
+                        db_name=str(arguments.get("db_name") or "").strip(),
+                        principal_id=str(arguments.get("principal_id") or "").strip() or None,
+                        principal_type=str(arguments.get("principal_type") or "").strip() or None,
+                        json_body=enqueue_body,
+                        timeout_seconds=30.0,
+                    )
+                    if resp.get("error"):
+                        return resp
+                    data = resp.get("data") if isinstance(resp.get("data"), dict) else {}
+                    job_id = str(data.get("job_id") or "").strip()
+                    if not job_id and isinstance(data.get("sample"), dict):
+                        job_id = str((data.get("sample") or {}).get("job_id") or "").strip()
+                    if not job_id:
+                        return {"error": "preview enqueue did not return job_id", "response": resp}
+                    if not wait:
+                        return {"status": "queued", "job_id": job_id, "limit": limit}
+
+                    deadline = asyncio.get_running_loop().time() + max(1.0, timeout_seconds)
+                    while asyncio.get_running_loop().time() < deadline:
+                        pipe = await _bff_json(
+                            "GET",
+                            f"/pipelines/{pipeline_id}",
+                            db_name=str(arguments.get("db_name") or "").strip(),
+                            principal_id=str(arguments.get("principal_id") or "").strip() or None,
+                            principal_type=str(arguments.get("principal_type") or "").strip() or None,
+                            params={k: v for k, v in {"branch": branch, "preview_node_id": node_id}.items() if v},
+                            timeout_seconds=15.0,
+                        )
+                        if pipe.get("error"):
+                            return pipe
+                        pipe_data = pipe.get("data") if isinstance(pipe.get("data"), dict) else {}
+                        pipeline = pipe_data.get("pipeline") if isinstance(pipe_data.get("pipeline"), dict) else {}
+                        if str(pipeline.get("last_preview_job_id") or "").strip() != job_id:
+                            await asyncio.sleep(max(0.2, poll_s))
+                            continue
+                        status_value = str(pipeline.get("last_preview_status") or "").strip().upper()
+                        if status_value in {"SUCCESS", "FAILED"}:
+                            sample = pipeline.get("last_preview_sample") if isinstance(pipeline.get("last_preview_sample"), dict) else {}
+                            masked = mask_pii(sample)
+                            return {
+                                "status": status_value.lower(),
+                                "job_id": job_id,
+                                "preview": _trim_preview_payload(masked, max_rows=8),
+                            }
+                        await asyncio.sleep(max(0.2, poll_s))
+
+                    return {"status": "timeout", "job_id": job_id, "message": "preview still running"}
+
+                if name == "pipeline_build_wait":
+                    pipeline_id = str(arguments.get("pipeline_id") or "").strip()
+                    if not pipeline_id:
+                        return {"status": "invalid", "errors": ["pipeline_id is required"]}
+                    limit = int(arguments.get("limit") or 200)
+                    limit = max(1, min(limit, 500))
+                    node_id = str(arguments.get("node_id") or "").strip() or None
+                    branch = str(arguments.get("branch") or "").strip() or None
+                    wait = bool(arguments.get("wait", True))
+                    timeout_seconds = float(arguments.get("timeout_seconds") or 180.0)
+                    poll_s = float(arguments.get("poll_interval_seconds") or 2.5)
+
+                    enqueue_body: Dict[str, Any] = {"limit": limit}
+                    if node_id:
+                        enqueue_body["node_id"] = node_id
+                    if branch:
+                        enqueue_body["branch"] = branch
+                    resp = await _bff_json(
+                        "POST",
+                        f"/pipelines/{pipeline_id}/build",
+                        db_name=str(arguments.get("db_name") or "").strip(),
+                        principal_id=str(arguments.get("principal_id") or "").strip() or None,
+                        principal_type=str(arguments.get("principal_type") or "").strip() or None,
+                        json_body=enqueue_body,
+                        timeout_seconds=30.0,
+                    )
+                    if resp.get("error"):
+                        return resp
+                    data = resp.get("data") if isinstance(resp.get("data"), dict) else {}
+                    job_id = str(data.get("job_id") or "").strip()
+                    if not job_id:
+                        return {"error": "build enqueue did not return job_id", "response": resp}
+                    if not wait:
+                        return {"status": "queued", "job_id": job_id, "limit": limit}
+
+                    deadline = asyncio.get_running_loop().time() + max(1.0, timeout_seconds)
+                    while asyncio.get_running_loop().time() < deadline:
+                        runs = await _bff_json(
+                            "GET",
+                            f"/pipelines/{pipeline_id}/runs",
+                            db_name=str(arguments.get("db_name") or "").strip(),
+                            principal_id=str(arguments.get("principal_id") or "").strip() or None,
+                            principal_type=str(arguments.get("principal_type") or "").strip() or None,
+                            params={"limit": 50},
+                            timeout_seconds=15.0,
+                        )
+                        if runs.get("error"):
+                            return runs
+                        runs_data = runs.get("data") if isinstance(runs.get("data"), dict) else {}
+                        run_list = runs_data.get("runs") if isinstance(runs_data.get("runs"), list) else []
+                        selected_run: Optional[Dict[str, Any]] = None
+                        for item in run_list:
+                            if not isinstance(item, dict):
+                                continue
+                            if str(item.get("job_id") or "").strip() == job_id:
+                                selected_run = item
+                                break
+                        if not selected_run:
+                            await asyncio.sleep(max(0.2, poll_s))
+                            continue
+                        status_value = str(selected_run.get("status") or "").strip().upper()
+                        if status_value in {"SUCCESS", "FAILED"}:
+                            output_json = selected_run.get("output_json") if isinstance(selected_run.get("output_json"), dict) else {}
+                            trimmed = _trim_build_output(output_json, max_rows=6)
+                            masked = mask_pii(trimmed)
+                            return {
+                                "status": status_value.lower(),
+                                "job_id": job_id,
+                                "artifact_id": output_json.get("artifact_id") if isinstance(output_json, dict) else None,
+                                "output": masked,
+                            }
+                        await asyncio.sleep(max(0.2, poll_s))
+
+                    return {"status": "timeout", "job_id": job_id, "message": "build still running"}
+
+                if name == "pipeline_deploy_promote_build":
+                    pipeline_id = str(arguments.get("pipeline_id") or "").strip()
+                    if not pipeline_id:
+                        return {"status": "invalid", "errors": ["pipeline_id is required"]}
+                    build_job_id = str(arguments.get("build_job_id") or "").strip()
+                    if not build_job_id:
+                        return {"status": "invalid", "errors": ["build_job_id is required"]}
+                    node_id = str(arguments.get("node_id") or "").strip()
+                    if not node_id:
+                        return {"status": "invalid", "errors": ["node_id is required"]}
+                    db_name = str(arguments.get("db_name") or "").strip()
+                    dataset_name = str(arguments.get("dataset_name") or "").strip()
+                    if not db_name or not dataset_name:
+                        return {"status": "invalid", "errors": ["db_name and dataset_name are required"]}
+
+                    payload: Dict[str, Any] = {
+                        "promote_build": True,
+                        "build_job_id": build_job_id,
+                        "node_id": node_id,
+                        "output": {"db_name": db_name, "dataset_name": dataset_name},
+                        "replay_on_deploy": bool(arguments.get("replay_on_deploy") or False),
+                    }
+                    artifact_id = str(arguments.get("artifact_id") or "").strip() or None
+                    if artifact_id:
+                        payload["artifact_id"] = artifact_id
+                    branch = str(arguments.get("branch") or "").strip() or None
+                    if branch:
+                        payload["branch"] = branch
+
+                    resp = await _bff_json(
+                        "POST",
+                        f"/pipelines/{pipeline_id}/deploy",
+                        db_name=db_name,
+                        principal_id=str(arguments.get("principal_id") or "").strip() or None,
+                        principal_type=str(arguments.get("principal_type") or "").strip() or None,
+                        json_body=payload,
+                        timeout_seconds=60.0,
+                    )
+                    if resp.get("error"):
+                        return resp
+                    data = resp.get("data") if isinstance(resp.get("data"), dict) else {}
+                    return {
+                        "status": "success",
+                        "pipeline_id": data.get("pipeline_id") or pipeline_id,
+                        "job_id": data.get("job_id"),
+                        "deployed_commit_id": data.get("deployed_commit_id"),
+                        "artifact_id": data.get("artifact_id"),
+                        "outputs": data.get("outputs"),
+                    }
 
                 return {"error": f"Unknown tool: {name}"}
 

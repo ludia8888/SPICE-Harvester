@@ -6,10 +6,14 @@ from shared.services.pipeline_plan_builder import (
     PipelinePlanBuilderError,
     add_edge,
     add_cast,
+    add_compute_assignments,
+    add_compute_column,
     add_filter,
     add_input,
     add_join,
+    add_select_expr,
     add_output,
+    configure_input_read,
     delete_edge,
     delete_node,
     new_plan,
@@ -47,6 +51,32 @@ def test_add_input_and_output_wires_edges():
     assert {"from": input_id, "to": out.node_id} in plan["definition_json"]["edges"]
 
 
+def test_add_input_supports_read_config():
+    plan = new_plan(goal="read permissive", db_name="demo")
+    res = add_input(
+        plan,
+        dataset_id="ds-1",
+        node_id="in_1",
+        read={"format": "csv", "mode": "PERMISSIVE", "corrupt_record_column": "_corrupt_record"},
+    )
+    node = next(node for node in res.plan["definition_json"]["nodes"] if node["id"] == "in_1")
+    assert node["metadata"]["read"]["format"] == "csv"
+    assert node["metadata"]["read"]["mode"] == "PERMISSIVE"
+
+
+def test_configure_input_read_patches_input_nodes_only():
+    plan = new_plan(goal="read permissive", db_name="demo")
+    plan = add_input(plan, dataset_id="ds-1", node_id="in_1").plan
+    patched = configure_input_read(plan, node_id="in_1", read={"format": "csv", "mode": "PERMISSIVE"})
+    node = next(node for node in patched.plan["definition_json"]["nodes"] if node["id"] == "in_1")
+    assert node["metadata"]["read"]["format"] == "csv"
+    assert node["metadata"]["read"]["mode"] == "PERMISSIVE"
+
+    # Non-input nodes should be rejected.
+    plan2 = add_filter(plan, input_node_id="in_1", expression="a > 1", node_id="f1").plan
+    with pytest.raises(PipelinePlanBuilderError):
+        configure_input_read(plan2, node_id="f1", read={"format": "csv"})
+
 def test_add_join_requires_two_inputs_and_keys():
     plan = new_plan(goal="join", db_name="demo")
     plan = add_input(plan, dataset_id="left", node_id="left").plan
@@ -65,6 +95,24 @@ def test_add_join_requires_two_inputs_and_keys():
     errors, _ = validate_structure(plan)
     assert errors == []
 
+
+def test_add_join_accepts_hints_and_broadcast_flags():
+    plan = new_plan(goal="join", db_name="demo")
+    plan = add_input(plan, dataset_id="left", node_id="left").plan
+    plan = add_input(plan, dataset_id="right", node_id="right").plan
+    res_join = add_join(
+        plan,
+        left_node_id="left",
+        right_node_id="right",
+        left_keys=["id"],
+        right_keys=["id"],
+        join_type="inner",
+        join_hints={"right": "broadcast"},
+        broadcast_right=True,
+    )
+    node = next(node for node in res_join.plan["definition_json"]["nodes"] if node["id"] == res_join.node_id)
+    assert node["metadata"]["joinHints"]["right"] == "broadcast"
+    assert node["metadata"]["broadcastRight"] is True
 
 def test_add_join_rejects_cross_join():
     plan = new_plan(goal="join", db_name="demo")
@@ -92,6 +140,34 @@ def test_add_cast_requires_column_and_type():
     res = add_cast(plan, input_node_id="inp", casts=[{"column": "a", "type": "xsd:integer"}])
     errors, _ = validate_structure(res.plan)
     assert errors == []
+
+
+def test_compute_column_and_assignments_build_metadata():
+    plan = new_plan(goal="compute", db_name="demo")
+    plan = add_input(plan, dataset_id="ds", node_id="inp").plan
+    res1 = add_compute_column(plan, input_node_id="inp", target_column="x", formula="a + 1")
+    node1 = next(node for node in res1.plan["definition_json"]["nodes"] if node["id"] == res1.node_id)
+    assert node1["metadata"]["operation"] == "compute"
+    assert node1["metadata"]["targetColumn"] == "x"
+    assert node1["metadata"]["formula"] == "a + 1"
+
+    res2 = add_compute_assignments(
+        plan,
+        input_node_id="inp",
+        assignments=[{"column": "x", "expression": "a + 1"}, {"column": "y", "expression": "a + 2"}],
+    )
+    node2 = next(node for node in res2.plan["definition_json"]["nodes"] if node["id"] == res2.node_id)
+    assert node2["metadata"]["operation"] == "compute"
+    assert isinstance(node2["metadata"]["assignments"], list)
+
+
+def test_select_expr_builds_metadata():
+    plan = new_plan(goal="select expr", db_name="demo")
+    plan = add_input(plan, dataset_id="ds", node_id="inp").plan
+    res = add_select_expr(plan, input_node_id="inp", expressions=["a", "b as bee"])
+    node = next(node for node in res.plan["definition_json"]["nodes"] if node["id"] == res.node_id)
+    assert node["metadata"]["operation"] == "select"
+    assert node["metadata"]["expressions"] == ["a", "b as bee"]
 
 
 def test_add_edge_is_idempotent():

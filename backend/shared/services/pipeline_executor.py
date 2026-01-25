@@ -558,12 +558,67 @@ class PipelineExecutor:
         if operation == "filter":
             return _filter_table(inputs[0], str(metadata.get("expression") or ""), parameters)
         if operation == "compute":
-            return _compute_table(inputs[0], str(metadata.get("expression") or ""), parameters)
+            table = inputs[0]
+            # Structured compute (preferred): {"assignments":[{"column":"c","expression":"..."}]}
+            assignments = (
+                metadata.get("assignments")
+                or metadata.get("computedColumns")
+                or metadata.get("computed_columns")
+            )
+            if isinstance(assignments, list) and assignments:
+                next_table = table
+                for item in assignments:
+                    if not isinstance(item, dict):
+                        continue
+                    target = str(item.get("column") or item.get("target") or item.get("name") or "").strip()
+                    expr = str(item.get("expression") or item.get("expr") or item.get("formula") or "").strip()
+                    if not target or not expr:
+                        continue
+                    next_table = _compute_assignment_table(next_table, target, expr, parameters)
+                return next_table
+
+            # Structured single-column compute: {"targetColumn":"c","formula":"..."}
+            target = (
+                metadata.get("targetColumn")
+                or metadata.get("target_column")
+                or metadata.get("target")
+                or metadata.get("column")
+            )
+            formula = metadata.get("formula") or metadata.get("expr")
+            if target and formula:
+                target_text = str(target).strip()
+                formula_text = str(formula).strip()
+                if target_text and formula_text:
+                    return _compute_assignment_table(table, target_text, formula_text, parameters)
+
+            return _compute_table(table, str(metadata.get("expression") or ""), parameters)
         if operation == "explode":
             columns = metadata.get("columns") or []
             if columns:
                 return _explode_table(inputs[0], str(columns[0]))
         if operation == "select":
+            expressions = metadata.get("expressions") or metadata.get("selectExpr") or metadata.get("select_expr")
+            if isinstance(expressions, list) and expressions:
+                # Preview engine only supports plain column names (or "col as alias") in selectExpr.
+                projected: list[str] = []
+                renames: dict[str, str] = {}
+                for expr in expressions:
+                    text = str(expr or "").strip()
+                    if not text:
+                        continue
+                    lower = text.lower()
+                    if " as " in lower:
+                        left, right = [part.strip() for part in text.rsplit(" as ", 1)]
+                        if left and right:
+                            projected.append(left)
+                            renames[left] = right
+                    else:
+                        projected.append(text)
+                if projected:
+                    selected = _select_columns(inputs[0], projected)
+                    if renames:
+                        selected = _rename_columns(selected, renames)
+                    return selected
             columns = metadata.get("columns") or []
             if columns:
                 return _select_columns(inputs[0], columns)
@@ -1347,13 +1402,48 @@ def _compare(left: Any, op: str, right: Any) -> bool:
     return False
 
 
+def _compute_assignment_table(
+    table: PipelineTable,
+    target: str,
+    expression: str,
+    parameters: Dict[str, Any],
+) -> PipelineTable:
+    target = (target or "").strip()
+    if not target:
+        return table
+    expression = apply_parameters((expression or "").strip(), parameters)
+    if not expression:
+        return table
+    rows: list[dict[str, Any]] = []
+    for row in table.rows:
+        computed = _safe_eval(expression, row, parameters)
+        next_row = dict(row)
+        next_row[target] = computed
+        rows.append(next_row)
+    columns = table.columns + ([target] if target not in table.columns else [])
+    return PipelineTable(columns=columns, rows=rows)
+
+
 def _compute_table(table: PipelineTable, expression: str, parameters: Dict[str, Any]) -> PipelineTable:
     expression = apply_parameters((expression or "").strip(), parameters)
     if not expression:
         return table
-    target, expr = _parse_assignment(expression)
-    if not target:
-        return table
+    target = ""
+    expr = expression
+    if "=" in expression:
+        left, right = expression.split("=", 1)
+        candidate = left.strip()
+        # Disambiguate: if the LHS is an existing column, treat this as a comparison expression,
+        # not an assignment. (Spark SQL uses '=' for comparisons; assignments are a DSL convenience.)
+        if candidate and candidate not in table.columns:
+            target = candidate
+            expr = right.strip()
+        else:
+            target = "computed"
+            expr = expression.strip()
+    else:
+        target = "computed"
+        expr = expression.strip()
     rows = []
     for row in table.rows:
         computed = _safe_eval(expr, row, parameters)
@@ -1398,6 +1488,8 @@ def _safe_eval(expression: str, row: Dict[str, Any], parameters: Dict[str, Any])
     expression = expression.strip()
     if not expression:
         return None
+    # Make a best-effort attempt to interpret Spark-style '=' comparisons in preview mode.
+    expression = re.sub(r"(?<![<>=!])=(?![=])", "==", expression)
     lower_expr = expression.lower()
     if lower_expr.startswith("to_timestamp(") and expression.endswith(")"):
         inner = expression[len("to_timestamp(") : -1].strip()
@@ -1426,7 +1518,13 @@ def _is_safe_ast(node: ast.AST) -> bool:
     for child in ast.walk(node):
         if isinstance(child, (ast.Expression, ast.BinOp, ast.UnaryOp, ast.Name, ast.Constant, ast.Load)):
             continue
+        if isinstance(child, (ast.Compare, ast.BoolOp)):
+            continue
         if isinstance(child, (ast.Add, ast.Sub, ast.Mult, ast.Div, ast.Mod, ast.Pow, ast.USub, ast.UAdd)):
+            continue
+        if isinstance(child, (ast.And, ast.Or)):
+            continue
+        if isinstance(child, (ast.Eq, ast.NotEq, ast.Gt, ast.GtE, ast.Lt, ast.LtE)):
             continue
         return False
     return True
@@ -1461,6 +1559,36 @@ def _eval_ast(node: ast.AST, variables: Dict[str, Any]) -> Any:
                 return left ** right
         except Exception:
             return None
+    if isinstance(node, ast.Compare):
+        left = _eval_ast(node.left, variables)
+        if len(node.ops) != 1 or len(node.comparators) != 1:
+            return None
+        right = _eval_ast(node.comparators[0], variables)
+        op = node.ops[0]
+        if isinstance(op, ast.Eq):
+            return left == right
+        if isinstance(op, ast.NotEq):
+            return left != right
+        try:
+            if isinstance(op, ast.Gt):
+                return left > right
+            if isinstance(op, ast.GtE):
+                return left >= right
+            if isinstance(op, ast.Lt):
+                return left < right
+            if isinstance(op, ast.LtE):
+                return left <= right
+        except Exception:
+            return None
+        return None
+
+    if isinstance(node, ast.BoolOp):
+        values = [_eval_ast(v, variables) for v in node.values]
+        if isinstance(node.op, ast.And):
+            return all(bool(v) for v in values)
+        if isinstance(node.op, ast.Or):
+            return any(bool(v) for v in values)
+        return None
     return None
 
 

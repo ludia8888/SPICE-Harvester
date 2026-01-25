@@ -412,12 +412,38 @@ def _validate_pipeline_definition(*, definition_json: Dict[str, Any], require_ou
         if operation not in supported_ops:
             errors.append(f"Unsupported operation '{operation}' on node {node_id}")
             continue
-        if operation in {"filter", "compute"} and not str(metadata.get("expression") or "").strip():
+        if operation == "filter" and not str(metadata.get("expression") or "").strip():
             errors.append(f"{operation} missing expression on node {node_id}")
+        if operation == "compute":
+            has_expression = bool(str(metadata.get("expression") or "").strip())
+            target = metadata.get("targetColumn") or metadata.get("target_column") or metadata.get("target")
+            formula = metadata.get("formula") or metadata.get("expr")
+            has_target_formula = bool(str(target or "").strip()) and bool(str(formula or "").strip())
+            assignments = (
+                metadata.get("assignments")
+                or metadata.get("computedColumns")
+                or metadata.get("computed_columns")
+            )
+            has_assignments = (
+                isinstance(assignments, list)
+                and any(
+                    isinstance(item, dict)
+                    and str(item.get("column") or item.get("target") or item.get("name") or "").strip()
+                    and str(item.get("expression") or item.get("expr") or item.get("formula") or "").strip()
+                    for item in assignments
+                )
+            )
+            if not (has_expression or has_target_formula or has_assignments):
+                errors.append("compute missing expression/targetColumn/formula/assignments on node %s" % node_id)
         if operation in {"select", "drop", "sort", "dedupe", "explode", "normalize"}:
             columns = metadata.get("columns") or []
-            if not columns:
-                errors.append(f"{operation} missing columns on node {node_id}")
+            expressions = metadata.get("expressions") or metadata.get("selectExpr") or metadata.get("select_expr")
+            if operation == "select":
+                if not columns and not (isinstance(expressions, list) and expressions):
+                    errors.append(f"{operation} missing columns/expressions on node {node_id}")
+            else:
+                if not columns:
+                    errors.append(f"{operation} missing columns on node {node_id}")
         if operation == "rename":
             rename_map = metadata.get("rename") or {}
             if not rename_map:
@@ -428,10 +454,17 @@ def _validate_pipeline_definition(*, definition_json: Dict[str, Any], require_ou
                 errors.append(f"cast missing columns on node {node_id}")
         if operation in {"groupBy", "aggregate"}:
             aggregates = metadata.get("aggregates") or []
-            if not isinstance(aggregates, list) or not any(
+            expr_items = (
+                metadata.get("aggregateExpressions")
+                or metadata.get("aggExpressions")
+                or metadata.get("aggregate_expressions")
+            )
+            has_exprs = isinstance(expr_items, list) and len(expr_items) > 0
+            has_aggs = isinstance(aggregates, list) and any(
                 isinstance(item, dict) and item.get("column") and item.get("op") for item in aggregates
-            ):
-                errors.append(f"{operation} missing aggregates on node {node_id}")
+            )
+            if not (has_aggs or has_exprs):
+                errors.append(f"{operation} missing aggregates/aggregateExpressions on node {node_id}")
         if operation == "join":
             if len(incoming.get(node_id, [])) < 2:
                 errors.append(f"join requires two inputs on node {node_id}")
@@ -465,8 +498,9 @@ def _validate_pipeline_definition(*, definition_json: Dict[str, Any], require_ou
         if operation == "window":
             window_meta = metadata.get("window") or {}
             order_by = window_meta.get("orderBy") or []
-            if not order_by:
-                errors.append(f"window missing orderBy on node {node_id}")
+            expressions = window_meta.get("expressions") if isinstance(window_meta.get("expressions"), list) else None
+            if not order_by and not (isinstance(expressions, list) and expressions):
+                errors.append(f"window missing orderBy/expressions on node {node_id}")
 
     return errors
 
