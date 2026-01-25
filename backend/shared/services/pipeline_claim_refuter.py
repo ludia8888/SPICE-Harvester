@@ -13,6 +13,8 @@ The refuter is intentionally domain-agnostic and relies only on:
 from __future__ import annotations
 
 import logging
+import re
+from datetime import date, datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 from shared.models.pipeline_plan import PipelinePlan
@@ -20,6 +22,7 @@ from shared.services.dataset_registry import DatasetRegistry
 from shared.services.pipeline_executor import PipelineExecutor, PipelineTable, _cast_value_with_status  # type: ignore
 from shared.services.pipeline_graph_utils import build_incoming, normalize_edges, normalize_nodes
 from shared.services.pipeline_transform_spec import normalize_operation, resolve_join_spec
+from shared.services.pipeline_type_utils import normalize_cast_target, parse_decimal_text, parse_datetime_text, parse_int_text
 from shared.utils.llm_safety import mask_pii, stable_json_dumps, sha256_hex
 
 logger = logging.getLogger(__name__)
@@ -422,6 +425,259 @@ def _refute_cast_success(
     return None
 
 
+_CAST_LOSSLESS_SUPPORTED_NORMALIZATIONS = {
+    "trim",
+    "lowercase",
+    "uppercase",
+    "collapse_whitespace",
+    "strip_leading_zeros",
+    "strip_trailing_zeros",
+    "normalize_integer",
+    "normalize_decimal",
+    "normalize_datetime",
+    "normalize_date",
+}
+
+
+def _normalize_allowed_normalization(value: Any) -> Tuple[List[str], List[str]]:
+    rules = _normalize_string_list(value)
+    normalized: List[str] = []
+    unknown: List[str] = []
+    for raw in rules:
+        key = str(raw or "").strip().lower().replace("-", "_")
+        if key in {"strip", "trim"}:
+            key = "trim"
+        if key in {"lower", "lower_case"}:
+            key = "lowercase"
+        if key in {"upper", "upper_case"}:
+            key = "uppercase"
+        if key in {"collapse_ws", "collapse_space", "collapse_spaces"}:
+            key = "collapse_whitespace"
+        if key in {"strip_leading_zero", "strip_leading_zeroes"}:
+            key = "strip_leading_zeros"
+        if key in {"strip_trailing_zero", "strip_trailing_zeroes"}:
+            key = "strip_trailing_zeros"
+        if key in {"normalize_int", "normalize_integer"}:
+            key = "normalize_integer"
+        if key in {"normalize_float", "normalize_number", "normalize_decimal"}:
+            key = "normalize_decimal"
+        if key in {"normalize_dt", "normalize_datetime"}:
+            key = "normalize_datetime"
+        if key in {"normalize_date"}:
+            key = "normalize_date"
+
+        if key not in _CAST_LOSSLESS_SUPPORTED_NORMALIZATIONS:
+            unknown.append(str(raw))
+            continue
+        normalized.append(key)
+    return normalized, unknown
+
+
+def _serialize_canonical_decimal(value: float) -> str:
+    # Deterministic, non-scientific canonical form with bounded precision.
+    # This intentionally does NOT preserve trailing zeros (information loss) unless the agent allows it via normalization.
+    text = format(float(value), ".15f")
+    text = text.rstrip("0").rstrip(".")
+    if text in {"", "-0"}:
+        return "0"
+    return text
+
+
+def _serialize_roundtrip(value: Any, *, target_type: str) -> str:
+    normalized = normalize_cast_target(target_type)
+    if value is None:
+        return ""
+    if normalized == "xsd:string":
+        if isinstance(value, (dict, list)):
+            return stable_json_dumps(value)
+        if isinstance(value, tuple):
+            return stable_json_dumps(list(value))
+        return str(value)
+    if normalized == "xsd:boolean":
+        if isinstance(value, bool):
+            return "true" if value else "false"
+        return str(value).strip().lower()
+    if normalized == "xsd:integer":
+        if isinstance(value, bool):
+            return "1" if value else "0"
+        if isinstance(value, int):
+            return str(value)
+        if isinstance(value, float) and value.is_integer():
+            return str(int(value))
+        return str(value).strip()
+    if normalized == "xsd:decimal":
+        if isinstance(value, bool):
+            return "1" if value else "0"
+        if isinstance(value, int):
+            return str(value)
+        if isinstance(value, float):
+            return _serialize_canonical_decimal(value)
+        # Fallback: treat as string.
+        return str(value).strip()
+    if normalized == "xsd:date":
+        if isinstance(value, date) and not isinstance(value, datetime):
+            return value.isoformat()
+        if isinstance(value, datetime):
+            return value.date().isoformat()
+        return str(value).strip()
+    if normalized == "xsd:dateTime":
+        if isinstance(value, datetime):
+            return value.isoformat()
+        return str(value).strip()
+    return str(value).strip()
+
+
+def _apply_lossless_normalization(text: str, rules: List[str]) -> str:
+    out = str(text or "")
+    for rule in rules:
+        if rule == "trim":
+            out = out.strip()
+            continue
+        if rule == "lowercase":
+            out = out.lower()
+            continue
+        if rule == "uppercase":
+            out = out.upper()
+            continue
+        if rule == "collapse_whitespace":
+            out = re.sub(r"\s+", " ", out).strip()
+            continue
+        if rule == "strip_leading_zeros":
+            match = re.match(r"^([+-]?)(0+)(\d+)$", out)
+            if match:
+                sign = match.group(1) or ""
+                digits = match.group(3).lstrip("0") or "0"
+                out = f"{sign}{digits}"
+            continue
+        if rule == "strip_trailing_zeros":
+            match = re.match(r"^([+-]?\d+)\.(\d+)$", out)
+            if match:
+                head = match.group(1)
+                tail = match.group(2).rstrip("0")
+                out = f"{head}.{tail}" if tail else head
+            continue
+        if rule == "normalize_integer":
+            parsed = parse_int_text(out)
+            if parsed is not None:
+                out = str(parsed)
+            continue
+        if rule == "normalize_decimal":
+            parsed = parse_decimal_text(out)
+            if parsed is not None:
+                out = _serialize_canonical_decimal(float(parsed))
+            continue
+        if rule == "normalize_datetime":
+            parsed = parse_datetime_text(out, allow_ambiguous=True)
+            if parsed is not None:
+                out = parsed.isoformat()
+            continue
+        if rule == "normalize_date":
+            parsed = parse_datetime_text(out, allow_ambiguous=True)
+            if parsed is not None:
+                out = parsed.date().isoformat()
+            continue
+    return out
+
+
+def _refute_cast_lossless(
+    input_table: PipelineTable,
+    output_table: PipelineTable,
+    casts: List[Dict[str, Any]],
+    *,
+    allowed_normalization: Any,
+    only_columns: Optional[List[str]] = None,
+) -> Optional[Dict[str, Any]]:
+    normalized_rules, unknown_rules = _normalize_allowed_normalization(allowed_normalization)
+    if unknown_rules:
+        return {
+            "description": "CAST_LOSSLESS has unsupported normalization rule(s)",
+            "row_refs": [],
+            "values": {"unknown_rules": unknown_rules, "supported_rules": sorted(_CAST_LOSSLESS_SUPPORTED_NORMALIZATIONS)},
+            "unverifiable": True,
+        }
+    if not normalized_rules:
+        return {
+            "description": "CAST_LOSSLESS requires allowed_normalization",
+            "row_refs": [],
+            "values": {"allowed_normalization": []},
+            "unverifiable": True,
+        }
+
+    requested = set(_normalize_string_list(only_columns)) if only_columns else None
+    cast_specs: List[Tuple[str, str]] = []
+    for item in casts or []:
+        if not isinstance(item, dict):
+            continue
+        col = str(item.get("column") or "").strip()
+        target = str(item.get("type") or "").strip()
+        if not col or not target:
+            continue
+        if requested is not None and col not in requested:
+            continue
+        cast_specs.append((col, target))
+
+    if not cast_specs:
+        return {
+            "description": "CAST_LOSSLESS has no casts to check",
+            "row_refs": [],
+            "values": {"casts": casts},
+            "unverifiable": True,
+        }
+
+    missing_cols = [col for col, _ in cast_specs if col not in input_table.columns or col not in output_table.columns]
+    if missing_cols:
+        return {
+            "description": "CAST_LOSSLESS column missing from input/output table",
+            "row_refs": [],
+            "values": {"missing_columns": sorted(set(missing_cols))},
+            "unverifiable": True,
+        }
+
+    # Cast transform preserves row ordering in the executor; compare row-by-row.
+    pair_count = min(len(input_table.rows), len(output_table.rows))
+    for idx in range(pair_count):
+        in_row = input_table.rows[idx]
+        out_row = output_table.rows[idx]
+        for col, target in cast_specs:
+            original_value = in_row.get(col)
+            if original_value is None:
+                continue
+            original_text = str(original_value) if not isinstance(original_value, bool) else str(original_value)
+            original_norm = _apply_lossless_normalization(original_text, normalized_rules)
+
+            # If the cast itself fails, that's an immediate counterexample for losslessness.
+            _, attempted, failed = _cast_value_with_status(original_value, target, cast_mode="SAFE_NULL")
+            if attempted and failed:
+                return {
+                    "description": "Cast parse failed",
+                    "row_refs": [_row_ref(in_row, row_index=idx, include_columns=[col])],
+                    "values": {
+                        "column": col,
+                        "target_type": normalize_cast_target(target),
+                        "allowed_normalization": normalized_rules,
+                        "original": original_text,
+                    },
+                }
+
+            roundtrip_text = _serialize_roundtrip(out_row.get(col), target_type=target)
+            roundtrip_norm = _apply_lossless_normalization(roundtrip_text, normalized_rules)
+            if original_norm != roundtrip_norm:
+                return {
+                    "description": "Round-trip mismatch (information loss)",
+                    "row_refs": [_row_ref(in_row, row_index=idx, include_columns=[col])],
+                    "values": {
+                        "column": col,
+                        "target_type": normalize_cast_target(target),
+                        "allowed_normalization": normalized_rules,
+                        "original": original_text,
+                        "normalized_original": original_norm,
+                        "roundtrip": roundtrip_text,
+                        "normalized_roundtrip": roundtrip_norm,
+                    },
+                }
+    return None
+
+
 def _extract_claims(definition_json: Dict[str, Any]) -> List[Dict[str, Any]]:
     nodes = definition_json.get("nodes")
     if not isinstance(nodes, list):
@@ -677,6 +933,7 @@ async def refute_pipeline_plan_claims(
                 inputs = incoming.get(node_id, [])
                 src_id = inputs[0] if inputs else None
                 src_table = tables.get(src_id) if src_id else None
+                out_table = tables.get(node_id) if node_id else None
                 if not src_table:
                     witness = {
                         "description": "Cast input table not available",
@@ -690,14 +947,21 @@ async def refute_pipeline_plan_claims(
                     if kind == "CAST_SUCCESS":
                         witness = _refute_cast_success(src_table, casts, only_columns=only_columns)
                     else:
-                        # CAST_LOSSLESS needs a user-provided canonicalization spec to be meaningful.
-                        unsound_hard = True
-                        witness = {
-                            "description": "CAST_LOSSLESS is not supported without explicit canonicalization spec; treated as soft",
-                            "row_refs": [],
-                            "values": {"node_id": node_id},
-                            "unverifiable": True,
-                        }
+                        if not out_table:
+                            witness = {
+                                "description": "Cast output table not available",
+                                "row_refs": [],
+                                "values": {"node_id": node_id},
+                                "unverifiable": True,
+                            }
+                        else:
+                            witness = _refute_cast_lossless(
+                                src_table,
+                                out_table,
+                                casts,
+                                allowed_normalization=spec.get("allowed_normalization", spec.get("allowedNormalization")),
+                                only_columns=only_columns,
+                            )
 
         elif kind in {"FILTER_ONLY_NULLS", "FILTER_MIN_RETAIN_RATE"}:
             node = nodes.get(node_id) if node_id else None

@@ -479,6 +479,7 @@ def _build_system_prompt(*, allowed_tools: List[str]) -> str:
         "- This flow is read-only analysis + plan/preview (no deploy/write).\n"
         "- Deterministic inference tools (keys/types/join-plan) produce hypotheses. Treat them as evidence/suggestions, not ground truth.\n"
         "- If you want hard gating on ETL assumptions, attach `claims` to node.metadata (list of {id, kind, severity, spec}).\n"
+        "  For CAST_LOSSLESS claims, include spec.allowed_normalization (e.g., [\"trim\",\"lowercase\"]).\n"
         "  You can call `plan_refute_claims` to find counterexamples (witness-based). A PASS means 'not refuted', never 'proven correct'.\n"
         "\n"
         "Common patterns:\n"

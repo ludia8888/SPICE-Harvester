@@ -133,6 +133,92 @@ async def test_refuter_cast_success_finds_parse_failure():
 
 
 @pytest.mark.asyncio
+async def test_refuter_cast_lossless_detects_leading_zero_loss():
+    plan = PipelinePlan.model_validate(
+        {
+            "goal": "cast lossless",
+            "data_scope": {"db_name": "demo"},
+            "definition_json": {
+                "nodes": [
+                    {"id": "src", "type": "input", "metadata": {"datasetId": "ds"}},
+                    {
+                        "id": "c1",
+                        "type": "transform",
+                        "metadata": {
+                            "operation": "cast",
+                            "casts": [{"column": "code", "type": "xsd:integer"}],
+                            "claims": [
+                                {
+                                    "id": "lossless_code",
+                                    "kind": "CAST_LOSSLESS",
+                                    "severity": "HARD",
+                                    "spec": {"allowed_normalization": ["trim"]},
+                                }
+                            ],
+                        },
+                    },
+                ],
+                "edges": [{"from": "src", "to": "c1"}],
+            },
+            "outputs": [],
+        }
+    )
+    report = await refute_pipeline_plan_claims(
+        plan=plan,
+        run_tables={
+            "src": {"columns": [{"name": "code"}], "rows": [{"code": "0012"}]},
+            "c1": {"columns": [{"name": "code"}], "rows": [{"code": 12}]},
+        },
+    )
+    assert report["status"] == "invalid"
+    assert report["gate"] == "BLOCK"
+    assert report["hard_failures"][0]["claim_id"] == "lossless_code"
+    assert report["hard_failures"][0]["witness"]["description"] == "Round-trip mismatch (information loss)"
+
+
+@pytest.mark.asyncio
+async def test_refuter_cast_lossless_allows_strip_leading_zeros():
+    plan = PipelinePlan.model_validate(
+        {
+            "goal": "cast lossless allow normalization",
+            "data_scope": {"db_name": "demo"},
+            "definition_json": {
+                "nodes": [
+                    {"id": "src", "type": "input", "metadata": {"datasetId": "ds"}},
+                    {
+                        "id": "c1",
+                        "type": "transform",
+                        "metadata": {
+                            "operation": "cast",
+                            "casts": [{"column": "code", "type": "xsd:integer"}],
+                            "claims": [
+                                {
+                                    "id": "lossless_code",
+                                    "kind": "CAST_LOSSLESS",
+                                    "severity": "HARD",
+                                    "spec": {"allowed_normalization": ["trim", "strip_leading_zeros"]},
+                                }
+                            ],
+                        },
+                    },
+                ],
+                "edges": [{"from": "src", "to": "c1"}],
+            },
+            "outputs": [],
+        }
+    )
+    report = await refute_pipeline_plan_claims(
+        plan=plan,
+        run_tables={
+            "src": {"columns": [{"name": "code"}], "rows": [{"code": "0012"}]},
+            "c1": {"columns": [{"name": "code"}], "rows": [{"code": 12}]},
+        },
+    )
+    assert report["status"] == "success"
+    assert report["gate"] == "PASS_NOT_REFUTED"
+
+
+@pytest.mark.asyncio
 async def test_refuter_fk_hard_is_downgraded_to_soft():
     plan = PipelinePlan.model_validate(
         {

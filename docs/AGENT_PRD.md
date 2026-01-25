@@ -104,6 +104,7 @@ Claim 예시(노드 메타데이터):
 
 주의(샘플 기반의 “비가역성/부정확성”):
 - PK 중복/NULL/캐스팅 실패/조인 다대다 등은 “샘플에서 발견되면 실제로 존재”하므로 **반례 기반 Hard Gate가 가능**합니다.
+- CAST_LOSSLESS는 “정규화 규칙(allowed_normalization)”이 명시된 경우에만 HARD로 반증합니다(원본 문자열 vs cast→serialize round-trip 비교).
 - FK orphan은 “부모 샘플에 없다”가 “전체에 없다”를 의미하지 않으므로, 현재는 **SOFT로만 처리**합니다(향후 full-scan membership oracle이 있으면 HARD 승격 가능).
 
 관련 코드:
