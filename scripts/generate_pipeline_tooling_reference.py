@@ -43,23 +43,30 @@ def _run_git(args: List[str]) -> str | None:
         return None
 
 
-def _detect_rev() -> str | None:
-    env_rev = (os.environ.get("SPICE_DOCS_GIT_REF") or "").strip()
-    if env_rev:
-        return env_rev
-    return _run_git(["git", "rev-parse", "HEAD"])
-
-
-def _detect_commit_time(rev: str | None) -> str:
+def _detect_source_revision(paths: Sequence[Path]) -> tuple[str | None, str]:
     """
-    Prefer a deterministic timestamp derived from git history so the generated docs
-    are stable for a given commit (avoids churn on every `sphinx-build`).
+    Prefer a deterministic timestamp derived from the *source-of-truth* files.
+
+    Important: this must NOT change on unrelated commits, otherwise the generated docs
+    will constantly be "out of date" immediately after every commit.
     """
-    if rev:
-        ts = _run_git(["git", "show", "-s", "--format=%cI", rev])
-        if ts:
-            return ts
-    return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+    rels = [str(p.resolve().relative_to(REPO_ROOT)) for p in paths]
+
+    # If the caller provides a ref, constrain the log lookup to that ref.
+    ref = (os.environ.get("SPICE_DOCS_GIT_REF") or "").strip()
+    if ref:
+        out = _run_git(["git", "log", "-1", "--format=%H|%cI", ref, "--", *rels])
+    else:
+        out = _run_git(["git", "log", "-1", "--format=%H|%cI", "--", *rels])
+
+    if out and "|" in out:
+        sha, ts = out.split("|", 1)
+        sha = sha.strip()
+        ts = ts.strip()
+        if sha and ts:
+            return sha, ts
+
+    return None, datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
 def _write_if_changed(path: Path, content: str) -> None:
@@ -255,14 +262,13 @@ def main() -> int:
 
     tool_specs = _extract_mcp_tool_specs()
     allowed_tools = _extract_agent_allowed_tools()
-    rev = _detect_rev()
-    updated_at = _detect_commit_time(rev)
+    source_rev, updated_at = _detect_source_revision([PIPELINE_MCP_SERVER, PIPELINE_AGENT_LOOP])
 
     mcp_names = [str(t.get("name") or "").strip() for t in tool_specs if isinstance(t, dict)]
 
-    mcp_md = _render_mcp_tools_md(tool_specs, updated_at=updated_at, rev=rev)
+    mcp_md = _render_mcp_tools_md(tool_specs, updated_at=updated_at, rev=source_rev)
     allowed_md = _render_agent_allowed_tools_md(
-        allowed_tools, mcp_tool_names=mcp_names, updated_at=updated_at, rev=rev
+        allowed_tools, mcp_tool_names=mcp_names, updated_at=updated_at, rev=source_rev
     )
 
     if args.check:

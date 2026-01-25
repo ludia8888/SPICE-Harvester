@@ -8,6 +8,7 @@ import logging
 import os
 import subprocess
 import sys
+import warnings
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, List, Sequence
@@ -15,6 +16,16 @@ from typing import Iterable, List, Sequence
 
 def _repo_root() -> Path:
     return Path(__file__).resolve().parents[1]
+
+
+CATALOG_PATH = _repo_root() / "backend" / "shared" / "errors" / "enterprise_catalog.py"
+
+
+warnings.filterwarnings(
+    "ignore",
+    message=r".*pkg_resources is deprecated as an API.*",
+    category=UserWarning,
+)
 
 
 def _load_catalog():
@@ -47,16 +58,19 @@ def _run_git(args: List[str]) -> str | None:
 
 def _deterministic_updated_date() -> str:
     """
-    Prefer a deterministic date derived from git history so the generated doc is
-    stable for a given commit (avoids drift just because "today" changed).
+    Prefer a deterministic date derived from the source-of-truth file history.
+
+    Important: this must NOT change on unrelated commits, otherwise the file will
+    constantly be "out of date" immediately after every commit.
     """
-    rev = (os.environ.get("SPICE_DOCS_GIT_REF") or "").strip() or _run_git(
-        ["git", "rev-parse", "HEAD"]
-    )
-    if rev:
-        ts = _run_git(["git", "show", "-s", "--format=%cI", rev])
-        if ts and "T" in ts:
-            return ts.split("T", 1)[0]
+    rel = str(CATALOG_PATH.relative_to(_repo_root()))
+    ref = (os.environ.get("SPICE_DOCS_GIT_REF") or "").strip()
+    if ref:
+        ts = _run_git(["git", "log", "-1", "--format=%cI", ref, "--", rel])
+    else:
+        ts = _run_git(["git", "log", "-1", "--format=%cI", "--", rel])
+    if ts and "T" in ts:
+        return ts.split("T", 1)[0]
     return datetime.now(timezone.utc).date().isoformat()
 
 
