@@ -58,6 +58,12 @@ def _normalize_claim_kind(value: Any) -> str:
         return "JOIN_FUNCTIONAL_RIGHT"
     if key in {"ROW_PRESERVE_LEFT", "JOIN_ROW_PRESERVE_LEFT"}:
         return "ROW_PRESERVE_LEFT"
+    if key in {"FILTER_ONLY_NULLS", "FILTER_NULL_ONLY", "FILTER_REMOVE_ONLY_NULLS"}:
+        return "FILTER_ONLY_NULLS"
+    if key in {"FILTER_MIN_RETAIN_RATE", "FILTER_MIN_RETAIN", "FILTER_RETAIN_RATE_MIN"}:
+        return "FILTER_MIN_RETAIN_RATE"
+    if key in {"UNION_ROW_LOSSLESS", "UNION_LOSSLESS", "UNION_LOSSLESS_ROWS"}:
+        return "UNION_ROW_LOSSLESS"
     return key
 
 
@@ -98,6 +104,170 @@ def _row_ref(
         "row_digest": f"sha256:{sha256_hex(stable_json_dumps(values))}",
         "values": values,
     }
+
+
+def _row_digest_for_columns(row: Dict[str, Any], columns: List[str]) -> str:
+    projected = {col: row.get(col) for col in columns}
+    return f"sha256:{sha256_hex(stable_json_dumps(projected))}"
+
+
+def _bag_counts_for_table(table: PipelineTable, *, columns: List[str]) -> Dict[str, int]:
+    counts: Dict[str, int] = {}
+    for row in table.rows:
+        digest = _row_digest_for_columns(row, columns)
+        counts[digest] = counts.get(digest, 0) + 1
+    return counts
+
+
+def _first_row_by_digest(table: PipelineTable, *, columns: List[str], digest: str) -> Optional[Tuple[int, Dict[str, Any]]]:
+    for idx, row in enumerate(table.rows):
+        if _row_digest_for_columns(row, columns) == digest:
+            return idx, row
+    return None
+
+
+def _value_is_null(value: Any, *, treat_empty_as_null: bool, treat_whitespace_as_null: bool) -> bool:
+    if value is None:
+        return True
+    if not isinstance(value, str):
+        return False
+    if treat_whitespace_as_null and value.strip() == "":
+        return True
+    if treat_empty_as_null and value == "":
+        return True
+    return False
+
+
+def _refute_filter_only_nulls(
+    input_table: PipelineTable,
+    output_table: PipelineTable,
+    *,
+    column: str,
+    treat_empty_as_null: bool,
+    treat_whitespace_as_null: bool,
+) -> Optional[Dict[str, Any]]:
+    col = str(column or "").strip()
+    if not col:
+        return {
+            "description": "FILTER_ONLY_NULLS missing target column",
+            "row_refs": [],
+            "values": {},
+            "unverifiable": True,
+        }
+    if col not in input_table.columns:
+        return {
+            "description": "FILTER_ONLY_NULLS column missing from input table",
+            "row_refs": [],
+            "values": {"column": col},
+            "unverifiable": True,
+        }
+
+    cols = list(input_table.columns)
+    in_counts = _bag_counts_for_table(input_table, columns=cols)
+    out_counts = _bag_counts_for_table(output_table, columns=cols)
+
+    # Find any removed row whose target column is NOT NULL.
+    for digest, in_count in in_counts.items():
+        out_count = out_counts.get(digest, 0)
+        if out_count >= in_count:
+            continue
+        hit = _first_row_by_digest(input_table, columns=cols, digest=digest)
+        if not hit:
+            continue
+        idx, row = hit
+        value = row.get(col)
+        if not _value_is_null(
+            value,
+            treat_empty_as_null=treat_empty_as_null,
+            treat_whitespace_as_null=treat_whitespace_as_null,
+        ):
+            return {
+                "description": "Filter removed non-null row",
+                "row_refs": [_row_ref(row, row_index=idx, include_columns=[col])],
+                "values": {
+                    "column": col,
+                    "value": value,
+                    "removed_row_digest": digest,
+                    "input_count": in_count,
+                    "output_count": out_count,
+                },
+            }
+    return None
+
+
+def _refute_filter_min_retain_rate(
+    input_table: PipelineTable,
+    output_table: PipelineTable,
+    *,
+    min_rate: float,
+) -> Optional[Dict[str, Any]]:
+    try:
+        threshold = float(min_rate)
+    except (TypeError, ValueError):
+        threshold = 0.0
+    if threshold <= 0:
+        return {
+            "description": "FILTER_MIN_RETAIN_RATE missing/invalid min_rate",
+            "row_refs": [],
+            "values": {"min_rate": min_rate},
+            "unverifiable": True,
+        }
+    in_count = len(input_table.rows)
+    out_count = len(output_table.rows)
+    rate = (out_count / float(in_count)) if in_count > 0 else 1.0
+    if rate + 1e-12 < threshold:
+        return {
+            "description": "Retain rate too low",
+            "row_refs": [],
+            "values": {"input_rows": in_count, "output_rows": out_count, "retain_rate": round(rate, 6), "min_rate": threshold},
+        }
+    return None
+
+
+def _refute_union_row_lossless(
+    left: PipelineTable,
+    right: PipelineTable,
+    output: PipelineTable,
+) -> Optional[Dict[str, Any]]:
+    # Compare as a multiset on the union output schema.
+    cols = list(output.columns)
+    if not cols:
+        return {
+            "description": "UNION_ROW_LOSSLESS output table has no columns",
+            "row_refs": [],
+            "values": {},
+            "unverifiable": True,
+        }
+    required: Dict[str, int] = {}
+    for source in (left, right):
+        for row in source.rows:
+            digest = _row_digest_for_columns(row, cols)
+            required[digest] = required.get(digest, 0) + 1
+    actual = _bag_counts_for_table(output, columns=cols)
+
+    for digest, needed in required.items():
+        have = actual.get(digest, 0)
+        if have >= needed:
+            continue
+        # Witness: show an input row that should be present but isn't.
+        hit = _first_row_by_digest(left, columns=cols, digest=digest) or _first_row_by_digest(right, columns=cols, digest=digest)
+        if hit:
+            idx, row = hit
+            # Keep witness payload small: include non-null columns (up to 12) or fallback to first 5.
+            include = [c for c in cols if row.get(c) is not None][:12]
+            if not include:
+                include = cols[:5]
+            return {
+                "description": "Row from input missing in UNION output",
+                "row_refs": [_row_ref(row, row_index=idx, include_columns=include)],
+                "values": {"missing_row_digest": digest, "required_count": needed, "output_count": have},
+            }
+        return {
+            "description": "Row from input missing in UNION output",
+            "row_refs": [],
+            "values": {"missing_row_digest": digest, "required_count": needed, "output_count": have},
+        }
+    return None
 
 
 def _refute_pk(
@@ -528,6 +698,83 @@ async def refute_pipeline_plan_claims(
                             "values": {"node_id": node_id},
                             "unverifiable": True,
                         }
+
+        elif kind in {"FILTER_ONLY_NULLS", "FILTER_MIN_RETAIN_RATE"}:
+            node = nodes.get(node_id) if node_id else None
+            meta = node.get("metadata") if isinstance(node, dict) else {}
+            operation = normalize_operation(meta.get("operation"))
+            if operation != "filter":
+                witness = {
+                    "description": f"{kind} applied to non-filter node",
+                    "row_refs": [],
+                    "values": {"node_id": node_id, "operation": operation},
+                    "unverifiable": True,
+                }
+            else:
+                inputs = incoming.get(node_id, [])
+                src_id = inputs[0] if inputs else None
+                input_table = tables.get(src_id) if src_id else None
+                output_table = tables.get(node_id) if node_id else None
+                if not input_table or not output_table:
+                    witness = {
+                        "description": "Filter input/output table not available",
+                        "row_refs": [],
+                        "values": {"node_id": node_id, "input": src_id},
+                        "unverifiable": True,
+                    }
+                else:
+                    if kind == "FILTER_ONLY_NULLS":
+                        col = str(spec.get("column") or spec.get("col") or spec.get("target_column") or spec.get("targetColumn") or "").strip()
+                        treat_empty_as_null = bool(
+                            spec.get("treat_empty_as_null", spec.get("empty_is_null", spec.get("emptyIsNull", False)))
+                        )
+                        treat_whitespace_as_null = bool(
+                            spec.get(
+                                "treat_whitespace_as_null",
+                                spec.get("whitespace_is_null", spec.get("whitespaceIsNull", False)),
+                            )
+                        )
+                        witness = _refute_filter_only_nulls(
+                            input_table,
+                            output_table,
+                            column=col,
+                            treat_empty_as_null=treat_empty_as_null,
+                            treat_whitespace_as_null=treat_whitespace_as_null,
+                        )
+                    else:
+                        witness = _refute_filter_min_retain_rate(
+                            input_table,
+                            output_table,
+                            min_rate=spec.get("min_rate", spec.get("minRate", 0.0)),
+                        )
+
+        elif kind == "UNION_ROW_LOSSLESS":
+            node = nodes.get(node_id) if node_id else None
+            meta = node.get("metadata") if isinstance(node, dict) else {}
+            operation = normalize_operation(meta.get("operation"))
+            if operation != "union":
+                witness = {
+                    "description": "UNION_ROW_LOSSLESS applied to non-union node",
+                    "row_refs": [],
+                    "values": {"node_id": node_id, "operation": operation},
+                    "unverifiable": True,
+                }
+            else:
+                inputs = incoming.get(node_id, [])
+                left_id = inputs[0] if len(inputs) >= 1 else None
+                right_id = inputs[1] if len(inputs) >= 2 else None
+                left_table = tables.get(left_id) if left_id else None
+                right_table = tables.get(right_id) if right_id else None
+                out_table = tables.get(node_id) if node_id else None
+                if not left_table or not right_table or not out_table:
+                    witness = {
+                        "description": "Union input/output table(s) not available",
+                        "row_refs": [],
+                        "values": {"node_id": node_id, "inputs": inputs},
+                        "unverifiable": True,
+                    }
+                else:
+                    witness = _refute_union_row_lossless(left_table, right_table, out_table)
 
         elif kind == "FK":
             # FK "orphan" checks are not sound under head-sampling. We can emit SOFT hints only.

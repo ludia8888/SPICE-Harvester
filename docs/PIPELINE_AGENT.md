@@ -94,6 +94,9 @@ Claim 저장 위치:
 - `JOIN_ASSUMES_RIGHT_PK`: join의 right key가 PK라고 가정(중복/NULL 반례로 HARD)
 - `JOIN_FUNCTIONAL_RIGHT`: N:1 join 가정(“left key가 right에서 2개 이상 매칭” 반례로 HARD)
 - `CAST_SUCCESS`: cast가 실패 없이 파싱된다고 주장(파싱 실패 값 1개 반례로 HARD)
+- `FILTER_ONLY_NULLS`: “특정 컬럼에서 NULL만 제거했다” 주장(삭제된 row 중 non-null이 1개라도 있으면 HARD)
+- `FILTER_MIN_RETAIN_RATE`: “retain_rate >= min_rate” 주장(비율 반례로 HARD)
+- `UNION_ROW_LOSSLESS`: “union이 입력 row를 잃지 않는다” 주장(input−output 차집합이 존재하면 HARD)
 - `FK` / `ROW_PRESERVE_LEFT` / `CAST_LOSSLESS` 등은 샘플 기반에서 HARD로 “증명/부정”이 어려워 현재는 SOFT로만 처리합니다.
 
 예시:

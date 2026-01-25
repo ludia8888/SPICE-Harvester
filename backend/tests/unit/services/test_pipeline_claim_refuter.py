@@ -161,3 +161,131 @@ async def test_refuter_fk_hard_is_downgraded_to_soft():
     assert report["soft_warnings"]
     assert report["soft_warnings"][0]["claim_id"] == "fk1"
 
+
+@pytest.mark.asyncio
+async def test_refuter_filter_only_nulls_finds_removed_non_null_row():
+    plan = PipelinePlan.model_validate(
+        {
+            "goal": "filter only nulls",
+            "data_scope": {"db_name": "demo"},
+            "definition_json": {
+                "nodes": [
+                    {"id": "src", "type": "input", "metadata": {"datasetId": "ds"}},
+                    {
+                        "id": "f1",
+                        "type": "transform",
+                        "metadata": {
+                            "operation": "filter",
+                            "expression": "a is not null",
+                            "claims": [
+                                {
+                                    "id": "only_nulls",
+                                    "kind": "FILTER_ONLY_NULLS",
+                                    "severity": "HARD",
+                                    "spec": {"column": "a"},
+                                }
+                            ],
+                        },
+                    },
+                ],
+                "edges": [{"from": "src", "to": "f1"}],
+            },
+            "outputs": [],
+        }
+    )
+    # Input contains a non-null row that is missing from output -> witness.
+    report = await refute_pipeline_plan_claims(
+        plan=plan,
+        run_tables={
+            "src": {"columns": [{"name": "a"}], "rows": [{"a": 1}, {"a": None}]},
+            "f1": {"columns": [{"name": "a"}], "rows": [{"a": None}]},
+        },
+    )
+    assert report["status"] == "invalid"
+    assert report["gate"] == "BLOCK"
+    assert report["hard_failures"][0]["claim_id"] == "only_nulls"
+    assert report["hard_failures"][0]["witness"]["description"] == "Filter removed non-null row"
+
+
+@pytest.mark.asyncio
+async def test_refuter_filter_min_retain_rate_finds_low_retention():
+    plan = PipelinePlan.model_validate(
+        {
+            "goal": "filter retain rate",
+            "data_scope": {"db_name": "demo"},
+            "definition_json": {
+                "nodes": [
+                    {"id": "src", "type": "input", "metadata": {"datasetId": "ds"}},
+                    {
+                        "id": "f1",
+                        "type": "transform",
+                        "metadata": {
+                            "operation": "filter",
+                            "expression": "a > 0",
+                            "claims": [
+                                {
+                                    "id": "min_retain",
+                                    "kind": "FILTER_MIN_RETAIN_RATE",
+                                    "severity": "HARD",
+                                    "spec": {"min_rate": 0.5},
+                                }
+                            ],
+                        },
+                    },
+                ],
+                "edges": [{"from": "src", "to": "f1"}],
+            },
+            "outputs": [],
+        }
+    )
+    report = await refute_pipeline_plan_claims(
+        plan=plan,
+        run_tables={
+            "src": {"columns": [{"name": "a"}], "rows": [{"a": i} for i in range(10)]},
+            "f1": {"columns": [{"name": "a"}], "rows": [{"a": 1}]},
+        },
+    )
+    assert report["status"] == "invalid"
+    assert report["gate"] == "BLOCK"
+    assert report["hard_failures"][0]["claim_id"] == "min_retain"
+    assert report["hard_failures"][0]["witness"]["description"] == "Retain rate too low"
+
+
+@pytest.mark.asyncio
+async def test_refuter_union_row_lossless_finds_missing_input_row():
+    plan = PipelinePlan.model_validate(
+        {
+            "goal": "union lossless",
+            "data_scope": {"db_name": "demo"},
+            "definition_json": {
+                "nodes": [
+                    {"id": "a", "type": "input", "metadata": {"datasetId": "ds-a"}},
+                    {"id": "b", "type": "input", "metadata": {"datasetId": "ds-b"}},
+                    {
+                        "id": "u1",
+                        "type": "transform",
+                        "metadata": {
+                            "operation": "union",
+                            "unionMode": "strict",
+                            "claims": [{"id": "union_lossless", "kind": "UNION_ROW_LOSSLESS", "severity": "HARD"}],
+                        },
+                    },
+                ],
+                "edges": [{"from": "a", "to": "u1"}, {"from": "b", "to": "u1"}],
+            },
+            "outputs": [],
+        }
+    )
+    report = await refute_pipeline_plan_claims(
+        plan=plan,
+        run_tables={
+            "a": {"columns": [{"name": "id"}], "rows": [{"id": 1}]},
+            "b": {"columns": [{"name": "id"}], "rows": [{"id": 2}]},
+            # Output missing the row from B.
+            "u1": {"columns": [{"name": "id"}], "rows": [{"id": 1}]},
+        },
+    )
+    assert report["status"] == "invalid"
+    assert report["gate"] == "BLOCK"
+    assert report["hard_failures"][0]["claim_id"] == "union_lossless"
+    assert report["hard_failures"][0]["witness"]["description"] == "Row from input missing in UNION output"

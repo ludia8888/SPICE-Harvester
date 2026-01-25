@@ -95,7 +95,9 @@ Claim 예시(노드 메타데이터):
   "claims": [
     {"id": "join_orders_customers_right_pk", "kind": "JOIN_ASSUMES_RIGHT_PK", "severity": "HARD"},
     {"id": "join_orders_customers_n_to_1", "kind": "JOIN_FUNCTIONAL_RIGHT", "severity": "HARD"},
-    {"id": "cast_order_id_parse", "kind": "CAST_SUCCESS", "severity": "HARD", "spec": {"columns": ["order_id"]}}
+    {"id": "cast_order_id_parse", "kind": "CAST_SUCCESS", "severity": "HARD", "spec": {"columns": ["order_id"]}},
+    {"id": "filter_only_nulls_customer_id", "kind": "FILTER_ONLY_NULLS", "severity": "HARD", "spec": {"column": "customer_id"}},
+    {"id": "union_lossless_stage", "kind": "UNION_ROW_LOSSLESS", "severity": "HARD"}
   ]
 }
 ```
