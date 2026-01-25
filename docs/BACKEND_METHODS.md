@@ -1,6 +1,6 @@
 # Backend Method Index
 
-> Generated: 2026-01-26T00:06:56+09:00
+> Generated: 2026-01-26T01:04:35+09:00
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 
 ## action_outbox_worker
@@ -1152,21 +1152,21 @@
 
 ### `backend/bff/services/pipeline_agent_autonomous_loop.py`
 - **Functions**
-  - `_trim_null_report(report)` (line 207): no docstring
-  - `_trim_key_inference(value)` (line 231): no docstring
-  - `_trim_type_inference(value)` (line 260): no docstring
-  - `_trim_join_plan(value)` (line 291): no docstring
-  - `_summarize_context_pack(pack)` (line 301): no docstring
-  - `_summarize_plan(plan_obj)` (line 361): no docstring
-  - `_plan_status(plan_obj)` (line 455): no docstring
-  - `_build_system_prompt(allowed_tools)` (line 478): no docstring
-  - `_prompt_text(items)` (line 550): no docstring
-  - `_build_prompt_header(state, answers, planner_hints, task_spec)` (line 557): no docstring
-  - `_build_compaction_snapshot(state, answers, planner_hints, task_spec)` (line 575): no docstring
-  - `_maybe_compact_prompt_items(state, answers, planner_hints, task_spec, max_chars)` (line 600): Deterministic compaction: when the append-only log grows too large, replace it with:
-  - `_mask_tool_observation(payload)` (line 632): no docstring
-  - `_is_internal_budget_clarification(questions)` (line 637): no docstring
-  - `async run_pipeline_agent_mcp_autonomous(goal, data_scope, answers, planner_hints, task_spec, context_pack, persist_plan, actor, tenant_id, user_id, data_policies, selected_model, allowed_models, llm_gateway, redis_service, audit_store, dataset_registry, plan_registry)` (line 645): Returns a payload compatible with the existing UI expectations for `/agent/pipeline-runs`.
+  - `_trim_null_report(report)` (line 211): no docstring
+  - `_trim_key_inference(value)` (line 235): no docstring
+  - `_trim_type_inference(value)` (line 264): no docstring
+  - `_trim_join_plan(value)` (line 295): no docstring
+  - `_summarize_context_pack(pack)` (line 305): no docstring
+  - `_summarize_plan(plan_obj)` (line 365): no docstring
+  - `_plan_status(plan_obj)` (line 459): no docstring
+  - `_build_system_prompt(allowed_tools)` (line 482): no docstring
+  - `_prompt_text(items)` (line 558): no docstring
+  - `_build_prompt_header(state, answers, planner_hints, task_spec)` (line 565): no docstring
+  - `_build_compaction_snapshot(state, answers, planner_hints, task_spec)` (line 583): no docstring
+  - `_maybe_compact_prompt_items(state, answers, planner_hints, task_spec, max_chars)` (line 608): Deterministic compaction: when the append-only log grows too large, replace it with:
+  - `_mask_tool_observation(payload)` (line 640): no docstring
+  - `_is_internal_budget_clarification(questions)` (line 645): no docstring
+  - `async run_pipeline_agent_mcp_autonomous(goal, data_scope, answers, planner_hints, task_spec, context_pack, persist_plan, actor, tenant_id, user_id, data_policies, selected_model, allowed_models, llm_gateway, redis_service, audit_store, dataset_registry, plan_registry)` (line 653): Returns a payload compatible with the existing UI expectations for `/agent/pipeline-runs`.
 - **Classes**
   - `AutonomousPipelineAgentToolCall` (line 45): no docstring
     - `_coerce_args(cls, v)` (line 51): no docstring
@@ -2706,27 +2706,27 @@
 
 ### `backend/mcp/pipeline_mcp_server.py`
 - **Functions**
-  - `_bff_api_base_url()` (line 91): Internal helper for MCP tools that need to call the BFF's REST API.
-  - `_bff_admin_token()` (line 102): no docstring
-  - `_bff_headers(db_name, principal_id, principal_type)` (line 107): no docstring
-  - `async _bff_json(method, path, db_name, principal_id, principal_type, json_body, params, timeout_seconds)` (line 138): no docstring
-  - `_trim_preview_payload(preview, max_rows)` (line 169): no docstring
-  - `_trim_build_output(output_json, max_rows)` (line 179): no docstring
-  - `_build_null_report_from_context_pack(context_pack, dataset_ids, max_columns)` (line 208): no docstring
-  - `_coerce_context_pack(context_pack)` (line 267): no docstring
-  - `_normalize_string_list(value)` (line 271): no docstring
-  - `_normalize_aggregates(value)` (line 283): no docstring
-  - `_filter_selected_datasets(context_pack, dataset_ids)` (line 301): no docstring
-  - `_context_pack_key_inference(context_pack, dataset_ids, max_pk_candidates, max_fk_candidates)` (line 317): no docstring
-  - `_extract_column_type(dataset, column_name)` (line 332): no docstring
-  - `_context_pack_type_inference(context_pack, dataset_ids, max_columns, max_samples, join_plan)` (line 348): no docstring
-  - `async main()` (line 2183): no docstring
+  - `_bff_api_base_url()` (line 95): Internal helper for MCP tools that need to call the BFF's REST API.
+  - `_bff_admin_token()` (line 106): no docstring
+  - `_bff_headers(db_name, principal_id, principal_type)` (line 111): no docstring
+  - `async _bff_json(method, path, db_name, principal_id, principal_type, json_body, params, timeout_seconds)` (line 142): no docstring
+  - `_trim_preview_payload(preview, max_rows)` (line 173): no docstring
+  - `_trim_build_output(output_json, max_rows)` (line 183): no docstring
+  - `_build_null_report_from_context_pack(context_pack, dataset_ids, max_columns)` (line 212): no docstring
+  - `_coerce_context_pack(context_pack)` (line 271): no docstring
+  - `_normalize_string_list(value)` (line 275): no docstring
+  - `_normalize_aggregates(value)` (line 287): no docstring
+  - `_filter_selected_datasets(context_pack, dataset_ids)` (line 305): no docstring
+  - `_context_pack_key_inference(context_pack, dataset_ids, max_pk_candidates, max_fk_candidates)` (line 321): no docstring
+  - `_extract_column_type(dataset, column_name)` (line 336): no docstring
+  - `_context_pack_type_inference(context_pack, dataset_ids, max_columns, max_samples, join_plan)` (line 352): no docstring
+  - `async main()` (line 2300): no docstring
 - **Classes**
-  - `PipelineMCPServer` (line 468): no docstring
-    - `__init__(self)` (line 469): no docstring
-    - `async _ensure_registries(self)` (line 475): no docstring
-    - `_setup_handlers(self)` (line 484): no docstring
-    - `async run(self)` (line 2172): no docstring
+  - `PipelineMCPServer` (line 472): no docstring
+    - `__init__(self)` (line 473): no docstring
+    - `async _ensure_registries(self)` (line 479): no docstring
+    - `_setup_handlers(self)` (line 488): no docstring
+    - `async run(self)` (line 2289): no docstring
 
 ### `backend/mcp/terminus_mcp_server.py`
 - **Functions**
@@ -3786,13 +3786,13 @@
   - `_resolve_execution_semantics(job, definition)` (line 235): no docstring
   - `_resolve_output_format(definition, output_metadata)` (line 239): no docstring
   - `_resolve_partition_columns(definition, output_metadata)` (line 254): no docstring
-  - `_is_data_object(key)` (line 4547): no docstring
-  - `_schema_from_dataframe(frame)` (line 4558): no docstring
-  - `_hash_schema_columns(columns)` (line 4566): no docstring
-  - `_schema_columns_map(columns)` (line 4570): no docstring
-  - `_schema_diff(current_columns, expected_columns)` (line 4583): no docstring
-  - `_list_part_files(path, extensions)` (line 4606): no docstring
-  - `async main()` (line 4621): no docstring
+  - `_is_data_object(key)` (line 4596): no docstring
+  - `_schema_from_dataframe(frame)` (line 4607): no docstring
+  - `_hash_schema_columns(columns)` (line 4615): no docstring
+  - `_schema_columns_map(columns)` (line 4619): no docstring
+  - `_schema_diff(current_columns, expected_columns)` (line 4632): no docstring
+  - `_list_part_files(path, extensions)` (line 4655): no docstring
+  - `async main()` (line 4670): no docstring
 - **Classes**
   - `PipelineWorker` (line 286): no docstring
     - `__init__(self)` (line 287): no docstring
@@ -6272,30 +6272,30 @@
   - `_cast_columns(table, casts, cast_mode, cast_stats)` (line 1124): no docstring
   - `_dedupe_table(table, columns)` (line 1150): no docstring
   - `_sort_table(table, columns)` (line 1163): no docstring
-  - `_union_tables(left, right, union_mode)` (line 1171): no docstring
-  - `_join_tables(left, right, join_type, left_key, right_key, join_key, left_keys, right_keys, allow_cross_join, max_output_rows)` (line 1209): no docstring
-  - `_merge_rows(left, right, right_column_map)` (line 1332): no docstring
-  - `_filter_table(table, expression, parameters)` (line 1349): no docstring
-  - `_parse_filter(expression, parameters)` (line 1365): no docstring
-  - `_compare(left, op, right)` (line 1381): no docstring
-  - `_compute_assignment_table(table, target, expression, parameters)` (line 1405): no docstring
-  - `_compute_table(table, expression, parameters)` (line 1427): no docstring
-  - `_explode_table(table, column)` (line 1457): no docstring
-  - `_parse_assignment(expression)` (line 1480): no docstring
-  - `_safe_eval(expression, row, parameters)` (line 1487): no docstring
-  - `_is_safe_ast(node)` (line 1517): no docstring
-  - `_eval_ast(node, variables)` (line 1533): no docstring
-  - `_parse_literal(raw)` (line 1595): no docstring
-  - `_parse_timestamp_literal(raw)` (line 1613): no docstring
-  - `_normalize_table(table, columns, trim, empty_to_null, whitespace_to_null, lowercase, uppercase)` (line 1632): no docstring
-  - `_regex_flags(raw)` (line 1670): no docstring
-  - `_normalize_regex_rules(metadata)` (line 1684): no docstring
-  - `_regex_replace_table(table, rules)` (line 1723): no docstring
-  - `_parse_csv_bytes(raw_bytes, max_rows)` (line 1751): Parse a CSV payload into row dicts.
-  - `_parse_excel_bytes(raw_bytes, max_rows)` (line 1802): no docstring
-  - `_parse_json_bytes(raw_bytes, max_rows)` (line 1814): no docstring
-  - `_infer_column_types(table)` (line 1849): no docstring
-  - `_build_table_ops(table)` (line 1858): no docstring
+  - `_union_tables(left, right, union_mode)` (line 1206): no docstring
+  - `_join_tables(left, right, join_type, left_key, right_key, join_key, left_keys, right_keys, allow_cross_join, max_output_rows)` (line 1244): no docstring
+  - `_merge_rows(left, right, right_column_map)` (line 1367): no docstring
+  - `_filter_table(table, expression, parameters)` (line 1384): no docstring
+  - `_parse_filter(expression, parameters)` (line 1400): no docstring
+  - `_compare(left, op, right)` (line 1416): no docstring
+  - `_compute_assignment_table(table, target, expression, parameters)` (line 1440): no docstring
+  - `_compute_table(table, expression, parameters)` (line 1462): no docstring
+  - `_explode_table(table, column)` (line 1492): no docstring
+  - `_parse_assignment(expression)` (line 1515): no docstring
+  - `_safe_eval(expression, row, parameters)` (line 1522): no docstring
+  - `_is_safe_ast(node)` (line 1552): no docstring
+  - `_eval_ast(node, variables)` (line 1568): no docstring
+  - `_parse_literal(raw)` (line 1630): no docstring
+  - `_parse_timestamp_literal(raw)` (line 1648): no docstring
+  - `_normalize_table(table, columns, trim, empty_to_null, whitespace_to_null, lowercase, uppercase)` (line 1667): no docstring
+  - `_regex_flags(raw)` (line 1705): no docstring
+  - `_normalize_regex_rules(metadata)` (line 1719): no docstring
+  - `_regex_replace_table(table, rules)` (line 1758): no docstring
+  - `_parse_csv_bytes(raw_bytes, max_rows)` (line 1786): Parse a CSV payload into row dicts.
+  - `_parse_excel_bytes(raw_bytes, max_rows)` (line 1837): no docstring
+  - `_parse_json_bytes(raw_bytes, max_rows)` (line 1849): no docstring
+  - `_infer_column_types(table)` (line 1884): no docstring
+  - `_build_table_ops(table)` (line 1893): no docstring
 - **Classes**
   - `PipelineExpectationError` (line 61): no docstring
   - `PipelineTable` (line 66): no docstring
@@ -6370,24 +6370,28 @@
   - `add_compute(plan, input_node_id, expression, node_id)` (line 357): no docstring
   - `add_compute_column(plan, input_node_id, target_column, formula, node_id)` (line 369): Add a compute transform that writes a single column.
   - `add_compute_assignments(plan, input_node_id, assignments, node_id)` (line 394): Add a compute transform that writes multiple columns (assignments).
-  - `add_cast(plan, input_node_id, casts, node_id)` (line 423): no docstring
-  - `add_rename(plan, input_node_id, rename, node_id)` (line 452): no docstring
-  - `add_select(plan, input_node_id, columns, node_id)` (line 478): no docstring
-  - `add_select_expr(plan, input_node_id, expressions, node_id)` (line 496): Add a select transform using Spark SQL selectExpr-style expressions.
-  - `add_drop(plan, input_node_id, columns, node_id)` (line 514): no docstring
-  - `add_dedupe(plan, input_node_id, columns, node_id)` (line 532): no docstring
-  - `add_group_by_expr(plan, input_node_id, group_by, aggregate_expressions, operation, node_id)` (line 550): Add a groupBy/aggregate node using Spark SQL aggregate expressions.
-  - `add_window_expr(plan, input_node_id, expressions, node_id)` (line 593): Add a window transform that computes one or more Spark SQL window expressions.
-  - `add_normalize(plan, input_node_id, columns, trim, empty_to_null, whitespace_to_null, lowercase, uppercase, node_id)` (line 622): no docstring
-  - `add_regex_replace(plan, input_node_id, rules, node_id)` (line 652): no docstring
-  - `add_output(plan, input_node_id, output_name, output_kind, node_id, output_metadata)` (line 688): no docstring
-  - `validate_structure(plan)` (line 726): Lightweight structural validation for plan.definition_json.
-  - `add_edge(plan, from_node_id, to_node_id)` (line 830): Add a graph edge (idempotent).
-  - `delete_edge(plan, from_node_id, to_node_id)` (line 860): Delete all matching edges from->to (no-op if not found).
-  - `set_node_inputs(plan, node_id, input_node_ids)` (line 888): Replace all incoming edges to node_id with input_node_ids (in order).
-  - `update_node_metadata(plan, node_id, set_fields, unset_fields, replace)` (line 926): Patch node.metadata (merge by default, replace if requested).
-  - `delete_node(plan, node_id)` (line 973): Delete a node and any incident edges; also removes outputs[] entry for output nodes.
-  - `update_output(plan, output_name, set_fields, unset_fields, replace)` (line 1007): Patch an outputs[] entry by output_name; keeps output node metadata.outputName in sync if renamed.
+  - `add_sort(plan, input_node_id, columns, node_id)` (line 423): Add a sort transform node.
+  - `add_explode(plan, input_node_id, column, node_id)` (line 466): Add an explode transform node for an array/map-like column.
+  - `add_union(plan, left_node_id, right_node_id, union_mode, node_id)` (line 485): Add a union transform node for two inputs.
+  - `add_pivot(plan, input_node_id, index, columns, values, agg, node_id)` (line 517): Add a pivot transform node.
+  - `add_cast(plan, input_node_id, casts, node_id)` (line 548): no docstring
+  - `add_rename(plan, input_node_id, rename, node_id)` (line 577): no docstring
+  - `add_select(plan, input_node_id, columns, node_id)` (line 603): no docstring
+  - `add_select_expr(plan, input_node_id, expressions, node_id)` (line 621): Add a select transform using Spark SQL selectExpr-style expressions.
+  - `add_drop(plan, input_node_id, columns, node_id)` (line 639): no docstring
+  - `add_dedupe(plan, input_node_id, columns, node_id)` (line 657): no docstring
+  - `add_group_by_expr(plan, input_node_id, group_by, aggregate_expressions, operation, node_id)` (line 675): Add a groupBy/aggregate node using Spark SQL aggregate expressions.
+  - `add_window_expr(plan, input_node_id, expressions, node_id)` (line 718): Add a window transform that computes one or more Spark SQL window expressions.
+  - `add_normalize(plan, input_node_id, columns, trim, empty_to_null, whitespace_to_null, lowercase, uppercase, node_id)` (line 747): no docstring
+  - `add_regex_replace(plan, input_node_id, rules, node_id)` (line 777): no docstring
+  - `add_output(plan, input_node_id, output_name, output_kind, node_id, output_metadata)` (line 813): no docstring
+  - `validate_structure(plan)` (line 851): Lightweight structural validation for plan.definition_json.
+  - `add_edge(plan, from_node_id, to_node_id)` (line 955): Add a graph edge (idempotent).
+  - `delete_edge(plan, from_node_id, to_node_id)` (line 985): Delete all matching edges from->to (no-op if not found).
+  - `set_node_inputs(plan, node_id, input_node_ids)` (line 1013): Replace all incoming edges to node_id with input_node_ids (in order).
+  - `update_node_metadata(plan, node_id, set_fields, unset_fields, replace)` (line 1051): Patch node.metadata (merge by default, replace if requested).
+  - `delete_node(plan, node_id)` (line 1098): Delete a node and any incident edges; also removes outputs[] entry for output nodes.
+  - `update_output(plan, output_name, set_fields, unset_fields, replace)` (line 1132): Patch an outputs[] entry by output_name; keeps output node metadata.outputName in sync if renamed.
 - **Classes**
   - `PipelinePlanBuilderError` (line 16): no docstring
   - `PlanMutation` (line 21): no docstring
@@ -8603,24 +8607,28 @@
 
 ### `backend/tests/unit/services/test_pipeline_plan_builder.py`
 - **Functions**
-  - `test_new_plan_has_minimum_shape()` (line 29): no docstring
-  - `test_add_input_and_output_wires_edges()` (line 37): no docstring
-  - `test_add_input_supports_read_config()` (line 56): no docstring
-  - `test_add_external_input_creates_input_node_without_dataset_selection()` (line 69): no docstring
-  - `test_configure_input_read_patches_input_nodes_only()` (line 85): no docstring
-  - `test_add_join_requires_two_inputs_and_keys()` (line 98): no docstring
-  - `test_add_join_accepts_hints_and_broadcast_flags()` (line 117): no docstring
-  - `test_add_join_rejects_cross_join()` (line 135): no docstring
-  - `test_add_cast_requires_column_and_type()` (line 151): no docstring
-  - `test_compute_column_and_assignments_build_metadata()` (line 163): no docstring
-  - `test_select_expr_builds_metadata()` (line 182): no docstring
-  - `test_add_edge_is_idempotent()` (line 191): no docstring
-  - `test_delete_edge_is_noop_if_missing_but_warns()` (line 203): no docstring
-  - `test_set_node_inputs_replaces_incoming_edges_ordered()` (line 216): no docstring
-  - `test_update_node_metadata_merges_and_unsets()` (line 231): no docstring
-  - `test_update_settings_patches_definition_settings()` (line 249): no docstring
-  - `test_delete_node_removes_outputs_entry()` (line 261): no docstring
-  - `test_update_output_renames_and_syncs_output_node_metadata()` (line 273): no docstring
+  - `test_new_plan_has_minimum_shape()` (line 33): no docstring
+  - `test_add_input_and_output_wires_edges()` (line 41): no docstring
+  - `test_add_input_supports_read_config()` (line 60): no docstring
+  - `test_add_external_input_creates_input_node_without_dataset_selection()` (line 73): no docstring
+  - `test_configure_input_read_patches_input_nodes_only()` (line 89): no docstring
+  - `test_add_join_requires_two_inputs_and_keys()` (line 102): no docstring
+  - `test_add_join_accepts_hints_and_broadcast_flags()` (line 121): no docstring
+  - `test_add_join_rejects_cross_join()` (line 139): no docstring
+  - `test_add_cast_requires_column_and_type()` (line 155): no docstring
+  - `test_compute_column_and_assignments_build_metadata()` (line 167): no docstring
+  - `test_select_expr_builds_metadata()` (line 186): no docstring
+  - `test_add_sort_supports_desc_prefix_and_dict_form()` (line 195): no docstring
+  - `test_add_explode_builds_metadata()` (line 209): no docstring
+  - `test_add_union_builds_metadata()` (line 218): no docstring
+  - `test_add_pivot_builds_metadata()` (line 228): no docstring
+  - `test_add_edge_is_idempotent()` (line 247): no docstring
+  - `test_delete_edge_is_noop_if_missing_but_warns()` (line 259): no docstring
+  - `test_set_node_inputs_replaces_incoming_edges_ordered()` (line 272): no docstring
+  - `test_update_node_metadata_merges_and_unsets()` (line 287): no docstring
+  - `test_update_settings_patches_definition_settings()` (line 305): no docstring
+  - `test_delete_node_removes_outputs_entry()` (line 317): no docstring
+  - `test_update_output_renames_and_syncs_output_node_metadata()` (line 329): no docstring
 
 ### `backend/tests/unit/services/test_pipeline_preview_inspector.py`
 - **Functions**

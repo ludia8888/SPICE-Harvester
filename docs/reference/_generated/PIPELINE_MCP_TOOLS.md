@@ -1,8 +1,8 @@
 # Pipeline MCP Tool Catalog
 
 <!-- BEGIN AUTO-GENERATED: pipeline_tooling_reference -->
-> Updated: 2026-01-25T20:49:49+09:00
-> Revision: `6d07a02f2684110be0f3c4d8f718977996f0d70e`
+> Updated: 2026-01-26T01:04:35+09:00
+> Revision: `a776c5d3c6cf63a5ef40bf04e23c3e2dddebfa44`
 > Source of truth: `backend/mcp/pipeline_mcp_server.py` (parsed from the `tool_specs` literal).
 > Regenerate: `python scripts/generate_pipeline_tooling_reference.py`
 
@@ -43,6 +43,7 @@
 | `plan_add_dedupe` | `plan, input_node_id, columns` | Add a dedupe transform node. |
 | `plan_add_drop` | `plan, input_node_id, columns` | Add a drop transform node. |
 | `plan_add_edge` | `plan, from_node_id, to_node_id` | Add an edge from->to (idempotent). Incoming edge order can matter for joins. |
+| `plan_add_explode` | `plan, input_node_id, column` | Add an explode transform node for an array/map-like column (replaces column with exploded elements). |
 | `plan_add_external_input` | `plan, read` | Add an input node backed by a Spark-native source (jdbc/kafka/file URI) via metadata.read. |
 | `plan_add_filter` | `plan, input_node_id, expression` | Add a filter transform node. |
 | `plan_add_group_by` | `plan, input_node_id, aggregates` | Add a groupBy/aggregate transform node (group_by + aggregates). aggregates items: {column,op,alias?}. |
@@ -51,11 +52,14 @@
 | `plan_add_join` | `plan, left_node_id, right_node_id, left_keys, right_keys` | Add a join transform node (LEFT then RIGHT edge order). Cross joins are rejected. |
 | `plan_add_normalize` | `plan, input_node_id, columns` | Add a normalize transform node. |
 | `plan_add_output` | `plan, input_node_id, output_name` | Add an output node + outputs[] entry. |
+| `plan_add_pivot` | `plan, input_node_id, index, columns, values` | Add a pivot transform node (groupBy(index...).pivot(columns).agg(values)). |
 | `plan_add_regex_replace` | `plan, input_node_id, rules` | Add a regexReplace transform node. rules=[{column,pattern,replacement,flags?}]. |
 | `plan_add_rename` | `plan, input_node_id, rename` | Add a rename transform node. rename={src:dst}. |
 | `plan_add_select` | `plan, input_node_id, columns` | Add a select transform node. |
 | `plan_add_select_expr` | `plan, input_node_id, expressions` | Add a select transform node using Spark selectExpr expressions. |
+| `plan_add_sort` | `plan, input_node_id, columns` | Add a sort transform node. columns supports ['col','-col2'] or [{'column','direction'}]. |
 | `plan_add_transform` | `plan, operation, input_node_ids` | Add a generic transform node (operation + metadata) with edges from input_node_ids. |
+| `plan_add_union` | `plan, left_node_id, right_node_id` | Add a union transform node for two inputs (unionByName). union_mode: strict|common_only|pad_missing_nulls|pad. |
 | `plan_add_window` | `plan, input_node_id` | Add a window transform node. order_by supports ['-col'] for DESC or [{'column','direction'}]. |
 | `plan_add_window_expr` | `plan, input_node_id, expressions` | Add a window transform node computing one or more Spark SQL window expressions. |
 | `plan_configure_input_read` | `plan, node_id` | Patch an input node's Spark read config (format/options/schema, permissive parsing, corrupt record capture). |
