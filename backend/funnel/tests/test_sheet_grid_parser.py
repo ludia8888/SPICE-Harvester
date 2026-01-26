@@ -4,7 +4,7 @@ from io import BytesIO
 import pytest
 
 from shared.models.structure_analysis import MergeRange
-from shared.services.sheet_grid_parser import SheetGridParseOptions, SheetGridParser
+from shared.services.core.sheet_grid_parser import SheetGridParseOptions, SheetGridParser
 
 
 class TestSheetGridParser:

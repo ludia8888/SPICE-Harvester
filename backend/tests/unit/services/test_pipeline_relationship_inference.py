@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 import pytest
 
 from bff.services.pipeline_context_pack import build_pipeline_context_pack
-from shared.services.pipeline_relationship_inference import (
+from shared.services.pipeline.pipeline_relationship_inference import (
     infer_join_plan_from_context_pack,
     infer_keys_from_context_pack,
 )

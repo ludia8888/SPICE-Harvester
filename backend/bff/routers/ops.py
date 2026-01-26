@@ -6,8 +6,8 @@ from typing import Any, Dict
 from fastapi import APIRouter, Depends
 
 from shared.models.requests import ApiResponse
-from shared.services.dataset_registry import DatasetRegistry
-from shared.services.objectify_registry import ObjectifyRegistry
+from shared.services.registries.dataset_registry import DatasetRegistry
+from shared.services.registries.objectify_registry import ObjectifyRegistry
 
 logger = logging.getLogger(__name__)
 

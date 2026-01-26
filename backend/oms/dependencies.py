@@ -32,10 +32,10 @@ from shared.errors.error_types import ErrorCategory, ErrorCode
 from shared.observability.request_context import get_correlation_id, get_request_id
 from shared.utils.label_mapper import LabelMapper
 from shared.utils.jsonld import JSONToJSONLDConverter
-from shared.services.elasticsearch_service import ElasticsearchService
-from shared.services.redis_service import RedisService
-from shared.services.command_status_service import CommandStatusService
-from shared.services.processed_event_registry import ProcessedEventRegistry
+from shared.services.storage.elasticsearch_service import ElasticsearchService
+from shared.services.storage.redis_service import RedisService
+from shared.services.core.command_status_service import CommandStatusService
+from shared.services.registries.processed_event_registry import ProcessedEventRegistry
 
 # OMS specific imports
 from oms.services.async_terminus import AsyncTerminusService
@@ -173,7 +173,7 @@ class OMSDependencyProvider:
             # If Redis not available, try direct connection
             if redis_service is None:
                 try:
-                    from shared.services.redis_service import RedisService as RedisServiceClass
+                    from shared.services.storage.redis_service import RedisService as RedisServiceClass
                     settings = get_settings()
 
                     redis_service = RedisServiceClass(

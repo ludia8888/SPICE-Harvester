@@ -9,10 +9,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple, Sequence
 
-from shared.services.pipeline_executor import PipelineExecutor, PipelineTable
-from shared.services.storage_service import StorageService
-from shared.services.pipeline_graph_utils import build_incoming, normalize_edges, normalize_nodes
-from shared.services.pipeline_transform_spec import resolve_join_spec, normalize_operation
+from shared.services.pipeline.pipeline_executor import PipelineExecutor, PipelineTable
+from shared.services.storage.storage_service import StorageService
+from shared.services.pipeline.pipeline_graph_utils import build_incoming, normalize_edges, normalize_nodes
+from shared.services.pipeline.pipeline_transform_spec import resolve_join_spec, normalize_operation
 
 
 @dataclass(frozen=True)

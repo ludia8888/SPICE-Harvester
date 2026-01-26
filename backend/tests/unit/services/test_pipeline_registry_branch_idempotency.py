@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from shared.services.pipeline_registry import PipelineAlreadyExistsError, PipelineRecord, PipelineRegistry
+from shared.services.registries.pipeline_registry import PipelineAlreadyExistsError, PipelineRecord, PipelineRegistry
 
 
 def _pipeline_record(*, pipeline_id: str, db_name: str, name: str, branch: str) -> PipelineRecord:

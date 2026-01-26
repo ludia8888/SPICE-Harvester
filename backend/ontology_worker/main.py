@@ -32,16 +32,16 @@ from shared.models.event_envelope import EventEnvelope
 from shared.models.config import ConnectionConfig
 from oms.services.async_terminus import AsyncTerminusService
 from oms.services.event_store import EventStore
-from shared.services.redis_service import RedisService, create_redis_service
-from shared.services.command_status_service import CommandStatusService
-from shared.services.processed_event_registry import (
+from shared.services.storage.redis_service import RedisService, create_redis_service
+from shared.services.core.command_status_service import CommandStatusService
+from shared.services.registries.processed_event_registry import (
     ClaimDecision,
     ProcessedEventRegistry,
     validate_registry_enabled,
     validate_lease_settings,
 )
-from shared.services.lineage_store import LineageStore
-from shared.services.audit_log_store import AuditLogStore
+from shared.services.registries.lineage_store import LineageStore
+from shared.services.core.audit_log_store import AuditLogStore
 from shared.security.input_sanitizer import validate_branch_name
 from shared.utils.ontology_version import resolve_ontology_version
 from oms.exceptions import DuplicateOntologyError, DatabaseError

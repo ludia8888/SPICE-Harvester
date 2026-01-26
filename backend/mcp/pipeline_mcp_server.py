@@ -36,12 +36,12 @@ from bff.services.pipeline_join_evaluator import evaluate_pipeline_joins  # noqa
 from bff.services.pipeline_plan_validation import validate_pipeline_plan  # noqa: E402
 from shared.models.pipeline_plan import PipelinePlan  # noqa: E402
 from shared.config.settings import get_settings  # noqa: E402
-from shared.services.dataset_profile_registry import DatasetProfileRegistry  # noqa: E402
-from shared.services.dataset_registry import DatasetRegistry  # noqa: E402
-from shared.services.pipeline_registry import PipelineRegistry  # noqa: E402
-from shared.services.pipeline_executor import PipelineExecutor  # noqa: E402
-from shared.services.pipeline_preview_inspector import inspect_preview  # noqa: E402
-from shared.services.pipeline_plan_builder import (  # noqa: E402
+from shared.services.registries.dataset_profile_registry import DatasetProfileRegistry  # noqa: E402
+from shared.services.registries.dataset_registry import DatasetRegistry  # noqa: E402
+from shared.services.registries.pipeline_registry import PipelineRegistry  # noqa: E402
+from shared.services.pipeline.pipeline_executor import PipelineExecutor  # noqa: E402
+from shared.services.pipeline.pipeline_preview_inspector import inspect_preview  # noqa: E402
+from shared.services.pipeline.pipeline_plan_builder import (  # noqa: E402
     PipelinePlanBuilderError,
     add_edge,
     add_cast,
@@ -78,12 +78,12 @@ from shared.services.pipeline_plan_builder import (  # noqa: E402
     update_output,
     validate_structure,
 )
-from shared.services.pipeline_relationship_inference import (  # noqa: E402
+from shared.services.pipeline.pipeline_relationship_inference import (  # noqa: E402
     infer_join_plan_from_context_pack,
     infer_keys_from_context_pack,
 )
-from shared.services.pipeline_claim_refuter import refute_pipeline_plan_claims  # noqa: E402
-from shared.services.pipeline_type_inference import (  # noqa: E402
+from shared.services.pipeline.pipeline_claim_refuter import refute_pipeline_plan_claims  # noqa: E402
+from shared.services.pipeline.pipeline_type_inference import (  # noqa: E402
     common_join_key_type,
     infer_xsd_type_with_confidence,
     normalize_declared_type,

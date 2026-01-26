@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from shared.services.pipeline_preview_inspector import inspect_preview
-from shared.services.pipeline_profiler import compute_column_stats
+from shared.services.pipeline.pipeline_preview_inspector import inspect_preview
+from shared.services.pipeline.pipeline_profiler import compute_column_stats
 
 
 @pytest.mark.unit

@@ -11,11 +11,11 @@ from fastapi import FastAPI
 from agent.routers.agent import router as agent_router
 from shared.config.settings import get_settings
 from shared.middleware.rate_limiter import RateLimiter
-from shared.services.audit_log_store import AuditLogStore
-from shared.services.agent_registry import AgentRegistry
-from shared.services.agent_session_registry import AgentSessionRegistry
-from shared.services.event_store import event_store
-from shared.services.service_factory import create_fastapi_service, get_agent_service_info, run_service
+from shared.services.core.audit_log_store import AuditLogStore
+from shared.services.registries.agent_registry import AgentRegistry
+from shared.services.registries.agent_session_registry import AgentSessionRegistry
+from shared.services.storage.event_store import event_store
+from shared.services.core.service_factory import create_fastapi_service, get_agent_service_info, run_service
 from shared.utils.app_logger import get_logger
 
 logger = get_logger(__name__)

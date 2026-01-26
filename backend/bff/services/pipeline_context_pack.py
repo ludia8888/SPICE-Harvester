@@ -14,11 +14,11 @@ from itertools import combinations
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 from uuid import UUID
 
-from shared.services.dataset_registry import DatasetRegistry
-from shared.services.dataset_profile_registry import DatasetProfileRegistry
-from shared.services.pipeline_profiler import compute_column_stats
-from shared.services.pipeline_schema_utils import normalize_schema_type
-from shared.services.pipeline_transform_spec import SUPPORTED_TRANSFORMS
+from shared.services.registries.dataset_registry import DatasetRegistry
+from shared.services.registries.dataset_profile_registry import DatasetProfileRegistry
+from shared.services.pipeline.pipeline_profiler import compute_column_stats
+from shared.services.pipeline.pipeline_schema_utils import normalize_schema_type
+from shared.services.pipeline.pipeline_transform_spec import SUPPORTED_TRANSFORMS
 from shared.utils.canonical_json import sha256_canonical_json_prefixed
 from shared.utils.llm_safety import mask_pii
 from shared.utils.schema_hash import compute_schema_hash

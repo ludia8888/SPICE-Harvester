@@ -9,7 +9,7 @@ import pytest
 from connector_trigger_service import main as trigger_module
 from connector_trigger_service.main import ConnectorTriggerService
 from shared.models.event_envelope import EventEnvelope
-from shared.services.connector_registry import ConnectorSource, OutboxItem, SyncState
+from shared.services.registries.connector_registry import ConnectorSource, OutboxItem, SyncState
 
 
 class _FakeTracing:

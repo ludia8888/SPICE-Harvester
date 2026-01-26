@@ -22,10 +22,10 @@ from shared.config.settings import get_settings
 from shared.observability.logging import install_trace_context_filter
 from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
-from shared.services.lakefs_client import LakeFSClient, LakeFSConflictError
-from shared.services.lakefs_storage_service import LakeFSStorageService, create_lakefs_storage_service
-from shared.services.storage_service import StorageService, create_storage_service
-from shared.services.writeback_merge_service import WritebackMergeService
+from shared.services.storage.lakefs_client import LakeFSClient, LakeFSConflictError
+from shared.services.storage.lakefs_storage_service import LakeFSStorageService, create_lakefs_storage_service
+from shared.services.storage.storage_service import StorageService, create_storage_service
+from shared.services.core.writeback_merge_service import WritebackMergeService
 from shared.utils.canonical_json import CANONICAL_JSON_VERSION, sha256_canonical_json_prefixed
 from shared.utils.writeback_paths import (
     queue_compaction_marker_key,

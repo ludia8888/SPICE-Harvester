@@ -1,6 +1,6 @@
 import pytest
 
-from shared.services.pipeline_executor import PipelineExecutor, PipelineTable
+from shared.services.pipeline.pipeline_executor import PipelineExecutor, PipelineTable
 
 
 class _DummyDatasetRegistry:
@@ -20,7 +20,7 @@ async def test_pipeline_unit_tests_define_inputs_and_expected_outputs():
     """
     CL-025: Unit tests are defined by (test inputs, transform graph, expected outputs).
     """
-    from shared.services.pipeline_unit_test_runner import run_unit_tests
+    from shared.services.pipeline.pipeline_unit_test_runner import run_unit_tests
 
     executor = PipelineExecutor(dataset_registry=_DummyDatasetRegistry())
     definition = {
@@ -73,7 +73,7 @@ async def test_pipeline_unit_tests_report_diffs_for_breaking_changes():
     """
     CL-026: Unit tests are effective for breaking-change detection/debugging via clear diffs.
     """
-    from shared.services.pipeline_unit_test_runner import run_unit_tests
+    from shared.services.pipeline.pipeline_unit_test_runner import run_unit_tests
 
     executor = PipelineExecutor(dataset_registry=_DummyDatasetRegistry())
     definition = {

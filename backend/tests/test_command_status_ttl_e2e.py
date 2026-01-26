@@ -14,8 +14,8 @@ from urllib.parse import urlparse
 import pytest
 
 from shared.config.app_config import AppConfig
-from shared.services.command_status_service import CommandStatusService, CommandStatus
-from shared.services.redis_service import RedisService
+from shared.services.core.command_status_service import CommandStatusService, CommandStatus
+from shared.services.storage.redis_service import RedisService
 
 
 @contextmanager

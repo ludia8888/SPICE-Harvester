@@ -20,7 +20,7 @@ from uuid import uuid4
 import pytest
 from typing import Optional
 
-from shared.services.processed_event_registry import ClaimDecision, ProcessedEventRegistry
+from shared.services.registries.processed_event_registry import ClaimDecision, ProcessedEventRegistry
 
 
 @contextmanager
@@ -382,7 +382,7 @@ class _FakeRedisService:
 @pytest.mark.asyncio
 async def test_command_status_endpoint_exposes_failure_reason():
     from oms.routers.command_status import get_command_status
-    from shared.services.command_status_service import CommandStatusService
+    from shared.services.core.command_status_service import CommandStatusService
     from shared.models.commands import CommandStatus
     from uuid import UUID
 

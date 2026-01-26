@@ -27,42 +27,42 @@ from shared.models.type_inference import FunnelAnalysisPayload
 from shared.models.event_envelope import EventEnvelope
 from shared.errors.error_envelope import build_error_envelope
 from shared.errors.error_types import ErrorCategory, ErrorCode
-from shared.services.dataset_registry import DatasetRegistry
-from shared.services.dataset_ingest_outbox import (
+from shared.services.registries.dataset_registry import DatasetRegistry
+from shared.services.events.dataset_ingest_outbox import (
     flush_dataset_ingest_outbox,
     build_dataset_event_payload,
 )
-from shared.services.objectify_registry import ObjectifyRegistry
-from shared.services.objectify_job_queue import ObjectifyJobQueue
-from shared.services.lakefs_client import LakeFSClient, LakeFSConflictError, LakeFSError
-from shared.services.pipeline_registry import PipelineAlreadyExistsError, PipelineMergeNotSupportedError, PipelineRegistry
-from shared.services.pipeline_job_queue import PipelineJobQueue
+from shared.services.registries.objectify_registry import ObjectifyRegistry
+from shared.services.events.objectify_job_queue import ObjectifyJobQueue
+from shared.services.storage.lakefs_client import LakeFSClient, LakeFSConflictError, LakeFSError
+from shared.services.registries.pipeline_registry import PipelineAlreadyExistsError, PipelineMergeNotSupportedError, PipelineRegistry
+from shared.services.pipeline.pipeline_job_queue import PipelineJobQueue
 from shared.models.pipeline_job import PipelineJob
 from shared.models.objectify_job import ObjectifyJob
-from shared.services.pipeline_executor import PipelineExecutor
-from shared.services.pipeline_definition_utils import resolve_pk_columns, split_expectation_columns
-from shared.services.event_store import event_store
-from shared.services.pipeline_control_plane_events import emit_pipeline_control_plane_event
+from shared.services.pipeline.pipeline_executor import PipelineExecutor
+from shared.services.pipeline.pipeline_definition_utils import resolve_pk_columns, split_expectation_columns
+from shared.services.storage.event_store import event_store
+from shared.services.pipeline.pipeline_control_plane_events import emit_pipeline_control_plane_event
 from shared.dependencies.providers import AuditLogStoreDep, LineageStoreDep
-from shared.services.pipeline_artifact_store import PipelineArtifactStore
-from shared.services.pipeline_profiler import compute_column_stats
-from shared.services.pipeline_schema_utils import normalize_schema_type
-from shared.services.pipeline_graph_utils import build_incoming, normalize_edges, normalize_nodes
-from shared.services.pipeline_dataset_utils import (
+from shared.services.pipeline.pipeline_artifact_store import PipelineArtifactStore
+from shared.services.pipeline.pipeline_profiler import compute_column_stats
+from shared.services.pipeline.pipeline_schema_utils import normalize_schema_type
+from shared.services.pipeline.pipeline_graph_utils import build_incoming, normalize_edges, normalize_nodes
+from shared.services.pipeline.pipeline_dataset_utils import (
     normalize_dataset_selection,
     resolve_dataset_version,
     resolve_fallback_branches,
 )
-from shared.services.pipeline_transform_spec import (
+from shared.services.pipeline.pipeline_transform_spec import (
     SUPPORTED_TRANSFORMS,
     normalize_operation,
     normalize_union_mode,
     resolve_join_spec,
 )
-from shared.services.pipeline_dependency_utils import normalize_dependency_entries
-from shared.services.pipeline_scheduler import _is_valid_cron_expression
-from shared.services.pipeline_preflight_utils import compute_pipeline_preflight
-from shared.services.redis_service import create_redis_service_legacy
+from shared.services.pipeline.pipeline_dependency_utils import normalize_dependency_entries
+from shared.services.pipeline.pipeline_scheduler import _is_valid_cron_expression
+from shared.services.pipeline.pipeline_preflight_utils import compute_pipeline_preflight
+from shared.services.storage.redis_service import create_redis_service_legacy
 from shared.utils.schema_hash import compute_schema_hash
 from shared.utils.s3_uri import build_s3_uri, parse_s3_uri
 from shared.utils.event_utils import build_command_event

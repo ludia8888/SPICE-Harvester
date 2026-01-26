@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from shared.services.llm_quota import LLMQuotaExceededError, enforce_llm_quota
+from shared.services.agent.llm_quota import LLMQuotaExceededError, enforce_llm_quota
 
 
 class _Client:

@@ -32,8 +32,8 @@ import httpx
 from botocore.exceptions import ClientError
 
 from shared.config.app_config import AppConfig
-from shared.services.redis_service import create_redis_service
-from shared.services.command_status_service import (
+from shared.services.storage.redis_service import create_redis_service
+from shared.services.core.command_status_service import (
     CommandStatusService as CommandStatusTracker,
     CommandStatus as CommandStatusEnum,
 )
@@ -48,15 +48,15 @@ from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
 from shared.security.auth_utils import get_expected_token
 from shared.security.input_sanitizer import validate_branch_name, validate_class_id, validate_instance_id
-from shared.services.processed_event_registry import (
+from shared.services.registries.processed_event_registry import (
     ClaimDecision,
     ProcessedEventRegistry,
     validate_registry_enabled,
     validate_lease_settings,
 )
-from shared.services.lineage_store import LineageStore
-from shared.services.audit_log_store import AuditLogStore
-from shared.services.dataset_registry import DatasetRegistry
+from shared.services.registries.lineage_store import LineageStore
+from shared.services.core.audit_log_store import AuditLogStore
+from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.utils.chaos import maybe_crash
 from shared.utils.ontology_version import normalize_ontology_version, resolve_ontology_version
 

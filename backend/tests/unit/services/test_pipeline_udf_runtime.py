@@ -1,6 +1,6 @@
 import pytest
 
-from shared.services.pipeline_udf_runtime import PipelineUdfError, compile_row_udf
+from shared.services.pipeline.pipeline_udf_runtime import PipelineUdfError, compile_row_udf
 
 
 @pytest.mark.unit

@@ -1,6 +1,6 @@
 import pytest
 
-from shared.services.pipeline_profiler import compute_column_stats
+from shared.services.pipeline.pipeline_profiler import compute_column_stats
 
 
 @pytest.mark.unit

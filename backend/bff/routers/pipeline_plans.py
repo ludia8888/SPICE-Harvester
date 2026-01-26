@@ -25,16 +25,16 @@ from shared.security.input_sanitizer import (
     validate_db_name,
 )
 from shared.security.auth_utils import enforce_db_scope
-from shared.services.agent_policy_registry import AgentPolicyRegistry
-from shared.services.dataset_registry import DatasetRegistry
-from shared.services.dataset_profile_registry import DatasetProfileRegistry
-from shared.services.pipeline_executor import PipelineExecutor
-from shared.services.pipeline_preview_inspector import inspect_preview
+from shared.services.registries.agent_policy_registry import AgentPolicyRegistry
+from shared.services.registries.dataset_registry import DatasetRegistry
+from shared.services.registries.dataset_profile_registry import DatasetProfileRegistry
+from shared.services.pipeline.pipeline_executor import PipelineExecutor
+from shared.services.pipeline.pipeline_preview_inspector import inspect_preview
 from shared.utils.canonical_json import sha256_canonical_json_prefixed
-from shared.services.pipeline_plan_registry import PipelinePlanRegistry
-from shared.services.pipeline_registry import PipelineRegistry
+from shared.services.registries.pipeline_plan_registry import PipelinePlanRegistry
+from shared.services.registries.pipeline_registry import PipelineRegistry
 from shared.dependencies.providers import AuditLogStoreDep, RedisServiceDep, LLMGatewayDep
-from shared.services.llm_quota import LLMQuotaExceededError
+from shared.services.agent.llm_quota import LLMQuotaExceededError
 
 logger = logging.getLogger(__name__)
 

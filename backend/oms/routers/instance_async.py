@@ -27,11 +27,11 @@ from shared.dependencies.providers import RedisServiceDep
 from shared.config.app_config import AppConfig
 from shared.models.commands import CommandType, InstanceCommand, CommandResult, CommandStatus
 from shared.models.common import BaseResponse
-from shared.services.command_status_service import CommandStatusService
-from shared.services.processed_event_registry import ProcessedEventRegistry
-from shared.services.redis_service import RedisService
+from shared.services.core.command_status_service import CommandStatusService
+from shared.services.registries.processed_event_registry import ProcessedEventRegistry
+from shared.services.storage.redis_service import RedisService
 from shared.models.event_envelope import EventEnvelope
-from shared.services.aggregate_sequence_allocator import OptimisticConcurrencyError
+from shared.services.events.aggregate_sequence_allocator import OptimisticConcurrencyError
 from shared.utils.ontology_version import resolve_ontology_version
 from oms.utils.command_status_utils import map_registry_status
 from oms.utils.ontology_stamp import merge_ontology_stamp

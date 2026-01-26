@@ -11,7 +11,7 @@ from typing import Any, Dict
 from fastapi import FastAPI
 
 # Shared service factory import
-from shared.services.service_factory import create_fastapi_service, get_funnel_service_info, run_service
+from shared.services.core.service_factory import create_fastapi_service, get_funnel_service_info, run_service
 
 from funnel.routers.type_inference_router import router as type_inference_router
 from shared.utils.app_logger import get_logger

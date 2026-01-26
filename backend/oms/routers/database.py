@@ -18,7 +18,7 @@ from shared.security.input_sanitizer import SecurityViolationError, sanitize_inp
 from shared.config.app_config import AppConfig
 from shared.config.settings import get_settings
 from shared.models.event_envelope import EventEnvelope
-from shared.services.aggregate_sequence_allocator import OptimisticConcurrencyError
+from shared.services.events.aggregate_sequence_allocator import OptimisticConcurrencyError
 
 logger = logging.getLogger(__name__)
 

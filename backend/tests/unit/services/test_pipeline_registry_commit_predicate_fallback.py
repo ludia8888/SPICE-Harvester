@@ -5,8 +5,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from shared.services.lakefs_client import LakeFSError
-from shared.services.pipeline_registry import PipelineRecord, PipelineRegistry
+from shared.services.storage.lakefs_client import LakeFSError
+from shared.services.registries.pipeline_registry import PipelineRecord, PipelineRegistry
 
 
 class _Acquire:

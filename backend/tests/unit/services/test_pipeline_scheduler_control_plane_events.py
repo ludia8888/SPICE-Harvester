@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from shared.services.pipeline_scheduler import PipelineScheduler
+from shared.services.pipeline.pipeline_scheduler import PipelineScheduler
 
 
 class _Registry:
@@ -29,7 +29,7 @@ async def test_scheduler_emits_ignored_event(monkeypatch: pytest.MonkeyPatch) ->
         return True
 
     monkeypatch.setattr(
-        "shared.services.pipeline_scheduler.emit_pipeline_control_plane_event",
+        "shared.services.pipeline.pipeline_scheduler.emit_pipeline_control_plane_event",
         _emit,
     )
 

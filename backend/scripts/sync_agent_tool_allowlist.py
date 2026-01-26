@@ -12,8 +12,8 @@ import argparse
 import asyncio
 import json
 
-from shared.services.agent_tool_allowlist import bootstrap_agent_tool_allowlist
-from shared.services.agent_tool_registry import AgentToolRegistry
+from shared.services.agent.agent_tool_allowlist import bootstrap_agent_tool_allowlist
+from shared.services.registries.agent_tool_registry import AgentToolRegistry
 
 
 def _build_parser() -> argparse.ArgumentParser:

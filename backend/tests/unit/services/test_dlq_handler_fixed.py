@@ -7,7 +7,7 @@ from typing import Any, Dict, Optional
 
 import pytest
 
-from shared.services.dlq_handler_fixed import DLQHandlerFixed, FailedMessage, RetryPolicy
+from shared.services.events.dlq_handler_fixed import DLQHandlerFixed, FailedMessage, RetryPolicy
 
 
 def _bootstrap_servers() -> str:

@@ -6,7 +6,7 @@ from typing import Any, Optional
 
 import pytest
 
-from shared.services.pipeline_scheduler import PipelineScheduler
+from shared.services.pipeline.pipeline_scheduler import PipelineScheduler
 
 
 @dataclass
@@ -59,7 +59,7 @@ class _Registry:
 async def test_scheduler_records_ignored_when_schedule_due_but_dependencies_up_to_date(monkeypatch: pytest.MonkeyPatch) -> None:
     now = datetime(2025, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
 
-    import shared.services.pipeline_scheduler as scheduler_module
+    import shared.services.pipeline.pipeline_scheduler as scheduler_module
 
     monkeypatch.setattr(scheduler_module, "_utcnow", lambda: now)
 
@@ -106,7 +106,7 @@ async def test_scheduler_records_ignored_when_schedule_due_but_dependencies_up_t
 async def test_scheduler_records_ignored_when_schedule_due_but_dependency_not_satisfied(monkeypatch: pytest.MonkeyPatch) -> None:
     now = datetime(2025, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
 
-    import shared.services.pipeline_scheduler as scheduler_module
+    import shared.services.pipeline.pipeline_scheduler as scheduler_module
 
     monkeypatch.setattr(scheduler_module, "_utcnow", lambda: now)
 
@@ -154,7 +154,7 @@ async def test_scheduler_does_not_trigger_dependency_only_when_pipeline_is_newer
     now = datetime(2025, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
     dep_built_at = datetime(2025, 1, 1, 11, 0, 0, tzinfo=timezone.utc)
 
-    import shared.services.pipeline_scheduler as scheduler_module
+    import shared.services.pipeline.pipeline_scheduler as scheduler_module
 
     monkeypatch.setattr(scheduler_module, "_utcnow", lambda: now)
 
@@ -199,7 +199,7 @@ async def test_scheduler_triggers_interval_schedule_when_due(monkeypatch: pytest
     now = datetime(2025, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
     last_run = datetime(2025, 1, 1, 11, 0, 0, tzinfo=timezone.utc)
 
-    import shared.services.pipeline_scheduler as scheduler_module
+    import shared.services.pipeline.pipeline_scheduler as scheduler_module
 
     monkeypatch.setattr(scheduler_module, "_utcnow", lambda: now)
 
@@ -244,7 +244,7 @@ async def test_scheduler_triggers_cron_schedule_when_matches(monkeypatch: pytest
     now = datetime(2025, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
     last_run = datetime(2025, 1, 1, 11, 59, 0, tzinfo=timezone.utc)
 
-    import shared.services.pipeline_scheduler as scheduler_module
+    import shared.services.pipeline.pipeline_scheduler as scheduler_module
 
     monkeypatch.setattr(scheduler_module, "_utcnow", lambda: now)
 
@@ -289,7 +289,7 @@ async def test_scheduler_triggers_when_dependency_is_newer_than_pipeline_build(m
     now = datetime(2025, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
     pipeline_built_at = datetime(2025, 1, 1, 10, 0, 0, tzinfo=timezone.utc)
 
-    import shared.services.pipeline_scheduler as scheduler_module
+    import shared.services.pipeline.pipeline_scheduler as scheduler_module
 
     monkeypatch.setattr(scheduler_module, "_utcnow", lambda: now)
 

@@ -25,8 +25,8 @@ from shared.observability.context_propagation import (
 from shared.observability.logging import install_trace_context_filter
 from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
-from shared.services.elasticsearch_service import create_elasticsearch_service_legacy
-from shared.services.processed_event_registry import ClaimDecision, ProcessedEventRegistry
+from shared.services.storage.elasticsearch_service import create_elasticsearch_service_legacy
+from shared.services.registries.processed_event_registry import ClaimDecision, ProcessedEventRegistry
 
 logger = logging.getLogger(__name__)
 

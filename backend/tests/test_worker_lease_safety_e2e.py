@@ -16,7 +16,7 @@ from contextlib import contextmanager
 import pytest
 
 from instance_worker.main import StrictInstanceWorker
-from shared.services.processed_event_registry import validate_lease_settings, validate_registry_enabled
+from shared.services.registries.processed_event_registry import validate_lease_settings, validate_registry_enabled
 
 
 @contextmanager

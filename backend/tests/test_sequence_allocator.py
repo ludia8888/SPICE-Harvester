@@ -13,7 +13,7 @@ from uuid import uuid4
 
 import pytest
 
-from shared.services.aggregate_sequence_allocator import AggregateSequenceAllocator, OptimisticConcurrencyError
+from shared.services.events.aggregate_sequence_allocator import AggregateSequenceAllocator, OptimisticConcurrencyError
 
 
 def _get_postgres_url_candidates() -> list[str]:

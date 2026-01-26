@@ -38,18 +38,18 @@ from shared.observability.logging import install_trace_context_filter
 from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
 from shared.security.database_access import DOMAIN_MODEL_ROLES, get_database_access_role
-from shared.services.action_log_registry import ActionLogRegistry, ActionLogStatus
-from shared.services.dataset_registry import DatasetRegistry
-from shared.services.event_store import event_store
-from shared.services.lakefs_client import LakeFSClient, LakeFSConflictError, LakeFSError
-from shared.services.lakefs_storage_service import create_lakefs_storage_service, LakeFSStorageService
-from shared.services.processed_event_registry import (
+from shared.services.registries.action_log_registry import ActionLogRegistry, ActionLogStatus
+from shared.services.registries.dataset_registry import DatasetRegistry
+from shared.services.storage.event_store import event_store
+from shared.services.storage.lakefs_client import LakeFSClient, LakeFSConflictError, LakeFSError
+from shared.services.storage.lakefs_storage_service import create_lakefs_storage_service, LakeFSStorageService
+from shared.services.registries.processed_event_registry import (
     ClaimDecision,
     ProcessedEventRegistry,
     validate_registry_enabled,
     validate_lease_settings,
 )
-from shared.services.storage_service import StorageService, create_storage_service
+from shared.services.storage.storage_service import StorageService, create_storage_service
 from shared.utils.canonical_json import sha256_canonical_json_prefixed
 from shared.utils.action_input_schema import (
     ActionInputSchemaError,

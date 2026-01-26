@@ -39,8 +39,8 @@ from shared.errors.error_types import ErrorCategory, ErrorCode
 from shared.observability.request_context import get_correlation_id, get_request_id
 from shared.utils.label_mapper import LabelMapper
 from shared.utils.jsonld import JSONToJSONLDConverter
-from shared.services.elasticsearch_service import ElasticsearchService
-from shared.services.action_log_registry import ActionLogRegistry
+from shared.services.storage.elasticsearch_service import ElasticsearchService
+from shared.services.registries.action_log_registry import ActionLogRegistry
 
 # BFF specific imports
 from bff.services.oms_client import OMSClient

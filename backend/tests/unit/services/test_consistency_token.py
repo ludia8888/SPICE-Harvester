@@ -5,7 +5,7 @@ import uuid
 
 import pytest
 
-from shared.services.consistency_token import ConsistencyToken, ConsistencyTokenService
+from shared.services.core.consistency_token import ConsistencyToken, ConsistencyTokenService
 
 
 @pytest.mark.asyncio

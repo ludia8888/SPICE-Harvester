@@ -16,13 +16,13 @@ from typing import Annotated
 from fastapi import Depends
 
 # Import service classes and factories - all dependencies are now explicit in pyproject.toml
-from shared.services.storage_service import StorageService, create_storage_service
-from shared.services.lakefs_storage_service import LakeFSStorageService, create_lakefs_storage_service
-from shared.services.redis_service import RedisService, create_redis_service
-from shared.services.elasticsearch_service import ElasticsearchService, create_elasticsearch_service
-from shared.services.lineage_store import LineageStore, create_lineage_store
-from shared.services.audit_log_store import AuditLogStore, create_audit_log_store
-from shared.services.llm_gateway import LLMGateway, create_llm_gateway
+from shared.services.storage.storage_service import StorageService, create_storage_service
+from shared.services.storage.lakefs_storage_service import LakeFSStorageService, create_lakefs_storage_service
+from shared.services.storage.redis_service import RedisService, create_redis_service
+from shared.services.storage.elasticsearch_service import ElasticsearchService, create_elasticsearch_service
+from shared.services.registries.lineage_store import LineageStore, create_lineage_store
+from shared.services.core.audit_log_store import AuditLogStore, create_audit_log_store
+from shared.services.agent.llm_gateway import LLMGateway, create_llm_gateway
 
 # Import container and settings
 from shared.dependencies.container import get_container, ServiceContainer

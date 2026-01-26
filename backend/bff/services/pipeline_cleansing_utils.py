@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple
 
-from shared.services.pipeline_graph_utils import normalize_edges, normalize_nodes, topological_sort
+from shared.services.pipeline.pipeline_graph_utils import normalize_edges, normalize_nodes, topological_sort
 
 
 def _unique_node_id(base: str, existing: set[str]) -> str:

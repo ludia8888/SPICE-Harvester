@@ -16,11 +16,11 @@ from shared.models.objectify_job import ObjectifyJob
 from shared.models.requests import ApiResponse
 from shared.security.input_sanitizer import sanitize_input, validate_class_id
 from shared.security.auth_utils import enforce_db_scope
-from shared.services.dataset_registry import DatasetRegistry
-from shared.services.objectify_registry import ObjectifyRegistry
-from shared.services.objectify_job_queue import ObjectifyJobQueue
-from shared.services.pipeline_registry import PipelineRegistry
-from shared.services.pipeline_schema_utils import normalize_schema_type
+from shared.services.registries.dataset_registry import DatasetRegistry
+from shared.services.registries.objectify_registry import ObjectifyRegistry
+from shared.services.events.objectify_job_queue import ObjectifyJobQueue
+from shared.services.registries.pipeline_registry import PipelineRegistry
+from shared.services.pipeline.pipeline_schema_utils import normalize_schema_type
 from shared.utils.import_type_normalization import normalize_import_target_type
 from shared.utils.key_spec import normalize_key_spec
 from shared.utils.s3_uri import parse_s3_uri

@@ -21,10 +21,10 @@ from contextlib import asynccontextmanager
 
 from shared.config.settings import ApplicationSettings, Environment, DatabaseSettings, ServiceSettings
 from shared.dependencies import ServiceContainer
-from shared.services.storage_service import StorageService
-from shared.services.redis_service import RedisService
-from shared.services.elasticsearch_service import ElasticsearchService
-from shared.services.command_status_service import CommandStatusService
+from shared.services.storage.storage_service import StorageService
+from shared.services.storage.redis_service import RedisService
+from shared.services.storage.elasticsearch_service import ElasticsearchService
+from shared.services.core.command_status_service import CommandStatusService
 from shared.utils.label_mapper import LabelMapper
 from shared.utils.jsonld import JSONToJSONLDConverter
 

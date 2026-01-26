@@ -29,18 +29,18 @@ from shared.models.events import (
     InstanceEvent,
     OntologyEvent
 )
-from shared.services.redis_service import RedisService, create_redis_service
-from shared.services.elasticsearch_service import ElasticsearchService, create_elasticsearch_service
-from shared.services.lakefs_storage_service import LakeFSStorageService, create_lakefs_storage_service
-from shared.services.projection_manager import ProjectionManager
-from shared.services.processed_event_registry import (
+from shared.services.storage.redis_service import RedisService, create_redis_service
+from shared.services.storage.elasticsearch_service import ElasticsearchService, create_elasticsearch_service
+from shared.services.storage.lakefs_storage_service import LakeFSStorageService, create_lakefs_storage_service
+from shared.services.core.projection_manager import ProjectionManager
+from shared.services.registries.processed_event_registry import (
     ClaimDecision,
     ProcessedEventRegistry,
     validate_registry_enabled,
     validate_lease_settings,
 )
-from shared.services.lineage_store import LineageStore
-from shared.services.audit_log_store import AuditLogStore
+from shared.services.registries.lineage_store import LineageStore
+from shared.services.core.audit_log_store import AuditLogStore
 from shared.utils.chaos import maybe_crash
 from shared.utils.ontology_version import split_ref_commit
 from shared.utils.language import coerce_localized_text, select_localized_text, get_default_language

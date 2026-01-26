@@ -1,6 +1,6 @@
 import pytest
 
-from shared.services.pipeline_scheduler import (
+from shared.services.pipeline.pipeline_scheduler import (
     _dependencies_satisfied,
     _is_valid_cron_expression,
     _normalize_dependencies,

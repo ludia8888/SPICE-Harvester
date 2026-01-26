@@ -5,7 +5,7 @@ import os
 import pytest
 import redis.asyncio as aioredis
 
-from shared.services.watermark_monitor import GlobalWatermark, PartitionWatermark, WatermarkMonitor
+from shared.services.core.watermark_monitor import GlobalWatermark, PartitionWatermark, WatermarkMonitor
 
 
 @pytest.mark.asyncio

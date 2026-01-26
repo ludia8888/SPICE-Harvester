@@ -25,7 +25,7 @@ import aiohttp
 import pytest
 
 from shared.config.search_config import get_instances_index_name
-from shared.services.event_store import event_store
+from shared.services.storage.event_store import event_store
 from shared.utils.writeback_lifecycle import overlay_doc_id
 from tests.utils.auth import bff_auth_headers
 
@@ -1054,7 +1054,7 @@ async def test_action_writeback_e2e_verification_suite() -> None:
             # 8) Conflict policy branches: FAIL / WRITEBACK_WINS (merge) / BASE_WINS (skip)
             from shared.config.app_config import AppConfig
             from shared.config.settings import get_settings
-            from shared.services.lakefs_storage_service import create_lakefs_storage_service
+            from shared.services.storage.lakefs_storage_service import create_lakefs_storage_service
             from shared.utils.writeback_paths import (
                 queue_entry_key,
                 ref_key,

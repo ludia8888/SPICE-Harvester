@@ -11,8 +11,8 @@ import httpx
 import pytest
 
 from shared.models.pipeline_job import PipelineJob
-from shared.services.lakefs_client import LakeFSClient, LakeFSNotFoundError
-from shared.services.pipeline_job_queue import PipelineJobQueue
+from shared.services.storage.lakefs_client import LakeFSClient, LakeFSNotFoundError
+from shared.services.pipeline.pipeline_job_queue import PipelineJobQueue
 from shared.utils.path_utils import safe_lakefs_ref
 
 
@@ -1817,7 +1817,7 @@ async def test_executor_vs_worker_validation_consistency() -> None:
     """
     Compare in-memory executor vs spark worker validation errors for PK expectations.
     """
-    from shared.services.pipeline_executor import PipelineExecutor, PipelineExpectationError
+    from shared.services.pipeline.pipeline_executor import PipelineExecutor, PipelineExpectationError
 
     definition = {
         "nodes": [

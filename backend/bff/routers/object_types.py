@@ -21,8 +21,8 @@ from shared.models.objectify_job import ObjectifyJob
 from shared.security.auth_utils import enforce_db_scope
 from shared.security.input_sanitizer import sanitize_input, validate_db_name
 from shared.security.database_access import DOMAIN_MODEL_ROLES, enforce_database_role
-from shared.services.dataset_registry import DatasetRegistry
-from shared.services.objectify_registry import ObjectifyRegistry
+from shared.services.registries.dataset_registry import DatasetRegistry
+from shared.services.registries.objectify_registry import ObjectifyRegistry
 from shared.utils.key_spec import normalize_key_spec
 from shared.utils.schema_hash import compute_schema_hash
 

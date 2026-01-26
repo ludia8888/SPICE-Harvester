@@ -12,7 +12,7 @@ import os
 import sys
 from contextlib import suppress
 
-from shared.services.processed_event_registry import ClaimDecision, ProcessedEventRegistry
+from shared.services.registries.processed_event_registry import ClaimDecision, ProcessedEventRegistry
 
 
 async def _main() -> int:

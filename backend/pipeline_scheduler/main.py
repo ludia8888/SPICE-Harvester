@@ -13,9 +13,9 @@ from shared.config.settings import get_settings
 from shared.observability.logging import install_trace_context_filter
 from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
-from shared.services.pipeline_job_queue import PipelineJobQueue
-from shared.services.pipeline_registry import PipelineRegistry
-from shared.services.pipeline_scheduler import PipelineScheduler
+from shared.services.pipeline.pipeline_job_queue import PipelineJobQueue
+from shared.services.registries.pipeline_registry import PipelineRegistry
+from shared.services.pipeline.pipeline_scheduler import PipelineScheduler
 
 
 async def main() -> None:

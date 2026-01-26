@@ -5,7 +5,7 @@ import json
 import pytest
 from pydantic import BaseModel
 
-from shared.services.llm_gateway import LLMGateway, LLMHTTPStatusError, LLMUnavailableError
+from shared.services.agent.llm_gateway import LLMGateway, LLMHTTPStatusError, LLMUnavailableError
 from shared.utils.llm_safety import sha256_hex, stable_json_dumps
 
 

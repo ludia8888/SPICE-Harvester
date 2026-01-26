@@ -11,7 +11,7 @@ from agent.models import AgentRunRequest, AgentToolCall
 from agent.services.agent_run_loop import AgentState, run_agent_steps
 from agent.services.agent_runtime import AgentRuntime
 from shared.config.settings import get_settings
-from shared.services.agent_registry import AgentRegistry
+from shared.services.registries.agent_registry import AgentRegistry
 from shared.models.responses import ApiResponse
 from shared.utils.llm_safety import digest_for_audit, mask_pii
 

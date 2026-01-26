@@ -5,7 +5,7 @@ from uuid import uuid4
 import pytest
 
 from shared.config.service_config import ServiceConfig
-from shared.services.pipeline_registry import PipelineRegistry
+from shared.services.registries.pipeline_registry import PipelineRegistry
 
 
 @pytest.mark.asyncio

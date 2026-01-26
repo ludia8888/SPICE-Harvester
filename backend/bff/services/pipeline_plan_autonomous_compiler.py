@@ -17,11 +17,11 @@ from uuid import uuid4
 from bff.services.pipeline_agent_autonomous_loop import run_pipeline_agent_mcp_autonomous
 from bff.services.pipeline_plan_models import PipelineClarificationQuestion, PipelinePlanCompileResult
 from shared.models.pipeline_plan import PipelinePlan, PipelinePlanDataScope
-from shared.services.audit_log_store import AuditLogStore
-from shared.services.dataset_registry import DatasetRegistry
-from shared.services.llm_gateway import LLMCallMeta, LLMGateway
-from shared.services.pipeline_plan_registry import PipelinePlanRegistry
-from shared.services.redis_service import RedisService
+from shared.services.core.audit_log_store import AuditLogStore
+from shared.services.registries.dataset_registry import DatasetRegistry
+from shared.services.agent.llm_gateway import LLMCallMeta, LLMGateway
+from shared.services.registries.pipeline_plan_registry import PipelinePlanRegistry
+from shared.services.storage.redis_service import RedisService
 
 
 def _coerce_questions(raw: Any) -> List[PipelineClarificationQuestion]:

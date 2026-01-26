@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 
 from shared.models.agent_plan_report import PlanCompilationReport
 from shared.models.pipeline_plan import PipelinePlan
-from shared.services.llm_gateway import LLMCallMeta
+from shared.services.agent.llm_gateway import LLMCallMeta
 
 
 class PipelineClarificationQuestion(BaseModel):

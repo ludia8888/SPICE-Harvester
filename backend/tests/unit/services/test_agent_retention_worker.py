@@ -6,7 +6,7 @@ import json
 import pytest
 from unittest.mock import AsyncMock
 
-from shared.services.agent_retention_worker import run_agent_session_retention_worker
+from shared.services.agent.agent_retention_worker import run_agent_session_retention_worker
 
 
 @pytest.mark.unit

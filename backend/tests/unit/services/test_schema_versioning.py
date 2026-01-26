@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from shared.services.schema_versioning import (
+from shared.services.core.schema_versioning import (
     SchemaMigration,
     SchemaRegistry,
     SchemaVersion,

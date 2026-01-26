@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from shared.services.agent_session_registry import (
+from shared.services.registries.agent_session_registry import (
     SESSION_STATUS_ACTIVE,
     SESSION_STATUS_COMPLETED,
     SESSION_STATUS_ERROR,

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from shared.models.pipeline_plan import PipelinePlan
 from shared.models.pipeline_task_spec import PipelineTaskScope, PipelineTaskSpec
-from shared.services.pipeline_task_spec_policy import clamp_task_spec, validate_plan_against_task_spec
+from shared.services.pipeline.pipeline_task_spec_policy import clamp_task_spec, validate_plan_against_task_spec
 
 
 def _plan_with_op(op: str) -> PipelinePlan:

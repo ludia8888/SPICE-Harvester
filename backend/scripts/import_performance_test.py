@@ -65,25 +65,25 @@ def measure_import_performance(import_func, description):
 
 def test_direct_import():
     """직접 경로 import 테스트 (개선된 방식)"""
-    from shared.services.elasticsearch_service import ElasticsearchService
+    from shared.services.storage.elasticsearch_service import ElasticsearchService
     assert ElasticsearchService is not None
 
 def test_bulk_import_simulation():
     """Bulk import 시뮬레이션 (이전 방식)"""
     # 이전에 __init__.py에서 모든 서비스를 import했던 방식을 시뮬레이션
-    from shared.services.redis_service import RedisService, create_redis_service
-    from shared.services.command_status_service import CommandStatusService, CommandStatus
-    from shared.services.sync_wrapper_service import SyncWrapperService  
-    from shared.services.websocket_service import (
+    from shared.services.storage.redis_service import RedisService, create_redis_service
+    from shared.services.core.command_status_service import CommandStatusService, CommandStatus
+    from shared.services.core.sync_wrapper_service import SyncWrapperService  
+    from shared.services.core.websocket_service import (
         WebSocketConnectionManager,
         WebSocketNotificationService,
         get_connection_manager,
         get_notification_service,
     )
-    from shared.services.storage_service import StorageService, create_storage_service
-    from shared.services.elasticsearch_service import ElasticsearchService, create_elasticsearch_service
-    from shared.services.background_task_manager import BackgroundTaskManager
-    from shared.services.service_factory import (
+    from shared.services.storage.storage_service import StorageService, create_storage_service
+    from shared.services.storage.elasticsearch_service import ElasticsearchService, create_elasticsearch_service
+    from shared.services.core.background_task_manager import BackgroundTaskManager
+    from shared.services.core.service_factory import (
         create_fastapi_service,
         get_bff_service_info,
         get_oms_service_info,
@@ -95,7 +95,7 @@ def test_bulk_import_simulation():
 
 def test_single_service_need():
     """실제 서비스에서 ElasticsearchService 하나만 필요한 경우"""
-    from shared.services.elasticsearch_service import ElasticsearchService
+    from shared.services.storage.elasticsearch_service import ElasticsearchService
     
     # 실제 서비스 초기화 시뮬레이션
     service = ElasticsearchService(

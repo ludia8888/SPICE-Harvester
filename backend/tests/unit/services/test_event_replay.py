@@ -10,7 +10,7 @@ import boto3
 import pytest
 from botocore.client import Config
 
-from shared.services.event_replay import EventReplayService
+from shared.services.events.event_replay import EventReplayService
 
 
 def _s3_client():

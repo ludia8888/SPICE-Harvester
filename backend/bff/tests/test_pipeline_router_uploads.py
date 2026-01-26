@@ -8,7 +8,7 @@ from starlette.datastructures import UploadFile
 from starlette.requests import Request
 
 from bff.routers import pipeline as pipeline_router
-from shared.services.dataset_registry import (
+from shared.services.registries.dataset_registry import (
     DatasetIngestRequestRecord,
     DatasetIngestTransactionRecord,
     DatasetRecord,

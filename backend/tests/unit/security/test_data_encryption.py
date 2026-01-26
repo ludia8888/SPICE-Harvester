@@ -11,7 +11,7 @@ from shared.security.data_encryption import (
     is_encrypted_json,
     is_encrypted_text,
 )
-from shared.services.agent_session_registry import AgentSessionRegistry
+from shared.services.registries.agent_session_registry import AgentSessionRegistry
 
 
 @pytest.mark.unit

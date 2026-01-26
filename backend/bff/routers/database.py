@@ -16,7 +16,7 @@ from fastapi.responses import JSONResponse
 # Modernized dependency injection imports
 from bff.dependencies import get_oms_client, OMSClientDep
 from bff.services.oms_client import OMSClient
-from shared.services.dataset_registry import DatasetRegistry
+from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.models.requests import ApiResponse, DatabaseCreateRequest
 from shared.security.input_sanitizer import (
     SecurityViolationError,

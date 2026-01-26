@@ -13,13 +13,13 @@ from typing import Dict, Any, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from oms.dependencies import get_redis_service
-from shared.services.redis_service import RedisService
+from shared.services.storage.redis_service import RedisService
 from shared.models.background_task import TaskStatus, BackgroundTask
-from shared.services.background_task_manager import (
+from shared.services.core.background_task_manager import (
     BackgroundTaskManager,
     create_background_task_manager,
 )
-from shared.services.redis_service import create_redis_service
+from shared.services.storage.redis_service import create_redis_service
 from shared.dependencies import get_container, ServiceContainer
 
 logger = logging.getLogger(__name__)

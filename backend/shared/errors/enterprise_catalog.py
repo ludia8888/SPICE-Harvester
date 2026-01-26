@@ -1026,6 +1026,13 @@ _EXTERNAL_CODE_SPECS: Dict[str, EnterpriseErrorSpec] = {
         title="Pipeline replay required",
         severity=EnterpriseSeverity.ERROR,
     ),
+    "DEFINITION_MISMATCH": EnterpriseErrorSpec(
+        code_template="SHV-{subsystem}-PIP-CON-1008",
+        domain=EnterpriseDomain.PIPELINE,
+        error_class=EnterpriseClass.CONFLICT,
+        title="Pipeline definition mismatch",
+        severity=EnterpriseSeverity.ERROR,
+    ),
     "LAKEFS_MERGE_CONFLICT": EnterpriseErrorSpec(
         code_template="SHV-{subsystem}-PIP-CON-1007",
         domain=EnterpriseDomain.PIPELINE,
@@ -2065,6 +2072,21 @@ _EXTERNAL_CODE_SPECS: Dict[str, EnterpriseErrorSpec] = {
         domain=EnterpriseDomain.UPSTREAM,
         error_class=EnterpriseClass.UNAVAILABLE,
         title="Google Sheet not accessible",
+        severity=EnterpriseSeverity.ERROR,
+    ),
+    # LLM-related errors for agent autonomous loop
+    "llm_output_invalid_json": EnterpriseErrorSpec(
+        code_template="SHV-{subsystem}-UPS-VAL-4001",
+        domain=EnterpriseDomain.UPSTREAM,
+        error_class=EnterpriseClass.VALIDATION,
+        title="LLM output invalid JSON",
+        severity=EnterpriseSeverity.WARNING,
+    ),
+    "llm_request_failed": EnterpriseErrorSpec(
+        code_template="SHV-{subsystem}-UPS-INTG-4001",
+        domain=EnterpriseDomain.UPSTREAM,
+        error_class=EnterpriseClass.INTEGRATION,
+        title="LLM request failed",
         severity=EnterpriseSeverity.ERROR,
     ),
 }

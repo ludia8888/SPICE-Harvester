@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from shared.services.pipeline_plan_builder import (
+from shared.services.pipeline.pipeline_plan_builder import (
     PipelinePlanBuilderError,
     add_edge,
     add_cast,

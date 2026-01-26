@@ -1,7 +1,7 @@
 import pytest
 
-from shared.services.pipeline_executor import PipelineTable, _build_table_ops
-from shared.services.pipeline_validation_utils import validate_expectations, validate_schema_contract
+from shared.services.pipeline.pipeline_executor import PipelineTable, _build_table_ops
+from shared.services.pipeline.pipeline_validation_utils import validate_expectations, validate_schema_contract
 
 
 @pytest.mark.unit

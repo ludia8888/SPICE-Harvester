@@ -5,7 +5,7 @@ from typing import Any, Optional
 
 import pytest
 
-from shared.services.pipeline_executor import PipelineExecutor
+from shared.services.pipeline.pipeline_executor import PipelineExecutor
 
 
 @dataclass(frozen=True)

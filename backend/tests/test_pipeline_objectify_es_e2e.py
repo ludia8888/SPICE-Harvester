@@ -10,7 +10,7 @@ import httpx
 import pytest
 
 from shared.config.search_config import get_instances_index_name
-from shared.services.dataset_registry import DatasetRegistry
+from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.utils.s3_uri import parse_s3_uri
 
 

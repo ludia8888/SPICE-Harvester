@@ -2,7 +2,7 @@ import pytest
 from fastapi import HTTPException, status
 from fastapi.testclient import TestClient
 
-from shared.services.service_factory import ServiceInfo, create_fastapi_service
+from shared.services.core.service_factory import ServiceInfo, create_fastapi_service
 
 
 @pytest.mark.unit

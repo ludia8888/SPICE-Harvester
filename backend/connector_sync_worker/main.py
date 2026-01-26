@@ -38,10 +38,10 @@ from shared.observability.context_propagation import (
 from shared.observability.logging import install_trace_context_filter
 from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
-from shared.services.connector_registry import ConnectorRegistry
-from shared.services.lineage_store import LineageStore
-from shared.services.processed_event_registry import ClaimDecision, ProcessedEventRegistry
-from shared.services.sheet_import_service import FieldMapping, SheetImportService
+from shared.services.registries.connector_registry import ConnectorRegistry
+from shared.services.registries.lineage_store import LineageStore
+from shared.services.registries.processed_event_registry import ClaimDecision, ProcessedEventRegistry
+from shared.services.core.sheet_import_service import FieldMapping, SheetImportService
 from shared.security.auth_utils import get_expected_token
 from shared.utils.import_type_normalization import normalize_import_target_type
 from shared.utils.time_utils import utcnow

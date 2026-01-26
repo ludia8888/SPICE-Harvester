@@ -6,7 +6,7 @@ import uuid
 import pytest
 import redis.asyncio as aioredis
 
-from shared.services.idempotency_service import IdempotencyService
+from shared.services.events.idempotency_service import IdempotencyService
 
 
 @pytest.mark.asyncio

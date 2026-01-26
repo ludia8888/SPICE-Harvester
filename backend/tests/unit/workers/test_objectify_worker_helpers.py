@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from objectify_worker.main import ObjectifyWorker
-from shared.services.sheet_import_service import FieldMapping
+from shared.services.core.sheet_import_service import FieldMapping
 
 
 def test_objectify_worker_field_helpers() -> None:

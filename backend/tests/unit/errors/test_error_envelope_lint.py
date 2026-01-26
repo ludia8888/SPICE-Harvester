@@ -7,7 +7,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from shared.services.service_factory import ServiceInfo, create_fastapi_service
+from shared.services.core.service_factory import ServiceInfo, create_fastapi_service
 
 
 _STATUS_KEY = "status"

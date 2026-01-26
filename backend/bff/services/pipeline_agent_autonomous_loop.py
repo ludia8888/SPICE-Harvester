@@ -25,18 +25,18 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from bff.services.pipeline_plan_models import PipelineClarificationQuestion
 from bff.services.pipeline_plan_validation import validate_pipeline_plan
 from shared.models.pipeline_plan import PipelinePlan, PipelinePlanDataScope
-from shared.services.audit_log_store import AuditLogStore
-from shared.services.dataset_registry import DatasetRegistry
-from shared.services.llm_gateway import (
+from shared.services.core.audit_log_store import AuditLogStore
+from shared.services.registries.dataset_registry import DatasetRegistry
+from shared.services.agent.llm_gateway import (
     LLMCallMeta,
     LLMGateway,
     LLMOutputValidationError,
     LLMRequestError,
     LLMUnavailableError,
 )
-from shared.services.llm_quota import enforce_llm_quota
-from shared.services.pipeline_plan_registry import PipelinePlanRegistry
-from shared.services.redis_service import RedisService
+from shared.services.agent.llm_quota import enforce_llm_quota
+from shared.services.registries.pipeline_plan_registry import PipelinePlanRegistry
+from shared.services.storage.redis_service import RedisService
 from shared.utils.llm_safety import mask_pii, stable_json_dumps
 
 logger = logging.getLogger(__name__)

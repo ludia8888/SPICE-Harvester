@@ -10,8 +10,8 @@ import pytest
 from connector_sync_worker import main as sync_module
 from connector_sync_worker.main import ConnectorSyncWorker
 from shared.models.event_envelope import EventEnvelope
-from shared.services.connector_registry import ConnectorMapping, ConnectorSource
-from shared.services.processed_event_registry import ClaimDecision, ClaimResult
+from shared.services.registries.connector_registry import ConnectorMapping, ConnectorSource
+from shared.services.registries.processed_event_registry import ClaimDecision, ClaimResult
 
 
 class _FakeTracing:

@@ -15,7 +15,7 @@ from shared.dependencies.providers import (
 )
 from shared.models.ai import AIAnswer, AIIntentResponse, AIIntentRoute, AIIntentType, AIQueryPlan, AIQueryTool
 from bff.routers import ai as ai_router
-from shared.services.llm_gateway import LLMCallMeta
+from shared.services.agent.llm_gateway import LLMCallMeta
 
 
 @dataclass

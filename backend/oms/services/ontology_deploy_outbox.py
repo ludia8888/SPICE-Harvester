@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from shared.config.settings import get_settings
-from shared.services.event_store import event_store
+from shared.services.storage.event_store import event_store
 from shared.models.event_envelope import EventEnvelope
 
 from oms.services.ontology_deployment_registry import OntologyDeploymentRegistry

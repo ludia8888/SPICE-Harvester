@@ -22,8 +22,8 @@ from shared.observability.request_context import get_correlation_id, get_request
 from shared.observability.metrics import get_metrics_collector
 from shared.observability.logging import install_trace_context_filter
 from shared.observability.tracing import get_tracing_service
-from shared.services.dataset_registry import DatasetRegistry
-from shared.services.service_factory import ServiceInfo, create_fastapi_service
+from shared.services.registries.dataset_registry import DatasetRegistry
+from shared.services.core.service_factory import ServiceInfo, create_fastapi_service
 from shared.utils.time_utils import utcnow
 
 logger = logging.getLogger(__name__)

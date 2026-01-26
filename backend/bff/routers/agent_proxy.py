@@ -29,9 +29,9 @@ from shared.dependencies.providers import AuditLogStoreDep, LLMGatewayDep, Redis
 from shared.models.responses import ApiResponse
 from shared.security.auth_utils import enforce_db_scope
 from shared.security.input_sanitizer import validate_db_name
-from shared.services.dataset_registry import DatasetRegistry
-from shared.services.pipeline_plan_registry import PipelinePlanRegistry
-from shared.services.pipeline_registry import PipelineRegistry
+from shared.services.registries.dataset_registry import DatasetRegistry
+from shared.services.registries.pipeline_plan_registry import PipelinePlanRegistry
+from shared.services.registries.pipeline_registry import PipelineRegistry
 
 logger = logging.getLogger(__name__)
 

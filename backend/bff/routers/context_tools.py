@@ -11,8 +11,8 @@ from bff.services.oms_client import OMSClient
 from bff.services.pipeline_context_pack import build_pipeline_context_pack
 from shared.models.responses import ApiResponse
 from shared.security.input_sanitizer import sanitize_input, validate_db_name
-from shared.services.agent_policy_registry import AgentPolicyRegistry
-from shared.services.dataset_registry import DatasetRegistry
+from shared.services.registries.agent_policy_registry import AgentPolicyRegistry
+from shared.services.registries.dataset_registry import DatasetRegistry
 
 logger = logging.getLogger(__name__)
 

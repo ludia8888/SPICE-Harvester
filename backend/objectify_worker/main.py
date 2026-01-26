@@ -28,13 +28,13 @@ from shared.observability.context_propagation import attach_context_from_kafka, 
 from shared.observability.logging import install_trace_context_filter
 from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
-from shared.services.dataset_registry import DatasetRegistry
-from shared.services.objectify_registry import ObjectifyRegistry
-from shared.services.pipeline_registry import PipelineRegistry
-from shared.services.lakefs_storage_service import create_lakefs_storage_service
-from shared.services.lineage_store import LineageStore
-from shared.services.processed_event_registry import ClaimDecision, ProcessedEventRegistry
-from shared.services.sheet_import_service import FieldMapping, SheetImportService
+from shared.services.registries.dataset_registry import DatasetRegistry
+from shared.services.registries.objectify_registry import ObjectifyRegistry
+from shared.services.registries.pipeline_registry import PipelineRegistry
+from shared.services.storage.lakefs_storage_service import create_lakefs_storage_service
+from shared.services.registries.lineage_store import LineageStore
+from shared.services.registries.processed_event_registry import ClaimDecision, ProcessedEventRegistry
+from shared.services.core.sheet_import_service import FieldMapping, SheetImportService
 from shared.utils.import_type_normalization import normalize_import_target_type
 from shared.utils.key_spec import normalize_key_spec
 from shared.utils.ontology_type_normalization import normalize_ontology_base_type

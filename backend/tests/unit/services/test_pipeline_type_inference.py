@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from shared.services.pipeline_type_inference import common_join_key_type, infer_xsd_type_with_confidence
+from shared.services.pipeline.pipeline_type_inference import common_join_key_type, infer_xsd_type_with_confidence
 
 
 def test_infer_xsd_type_with_confidence_integer() -> None:

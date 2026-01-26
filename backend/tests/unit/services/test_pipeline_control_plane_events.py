@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from shared.services import pipeline_control_plane_events as cpe
+from shared.services.pipeline import pipeline_control_plane_events as cpe
 
 
 @pytest.mark.asyncio

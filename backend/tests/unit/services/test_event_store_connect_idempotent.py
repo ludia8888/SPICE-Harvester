@@ -5,8 +5,8 @@ from typing import Any
 
 import pytest
 
-from shared.services import event_store as event_store_module
-from shared.services.event_store import EventStore
+from shared.services.storage import event_store as event_store_module
+from shared.services.storage.event_store import EventStore
 
 
 class _DummyS3:

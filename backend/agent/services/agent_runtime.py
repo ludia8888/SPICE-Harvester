@@ -19,8 +19,8 @@ import httpx
 from agent.models import AgentToolCall
 from shared.config.settings import get_settings
 from shared.models.event_envelope import EventEnvelope
-from shared.services.audit_log_store import AuditLogStore
-from shared.services.event_store import EventStore
+from shared.services.core.audit_log_store import AuditLogStore
+from shared.services.storage.event_store import EventStore
 from shared.utils.llm_safety import digest_for_audit, mask_pii, truncate_text
 
 logger = logging.getLogger(__name__)

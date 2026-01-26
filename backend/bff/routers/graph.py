@@ -13,15 +13,15 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status, Query
 from pydantic import BaseModel
 
 from bff.dependencies import get_oms_client
-from shared.services.dataset_registry import DatasetRegistry
+from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.utils.access_policy import apply_access_policy
 from shared.security.input_sanitizer import validate_branch_name, validate_db_name
 from shared.utils.language import get_accept_language
-from shared.services.graph_federation_service_woql import GraphFederationServiceWOQL
+from shared.services.core.graph_federation_service_woql import GraphFederationServiceWOQL
 from shared.config.app_config import AppConfig
 from shared.config.settings import get_settings
 from shared.dependencies.providers import LineageStoreDep
-from shared.services.lineage_store import LineageStore
+from shared.services.registries.lineage_store import LineageStore
 from shared.models.graph_query import (
     GraphEdge,
     GraphHop,
@@ -117,7 +117,7 @@ def _apply_access_policies_to_documents(
 
 
 # Import needed dependencies
-from shared.services.async_terminus import AsyncTerminusService
+from shared.services.core.async_terminus import AsyncTerminusService
 from shared.models.config import ConnectionConfig
 
 # Dependency for GraphFederationServiceWOQL (REAL WOQL)

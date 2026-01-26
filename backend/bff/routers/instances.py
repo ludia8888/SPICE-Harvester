@@ -24,17 +24,17 @@ from shared.security.input_sanitizer import (
     sanitize_es_query,
 )
 from shared.security.database_access import DOMAIN_MODEL_ROLES, enforce_database_role
-from shared.services.elasticsearch_service import ElasticsearchService
+from shared.services.storage.elasticsearch_service import ElasticsearchService
 from shared.config.search_config import get_instances_index_name
 from shared.config.app_config import AppConfig
 from shared.config.settings import get_settings
-from shared.services.action_log_registry import ActionLogRecord, ActionLogRegistry
-from shared.services.dataset_registry import DatasetRegistry
-from shared.services.lakefs_storage_service import create_lakefs_storage_service
-from shared.services.storage_service import create_storage_service
+from shared.services.registries.action_log_registry import ActionLogRecord, ActionLogRegistry
+from shared.services.registries.dataset_registry import DatasetRegistry
+from shared.services.storage.lakefs_storage_service import create_lakefs_storage_service
+from shared.services.storage.storage_service import create_storage_service
 from shared.utils.access_policy import apply_access_policy
 from shared.utils.writeback_lifecycle import derive_lifecycle_id, overlay_doc_id
-from shared.services.writeback_merge_service import WritebackMergeService
+from shared.services.core.writeback_merge_service import WritebackMergeService
 from elasticsearch.exceptions import ConnectionError as ESConnectionError, NotFoundError, RequestError
 
 logger = logging.getLogger(__name__)

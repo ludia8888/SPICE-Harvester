@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 
 from funnel.services.data_processor import FunnelDataProcessor
 from funnel.services.structure_analysis import FunnelStructureAnalyzer
-from shared.services.sheet_grid_parser import SheetGridParseOptions, SheetGridParser
+from shared.services.core.sheet_grid_parser import SheetGridParseOptions, SheetGridParser
 from shared.models.sheet_grid import GoogleSheetStructureAnalysisRequest, SheetGrid
 from shared.models.structure_patch import SheetStructurePatch
 from shared.models.structure_analysis import (

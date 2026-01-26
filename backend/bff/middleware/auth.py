@@ -19,7 +19,7 @@ from shared.errors.error_envelope import build_error_envelope
 from shared.errors.error_types import ErrorCategory, ErrorCode
 from shared.security.auth_utils import extract_presented_token, is_exempt_path
 from shared.security.user_context import UserPrincipal, UserTokenError, extract_bearer_token, verify_user_token
-from shared.services.agent_tool_registry import AgentToolPolicyRecord
+from shared.services.registries.agent_tool_registry import AgentToolPolicyRecord
 from shared.observability.request_context import get_correlation_id, get_request_id
 from shared.utils.llm_safety import digest_for_audit
 

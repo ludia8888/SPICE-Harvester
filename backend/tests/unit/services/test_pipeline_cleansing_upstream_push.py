@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from bff.services.pipeline_cleansing_utils import apply_cleansing_transforms
-from shared.services.pipeline_preflight_utils import SchemaInfo
+from shared.services.pipeline.pipeline_preflight_utils import SchemaInfo
 
 
 @pytest.mark.unit

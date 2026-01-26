@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from bff.routers.ci_webhooks import AgentSessionCIResultIngestRequest, ingest_ci_result
-from shared.services.agent_session_registry import AgentSessionCIResultRecord, AgentSessionRecord
+from shared.services.registries.agent_session_registry import AgentSessionCIResultRecord, AgentSessionRecord
 
 
 class _Request:

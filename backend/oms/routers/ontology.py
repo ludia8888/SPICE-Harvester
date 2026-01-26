@@ -28,11 +28,11 @@ from shared.models.commands import CommandType, OntologyCommand, CommandStatus
 from shared.models.events import EventType
 from shared.config.app_config import AppConfig
 from shared.models.event_envelope import EventEnvelope
-from shared.services.aggregate_sequence_allocator import OptimisticConcurrencyError
+from shared.services.events.aggregate_sequence_allocator import OptimisticConcurrencyError
 from shared.utils.ontology_version import resolve_ontology_version
 from shared.utils.language import coerce_localized_text, get_accept_language, select_localized_text
 from shared.utils.ontology_type_normalization import normalize_ontology_base_type
-from shared.services.ontology_linter import (
+from shared.services.core.ontology_linter import (
     OntologyLinterConfig,
     compute_risk_score,
     lint_ontology_create,

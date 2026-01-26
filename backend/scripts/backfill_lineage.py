@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from oms.services.event_store import EventStore
-from shared.services.lineage_store import LineageStore
+from shared.services.registries.lineage_store import LineageStore
 
 
 def _parse_dt(value: str) -> datetime:

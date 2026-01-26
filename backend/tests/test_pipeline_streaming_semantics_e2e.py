@@ -9,7 +9,7 @@ from typing import Any, Optional
 import httpx
 import pytest
 
-from shared.services.dataset_registry import DatasetRegistry
+from shared.services.registries.dataset_registry import DatasetRegistry
 
 
 BFF_URL = (os.getenv("BFF_BASE_URL") or "http://localhost:8002").rstrip("/")

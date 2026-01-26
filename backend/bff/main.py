@@ -35,13 +35,13 @@ from shared.dependencies import (
     shutdown_container,
     register_core_services
 )
-from shared.services.dataset_ingest_outbox import run_dataset_ingest_outbox_worker
-from shared.services.dataset_ingest_reconciler import run_dataset_ingest_reconciler
-from shared.services.objectify_outbox import run_objectify_outbox_worker
-from shared.services.objectify_reconciler import run_objectify_reconciler
-from shared.services.agent_retention_worker import run_agent_session_retention_worker
-from shared.services.storage_service import StorageService, create_storage_service
-from shared.services.lineage_store import LineageStore
+from shared.services.events.dataset_ingest_outbox import run_dataset_ingest_outbox_worker
+from shared.services.events.dataset_ingest_reconciler import run_dataset_ingest_reconciler
+from shared.services.events.objectify_outbox import run_objectify_outbox_worker
+from shared.services.events.objectify_reconciler import run_objectify_reconciler
+from shared.services.agent.agent_retention_worker import run_agent_session_retention_worker
+from shared.services.storage.storage_service import StorageService, create_storage_service
+from shared.services.registries.lineage_store import LineageStore
 from shared.dependencies.providers import (
     StorageServiceDep,
     RedisServiceDep, 
@@ -50,19 +50,19 @@ from shared.dependencies.providers import (
 )
 
 # Service factory import
-from shared.services.service_factory import create_fastapi_service, get_bff_service_info, run_service
-from shared.services.connector_registry import ConnectorRegistry
-from shared.services.dataset_registry import DatasetRegistry
-from shared.services.dataset_profile_registry import DatasetProfileRegistry
-from shared.services.agent_registry import AgentRegistry
-from shared.services.agent_session_registry import AgentSessionRegistry
-from shared.services.agent_policy_registry import AgentPolicyRegistry
-from shared.services.agent_tool_registry import AgentToolRegistry
-from shared.services.agent_tool_allowlist import bootstrap_agent_tool_allowlist
-from shared.services.pipeline_registry import PipelineRegistry
-from shared.services.pipeline_plan_registry import PipelinePlanRegistry
-from shared.services.pipeline_executor import PipelineExecutor
-from shared.services.objectify_registry import ObjectifyRegistry
+from shared.services.core.service_factory import create_fastapi_service, get_bff_service_info, run_service
+from shared.services.registries.connector_registry import ConnectorRegistry
+from shared.services.registries.dataset_registry import DatasetRegistry
+from shared.services.registries.dataset_profile_registry import DatasetProfileRegistry
+from shared.services.registries.agent_registry import AgentRegistry
+from shared.services.registries.agent_session_registry import AgentSessionRegistry
+from shared.services.registries.agent_policy_registry import AgentPolicyRegistry
+from shared.services.registries.agent_tool_registry import AgentToolRegistry
+from shared.services.agent.agent_tool_allowlist import bootstrap_agent_tool_allowlist
+from shared.services.registries.pipeline_registry import PipelineRegistry
+from shared.services.registries.pipeline_plan_registry import PipelinePlanRegistry
+from shared.services.pipeline.pipeline_executor import PipelineExecutor
+from shared.services.registries.objectify_registry import ObjectifyRegistry
 
 # Shared models and utilities
 from shared.models.ontology import (
@@ -88,8 +88,8 @@ from shared.security.input_sanitizer import (
 )
 from shared.utils.label_mapper import LabelMapper
 from shared.dependencies import configure_type_inference_service
-from shared.services.redis_service import create_redis_service
-from shared.services.websocket_service import get_notification_service
+from shared.services.storage.redis_service import create_redis_service
+from shared.services.core.websocket_service import get_notification_service
 
 # Rate limiting middleware
 from shared.middleware.rate_limiter import rate_limit, RateLimitPresets, RateLimiter
@@ -427,7 +427,7 @@ class BFFServiceContainer:
             dataset_registry = self.get_dataset_registry()
             storage_service = None
             try:
-                from shared.services.storage_service import create_storage_service
+                from shared.services.storage.storage_service import create_storage_service
 
                 storage_service = create_storage_service(self.settings)
             except Exception as exc:

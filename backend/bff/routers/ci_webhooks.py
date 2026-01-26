@@ -22,7 +22,7 @@ from pydantic import BaseModel, Field
 
 from shared.models.requests import ApiResponse
 from shared.security.input_sanitizer import sanitize_input
-from shared.services.agent_session_registry import AgentSessionRegistry
+from shared.services.registries.agent_session_registry import AgentSessionRegistry
 
 router = APIRouter(prefix="/admin/ci", tags=["Admin"])
 

@@ -35,7 +35,7 @@ from shared.observability.context_propagation import (
 from shared.observability.logging import install_trace_context_filter
 from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
-from shared.services.connector_registry import ConnectorRegistry, ConnectorSource
+from shared.services.registries.connector_registry import ConnectorRegistry, ConnectorSource
 from shared.utils.time_utils import utcnow
 
 logger = logging.getLogger(__name__)

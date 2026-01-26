@@ -1,7 +1,7 @@
 import pytest
 
 from objectify_worker.main import ObjectifyWorker
-from shared.services.sheet_import_service import FieldMapping
+from shared.services.core.sheet_import_service import FieldMapping
 
 
 def _build_instances(

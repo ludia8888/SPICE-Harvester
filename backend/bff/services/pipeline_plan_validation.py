@@ -17,9 +17,9 @@ from typing import Any, Dict, List, Optional
 from shared.models.agent_plan_report import PlanCompilationReport, PlanDiagnostic, PlanDiagnosticSeverity
 from shared.models.pipeline_plan import PipelinePlan
 from shared.models.pipeline_task_spec import PipelineTaskSpec
-from shared.services.dataset_registry import DatasetRegistry
-from shared.services.pipeline_graph_utils import normalize_edges, normalize_nodes, topological_sort
-from shared.services.pipeline_task_spec_policy import clamp_task_spec, validate_plan_against_task_spec
+from shared.services.registries.dataset_registry import DatasetRegistry
+from shared.services.pipeline.pipeline_graph_utils import normalize_edges, normalize_nodes, topological_sort
+from shared.services.pipeline.pipeline_task_spec_policy import clamp_task_spec, validate_plan_against_task_spec
 from shared.utils.canonical_json import sha256_canonical_json_prefixed
 
 from bff.routers import pipeline as pipeline_router

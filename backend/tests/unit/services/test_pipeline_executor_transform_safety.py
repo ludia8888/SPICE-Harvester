@@ -1,6 +1,6 @@
 import pytest
 
-from shared.services.pipeline_executor import PipelineTable, _join_tables, _union_tables
+from shared.services.pipeline.pipeline_executor import PipelineTable, _join_tables, _union_tables
 
 
 @pytest.mark.unit

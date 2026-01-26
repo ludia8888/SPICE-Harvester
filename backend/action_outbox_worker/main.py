@@ -31,11 +31,11 @@ from shared.observability.context_propagation import attach_context_from_carrier
 from shared.observability.logging import install_trace_context_filter
 from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
-from shared.services.action_log_registry import ActionLogRecord, ActionLogRegistry, ActionLogStatus
-from shared.services.event_store import event_store
-from shared.services.lakefs_client import LakeFSClient, LakeFSConflictError, LakeFSError
-from shared.services.lakefs_storage_service import create_lakefs_storage_service, LakeFSStorageService
-from shared.services.processed_event_registry import (
+from shared.services.registries.action_log_registry import ActionLogRecord, ActionLogRegistry, ActionLogStatus
+from shared.services.storage.event_store import event_store
+from shared.services.storage.lakefs_client import LakeFSClient, LakeFSConflictError, LakeFSError
+from shared.services.storage.lakefs_storage_service import create_lakefs_storage_service, LakeFSStorageService
+from shared.services.registries.processed_event_registry import (
     ClaimDecision,
     ProcessedEventRegistry,
     validate_registry_enabled,

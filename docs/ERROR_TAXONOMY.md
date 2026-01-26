@@ -68,6 +68,7 @@ Run: `python scripts/generate_error_taxonomy.py`.
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | BUILD_NOT_SUCCESS | SHV-{SUBSYS}-PIP-STA-1001 | pipeline | state | error | Build not successful | false | none | 1 | 0 | 0 | none | false | true | BUILD_NOT_SUCCESS | request_human | 409 |
 | CARDINALITY_RECOMMENDATION | SHV-{SUBSYS}-ONT-VAL-1107 | ontology | validation | info | Cardinality recommendation | false | none | 1 | 0 | 0 | none | false | true | CARDINALITY_RECOMMENDATION | request_human | 400 |
+| DEFINITION_MISMATCH | SHV-{SUBSYS}-PIP-CON-1008 | pipeline | conflict | error | Pipeline definition mismatch | false | none | 1 | 0 | 0 | none | false | true | DEFINITION_MISMATCH | request_human | 409 |
 | DUPLICATE_PREDICATE | SHV-{SUBSYS}-ONT-VAL-1118 | ontology | validation | error | Duplicate predicate | false | none | 1 | 0 | 0 | none | false | true | DUPLICATE_PREDICATE | request_human | 400 |
 | DUPLICATE_RELATIONSHIP | SHV-{SUBSYS}-ONT-VAL-1117 | ontology | validation | error | Duplicate relationship | false | none | 1 | 0 | 0 | none | false | true | DUPLICATE_RELATIONSHIP | request_human | 400 |
 | DUPLICATE_ROW_KEY | SHV-{SUBSYS}-DAT-CON-3002 | data | conflict | error | Duplicate row key | false | none | 1 | 0 | 0 | none | false | true | DUPLICATE_ROW_KEY | request_human | 409 |
@@ -232,6 +233,8 @@ Run: `python scripts/generate_error_taxonomy.py`.
 | conflict_detected | SHV-{SUBSYS}-CNF-CON-3001 | conflict | conflict | error | Conflict detected | false | none | 1 | 0 | 0 | none | false | true | conflict_detected | request_human | 409 |
 | context7_unavailable | SHV-{SUBSYS}-UPS-UNA-3001 | upstream | unavailable | error | Context7 unavailable | true | backoff | 3 | 500 | 10000 | deterministic_equal_jitter | false | false | context7_unavailable | retry_backoff | 503 |
 | data_access_denied | SHV-{SUBSYS}-ACC-PER-3001 | access | permission | error | Data access denied | false | none | 1 | 0 | 0 | none | false | true | data_access_denied | request_human | 403 |
+| llm_output_invalid_json | SHV-{SUBSYS}-UPS-VAL-4001 | upstream | validation | warning | LLM output invalid JSON | false | none | 1 | 0 | 0 | none | false | true | llm_output_invalid_json | request_human | 400 |
+| llm_request_failed | SHV-{SUBSYS}-UPS-INTG-4001 | upstream | integration | error | LLM request failed | false | none | 1 | 0 | 0 | none | false | true | llm_request_failed | request_human | 502 |
 | no_deployed_ontology | SHV-{SUBSYS}-ONT-STA-3001 | ontology | state | error | No deployed ontology | false | none | 1 | 0 | 0 | none | false | true | no_deployed_ontology | request_human | 409 |
 | optimistic_concurrency_conflict | SHV-{SUBSYS}-CNF-CON-2001 | conflict | conflict | error | Optimistic concurrency conflict | false | none | 1 | 0 | 0 | none | false | true | optimistic_concurrency_conflict | request_human | 409 |
 | overlay_degraded | SHV-{SUBSYS}-SYS-UNA-3001 | system | unavailable | error | Overlay degraded | false | none | 1 | 0 | 0 | none | false | true | overlay_degraded | safe_mode,request_human | 503 |

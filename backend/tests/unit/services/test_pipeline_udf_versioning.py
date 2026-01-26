@@ -6,8 +6,8 @@ from typing import Any, Optional
 
 import pytest
 
-from shared.services.pipeline_executor import PipelineExecutor
-from shared.services.pipeline_registry import PipelineRegistry
+from shared.services.pipeline.pipeline_executor import PipelineExecutor
+from shared.services.registries.pipeline_registry import PipelineRegistry
 
 
 def _get_postgres_url_candidates() -> list[str]:

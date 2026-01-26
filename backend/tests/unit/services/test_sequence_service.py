@@ -4,7 +4,7 @@ import fnmatch
 
 import pytest
 
-from shared.services.sequence_service import SequenceService
+from shared.services.core.sequence_service import SequenceService
 
 
 class _FakeRedis:

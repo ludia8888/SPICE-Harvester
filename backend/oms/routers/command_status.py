@@ -15,8 +15,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from oms.dependencies import CommandStatusServiceDep, EventStoreDep, ProcessedEventRegistryDep
 from shared.models.commands import CommandResult, CommandStatus
-from shared.services.command_status_service import CommandStatusService
-from shared.services.processed_event_registry import ProcessedEventRegistry
+from shared.services.core.command_status_service import CommandStatusService
+from shared.services.registries.processed_event_registry import ProcessedEventRegistry
 from oms.services.event_store import EventStore
 from oms.utils.command_status_utils import map_registry_status
 

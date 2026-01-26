@@ -26,11 +26,11 @@ from shared.models.background_task import (
     TaskMetrics,
     TaskFilter
 )
-from shared.services.background_task_manager import (
+from shared.services.core.background_task_manager import (
     BackgroundTaskManager,
     create_background_task_manager,
 )
-from shared.services.redis_service import RedisService, create_redis_service
+from shared.services.storage.redis_service import RedisService, create_redis_service
 from shared.dependencies import get_container, ServiceContainer
 
 logger = logging.getLogger(__name__)

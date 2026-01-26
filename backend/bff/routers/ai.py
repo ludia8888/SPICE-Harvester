@@ -42,16 +42,16 @@ from shared.models.ai import (
 from shared.models.graph_query import GraphQueryRequest, GraphQueryResponse
 from shared.observability.request_context import get_correlation_id, get_request_id
 from shared.security.input_sanitizer import sanitize_input, validate_branch_name, validate_db_name
-from shared.services.redis_service import RedisService
-from shared.services.llm_gateway import LLMOutputValidationError, LLMRequestError, LLMUnavailableError
+from shared.services.storage.redis_service import RedisService
+from shared.services.agent.llm_gateway import LLMOutputValidationError, LLMRequestError, LLMUnavailableError
 from shared.utils.language import detect_language_from_text, get_accept_language, normalize_language
 from shared.utils.llm_safety import digest_for_audit, mask_pii, sample_items
 
 # Reuse the existing graph query execution logic (single source of truth)
 from bff.routers.graph import execute_graph_query as _execute_graph_query_route
 from bff.routers.graph import get_graph_federation_service as _get_graph_federation_service
-from shared.services.agent_session_registry import AgentSessionRegistry
-from shared.services.dataset_registry import DatasetRegistry
+from shared.services.registries.agent_session_registry import AgentSessionRegistry
+from shared.services.registries.dataset_registry import DatasetRegistry
 
 logger = logging.getLogger(__name__)
 

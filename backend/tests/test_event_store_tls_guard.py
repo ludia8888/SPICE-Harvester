@@ -9,7 +9,7 @@ from contextlib import contextmanager
 
 import pytest
 
-from shared.services.event_store import EventStore
+from shared.services.storage.event_store import EventStore
 
 
 @contextmanager

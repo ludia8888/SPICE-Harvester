@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from shared.services.storage_service import StorageService
+from shared.services.storage.storage_service import StorageService
 
 
 class _FakeS3Client:
@@ -48,7 +48,7 @@ async def test_list_command_files_paginates_filters_and_sorts():
 
 
 def test_storage_service_does_not_disable_tls_verify_by_default(monkeypatch):
-    import shared.services.storage_service as storage_module
+    import shared.services.storage.storage_service as storage_module
 
     captured = {}
 
@@ -73,7 +73,7 @@ def test_storage_service_does_not_disable_tls_verify_by_default(monkeypatch):
 
 
 def test_storage_service_respects_explicit_tls_verify_flag(monkeypatch):
-    import shared.services.storage_service as storage_module
+    import shared.services.storage.storage_service as storage_module
 
     captured = {}
 
@@ -99,7 +99,7 @@ def test_storage_service_respects_explicit_tls_verify_flag(monkeypatch):
 
 
 def test_storage_service_supports_tls_ca_bundle_path(monkeypatch):
-    import shared.services.storage_service as storage_module
+    import shared.services.storage.storage_service as storage_module
 
     captured = {}
 

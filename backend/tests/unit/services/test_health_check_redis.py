@@ -1,6 +1,6 @@
 import pytest
 
-from shared.services.health_check import HealthStatus, RedisHealthCheck
+from shared.services.core.health_check import HealthStatus, RedisHealthCheck
 
 
 class RedisServiceWithInfo:

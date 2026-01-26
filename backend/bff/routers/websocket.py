@@ -14,7 +14,7 @@ from typing import Optional, Dict, Any
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, Query, HTTPException
 from fastapi.responses import HTMLResponse
 
-from shared.services.websocket_service import (
+from shared.services.core.websocket_service import (
     get_connection_manager, 
     get_notification_service,
     WebSocketConnectionManager

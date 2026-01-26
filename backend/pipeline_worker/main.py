@@ -53,16 +53,16 @@ from shared.observability.context_propagation import attach_context_from_kafka, 
 from shared.observability.logging import install_trace_context_filter
 from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
-from shared.services.dataset_registry import DatasetRegistry
-from shared.services.lakefs_client import LakeFSClient, LakeFSConflictError, LakeFSError
-from shared.services.lakefs_storage_service import LakeFSStorageService
-from shared.services.lineage_store import LineageStore
-from shared.services.pipeline_profiler import compute_column_stats
-from shared.services.pipeline_registry import PipelineRegistry
-from shared.services.pipeline_control_plane_events import emit_pipeline_control_plane_event
-from shared.services.pipeline_graph_utils import build_incoming, normalize_edges, normalize_nodes, topological_sort
-from shared.services.pipeline_parameter_utils import apply_parameters, normalize_parameters
-from shared.services.pipeline_definition_utils import (
+from shared.services.registries.dataset_registry import DatasetRegistry
+from shared.services.storage.lakefs_client import LakeFSClient, LakeFSConflictError, LakeFSError
+from shared.services.storage.lakefs_storage_service import LakeFSStorageService
+from shared.services.registries.lineage_store import LineageStore
+from shared.services.pipeline.pipeline_profiler import compute_column_stats
+from shared.services.registries.pipeline_registry import PipelineRegistry
+from shared.services.pipeline.pipeline_control_plane_events import emit_pipeline_control_plane_event
+from shared.services.pipeline.pipeline_graph_utils import build_incoming, normalize_edges, normalize_nodes, topological_sort
+from shared.services.pipeline.pipeline_parameter_utils import apply_parameters, normalize_parameters
+from shared.services.pipeline.pipeline_definition_utils import (
     build_expectations_with_pk,
     resolve_delete_column,
     resolve_execution_semantics,
@@ -72,28 +72,28 @@ from shared.services.pipeline_definition_utils import (
     validate_pk_semantics,
     split_expectation_columns,
 )
-from shared.services.pipeline_dataset_utils import normalize_dataset_selection, resolve_dataset_version
-from shared.services.pipeline_validation_utils import (
+from shared.services.pipeline.pipeline_dataset_utils import normalize_dataset_selection, resolve_dataset_version
+from shared.services.pipeline.pipeline_validation_utils import (
     TableOps,
     validate_expectations,
     validate_schema_checks,
     validate_schema_contract,
 )
-from shared.services.pipeline_schema_utils import normalize_schema_type
-from shared.services.pipeline_type_utils import normalize_cast_mode, spark_type_to_xsd, xsd_to_spark_type
-from shared.services.pipeline_transform_spec import (
+from shared.services.pipeline.pipeline_schema_utils import normalize_schema_type
+from shared.services.pipeline.pipeline_type_utils import normalize_cast_mode, spark_type_to_xsd, xsd_to_spark_type
+from shared.services.pipeline.pipeline_transform_spec import (
     SUPPORTED_TRANSFORMS,
     normalize_operation,
     normalize_union_mode,
     resolve_join_spec,
 )
-from shared.services.objectify_registry import ObjectifyRegistry
-from shared.services.objectify_job_queue import ObjectifyJobQueue
+from shared.services.registries.objectify_registry import ObjectifyRegistry
+from shared.services.events.objectify_job_queue import ObjectifyJobQueue
 from shared.models.objectify_job import ObjectifyJob
-from shared.services.processed_event_registry import ProcessedEventRegistry, ClaimDecision
-from shared.services.pipeline_lock import PipelineLock, PipelineLockError
-from shared.services.redis_service import RedisService, create_redis_service_legacy
-from shared.services.storage_service import StorageService
+from shared.services.registries.processed_event_registry import ProcessedEventRegistry, ClaimDecision
+from shared.services.pipeline.pipeline_lock import PipelineLock, PipelineLockError
+from shared.services.storage.redis_service import RedisService, create_redis_service_legacy
+from shared.services.storage.storage_service import StorageService
 from shared.utils.path_utils import safe_lakefs_ref
 from shared.utils.s3_uri import build_s3_uri, parse_s3_uri
 from shared.utils.schema_hash import compute_schema_hash

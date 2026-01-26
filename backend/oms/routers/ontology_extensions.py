@@ -50,7 +50,7 @@ from shared.security.input_sanitizer import (
 from shared.utils.branch_utils import get_protected_branches, protected_branch_write_message
 from shared.config.settings import get_settings
 from shared.utils.ontology_type_normalization import normalize_ontology_base_type
-from shared.services.ontology_linter import (
+from shared.services.core.ontology_linter import (
     OntologyLinterConfig,
     compute_risk_score,
     lint_ontology_create,

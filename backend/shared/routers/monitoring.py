@@ -394,7 +394,7 @@ async def get_background_task_metrics(
     """
     try:
         # Get BackgroundTaskManager from container
-        from shared.services.background_task_manager import BackgroundTaskManager
+        from shared.services.core.background_task_manager import BackgroundTaskManager
         
         if not container.has(BackgroundTaskManager):
             return {
@@ -459,7 +459,7 @@ async def get_active_background_tasks(
     helping identify potential issues with stuck or long-running tasks.
     """
     try:
-        from shared.services.background_task_manager import BackgroundTaskManager
+        from shared.services.core.background_task_manager import BackgroundTaskManager
         from shared.models.background_task import TaskStatus
         
         if not container.has(BackgroundTaskManager):
@@ -541,7 +541,7 @@ async def get_background_task_health(
     - Resource exhaustion
     """
     try:
-        from shared.services.background_task_manager import BackgroundTaskManager
+        from shared.services.core.background_task_manager import BackgroundTaskManager
         
         if not container.has(BackgroundTaskManager):
             return JSONResponse(

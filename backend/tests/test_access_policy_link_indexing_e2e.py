@@ -22,9 +22,9 @@ import pytest_asyncio
 
 from shared.config.settings import get_settings
 from shared.config.service_config import ServiceConfig
-from shared.services.dataset_registry import DatasetRegistry
-from shared.services.event_store import EventStore
-from shared.services.lakefs_storage_service import create_lakefs_storage_service
+from shared.services.registries.dataset_registry import DatasetRegistry
+from shared.services.storage.event_store import EventStore
+from shared.services.storage.lakefs_storage_service import create_lakefs_storage_service
 from shared.utils.s3_uri import build_s3_uri
 from tests.utils.auth import bff_auth_headers, oms_auth_headers
 

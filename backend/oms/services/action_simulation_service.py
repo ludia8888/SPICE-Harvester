@@ -11,10 +11,10 @@ from shared.config.app_config import AppConfig
 from shared.errors.enterprise_catalog import is_external_code, resolve_enterprise_error
 from shared.errors.error_types import ErrorCode
 from shared.security.database_access import DOMAIN_MODEL_ROLES, get_database_access_role
-from shared.services.dataset_registry import DatasetRegistry
-from shared.services.lakefs_storage_service import LakeFSStorageService
-from shared.services.storage_service import StorageService
-from shared.services.writeback_merge_service import WritebackMergeService
+from shared.services.registries.dataset_registry import DatasetRegistry
+from shared.services.storage.lakefs_storage_service import LakeFSStorageService
+from shared.services.storage.storage_service import StorageService
+from shared.services.core.writeback_merge_service import WritebackMergeService
 from shared.utils.access_policy import apply_access_policy
 from shared.utils.action_input_schema import (
     ActionInputSchemaError,

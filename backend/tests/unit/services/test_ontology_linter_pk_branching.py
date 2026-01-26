@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 
 from shared.models.ontology import Property
-from shared.services.ontology_linter import OntologyLinterConfig, lint_ontology_create
+from shared.services.core.ontology_linter import OntologyLinterConfig, lint_ontology_create
 
 
 def _reset_env(monkeypatch) -> None:

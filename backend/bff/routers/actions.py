@@ -20,9 +20,9 @@ from bff.dependencies import get_action_log_registry, get_oms_client
 from bff.services.oms_client import OMSClient
 from shared.security.database_access import DOMAIN_MODEL_ROLES, enforce_database_role, resolve_database_actor
 from shared.security.input_sanitizer import SecurityViolationError, sanitize_input, validate_db_name
-from shared.services.action_log_registry import ActionLogRecord, ActionLogRegistry
+from shared.services.registries.action_log_registry import ActionLogRecord, ActionLogRegistry
 
-from shared.services.action_simulation_registry import ActionSimulationRegistry
+from shared.services.registries.action_simulation_registry import ActionSimulationRegistry
 
 logger = logging.getLogger(__name__)
 

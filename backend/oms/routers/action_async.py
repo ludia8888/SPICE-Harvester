@@ -28,11 +28,11 @@ from shared.observability.context_propagation import enrich_metadata_with_curren
 from shared.observability.request_context import get_correlation_id
 from shared.security.database_access import DOMAIN_MODEL_ROLES, get_database_access_role
 from shared.security.input_sanitizer import SecurityViolationError, sanitize_input
-from shared.services.action_log_registry import ActionLogRegistry
-from shared.services.action_simulation_registry import ActionSimulationRegistry
-from shared.services.dataset_registry import DatasetRegistry
-from shared.services.lakefs_storage_service import create_lakefs_storage_service
-from shared.services.storage_service import create_storage_service
+from shared.services.registries.action_log_registry import ActionLogRegistry
+from shared.services.registries.action_simulation_registry import ActionSimulationRegistry
+from shared.services.registries.dataset_registry import DatasetRegistry
+from shared.services.storage.lakefs_storage_service import create_lakefs_storage_service
+from shared.services.storage.storage_service import create_storage_service
 from shared.utils.canonical_json import sha256_canonical_json_prefixed
 from shared.utils.action_audit_policy import audit_action_log_input
 from shared.utils.action_input_schema import (

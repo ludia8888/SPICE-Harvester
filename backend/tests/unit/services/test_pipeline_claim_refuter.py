@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from shared.models.pipeline_plan import PipelinePlan
-from shared.services.pipeline_claim_refuter import refute_pipeline_plan_claims
+from shared.services.pipeline.pipeline_claim_refuter import refute_pipeline_plan_claims
 
 
 @pytest.mark.asyncio

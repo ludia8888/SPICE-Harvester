@@ -28,18 +28,18 @@ from shared.models.objectify_job import ObjectifyJob
 from shared.middleware.rate_limiter import rate_limit, RateLimitPresets
 from shared.observability.tracing import trace_endpoint
 from shared.security.input_sanitizer import sanitize_input, validate_db_name
-from shared.services.sheet_grid_parser import SheetGridParseOptions, SheetGridParser
-from shared.services.objectify_job_queue import ObjectifyJobQueue
-from shared.services.objectify_registry import ObjectifyRegistry
+from shared.services.core.sheet_grid_parser import SheetGridParseOptions, SheetGridParser
+from shared.services.events.objectify_job_queue import ObjectifyJobQueue
+from shared.services.registries.objectify_registry import ObjectifyRegistry
 from shared.utils.schema_hash import compute_schema_hash
-from shared.services.connector_registry import ConnectorRegistry
-from shared.services.dataset_registry import DatasetRegistry
-from shared.services.pipeline_registry import PipelineRegistry
+from shared.services.registries.connector_registry import ConnectorRegistry
+from shared.services.registries.dataset_registry import DatasetRegistry
+from shared.services.registries.pipeline_registry import PipelineRegistry
 from shared.dependencies.providers import LineageStoreDep
 from shared.utils.s3_uri import build_s3_uri
 from shared.config.app_config import AppConfig
 from shared.config.settings import get_settings
-from shared.services.event_store import event_store
+from shared.services.storage.event_store import event_store
 from shared.models.event_envelope import EventEnvelope
 from shared.utils.event_utils import build_command_event
 from data_connector.google_sheets.auth import GoogleOAuth2Client

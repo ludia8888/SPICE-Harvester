@@ -41,16 +41,16 @@ from shared.dependencies.providers import (
 )
 
 # Service factory import
-from shared.services.service_factory import create_fastapi_service, get_oms_service_info, run_service
+from shared.services.core.service_factory import create_fastapi_service, get_oms_service_info, run_service
 from oms.middleware.auth import install_oms_auth_middleware, ensure_oms_auth_configured
 
 # OMS specific imports  
 from oms.services.async_terminus import AsyncTerminusService
 from oms.services.event_store import event_store
 from shared.models.config import ConnectionConfig
-from shared.services.redis_service import RedisService
-from shared.services.command_status_service import CommandStatusService
-from shared.services.elasticsearch_service import ElasticsearchService
+from shared.services.storage.redis_service import RedisService
+from shared.services.core.command_status_service import CommandStatusService
+from shared.services.storage.elasticsearch_service import ElasticsearchService
 from shared.models.requests import ApiResponse
 from shared.errors.error_envelope import build_error_envelope
 from shared.errors.error_types import ErrorCategory, ErrorCode

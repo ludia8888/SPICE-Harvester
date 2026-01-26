@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from bff.dependencies import LabelMapper, TerminusService, get_label_mapper, get_terminus_service
 from shared.models.ontology import QueryInput, QueryResponse
-from shared.services.dataset_registry import DatasetRegistry
+from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.utils.access_policy import apply_access_policy
 
 # Security validation imports

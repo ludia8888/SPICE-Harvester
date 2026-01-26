@@ -20,7 +20,7 @@ from pydantic import BaseModel, Field
 
 from bff.dependencies import get_oms_client, get_storage_service, get_elasticsearch_service
 from bff.services.oms_client import OMSClient
-from shared.services.event_store import EventStore
+from shared.services.storage.event_store import EventStore
 from shared.config.settings import get_settings
 from shared.config.search_config import (
     get_instances_index_name,
@@ -29,19 +29,19 @@ from shared.config.search_config import (
 )
 from shared.dependencies.providers import AuditLogStoreDep, LineageStoreDep
 from shared.models.lineage import LineageDirection
-from shared.services.storage_service import StorageService
-from shared.services.background_task_manager import (
+from shared.services.storage.storage_service import StorageService
+from shared.services.core.background_task_manager import (
     BackgroundTaskManager,
     create_background_task_manager,
 )
-from shared.services.redis_service import RedisService, create_redis_service
-from shared.services.elasticsearch_service import ElasticsearchService
+from shared.services.storage.redis_service import RedisService, create_redis_service
+from shared.services.storage.elasticsearch_service import ElasticsearchService
 from shared.dependencies import get_container, ServiceContainer
 from shared.models.background_task import TaskStatus
 from shared.security.input_sanitizer import validate_branch_name, validate_db_name
 from shared.middleware.rate_limiter import rate_limit, RateLimitPresets
 from shared.utils.ontology_version import split_ref_commit
-from shared.services.pipeline_registry import PipelineRegistry
+from shared.services.registries.pipeline_registry import PipelineRegistry
 from shared.security.auth_utils import extract_presented_token, get_expected_token
 
 logger = logging.getLogger(__name__)

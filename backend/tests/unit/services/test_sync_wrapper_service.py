@@ -8,7 +8,7 @@ import pytest
 
 from shared.models.commands import CommandStatus
 from shared.models.sync_wrapper import SyncOptions
-from shared.services.sync_wrapper_service import SyncWrapperService
+from shared.services.core.sync_wrapper_service import SyncWrapperService
 
 
 class _FakeCommandStatusService:

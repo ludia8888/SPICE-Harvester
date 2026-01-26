@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 from bff.middleware.auth import install_bff_auth_middleware
 from bff.routers.admin import require_admin
 from oms.middleware.auth import install_oms_auth_middleware
-from shared.services.agent_tool_registry import AgentToolPolicyRecord
+from shared.services.registries.agent_tool_registry import AgentToolPolicyRecord
 from shared.i18n.middleware import install_i18n_middleware
 from shared.middleware.rate_limiter import rate_limit, install_rate_limit_headers_middleware
 

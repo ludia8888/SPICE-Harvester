@@ -20,7 +20,7 @@ from shared.security.database_access import (
     SECURITY_ROLES,
     enforce_database_role,
 )
-from shared.services.dataset_registry import DatasetRegistry
+from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.utils.key_spec import normalize_key_spec
 
 logger = logging.getLogger(__name__)
