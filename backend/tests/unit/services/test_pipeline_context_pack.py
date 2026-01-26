@@ -112,19 +112,31 @@ async def test_pipeline_context_pack_suggests_join_keys_and_shows_real_data() ->
     assert profiles.get("customer_id") is not None
     assert profiles.get("customer_id", {}).get("format") is not None
 
-    # FK candidates with direction confidence
+    # FK candidates with Raw Data-Centric observations
     fk_candidates = pack["integration_suggestions"].get("foreign_key_candidates") or []
     assert any(
         c.get("child_column") == "customerId" and c.get("parent_column") == "customer_id"
         for c in fk_candidates
     )
-    # Verify direction confidence is present
+    # Raw Data-Centric (2026-01): Verify direction_analysis and observations
     if fk_candidates:
-        assert "direction_confidence" in fk_candidates[0]
+        # New: direction_analysis with system_guess and alternative
+        assert "direction_analysis" in fk_candidates[0]
+        assert "system_guess" in fk_candidates[0]["direction_analysis"]
+        assert "alternative" in fk_candidates[0]["direction_analysis"]
+        # New: observations list
+        assert "observations" in fk_candidates[0]
+        # New: raw metrics
+        assert "metrics" in fk_candidates[0]
 
-    # Agent guidance should be present
+    # Raw Data-Centric: Agent guidance with "YOU DECIDE" philosophy
     assert "agent_guidance" in pack
-    assert "confidence_summary" in pack
+    assert pack["agent_guidance"]["approach"] == "RAW_DATA_CENTRIC"
+    assert "philosophy" in pack["agent_guidance"]
+    assert "how_to_analyze" in pack["agent_guidance"]
+
+    # New: sample_metadata replaces confidence_summary
+    assert "sample_metadata" in pack
 
 
 @pytest.mark.unit

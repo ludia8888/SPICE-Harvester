@@ -274,6 +274,140 @@ def _coerce_context_pack(context_pack: Any) -> Dict[str, Any]:
     return context_pack if isinstance(context_pack, dict) else {}
 
 
+# ==============================================================================
+# Enterprise Enhancement (2026-01): MCP Tool Safety
+# ==============================================================================
+
+class _ToolCallRateLimiter:
+    """
+    Simple rate limiter for MCP tool calls to prevent runaway Agent loops.
+    Tracks calls per tool and total calls within time windows.
+    """
+
+    def __init__(
+        self,
+        *,
+        max_calls_per_minute: int = 60,
+        max_calls_per_tool_per_minute: int = 30,
+    ):
+        self._max_total = max_calls_per_minute
+        self._max_per_tool = max_calls_per_tool_per_minute
+        self._call_times: List[float] = []
+        self._tool_call_times: Dict[str, List[float]] = {}
+        import time
+        self._time = time
+
+    def check_and_record(self, tool_name: str) -> Optional[str]:
+        """
+        Check if the call is allowed and record it.
+        Returns None if allowed, or an error message if rate limited.
+        """
+        now = self._time.time()
+        minute_ago = now - 60
+
+        # Clean old entries
+        self._call_times = [t for t in self._call_times if t > minute_ago]
+
+        if tool_name not in self._tool_call_times:
+            self._tool_call_times[tool_name] = []
+        self._tool_call_times[tool_name] = [
+            t for t in self._tool_call_times[tool_name] if t > minute_ago
+        ]
+
+        # Check total rate
+        if len(self._call_times) >= self._max_total:
+            return (
+                f"RATE LIMIT: Total MCP tool calls exceeded {self._max_total}/minute. "
+                "This may indicate an Agent loop. Wait before retrying or check Agent logic."
+            )
+
+        # Check per-tool rate
+        if len(self._tool_call_times[tool_name]) >= self._max_per_tool:
+            return (
+                f"RATE LIMIT: Tool '{tool_name}' called {self._max_per_tool}+ times/minute. "
+                "Consider batching operations or using a different approach."
+            )
+
+        # Record the call
+        self._call_times.append(now)
+        self._tool_call_times[tool_name].append(now)
+        return None
+
+
+# Global rate limiter instance
+_rate_limiter = _ToolCallRateLimiter()
+
+
+def _validate_required_params(
+    arguments: Dict[str, Any],
+    required: List[str],
+    tool_name: str,
+) -> Optional[Dict[str, Any]]:
+    """
+    Validate required parameters and return a helpful error response if missing.
+    Returns None if all required params are present, or an error dict otherwise.
+    """
+    missing = []
+    for param in required:
+        value = arguments.get(param)
+        if value is None or (isinstance(value, str) and not value.strip()):
+            missing.append(param)
+
+    if not missing:
+        return None
+
+    return {
+        "error": f"Missing required parameter(s): {', '.join(missing)}",
+        "tool": tool_name,
+        "required_params": required,
+        "received_params": list(arguments.keys()),
+        "hint": f"Call {tool_name} with all required parameters: {required}",
+    }
+
+
+def _build_tool_error_response(
+    tool_name: str,
+    error: Exception,
+    *,
+    arguments: Optional[Dict[str, Any]] = None,
+    hint: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Enterprise Enhancement: Build a helpful error response for MCP tool failures.
+    Includes context about what went wrong and how to fix it.
+    """
+    error_type = type(error).__name__
+    error_msg = str(error)
+
+    response: Dict[str, Any] = {
+        "error": error_msg,
+        "error_type": error_type,
+        "tool": tool_name,
+    }
+
+    # Add specific hints based on error type
+    if "required" in error_msg.lower():
+        response["hint"] = "Check that all required parameters are provided with non-empty values"
+    elif "not found" in error_msg.lower():
+        response["hint"] = "Verify that the referenced ID exists. Use appropriate list/search tools first."
+    elif "invalid" in error_msg.lower():
+        response["hint"] = "Check parameter format and allowed values"
+    elif isinstance(error, PipelinePlanBuilderError):
+        response["hint"] = "This is a plan structure error. Review the plan and fix the identified issue."
+    elif hint:
+        response["hint"] = hint
+
+    # Include relevant arguments for debugging (mask sensitive values)
+    if arguments:
+        safe_args = {
+            k: v if k not in ("token", "password", "secret", "key") else "***"
+            for k, v in arguments.items()
+        }
+        response["arguments_received"] = safe_args
+
+    return response
+
+
 def _normalize_string_list(value: Any) -> List[str]:
     if value is None:
         return []
@@ -1340,6 +1474,12 @@ class PipelineMCPServer:
 
         @self.server.call_tool()
         async def call_tool(name: str, arguments: Dict[str, Any]) -> Any:
+            # Enterprise Enhancement (2026-01): Rate limiting to prevent runaway loops
+            rate_limit_error = _rate_limiter.check_and_record(name)
+            if rate_limit_error:
+                logger.warning("MCP tool rate limited: %s", rate_limit_error)
+                return {"error": rate_limit_error, "tool": name, "retry_after_seconds": 60}
+
             try:
                 if name == "context_pack_build":
                     dataset_registry, profile_registry = await self._ensure_registries()
@@ -2856,13 +2996,33 @@ class PipelineMCPServer:
                         "pipeline_spec_commit_id": pipeline_spec_commit_id,
                     }
 
-                return {"error": f"Unknown tool: {name}"}
+                # Enterprise Enhancement: Helpful error for unknown tools
+                similar_tools = [
+                    t for t in [
+                        "context_pack_build", "plan_new", "plan_add_input", "plan_add_join",
+                        "plan_add_filter", "plan_add_cast", "plan_add_output", "plan_validate",
+                        "plan_preview", "plan_execute", "pipeline_deploy_promote_build",
+                    ]
+                    if name.lower() in t.lower() or t.lower() in name.lower()
+                ]
+                return {
+                    "error": f"Unknown tool: {name}",
+                    "hint": "Check the tool name spelling",
+                    "similar_tools": similar_tools[:3] if similar_tools else [],
+                }
 
             except PipelinePlanBuilderError as exc:
-                return {"error": str(exc)}
+                # Enterprise Enhancement: Structured error for plan builder errors
+                return _build_tool_error_response(
+                    name,
+                    exc,
+                    arguments=arguments,
+                    hint="Review the plan structure and fix the identified issue",
+                )
             except Exception as exc:
                 logger.exception("pipeline_mcp tool failed name=%s", name)
-                return {"error": str(exc)}
+                # Enterprise Enhancement: Structured error response
+                return _build_tool_error_response(name, exc, arguments=arguments)
 
     async def run(self) -> None:
         async with stdio_server() as (read_stream, write_stream):

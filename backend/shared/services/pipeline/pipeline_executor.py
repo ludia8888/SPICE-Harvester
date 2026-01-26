@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import ast
 import csv
+import difflib
 import io
 import json
 import os
@@ -1299,10 +1300,29 @@ def _join_tables(
             raise ValueError("join requires leftKey/rightKey or leftKeys/rightKeys (or joinKey)")
     if resolved_left and resolved_right and len(resolved_left) != len(resolved_right):
         raise ValueError("join requires leftKeys/rightKeys of the same length")
+
+    # Enterprise Enhancement (2026-01): Detect and warn about column collisions
+    # Column collision causes silent renames that can confuse downstream transforms
     right_column_map: List[Tuple[str, str]] = []
+    collision_renames: List[Tuple[str, str]] = []
     for col in right.columns:
-        mapped = f"right_{col}" if col in left.columns else col
+        if col in left.columns:
+            mapped = f"right_{col}"
+            collision_renames.append((col, mapped))
+        else:
+            mapped = col
         right_column_map.append((col, mapped))
+
+    # Log collision warning for Agent visibility
+    if collision_renames:
+        import logging
+        logger = logging.getLogger(__name__)
+        rename_list = ", ".join(f"'{orig}' -> '{new}'" for orig, new in collision_renames)
+        logger.warning(
+            f"JOIN COLUMN COLLISION: Columns renamed to avoid duplicates: {rename_list}. "
+            "Downstream transforms should use the renamed column names."
+        )
+
     columns = left.columns + [mapped for _, mapped in right_column_map]
 
     rows: List[Dict[str, Any]] = []
@@ -1388,7 +1408,42 @@ def _merge_rows(
     return output
 
 
+def _find_similar_columns(target: str, available: List[str], cutoff: float = 0.6) -> List[str]:
+    """
+    Enterprise Enhancement (2026-01):
+    Find column names similar to the target for helpful error messages.
+
+    Uses difflib sequence matching to suggest potential typo corrections.
+    """
+    if not target or not available:
+        return []
+
+    target_lower = target.lower()
+    matches = []
+
+    for col in available:
+        # Check for exact case-insensitive match
+        if col.lower() == target_lower:
+            return [col]
+
+        # Calculate similarity ratio
+        ratio = difflib.SequenceMatcher(None, target_lower, col.lower()).ratio()
+        if ratio >= cutoff:
+            matches.append((col, ratio))
+
+    # Sort by similarity and return column names
+    matches.sort(key=lambda x: x[1], reverse=True)
+    return [m[0] for m in matches]
+
+
 def _filter_table(table: PipelineTable, expression: str, parameters: Dict[str, Any]) -> PipelineTable:
+    """
+    Filter table rows based on expression.
+
+    Enterprise Enhancement (2026-01):
+    Added column reference validation to detect typos that would silently
+    return empty results instead of raising clear errors.
+    """
     expression = apply_parameters((expression or "").strip(), parameters)
     if not expression:
         return table
@@ -1396,11 +1451,36 @@ def _filter_table(table: PipelineTable, expression: str, parameters: Dict[str, A
     if not parsed:
         return table
     column, op, value = parsed
+
+    # Enterprise Enhancement: Validate column reference exists
+    if column not in table.columns:
+        # Find similar column names for helpful error message
+        similar_columns = _find_similar_columns(column, table.columns)
+        similar_hint = ""
+        if similar_columns:
+            similar_hint = f" Did you mean: {', '.join(similar_columns[:3])}?"
+
+        error_msg = (
+            f"FILTER COLUMN NOT FOUND: Column '{column}' does not exist in table. "
+            f"Available columns: {table.columns}.{similar_hint}"
+        )
+        logger.error(error_msg)
+        raise ValueError(error_msg)
+
     filtered = []
     for row in table.rows:
         cell = row.get(column)
         if _compare(cell, op, value):
             filtered.append(row)
+
+    # Enterprise Enhancement: Warn if filter removes all rows (potential logic error)
+    if table.rows and not filtered:
+        logger.warning(
+            f"FILTER EMPTY RESULT: Expression '{expression}' filtered out all {len(table.rows)} rows. "
+            f"Sample values for '{column}': {[row.get(column) for row in table.rows[:5]]}. "
+            "This may indicate an incorrect filter condition."
+        )
+
     return PipelineTable(columns=table.columns, rows=filtered)
 
 
@@ -1592,6 +1672,17 @@ def _eval_ast(node: ast.AST, variables: Dict[str, Any]) -> Any:
     if isinstance(node, ast.BinOp):
         left = _eval_ast(node.left, variables)
         right = _eval_ast(node.right, variables)
+
+        # Enterprise Enhancement (2026-01): Explicit division by zero handling
+        if isinstance(node.op, (ast.Div, ast.Mod)):
+            if right == 0 or right is None:
+                logger.warning(
+                    f"DIVISION BY ZERO: Attempted {'division' if isinstance(node.op, ast.Div) else 'modulo'} "
+                    f"with divisor=0 or NULL (left={left}, right={right}). Returning NULL. "
+                    "Check your expression or add a guard condition (e.g., CASE WHEN divisor != 0)."
+                )
+                return None
+
         try:
             if isinstance(node.op, ast.Add):
                 return left + right
@@ -1605,7 +1696,17 @@ def _eval_ast(node: ast.AST, variables: Dict[str, Any]) -> Any:
                 return left % right
             if isinstance(node.op, ast.Pow):
                 return left ** right
-        except Exception:
+        except TypeError as e:
+            logger.warning(
+                f"TYPE ERROR IN EXPRESSION: Cannot perform operation on incompatible types "
+                f"(left={left!r}, right={right!r}). Error: {e}. Returning NULL."
+            )
+            return None
+        except Exception as e:
+            logger.warning(
+                f"EXPRESSION EVALUATION ERROR: Unexpected error during computation "
+                f"(left={left!r}, right={right!r}). Error: {e}. Returning NULL."
+            )
             return None
     if isinstance(node, ast.Compare):
         left = _eval_ast(node.left, variables)

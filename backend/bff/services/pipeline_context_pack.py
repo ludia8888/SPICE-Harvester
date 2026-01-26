@@ -1,8 +1,11 @@
 """
 Pipeline Builder planning context pack.
 
-Provides a small, PII-masked summary of available datasets (schema + sample stats)
-to help an LLM propose cleansing/integration pipeline definitions.
+Raw Data-Centric Approach (2026-01):
+- Prioritizes showing actual data to LLM over computed recommendations
+- Provides OBSERVATIONS, not RECOMMENDATIONS
+- LLM's pattern recognition and domain knowledge should drive decisions
+- System acts as "transparent observer", not "decision maker"
 """
 
 from __future__ import annotations
@@ -20,7 +23,13 @@ from shared.services.pipeline.pipeline_profiler import compute_column_stats
 from shared.services.pipeline.pipeline_schema_utils import normalize_schema_type
 from shared.services.pipeline.pipeline_transform_spec import SUPPORTED_TRANSFORMS
 from shared.utils.canonical_json import sha256_canonical_json_prefixed
-from shared.utils.llm_safety import mask_pii
+from shared.utils.llm_safety import (
+    mask_pii,
+    build_column_semantic_observations,
+    build_raw_data_display,
+    build_relationship_observations,
+    extract_column_value_patterns,
+)
 from shared.utils.schema_hash import compute_schema_hash
 
 logger = logging.getLogger(__name__)
@@ -274,11 +283,32 @@ def _value_overlap_stats(
     col_a: str,
     rows_b: list[dict[str, Any]],
     col_b: str,
-) -> Dict[str, float]:
-    set_a = {_normalize_cell(row.get(col_a)) for row in rows_a if isinstance(row, dict)}
-    set_b = {_normalize_cell(row.get(col_b)) for row in rows_b if isinstance(row, dict)}
-    set_a.discard(None)
-    set_b.discard(None)
+) -> Dict[str, Any]:
+    """
+    Calculate value overlap statistics between two columns.
+
+    Enterprise Enhancement (2026-01):
+    - Track NULL/empty ratios separately for transparency
+    - Agent can see if overlap is artificially high due to high NULL rates
+    """
+    # Count total rows and NULL/empty values
+    total_a = len([row for row in rows_a if isinstance(row, dict)])
+    total_b = len([row for row in rows_b if isinstance(row, dict)])
+
+    all_values_a = [_normalize_cell(row.get(col_a)) for row in rows_a if isinstance(row, dict)]
+    all_values_b = [_normalize_cell(row.get(col_b)) for row in rows_b if isinstance(row, dict)]
+
+    null_count_a = sum(1 for v in all_values_a if v is None)
+    null_count_b = sum(1 for v in all_values_b if v is None)
+
+    # Calculate NULL ratios for transparency
+    null_ratio_a = null_count_a / float(total_a) if total_a > 0 else 0.0
+    null_ratio_b = null_count_b / float(total_b) if total_b > 0 else 0.0
+
+    # Build non-null sets for overlap calculation
+    set_a = {v for v in all_values_a if v is not None}
+    set_b = {v for v in all_values_b if v is not None}
+
     if not set_a or not set_b:
         return {
             "overlap_ratio": 0.0,
@@ -286,18 +316,37 @@ def _value_overlap_stats(
             "right_containment": 0.0,
             "left_value_count": float(len(set_a)),
             "right_value_count": float(len(set_b)),
+            "left_null_ratio": round(null_ratio_a, 3),
+            "right_null_ratio": round(null_ratio_b, 3),
+            "null_warning": (
+                "High NULL ratio may affect join quality"
+                if max(null_ratio_a, null_ratio_b) > 0.3
+                else None
+            ),
         }
+
     intersection = set_a & set_b
     denom = min(len(set_a), len(set_b))
     overlap_ratio = (len(intersection) / float(denom)) if denom > 0 else 0.0
     left_containment = len(intersection) / float(len(set_a)) if set_a else 0.0
     right_containment = len(intersection) / float(len(set_b)) if set_b else 0.0
+
+    # Generate warning if NULL ratio is high
+    null_warning = None
+    if max(null_ratio_a, null_ratio_b) > 0.5:
+        null_warning = "WARNING: >50% NULL values - join may produce many unmatched rows"
+    elif max(null_ratio_a, null_ratio_b) > 0.3:
+        null_warning = "High NULL ratio may affect join quality"
+
     return {
         "overlap_ratio": overlap_ratio,
         "left_containment": left_containment,
         "right_containment": right_containment,
         "left_value_count": float(len(set_a)),
         "right_value_count": float(len(set_b)),
+        "left_null_ratio": round(null_ratio_a, 3),
+        "right_null_ratio": round(null_ratio_b, 3),
+        "null_warning": null_warning,
     }
 
 
@@ -472,6 +521,11 @@ def _build_confidence_metadata(
     """
     Build comprehensive confidence metadata for LLM Agent decision-making.
 
+    Enterprise Enhancement (2026-01):
+    - Added explicit sample coverage warnings
+    - Added critical warnings for very low coverage
+    - Agent receives clear guidance on when to validate
+
     This metadata helps the Agent understand:
     1. How reliable the statistical estimates are
     2. Whether to trust the recommendation or request validation
@@ -485,9 +539,37 @@ def _build_confidence_metadata(
         "confidence_reason": _confidence_reason(sample_row_count, total_row_count),
     }
 
+    critical_warnings: list[str] = []
+
     if total_row_count is not None and total_row_count > 0:
+        coverage_ratio = sample_row_count / total_row_count
         metadata["total_row_count"] = total_row_count
-        metadata["sample_coverage_ratio"] = round(sample_row_count / total_row_count, 4)
+        metadata["sample_coverage_ratio"] = round(coverage_ratio, 6)
+
+        # Enterprise: Add critical warnings for low coverage
+        if coverage_ratio < 0.001:  # < 0.1%
+            critical_warnings.append(
+                f"CRITICAL: Sample covers only {coverage_ratio*100:.3f}% of data. "
+                "Uniqueness in sample does NOT guarantee uniqueness in full data. "
+                "MUST validate PK/FK constraints on full dataset before deployment."
+            )
+            confidence_level *= 0.5  # Reduce confidence significantly
+        elif coverage_ratio < 0.01:  # < 1%
+            critical_warnings.append(
+                f"WARNING: Sample covers only {coverage_ratio*100:.2f}% of data. "
+                "Patterns in sample may not represent full data distribution."
+            )
+            confidence_level *= 0.7
+        elif coverage_ratio < 0.05:  # < 5%
+            critical_warnings.append(
+                f"Note: Sample covers {coverage_ratio*100:.1f}% of data. "
+                "Consider validating critical assumptions on larger sample."
+            )
+
+        metadata["confidence_level"] = round(confidence_level, 2)
+
+    if critical_warnings:
+        metadata["critical_warnings"] = critical_warnings
 
     # Provide explicit recommendation for the Agent
     if confidence_level >= 0.8:
@@ -496,6 +578,14 @@ def _build_confidence_metadata(
         metadata["recommendation"] = "moderate confidence; consider validating on larger sample"
     else:
         metadata["recommendation"] = "LOW CONFIDENCE; MUST validate on full data before using"
+
+    # Add action items for low confidence
+    if confidence_level < 0.5:
+        metadata["required_actions"] = [
+            "Run plan_evaluate_joins to verify join cardinality on larger sample",
+            "Use plan_preflight to check for constraint violations",
+            "Consider requesting larger sample via max_sample_rows parameter",
+        ]
 
     return metadata
 
@@ -538,6 +628,7 @@ def _type_family(column_stats: dict[str, Any], profile: dict[str, Any]) -> str:
 
 
 def _type_compatibility(left_family: str, right_family: str) -> float:
+    """Calculate type compatibility score between two type families."""
     if left_family == right_family:
         return 0.4 if left_family == "unknown" else 1.0
     numeric = {"number", "number_like"}
@@ -549,6 +640,40 @@ def _type_compatibility(left_family: str, right_family: str) -> float:
     if "unknown" in (left_family, right_family):
         return 0.5
     return 0.1
+
+
+def _type_compatibility_warning(left_family: str, right_family: str) -> Optional[str]:
+    """
+    Generate type compatibility warning for Agent.
+
+    Enterprise Enhancement (2026-01):
+    - Generates semantic warnings for type mismatches
+    - Helps Agent understand when cast may be needed
+    - Returns None if types are compatible
+    """
+    if left_family == right_family:
+        if left_family == "unknown":
+            return "Type unknown for both columns; verify compatibility manually"
+        return None
+
+    numeric = {"number", "number_like"}
+    stringish = {"string", "string_like"}
+
+    if left_family in numeric and right_family in numeric:
+        return None
+
+    if left_family in stringish and right_family in stringish:
+        return None
+
+    if "unknown" in (left_family, right_family):
+        return "One column type is unknown; verify compatibility"
+
+    # Semantic type mismatch - this is a critical issue
+    return (
+        f"TYPE MISMATCH: left is '{left_family}', right is '{right_family}'. "
+        "Join may produce 0 matches or require explicit CAST. "
+        "Example: joining UUID (string) on integer ID will never match."
+    )
 
 
 def _select_candidate_columns(
@@ -648,22 +773,17 @@ def _suggest_primary_keys(
     total_row_count: Optional[int] = None,
 ) -> list[dict[str, Any]]:
     """
-    Suggest primary key candidates with confidence metadata.
+    Build PRIMARY KEY observations with raw data patterns for LLM analysis.
 
-    The confidence metadata helps the LLM Agent understand:
-    - How reliable the distinctness/uniqueness estimates are
-    - Whether to trust the PK recommendation or request validation
-    - What percentage of data was actually sampled
+    Raw Data-Centric Approach (2026-01):
+    - Provides actual value patterns so LLM can recognize ID formats
+    - LLM sees: "values are UUIDs", "values are sequential IDs like USR-001"
+    - LLM decides based on domain knowledge, not just statistical scores
 
-    Args:
-        columns: List of column definitions
-        column_stats: Statistics computed from sample rows
-        sample_rows: The actual sample data
-        max_candidates: Maximum number of PK candidates to return
-        total_row_count: Total rows in the dataset (for confidence calculation)
-
-    Returns:
-        List of PK candidates with scores and confidence metadata
+    The observations help LLM understand:
+    - What the actual values look like (UUID, sequential, etc.)
+    - Whether column semantics suggest PK (name + value patterns)
+    - Statistical distinctness (but as observation, not recommendation)
     """
     sample_row_count = int(column_stats.get("sample_row_count") or 0)
     stats_by_col = column_stats.get("columns") if isinstance(column_stats.get("columns"), dict) else {}
@@ -681,19 +801,78 @@ def _suggest_primary_keys(
         if score <= 0.0:
             continue
 
-        # Add confidence warning to reasons if sample is small
-        pk_reasons = list(reasons)
-        if confidence_meta["confidence_level"] < 0.5:
-            pk_reasons.append("WARNING: small sample - validate uniqueness on full data")
+        # Raw Data-Centric: Extract value patterns for LLM to analyze
+        values = [row.get(name) for row in sample_rows if isinstance(row, dict)]
+        value_patterns = extract_column_value_patterns(values, max_samples=100)
+
+        # Build semantic observations (name + value patterns)
+        semantic_obs = build_column_semantic_observations(name, values, max_samples=100)
+
+        # Build observations list (NOT recommendations)
+        observations: list[str] = []
+
+        # Name-based observations
+        if _looks_like_id(name):
+            observations.append(f"Column name '{name}' follows ID naming convention")
+
+        # Value pattern observations
+        dominant = value_patterns.get("dominant_pattern")
+        dominant_ratio = value_patterns.get("dominant_ratio", 0)
+        if dominant == "uuid":
+            observations.append(f"Values are UUIDs ({dominant_ratio*100:.0f}% of sample)")
+            observations.append("UUIDs are system-generated, typically unique identifiers")
+        elif dominant == "sequential_id":
+            observations.append(f"Values follow sequential ID pattern like 'USR-001' ({dominant_ratio*100:.0f}%)")
+            observations.append("Sequential IDs are often application-generated primary keys")
+        elif dominant == "integer" or dominant == "integer_string":
+            observations.append(f"Values are integers ({dominant_ratio*100:.0f}%)")
+            observations.append("May be auto-increment primary key if distinct ratio is high")
+        elif dominant:
+            observations.append(f"Dominant value pattern: {dominant} ({dominant_ratio*100:.0f}%)")
+
+        # Distinctness observation
+        if distinct_ratio >= 0.99:
+            observations.append(f"All {sample_row_count} sample values are unique")
+        elif distinct_ratio >= 0.95:
+            observations.append(f"High uniqueness: {distinct_ratio*100:.1f}% distinct in sample")
+        elif distinct_ratio < 0.8:
+            observations.append(f"Moderate duplicates: only {distinct_ratio*100:.1f}% distinct")
+
+        # NULL observation
+        if missing_ratio > 0.05:
+            observations.append(f"Has {missing_ratio*100:.1f}% NULL/empty values")
+
+        # Cross-reference observations from semantic analysis
+        for obs in semantic_obs.get("cross_observations", []):
+            if obs not in observations:
+                observations.append(obs)
 
         candidates.append(
             {
                 "columns": [name],
-                "score": score,
+                # Statistical metrics (for reference, not decision)
                 "distinct_ratio": distinct_ratio,
                 "missing_ratio": missing_ratio,
-                "duplicate_ratio": round(1.0 - distinct_ratio, 3),
-                "reasons": pk_reasons,
+                "score": score,  # Keep for backwards compatibility
+                # Raw Data-Centric: Value patterns for LLM analysis
+                "value_pattern": {
+                    "dominant": dominant,
+                    "dominant_ratio": dominant_ratio,
+                    "examples": value_patterns.get("pattern_distribution", {}).get(dominant, {}).get("examples", [])[:5],
+                    "is_homogeneous": value_patterns.get("is_homogeneous", False),
+                },
+                # Observations (NOT recommendations) for LLM to interpret
+                "observations": observations,
+                # Semantic hints from name + value analysis
+                "semantic_hints": semantic_obs.get("semantic_hints", []),
+                # Sample metadata
+                "sample_info": {
+                    "sample_size": sample_row_count,
+                    "total_rows": total_row_count,
+                    "coverage": round(sample_row_count / total_row_count, 4) if total_row_count else None,
+                },
+                # Legacy field for backwards compatibility
+                "reasons": reasons,
                 "confidence": confidence_meta,
             }
         )
@@ -859,10 +1038,31 @@ def _suggest_join_keys(datasets: list[dict[str, Any]], *, max_candidates: int) -
                     )
                     format_sim = _format_similarity(left_format or {}, right_format or {})
                     type_sim = _type_compatibility(left_type, right_type)
+                    type_warning = _type_compatibility_warning(left_type, right_type)
+
+                    # Enterprise Enhancement: Include NULL warning from overlap stats
+                    null_warning = overlap_stats.get("null_warning")
+                    left_null_ratio = overlap_stats.get("left_null_ratio", 0.0)
+                    right_null_ratio = overlap_stats.get("right_null_ratio", 0.0)
+
                     score = 0.30 * name_sim + 0.30 * overlap + 0.20 * format_sim + 0.10 * type_sim + 0.10 * quality
+
+                    # Enterprise: Reduce score for type mismatches and high NULL ratios
+                    if type_sim <= 0.2:
+                        score *= 0.7  # Penalize semantic type mismatch
+                    if max(left_null_ratio, right_null_ratio) > 0.5:
+                        score *= 0.8  # Penalize high NULL ratio
+
                     if score < 0.5 or (overlap <= 0.0 and name_sim < 0.9 and format_sim < 0.7 and type_sim < 0.6):
                         continue
                     reasons: list[str] = []
+
+                    # Enterprise: Add critical warnings first
+                    if type_warning:
+                        reasons.append(type_warning)
+                    if null_warning:
+                        reasons.append(null_warning)
+
                     if name_sim >= 0.9:
                         reasons.append("column names match closely")
                     elif name_sim >= 0.7:
@@ -875,7 +1075,7 @@ def _suggest_join_keys(datasets: list[dict[str, Any]], *, max_candidates: int) -
                         reasons.append("format patterns align")
                     if type_sim >= 0.8:
                         reasons.append("type families align")
-                    elif type_sim <= 0.2:
+                    elif type_sim <= 0.2 and not type_warning:
                         reasons.append("type mismatch; cast may be needed")
                     if quality >= 0.7:
                         reasons.append("high distinctness / low missingness in sample")
@@ -886,6 +1086,17 @@ def _suggest_join_keys(datasets: list[dict[str, Any]], *, max_candidates: int) -
                     cardinality_conf = _cardinality_confidence(sample_n)
                     if cardinality_conf < 0.6:
                         reasons.append("cardinality estimated from sample; may differ on full data")
+                    # Enterprise: Build critical warnings list
+                    critical_warnings = []
+                    if type_warning:
+                        critical_warnings.append(type_warning)
+                    if null_warning:
+                        critical_warnings.append(null_warning)
+                    if cardinality_conf < 0.5:
+                        critical_warnings.append(
+                            "LOW sample confidence - cardinality may be wrong at full scale"
+                        )
+
                     candidates.append(
                         {
                             "left_dataset_id": left.get("dataset_id"),
@@ -909,6 +1120,9 @@ def _suggest_join_keys(datasets: list[dict[str, Any]], *, max_candidates: int) -
                             "right_missing_ratio": round(float(right_missing), 3),
                             "left_containment_ratio": round(float(left_containment), 3),
                             "right_containment_ratio": round(float(right_containment), 3),
+                            # Enterprise: Add NULL ratio information
+                            "left_null_ratio": round(float(left_null_ratio), 3),
+                            "right_null_ratio": round(float(right_null_ratio), 3),
                             "cardinality_hint": cardinality,
                             "cardinality_confidence": round(float(cardinality_conf), 3),
                             "cardinality_note": "estimated from sample; may differ at full scale",
@@ -917,6 +1131,8 @@ def _suggest_join_keys(datasets: list[dict[str, Any]], *, max_candidates: int) -
                                 "right": int(right_sample_n),
                             },
                             "reasons": reasons,
+                            # Enterprise: Explicit warnings for Agent
+                            "critical_warnings": critical_warnings if critical_warnings else None,
                         }
                     )
 
@@ -1382,40 +1598,96 @@ async def build_pipeline_context_pack(
         if direction_confidence < 0.5:
             fk_reasons.append("WARNING: direction uncertain - verify parent/child orientation")
 
+        # =======================================================================
+        # Raw Data-Centric FK Observation (2026-01)
+        # Provides RAW METRICS for LLM to analyze, not pre-made decisions
+        # =======================================================================
+
+        # Get dataset names for context
+        left_ds_name = next((ds.get("name") for ds in selected if ds.get("dataset_id") == left_id), left_id)
+        right_ds_name = next((ds.get("name") for ds in selected if ds.get("dataset_id") == right_id), right_id)
+
+        # Build observations (NOT recommendations)
+        fk_observations: list[str] = []
+
+        # Column name observations
+        if left_col.endswith("_id") and not right_col.endswith("_id"):
+            fk_observations.append(f"'{left_col}' has _id suffix, '{right_col}' does not")
+        elif right_col.endswith("_id") and not left_col.endswith("_id"):
+            fk_observations.append(f"'{right_col}' has _id suffix, '{left_col}' does not")
+
+        # Uniqueness observations
+        if left_score >= 0.95:
+            fk_observations.append(f"'{left_col}' in {left_ds_name} appears unique (score: {left_score:.2f})")
+        if right_score >= 0.95:
+            fk_observations.append(f"'{right_col}' in {right_ds_name} appears unique (score: {right_score:.2f})")
+
+        # Containment observations
+        if left_containment >= 0.9:
+            fk_observations.append(f"{left_containment*100:.0f}% of {left_ds_name}.{left_col} values exist in {right_ds_name}.{right_col}")
+        elif left_containment >= 0.5:
+            fk_observations.append(f"Partial match: {left_containment*100:.0f}% of {left_ds_name}.{left_col} → {right_ds_name}.{right_col}")
+
+        if right_containment >= 0.9:
+            fk_observations.append(f"{right_containment*100:.0f}% of {right_ds_name}.{right_col} values exist in {left_ds_name}.{left_col}")
+        elif right_containment >= 0.5:
+            fk_observations.append(f"Partial match: {right_containment*100:.0f}% of {right_ds_name}.{right_col} → {left_ds_name}.{left_col}")
+
+        # Cardinality observation
+        cardinality = candidate.get("cardinality_hint")
+        if cardinality:
+            fk_observations.append(f"Cardinality pattern in sample: {cardinality}")
+
+        # NULL ratio observations
+        left_null = candidate.get("left_null_ratio", 0)
+        right_null = candidate.get("right_null_ratio", 0)
+        if left_null > 0.1:
+            fk_observations.append(f"'{left_col}' has {left_null*100:.0f}% NULL values")
+        if right_null > 0.1:
+            fk_observations.append(f"'{right_col}' has {right_null*100:.0f}% NULL values")
+
         fk_candidate = {
+            # Raw metrics - LLM interprets these
+            "columns": {
+                "left": {"dataset_id": left_id, "dataset_name": left_ds_name, "column": left_col},
+                "right": {"dataset_id": right_id, "dataset_name": right_ds_name, "column": right_col},
+            },
+            "metrics": {
+                "left_uniqueness_score": round(left_score, 3),
+                "right_uniqueness_score": round(right_score, 3),
+                "left_containment": round(left_containment, 3),  # % of left values in right
+                "right_containment": round(right_containment, 3),  # % of right values in left
+                "cardinality_hint": cardinality,
+                "sample_overlap": round(float(candidate.get("sample_value_overlap") or 0), 3),
+            },
+            # Observations (facts, not decisions)
+            "observations": fk_observations,
+            # Direction analysis - presented as observation, not conclusion
+            "direction_analysis": {
+                "system_guess": {
+                    "child": {"dataset_id": child_id, "column": child_col},
+                    "parent": {"dataset_id": parent_id, "column": parent_col},
+                },
+                "alternative": {
+                    "child": {"dataset_id": alt_child_id, "column": alt_child_col},
+                    "parent": {"dataset_id": alt_parent_id, "column": alt_parent_col},
+                },
+                "basis": direction_basis,
+                "note": (
+                    "This is a GUESS based on uniqueness and containment metrics. "
+                    "YOU should verify based on domain knowledge. "
+                    "Which table is the 'parent' (reference data) and which is the 'child' (transactional data)?"
+                ),
+            },
+            # Legacy fields for backwards compatibility
             "child_dataset_id": child_id,
             "child_column": child_col,
             "parent_dataset_id": parent_id,
             "parent_column": parent_col,
             "score": round(float(candidate.get("score") or 0.0) * max(left_score, right_score, containment_best), 3),
             "containment_ratio": round(containment_best, 3),
-            "cardinality_hint": candidate.get("cardinality_hint"),
+            "cardinality_hint": cardinality,
             "reasons": fk_reasons,
-            # New: directionality confidence for Agent decision-making
-            "direction_confidence": {
-                "confidence_level": round(direction_confidence, 2),
-                "basis": direction_basis,
-                "recommendation": (
-                    "high confidence in direction"
-                    if direction_confidence >= 0.7
-                    else "moderate confidence; consider validating"
-                    if direction_confidence >= 0.5
-                    else "LOW confidence; direction may be wrong - verify manually"
-                ),
-            },
-            # New: alternative orientation for Agent to consider
-            "alternative_orientation": {
-                "child_dataset_id": alt_child_id,
-                "child_column": alt_child_col,
-                "parent_dataset_id": alt_parent_id,
-                "parent_column": alt_parent_col,
-                "note": "alternative FK direction if primary orientation is incorrect",
-            },
-            # New: sample confidence metadata
-            "sample_confidence": _build_confidence_metadata(
-                min_sample,
-                None,  # total not available at join level
-            ),
         }
         fk_candidates.append(fk_candidate)
     cleansing_suggestions: list[dict[str, Any]] = []
@@ -1439,67 +1711,98 @@ async def build_pipeline_context_pack(
     avg_sample = sum(all_sample_counts) / len(all_sample_counts) if all_sample_counts else 0
     overall_confidence = _cardinality_confidence(min_sample)
 
+    # ===========================================================================
+    # Raw Data-Centric Response (2026-01)
+    # Philosophy: LLM sees data and makes its own judgments
+    # System provides OBSERVATIONS, not RECOMMENDATIONS
+    # ===========================================================================
+
     return {
         "db_name": db_name,
         "branch": branch_value,
         "datasets_overview": overview,
         "selected_datasets": selected,
-        "integration_suggestions": {
+        # Renamed: "suggestions" -> "observations" to reflect non-prescriptive nature
+        "relationship_observations": {
             "join_key_candidates": join_candidates,
             "foreign_key_candidates": fk_candidates,
-            "cleansing_suggestions": cleansing_suggestions,
+            "note": (
+                "These are OBSERVATIONS based on column names and value overlap. "
+                "YOU must decide which relationships are valid based on your domain knowledge."
+            ),
         },
-        # New: Overall confidence metadata for Agent decision-making
-        "confidence_summary": {
-            "overall_confidence_level": round(overall_confidence, 2),
+        "cleansing_observations": {
+            "potential_issues": cleansing_suggestions,
+            "note": (
+                "These are detected patterns that MAY need cleansing. "
+                "YOU must decide if cleansing is appropriate for each case."
+            ),
+        },
+        # Sample metadata (transparency about data coverage)
+        "sample_metadata": {
             "min_sample_rows": min_sample,
             "avg_sample_rows": round(avg_sample, 1),
             "datasets_analyzed": len(selected),
-            "interpretation_guide": {
-                "confidence >= 0.8": "High confidence - recommendations can be used directly",
-                "confidence 0.5-0.8": "Moderate confidence - consider validating critical decisions",
-                "confidence < 0.5": "LOW confidence - treat as preliminary; MUST validate on full data",
-            },
-            "warnings": (
-                [
-                    "Sample sizes are small; all PK/FK recommendations should be validated on full data",
-                    "Cardinality estimates may differ significantly at full scale",
-                ]
+            "coverage_warning": (
+                "Sample sizes are small; patterns in sample may not represent full data"
                 if overall_confidence < 0.5
-                else []
-            ),
-            "recommendation": (
-                "Recommendations are reliable; proceed with pipeline construction"
-                if overall_confidence >= 0.8
-                else "Recommendations are tentative; validate key relationships before finalizing"
-                if overall_confidence >= 0.5
-                else "LOW CONFIDENCE: Treat all recommendations as hypotheses requiring validation"
+                else None
             ),
         },
-        # New: Explicit guidance for the LLM Agent
+        # Raw Data-Centric Agent Guidance
         "agent_guidance": {
-            "how_to_interpret_scores": {
-                "pk_score": "Higher is better (0-1). Score >= 0.9 suggests strong PK candidate. Check 'confidence' field for reliability.",
-                "fk_score": "Higher is better (0-1). Check 'direction_confidence' to verify parent/child orientation.",
-                "cardinality_hint": "Estimated relationship type (1:1, 1:N, N:1, N:N). Check 'cardinality_confidence' for reliability.",
-            },
-            "confidence_field_meaning": {
-                "confidence_level": "Statistical reliability of the estimate (0-1). Below 0.5 means high uncertainty.",
-                "confidence_reason": "Human-readable explanation of why confidence is at this level.",
-                "recommendation": "Suggested action based on confidence level.",
-            },
-            "when_to_request_validation": [
-                "When confidence_level < 0.5 for any PK/FK recommendation",
-                "When direction_confidence < 0.5 for FK relationships",
-                "When cardinality_confidence < 0.5 and cardinality matters for the pipeline",
-                "When sample_row_count < 50 for any dataset",
-            ],
-            "sample_limitations": (
-                f"Data was sampled (avg {avg_sample:.0f} rows per dataset). "
-                "Patterns rare in the sample may exist in full data. "
-                "Uniqueness guarantees from sample do not guarantee uniqueness in full data."
+            # Core principle: YOU DECIDE
+            "approach": "RAW_DATA_CENTRIC",
+            "philosophy": (
+                "You are the decision maker. This system provides OBSERVATIONS about the data. "
+                "Use your pattern recognition and domain knowledge to make judgments. "
+                "Do not blindly follow scores or recommendations."
             ),
+            # How to use the data
+            "how_to_analyze": {
+                "primary_keys": (
+                    "Look at 'value_pattern' to understand what values look like. "
+                    "UUIDs and sequential IDs (USR-001) are likely system-generated PKs. "
+                    "Check 'observations' for semantic hints. "
+                    "YOU decide if the column is a valid PK based on your understanding."
+                ),
+                "foreign_keys": (
+                    "Look at value overlap between columns. "
+                    "Check if column names suggest relationships (e.g., 'user_id' references 'users'). "
+                    "Consider domain semantics - what SHOULD these tables' relationship be? "
+                    "YOU decide the FK direction and join type."
+                ),
+                "joins": (
+                    "Look at 'observations' for overlap metrics and uniqueness. "
+                    "Consider what join type makes sense for the business logic. "
+                    "Inner join loses non-matching rows; left join preserves them. "
+                    "YOU decide based on what the pipeline needs to accomplish."
+                ),
+            },
+            # What to look for in raw data
+            "pattern_recognition_hints": {
+                "uuid_pattern": "8-4-4-4-12 hex format (e.g., 'a1b2c3d4-e5f6-...')",
+                "sequential_id": "Prefix + number (e.g., 'USR-001', 'INV00123', 'ORD-2024-001')",
+                "auto_increment": "Pure integers starting from 1 (e.g., 1, 2, 3, ...)",
+                "natural_key": "Business-meaningful values (e.g., email, SSN, product_code)",
+                "timestamp_column": "created_at, updated_at suggest this is metadata, not PK",
+            },
+            # What scores mean (context, not instruction)
+            "score_context": {
+                "distinct_ratio": "Percentage of unique values. 1.0 means all unique in sample.",
+                "missing_ratio": "Percentage of NULL/empty. PKs should have 0% missing.",
+                "overlap_ratio": "How many values exist in both columns. Higher = likely joinable.",
+                "containment": "What % of left values exist in right. High = FK direction hint.",
+            },
+            # Explicit instruction
+            "your_responsibility": [
+                "Examine the actual sample_rows to see real data values",
+                "Use your knowledge of data modeling to interpret patterns",
+                "Make decisions based on domain context, not just statistics",
+                "When unsure, use plan_preview to test your assumptions",
+            ],
         },
+        # Pipeline building reference
         "pipeline_definition_hints": {
             "supported_operations": sorted(SUPPORTED_TRANSFORMS),
             "input_node_metadata": {
@@ -1511,5 +1814,11 @@ async def build_pipeline_context_pack(
                 "operation": "one of supported_operations",
             },
             "note": "Keep definitions sample-safe; avoid UDF. Use joins/unions + cleansing ops (rename/cast/dedupe/filter/compute).",
+        },
+        # Legacy field for backwards compatibility
+        "integration_suggestions": {
+            "join_key_candidates": join_candidates,
+            "foreign_key_candidates": fk_candidates,
+            "cleansing_suggestions": cleansing_suggestions,
         },
     }

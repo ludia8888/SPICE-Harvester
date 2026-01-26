@@ -22,6 +22,22 @@ _EMAIL_HINTS = ("email", "e_mail")
 _PHONE_HINTS = ("phone", "mobile", "tel", "cell")
 _POSTAL_HINTS = ("zip", "postal", "postcode")
 
+# Enterprise Enhancement (2026-01): Columns that should preserve whitespace
+# These patterns indicate semantic whitespace that should NOT be normalized
+_PRESERVE_WHITESPACE_PATTERNS = (
+    "code", "script", "json", "xml", "html", "yaml", "yml",
+    "query", "sql", "expression", "formula", "template",
+    "content", "body", "text", "description", "comment", "note",
+    "address", "snippet", "source", "raw",
+)
+
+# Enterprise Enhancement (2026-01): Table name patterns that should NOT be deduped
+# Event/log tables intentionally have duplicate-looking rows
+_NO_DEDUPE_TABLE_PATTERNS = (
+    "log", "event", "audit", "history", "trace", "metric",
+    "transaction", "activity", "record", "journal", "change",
+)
+
 
 def _iter_values(rows: Iterable[Dict[str, Any]], column: str) -> List[Any]:
     values: List[Any] = []
@@ -119,6 +135,53 @@ def _domain_hint(name: str) -> Optional[str]:
     return None
 
 
+def _should_preserve_whitespace(column_name: str) -> bool:
+    """
+    Enterprise Enhancement (2026-01):
+    Detect columns that should preserve whitespace (code, JSON, text content, etc.)
+    These columns should NOT receive whitespace normalization suggestions.
+    """
+    lowered = str(column_name or "").strip().lower()
+    if not lowered:
+        return False
+    return any(pattern in lowered for pattern in _PRESERVE_WHITESPACE_PATTERNS)
+
+
+def _is_event_or_log_table(table_name: Optional[str], column_names: List[str]) -> bool:
+    """
+    Enterprise Enhancement (2026-01):
+    Detect event/log tables that should NOT receive dedupe suggestions.
+    Event tables intentionally have repeated entries.
+
+    Detection heuristics:
+    1. Table name contains log/event/audit patterns
+    2. Has timestamp + event_type columns (typical event table schema)
+    """
+    # Check table name
+    if table_name:
+        lowered = str(table_name).strip().lower()
+        if any(pattern in lowered for pattern in _NO_DEDUPE_TABLE_PATTERNS):
+            return True
+
+    # Check column patterns that suggest event/log table
+    lowered_cols = [str(col).lower() for col in column_names]
+
+    # Event tables typically have: timestamp + event_type/action
+    has_timestamp = any(
+        "timestamp" in col or "created_at" in col or "occurred_at" in col or "event_time" in col
+        for col in lowered_cols
+    )
+    has_event_type = any(
+        "event_type" in col or "action" in col or "event_name" in col or "activity" in col
+        for col in lowered_cols
+    )
+
+    if has_timestamp and has_event_type:
+        return True
+
+    return False
+
+
 def _row_key(row: Dict[str, Any], columns: List[str]) -> tuple:
     return tuple(str(row.get(col)) for col in columns)
 
@@ -167,7 +230,24 @@ def _column_type_map(columns: Any) -> Dict[str, str]:
     return output
 
 
-def inspect_preview(preview: Dict[str, Any]) -> Dict[str, Any]:
+def inspect_preview(
+    preview: Dict[str, Any],
+    *,
+    table_name: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Analyze preview data and suggest cleansing operations.
+
+    Enterprise Enhancement (2026-01):
+    - Added table_name parameter to detect event/log tables
+    - Protects columns with semantic whitespace (code, JSON, etc.)
+    - Includes parseability warning when cast may lose data
+    - Suppresses dedupe suggestions for event/log tables
+
+    Args:
+        preview: Preview data with rows, columns, and stats
+        table_name: Optional table name for context-aware suggestions
+    """
     if not isinstance(preview, dict):
         return {"columns": {}, "issues": [], "suggestions": [], "needs_cleansing": False}
 
@@ -217,24 +297,42 @@ def inspect_preview(preview: Dict[str, Any]) -> Dict[str, Any]:
         }
 
         if whitespace_ratio >= _WHITESPACE_THRESHOLD or empty_ratio >= _EMPTY_THRESHOLD:
-            suggestions.append(
-                {
-                    "column": col_name,
-                    "operation": "normalize",
-                    "trim": True,
-                    "empty_to_null": True,
-                    "whitespace_to_null": True,
-                    "reason": "high whitespace/empty ratio",
-                }
-            )
-            issues.append(
-                {
-                    "column": col_name,
-                    "issue": "high_empty_or_whitespace",
-                    "severity": "warning",
-                    "evidence": {"empty_ratio": empty_ratio, "whitespace_ratio": whitespace_ratio},
-                }
-            )
+            # Enterprise Enhancement: Protect columns with semantic whitespace
+            if _should_preserve_whitespace(col_name):
+                issues.append(
+                    {
+                        "column": col_name,
+                        "issue": "whitespace_in_semantic_column",
+                        "severity": "info",
+                        "evidence": {
+                            "empty_ratio": empty_ratio,
+                            "whitespace_ratio": whitespace_ratio,
+                            "note": (
+                                "Column name suggests semantic whitespace (code/JSON/text). "
+                                "Normalization suggestion suppressed to prevent data corruption."
+                            ),
+                        },
+                    }
+                )
+            else:
+                suggestions.append(
+                    {
+                        "column": col_name,
+                        "operation": "normalize",
+                        "trim": True,
+                        "empty_to_null": True,
+                        "whitespace_to_null": True,
+                        "reason": "high whitespace/empty ratio",
+                    }
+                )
+                issues.append(
+                    {
+                        "column": col_name,
+                        "issue": "high_empty_or_whitespace",
+                        "severity": "warning",
+                        "evidence": {"empty_ratio": empty_ratio, "whitespace_ratio": whitespace_ratio},
+                    }
+                )
 
         if inferred_type == "xsd:string":
             best_type = None
@@ -244,15 +342,35 @@ def inspect_preview(preview: Dict[str, Any]) -> Dict[str, Any]:
                     best_type = target
                     best_score = score
             if best_type:
-                suggestions.append(
-                    {
-                        "column": col_name,
-                        "operation": "cast",
-                        "target_type": best_type,
-                        "confidence": best_score,
-                        "reason": "high parseability for target type",
-                    }
-                )
+                # Enterprise Enhancement: Calculate failure count and add warning
+                total_values = len(values)
+                failure_count = int(total_values * (1.0 - best_score))
+
+                cast_suggestion: Dict[str, Any] = {
+                    "column": col_name,
+                    "operation": "cast",
+                    "target_type": best_type,
+                    "confidence": best_score,
+                    "reason": "high parseability for target type",
+                    # Enterprise: Add explicit failure information
+                    "parseability_ratio": best_score,
+                    "estimated_failures": failure_count,
+                    "total_values_checked": total_values,
+                }
+
+                # Enterprise: Add warning if not 100% parseable
+                if best_score < 1.0:
+                    cast_suggestion["data_loss_warning"] = (
+                        f"WARNING: {failure_count} of {total_values} values ({(1-best_score)*100:.1f}%) "
+                        f"will fail to parse and become NULL. Review unparseable values before casting."
+                    )
+                    cast_suggestion["recommendation"] = (
+                        "Consider filtering or handling unparseable values first"
+                        if failure_count > 10
+                        else "Low failure count; cast is likely safe"
+                    )
+
+                suggestions.append(cast_suggestion)
             if case_variation >= _CASE_VARIATION_THRESHOLD:
                 suggestions.append(
                     {
@@ -313,34 +431,54 @@ def inspect_preview(preview: Dict[str, Any]) -> Dict[str, Any]:
             unique_rows = len({_row_key(row, column_names) for row in rows if isinstance(row, dict)})
             duplicate_ratio = _ratio(len(rows) - unique_rows, len(rows))
             if duplicate_ratio >= _DUPLICATE_ROW_THRESHOLD:
-                preferred = [
-                    name
-                    for name in column_names
-                    if _looks_like_id(name)
-                    and report_columns.get(name, {}).get("distinct_ratio", 0.0) >= 0.9
-                    and report_columns.get(name, {}).get("null_ratio", 1.0) <= 0.05
-                ]
-                candidates = preferred or [
-                    name
-                    for name in column_names
-                    if report_columns.get(name, {}).get("distinct_ratio", 0.0) >= 0.9
-                    and report_columns.get(name, {}).get("null_ratio", 1.0) <= 0.05
-                ]
-                suggestions.append(
-                    {
-                        "operation": "dedupe",
-                        "columns": candidates[:3] if candidates else [],
-                        "reason": "duplicate rows detected in preview",
-                        "duplicate_ratio": round(duplicate_ratio, 4),
-                    }
-                )
-                issues.append(
-                    {
-                        "issue": "duplicate_rows",
-                        "severity": "warning",
-                        "evidence": {"duplicate_ratio": round(duplicate_ratio, 4)},
-                    }
-                )
+                # Enterprise Enhancement: Detect event/log tables
+                is_event_table = _is_event_or_log_table(table_name, column_names)
+
+                if is_event_table:
+                    # Don't suggest dedupe for event/log tables - duplicates are intentional
+                    issues.append(
+                        {
+                            "issue": "duplicate_rows_in_event_table",
+                            "severity": "info",
+                            "evidence": {
+                                "duplicate_ratio": round(duplicate_ratio, 4),
+                                "note": (
+                                    "Table appears to be an event/log table where duplicates "
+                                    "represent legitimate repeated events. Dedupe suggestion suppressed."
+                                ),
+                                "table_name": table_name,
+                            },
+                        }
+                    )
+                else:
+                    preferred = [
+                        name
+                        for name in column_names
+                        if _looks_like_id(name)
+                        and report_columns.get(name, {}).get("distinct_ratio", 0.0) >= 0.9
+                        and report_columns.get(name, {}).get("null_ratio", 1.0) <= 0.05
+                    ]
+                    candidates = preferred or [
+                        name
+                        for name in column_names
+                        if report_columns.get(name, {}).get("distinct_ratio", 0.0) >= 0.9
+                        and report_columns.get(name, {}).get("null_ratio", 1.0) <= 0.05
+                    ]
+                    suggestions.append(
+                        {
+                            "operation": "dedupe",
+                            "columns": candidates[:3] if candidates else [],
+                            "reason": "duplicate rows detected in preview",
+                            "duplicate_ratio": round(duplicate_ratio, 4),
+                        }
+                    )
+                    issues.append(
+                        {
+                            "issue": "duplicate_rows",
+                            "severity": "warning",
+                            "evidence": {"duplicate_ratio": round(duplicate_ratio, 4)},
+                        }
+                    )
 
     return {
         "sample_row_count": sample_row_count,

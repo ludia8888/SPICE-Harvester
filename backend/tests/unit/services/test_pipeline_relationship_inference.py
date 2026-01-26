@@ -205,5 +205,8 @@ async def test_relationship_inference_enriches_key_inference_payload() -> None:
     assert isinstance(fk, list)
     if fk:
         assert fk[0].get("direction") == "child_to_parent"
-        assert fk[0].get("recommended_join_type") == "left"
+        # Enterprise Enhancement (2026-01): Join type is now intelligently recommended
+        # based on containment ratio, NULL ratios, and cardinality
+        assert fk[0].get("recommended_join_type") in ("left", "inner")
+        assert "join_type_reason" in fk[0]  # Should have explanation
 

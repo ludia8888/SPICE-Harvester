@@ -5,6 +5,12 @@ This module implements a *refutation gate*:
 - It never "proves" a plan/claim correct.
 - It only produces HARD failures when it can provide a concrete counterexample ("witness").
 
+Enterprise Enhancement (2026-01):
+Added explicit tracking of supported claim kinds and clear warnings about:
+- Sample-based verification limitations
+- Claims that cannot be hard-gated (FK, ROW_PRESERVE_LEFT)
+- Unknown/unsupported claim kinds that may indicate typos
+
 The refuter is intentionally domain-agnostic and relies only on:
 - plan structure (nodes/edges/metadata), and
 - deterministic sample tables produced by PipelineExecutor (or provided run_tables).
@@ -15,7 +21,7 @@ from __future__ import annotations
 import logging
 import re
 from datetime import date, datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from shared.models.pipeline_plan import PipelinePlan
 from shared.services.registries.dataset_registry import DatasetRegistry
@@ -77,6 +83,48 @@ def _normalize_claim_severity(value: Any) -> str:
     if raw in {"HARD", "FAIL", "BLOCK"}:
         return "HARD"
     return "HARD"
+
+
+# Enterprise Enhancement (2026-01): Explicitly define supported claim kinds
+# to detect typos and provide clear warnings for unsupported claims
+_SUPPORTED_CLAIM_KINDS: Set[str] = {
+    "PK",
+    "FK",
+    "CAST_SUCCESS",
+    "CAST_LOSSLESS",
+    "JOIN_ASSUMES_RIGHT_PK",
+    "JOIN_FUNCTIONAL_RIGHT",
+    "ROW_PRESERVE_LEFT",
+    "FILTER_ONLY_NULLS",
+    "FILTER_MIN_RETAIN_RATE",
+    "UNION_ROW_LOSSLESS",
+}
+
+# Claims that CANNOT be hard-gated due to sampling/truncation limitations
+_SOFT_ONLY_CLAIM_KINDS: Set[str] = {
+    "FK",  # Cannot prove absence in parent set with sampling
+    "ROW_PRESERVE_LEFT",  # Affected by sampling/truncation
+}
+
+
+def _find_similar_claim_kinds(target: str, cutoff: float = 0.6) -> List[str]:
+    """Find claim kinds similar to the target for helpful error messages."""
+    import difflib
+
+    if not target:
+        return []
+
+    target_lower = target.lower().replace("-", "_")
+    matches = []
+
+    for kind in _SUPPORTED_CLAIM_KINDS:
+        kind_lower = kind.lower().replace("-", "_")
+        ratio = difflib.SequenceMatcher(None, target_lower, kind_lower).ratio()
+        if ratio >= cutoff:
+            matches.append((kind, ratio))
+
+    matches.sort(key=lambda x: x[1], reverse=True)
+    return [m[0] for m in matches]
 
 
 def _claim_spec(claim: Dict[str, Any]) -> Dict[str, Any]:
@@ -1139,21 +1187,55 @@ async def refute_pipeline_plan_claims(
                     witness = _refute_union_row_lossless(left_table, right_table, out_table)
 
         elif kind == "FK":
+            # Enterprise Enhancement (2026-01): Provide clear explanation for FK soft-gating
             # FK "orphan" checks are not sound under head-sampling. We can emit SOFT hints only.
             unsound_hard = True
+
+            # Log explicit warning if user specified HARD severity
+            if severity == "HARD":
+                logger.warning(
+                    f"FK CLAIM DOWNGRADED TO SOFT: Claim '{claim_id}' was specified as HARD, "
+                    "but FK claims cannot be hard-gated under sampling. This is because sample-based "
+                    "verification cannot prove that a foreign key value exists in the parent table - "
+                    "we can only check the sampled rows. Use explicit parent key lookup for production validation."
+                )
+
             witness = {
                 "description": "FK refutation is sample-based and not hard-gated (cannot prove absence in parent set)",
                 "row_refs": [],
-                "values": {"note": "treated as soft unless a full-scan membership oracle exists"},
+                "values": {
+                    "note": "treated as soft unless a full-scan membership oracle exists",
+                    "original_severity": severity,
+                    "reason": "FK claims require full parent table scan to verify membership, which is not available in preview mode",
+                    "recommendation": "For production, use explicit FK constraint enforcement in the target database",
+                },
                 "unverifiable": True,
             }
 
         else:
+            # Enterprise Enhancement (2026-01): Improved unknown claim handling with suggestions
             unsound_hard = True
+
+            # Find similar claim kinds for helpful suggestions
+            similar_kinds = _find_similar_claim_kinds(kind)
+            suggestion = ""
+            if similar_kinds:
+                suggestion = f" Did you mean: {', '.join(similar_kinds[:3])}?"
+
+            logger.warning(
+                f"UNKNOWN CLAIM KIND: '{kind}' is not a supported claim type. "
+                f"Supported types: {sorted(_SUPPORTED_CLAIM_KINDS)}.{suggestion}"
+            )
+
             witness = {
-                "description": "Unknown/unsupported claim kind",
+                "description": f"Unknown/unsupported claim kind: '{kind}'",
                 "row_refs": [],
-                "values": {"kind": kind},
+                "values": {
+                    "kind": kind,
+                    "supported_kinds": sorted(_SUPPORTED_CLAIM_KINDS),
+                    "similar_suggestions": similar_kinds[:3] if similar_kinds else [],
+                    "note": "This claim was not evaluated. Check for typos or use a supported claim kind.",
+                },
                 "unverifiable": True,
             }
 
@@ -1182,6 +1264,28 @@ async def refute_pipeline_plan_claims(
     gate = "BLOCK" if hard_failures else "PASS_NOT_REFUTED"
     status = "invalid" if hard_failures else "success"
     errors = [f"{v.get('claim_id')}: {((v.get('witness') or {}).get('description') or '')}" for v in hard_failures][:20]
+
+    # Enterprise Enhancement (2026-01): Add sample-based verification limitations warning
+    if status == "success" and checked > 0:
+        warnings.append(
+            "SAMPLE-BASED VERIFICATION: Claims were checked against sampled data only. "
+            f"Passing {checked} checks does NOT guarantee correctness on full dataset. "
+            "For production pipelines, implement runtime validation on actual data."
+        )
+
+    # Count soft-only claims that were downgraded
+    downgraded_claims = [
+        c for c in claims
+        if c.get("_kind") in _SOFT_ONLY_CLAIM_KINDS and c.get("_severity") == "HARD"
+    ]
+    if downgraded_claims:
+        downgraded_kinds = set(c.get("_kind") for c in downgraded_claims)
+        warnings.append(
+            f"SEVERITY DOWNGRADE: {len(downgraded_claims)} claim(s) with kind {sorted(downgraded_kinds)} "
+            "were specified as HARD but downgraded to SOFT because these claim types cannot be "
+            "reliably verified with sample data."
+        )
+
     payload = {
         "status": status,
         "gate": gate,
@@ -1194,6 +1298,14 @@ async def refute_pipeline_plan_claims(
             "claims_checked": checked,
             "hard_failures": len(hard_failures),
             "soft_warnings": len(soft_warnings),
+            "downgraded_to_soft": len(downgraded_claims),
+        },
+        # Enterprise Enhancement: Include verification scope disclaimer
+        "verification_scope": {
+            "mode": "sample_based",
+            "disclaimer": "Results are based on sampled data and do not guarantee correctness on full dataset",
+            "supported_hard_gate_kinds": sorted(_SUPPORTED_CLAIM_KINDS - _SOFT_ONLY_CLAIM_KINDS),
+            "soft_only_kinds": sorted(_SOFT_ONLY_CLAIM_KINDS),
         },
     }
     return mask_pii(payload)
