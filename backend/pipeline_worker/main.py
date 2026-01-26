@@ -717,6 +717,21 @@ class PipelineWorker:
                                 try:
                                     self._restart_spark_session()
                                 except Exception as restart_exc:
+                                    # If the Spark JVM is dead and we cannot restart it, we must NOT leave the
+                                    # processed_events lease stuck in "processing" (it blocks the Kafka partition
+                                    # until lease expiry). Mark the job failed (best-effort) before forcing a restart.
+                                    err = f"{err} (spark_restart_failed: {restart_exc})"
+                                    if self.processed and job:
+                                        try:
+                                            await self.processed.mark_failed(
+                                                handler=self.handler,
+                                                event_id=job.job_id,
+                                                error=err,
+                                            )
+                                        except Exception as mark_err:
+                                            logger.warning(
+                                                "Failed to mark pipeline job failed before restart: %s", mark_err
+                                            )
                                     logger.warning(
                                         "Failed to restart Spark session after connection refusal: %s", restart_exc
                                     )
@@ -3668,9 +3683,11 @@ class PipelineWorker:
                 "else null end"
             )
         if spark_type == "timestamp":
-            return F.expr(f"to_timestamp({cleaned})")
+            # Use try_cast so ANSI mode won't raise on malformed inputs; return NULL instead.
+            return F.expr(f"try_cast({cleaned} as timestamp)")
         if spark_type == "date":
-            return F.expr(f"to_date({cleaned})")
+            # Use try_cast so ANSI mode won't raise on malformed inputs; return NULL instead.
+            return F.expr(f"try_cast({cleaned} as date)")
         return F.expr(cleaned)
 
     def _safe_cast_column(self, column: str, target_type: str) -> "Column":
@@ -4238,13 +4255,33 @@ class PipelineWorker:
             if left_keys and right_keys:
                 if len(left_keys) != len(right_keys):
                     raise ValueError("Join requires leftKeys/rightKeys of the same length.")
+
+                def _resolve_join_col(df, col_name: str) -> str:
+                    """
+                    Resolve join column names defensively.
+
+                    Spark's CSV reader may strip a UTF-8 BOM from the first header column, while
+                    upstream sampling/metadata may preserve it. If the plan references a BOM-prefixed
+                    column (e.g. "\\ufeffproduct_category_name") but the DataFrame has the non-BOM
+                    column, transparently fall back to the stripped name.
+                    """
+                    if col_name in df.columns:
+                        return col_name
+                    stripped = col_name.lstrip("\ufeff")
+                    if stripped != col_name and stripped in df.columns:
+                        return stripped
+                    return col_name
+
                 if len(left_keys) == 1:
-                    left_key = left_keys[0]
-                    right_key = right_keys[0]
+                    left_key = _resolve_join_col(left, left_keys[0])
+                    right_key = _resolve_join_col(right, right_keys[0])
                     if left_key == right_key:
                         return left.join(right, on=[left_key], how=join_type)
                     return left.join(right, left[left_key] == right[right_key], how=join_type)
-                conditions = [left[lkey] == right[rkey] for lkey, rkey in zip(left_keys, right_keys)]
+                conditions = [
+                    left[_resolve_join_col(left, lkey)] == right[_resolve_join_col(right, rkey)]
+                    for lkey, rkey in zip(left_keys, right_keys)
+                ]
                 join_expr = conditions[0]
                 for cond in conditions[1:]:
                     join_expr = join_expr & cond

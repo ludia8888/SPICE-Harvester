@@ -335,6 +335,72 @@ class InputSanitizer:
 
         return sanitized
 
+    _RESERVED_OBJECT_KEYS = {"__proto__", "prototype", "constructor"}
+
+    def sanitize_map_key(self, value: str, *, max_length: int = 500) -> str:
+        """
+        Sanitize keys for *free-form* key/value maps embedded in payloads.
+
+        Examples:
+        - rename mappings: {"﻿product_category_name": "product_category_name"}
+        - Spark conf: {"spark.sql.ansi.enabled": "true"}
+        - Spark read/write options: {"header": "true", "delimiter": ","}
+
+        These keys are not internal JSON field names, so they must allow punctuation and Unicode.
+        We only enforce:
+        - string type
+        - max length
+        - no ASCII control characters
+        - block prototype-pollution keys (defense-in-depth)
+        """
+        if not isinstance(value, str):
+            raise SecurityViolationError(f"Expected string, got {type(value)}")
+        if len(value) > max_length:
+            raise SecurityViolationError(f"Map key too long: {len(value)} > {max_length}")
+
+        # Keep semantics intact; only strip ASCII control chars.
+        sanitized = re.sub(r"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]", "", value)
+        if not sanitized:
+            raise SecurityViolationError("Map key must not be empty")
+        if sanitized in self._RESERVED_OBJECT_KEYS:
+            raise SecurityViolationError("Reserved object key not allowed")
+        return sanitized
+
+    def sanitize_identifier_mapping(
+        self,
+        data: Dict[str, Any],
+        *,
+        max_depth: int = 10,
+        current_depth: int = 0,
+    ) -> Dict[str, str]:
+        """
+        Sanitize a mapping whose keys AND values are identifiers (e.g., column rename maps).
+
+        This MUST NOT apply `sanitize_field_name()` because identifier keys can contain Unicode
+        (including BOM artifacts in CSV headers) and punctuation.
+        """
+        if current_depth > max_depth:
+            raise SecurityViolationError(
+                f"Dictionary nesting too deep: {current_depth} > {max_depth}"
+            )
+        if not isinstance(data, dict):
+            raise SecurityViolationError(f"Expected dict, got {type(data)}")
+        if len(data) > self.max_dict_keys:
+            raise SecurityViolationError(
+                f"Too many keys in dict: {len(data)} > {self.max_dict_keys}"
+            )
+
+        sanitized: Dict[str, str] = {}
+        for key, value in data.items():
+            if not isinstance(key, str):
+                raise SecurityViolationError("Mapping keys must be strings")
+            if not isinstance(value, str):
+                value = str(value)
+            src = self.sanitize_map_key(key, max_length=500)
+            dst = self.sanitize_map_key(value, max_length=500)
+            sanitized[src] = dst
+        return sanitized
+
     def sanitize_description(self, value: str) -> str:
         """설명 텍스트 정화 (command injection 체크 안함)"""
         if not isinstance(value, str):
@@ -439,6 +505,17 @@ class InputSanitizer:
                 "group_by",
                 "groupby",
             }
+
+            # Some fields contain *maps* keyed by identifiers (column names, option names, etc).
+            # Treat their nested keys as data, not internal JSON field names.
+            if isinstance(value, dict) and key_lower in {"rename"}:
+                clean_value = self.sanitize_identifier_mapping(
+                    value,
+                    max_depth=max_depth,
+                    current_depth=current_depth + 1,
+                )
+                sanitized[clean_key] = clean_value
+                continue
 
             if isinstance(value, str) and key_lower in sql_expr_keys:
                 clean_value = self.sanitize_sql_expression(value)

@@ -291,6 +291,12 @@ def _column_type(schema: SchemaInfo, column: str) -> Optional[str]:
     value = schema.type_map.get(column)
     if value:
         return normalize_schema_type(value)
+    # Spark CSV reader may strip a BOM from the first header column; be forgiving in preflight.
+    stripped = str(column or "").lstrip("\ufeff")
+    if stripped and stripped != column:
+        value = schema.type_map.get(stripped)
+        if value:
+            return normalize_schema_type(value)
     return None
 
 
@@ -377,8 +383,30 @@ async def compute_pipeline_preflight(
                     }
                 )
             else:
-                left_missing = [key for key in left_keys if key not in inputs[0].columns]
-                right_missing = [key for key in right_keys if key not in inputs[1].columns]
+                left_cols = set(inputs[0].columns or [])
+                right_cols = set(inputs[1].columns or [])
+                left_cols_stripped = {str(col).lstrip("\ufeff") for col in left_cols}
+                right_cols_stripped = {str(col).lstrip("\ufeff") for col in right_cols}
+
+                left_missing: List[str] = []
+                right_missing: List[str] = []
+                normalized: List[Dict[str, Any]] = []
+                for key in left_keys:
+                    if key in left_cols:
+                        continue
+                    stripped = str(key).lstrip("\ufeff")
+                    if stripped != key and stripped in left_cols_stripped:
+                        normalized.append({"side": "left", "original": key, "resolved": stripped})
+                        continue
+                    left_missing.append(key)
+                for key in right_keys:
+                    if key in right_cols:
+                        continue
+                    stripped = str(key).lstrip("\ufeff")
+                    if stripped != key and stripped in right_cols_stripped:
+                        normalized.append({"side": "right", "original": key, "resolved": stripped})
+                        continue
+                    right_missing.append(key)
                 if left_missing or right_missing:
                     issues.append(
                         {
@@ -399,6 +427,16 @@ async def compute_pipeline_preflight(
                         }
                     )
                 else:
+                    if normalized:
+                        issues.append(
+                            {
+                                "kind": "join_key_normalized",
+                                "severity": "warning",
+                                "node_id": node_id,
+                                "message": "join key normalized by stripping UTF-8 BOM prefix",
+                                "normalized": normalized,
+                            }
+                        )
                     mismatches: List[Dict[str, Any]] = []
                     unknowns: List[Dict[str, Any]] = []
                     suggested_casts: List[Dict[str, Any]] = []

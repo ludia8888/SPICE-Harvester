@@ -49,7 +49,9 @@ def _ensure_string_list(value: Any, *, name: str) -> List[str]:
     items = _ensure_list(value, name=name)
     out: List[str] = []
     for item in items:
-        text = str(item or "").strip()
+        # Some CSV headers include a UTF-8 BOM on the first column name.
+        # Spark typically strips it during read; normalize here so plans match runtime behavior.
+        text = str(item or "").strip().lstrip("\ufeff")
         if text:
             out.append(text)
     if not out:
