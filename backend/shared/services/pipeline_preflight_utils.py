@@ -25,11 +25,12 @@ def _normalize_column_list(raw: Any) -> List[str]:
         if isinstance(item, dict):
             name = str(item.get("name") or item.get("column") or "").strip()
             if name:
-                output.append(name)
+                # Spark may strip a UTF-8 BOM prefix from CSV headers; normalize consistently.
+                output.append(name.lstrip("\ufeff") or name)
         else:
             value = str(item).strip()
             if value:
-                output.append(value)
+                output.append(value.lstrip("\ufeff") or value)
     return output
 
 
@@ -39,11 +40,20 @@ def _extract_schema_columns(schema: Any) -> Tuple[List[str], Dict[str, Optional[
     if isinstance(schema.get("columns"), list):
         columns: List[str] = []
         type_map: Dict[str, Optional[str]] = {}
+        seen: set[str] = set()
         for col in schema["columns"]:
             if isinstance(col, dict):
                 name = str(col.get("name") or col.get("column") or "").strip()
                 if not name:
                     continue
+                name = name.lstrip("\ufeff") or name
+                if name in seen:
+                    base = name
+                    idx = 1
+                    while f"{base}__{idx}" in seen:
+                        idx += 1
+                    name = f"{base}__{idx}"
+                seen.add(name)
                 columns.append(name)
                 raw_type = col.get("type") or col.get("data_type") or col.get("dtype")
                 if raw_type:
@@ -51,17 +61,34 @@ def _extract_schema_columns(schema: Any) -> Tuple[List[str], Dict[str, Optional[
             elif isinstance(col, str):
                 name = col.strip()
                 if name:
+                    name = name.lstrip("\ufeff") or name
+                    if name in seen:
+                        base = name
+                        idx = 1
+                        while f"{base}__{idx}" in seen:
+                            idx += 1
+                        name = f"{base}__{idx}"
+                    seen.add(name)
                     columns.append(name)
         return columns, type_map
     if isinstance(schema.get("fields"), list):
         columns = []
         type_map: Dict[str, Optional[str]] = {}
+        seen: set[str] = set()
         for col in schema["fields"]:
             if not isinstance(col, dict):
                 continue
             name = str(col.get("name") or "").strip()
             if not name:
                 continue
+            name = name.lstrip("\ufeff") or name
+            if name in seen:
+                base = name
+                idx = 1
+                while f"{base}__{idx}" in seen:
+                    idx += 1
+                name = f"{base}__{idx}"
+            seen.add(name)
             columns.append(name)
             raw_type = col.get("type")
             if raw_type:
@@ -70,10 +97,19 @@ def _extract_schema_columns(schema: Any) -> Tuple[List[str], Dict[str, Optional[
     if isinstance(schema.get("properties"), dict):
         columns = []
         type_map = {}
+        seen: set[str] = set()
         for key, value in schema["properties"].items():
             name = str(key).strip()
             if not name:
                 continue
+            name = name.lstrip("\ufeff") or name
+            if name in seen:
+                base = name
+                idx = 1
+                while f"{base}__{idx}" in seen:
+                    idx += 1
+                name = f"{base}__{idx}"
+            seen.add(name)
             columns.append(name)
             if isinstance(value, dict) and value.get("type"):
                 type_map[name] = normalize_schema_type(value.get("type"))
@@ -87,7 +123,22 @@ def _extract_sample_rows(sample: Any) -> List[Dict[str, Any]]:
     rows = sample.get("rows")
     if isinstance(rows, list):
         if rows and isinstance(rows[0], dict):
-            return rows  # type: ignore[return-value]
+            output: List[Dict[str, Any]] = []
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                normalized: Dict[str, Any] = {}
+                for key, value in row.items():
+                    name = (str(key) or "").lstrip("\ufeff") or str(key)
+                    if name in normalized:
+                        base = name
+                        idx = 1
+                        while f"{base}__{idx}" in normalized:
+                            idx += 1
+                        name = f"{base}__{idx}"
+                    normalized[name] = value
+                output.append(normalized)
+            return output
         columns, _ = _extract_schema_columns(sample)
         output: List[Dict[str, Any]] = []
         for row in rows:
@@ -102,7 +153,22 @@ def _extract_sample_rows(sample: Any) -> List[Dict[str, Any]]:
         return output
     data_rows = sample.get("data")
     if isinstance(data_rows, list) and data_rows and isinstance(data_rows[0], dict):
-        return data_rows  # type: ignore[return-value]
+        output: List[Dict[str, Any]] = []
+        for row in data_rows:
+            if not isinstance(row, dict):
+                continue
+            normalized: Dict[str, Any] = {}
+            for key, value in row.items():
+                name = (str(key) or "").lstrip("\ufeff") or str(key)
+                if name in normalized:
+                    base = name
+                    idx = 1
+                    while f"{base}__{idx}" in normalized:
+                        idx += 1
+                    name = f"{base}__{idx}"
+                normalized[name] = value
+            output.append(normalized)
+        return output
     return []
 
 
@@ -189,17 +255,59 @@ def _apply_cast(schema: SchemaInfo, casts: List[Dict[str, Any]]) -> SchemaInfo:
     return SchemaInfo(columns=list(schema.columns), type_map=type_map, dynamic_columns=schema.dynamic_columns)
 
 
-def _apply_compute(schema: SchemaInfo, expression: str) -> SchemaInfo:
-    expression = str(expression or "").strip()
+def _apply_compute(schema: SchemaInfo, metadata: Any) -> SchemaInfo:
+    """
+    Compute transforms can be represented in a few deterministic forms:
+
+    - legacy: {"expression": "new_col = ..."}
+    - preferred single column: {"targetColumn": "new_col", "formula": "..."}
+    - preferred multi column: {"assignments": [{"column": "c1", "expression": "..."}, ...]}
+
+    Preflight does NOT evaluate Spark SQL; it only propagates *column existence* so downstream
+    join/filter/contract checks can validate against produced schemas.
+    """
+    if isinstance(metadata, dict):
+        # Multi-column assignments (preferred).
+        assignments = metadata.get("assignments")
+        if isinstance(assignments, list) and assignments:
+            columns = list(schema.columns)
+            type_map = dict(schema.type_map)
+            for item in assignments:
+                if not isinstance(item, dict):
+                    continue
+                col = str(item.get("column") or item.get("target") or item.get("name") or "").strip()
+                if not col:
+                    continue
+                if col not in columns:
+                    columns.append(col)
+                if col not in type_map:
+                    type_map[col] = None
+            return SchemaInfo(columns=columns, type_map=type_map, dynamic_columns=schema.dynamic_columns)
+
+        # Single-column assignment (preferred).
+        target = str(metadata.get("targetColumn") or metadata.get("target_column") or "").strip()
+        formula = str(metadata.get("formula") or "").strip()
+        if target and formula:
+            columns = list(schema.columns)
+            if target not in columns:
+                columns.append(target)
+            type_map = dict(schema.type_map)
+            if target not in type_map:
+                type_map[target] = None
+            return SchemaInfo(columns=columns, type_map=type_map, dynamic_columns=schema.dynamic_columns)
+
+        # Legacy "expression" string.
+        metadata = metadata.get("expression") or ""
+
+    expression = str(metadata or "").strip()
     if not expression:
         return schema
-    target = None
-    if "=" in expression:
-        target = expression.split("=", 1)[0].strip()
-    else:
-        target = "computed"
+
+    # Best-effort: handle "a = ..." shape.
+    target = expression.split("=", 1)[0].strip() if "=" in expression else "computed"
     if not target:
         return schema
+
     columns = list(schema.columns)
     if target not in columns:
         columns.append(target)
@@ -233,28 +341,265 @@ def _apply_group_by(schema: SchemaInfo, group_by: List[str], aggregates: List[Di
     return SchemaInfo(columns=output, type_map=type_map, dynamic_columns=schema.dynamic_columns)
 
 
-def _apply_window(schema: SchemaInfo) -> SchemaInfo:
+def _parse_sql_alias(expr: str) -> Optional[str]:
+    """
+    Best-effort alias extraction for Spark SQL expressions.
+
+    Supports the most common deterministic form:
+      "<expr> AS <alias>"
+    """
+    raw = str(expr or "").strip()
+    if not raw:
+        return None
+    lower = raw.lower()
+    if " as " not in lower:
+        return None
+    before, _sep, _after = lower.rpartition(" as ")
+    alias = raw[len(before) + 4 :].strip()
+    if alias.startswith("`") and alias.endswith("`") and len(alias) >= 2:
+        alias = alias[1:-1].replace("``", "`").strip()
+    return alias or None
+
+
+def _apply_group_by_expr(schema: SchemaInfo, group_by: List[str], expressions: List[Any]) -> SchemaInfo:
+    """
+    Schema propagation for Spark `groupBy(...).agg(expr(...).alias(...))` via `aggregateExpressions`.
+
+    If an expression does not have an explicit alias, we conservatively mark the output as dynamic
+    to avoid hard preflight failures on downstream selects.
+    """
+    grouped = [col for col in group_by if col in schema.columns]
+    type_map: Dict[str, Optional[str]] = {col: schema.type_map.get(col) for col in grouped}
+    output = list(grouped)
+    existing: set[str] = set(output)
+
+    for item in expressions or []:
+        alias: Optional[str] = None
+        if isinstance(item, str):
+            alias = _parse_sql_alias(item)
+        elif isinstance(item, dict):
+            alias = str(item.get("alias") or item.get("as") or "").strip() or None
+            if not alias:
+                alias = _parse_sql_alias(str(item.get("expr") or item.get("expression") or ""))
+        else:
+            continue
+
+        if not alias:
+            return SchemaInfo(columns=output, type_map=type_map, dynamic_columns=True)
+
+        name = alias
+        if name in existing:
+            base = name
+            idx = 1
+            while f"{base}__{idx}" in existing:
+                idx += 1
+            name = f"{base}__{idx}"
+        existing.add(name)
+        output.append(name)
+        type_map.setdefault(name, None)
+
+    return SchemaInfo(columns=output, type_map=type_map, dynamic_columns=schema.dynamic_columns)
+
+
+def _apply_window(schema: SchemaInfo, metadata: Any = None) -> SchemaInfo:
+    """
+    Window transforms can either be declarative metadata (partition/order + row_number)
+    or a list of Spark SQL expressions that add new columns.
+
+    Preflight does NOT evaluate Spark SQL; it only propagates produced column names.
+    """
     columns = list(schema.columns)
+    type_map = dict(schema.type_map)
+
+    if isinstance(metadata, dict):
+        window_meta = metadata.get("window") if isinstance(metadata.get("window"), dict) else {}
+        expressions = None
+        if isinstance(window_meta, dict) and isinstance(window_meta.get("expressions"), list):
+            expressions = window_meta.get("expressions")
+        elif isinstance(metadata.get("expressions"), list):
+            expressions = metadata.get("expressions")
+
+        if isinstance(expressions, list) and expressions:
+            for item in expressions:
+                if not isinstance(item, dict):
+                    continue
+                name = str(item.get("column") or item.get("name") or "").strip().lstrip("\ufeff")
+                if not name:
+                    continue
+                if name not in columns:
+                    columns.append(name)
+                type_map.setdefault(name, None)
+            return SchemaInfo(columns=columns, type_map=type_map, dynamic_columns=schema.dynamic_columns)
+
+        output_col = str(window_meta.get("outputColumn") or "row_number").strip().lstrip("\ufeff") if isinstance(window_meta, dict) else ""
+        output_col = output_col or "row_number"
+        if output_col not in columns:
+            columns.append(output_col)
+        type_map.setdefault(output_col, "xsd:integer")
+        return SchemaInfo(columns=columns, type_map=type_map, dynamic_columns=schema.dynamic_columns)
+
     if "row_number" not in columns:
         columns.append("row_number")
-    type_map = dict(schema.type_map)
     type_map.setdefault("row_number", "xsd:integer")
     return SchemaInfo(columns=columns, type_map=type_map, dynamic_columns=schema.dynamic_columns)
 
 
-def _apply_join(left: SchemaInfo, right: SchemaInfo) -> SchemaInfo:
+def _apply_join(
+    left: SchemaInfo,
+    right: SchemaInfo,
+    *,
+    left_keys: Optional[List[str]] = None,
+    right_keys: Optional[List[str]] = None,
+) -> SchemaInfo:
+    """
+    Apply the deterministic join output naming policy.
+
+    - Left columns are preserved.
+    - Right columns that collide with left are prefixed with `right_`.
+    - If join keys are same-named, Spark join de-dupes those key columns; we do NOT add a second
+      `right_<key>` column for them.
+
+    This must match the Spark runtime join behavior to prevent preflight/schema mismatches.
+    """
+    left_key_list = [str(k).strip().lstrip("\ufeff") for k in (left_keys or []) if str(k).strip()]
+    right_key_list = [str(k).strip().lstrip("\ufeff") for k in (right_keys or []) if str(k).strip()]
+    same_key_names = bool(left_key_list) and len(left_key_list) == len(right_key_list) and all(
+        lk == rk for lk, rk in zip(left_key_list, right_key_list)
+    )
+    join_key_keep = set(right_key_list) if same_key_names else set()
+
     columns = list(left.columns)
     type_map: Dict[str, Optional[str]] = dict(left.type_map)
     left_set = set(left.columns)
+    existing: set[str] = set(columns)
+
     for col in right.columns:
-        mapped = f"right_{col}" if col in left_set else col
+        if col in left_set:
+            if col in join_key_keep:
+                # Same-named join keys are de-duped by Spark `on=[...]`.
+                continue
+            mapped = f"right_{col}"
+        else:
+            mapped = col
+
+        # Ensure uniqueness deterministically.
+        if mapped in existing:
+            base = mapped
+            idx = 1
+            while f"{base}__{idx}" in existing:
+                idx += 1
+            mapped = f"{base}__{idx}"
+
         columns.append(mapped)
+        existing.add(mapped)
         type_map[mapped] = right.type_map.get(col)
+
     return SchemaInfo(
         columns=columns,
         type_map=type_map,
         dynamic_columns=left.dynamic_columns or right.dynamic_columns,
     )
+
+
+def _apply_select_expr(schema: SchemaInfo, expressions: List[str]) -> Tuple[SchemaInfo, List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """
+    Best-effort schema propagation for Spark `selectExpr`.
+
+    Returns:
+    - output schema
+    - missing column references (deterministic hard errors)
+    - normalized column refs (BOM-stripped)
+    """
+    missing: List[Dict[str, Any]] = []
+    normalized: List[Dict[str, Any]] = []
+
+    # If the select uses star expansion, treat output as dynamic to avoid false claims.
+    for raw in expressions:
+        text = str(raw or "").strip()
+        if text == "*" or text.endswith(".*"):
+            return (
+                SchemaInfo(columns=list(schema.columns), type_map=dict(schema.type_map), dynamic_columns=True),
+                missing,
+                normalized,
+            )
+
+    out_cols: List[str] = []
+    out_types: Dict[str, Optional[str]] = {}
+    existing: set[str] = set()
+
+    for raw in expressions:
+        expr = str(raw or "").strip()
+        if not expr:
+            continue
+
+        # Handle a strict subset of expressions deterministically:
+        # - `src`
+        # - `src AS dst`
+        # with optional backticks around identifiers.
+        src = None
+        dst = None
+        upper = expr.upper()
+        if " AS " in upper:
+            parts = expr.split(" AS ", 1) if " AS " in expr else expr.split(" as ", 1)
+            if len(parts) == 2:
+                src = parts[0].strip()
+                dst = parts[1].strip()
+        else:
+            src = expr
+            dst = None
+
+        def _unquote_ident(value: Optional[str]) -> Optional[str]:
+            if value is None:
+                return None
+            text = str(value).strip()
+            if text.startswith("`") and text.endswith("`") and len(text) >= 2:
+                inner = text[1:-1].replace("``", "`")
+                return inner.strip()
+            return text
+
+        src_name = _unquote_ident(src)
+        dst_name = _unquote_ident(dst) if dst else None
+
+        # If src is not a simple identifier, we can't validate it; only propagate alias if present.
+        if src_name and ("(" in src_name or ")" in src_name or " " in src_name or "." in src_name):
+            if dst_name:
+                name = dst_name
+                if name in existing:
+                    base = name
+                    idx = 1
+                    while f"{base}__{idx}" in existing:
+                        idx += 1
+                    name = f"{base}__{idx}"
+                out_cols.append(name)
+                existing.add(name)
+                out_types[name] = None
+            continue
+
+        if not src_name:
+            continue
+
+        resolved_src = src_name
+        if resolved_src not in schema.columns:
+            stripped = resolved_src.lstrip("\ufeff")
+            if stripped != resolved_src and stripped in schema.columns:
+                normalized.append({"original": resolved_src, "resolved": stripped})
+                resolved_src = stripped
+            else:
+                missing.append({"column": resolved_src})
+                # Still keep going so output schema is computed for LLM feedback.
+
+        out_name = dst_name or src_name
+        if out_name in existing:
+            base = out_name
+            idx = 1
+            while f"{base}__{idx}" in existing:
+                idx += 1
+            out_name = f"{base}__{idx}"
+        out_cols.append(out_name)
+        existing.add(out_name)
+        out_types[out_name] = schema.type_map.get(resolved_src)
+
+    return SchemaInfo(columns=out_cols, type_map=out_types, dynamic_columns=schema.dynamic_columns), missing, normalized
 
 
 def _apply_union(left: SchemaInfo, right: SchemaInfo, mode: str) -> SchemaInfo:
@@ -395,7 +740,8 @@ async def compute_pipeline_preflight(
                     if key in left_cols:
                         continue
                     stripped = str(key).lstrip("\ufeff")
-                    if stripped != key and stripped in left_cols_stripped:
+                    if stripped in left_cols_stripped:
+                        # Be forgiving when schema columns contain a UTF-8 BOM prefix (Spark may strip it at read time).
                         normalized.append({"side": "left", "original": key, "resolved": stripped})
                         continue
                     left_missing.append(key)
@@ -403,7 +749,7 @@ async def compute_pipeline_preflight(
                     if key in right_cols:
                         continue
                     stripped = str(key).lstrip("\ufeff")
-                    if stripped != key and stripped in right_cols_stripped:
+                    if stripped in right_cols_stripped:
                         normalized.append({"side": "right", "original": key, "resolved": stripped})
                         continue
                     right_missing.append(key)
@@ -424,6 +770,10 @@ async def compute_pipeline_preflight(
                                 "keys": right_keys,
                                 "missing": right_missing,
                             },
+                            # Provide a small, deterministic witness surface so the agent can repair
+                            # without guessing (avoid semantic/heuristic routing).
+                            "left_available_columns": list(inputs[0].columns or [])[:60],
+                            "right_available_columns": list(inputs[1].columns or [])[:60],
                         }
                     )
                 else:
@@ -516,7 +866,7 @@ async def compute_pipeline_preflight(
                                 "unknowns": unknowns,
                             }
                         )
-            schema_by_node[node_id] = _apply_join(inputs[0], inputs[1])
+            schema_by_node[node_id] = _apply_join(inputs[0], inputs[1], left_keys=left_keys, right_keys=right_keys)
             continue
 
         if operation == "union" and len(inputs) >= 2:
@@ -638,7 +988,35 @@ async def compute_pipeline_preflight(
 
         base = inputs[0]
         if operation == "select":
-            schema_by_node[node_id] = _apply_select(base, _normalize_column_list(metadata.get("columns") or []))
+            exprs = metadata.get("expressions") or metadata.get("selectExpr") or metadata.get("select_expr")
+            if isinstance(exprs, list) and exprs:
+                schema, missing, normalized = _apply_select_expr(base, [str(item) for item in exprs])
+                if missing and not base.dynamic_columns:
+                    issues.append(
+                        {
+                            "kind": "select_expr_missing_column",
+                            "severity": "error",
+                            "node_id": node_id,
+                            "message": "selectExpr references missing column(s)",
+                            "missing": missing,
+                            "input_node_id": input_ids[0] if len(input_ids) > 0 else None,
+                            "available_columns": list(base.columns or [])[:80],
+                        }
+                    )
+                if normalized:
+                    issues.append(
+                        {
+                            "kind": "select_expr_normalized",
+                            "severity": "warning",
+                            "node_id": node_id,
+                            "message": "selectExpr column normalized by stripping UTF-8 BOM prefix",
+                            "normalized": normalized,
+                            "input_node_id": input_ids[0] if len(input_ids) > 0 else None,
+                        }
+                    )
+                schema_by_node[node_id] = schema
+            else:
+                schema_by_node[node_id] = _apply_select(base, _normalize_column_list(metadata.get("columns") or []))
         elif operation == "drop":
             schema_by_node[node_id] = _apply_drop(base, _normalize_column_list(metadata.get("columns") or []))
         elif operation == "rename":
@@ -648,13 +1026,21 @@ async def compute_pipeline_preflight(
             casts = metadata.get("casts") or []
             schema_by_node[node_id] = _apply_cast(base, casts if isinstance(casts, list) else [])
         elif operation == "compute":
-            schema_by_node[node_id] = _apply_compute(base, metadata.get("expression") or "")
+            schema_by_node[node_id] = _apply_compute(base, metadata)
         elif operation == "regexReplace":
             schema_by_node[node_id] = base
         elif operation in {"groupBy", "aggregate"}:
             group_by = _normalize_column_list(metadata.get("groupBy") or [])
-            aggregates = metadata.get("aggregates") or []
-            schema_by_node[node_id] = _apply_group_by(base, group_by, aggregates if isinstance(aggregates, list) else [])
+            expr_items = (
+                metadata.get("aggregateExpressions")
+                or metadata.get("aggExpressions")
+                or metadata.get("aggregate_expressions")
+            )
+            if isinstance(expr_items, list) and expr_items:
+                schema_by_node[node_id] = _apply_group_by_expr(base, group_by, expr_items)
+            else:
+                aggregates = metadata.get("aggregates") or []
+                schema_by_node[node_id] = _apply_group_by(base, group_by, aggregates if isinstance(aggregates, list) else [])
         elif operation == "pivot":
             pivot_meta = metadata.get("pivot") or {}
             if isinstance(pivot_meta, dict):
@@ -667,7 +1053,7 @@ async def compute_pipeline_preflight(
                 dynamic_columns=True,
             )
         elif operation == "window":
-            schema_by_node[node_id] = _apply_window(base)
+            schema_by_node[node_id] = _apply_window(base, metadata)
         else:
             schema_by_node[node_id] = base
 
@@ -789,7 +1175,16 @@ async def compute_schema_by_node(
         operation = normalize_operation(metadata.get("operation"))
 
         if operation == "join" and len(inputs) >= 2:
-            schema_by_node[node_id] = _apply_join(inputs[0], inputs[1])
+            join_spec = resolve_join_spec(metadata)
+            left_keys = list(join_spec.left_keys or [])
+            right_keys = list(join_spec.right_keys or [])
+            left_key = join_spec.left_key or join_spec.right_key
+            right_key = join_spec.right_key or join_spec.left_key
+            if left_key and not left_keys:
+                left_keys = [left_key]
+            if right_key and not right_keys:
+                right_keys = [right_key]
+            schema_by_node[node_id] = _apply_join(inputs[0], inputs[1], left_keys=left_keys, right_keys=right_keys)
             continue
 
         if operation == "union" and len(inputs) >= 2:
@@ -803,7 +1198,11 @@ async def compute_schema_by_node(
 
         base = inputs[0]
         if operation == "select":
-            schema_by_node[node_id] = _apply_select(base, _normalize_column_list(metadata.get("columns") or []))
+            exprs = metadata.get("expressions") or metadata.get("selectExpr") or metadata.get("select_expr")
+            if isinstance(exprs, list) and exprs:
+                schema_by_node[node_id] = _apply_select_expr(base, [str(item) for item in exprs])[0]
+            else:
+                schema_by_node[node_id] = _apply_select(base, _normalize_column_list(metadata.get("columns") or []))
         elif operation == "drop":
             schema_by_node[node_id] = _apply_drop(base, _normalize_column_list(metadata.get("columns") or []))
         elif operation == "rename":
@@ -813,13 +1212,21 @@ async def compute_schema_by_node(
             casts = metadata.get("casts") or []
             schema_by_node[node_id] = _apply_cast(base, casts if isinstance(casts, list) else [])
         elif operation == "compute":
-            schema_by_node[node_id] = _apply_compute(base, metadata.get("expression") or "")
+            schema_by_node[node_id] = _apply_compute(base, metadata)
         elif operation == "regexReplace":
             schema_by_node[node_id] = base
         elif operation in {"groupBy", "aggregate"}:
             group_by = _normalize_column_list(metadata.get("groupBy") or [])
-            aggregates = metadata.get("aggregates") or []
-            schema_by_node[node_id] = _apply_group_by(base, group_by, aggregates if isinstance(aggregates, list) else [])
+            expr_items = (
+                metadata.get("aggregateExpressions")
+                or metadata.get("aggExpressions")
+                or metadata.get("aggregate_expressions")
+            )
+            if isinstance(expr_items, list) and expr_items:
+                schema_by_node[node_id] = _apply_group_by_expr(base, group_by, expr_items)
+            else:
+                aggregates = metadata.get("aggregates") or []
+                schema_by_node[node_id] = _apply_group_by(base, group_by, aggregates if isinstance(aggregates, list) else [])
         elif operation == "pivot":
             pivot_meta = metadata.get("pivot") or {}
             if isinstance(pivot_meta, dict):
@@ -832,7 +1239,7 @@ async def compute_schema_by_node(
                 dynamic_columns=True,
             )
         elif operation == "window":
-            schema_by_node[node_id] = _apply_window(base)
+            schema_by_node[node_id] = _apply_window(base, metadata)
         else:
             schema_by_node[node_id] = base
 

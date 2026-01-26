@@ -193,7 +193,7 @@ Bring up the stack with end-user JWT enabled and an OpenAI-compatible LLM:
 ```bash
 USER_JWT_ENABLED=true \
 USER_JWT_HS256_SECRET=spice-dev-user-jwt-secret \
-OPENAI_API_KEY=your_openai_api_key_here \
+LLM_API_KEY=your_openai_api_key_here \
 PIPELINE_PLAN_LLM_ENABLED=true \
 ADMIN_TOKEN=test-token \
 docker compose -f backend/docker-compose.yml up -d --build

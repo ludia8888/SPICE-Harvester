@@ -263,6 +263,12 @@ class InputSanitizer:
         if not isinstance(value, str):
             raise SecurityViolationError(f"Expected string, got {type(value)}")
 
+        # Strip Unicode BOM markers that commonly appear in CSV headers.
+        # This is semantics-preserving (BOM is not part of the intended identifier) and avoids
+        # false-positive "invalid field name" errors when pipelines reference such columns.
+        if "\ufeff" in value:
+            value = value.replace("\ufeff", "")
+
         # Allow limited "$" keys and internal pipeline metadata keys.
         if value in {"$ref", "$now", "_canonical_contract_applied"}:
             return value
@@ -506,9 +512,9 @@ class InputSanitizer:
                 "groupby",
             }
 
-            # Some fields contain *maps* keyed by identifiers (column names, option names, etc).
+            # Some fields contain *maps* keyed by identifiers (column names, Spark config keys, option names, etc).
             # Treat their nested keys as data, not internal JSON field names.
-            if isinstance(value, dict) and key_lower in {"rename"}:
+            if isinstance(value, dict) and key_lower in {"rename", "spark_conf", "sparkconf", "options", "options_env", "optionsenv"}:
                 clean_value = self.sanitize_identifier_mapping(
                     value,
                     max_depth=max_depth,

@@ -3593,7 +3593,6 @@ class DatasetRegistry:
     ) -> tuple[DatasetRecord, DatasetIngestRequestRecord]:
         if not self._pool:
             raise RuntimeError("DatasetRegistry not connected")
-        schema_payload = normalize_json_payload(schema_json) if schema_json is not None else None
         approved_at = utcnow()
         async with self._pool.acquire() as conn:
             async with conn.transaction():
@@ -3611,12 +3610,16 @@ class DatasetRegistry:
                 )
                 if not row:
                     raise RuntimeError("Ingest request not found")
-                payload = schema_payload if schema_payload is not None else coerce_json_dataset(row["schema_json"])
+                # Approving schema means promoting the ingest-request schema_json into the dataset's
+                # authoritative schema_json. Keep payload as a dict for validation, then serialize
+                # once for asyncpg/jsonb binding.
+                payload = schema_json if schema_json is not None else coerce_json_dataset(row["schema_json"])
                 payload = payload or {}
                 if not isinstance(payload, dict):
                     raise ValueError("schema_json must be an object")
                 if not payload:
                     raise ValueError("schema_json is required to approve")
+                payload_json = normalize_json_payload(payload)
 
                 dataset_id = str(row["dataset_id"])
                 await conn.execute(
@@ -3626,7 +3629,7 @@ class DatasetRegistry:
                     WHERE dataset_id = $1::uuid
                     """,
                     dataset_id,
-                    payload,
+                    payload_json,
                 )
                 await conn.execute(
                     f"""
@@ -3639,7 +3642,7 @@ class DatasetRegistry:
                     WHERE ingest_request_id = $1::uuid
                     """,
                     ingest_request_id,
-                    payload,
+                    payload_json,
                     approved_by,
                     approved_at,
                 )

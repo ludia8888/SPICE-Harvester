@@ -71,6 +71,7 @@ from shared.services.pipeline_plan_builder import (  # noqa: E402
     delete_edge,
     delete_node,
     new_plan,
+    reset_plan,
     set_node_inputs,
     update_settings,
     update_node_metadata,
@@ -527,6 +528,17 @@ class PipelineMCPServer:
                             "dataset_ids": {"type": "array", "items": {"type": "string"}},
                         },
                         "required": ["goal", "db_name"],
+                    },
+                },
+                {
+                    "name": "plan_reset",
+                    "description": "Reset an existing plan to empty (preserves goal + data_scope).",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "plan": {"type": "object"},
+                        },
+                        "required": ["plan"],
                     },
                 },
                 {
@@ -1033,17 +1045,18 @@ class PipelineMCPServer:
                 },
                 {
                     "name": "plan_update_output",
-                    "description": "Patch outputs[] entry (by output_name); keeps output node metadata.outputName in sync if renamed.",
+                    "description": "Patch outputs[] entry (by output_name or output node_id); keeps output node metadata.outputName in sync if renamed.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
                             "plan": {"type": "object"},
                             "output_name": {"type": "string"},
+                            "node_id": {"type": "string"},
                             "set": {"type": "object"},
                             "unset": {"type": "array", "items": {"type": "string"}},
                             "replace": {"type": "boolean"},
                         },
-                        "required": ["plan", "output_name"],
+                        "required": ["plan"],
                     },
                 },
                 {
@@ -1309,6 +1322,11 @@ class PipelineMCPServer:
                         dataset_ids=arguments.get("dataset_ids"),
                     )
                     return {"plan": plan}
+
+                if name == "plan_reset":
+                    plan = arguments.get("plan") or {}
+                    result = reset_plan(plan)
+                    return {"plan": result.plan, "warnings": list(result.warnings)}
 
                 if name == "plan_add_input":
                     plan = arguments.get("plan") or {}
@@ -1883,9 +1901,30 @@ class PipelineMCPServer:
 
                 if name == "plan_update_output":
                     plan = arguments.get("plan") or {}
+                    output_name = str(arguments.get("output_name") or "").strip()
+                    if not output_name:
+                        # Convenience: allow selecting the output entry by output node id, since most other
+                        # plan patch tools are node_id-based and LLMs commonly supply node_id.
+                        node_id = str(arguments.get("node_id") or "").strip()
+                        if node_id:
+                            definition = plan.get("definition_json")
+                            nodes = definition.get("nodes") if isinstance(definition, dict) else None
+                            if isinstance(nodes, list):
+                                for node in nodes:
+                                    if not isinstance(node, dict):
+                                        continue
+                                    if str(node.get("id") or "").strip() != node_id:
+                                        continue
+                                    if str(node.get("type") or "").strip().lower() != "output":
+                                        continue
+                                    meta = node.get("metadata") if isinstance(node.get("metadata"), dict) else {}
+                                    output_name = str(meta.get("outputName") or meta.get("output_name") or "").strip()
+                                    break
+                    if not output_name:
+                        return {"error": "output_name is required (or provide node_id of an output node)."}
                     result = update_output(
                         plan,
-                        output_name=str(arguments.get("output_name") or ""),
+                        output_name=output_name,
                         set_fields=arguments.get("set"),
                         unset_fields=arguments.get("unset"),
                         replace=bool(arguments.get("replace", False)),
@@ -2275,7 +2314,7 @@ class PipelineMCPServer:
                     job_id_arg = str(arguments.get("job_id") or "").strip() or None
                     force = bool(arguments.get("force") or False)
                     wait = bool(arguments.get("wait", True))
-                    timeout_seconds = float(arguments.get("timeout_seconds") or 60.0)
+                    timeout_seconds = float(arguments.get("timeout_seconds") or 180.0)
                     poll_s = float(arguments.get("poll_interval_seconds") or 2.0)
                     db_name = str(arguments.get("db_name") or "").strip()
                     principal_id = str(arguments.get("principal_id") or "").strip() or None
@@ -2442,7 +2481,7 @@ class PipelineMCPServer:
                     job_id_arg = str(arguments.get("job_id") or "").strip() or None
                     force = bool(arguments.get("force") or False)
                     wait = bool(arguments.get("wait", True))
-                    timeout_seconds = float(arguments.get("timeout_seconds") or 180.0)
+                    timeout_seconds = float(arguments.get("timeout_seconds") or 600.0)
                     poll_s = float(arguments.get("poll_interval_seconds") or 2.5)
                     db_name = str(arguments.get("db_name") or "").strip()
                     principal_id = str(arguments.get("principal_id") or "").strip() or None
@@ -2708,6 +2747,23 @@ class PipelineMCPServer:
                                     "build_status": detail.get("build_status") or detail.get("buildStatus"),
                                     "errors": detail.get("errors"),
                                     "message": detail.get("message") or "Build is not successful yet",
+                                }
+                            if isinstance(detail, dict) and str(detail.get("code") or "").strip() == "REPLAY_REQUIRED":
+                                # Deploy can be blocked when the target dataset exists and the deploy would change
+                                # its schema/contract. The caller must either:
+                                # - retry with replay_on_deploy=true, or
+                                # - choose a new dataset_name.
+                                return {
+                                    "status": "replay_required",
+                                    "pipeline_id": pipeline_id,
+                                    "build_job_id": build_job_id,
+                                    "node_id": node_id,
+                                    "db_name": db_name,
+                                    "dataset_name": dataset_name,
+                                    "code": "REPLAY_REQUIRED",
+                                    "message": detail.get("message") or resp.get("error") or "Replay is required to deploy",
+                                    "detail": detail,
+                                    "hint": "Retry with replay_on_deploy=true OR deploy to a new dataset_name.",
                                 }
                             if isinstance(detail, str) and "definition" in detail.lower() and "match" in detail.lower():
                                 return {

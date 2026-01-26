@@ -215,7 +215,7 @@ Claim 저장 위치:
 
 실제 gpt-5 호출(엔터프라이즈/프로덕션):
 - `LLM_PROVIDER=openai_compat`
-- `OPENAI_API_KEY=...` (또는 `LLM_API_KEY=...`)
+- `LLM_API_KEY=...` (legacy alias: `OPENAI_API_KEY=...`)
 
 외부 키 없이 E2E/CI 스모크(결정론 mock):
 - `LLM_PROVIDER=mock`

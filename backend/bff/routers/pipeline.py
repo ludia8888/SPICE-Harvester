@@ -4720,7 +4720,11 @@ async def deploy_pipeline(
                         "build_job_id": str(build_job_id),
                         "node_id": str(node_id) if node_id else "*",
                     },
-                    allow_empty=False,
+                    # Promotions are intentionally idempotent. A single build branch typically contains
+                    # artifacts for *all* output nodes. If one output was already promoted (merge done),
+                    # subsequent output promotions for the same build must still succeed so we can
+                    # register the remaining dataset versions even when lakeFS reports "no changes".
+                    allow_empty=True,
                 )
             except LakeFSConflictError as exc:
                 raise HTTPException(

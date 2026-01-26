@@ -80,6 +80,9 @@ def _normalize_columns(schema_json: Any, sample_json: Any) -> list[dict[str, Any
                     name = str(col.get("name") or col.get("column") or "").strip()
                     if not name:
                         continue
+                    # Spark CSV readers may strip a UTF-8 BOM prefix from the first column name.
+                    # Normalize here so LLM-generated expressions reference runtime column names.
+                    name = name.lstrip("\ufeff") or name
                     output.append(
                         {
                             "name": name,
@@ -89,9 +92,24 @@ def _normalize_columns(schema_json: Any, sample_json: Any) -> list[dict[str, Any
                 else:
                     name = str(col or "").strip()
                     if name:
+                        name = name.lstrip("\ufeff") or name
                         output.append({"name": name, "type": "xsd:string"})
             if output:
-                return output
+                # Ensure uniqueness after BOM normalization.
+                seen: set[str] = set()
+                normalized: list[dict[str, Any]] = []
+                for item in output:
+                    raw = str(item.get("name") or "")
+                    base = raw
+                    name = raw
+                    if name in seen:
+                        suffix = 1
+                        while f"{base}__{suffix}" in seen:
+                            suffix += 1
+                        name = f"{base}__{suffix}"
+                    seen.add(name)
+                    normalized.append({"name": name, "type": item.get("type")})
+                return normalized
     return []
 
 
@@ -109,7 +127,21 @@ def _extract_rows(sample_json: Any, *, columns: list[dict[str, Any]], max_rows: 
         return []
 
     if isinstance(rows[0], dict):
-        return [dict(row) for row in rows if isinstance(row, dict)]
+        output: list[dict[str, Any]] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            normalized: dict[str, Any] = {}
+            for key, value in row.items():
+                name = str(key).lstrip("\ufeff") or str(key)
+                if name in normalized:
+                    suffix = 1
+                    while f"{name}__{suffix}" in normalized:
+                        suffix += 1
+                    name = f"{name}__{suffix}"
+                normalized[name] = value
+            output.append(normalized)
+        return output
 
     col_names = [str(col.get("name") or "").strip() for col in (columns or [])]
     col_names = [name for name in col_names if name]

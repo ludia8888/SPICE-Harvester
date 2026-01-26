@@ -7,6 +7,7 @@ Consumes Kafka pipeline-jobs and executes dataset transforms using Spark.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import json
 import logging
@@ -28,6 +29,7 @@ try:
     from pyspark.sql import functions as F  # type: ignore
     from pyspark.sql.types import StructType  # type: ignore
     from pyspark.sql.window import Window  # type: ignore
+    from pyspark import StorageLevel  # type: ignore
 
     _PYSPARK_AVAILABLE = True
 except ModuleNotFoundError:  # pragma: no cover
@@ -37,6 +39,7 @@ except ModuleNotFoundError:  # pragma: no cover
     DataFrame = Any  # type: ignore[assignment,misc]
     F = None  # type: ignore[assignment]
     Window = None  # type: ignore[assignment]
+    StorageLevel = Any  # type: ignore[assignment,misc]
     StructType = Any  # type: ignore[assignment,misc]
 
 from data_connector.google_sheets.service import GoogleSheetsService
@@ -299,6 +302,12 @@ class PipelineWorker:
         self.max_retries = pipeline_settings.jobs_max_retries
         self.backoff_base = pipeline_settings.jobs_backoff_base_seconds
         self.backoff_max = pipeline_settings.jobs_backoff_max_seconds
+        # Spark jobs can legitimately take longer than Kafka's default 5m max poll interval.
+        # This must be long enough to cover worst-case preview/build/deploy runtimes.
+        self.max_poll_interval_ms = pipeline_settings.jobs_max_poll_interval_ms
+        # If the worker is restarted mid-job, we want fast recovery; a 15m lease blocks the
+        # entire Kafka partition. Keep this short for pipeline jobs and rely on heartbeats.
+        self.processed_event_lease_timeout_seconds = pipeline_settings.processed_event_lease_timeout_seconds
 
         self.consumer: Optional[Consumer] = None
         self.dlq_producer: Optional[Producer] = None
@@ -393,7 +402,7 @@ class PipelineWorker:
         if self.objectify_registry:
             self.objectify_job_queue = ObjectifyJobQueue(objectify_registry=self.objectify_registry)
 
-        self.processed = ProcessedEventRegistry()
+        self.processed = ProcessedEventRegistry(lease_timeout_seconds=int(self.processed_event_lease_timeout_seconds))
         await self.processed.initialize()
 
         self.lineage = LineageStore()
@@ -436,7 +445,7 @@ class PipelineWorker:
                 "auto.offset.reset": "earliest",
                 "enable.auto.commit": False,
                 "session.timeout.ms": 45000,
-                "max.poll.interval.ms": 300000,
+                "max.poll.interval.ms": int(self.max_poll_interval_ms),
             }
         )
         self.consumer.subscribe([self.topic])
@@ -699,7 +708,14 @@ class PipelineWorker:
                                 self._heartbeat_loop(handler=self.handler, event_id=job.job_id)
                             )
 
+                            logger.info(
+                                "Executing pipeline job (job_id=%s pipeline_id=%s mode=%s)",
+                                job.job_id,
+                                job.pipeline_id,
+                                getattr(job, "mode", None),
+                            )
                             await self._execute_job(job)
+                            logger.info("Pipeline job complete (job_id=%s pipeline_id=%s)", job.job_id, job.pipeline_id)
                             await self.processed.mark_done(handler=self.handler, event_id=job.job_id)
                             if self.consumer:
                                 self.consumer.commit(msg)
@@ -934,6 +950,7 @@ class PipelineWorker:
         input_sampling: dict[str, Any] = {}
         input_commit_payload: Optional[list[dict[str, Any]]] = None
         temp_dirs: list[str] = []
+        persisted_dfs: list[DataFrame] = []
         output_nodes = {
             node_id: node for node_id, node in nodes.items() if str(node.get("type") or "") == "output"
         }
@@ -1522,6 +1539,14 @@ class PipelineWorker:
                     if lock:
                         lock.raise_if_lost()
                     output_df = tables.get(node_id, self._empty_dataframe())
+                    if _PYSPARK_AVAILABLE:
+                        # Build mode touches the same DataFrame multiple times (count/sample/write). Persist the
+                        # final output to avoid recomputation spikes that can OOM-kill the worker in Docker.
+                        try:
+                            output_df = output_df.persist(StorageLevel.DISK_ONLY)
+                            persisted_dfs.append(output_df)
+                        except Exception:
+                            pass
                     schema_columns = _schema_from_dataframe(output_df)
                     delta_row_count = int(output_df.count())
                     if delta_row_count > 0:
@@ -1735,6 +1760,9 @@ class PipelineWorker:
                         file_format=item["output_format"],
                         partition_cols=item["partition_columns"],
                     )
+                    if _PYSPARK_AVAILABLE:
+                        with contextlib.suppress(Exception):
+                            output_df.unpersist(blocking=False)
                     row_count = int(item["delta_row_count"])
                     if output_write_mode == "append":
                         try:
@@ -2394,6 +2422,10 @@ class PipelineWorker:
                 await lock.release()
             for path in temp_dirs:
                 shutil.rmtree(path, ignore_errors=True)
+            if _PYSPARK_AVAILABLE and persisted_dfs:
+                for df in persisted_dfs:
+                    with contextlib.suppress(Exception):
+                        df.unpersist(blocking=False)
             # Restore any per-job overrides so the next run starts from the worker defaults.
             if self.spark and prev_spark_conf:
                 for key, value in prev_spark_conf.items():
@@ -3706,7 +3738,7 @@ class PipelineWorker:
             return df
         output = df
         for cast in casts:
-            column = str(cast.get("column") or "").strip()
+            column = str(cast.get("column") or "").strip().lstrip("\ufeff")
             if not column or column not in output.columns:
                 continue
             data_type = normalize_schema_type(cast.get("type") or "xsd:string")
@@ -4121,7 +4153,7 @@ class PipelineWorker:
         if forced_format == "csv" or (not forced_format and has_csv):
             if "header" not in options:
                 reader = reader.option("header", "true")
-            return reader.csv(temp_dir)
+            return self._strip_bom_headers(reader.csv(temp_dir))
         if forced_format in {"excel", "xlsx"} or (not forced_format and has_excel):
             return self._load_excel_path(next(path for path in local_paths if path.endswith((".xlsx", ".xlsm"))))
         if forced_format:
@@ -4173,7 +4205,7 @@ class PipelineWorker:
         if fmt == "csv":
             if "header" not in options:
                 reader = reader.option("header", "true")
-            return reader.csv(path)
+            return self._strip_bom_headers(reader.csv(path))
         if fmt == "parquet":
             return reader.parquet(path)
         if path.endswith((".xlsx", ".xlsm")):
@@ -4184,6 +4216,44 @@ class PipelineWorker:
             # Best-effort generic reader for formats provided by the Spark runtime (orc/text/avro/etc).
             return reader.format(fmt).load(path)
         raise ValueError(f"Unsupported dataset file type: {path}")
+
+    def _strip_bom_headers(self, df: DataFrame) -> DataFrame:
+        """
+        Normalize UTF-8 BOM artifacts in CSV headers.
+
+        Spark sometimes strips BOM from headers. Some upload/profiling code may preserve it.
+        Creating BOM-prefixed *alias* columns is unsafe because it can introduce duplicate
+        columns after joins (e.g., many datasets share a first column like order_id).
+
+        Instead, we canonicalize to the BOM-stripped header and ensure uniqueness.
+        """
+        if not _PYSPARK_AVAILABLE:
+            return df
+        try:
+            cols = list(df.columns)
+        except Exception:
+            return df
+        if not cols:
+            return df
+
+        new_cols: list[str] = []
+        seen: set[str] = set()
+        for col in cols:
+            base = str(col).lstrip("\ufeff") or str(col)
+            name = base
+            if name in seen:
+                suffix = 1
+                while f"{base}__{suffix}" in seen:
+                    suffix += 1
+                name = f"{base}__{suffix}"
+            seen.add(name)
+            new_cols.append(name)
+        if new_cols == cols:
+            return df
+        try:
+            return df.toDF(*new_cols)
+        except Exception:
+            return df
 
     def _load_excel_path(self, path: str) -> DataFrame:
         import pandas as pd
@@ -4270,22 +4340,50 @@ class PipelineWorker:
                     stripped = col_name.lstrip("\ufeff")
                     if stripped != col_name and stripped in df.columns:
                         return stripped
+                    # Also handle the opposite mismatch: plan references the stripped name but the DataFrame
+                    # still includes the BOM prefix (rare, but possible depending on reader/encoding).
+                    bom = f"\ufeff{col_name}"
+                    if bom in df.columns:
+                        return bom
                     return col_name
 
-                if len(left_keys) == 1:
-                    left_key = _resolve_join_col(left, left_keys[0])
-                    right_key = _resolve_join_col(right, right_keys[0])
-                    if left_key == right_key:
-                        return left.join(right, on=[left_key], how=join_type)
-                    return left.join(right, left[left_key] == right[right_key], how=join_type)
-                conditions = [
-                    left[_resolve_join_col(left, lkey)] == right[_resolve_join_col(right, rkey)]
-                    for lkey, rkey in zip(left_keys, right_keys)
-                ]
+                resolved_left_keys = [_resolve_join_col(left, lkey) for lkey in left_keys]
+                resolved_right_keys = [_resolve_join_col(right, rkey) for rkey in right_keys]
+                same_key_names = all(lk == rk for lk, rk in zip(resolved_left_keys, resolved_right_keys))
+
+                # Deterministically avoid duplicate column names in join output by renaming
+                # colliding right-side columns. This matches preflight's `right_` prefixing
+                # logic, so plans can rely on stable column names without Spark ambiguity.
+                left_set = set(left.columns)
+                right_df = right
+                right_col_map: Dict[str, str] = {}
+                right_cols: set[str] = set(right.columns)
+                join_key_keep = set(resolved_right_keys) if same_key_names else set()
+                for col in list(right.columns):
+                    if col in left_set and col not in join_key_keep:
+                        new = f"right_{col}"
+                        if new in right_cols or new in left_set:
+                            base = new
+                            idx = 1
+                            while f"{base}__{idx}" in right_cols or f"{base}__{idx}" in left_set:
+                                idx += 1
+                            new = f"{base}__{idx}"
+                        right_df = right_df.withColumnRenamed(col, new)
+                        right_col_map[col] = new
+                        right_cols.discard(col)
+                        right_cols.add(new)
+
+                mapped_right_keys = [right_col_map.get(rk, rk) for rk in resolved_right_keys]
+
+                if same_key_names:
+                    # When key names match, join using `on=[...]` so Spark de-dupes the key columns.
+                    return left.join(right_df, on=resolved_left_keys, how=join_type)
+
+                conditions = [left[lk] == right_df[rk] for lk, rk in zip(resolved_left_keys, mapped_right_keys)]
                 join_expr = conditions[0]
                 for cond in conditions[1:]:
                     join_expr = join_expr & cond
-                return left.join(right, join_expr, how=join_type)
+                return left.join(right_df, join_expr, how=join_type)
             if allow_cross_join:
                 if join_type != "cross":
                     logger.warning("allowCrossJoin enabled but joinType=%s; forcing cross join", join_type)
@@ -4295,7 +4393,7 @@ class PipelineWorker:
                     return left.join(right, how="cross")
             raise ValueError("Join requires leftKey/rightKey or leftKeys/rightKeys (or joinKey). Cross join requires allowCrossJoin=true.")
         if operation == "filter":
-            expr = apply_parameters(str(metadata.get("expression") or ""), parameters)
+            expr = apply_parameters(str(metadata.get("expression") or ""), parameters).replace("\ufeff", "")
             if expr:
                 return inputs[0].filter(expr)
         if operation == "compute":
@@ -4311,11 +4409,11 @@ class PipelineWorker:
                 for item in assignments:
                     if not isinstance(item, dict):
                         continue
-                    target = str(item.get("column") or item.get("target") or item.get("name") or "").strip()
+                    target = str(item.get("column") or item.get("target") or item.get("name") or "").strip().lstrip("\ufeff")
                     formula = str(item.get("expression") or item.get("expr") or item.get("formula") or "").strip()
                     if not target or not formula:
                         continue
-                    formula = apply_parameters(formula, parameters)
+                    formula = apply_parameters(formula, parameters).replace("\ufeff", "")
                     out = out.withColumn(target, F.expr(formula))
                 return out
 
@@ -4328,34 +4426,34 @@ class PipelineWorker:
             )
             formula = metadata.get("formula") or metadata.get("expr")
             if target and formula:
-                target_text = str(target).strip()
-                formula_text = apply_parameters(str(formula).strip(), parameters)
+                target_text = str(target).strip().lstrip("\ufeff")
+                formula_text = apply_parameters(str(formula).strip(), parameters).replace("\ufeff", "")
                 if target_text and formula_text:
                     return df.withColumn(target_text, F.expr(formula_text))
 
             # Back-compat fallback: "col = expr" OR "expr" (avoid mis-parsing `a = b` comparisons).
-            expr = apply_parameters(str(metadata.get("expression") or ""), parameters).strip()
+            expr = apply_parameters(str(metadata.get("expression") or ""), parameters).replace("\ufeff", "").strip()
             if not expr:
                 return df
             if "=" in expr:
                 target_candidate, formula_candidate = [part.strip() for part in expr.split("=", 1)]
-                target_clean = target_candidate.strip()
+                target_clean = target_candidate.strip().lstrip("\ufeff")
                 if target_clean.startswith("`") and target_clean.endswith("`") and len(target_clean) > 1:
                     target_clean = target_clean[1:-1].replace("``", "`")
                 if target_clean and target_clean not in df.columns:
-                    return df.withColumn(target_clean, F.expr(formula_candidate))
+                    return df.withColumn(target_clean, F.expr(formula_candidate.replace("\ufeff", "")))
             return df.withColumn("computed", F.expr(expr))
         if operation == "explode":
             columns = metadata.get("columns") or []
             if columns:
-                column = str(columns[0]).strip()
+                column = str(columns[0]).strip().lstrip("\ufeff")
                 if column:
                     return inputs[0].withColumn(column, F.explode(F.col(column)))
         if operation == "select":
             expressions = metadata.get("expressions") or metadata.get("selectExpr") or metadata.get("select_expr")
             if isinstance(expressions, list) and expressions:
                 resolved = [
-                    apply_parameters(str(item), parameters)
+                    apply_parameters(str(item), parameters).replace("\ufeff", "")
                     for item in expressions
                     if str(item or "").strip()
                 ]
@@ -4363,17 +4461,54 @@ class PipelineWorker:
                     return inputs[0].selectExpr(*resolved)
             columns = metadata.get("columns") or []
             if columns:
-                return inputs[0].select(*[F.col(col) for col in columns])
+                cleaned = [str(col).strip().lstrip("\ufeff") for col in columns if str(col or "").strip()]
+                return inputs[0].select(*[F.col(col) for col in cleaned])
         if operation == "drop":
             columns = metadata.get("columns") or []
             if columns:
-                return inputs[0].drop(*columns)
+                cleaned = [str(col).strip().lstrip("\ufeff") for col in columns if str(col or "").strip()]
+                return inputs[0].drop(*cleaned)
         if operation == "rename":
             rename_map = metadata.get("rename") or {}
             if rename_map:
                 df = inputs[0]
-                for key, value in rename_map.items():
-                    df = df.withColumnRenamed(str(key), str(value))
+                existing = list(df.columns)
+                existing_set = set(existing)
+                for raw_src, raw_dst in rename_map.items():
+                    src = str(raw_src)
+                    dst = str(raw_dst).lstrip("\ufeff")
+
+                    # Handle UTF-8 BOM artifacts deterministically.
+                    # - If the plan references a BOM-prefixed column that Spark stripped, fall back.
+                    # - If the plan wants to rename BOM->stripped but stripped already exists, drop the
+                    #   redundant BOM column instead of creating a duplicate destination column.
+                    if src not in existing_set:
+                        stripped = src.lstrip("\ufeff")
+                        if stripped != src and stripped in existing_set:
+                            src = stripped
+                    if src not in existing_set:
+                        continue
+                    if src == dst:
+                        continue
+
+                    if dst in existing_set:
+                        # Special-case: strip BOM (src starts with BOM, dst == stripped version).
+                        if str(raw_src).startswith("\ufeff") and dst == str(raw_src).lstrip("\ufeff"):
+                            df = df.drop(src)
+                            existing_set.remove(src)
+                            continue
+
+                        # General-case collision: make the destination unique to avoid invalid schemas.
+                        base = dst
+                        suffix = 1
+                        while dst in existing_set:
+                            dst = f"{base}__{suffix}"
+                            suffix += 1
+
+                    df = df.withColumnRenamed(src, dst)
+                    existing_set.remove(src)
+                    existing_set.add(dst)
+
                 return df
         if operation == "cast":
             casts = metadata.get("casts") or []
@@ -4386,7 +4521,7 @@ class PipelineWorker:
                 for rule in rules:
                     if not isinstance(rule, dict):
                         continue
-                    column = str(rule.get("column") or "").strip()
+                    column = str(rule.get("column") or "").strip().lstrip("\ufeff")
                     pattern = str(rule.get("pattern") or "").strip()
                     if not column or not pattern:
                         continue
@@ -4418,7 +4553,7 @@ class PipelineWorker:
                     pattern = f"(?{inline}){pattern}"
                 replacement = str(metadata.get("replacement") or "")
                 for col in columns:
-                    col_name = str(col).strip()
+                    col_name = str(col).strip().lstrip("\ufeff")
                     if not col_name:
                         continue
                     df = df.withColumn(col_name, F.regexp_replace(F.col(col_name), pattern, replacement))
@@ -4426,7 +4561,8 @@ class PipelineWorker:
         if operation == "dedupe":
             subset = metadata.get("columns") or []
             if subset:
-                return inputs[0].dropDuplicates(subset)
+                cleaned = [str(col).strip().lstrip("\ufeff") for col in subset if str(col or "").strip()]
+                return inputs[0].dropDuplicates(cleaned)
             return inputs[0].dropDuplicates()
         if operation == "sort":
             columns = metadata.get("columns") or []
@@ -4441,12 +4577,13 @@ class PipelineWorker:
                         if col.startswith("-"):
                             direction = "desc"
                             col = col[1:].strip()
+                        col = col.lstrip("\ufeff")
                         if not col:
                             continue
                         specs.append(F.col(col).desc() if direction == "desc" else F.col(col))
                         continue
                     if isinstance(item, dict):
-                        col = str(item.get("column") or item.get("name") or "").strip()
+                        col = str(item.get("column") or item.get("name") or "").strip().lstrip("\ufeff")
                         if not col:
                             continue
                         direction = str(item.get("direction") or item.get("dir") or "asc").strip().lower()
@@ -4492,7 +4629,12 @@ class PipelineWorker:
                 return align(left, left_set).unionByName(align(right, right_set))
             raise ValueError(f"Invalid unionMode: {union_mode}")
         if operation in {"groupBy", "aggregate"}:
-            group_by = metadata.get("groupBy") or []
+            group_by_raw = metadata.get("groupBy") or []
+            group_by = [
+                str(col).strip().lstrip("\ufeff")
+                for col in (group_by_raw if isinstance(group_by_raw, list) else [])
+                if str(col or "").strip()
+            ]
             group_cols = [F.col(col) for col in group_by] if group_by else []
 
             agg_exprs: list[Any] = []
@@ -4504,7 +4646,7 @@ class PipelineWorker:
             if isinstance(expr_items, list) and expr_items:
                 for item in expr_items:
                     if isinstance(item, str):
-                        expr_text = apply_parameters(item, parameters).strip()
+                        expr_text = apply_parameters(item, parameters).replace("\ufeff", "").strip()
                         if not expr_text:
                             continue
                         alias = None
@@ -4524,7 +4666,7 @@ class PipelineWorker:
                     expr_text = str(item.get("expr") or item.get("expression") or "").strip()
                     if not expr_text:
                         continue
-                    expr_text = apply_parameters(expr_text, parameters)
+                    expr_text = apply_parameters(expr_text, parameters).replace("\ufeff", "")
                     alias = str(item.get("alias") or item.get("as") or "").strip() or None
                     col_expr = F.expr(expr_text)
                     if alias:
@@ -4536,7 +4678,7 @@ class PipelineWorker:
                 for agg in aggregates:
                     if not isinstance(agg, dict):
                         continue
-                    col_name = agg.get("column")
+                    col_name = str(agg.get("column") or "").strip().lstrip("\ufeff")
                     op = str(agg.get("op") or "").lower()
                     alias = agg.get("alias") or f"{op}_{col_name}"
                     if not col_name or not op:
@@ -4559,9 +4701,14 @@ class PipelineWorker:
                 return inputs[0].agg(*agg_exprs)
         if operation == "pivot":
             pivot_meta = metadata.get("pivot") or {}
-            index_cols = pivot_meta.get("index") or []
-            columns_col = pivot_meta.get("columns")
-            values_col = pivot_meta.get("values")
+            index_cols_raw = pivot_meta.get("index") or []
+            index_cols = [
+                str(c).strip().lstrip("\ufeff")
+                for c in (index_cols_raw if isinstance(index_cols_raw, list) else [])
+                if str(c or "").strip()
+            ]
+            columns_col = str(pivot_meta.get("columns") or "").strip().lstrip("\ufeff") or None
+            values_col = str(pivot_meta.get("values") or "").strip().lstrip("\ufeff") or None
             agg = str(pivot_meta.get("agg") or "sum").lower()
             if index_cols and columns_col and values_col:
                 base = inputs[0].groupBy(*[F.col(c) for c in index_cols]).pivot(columns_col)
@@ -4586,17 +4733,22 @@ class PipelineWorker:
                 for item in expressions:
                     if not isinstance(item, dict):
                         continue
-                    name = str(item.get("column") or item.get("name") or "").strip()
+                    name = str(item.get("column") or item.get("name") or "").strip().lstrip("\ufeff")
                     expr_text = str(item.get("expr") or item.get("expression") or "").strip()
                     if not name or not expr_text:
                         continue
-                    expr_text = apply_parameters(expr_text, parameters)
+                    expr_text = apply_parameters(expr_text, parameters).replace("\ufeff", "")
                     df = df.withColumn(name, F.expr(expr_text))
                 return df
 
-            partition_by = window_meta.get("partitionBy") or []
+            partition_by_raw = window_meta.get("partitionBy") or []
+            partition_by = [
+                str(c).strip().lstrip("\ufeff")
+                for c in (partition_by_raw if isinstance(partition_by_raw, list) else [])
+                if str(c or "").strip()
+            ]
             order_by = window_meta.get("orderBy") or []
-            output_column = str(window_meta.get("outputColumn") or "row_number").strip() or "row_number"
+            output_column = str(window_meta.get("outputColumn") or "row_number").strip().lstrip("\ufeff") or "row_number"
             if order_by:
                 specs: list[Any] = []
                 for item in order_by:
@@ -4608,12 +4760,13 @@ class PipelineWorker:
                         if col.startswith("-"):
                             direction = "desc"
                             col = col[1:].strip()
+                        col = col.lstrip("\ufeff")
                         if not col:
                             continue
                         specs.append(F.col(col).desc() if direction == "desc" else F.col(col))
                         continue
                     if isinstance(item, dict):
-                        col = str(item.get("column") or item.get("name") or "").strip()
+                        col = str(item.get("column") or item.get("name") or "").strip().lstrip("\ufeff")
                         if not col:
                             continue
                         direction = str(item.get("direction") or item.get("dir") or "asc").strip().lower()
