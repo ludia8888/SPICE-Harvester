@@ -22,7 +22,11 @@ make -C docs html
 
 Docs QA (generators up-to-date + warnings-as-errors):
 ```bash
+# With the docs venv activated:
 python scripts/check_docs.py
+
+# Or explicitly:
+./.venv-docs/bin/python scripts/check_docs.py
 ```
 
 ### Core Documentation
@@ -101,19 +105,18 @@ docs/
 └── architecture/         # Architecture diagrams and details
     └── README.md
 
-backend/docs/              # Backend-specific documentation
+backend/docs/              # Backend-specific docs (not in the Sphinx toctree)
+├── API_RATE_LIMITING.md
+├── OPENTELEMETRY_OBSERVABILITY.md
+├── kafka_broker_config.md
+├── Command/
+│   └── Event Sourcing + CQRS 아키텍처 설계 원칙.md
 ├── api/
 │   └── OMS_DATABASE_ENDPOINTS.md
 ├── deployment/
-│   ├── DEPLOYMENT_GUIDE.md
-│   └── PORT_CONFIGURATION.md     # 📁 Moved from backend root
+│   └── PORT_CONFIGURATION.md
 ├── development/
-│   ├── FRONTEND_DEVELOPMENT_GUIDE.md  # Backend-specific frontend guide
-│   ├── CORS_CONFIGURATION_GUIDE.md
-│   ├── CORS_QUICK_START.md       # 📁 Moved from backend root
-│   └── DATABASE_LIST_FIX_SUMMARY.md
-├── security/
-│   └── SECURITY.md
+│   └── CORS_CONFIGURATION_GUIDE.md
 └── testing/
     ├── COMPLEX_TYPES_TEST_README.md
     └── OMS_PRODUCTION_TEST_README.md
