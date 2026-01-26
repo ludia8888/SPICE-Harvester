@@ -116,94 +116,6 @@ def sample_items(items: List[Any], *, max_items: int) -> List[Any]:
 # Enterprise Enhancement (2026-01): Standard Response Formats for LLM Agent
 # ==============================================================================
 
-def build_sample_disclaimer(
-    *,
-    sample_size: Optional[int] = None,
-    total_size: Optional[int] = None,
-    coverage_ratio: Optional[float] = None,
-) -> Dict[str, Any]:
-    """
-    Build a standard disclaimer for sample-based results.
-
-    This helps the Agent understand that results are based on sampled data
-    and may not reflect the full dataset characteristics.
-    """
-    disclaimer: Dict[str, Any] = {
-        "mode": "sample_based",
-        "disclaimer": "Results are based on sampled data and do not guarantee correctness on full dataset",
-    }
-
-    if sample_size is not None:
-        disclaimer["sample_size"] = sample_size
-    if total_size is not None:
-        disclaimer["total_size"] = total_size
-    if coverage_ratio is not None:
-        disclaimer["coverage_ratio"] = round(coverage_ratio, 4)
-
-    # Add severity based on coverage
-    if coverage_ratio is not None:
-        if coverage_ratio < 0.001:
-            disclaimer["confidence_level"] = "very_low"
-            disclaimer["warning"] = (
-                "CRITICAL: Sample covers less than 0.1% of data. "
-                "Results may be severely unrepresentative."
-            )
-        elif coverage_ratio < 0.01:
-            disclaimer["confidence_level"] = "low"
-            disclaimer["warning"] = (
-                "Sample covers less than 1% of data. "
-                "Results should be treated as rough estimates."
-            )
-        elif coverage_ratio < 0.1:
-            disclaimer["confidence_level"] = "medium"
-        else:
-            disclaimer["confidence_level"] = "high"
-
-    return disclaimer
-
-
-def build_confidence_envelope(
-    *,
-    primary_value: Any,
-    confidence_score: float,
-    alternative_values: Optional[List[Any]] = None,
-    warnings: Optional[List[str]] = None,
-    metadata: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
-    """
-    Wrap a value with confidence metadata for the Agent.
-
-    This standard format helps the Agent understand:
-    - How confident we are in the primary value
-    - What alternative interpretations exist
-    - What warnings should be considered
-    """
-    envelope: Dict[str, Any] = {
-        "value": primary_value,
-        "confidence": round(min(1.0, max(0.0, confidence_score)), 3),
-    }
-
-    # Classify confidence level
-    if confidence_score >= 0.9:
-        envelope["confidence_level"] = "high"
-    elif confidence_score >= 0.7:
-        envelope["confidence_level"] = "medium"
-    elif confidence_score >= 0.5:
-        envelope["confidence_level"] = "low"
-    else:
-        envelope["confidence_level"] = "very_low"
-
-    if alternative_values:
-        envelope["alternatives"] = alternative_values
-
-    if warnings:
-        envelope["warnings"] = warnings
-
-    if metadata:
-        envelope["metadata"] = metadata
-
-    return envelope
-
 
 def build_agent_error_response(
     error_message: str,
@@ -241,43 +153,6 @@ def build_agent_error_response(
         response["context"] = context
 
     return response
-
-
-def build_ambiguity_warning(
-    value_type: str,
-    primary_interpretation: str,
-    alternative_interpretation: str,
-    *,
-    raw_value: Optional[str] = None,
-    resolution_hint: Optional[str] = None,
-) -> Dict[str, Any]:
-    """
-    Build a standard warning for ambiguous data interpretations.
-
-    Examples:
-    - Locale ambiguity: "1.234" could be 1.234 or 1234
-    - Date format ambiguity: "01/02/2024" could be Jan 2 or Feb 1
-    """
-    warning: Dict[str, Any] = {
-        "type": "ambiguity",
-        "category": value_type,
-        "primary_interpretation": primary_interpretation,
-        "alternative_interpretation": alternative_interpretation,
-        "is_ambiguous": True,
-    }
-
-    if raw_value:
-        warning["raw_value"] = raw_value
-
-    if resolution_hint:
-        warning["resolution_hint"] = resolution_hint
-    else:
-        warning["resolution_hint"] = (
-            f"Verify the intended interpretation for {value_type}. "
-            "Consider using explicit format specifications."
-        )
-
-    return warning
 
 
 # ==============================================================================
