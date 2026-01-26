@@ -98,10 +98,10 @@ USER_JWT_TTL_SECONDS=3600
 LLM_PROVIDER=openai_compat
 LLM_BASE_URL=https://api.openai.com/v1
 LLM_MODEL=gpt-5
-OPENAI_API_KEY=change_me
+LLM_API_KEY=change_me
 
-# Alternative key name:
-# LLM_API_KEY=change_me
+# Legacy alias (supported via fallback):
+# OPENAI_API_KEY=change_me
 
 # Dev-only (deterministic): mock planner responses (JSON, typically minified)
 # LLM_PROVIDER=mock

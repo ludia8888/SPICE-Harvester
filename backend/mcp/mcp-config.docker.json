@@ -15,7 +15,7 @@
     }
   },
   "globalSettings": {
-    "timeout": 30000,
+    "timeout": 900000,
     "logLevel": "info",
     "retryOnFailure": true,
     "maxRetries": 3

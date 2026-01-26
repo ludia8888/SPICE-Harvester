@@ -43,7 +43,7 @@ OMS_URL = (os.getenv("OMS_BASE_URL") or os.getenv("OMS_URL") or "http://localhos
 # Optional external verification
 SMOKE_GOOGLE_SHEET_URL = (os.getenv("SMOKE_GOOGLE_SHEET_URL") or "").strip()
 SMOKE_GOOGLE_SHEET_API_KEY = (os.getenv("SMOKE_GOOGLE_SHEET_API_KEY") or "").strip()
-SMOKE_OPENAI_ENABLED = (os.getenv("OPENAI_API_KEY") or "").strip() != ""
+SMOKE_OPENAI_ENABLED = bool((os.getenv("LLM_API_KEY") or "").strip() or (os.getenv("OPENAI_API_KEY") or "").strip())
 _ENV_SMOKE_TOKEN = (
     (os.getenv("SMOKE_ADMIN_TOKEN") or os.getenv("BFF_ADMIN_TOKEN") or os.getenv("ADMIN_TOKEN") or "").strip()
 )

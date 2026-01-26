@@ -555,7 +555,7 @@ class LLMSettings(BaseSettings):
         description="Google API key (LLM_GOOGLE_API_KEY; fallback GOOGLE_API_KEY/LLM_API_KEY)",
     )
 
-    timeout_seconds: float = Field(default=20.0, description="LLM timeout seconds (LLM_TIMEOUT_SECONDS)")
+    timeout_seconds: float = Field(default=60.0, description="LLM timeout seconds (LLM_TIMEOUT_SECONDS)")
     temperature: float = Field(default=0.0, description="LLM temperature (LLM_TEMPERATURE)")
     max_tokens: int = Field(default=800, description="LLM max tokens (LLM_MAX_TOKENS)")
     enable_json_mode: bool = Field(default=True, description="Enable JSON mode (LLM_ENABLE_JSON_MODE)")
@@ -627,25 +627,43 @@ class LLMSettings(BaseSettings):
     @field_validator("api_key", mode="before")
     @classmethod
     def fallback_openai_api_key(cls, v):  # noqa: ANN001
-        if v not in (None, ""):
-            return v
+        raw = str(v).strip() if v not in (None, "") else ""
         fallback = (os.getenv("OPENAI_API_KEY") or "").strip()
+        if raw and fallback and raw != fallback:
+            raise ValueError(
+                "Conflicting API key env vars: LLM_API_KEY and OPENAI_API_KEY are both set to different values. "
+                "Use only LLM_API_KEY."
+            )
+        if raw:
+            return raw
         return fallback or None
 
     @field_validator("base_url", mode="before")
     @classmethod
     def fallback_openai_base_url(cls, v):  # noqa: ANN001
-        if v not in (None, ""):
-            return v
+        raw = str(v).strip() if v not in (None, "") else ""
         fallback = (os.getenv("OPENAI_BASE_URL") or os.getenv("OPENAI_API_BASE") or "").strip()
+        if raw and fallback and raw.rstrip("/") != fallback.rstrip("/"):
+            raise ValueError(
+                "Conflicting base URL env vars: LLM_BASE_URL and OPENAI_BASE_URL/OPENAI_API_BASE are both set to "
+                "different values. Use only LLM_BASE_URL."
+            )
+        if raw:
+            return raw
         return fallback or None
 
     @field_validator("model", mode="before")
     @classmethod
     def fallback_openai_model(cls, v):  # noqa: ANN001
-        if v not in (None, ""):
-            return v
+        raw = str(v).strip() if v not in (None, "") else ""
         fallback = (os.getenv("OPENAI_MODEL") or "").strip()
+        if raw and fallback and raw != fallback:
+            raise ValueError(
+                "Conflicting model env vars: LLM_MODEL and OPENAI_MODEL are both set to different values. "
+                "Use only LLM_MODEL."
+            )
+        if raw:
+            return raw
         return fallback or None
 
     @property
@@ -1097,6 +1115,17 @@ class PipelineSettings(BaseSettings):
     jobs_backoff_max_seconds: int = Field(
         default=60,
         description="Pipeline job retry backoff max seconds (PIPELINE_JOBS_BACKOFF_MAX_SECONDS)",
+    )
+    jobs_max_poll_interval_ms: int = Field(
+        default=3600000,
+        description="Kafka max.poll.interval.ms for pipeline worker jobs (PIPELINE_JOBS_MAX_POLL_INTERVAL_MS)",
+    )
+    processed_event_lease_timeout_seconds: int = Field(
+        default=120,
+        description=(
+            "Processed-event lease timeout seconds for pipeline worker idempotency "
+            "(PIPELINE_PROCESSED_EVENT_LEASE_TIMEOUT_SECONDS)"
+        ),
     )
 
     # Scheduler

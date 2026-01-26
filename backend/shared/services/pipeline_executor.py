@@ -865,11 +865,18 @@ def _group_by_table(
                     agg_state["count"] += 1
             elif spec["op"] == "sum":
                 if value is not None:
-                    agg_state["sum"] += float(value)
+                    try:
+                        agg_state["sum"] += float(value)
+                    except (TypeError, ValueError):
+                        # Preview engine is best-effort: ignore non-numeric values rather than crashing.
+                        continue
             elif spec["op"] == "avg":
                 if value is not None:
-                    agg_state["sum"] += float(value)
-                    agg_state["count"] += 1
+                    try:
+                        agg_state["sum"] += float(value)
+                        agg_state["count"] += 1
+                    except (TypeError, ValueError):
+                        continue
             elif spec["op"] == "min":
                 if value is not None:
                     agg_state["min"] = value if agg_state["min"] is None else min(agg_state["min"], value)
@@ -1160,12 +1167,47 @@ def _dedupe_table(table: PipelineTable, columns: List[str]) -> PipelineTable:
     return PipelineTable(columns=table.columns, rows=rows)
 
 
-def _sort_table(table: PipelineTable, columns: List[str]) -> PipelineTable:
-    cols = [col for col in columns if col in table.columns]
-    if not cols:
+def _sort_table(table: PipelineTable, columns: List[Any]) -> PipelineTable:
+    # columns supports:
+    # - ["col1", "-col2"]  (prefix '-' for DESC)
+    # - [{"column":"col1","direction":"asc|desc"}, ...]
+    specs: list[tuple[str, str]] = []
+    for item in columns or []:
+        if isinstance(item, str):
+            col = item.strip()
+            if not col:
+                continue
+            direction = "asc"
+            if col.startswith("-"):
+                direction = "desc"
+                col = col[1:].strip()
+            if col and col in table.columns:
+                specs.append((col, direction))
+            continue
+        if isinstance(item, dict):
+            col = str(item.get("column") or item.get("name") or "").strip()
+            if not col or col not in table.columns:
+                continue
+            direction = str(item.get("direction") or item.get("dir") or "asc").strip().lower()
+            if direction not in {"asc", "desc"}:
+                direction = "asc"
+            specs.append((col, direction))
+    if not specs:
         return table
-    rows = sorted(table.rows, key=lambda row: tuple(row.get(col) for col in cols))
-    return PipelineTable(columns=table.columns, rows=rows)
+
+    rows_sorted = list(table.rows)
+    # Multi-key sort with per-column direction (stable sort from last key to first).
+    for col, direction in reversed(specs):
+        reverse = direction == "desc"
+
+        def _key(row: Dict[str, Any], *, _col: str = col) -> Any:
+            value = row.get(_col)
+            # Keep NULLs last regardless of direction.
+            return (value is None, value)
+
+        rows_sorted.sort(key=_key, reverse=reverse)
+
+    return PipelineTable(columns=table.columns, rows=rows_sorted)
 
 
 def _union_tables(left: PipelineTable, right: PipelineTable, *, union_mode: str = "strict") -> PipelineTable:
@@ -1508,10 +1550,16 @@ def _safe_eval(expression: str, row: Dict[str, Any], parameters: Dict[str, Any])
     try:
         tree = ast.parse(expression, mode="eval")
     except Exception:
-        return expression
+        # Spark SQL expressions (e.g. CAST/TRY_CAST/date_trunc) are not Python.
+        # In preview mode, treat unsupported expressions as NULL rather than leaking the raw expression
+        # into downstream ops (e.g. groupBy(sum) would crash on float("cast(...)")).
+        return None
     if not _is_safe_ast(tree):
-        return expression
-    return _eval_ast(tree.body, variables)
+        return None
+    try:
+        return _eval_ast(tree.body, variables)
+    except Exception:
+        return None
 
 
 def _is_safe_ast(node: ast.AST) -> bool:

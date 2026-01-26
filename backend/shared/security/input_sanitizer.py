@@ -263,6 +263,12 @@ class InputSanitizer:
         if not isinstance(value, str):
             raise SecurityViolationError(f"Expected string, got {type(value)}")
 
+        # Strip Unicode BOM markers that commonly appear in CSV headers.
+        # This is semantics-preserving (BOM is not part of the intended identifier) and avoids
+        # false-positive "invalid field name" errors when pipelines reference such columns.
+        if "\ufeff" in value:
+            value = value.replace("\ufeff", "")
+
         # Allow limited "$" keys and internal pipeline metadata keys.
         if value in {"$ref", "$now", "_canonical_contract_applied"}:
             return value
@@ -335,6 +341,72 @@ class InputSanitizer:
 
         return sanitized
 
+    _RESERVED_OBJECT_KEYS = {"__proto__", "prototype", "constructor"}
+
+    def sanitize_map_key(self, value: str, *, max_length: int = 500) -> str:
+        """
+        Sanitize keys for *free-form* key/value maps embedded in payloads.
+
+        Examples:
+        - rename mappings: {"﻿product_category_name": "product_category_name"}
+        - Spark conf: {"spark.sql.ansi.enabled": "true"}
+        - Spark read/write options: {"header": "true", "delimiter": ","}
+
+        These keys are not internal JSON field names, so they must allow punctuation and Unicode.
+        We only enforce:
+        - string type
+        - max length
+        - no ASCII control characters
+        - block prototype-pollution keys (defense-in-depth)
+        """
+        if not isinstance(value, str):
+            raise SecurityViolationError(f"Expected string, got {type(value)}")
+        if len(value) > max_length:
+            raise SecurityViolationError(f"Map key too long: {len(value)} > {max_length}")
+
+        # Keep semantics intact; only strip ASCII control chars.
+        sanitized = re.sub(r"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]", "", value)
+        if not sanitized:
+            raise SecurityViolationError("Map key must not be empty")
+        if sanitized in self._RESERVED_OBJECT_KEYS:
+            raise SecurityViolationError("Reserved object key not allowed")
+        return sanitized
+
+    def sanitize_identifier_mapping(
+        self,
+        data: Dict[str, Any],
+        *,
+        max_depth: int = 10,
+        current_depth: int = 0,
+    ) -> Dict[str, str]:
+        """
+        Sanitize a mapping whose keys AND values are identifiers (e.g., column rename maps).
+
+        This MUST NOT apply `sanitize_field_name()` because identifier keys can contain Unicode
+        (including BOM artifacts in CSV headers) and punctuation.
+        """
+        if current_depth > max_depth:
+            raise SecurityViolationError(
+                f"Dictionary nesting too deep: {current_depth} > {max_depth}"
+            )
+        if not isinstance(data, dict):
+            raise SecurityViolationError(f"Expected dict, got {type(data)}")
+        if len(data) > self.max_dict_keys:
+            raise SecurityViolationError(
+                f"Too many keys in dict: {len(data)} > {self.max_dict_keys}"
+            )
+
+        sanitized: Dict[str, str] = {}
+        for key, value in data.items():
+            if not isinstance(key, str):
+                raise SecurityViolationError("Mapping keys must be strings")
+            if not isinstance(value, str):
+                value = str(value)
+            src = self.sanitize_map_key(key, max_length=500)
+            dst = self.sanitize_map_key(value, max_length=500)
+            sanitized[src] = dst
+        return sanitized
+
     def sanitize_description(self, value: str) -> str:
         """설명 텍스트 정화 (command injection 체크 안함)"""
         if not isinstance(value, str):
@@ -358,6 +430,26 @@ class InputSanitizer:
         # 제어 문자만 제거
         sanitized = re.sub(r"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]", "", value)
         return sanitized
+
+    def sanitize_sql_expression(self, value: str, max_length: int = 20000) -> str:
+        """
+        Sanitize a SQL *expression* (Spark SQL / ETL compute predicate / select expr).
+
+        Important: unlike `sanitize_string`, this MUST NOT run SQL-injection keyword heuristics.
+        In the pipeline domain, strings like `cast(...)`, `substring(...)`, `union`, etc. are normal and
+        blocking them breaks legitimate ETL and agent tool usage.
+
+        We only enforce:
+        - string type
+        - max length (DoS guard)
+        - removal of control characters
+        """
+        if not isinstance(value, str):
+            raise SecurityViolationError(f"Expected string, got {type(value)}")
+        if len(value) > max_length:
+            raise SecurityViolationError(f"SQL expression too long: {len(value)} > {max_length}")
+        # Keep user intent intact; only strip control chars.
+        return re.sub(r"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]", "", value)
 
     def sanitize_shell_command(self, value: str) -> str:
         """Shell 명령어 컨텍스트의 문자열 정화 (모든 보안 체크 적용)"""
@@ -399,7 +491,49 @@ class InputSanitizer:
                 clean_key = self.sanitize_any(key, max_depth, current_depth + 1)
 
             # 값은 컨텍스트에 따라 처리
-            if isinstance(value, str) and key in ["description", "comment", "note", "label"]:
+            key_lower = key.lower() if isinstance(key, str) else ""
+            sql_expr_keys = {
+                # Common Spark SQL expression fields
+                "expression",
+                "expr",
+                "sql",
+                "query",
+                "predicate",
+                "condition",
+                "where",
+                "having",
+            }
+            sql_expr_list_keys = {
+                # Lists of Spark SQL expressions (select expr / agg expr / group-by expr)
+                "expressions",
+                "aggregate_expressions",
+                "aggregateexpressions",
+                "group_by",
+                "groupby",
+            }
+
+            # Some fields contain *maps* keyed by identifiers (column names, Spark config keys, option names, etc).
+            # Treat their nested keys as data, not internal JSON field names.
+            if isinstance(value, dict) and key_lower in {"rename", "spark_conf", "sparkconf", "options", "options_env", "optionsenv"}:
+                clean_value = self.sanitize_identifier_mapping(
+                    value,
+                    max_depth=max_depth,
+                    current_depth=current_depth + 1,
+                )
+                sanitized[clean_key] = clean_value
+                continue
+
+            if isinstance(value, str) and key_lower in sql_expr_keys:
+                clean_value = self.sanitize_sql_expression(value)
+            elif isinstance(value, list) and key_lower in sql_expr_list_keys:
+                cleaned_items: list[Any] = []
+                for item in value:
+                    if isinstance(item, str):
+                        cleaned_items.append(self.sanitize_sql_expression(item))
+                    else:
+                        cleaned_items.append(self.sanitize_any(item, max_depth, current_depth + 1))
+                clean_value = cleaned_items
+            elif isinstance(value, str) and key in ["description", "comment", "note", "label"]:
                 # 설명 필드는 description sanitizer 사용
                 clean_value = self.sanitize_description(value)
             elif isinstance(value, str) and key in ["command", "script", "exec"]:

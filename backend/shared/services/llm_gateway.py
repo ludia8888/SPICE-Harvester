@@ -437,6 +437,9 @@ class LLMGateway:
         self.pricing_json = str(getattr(llm, "pricing_json", "") or "").strip() or None
         self._circuit: dict[str, dict[str, float]] = {}
         self._tool_calls_supported: dict[str, bool] = {}
+        # Responses API JSON schema support is provider/model specific.
+        # Cache failures to avoid paying a 4xx + fallback penalty on every call.
+        self._responses_json_schema_supported: dict[str, bool] = {}
         # Mock provider supports deterministic sequences for E2E/CI runs.
         # Keyed by normalized task name and advanced per call.
         self._mock_sequence_cursors: dict[str, int] = {}
@@ -521,7 +524,6 @@ class LLMGateway:
         )
         headers: Dict[str, str] = {
             "Content-Type": "application/json",
-            "Idempotency-Key": sha256_hex(f"llm:{task}:{model}:{prompt_hash}"),
         }
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
@@ -628,7 +630,6 @@ class LLMGateway:
         )
         headers: Dict[str, str] = {
             "Content-Type": "application/json",
-            "Idempotency-Key": sha256_hex(f"llm:{task}:{model}:{prompt_hash}:tools"),
         }
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
@@ -732,10 +733,15 @@ class LLMGateway:
         model: str,
         max_tokens: int,
         prompt_hash: str,
+        tool_parameters: Optional[Dict[str, Any]] = None,
+        schema_name: Optional[str] = None,
         extra_headers: Optional[Dict[str, str]] = None,
         extra_body: Optional[Dict[str, Any]] = None,
     ) -> tuple[Dict[str, Any], dict[str, Any]]:
         url = f"{self.base_url}/responses"
+        use_schema = bool(tool_parameters and schema_name)
+        if self._responses_json_schema_supported.get(str(model or "")) is False:
+            use_schema = False
         _log_llm_event(
             "openai.request",
             {
@@ -746,16 +752,30 @@ class LLMGateway:
                 "system_prompt_chars": len(system_prompt),
                 "user_prompt_chars": len(user_prompt),
                 "max_output_tokens": max_tokens,
+                "format": "json_schema" if use_schema else "json_object",
+                "schema_name": schema_name if use_schema else None,
             },
         )
         headers: Dict[str, str] = {
             "Content-Type": "application/json",
-            "Idempotency-Key": sha256_hex(f"llm:{task}:{model}:{prompt_hash}:responses"),
         }
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
         if extra_headers:
             headers.update({str(k): str(v) for k, v in extra_headers.items() if str(k).strip() and str(v).strip()})
+
+        text_format: Dict[str, Any]
+        if use_schema:
+            text_format = {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": str(schema_name),
+                    "schema": dict(tool_parameters or {}),
+                    "strict": True,
+                },
+            }
+        else:
+            text_format = {"type": "json_object"}
 
         body: Dict[str, Any] = {
             "model": model,
@@ -763,7 +783,7 @@ class LLMGateway:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            "text": {"format": {"type": "json_object"}, "verbosity": "low"},
+            "text": {"format": text_format, "verbosity": "low"},
             "max_output_tokens": int(max_tokens),
         }
         body.update(_openai_reasoning_params(model))
@@ -774,6 +794,27 @@ class LLMGateway:
 
         async with httpx.AsyncClient(timeout=self.timeout_s) as client:
             resp = await client.post(url, headers=headers, json=body)
+            # Some OpenAI-compatible gateways do not support json_schema response formatting.
+            # Fall back to json_object format on 4xx errors.
+            if resp.status_code in {400, 404} and use_schema:
+                self._responses_json_schema_supported[str(model or "")] = False
+                use_schema = False
+                body["text"] = {"format": {"type": "json_object"}, "verbosity": "low"}
+                _log_llm_event(
+                    "openai.request",
+                    {
+                        "mode": "responses_json",
+                        "task": task,
+                        "model": model,
+                        "prompt_hash": prompt_hash,
+                        "max_output_tokens": max_tokens,
+                        "format": "json_object",
+                        "fallback_from": "json_schema",
+                    },
+                )
+                resp = await client.post(url, headers=headers, json=body)
+            elif resp.status_code < 400 and use_schema:
+                self._responses_json_schema_supported[str(model or "")] = True
         if resp.status_code >= 400:
             _log_llm_event(
                 "openai.http_error",
@@ -788,14 +829,59 @@ class LLMGateway:
             raise LLMHTTPStatusError(status_code=resp.status_code, body_preview=resp.text[:500])
 
         data = resp.json()
+        status_value = str(data.get("status") or "").strip().lower() if isinstance(data, dict) else ""
+        incomplete_details = data.get("incomplete_details") if isinstance(data, dict) else None
         content_text = _extract_openai_responses_text(data)
+
+        # If we got a partial response (commonly due to output token budget), retry once with a larger output budget.
+        if status_value == "incomplete":
+            reason = ""
+            if isinstance(incomplete_details, dict):
+                reason = str(incomplete_details.get("reason") or incomplete_details.get("type") or "").strip().lower()
+            should_bump = reason in {"max_output_tokens", "length", "output_limit"} or "output" in reason
+            if should_bump and int(max_tokens) < 12000:
+                bumped = min(12000, max(1, int(max_tokens)) * 2)
+                _log_llm_event(
+                    "openai.request",
+                    {
+                        "mode": "responses_json",
+                        "task": task,
+                        "model": model,
+                        "prompt_hash": prompt_hash,
+                        "max_output_tokens": bumped,
+                        "format": "json_schema" if use_schema else "json_object",
+                        "retry_reason": f"incomplete:{reason or 'unknown'}",
+                    },
+                )
+                retry_body = dict(body)
+                retry_body["max_output_tokens"] = int(bumped)
+                async with httpx.AsyncClient(timeout=self.timeout_s) as retry_client:
+                    resp = await retry_client.post(url, headers=headers, json=retry_body)
+                if resp.status_code >= 400:
+                    _log_llm_event(
+                        "openai.http_error",
+                        {
+                            "mode": "responses_json",
+                            "task": task,
+                            "model": model,
+                            "status_code": resp.status_code,
+                            "body": resp.text[:500],
+                        },
+                    )
+                    raise LLMHTTPStatusError(status_code=resp.status_code, body_preview=resp.text[:500])
+                data = resp.json()
+                status_value = str(data.get("status") or "").strip().lower() if isinstance(data, dict) else ""
+                incomplete_details = data.get("incomplete_details") if isinstance(data, dict) else None
+                content_text = _extract_openai_responses_text(data)
         _log_llm_event(
             "openai.response",
             {
                 "mode": "responses_json",
                 "task": task,
                 "model": model,
-                "status": data.get("status") if isinstance(data, dict) else None,
+                "status": status_value or (data.get("status") if isinstance(data, dict) else None),
+                "incomplete_details": incomplete_details,
+                "error": data.get("error") if isinstance(data, dict) else None,
                 "output_len": len(content_text or ""),
                 "output_preview": content_text,
                 "output_types": [
@@ -807,6 +893,9 @@ class LLMGateway:
                 else [],
             },
         )
+
+        if status_value == "incomplete":
+            raise LLMOutputValidationError(f"Responses API returned incomplete output: {incomplete_details}")
 
         obj = _extract_json_object(str(content_text or ""))
         usage = data.get("usage") if isinstance(data, dict) else {}
@@ -1122,6 +1211,8 @@ class LLMGateway:
                         usage = {}
                     elif provider == "openai_compat":
                         if _use_openai_responses_api(model_to_use):
+                            safe_task = re.sub(r"[^a-zA-Z0-9_]+", "_", (task or "task").strip().lower()).strip("_")
+                            schema_name = f"{safe_task or 'response'}_schema"[:64]
                             obj, usage = await self._call_openai_compat_responses_json(
                                 task=task,
                                 system_prompt=system_prompt,
@@ -1129,6 +1220,8 @@ class LLMGateway:
                                 model=model_to_use,
                                 max_tokens=max_tokens,
                                 prompt_hash=prompt_hash,
+                                tool_parameters=_tool_parameters_from_model(response_model),
+                                schema_name=schema_name,
                                 extra_headers=provider_extra_headers,
                                 extra_body=provider_extra_body,
                             )
@@ -1294,6 +1387,10 @@ class LLMGateway:
         except (ValidationError, LLMOutputValidationError) as e:
             error = f"LLM output validation failed: {e}"
             raise LLMOutputValidationError(error) from e
+        except httpx.RequestError as e:
+            # Prevent raw httpx exceptions from escaping to global exception handlers (503),
+            # so callers can handle LLM failures deterministically.
+            raise LLMRequestError(f"LLM request failed: {e}") from e
         except Exception as e:
             error = str(e)
             raise

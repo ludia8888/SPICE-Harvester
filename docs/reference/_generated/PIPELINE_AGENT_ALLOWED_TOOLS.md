@@ -1,8 +1,8 @@
 # Pipeline Agent Tool Allowlist
 
 <!-- BEGIN AUTO-GENERATED: pipeline_tooling_reference -->
-> Updated: 2026-01-25T20:49:49+09:00
-> Revision: `6d07a02f2684110be0f3c4d8f718977996f0d70e`
+> Updated: 2026-01-27T02:46:12+09:00
+> Revision: `82993e8f40993e1c3caf44acc3b92566c8ff33b8`
 > Source of truth: `backend/bff/services/pipeline_agent_autonomous_loop.py` (`_PIPELINE_AGENT_ALLOWED_TOOLS`).
 > Regenerate: `python scripts/generate_pipeline_tooling_reference.py`
 
@@ -25,6 +25,7 @@
 - `plan_add_dedupe`
 - `plan_add_drop`
 - `plan_add_edge`
+- `plan_add_explode`
 - `plan_add_external_input`
 - `plan_add_filter`
 - `plan_add_group_by`
@@ -33,11 +34,14 @@
 - `plan_add_join`
 - `plan_add_normalize`
 - `plan_add_output`
+- `plan_add_pivot`
 - `plan_add_regex_replace`
 - `plan_add_rename`
 - `plan_add_select`
 - `plan_add_select_expr`
+- `plan_add_sort`
 - `plan_add_transform`
+- `plan_add_union`
 - `plan_add_window`
 - `plan_add_window_expr`
 - `plan_configure_input_read`
@@ -47,6 +51,7 @@
 - `plan_new`
 - `plan_preview`
 - `plan_refute_claims`
+- `plan_reset`
 - `plan_set_node_inputs`
 - `plan_update_node_metadata`
 - `plan_update_output`

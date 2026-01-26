@@ -7,6 +7,7 @@ instead of emitting a full definition_json in one shot.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -49,12 +50,34 @@ def _ensure_string_list(value: Any, *, name: str) -> List[str]:
     items = _ensure_list(value, name=name)
     out: List[str] = []
     for item in items:
-        text = str(item or "").strip()
+        # Some CSV headers include a UTF-8 BOM on the first column name.
+        # Spark typically strips it during read; normalize here so plans match runtime behavior.
+        text = str(item or "").strip().lstrip("\ufeff")
         if text:
             out.append(text)
     if not out:
         raise PipelinePlanBuilderError(f"{name} must be a non-empty list of strings")
     return out
+
+
+_SELECT_EXPR_HINT_RE = re.compile(r"(?i)\s+as\s+")
+
+
+def _looks_like_spark_expr(text: str) -> bool:
+    """
+    Detect obvious Spark SQL expressions passed where a *column name* is required.
+
+    This is intentionally conservative: when a user/LLM needs expressions, use selectExpr tools
+    (plan_add_select_expr / plan_add_group_by_expr / plan_add_window_expr).
+    """
+    raw = str(text or "").strip()
+    if not raw:
+        return False
+    if _SELECT_EXPR_HINT_RE.search(raw):
+        return True
+    if any(ch in raw for ch in ("(", ")", "'", '"', "\n", "\r", "\t", ",")):
+        return True
+    return False
 
 
 def _definition(plan: Dict[str, Any]) -> Dict[str, Any]:
@@ -117,6 +140,29 @@ def _find_node(definition: Dict[str, Any], node_id: str) -> Optional[Dict[str, A
     return None
 
 
+def _incoming_sources_in_order(definition: Dict[str, Any], node_id: str) -> List[str]:
+    """
+    Return incoming edge sources for `node_id` in the order they appear in definition_json.edges.
+
+    Note: edge order matters for joins (LEFT then RIGHT). We preserve list ordering to keep
+    idempotency checks deterministic and semantics-preserving.
+    """
+    target = str(node_id or "").strip()
+    if not target:
+        return []
+    edges = _ensure_list(definition.get("edges"), name="definition_json.edges")
+    sources: List[str] = []
+    for edge in edges:
+        if not isinstance(edge, dict):
+            continue
+        if str(edge.get("to") or "").strip() != target:
+            continue
+        src = str(edge.get("from") or "").strip()
+        if src:
+            sources.append(src)
+    return sources
+
+
 def _unique_node_id(base: str, existing: set[str]) -> str:
     base = str(base or "").strip() or "node"
     candidate = base
@@ -152,6 +198,34 @@ def new_plan(
     return plan
 
 
+def reset_plan(plan: Dict[str, Any]) -> PlanMutation:
+    """
+    Reset a plan's definition to empty while preserving goal + data_scope.
+
+    This is useful when an autonomous loop wants to restart planning deterministically
+    without allocating a new plan_id.
+    """
+    plan_obj = _ensure_dict(plan, name="plan")
+    goal_text = _ensure_str(plan_obj.get("goal"), name="goal")
+    scope_obj = _ensure_dict(plan_obj.get("data_scope"), name="data_scope")
+    db = _ensure_str(scope_obj.get("db_name"), name="data_scope.db_name")
+    scope: Dict[str, Any] = {"db_name": db}
+    branch = str(scope_obj.get("branch") or "").strip() or None
+    if branch:
+        scope["branch"] = branch
+    dataset_ids = scope_obj.get("dataset_ids")
+    if isinstance(dataset_ids, list) and dataset_ids:
+        scope["dataset_ids"] = [str(item).strip() for item in dataset_ids if str(item).strip()]
+
+    plan_obj["goal"] = goal_text
+    plan_obj["data_scope"] = scope
+    plan_obj["definition_json"] = {"nodes": [], "edges": []}
+    plan_obj["outputs"] = []
+    plan_obj["associations"] = []
+    plan_obj["warnings"] = []
+    return PlanMutation(plan=plan_obj)
+
+
 def add_input(
     plan: Dict[str, Any],
     *,
@@ -175,8 +249,6 @@ def add_input(
         if ds_name:
             base = f"input_{ds_name}".replace(" ", "_")
         resolved_id = _unique_node_id(base, existing)
-    if resolved_id in existing:
-        raise PipelinePlanBuilderError(f"node_id already exists: {resolved_id}")
 
     metadata: Dict[str, Any] = {}
     if ds_id:
@@ -188,6 +260,17 @@ def add_input(
     if isinstance(read, dict) and read:
         # `read` config is interpreted by the Spark pipeline worker to control parsing (csv/json options, schema, etc).
         metadata["read"] = dict(read)
+
+    if resolved_id in existing:
+        # Idempotent behavior for explicit node_id: if the node exists and matches exactly,
+        # treat as a no-op instead of failing the entire batch.
+        if str(node_id or "").strip():
+            node = _find_node(definition, resolved_id)
+            existing_meta = node.get("metadata") if isinstance(node, dict) and isinstance(node.get("metadata"), dict) else {}
+            node_type = str(node.get("type") or "").strip().lower() if isinstance(node, dict) else ""
+            if node_type == "input" and existing_meta == metadata:
+                return PlanMutation(plan=plan, node_id=resolved_id, warnings=(f"node already exists (noop): {resolved_id}",))
+        raise PipelinePlanBuilderError(f"node_id already exists: {resolved_id}")
 
     definition["nodes"].append({"id": resolved_id, "type": "input", "metadata": metadata})
     return PlanMutation(plan=plan, node_id=resolved_id)
@@ -216,12 +299,19 @@ def add_external_input(
     resolved_id = str(node_id or "").strip() or None
     if not resolved_id:
         resolved_id = _unique_node_id(f"input_{fmt}", existing)
-    if resolved_id in existing:
-        raise PipelinePlanBuilderError(f"node_id already exists: {resolved_id}")
 
     metadata: Dict[str, Any] = {"read": dict(read_cfg)}
     if source_name:
         metadata["sourceName"] = str(source_name).strip() or None
+
+    if resolved_id in existing:
+        if str(node_id or "").strip():
+            node = _find_node(definition, resolved_id)
+            existing_meta = node.get("metadata") if isinstance(node, dict) and isinstance(node.get("metadata"), dict) else {}
+            node_type = str(node.get("type") or "").strip().lower() if isinstance(node, dict) else ""
+            if node_type == "input" and existing_meta == metadata:
+                return PlanMutation(plan=plan, node_id=resolved_id, warnings=(f"node already exists (noop): {resolved_id}",))
+        raise PipelinePlanBuilderError(f"node_id already exists: {resolved_id}")
 
     definition["nodes"].append({"id": resolved_id, "type": "input", "metadata": metadata})
     return PlanMutation(plan=plan, node_id=resolved_id)
@@ -286,11 +376,22 @@ def add_transform(
     resolved_id = str(node_id or "").strip() or None
     if not resolved_id:
         resolved_id = _unique_node_id(op, existing)
-    if resolved_id in existing:
-        raise PipelinePlanBuilderError(f"node_id already exists: {resolved_id}")
 
     meta = dict(metadata or {})
     meta["operation"] = op
+
+    if resolved_id in existing:
+        # Idempotent behavior for explicit node_id: if the node exists and matches exactly,
+        # treat as a no-op instead of failing the entire batch.
+        if str(node_id or "").strip():
+            node = _find_node(definition, resolved_id)
+            existing_meta = node.get("metadata") if isinstance(node, dict) and isinstance(node.get("metadata"), dict) else {}
+            node_type = str(node.get("type") or "").strip().lower() if isinstance(node, dict) else ""
+            incoming = _incoming_sources_in_order(definition, resolved_id)
+            if node_type == "transform" and existing_meta == meta and incoming == inputs:
+                return PlanMutation(plan=plan, node_id=resolved_id, warnings=(f"node already exists (noop): {resolved_id}",))
+        raise PipelinePlanBuilderError(f"node_id already exists: {resolved_id}")
+
     definition["nodes"].append({"id": resolved_id, "type": "transform", "metadata": meta})
     for src in inputs:
         definition["edges"].append({"from": src, "to": resolved_id})
@@ -321,6 +422,16 @@ def add_join(
     rk = _ensure_string_list(right_keys, name="right_keys")
     if len(lk) != len(rk):
         raise PipelinePlanBuilderError("left_keys/right_keys must have the same length")
+    # Joins are compiled as equality on column references. Expressions like
+    # `trim(cast(id as string))` must be materialized first via compute/cast tools.
+    # Enforce this early so LLM plans don't pass validation only to fail preflight.
+    for key in list(lk) + list(rk):
+        if "(" in key or ")" in key:
+            raise PipelinePlanBuilderError(
+                "join keys must be column names (not SQL expressions). "
+                "Create a computed key column (e.g., order_id_t) using plan_add_compute_assignments or plan_add_cast, "
+                "then join on that column."
+            )
 
     hints = None
     if join_hints is not None:
@@ -420,6 +531,131 @@ def add_compute_assignments(
     )
 
 
+def add_sort(
+    plan: Dict[str, Any],
+    *,
+    input_node_id: str,
+    columns: List[Any],
+    node_id: Optional[str] = None,
+) -> PlanMutation:
+    """
+    Add a sort transform node.
+
+    `columns` supports:
+    - ["col1", "-col2"]  (prefix '-' for DESC)
+    - [{"column":"col1","direction":"asc|desc"}, ...]
+    """
+    src = _ensure_str(input_node_id, name="input_node_id")
+    items = _ensure_list(columns, name="columns")
+    normalized: List[Any] = []
+    for item in items:
+        if isinstance(item, str):
+            col = item.strip()
+            if col:
+                normalized.append(col)
+            continue
+        if isinstance(item, dict):
+            col = str(item.get("column") or item.get("name") or "").strip()
+            if not col:
+                continue
+            direction = str(item.get("direction") or item.get("dir") or "asc").strip().lower()
+            if direction not in {"asc", "desc"}:
+                direction = "asc"
+            normalized.append({"column": col, "direction": direction})
+            continue
+    if not normalized:
+        raise PipelinePlanBuilderError("columns is required for sort")
+    return add_transform(
+        plan,
+        operation="sort",
+        input_node_ids=[src],
+        node_id=node_id,
+        metadata={"columns": normalized},
+    )
+
+
+def add_explode(
+    plan: Dict[str, Any],
+    *,
+    input_node_id: str,
+    column: str,
+    node_id: Optional[str] = None,
+) -> PlanMutation:
+    """Add an explode transform node for an array/map-like column."""
+    src = _ensure_str(input_node_id, name="input_node_id")
+    col = _ensure_str(column, name="column")
+    return add_transform(
+        plan,
+        operation="explode",
+        input_node_ids=[src],
+        node_id=node_id,
+        metadata={"columns": [col]},
+    )
+
+
+def add_union(
+    plan: Dict[str, Any],
+    *,
+    left_node_id: str,
+    right_node_id: str,
+    union_mode: str = "strict",
+    node_id: Optional[str] = None,
+) -> PlanMutation:
+    """
+    Add a union transform node for two inputs.
+
+    union_mode:
+    - strict: schemas must match (column set), unionByName
+    - common_only: keep only common columns
+    - pad_missing_nulls / pad: align to union of columns, missing -> NULL
+    """
+    left = _ensure_str(left_node_id, name="left_node_id")
+    right = _ensure_str(right_node_id, name="right_node_id")
+    if left == right:
+        raise PipelinePlanBuilderError("left_node_id and right_node_id must be different")
+    mode = str(union_mode or "strict").strip().lower() or "strict"
+    if mode not in {"strict", "common_only", "pad_missing_nulls", "pad"}:
+        raise PipelinePlanBuilderError(f"Invalid union_mode: {union_mode}")
+    return add_transform(
+        plan,
+        operation="union",
+        input_node_ids=[left, right],
+        node_id=node_id,
+        metadata={"unionMode": mode},
+    )
+
+
+def add_pivot(
+    plan: Dict[str, Any],
+    *,
+    input_node_id: str,
+    index: List[str],
+    columns: str,
+    values: str,
+    agg: str = "sum",
+    node_id: Optional[str] = None,
+) -> PlanMutation:
+    """
+    Add a pivot transform node.
+
+    This maps to Spark `groupBy(index...).pivot(columns).<agg>(values)`.
+    """
+    src = _ensure_str(input_node_id, name="input_node_id")
+    index_cols = _ensure_string_list(index, name="index")
+    pivot_col = _ensure_str(columns, name="columns")
+    value_col = _ensure_str(values, name="values")
+    agg_norm = str(agg or "sum").strip().lower() or "sum"
+    if agg_norm not in {"sum", "count", "avg", "min", "max"}:
+        raise PipelinePlanBuilderError(f"Invalid pivot agg: {agg}")
+    return add_transform(
+        plan,
+        operation="pivot",
+        input_node_ids=[src],
+        node_id=node_id,
+        metadata={"pivot": {"index": index_cols, "columns": pivot_col, "values": value_col, "agg": agg_norm}},
+    )
+
+
 def add_cast(
     plan: Dict[str, Any],
     *,
@@ -484,6 +720,12 @@ def add_select(
 ) -> PlanMutation:
     src = _ensure_str(input_node_id, name="input_node_id")
     cols = _ensure_string_list(columns, name="columns")
+    for col in cols:
+        if _looks_like_spark_expr(col):
+            raise PipelinePlanBuilderError(
+                "select columns must be column names (not Spark expressions). "
+                "Use plan_add_select_expr for expressions."
+            )
     return add_transform(
         plan,
         operation="select",
@@ -570,6 +812,12 @@ def add_group_by_expr(
     group_cols = []
     if group_by:
         group_cols = [str(item).strip() for item in group_by if str(item).strip()]
+        for col in group_cols:
+            if _looks_like_spark_expr(col):
+                raise PipelinePlanBuilderError(
+                    "group_by entries must be column names (not Spark expressions). "
+                    "Compute a new column first (plan_add_compute_assignments) and group by its column name."
+                )
     expr_items = _ensure_list(aggregate_expressions, name="aggregate_expressions")
     if not expr_items:
         raise PipelinePlanBuilderError("aggregate_expressions is required")
@@ -709,11 +957,25 @@ def add_output(
     resolved_id = str(node_id or "").strip() or None
     if not resolved_id:
         resolved_id = _unique_node_id(f"output_{name}".replace(" ", "_"), existing)
-    if resolved_id in existing:
-        raise PipelinePlanBuilderError(f"node_id already exists: {resolved_id}")
 
     metadata = dict(output_metadata or {})
     metadata["outputName"] = name
+
+    if resolved_id in existing:
+        if str(node_id or "").strip():
+            node = _find_node(definition, resolved_id)
+            existing_meta = node.get("metadata") if isinstance(node, dict) and isinstance(node.get("metadata"), dict) else {}
+            node_type = str(node.get("type") or "").strip().lower() if isinstance(node, dict) else ""
+            incoming = _incoming_sources_in_order(definition, resolved_id)
+            outputs = _ensure_list(plan.get("outputs"), name="outputs")
+            has_output_entry = any(
+                isinstance(item, dict) and str(item.get("output_name") or item.get("outputName") or "").strip() == name
+                for item in outputs
+            )
+            if node_type == "output" and existing_meta == metadata and incoming == [src] and has_output_entry:
+                return PlanMutation(plan=plan, node_id=resolved_id, warnings=(f"node already exists (noop): {resolved_id}",))
+        raise PipelinePlanBuilderError(f"node_id already exists: {resolved_id}")
+
     definition["nodes"].append({"id": resolved_id, "type": "output", "metadata": metadata})
     definition["edges"].append({"from": src, "to": resolved_id})
 
@@ -772,9 +1034,36 @@ def validate_structure(plan: Dict[str, Any]) -> Tuple[List[str], List[str]]:
             continue
         incoming.setdefault(dst, []).append(src)
 
+    # Agent iteration often creates "scratch" nodes that are not yet wired into an output.
+    # Those nodes should not block structural validation. We only enforce operation-specific
+    # requirements (e.g. select must have columns, groupBy must have aggregates) for nodes
+    # that are reachable from at least one output node.
+    output_ids: List[str] = []
+    for node_id, node in node_by_id.items():
+        node_type = str(node.get("type") or "").strip().lower() or "transform"
+        if node_type == "output":
+            output_ids.append(node_id)
+
+    validate_op_nodes: set[str] = set()
+    if output_ids:
+        stack = list(output_ids)
+        validate_op_nodes = set(output_ids)
+        while stack:
+            current = stack.pop()
+            for src in incoming.get(current, []):
+                if src in validate_op_nodes:
+                    continue
+                validate_op_nodes.add(src)
+                stack.append(src)
+
     for node_id, node in node_by_id.items():
         node_type = str(node.get("type") or "").strip().lower() or "transform"
         if node_type == "transform":
+            # If there are no outputs yet, skip operation-specific validation to allow
+            # incremental plan construction. If outputs exist, validate only nodes that
+            # contribute to at least one output.
+            if not validate_op_nodes or node_id not in validate_op_nodes:
+                continue
             metadata = node.get("metadata") if isinstance(node.get("metadata"), dict) else {}
             op = str(metadata.get("operation") or "").strip()
             if not op:
@@ -784,12 +1073,38 @@ def validate_structure(plan: Dict[str, Any]) -> Tuple[List[str], List[str]]:
             if op not in SUPPORTED_TRANSFORMS:
                 errors.append(f"Unsupported operation '{op}' on node {node_id}")
                 continue
-            if op in {"filter", "compute"} and not str(metadata.get("expression") or "").strip():
+            if op == "filter" and not str(metadata.get("expression") or "").strip():
                 errors.append(f"{op} missing expression on node {node_id}")
-            if op in {"select", "drop", "sort", "dedupe", "explode"}:
+            if op == "compute":
+                has_expression = bool(str(metadata.get("expression") or "").strip())
+                target = metadata.get("targetColumn") or metadata.get("target_column") or metadata.get("target")
+                formula = metadata.get("formula") or metadata.get("expr")
+                has_target_formula = bool(str(target or "").strip()) and bool(str(formula or "").strip())
+                assignments = (
+                    metadata.get("assignments")
+                    or metadata.get("computedColumns")
+                    or metadata.get("computed_columns")
+                )
+                has_assignments = (
+                    isinstance(assignments, list)
+                    and any(
+                        isinstance(item, dict)
+                        and str(item.get("column") or item.get("target") or item.get("name") or "").strip()
+                        and str(item.get("expression") or item.get("expr") or item.get("formula") or "").strip()
+                        for item in assignments
+                    )
+                )
+                if not (has_expression or has_target_formula or has_assignments):
+                    errors.append(f"compute missing expression/targetColumn/formula/assignments on node {node_id}")
+            if op in {"select", "drop", "sort", "dedupe", "explode", "normalize"}:
                 cols = metadata.get("columns") or []
-                if not cols:
-                    errors.append(f"{op} missing columns on node {node_id}")
+                exprs = metadata.get("expressions") or metadata.get("selectExpr") or metadata.get("select_expr")
+                if op == "select":
+                    if not cols and not (isinstance(exprs, list) and exprs):
+                        errors.append(f"{op} missing columns/expressions on node {node_id}")
+                else:
+                    if not cols:
+                        errors.append(f"{op} missing columns on node {node_id}")
             if op == "rename":
                 rename_map = metadata.get("rename") or {}
                 if not rename_map:
@@ -800,10 +1115,17 @@ def validate_structure(plan: Dict[str, Any]) -> Tuple[List[str], List[str]]:
                     errors.append(f"cast missing columns on node {node_id}")
             if op in {"groupBy", "aggregate"}:
                 aggregates = metadata.get("aggregates") or []
-                if not isinstance(aggregates, list) or not any(
+                expr_items = (
+                    metadata.get("aggregateExpressions")
+                    or metadata.get("aggExpressions")
+                    or metadata.get("aggregate_expressions")
+                )
+                has_exprs = isinstance(expr_items, list) and len(expr_items) > 0
+                has_aggs = isinstance(aggregates, list) and any(
                     isinstance(item, dict) and item.get("column") and item.get("op") for item in aggregates
-                ):
-                    errors.append(f"{op} missing aggregates on node {node_id}")
+                )
+                if not (has_aggs or has_exprs):
+                    errors.append(f"{op} missing aggregates/aggregateExpressions on node {node_id}")
             if op == "join":
                 inc = incoming.get(node_id, [])
                 if len(inc) < 2:
