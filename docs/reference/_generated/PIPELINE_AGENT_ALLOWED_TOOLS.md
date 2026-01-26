@@ -1,8 +1,8 @@
 # Pipeline Agent Tool Allowlist
 
 <!-- BEGIN AUTO-GENERATED: pipeline_tooling_reference -->
-> Updated: 2026-01-26T01:04:35+09:00
-> Revision: `a776c5d3c6cf63a5ef40bf04e23c3e2dddebfa44`
+> Updated: 2026-01-27T02:46:12+09:00
+> Revision: `82993e8f40993e1c3caf44acc3b92566c8ff33b8`
 > Source of truth: `backend/bff/services/pipeline_agent_autonomous_loop.py` (`_PIPELINE_AGENT_ALLOWED_TOOLS`).
 > Regenerate: `python scripts/generate_pipeline_tooling_reference.py`
 
@@ -51,6 +51,7 @@
 - `plan_new`
 - `plan_preview`
 - `plan_refute_claims`
+- `plan_reset`
 - `plan_set_node_inputs`
 - `plan_update_node_metadata`
 - `plan_update_output`

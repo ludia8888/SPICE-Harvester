@@ -1,8 +1,8 @@
 # Pipeline MCP Tool Catalog
 
 <!-- BEGIN AUTO-GENERATED: pipeline_tooling_reference -->
-> Updated: 2026-01-26T01:04:35+09:00
-> Revision: `a776c5d3c6cf63a5ef40bf04e23c3e2dddebfa44`
+> Updated: 2026-01-27T02:46:12+09:00
+> Revision: `82993e8f40993e1c3caf44acc3b92566c8ff33b8`
 > Source of truth: `backend/mcp/pipeline_mcp_server.py` (parsed from the `tool_specs` literal).
 > Regenerate: `python scripts/generate_pipeline_tooling_reference.py`
 
@@ -26,10 +26,10 @@
 
 | Tool | Required args | Description |
 | --- | --- | --- |
-| `pipeline_build_wait` | `pipeline_id` | Queue a Spark build for a Pipeline and wait (poll) until completion; returns masked build output summary. |
-| `pipeline_create_from_plan` | `plan, name, location` | Create a Pipeline (control plane) from a PipelinePlan.definition_json. Requires admin token; respects principal headers for permissions. |
-| `pipeline_deploy_promote_build` | `pipeline_id, build_job_id, node_id, db_name, dataset_name` | Promote a successful build to a deployed dataset (requires approve permission). |
-| `pipeline_preview_wait` | `pipeline_id` | Queue a Spark preview for a Pipeline and wait (poll) until completion; returns masked preview sample. |
+| `pipeline_build_wait` | `pipeline_id` | Queue a Spark build for a Pipeline and optionally wait (poll) until completion. If job_id is provided, this tool will poll that existing job_id without enqueuing a new build (prevents runaway QUEUED runs). |
+| `pipeline_create_from_plan` | `plan, name, location` | Create a Pipeline (control plane) from a PipelinePlan.definition_json. If the pipeline already exists (same db/name/branch), this tool will update it and return the existing pipeline_id (idempotent upsert). Requires admin token; respects principal headers for permissions. |
+| `pipeline_deploy_promote_build` | `pipeline_id, build_job_id, node_id, db_name, dataset_name` | Promote a successful build to a deployed dataset (requires approve permission). To avoid build↔deploy definition hash mismatches, you may pass definition_json, or pass pipeline_spec_commit_id and this tool will fetch the exact build snapshot from pipeline_versions. |
+| `pipeline_preview_wait` | `pipeline_id` | Queue a Spark preview for a Pipeline and optionally wait (poll) until completion. If job_id is provided, this tool will poll that existing job_id without enqueuing a new preview (prevents runaway QUEUED runs). |
 | `pipeline_update_from_plan` | `pipeline_id, plan` | Update an existing Pipeline definition from a PipelinePlan.definition_json. |
 
 ## Plan Builder / Validation
@@ -54,7 +54,7 @@
 | `plan_add_output` | `plan, input_node_id, output_name` | Add an output node + outputs[] entry. |
 | `plan_add_pivot` | `plan, input_node_id, index, columns, values` | Add a pivot transform node (groupBy(index...).pivot(columns).agg(values)). |
 | `plan_add_regex_replace` | `plan, input_node_id, rules` | Add a regexReplace transform node. rules=[{column,pattern,replacement,flags?}]. |
-| `plan_add_rename` | `plan, input_node_id, rename` | Add a rename transform node. rename={src:dst}. |
+| `plan_add_rename` | `plan, input_node_id` | Add a rename transform node. Prefer rename={src:dst}, but renames/mappings as [{from,to}] are also accepted. |
 | `plan_add_select` | `plan, input_node_id, columns` | Add a select transform node. |
 | `plan_add_select_expr` | `plan, input_node_id, expressions` | Add a select transform node using Spark selectExpr expressions. |
 | `plan_add_sort` | `plan, input_node_id, columns` | Add a sort transform node. columns supports ['col','-col2'] or [{'column','direction'}]. |
@@ -69,10 +69,11 @@
 | `plan_new` | `goal, db_name` | Create a new PipelinePlan JSON (empty nodes/edges). |
 | `plan_preview` | `plan` | Preview a plan via the deterministic PipelineExecutor (sample-safe). |
 | `plan_refute_claims` | `plan` | Refute plan-embedded claims with concrete counterexamples (witness-based hard gate). |
+| `plan_reset` | `plan` | Reset an existing plan to empty (preserves goal + data_scope). |
 | `plan_set_node_inputs` | `plan, node_id, input_node_ids` | Replace all incoming edges to node_id with input_node_ids (in order). |
-| `plan_update_node_metadata` | `plan, node_id` | Patch node.metadata (merge by default, replace if requested). |
-| `plan_update_output` | `plan, output_name` | Patch outputs[] entry (by output_name); keeps output node metadata.outputName in sync if renamed. |
-| `plan_update_settings` | `plan` | Patch plan.definition_json.settings (merge by default, replace if requested). |
+| `plan_update_node_metadata` | `plan, node_id` | Patch node.metadata (merge by default, replace if requested). Use `set` (aliases: `metadata`, `meta`). |
+| `plan_update_output` | `plan` | Patch outputs[] entry (by output_name or output node_id); keeps output node metadata.outputName in sync if renamed. |
+| `plan_update_settings` | `plan` | Patch plan.definition_json.settings (merge by default, replace if requested). Use `set` (alias: `settings`). |
 | `plan_validate` | `plan` | Validate a PipelinePlan using dataset-aware preflight rules. |
 | `plan_validate_structure` | `plan` | Validate plan.definition_json structure without resolving dataset schemas. |
 
