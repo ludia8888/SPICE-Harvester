@@ -500,18 +500,64 @@ class PipelineMCPServer:
             tool_specs: List[Dict[str, Any]] = [
                 {
                     "name": "context_pack_build",
-                    "description": "Build a safe pipeline context pack (schemas/samples + join/pk/fk/cast/cleansing hints).",
+                    "description": (
+                        "Build a pipeline context pack with schema analysis, sample data, and relationship recommendations. "
+                        "IMPORTANT: All recommendations include 'confidence' metadata. Check 'confidence_level' before trusting: "
+                        ">=0.8 = reliable, 0.5-0.8 = validate recommended, <0.5 = LOW confidence - must validate on full data. "
+                        "The output includes 'agent_guidance' explaining how to interpret scores and when to request validation."
+                    ),
                     "inputSchema": {
                         "type": "object",
                         "properties": {
-                            "db_name": {"type": "string"},
-                            "branch": {"type": "string"},
-                            "dataset_ids": {"type": "array", "items": {"type": "string"}},
-                            "max_datasets_overview": {"type": "integer"},
-                            "max_selected_datasets": {"type": "integer"},
-                            "max_sample_rows": {"type": "integer"},
-                            "max_join_candidates": {"type": "integer"},
-                            "max_pk_candidates": {"type": "integer"},
+                            "db_name": {
+                                "type": "string",
+                                "description": "Database name to analyze",
+                            },
+                            "branch": {
+                                "type": "string",
+                                "description": "lakeFS branch (default: main)",
+                            },
+                            "dataset_ids": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "UUIDs of datasets to analyze in detail",
+                            },
+                            "max_datasets_overview": {
+                                "type": "integer",
+                                "description": "Max datasets in overview list (default: 20)",
+                            },
+                            "max_selected_datasets": {
+                                "type": "integer",
+                                "description": "Max datasets for detailed analysis (default: 6)",
+                            },
+                            "max_sample_rows": {
+                                "type": ["integer", "string"],
+                                "description": (
+                                    "Sample rows per dataset. Use 'auto' or omit for dynamic sampling "
+                                    "(recommended - adjusts based on data size for better confidence). "
+                                    "Fixed integer forces exact sample size."
+                                ),
+                            },
+                            "use_dynamic_sampling": {
+                                "type": "boolean",
+                                "description": "Enable dynamic sample size based on total rows (default: true, recommended)",
+                            },
+                            "max_join_candidates": {
+                                "type": "integer",
+                                "description": "Max join key recommendations (default: 10)",
+                            },
+                            "max_pk_candidates": {
+                                "type": "integer",
+                                "description": "Max primary key candidates per dataset (default: 8)",
+                            },
+                            "mask_pii": {
+                                "type": "boolean",
+                                "description": (
+                                    "Mask PII (emails, phone numbers) in sample data. "
+                                    "Default: false (disabled) - Agent sees real data for accurate analysis. "
+                                    "Set to true only if data contains sensitive PII that must not be exposed."
+                                ),
+                            },
                         },
                         "required": ["db_name"],
                     },
@@ -1300,6 +1346,28 @@ class PipelineMCPServer:
                     db_name = str(arguments.get("db_name") or "").strip()
                     if not db_name:
                         raise PipelinePlanBuilderError("db_name is required")
+
+                    # Support dynamic sampling: None means auto-determine based on data size
+                    max_sample_rows_arg = arguments.get("max_sample_rows")
+                    if max_sample_rows_arg is None or str(max_sample_rows_arg).strip().lower() in ("auto", "dynamic", ""):
+                        max_sample_rows = None  # triggers dynamic sampling
+                    else:
+                        max_sample_rows = int(max_sample_rows_arg)
+
+                    # Default to dynamic sampling for better Agent intelligence
+                    use_dynamic = arguments.get("use_dynamic_sampling")
+                    if use_dynamic is None:
+                        use_dynamic_sampling = True  # default ON
+                    else:
+                        use_dynamic_sampling = bool(use_dynamic)
+
+                    # PII masking: disabled by default for better Agent intelligence
+                    mask_pii_arg = arguments.get("mask_pii")
+                    if mask_pii_arg is None:
+                        mask_pii_enabled = False  # default OFF for Agent intelligence
+                    else:
+                        mask_pii_enabled = bool(mask_pii_arg)
+
                     pack = await build_pipeline_context_pack(
                         db_name=db_name,
                         branch=str(arguments.get("branch") or "").strip() or None,
@@ -1308,9 +1376,11 @@ class PipelineMCPServer:
                         profile_registry=profile_registry,
                         max_datasets_overview=int(arguments.get("max_datasets_overview") or 20),
                         max_selected_datasets=int(arguments.get("max_selected_datasets") or 6),
-                        max_sample_rows=int(arguments.get("max_sample_rows") or 20),
+                        max_sample_rows=max_sample_rows,
                         max_join_candidates=int(arguments.get("max_join_candidates") or 10),
-                        max_pk_candidates=int(arguments.get("max_pk_candidates") or 6),
+                        max_pk_candidates=int(arguments.get("max_pk_candidates") or 8),
+                        use_dynamic_sampling=use_dynamic_sampling,
+                        mask_pii_enabled=mask_pii_enabled,
                     )
                     return {"context_pack": pack}
 

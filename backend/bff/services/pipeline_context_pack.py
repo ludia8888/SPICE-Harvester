@@ -405,6 +405,7 @@ def _estimate_cardinality(left_ratio: float, right_ratio: float, *, threshold: f
 
 
 def _cardinality_confidence(sample_count: int) -> float:
+    """Calculate confidence level based on sample size."""
     if sample_count >= 2000:
         return 0.9
     if sample_count >= 1000:
@@ -416,6 +417,87 @@ def _cardinality_confidence(sample_count: int) -> float:
     if sample_count >= 50:
         return 0.35
     return 0.2
+
+
+def _confidence_reason(sample_count: int, total_row_count: Optional[int] = None) -> str:
+    """Generate human-readable confidence reason for LLM Agent."""
+    if sample_count >= 2000:
+        reason = "large sample size (2000+ rows); high confidence"
+    elif sample_count >= 1000:
+        reason = "good sample size (1000+ rows); reliable estimate"
+    elif sample_count >= 500:
+        reason = "moderate sample size (500+ rows); reasonably confident"
+    elif sample_count >= 200:
+        reason = "limited sample size (200+ rows); validate on full data recommended"
+    elif sample_count >= 50:
+        reason = "small sample size (50+ rows); treat as preliminary estimate"
+    else:
+        reason = "very small sample (<50 rows); LOW CONFIDENCE - must validate on full data"
+
+    if total_row_count is not None and total_row_count > 0:
+        coverage = (sample_count / total_row_count) * 100
+        if coverage < 1.0:
+            reason += f"; sample covers only {coverage:.2f}% of total data"
+        elif coverage < 10.0:
+            reason += f"; sample covers {coverage:.1f}% of total data"
+
+    return reason
+
+
+def _recommend_sample_size(total_rows: Optional[int]) -> int:
+    """
+    Dynamically recommend sample size based on total row count.
+
+    Returns larger samples for better statistical confidence:
+    - Small datasets (<100): sample all rows
+    - Medium datasets (<1000): sample up to 100 rows
+    - Large datasets (<100K): sample up to 500 rows
+    - Very large datasets (100K+): sample up to 2000 rows
+    """
+    if total_rows is None or total_rows <= 0:
+        return 100  # default when unknown
+    if total_rows < 100:
+        return total_rows  # 100% sampling for small datasets
+    if total_rows < 1000:
+        return min(100, total_rows)
+    if total_rows < 100000:
+        return min(500, total_rows)
+    return 2000  # cap at 2000 for very large datasets
+
+
+def _build_confidence_metadata(
+    sample_row_count: int,
+    total_row_count: Optional[int] = None,
+) -> dict[str, Any]:
+    """
+    Build comprehensive confidence metadata for LLM Agent decision-making.
+
+    This metadata helps the Agent understand:
+    1. How reliable the statistical estimates are
+    2. Whether to trust the recommendation or request validation
+    3. What the sample coverage looks like
+    """
+    confidence_level = _cardinality_confidence(sample_row_count)
+
+    metadata: dict[str, Any] = {
+        "sample_row_count": sample_row_count,
+        "confidence_level": round(confidence_level, 2),
+        "confidence_reason": _confidence_reason(sample_row_count, total_row_count),
+    }
+
+    if total_row_count is not None and total_row_count > 0:
+        metadata["total_row_count"] = total_row_count
+        metadata["sample_coverage_ratio"] = round(sample_row_count / total_row_count, 4)
+
+    # Provide explicit recommendation for the Agent
+    if confidence_level >= 0.8:
+        metadata["recommendation"] = "high confidence; safe to use directly"
+    elif confidence_level >= 0.5:
+        metadata["recommendation"] = "moderate confidence; consider validating on larger sample"
+    else:
+        metadata["recommendation"] = "LOW CONFIDENCE; MUST validate on full data before using"
+
+    return metadata
 
 
 def _key_quality(column_stats: dict[str, Any], sample_row_count: int) -> float:
@@ -563,10 +645,32 @@ def _suggest_primary_keys(
     column_stats: dict[str, Any],
     sample_rows: list[dict[str, Any]],
     max_candidates: int,
+    total_row_count: Optional[int] = None,
 ) -> list[dict[str, Any]]:
+    """
+    Suggest primary key candidates with confidence metadata.
+
+    The confidence metadata helps the LLM Agent understand:
+    - How reliable the distinctness/uniqueness estimates are
+    - Whether to trust the PK recommendation or request validation
+    - What percentage of data was actually sampled
+
+    Args:
+        columns: List of column definitions
+        column_stats: Statistics computed from sample rows
+        sample_rows: The actual sample data
+        max_candidates: Maximum number of PK candidates to return
+        total_row_count: Total rows in the dataset (for confidence calculation)
+
+    Returns:
+        List of PK candidates with scores and confidence metadata
+    """
     sample_row_count = int(column_stats.get("sample_row_count") or 0)
     stats_by_col = column_stats.get("columns") if isinstance(column_stats.get("columns"), dict) else {}
     candidates: list[dict[str, Any]] = []
+
+    # Build confidence metadata once for all candidates
+    confidence_meta = _build_confidence_metadata(sample_row_count, total_row_count)
 
     for col in columns:
         name = str(col.get("name") or "").strip()
@@ -576,6 +680,12 @@ def _suggest_primary_keys(
         score, distinct_ratio, missing_ratio, reasons = _score_pk_candidate(name, col_stats or {}, sample_row_count)
         if score <= 0.0:
             continue
+
+        # Add confidence warning to reasons if sample is small
+        pk_reasons = list(reasons)
+        if confidence_meta["confidence_level"] < 0.5:
+            pk_reasons.append("WARNING: small sample - validate uniqueness on full data")
+
         candidates.append(
             {
                 "columns": [name],
@@ -583,7 +693,8 @@ def _suggest_primary_keys(
                 "distinct_ratio": distinct_ratio,
                 "missing_ratio": missing_ratio,
                 "duplicate_ratio": round(1.0 - distinct_ratio, 3),
-                "reasons": reasons,
+                "reasons": pk_reasons,
+                "confidence": confidence_meta,
             }
         )
 
@@ -593,8 +704,11 @@ def _suggest_primary_keys(
     if not sample_rows or len(top_candidates) < 2:
         return top_candidates
 
+    # Composite key candidates (2-column and 3-column combinations)
     combo_candidates: list[dict[str, Any]] = []
-    combo_cols = [item["columns"][0] for item in top_candidates[:4]]
+    combo_cols = [item["columns"][0] for item in top_candidates[:6]]  # expanded from 4 to 6
+
+    # 2-column composites
     for cols in combinations(combo_cols, 2):
         non_null_rows = [
             row for row in sample_rows
@@ -608,15 +722,56 @@ def _suggest_primary_keys(
         score = 0.65 * distinct_ratio + 0.35 * (1.0 - missing_ratio)
         if score < 0.7:
             continue
+
+        combo_reasons = ["composite key (2 columns) improves distinctness"]
+        if confidence_meta["confidence_level"] < 0.5:
+            combo_reasons.append("WARNING: small sample - validate on full data")
+
         combo_candidates.append(
             {
                 "columns": list(cols),
                 "score": round(score, 3),
                 "distinct_ratio": round(distinct_ratio, 3),
                 "missing_ratio": round(missing_ratio, 3),
-                "reasons": ["composite key improves distinctness"],
+                "duplicate_ratio": round(1.0 - distinct_ratio, 3),
+                "reasons": combo_reasons,
+                "confidence": confidence_meta,
             }
         )
+
+    # 3-column composites (new feature)
+    if len(combo_cols) >= 3:
+        for cols in combinations(combo_cols, 3):
+            non_null_rows = [
+                row for row in sample_rows
+                if all(str(row.get(col) or "").strip() not in ("", "None") for col in cols)
+            ]
+            if not non_null_rows:
+                continue
+            unique_count = len({tuple(row.get(col) for col in cols) for row in non_null_rows})
+            distinct_ratio = float(unique_count) / float(len(non_null_rows))
+            missing_ratio = 1.0 - (len(non_null_rows) / float(len(sample_rows)))
+            score = 0.65 * distinct_ratio + 0.35 * (1.0 - missing_ratio)
+            # Higher threshold for 3-column composites (prefer simpler keys)
+            if score < 0.85:
+                continue
+
+            combo_reasons = ["composite key (3 columns) achieves uniqueness"]
+            if confidence_meta["confidence_level"] < 0.5:
+                combo_reasons.append("WARNING: small sample - validate on full data")
+            combo_reasons.append("consider if a simpler key exists")
+
+            combo_candidates.append(
+                {
+                    "columns": list(cols),
+                    "score": round(score * 0.95, 3),  # slight penalty for complexity
+                    "distinct_ratio": round(distinct_ratio, 3),
+                    "missing_ratio": round(missing_ratio, 3),
+                    "duplicate_ratio": round(1.0 - distinct_ratio, 3),
+                    "reasons": combo_reasons,
+                    "confidence": confidence_meta,
+                }
+            )
 
     combined = top_candidates + combo_candidates
     combined.sort(key=lambda item: float(item.get("score") or 0.0), reverse=True)
@@ -1016,9 +1171,11 @@ async def build_pipeline_context_pack(
     profile_registry: Optional[DatasetProfileRegistry] = None,
     max_datasets_overview: int = 20,
     max_selected_datasets: int = 6,
-    max_sample_rows: int = 20,
+    max_sample_rows: Optional[int] = None,  # None = dynamic sampling
     max_join_candidates: int = 10,
-    max_pk_candidates: int = 6,
+    max_pk_candidates: int = 8,  # increased from 6
+    use_dynamic_sampling: bool = True,
+    mask_pii_enabled: bool = False,  # Disabled by default for better Agent intelligence
 ) -> Dict[str, Any]:
     db_name = str(db_name or "").strip()
     if not db_name:
@@ -1064,16 +1221,38 @@ async def build_pipeline_context_pack(
         if not dataset_id or dataset_id not in selected_set:
             continue
         cols = _normalize_columns(item.get("schema_json"), item.get("sample_json"))
-        raw_rows = _extract_rows(item.get("sample_json"), columns=cols, max_rows=max_sample_rows)
-        masked_rows = mask_pii(raw_rows, max_string_chars=120)
+
+        # Dynamic sampling: determine optimal sample size based on total rows
+        total_row_count = item.get("row_count")
+        if total_row_count is not None:
+            try:
+                total_row_count = int(total_row_count)
+            except (TypeError, ValueError):
+                total_row_count = None
+
+        if use_dynamic_sampling and max_sample_rows is None:
+            effective_sample_rows = _recommend_sample_size(total_row_count)
+        else:
+            effective_sample_rows = max_sample_rows if max_sample_rows is not None else 100
+
+        raw_rows = _extract_rows(item.get("sample_json"), columns=cols, max_rows=effective_sample_rows)
         raw_stats = compute_column_stats(rows=raw_rows, columns=cols, max_top_values=5)
-        masked_stats = mask_pii(raw_stats, max_string_chars=120)
+
+        # PII masking: disabled by default for better Agent data analysis
+        if mask_pii_enabled:
+            output_rows = mask_pii(raw_rows, max_string_chars=120)
+            output_stats = mask_pii(raw_stats, max_string_chars=120)
+        else:
+            # No masking - Agent sees real data for accurate analysis
+            output_rows = raw_rows
+            output_stats = raw_stats
         column_profiles = _build_column_profiles(columns=cols, column_stats=raw_stats, sample_rows=raw_rows)
         pk_candidates = _suggest_primary_keys(
             columns=cols,
             column_stats=raw_stats,
             sample_rows=raw_rows,
             max_candidates=max_pk_candidates,
+            total_row_count=total_row_count,
         )
         for candidate in pk_candidates:
             cols_candidate = candidate.get("columns") or []
@@ -1093,8 +1272,8 @@ async def build_pipeline_context_pack(
                 "latest_commit_id": item.get("latest_commit_id"),
                 "row_count": item.get("row_count"),
                 "columns": cols,
-                "sample_rows": masked_rows,
-                "column_stats": masked_stats,
+                "sample_rows": output_rows,  # Real data for Agent analysis
+                "column_stats": output_stats,  # Real stats for accurate recommendations
                 "column_profiles": column_profiles,
                 "pk_candidates": pk_candidates,
                 "schema_hash": schema_hash,
@@ -1154,30 +1333,91 @@ async def build_pipeline_context_pack(
         containment_best = max(left_containment, right_containment)
         if left_score <= 0 and right_score <= 0 and containment_best < 0.6:
             continue
+
+        # Calculate directionality confidence
+        # Higher confidence when one side clearly has PK characteristics
+        score_diff = abs(left_score - right_score)
+        containment_diff = abs(left_containment - right_containment)
+
+        if score_diff > 0.3:
+            direction_confidence = min(0.9, 0.5 + score_diff)
+            direction_basis = "PK score difference"
+        elif containment_diff > 0.3:
+            direction_confidence = min(0.8, 0.4 + containment_diff)
+            direction_basis = "containment ratio difference"
+        else:
+            direction_confidence = 0.3 + (score_diff + containment_diff) / 2
+            direction_basis = "weak signal; direction uncertain"
+
+        # Determine direction
         if left_score >= right_score and left_score > 0:
             parent_id, parent_col = left_id, left_col
             child_id, child_col = right_id, right_col
+            alt_parent_id, alt_parent_col = right_id, right_col
+            alt_child_id, alt_child_col = left_id, left_col
         elif right_score > 0:
             parent_id, parent_col = right_id, right_col
             child_id, child_col = left_id, left_col
+            alt_parent_id, alt_parent_col = left_id, left_col
+            alt_child_id, alt_child_col = right_id, right_col
         elif left_containment >= right_containment:
             parent_id, parent_col = right_id, right_col
             child_id, child_col = left_id, left_col
+            alt_parent_id, alt_parent_col = left_id, left_col
+            alt_child_id, alt_child_col = right_id, right_col
         else:
             parent_id, parent_col = left_id, left_col
             child_id, child_col = right_id, right_col
-        fk_candidates.append(
-            {
-                "child_dataset_id": child_id,
-                "child_column": child_col,
-                "parent_dataset_id": parent_id,
-                "parent_column": parent_col,
-                "score": round(float(candidate.get("score") or 0.0) * max(left_score, right_score, containment_best), 3),
-                "containment_ratio": round(containment_best, 3),
-                "cardinality_hint": candidate.get("cardinality_hint"),
-                "reasons": candidate.get("reasons") or [],
-            }
-        )
+            alt_parent_id, alt_parent_col = right_id, right_col
+            alt_child_id, alt_child_col = left_id, left_col
+
+        # Build FK reasons with confidence warnings
+        fk_reasons = list(candidate.get("reasons") or [])
+        sample_counts = candidate.get("sample_row_counts", {})
+        min_sample = min(sample_counts.get("left", 0), sample_counts.get("right", 0))
+        sample_confidence = _cardinality_confidence(min_sample)
+
+        if sample_confidence < 0.5:
+            fk_reasons.append("WARNING: small sample size - validate FK relationship on full data")
+        if direction_confidence < 0.5:
+            fk_reasons.append("WARNING: direction uncertain - verify parent/child orientation")
+
+        fk_candidate = {
+            "child_dataset_id": child_id,
+            "child_column": child_col,
+            "parent_dataset_id": parent_id,
+            "parent_column": parent_col,
+            "score": round(float(candidate.get("score") or 0.0) * max(left_score, right_score, containment_best), 3),
+            "containment_ratio": round(containment_best, 3),
+            "cardinality_hint": candidate.get("cardinality_hint"),
+            "reasons": fk_reasons,
+            # New: directionality confidence for Agent decision-making
+            "direction_confidence": {
+                "confidence_level": round(direction_confidence, 2),
+                "basis": direction_basis,
+                "recommendation": (
+                    "high confidence in direction"
+                    if direction_confidence >= 0.7
+                    else "moderate confidence; consider validating"
+                    if direction_confidence >= 0.5
+                    else "LOW confidence; direction may be wrong - verify manually"
+                ),
+            },
+            # New: alternative orientation for Agent to consider
+            "alternative_orientation": {
+                "child_dataset_id": alt_child_id,
+                "child_column": alt_child_col,
+                "parent_dataset_id": alt_parent_id,
+                "parent_column": alt_parent_col,
+                "note": "alternative FK direction if primary orientation is incorrect",
+            },
+            # New: sample confidence metadata
+            "sample_confidence": _build_confidence_metadata(
+                min_sample,
+                None,  # total not available at join level
+            ),
+        }
+        fk_candidates.append(fk_candidate)
     cleansing_suggestions: list[dict[str, Any]] = []
     for dataset in selected:
         for suggestion in _suggest_cleansing(dataset):
@@ -1186,6 +1426,18 @@ async def build_pipeline_context_pack(
     for dataset in selected:
         dataset.pop("_raw_rows", None)
         dataset.pop("_raw_column_stats", None)
+
+    # Build overall confidence summary for Agent
+    all_sample_counts = []
+    for ds in selected:
+        stats = ds.get("column_stats", {})
+        sample_n = stats.get("sample_row_count", 0) if isinstance(stats, dict) else 0
+        if sample_n > 0:
+            all_sample_counts.append(sample_n)
+
+    min_sample = min(all_sample_counts) if all_sample_counts else 0
+    avg_sample = sum(all_sample_counts) / len(all_sample_counts) if all_sample_counts else 0
+    overall_confidence = _cardinality_confidence(min_sample)
 
     return {
         "db_name": db_name,
@@ -1196,6 +1448,57 @@ async def build_pipeline_context_pack(
             "join_key_candidates": join_candidates,
             "foreign_key_candidates": fk_candidates,
             "cleansing_suggestions": cleansing_suggestions,
+        },
+        # New: Overall confidence metadata for Agent decision-making
+        "confidence_summary": {
+            "overall_confidence_level": round(overall_confidence, 2),
+            "min_sample_rows": min_sample,
+            "avg_sample_rows": round(avg_sample, 1),
+            "datasets_analyzed": len(selected),
+            "interpretation_guide": {
+                "confidence >= 0.8": "High confidence - recommendations can be used directly",
+                "confidence 0.5-0.8": "Moderate confidence - consider validating critical decisions",
+                "confidence < 0.5": "LOW confidence - treat as preliminary; MUST validate on full data",
+            },
+            "warnings": (
+                [
+                    "Sample sizes are small; all PK/FK recommendations should be validated on full data",
+                    "Cardinality estimates may differ significantly at full scale",
+                ]
+                if overall_confidence < 0.5
+                else []
+            ),
+            "recommendation": (
+                "Recommendations are reliable; proceed with pipeline construction"
+                if overall_confidence >= 0.8
+                else "Recommendations are tentative; validate key relationships before finalizing"
+                if overall_confidence >= 0.5
+                else "LOW CONFIDENCE: Treat all recommendations as hypotheses requiring validation"
+            ),
+        },
+        # New: Explicit guidance for the LLM Agent
+        "agent_guidance": {
+            "how_to_interpret_scores": {
+                "pk_score": "Higher is better (0-1). Score >= 0.9 suggests strong PK candidate. Check 'confidence' field for reliability.",
+                "fk_score": "Higher is better (0-1). Check 'direction_confidence' to verify parent/child orientation.",
+                "cardinality_hint": "Estimated relationship type (1:1, 1:N, N:1, N:N). Check 'cardinality_confidence' for reliability.",
+            },
+            "confidence_field_meaning": {
+                "confidence_level": "Statistical reliability of the estimate (0-1). Below 0.5 means high uncertainty.",
+                "confidence_reason": "Human-readable explanation of why confidence is at this level.",
+                "recommendation": "Suggested action based on confidence level.",
+            },
+            "when_to_request_validation": [
+                "When confidence_level < 0.5 for any PK/FK recommendation",
+                "When direction_confidence < 0.5 for FK relationships",
+                "When cardinality_confidence < 0.5 and cardinality matters for the pipeline",
+                "When sample_row_count < 50 for any dataset",
+            ],
+            "sample_limitations": (
+                f"Data was sampled (avg {avg_sample:.0f} rows per dataset). "
+                "Patterns rare in the sample may exist in full data. "
+                "Uniqueness guarantees from sample do not guarantee uniqueness in full data."
+            ),
         },
         "pipeline_definition_hints": {
             "supported_operations": sorted(SUPPORTED_TRANSFORMS),
