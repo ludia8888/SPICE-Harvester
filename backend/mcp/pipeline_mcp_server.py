@@ -38,6 +38,7 @@ from shared.models.pipeline_plan import PipelinePlan  # noqa: E402
 from shared.config.settings import get_settings  # noqa: E402
 from shared.services.dataset_profile_registry import DatasetProfileRegistry  # noqa: E402
 from shared.services.dataset_registry import DatasetRegistry  # noqa: E402
+from shared.services.pipeline_registry import PipelineRegistry  # noqa: E402
 from shared.services.pipeline_executor import PipelineExecutor  # noqa: E402
 from shared.services.pipeline_preview_inspector import inspect_preview  # noqa: E402
 from shared.services.pipeline_plan_builder import (  # noqa: E402
@@ -474,6 +475,7 @@ class PipelineMCPServer:
         self.server = Server("pipeline-mcp-server")
         self._dataset_registry: Optional[DatasetRegistry] = None
         self._profile_registry: Optional[DatasetProfileRegistry] = None
+        self._pipeline_registry: Optional[PipelineRegistry] = None
         self._setup_handlers()
 
     async def _ensure_registries(self) -> tuple[DatasetRegistry, DatasetProfileRegistry]:
@@ -484,6 +486,12 @@ class PipelineMCPServer:
             self._profile_registry = DatasetProfileRegistry()
             await self._profile_registry.initialize()
         return self._dataset_registry, self._profile_registry
+
+    async def _ensure_pipeline_registry(self) -> PipelineRegistry:
+        if self._pipeline_registry is None:
+            self._pipeline_registry = PipelineRegistry()
+            await self._pipeline_registry.initialize()
+        return self._pipeline_registry
 
     def _setup_handlers(self) -> None:
         @self.server.list_tools()
@@ -1170,7 +1178,7 @@ class PipelineMCPServer:
                 },
                 {
                     "name": "pipeline_create_from_plan",
-                    "description": "Create a Pipeline (control plane) from a PipelinePlan.definition_json. Requires admin token; respects principal headers for permissions.",
+                    "description": "Create a Pipeline (control plane) from a PipelinePlan.definition_json. If the pipeline already exists (same db/name/branch), this tool will update it and return the existing pipeline_id (idempotent upsert). Requires admin token; respects principal headers for permissions.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -1204,7 +1212,7 @@ class PipelineMCPServer:
                 },
                 {
                     "name": "pipeline_preview_wait",
-                    "description": "Queue a Spark preview for a Pipeline and wait (poll) until completion; returns masked preview sample.",
+                    "description": "Queue a Spark preview for a Pipeline and optionally wait (poll) until completion. If job_id is provided, this tool will poll that existing job_id without enqueuing a new preview (prevents runaway QUEUED runs).",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -1213,6 +1221,8 @@ class PipelineMCPServer:
                             "node_id": {"type": "string"},
                             "limit": {"type": "integer"},
                             "branch": {"type": "string"},
+                            "job_id": {"type": "string", "description": "Existing preview job_id to poll (skip enqueue)."},
+                            "force": {"type": "boolean", "description": "Force enqueue a new preview even if a matching job is already running."},
                             "wait": {"type": "boolean"},
                             "timeout_seconds": {"type": "number"},
                             "poll_interval_seconds": {"type": "number"},
@@ -1224,7 +1234,7 @@ class PipelineMCPServer:
                 },
                 {
                     "name": "pipeline_build_wait",
-                    "description": "Queue a Spark build for a Pipeline and wait (poll) until completion; returns masked build output summary.",
+                    "description": "Queue a Spark build for a Pipeline and optionally wait (poll) until completion. If job_id is provided, this tool will poll that existing job_id without enqueuing a new build (prevents runaway QUEUED runs).",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -1233,6 +1243,8 @@ class PipelineMCPServer:
                             "node_id": {"type": "string"},
                             "limit": {"type": "integer"},
                             "branch": {"type": "string"},
+                            "job_id": {"type": "string", "description": "Existing build job_id to poll (skip enqueue)."},
+                            "force": {"type": "boolean", "description": "Force enqueue a new build even if a matching job is already running."},
                             "wait": {"type": "boolean"},
                             "timeout_seconds": {"type": "number"},
                             "poll_interval_seconds": {"type": "number"},
@@ -1244,7 +1256,7 @@ class PipelineMCPServer:
                 },
                 {
                     "name": "pipeline_deploy_promote_build",
-                    "description": "Promote a successful build to a deployed dataset (requires approve permission).",
+                    "description": "Promote a successful build to a deployed dataset (requires approve permission). To avoid build↔deploy definition hash mismatches, you may pass definition_json, or pass pipeline_spec_commit_id and this tool will fetch the exact build snapshot from pipeline_versions.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -1256,6 +1268,8 @@ class PipelineMCPServer:
                             "dataset_name": {"type": "string"},
                             "branch": {"type": "string"},
                             "replay_on_deploy": {"type": "boolean"},
+                            "definition_json": {"type": "object", "description": "Optional exact pipeline definition_json to deploy (must match build)."},
+                            "pipeline_spec_commit_id": {"type": "string", "description": "Optional pipeline version commit id used by the build; used to fetch definition_json snapshot automatically."},
                             "principal_id": {"type": "string"},
                             "principal_type": {"type": "string"},
                         },
@@ -2118,6 +2132,80 @@ class PipelineMCPServer:
                         timeout_seconds=30.0,
                     )
                     if resp.get("error"):
+                        # Upsert behavior: if the pipeline already exists, update its definition.
+                        if int(resp.get("status_code") or 0) == 409 and isinstance(resp.get("response"), dict):
+                            resp_body = resp.get("response") or {}
+                            detail = resp_body.get("detail") if isinstance(resp_body.get("detail"), dict) else {}
+                            detail_code = str(detail.get("code") or "").strip().upper()
+                            enterprise = resp_body.get("enterprise") if isinstance(resp_body.get("enterprise"), dict) else {}
+                            legacy_code = str(enterprise.get("legacy_code") or "").strip().upper()
+                            if detail_code == "PIPELINE_ALREADY_EXISTS" or legacy_code == "PIPELINE_ALREADY_EXISTS":
+                                branch = str(payload.get("branch") or "main").strip() or "main"
+                                list_resp = await _bff_json(
+                                    "GET",
+                                    "/pipelines",
+                                    db_name=db_name,
+                                    principal_id=str(arguments.get("principal_id") or "").strip() or None,
+                                    principal_type=str(arguments.get("principal_type") or "").strip() or None,
+                                    params={"db_name": db_name, "limit": 200},
+                                    timeout_seconds=30.0,
+                                )
+                                if not list_resp.get("error"):
+                                    data = list_resp.get("data") if isinstance(list_resp.get("data"), dict) else {}
+                                    items = data.get("pipelines") if isinstance(data.get("pipelines"), list) else []
+                                    match = None
+                                    for item in items:
+                                        if not isinstance(item, dict):
+                                            continue
+                                        if str(item.get("name") or "").strip() != pipeline_name:
+                                            continue
+                                        if str(item.get("branch") or "main").strip() != branch:
+                                            continue
+                                        match = item
+                                        break
+                                    pipeline_id_existing = (
+                                        str((match or {}).get("pipeline_id") or (match or {}).get("pipelineId") or "").strip()
+                                        if isinstance(match, dict)
+                                        else ""
+                                    )
+                                    if pipeline_id_existing:
+                                        update_resp = await _bff_json(
+                                            "PUT",
+                                            f"/pipelines/{pipeline_id_existing}",
+                                            db_name=db_name,
+                                            principal_id=str(arguments.get("principal_id") or "").strip() or None,
+                                            principal_type=str(arguments.get("principal_type") or "").strip() or None,
+                                            json_body={"definition_json": dict(plan.definition_json or {})},
+                                            timeout_seconds=30.0,
+                                        )
+                                        if update_resp.get("error"):
+                                            return update_resp
+                                        update_data = (
+                                            update_resp.get("data")
+                                            if isinstance(update_resp.get("data"), dict)
+                                            else {}
+                                        )
+                                        pipeline = (
+                                            update_data.get("pipeline")
+                                            if isinstance(update_data.get("pipeline"), dict)
+                                            else {}
+                                        )
+                                        return {
+                                            "status": "success",
+                                            "reused": True,
+                                            "pipeline": {
+                                                "pipeline_id": pipeline.get("pipeline_id")
+                                                or pipeline.get("pipelineId")
+                                                or pipeline_id_existing,
+                                                "db_name": pipeline.get("db_name") or db_name,
+                                                "name": pipeline.get("name") or pipeline_name,
+                                                "branch": pipeline.get("branch") or branch,
+                                                "location": pipeline.get("location") or location,
+                                                "version": pipeline.get("version")
+                                                or pipeline.get("commit_id")
+                                                or pipeline.get("commitId"),
+                                            },
+                                        }
                         return resp
                     data = resp.get("data") if isinstance(resp.get("data"), dict) else {}
                     pipeline = data.get("pipeline") if isinstance(data.get("pipeline"), dict) else {}
@@ -2184,66 +2272,164 @@ class PipelineMCPServer:
                     limit = max(1, min(limit, 500))
                     node_id = str(arguments.get("node_id") or "").strip() or None
                     branch = str(arguments.get("branch") or "").strip() or None
+                    job_id_arg = str(arguments.get("job_id") or "").strip() or None
+                    force = bool(arguments.get("force") or False)
                     wait = bool(arguments.get("wait", True))
                     timeout_seconds = float(arguments.get("timeout_seconds") or 60.0)
                     poll_s = float(arguments.get("poll_interval_seconds") or 2.0)
+                    db_name = str(arguments.get("db_name") or "").strip()
+                    principal_id = str(arguments.get("principal_id") or "").strip() or None
+                    principal_type = str(arguments.get("principal_type") or "").strip() or None
 
-                    # Enqueue preview on the Spark worker via BFF.
-                    enqueue_body: Dict[str, Any] = {"limit": limit}
-                    if node_id:
-                        enqueue_body["node_id"] = node_id
-                    if branch:
-                        enqueue_body["branch"] = branch
-                    resp = await _bff_json(
-                        "POST",
-                        f"/pipelines/{pipeline_id}/preview",
-                        db_name=str(arguments.get("db_name") or "").strip(),
-                        principal_id=str(arguments.get("principal_id") or "").strip() or None,
-                        principal_type=str(arguments.get("principal_type") or "").strip() or None,
-                        json_body=enqueue_body,
-                        timeout_seconds=30.0,
-                    )
-                    if resp.get("error"):
-                        return resp
-                    data = resp.get("data") if isinstance(resp.get("data"), dict) else {}
-                    job_id = str(data.get("job_id") or "").strip()
-                    if not job_id and isinstance(data.get("sample"), dict):
-                        job_id = str((data.get("sample") or {}).get("job_id") or "").strip()
-                    if not job_id:
-                        return {"error": "preview enqueue did not return job_id", "response": resp}
-                    if not wait:
-                        return {"status": "queued", "job_id": job_id, "limit": limit}
-
-                    deadline = asyncio.get_running_loop().time() + max(1.0, timeout_seconds)
-                    while asyncio.get_running_loop().time() < deadline:
-                        pipe = await _bff_json(
+                    async def _fetch_runs() -> Dict[str, Any]:
+                        return await _bff_json(
                             "GET",
-                            f"/pipelines/{pipeline_id}",
-                            db_name=str(arguments.get("db_name") or "").strip(),
-                            principal_id=str(arguments.get("principal_id") or "").strip() or None,
-                            principal_type=str(arguments.get("principal_type") or "").strip() or None,
-                            params={k: v for k, v in {"branch": branch, "preview_node_id": node_id}.items() if v},
+                            f"/pipelines/{pipeline_id}/runs",
+                            db_name=db_name,
+                            principal_id=principal_id,
+                            principal_type=principal_type,
+                            params={"limit": 50},
                             timeout_seconds=15.0,
                         )
-                        if pipe.get("error"):
-                            return pipe
-                        pipe_data = pipe.get("data") if isinstance(pipe.get("data"), dict) else {}
-                        pipeline = pipe_data.get("pipeline") if isinstance(pipe_data.get("pipeline"), dict) else {}
-                        if str(pipeline.get("last_preview_job_id") or "").strip() != job_id:
+
+                    job_id = job_id_arg
+                    reused_existing = False
+                    if not job_id and not force:
+                        # If there's already a queued/running preview for this node, reuse it.
+                        runs = await _fetch_runs()
+                        if not runs.get("error"):
+                            runs_data = runs.get("data") if isinstance(runs.get("data"), dict) else {}
+                            run_list = runs_data.get("runs") if isinstance(runs_data.get("runs"), list) else []
+                            for item in run_list:
+                                if not isinstance(item, dict):
+                                    continue
+                                if str(item.get("mode") or "").strip().lower() != "preview":
+                                    continue
+                                status_value = str(item.get("status") or "").strip().upper()
+                                if status_value not in {"QUEUED", "RUNNING"}:
+                                    continue
+                                item_node_id = str(item.get("node_id") or "").strip() or None
+                                if item_node_id != node_id:
+                                    continue
+                                candidate = str(item.get("job_id") or "").strip()
+                                if candidate:
+                                    job_id = candidate
+                                    reused_existing = True
+                                    break
+
+                    if not job_id:
+                        # Enqueue preview on the Spark worker via BFF.
+                        enqueue_body: Dict[str, Any] = {"limit": limit}
+                        if node_id:
+                            enqueue_body["node_id"] = node_id
+                        if branch:
+                            enqueue_body["branch"] = branch
+                        resp = await _bff_json(
+                            "POST",
+                            f"/pipelines/{pipeline_id}/preview",
+                            db_name=db_name,
+                            principal_id=principal_id,
+                            principal_type=principal_type,
+                            json_body=enqueue_body,
+                            timeout_seconds=30.0,
+                        )
+                        if resp.get("error"):
+                            return resp
+                        data = resp.get("data") if isinstance(resp.get("data"), dict) else {}
+                        job_id = str(data.get("job_id") or "").strip()
+                        if not job_id and isinstance(data.get("sample"), dict):
+                            job_id = str((data.get("sample") or {}).get("job_id") or "").strip()
+                        if not job_id:
+                            return {"error": "preview enqueue did not return job_id", "response": resp}
+
+                    if not wait:
+                        # If the caller provided a job_id, return a one-shot status snapshot.
+                        if job_id_arg:
+                            runs = await _fetch_runs()
+                            if runs.get("error"):
+                                return {
+                                    "status": "queued",
+                                    "job_id": job_id,
+                                    "reused_existing_job": reused_existing,
+                                }
+                            runs_data = runs.get("data") if isinstance(runs.get("data"), dict) else {}
+                            run_list = runs_data.get("runs") if isinstance(runs_data.get("runs"), list) else []
+                            selected_run: Optional[Dict[str, Any]] = None
+                            for item in run_list:
+                                if not isinstance(item, dict):
+                                    continue
+                                if str(item.get("job_id") or "").strip() == job_id:
+                                    selected_run = item
+                                    break
+                            if selected_run:
+                                status_value = str(selected_run.get("status") or "").strip().upper() or "QUEUED"
+                                if status_value in {"SUCCESS", "FAILED"}:
+                                    sample_json = (
+                                        selected_run.get("sample_json")
+                                        if isinstance(selected_run.get("sample_json"), dict)
+                                        else {}
+                                    )
+                                    masked = mask_pii(sample_json)
+                                    return {
+                                        "status": status_value.lower(),
+                                        "job_id": job_id,
+                                        "reused_existing_job": reused_existing,
+                                        "preview": _trim_preview_payload(masked, max_rows=8),
+                                    }
+                                return {
+                                    "status": status_value.lower(),
+                                    "job_id": job_id,
+                                    "reused_existing_job": reused_existing,
+                                }
+                        return {
+                            "status": "queued",
+                            "job_id": job_id,
+                            "reused_existing_job": reused_existing,
+                            "limit": limit,
+                        }
+
+                    deadline = asyncio.get_running_loop().time() + max(1.0, timeout_seconds)
+                    last_status: Optional[str] = None
+                    while asyncio.get_running_loop().time() < deadline:
+                        runs = await _fetch_runs()
+                        if runs.get("error"):
+                            return runs
+                        runs_data = runs.get("data") if isinstance(runs.get("data"), dict) else {}
+                        run_list = runs_data.get("runs") if isinstance(runs_data.get("runs"), list) else []
+                        selected_run: Optional[Dict[str, Any]] = None
+                        for item in run_list:
+                            if not isinstance(item, dict):
+                                continue
+                            if str(item.get("job_id") or "").strip() == job_id:
+                                selected_run = item
+                                break
+                        if not selected_run:
                             await asyncio.sleep(max(0.2, poll_s))
                             continue
-                        status_value = str(pipeline.get("last_preview_status") or "").strip().upper()
+                        status_value = str(selected_run.get("status") or "").strip().upper() or "QUEUED"
+                        last_status = status_value
                         if status_value in {"SUCCESS", "FAILED"}:
-                            sample = pipeline.get("last_preview_sample") if isinstance(pipeline.get("last_preview_sample"), dict) else {}
-                            masked = mask_pii(sample)
+                            sample_json = (
+                                selected_run.get("sample_json")
+                                if isinstance(selected_run.get("sample_json"), dict)
+                                else {}
+                            )
+                            masked = mask_pii(sample_json)
                             return {
                                 "status": status_value.lower(),
                                 "job_id": job_id,
+                                "reused_existing_job": reused_existing,
                                 "preview": _trim_preview_payload(masked, max_rows=8),
                             }
                         await asyncio.sleep(max(0.2, poll_s))
 
-                    return {"status": "timeout", "job_id": job_id, "message": "preview still running"}
+                    return {
+                        "status": "timeout",
+                        "job_id": job_id,
+                        "reused_existing_job": reused_existing,
+                        "last_status": last_status,
+                        "message": "preview still running",
+                    }
 
                 if name == "pipeline_build_wait":
                     pipeline_id = str(arguments.get("pipeline_id") or "").strip()
@@ -2253,44 +2439,125 @@ class PipelineMCPServer:
                     limit = max(1, min(limit, 500))
                     node_id = str(arguments.get("node_id") or "").strip() or None
                     branch = str(arguments.get("branch") or "").strip() or None
+                    job_id_arg = str(arguments.get("job_id") or "").strip() or None
+                    force = bool(arguments.get("force") or False)
                     wait = bool(arguments.get("wait", True))
                     timeout_seconds = float(arguments.get("timeout_seconds") or 180.0)
                     poll_s = float(arguments.get("poll_interval_seconds") or 2.5)
+                    db_name = str(arguments.get("db_name") or "").strip()
+                    principal_id = str(arguments.get("principal_id") or "").strip() or None
+                    principal_type = str(arguments.get("principal_type") or "").strip() or None
 
-                    enqueue_body: Dict[str, Any] = {"limit": limit}
-                    if node_id:
-                        enqueue_body["node_id"] = node_id
-                    if branch:
-                        enqueue_body["branch"] = branch
-                    resp = await _bff_json(
-                        "POST",
-                        f"/pipelines/{pipeline_id}/build",
-                        db_name=str(arguments.get("db_name") or "").strip(),
-                        principal_id=str(arguments.get("principal_id") or "").strip() or None,
-                        principal_type=str(arguments.get("principal_type") or "").strip() or None,
-                        json_body=enqueue_body,
-                        timeout_seconds=30.0,
-                    )
-                    if resp.get("error"):
-                        return resp
-                    data = resp.get("data") if isinstance(resp.get("data"), dict) else {}
-                    job_id = str(data.get("job_id") or "").strip()
-                    if not job_id:
-                        return {"error": "build enqueue did not return job_id", "response": resp}
-                    if not wait:
-                        return {"status": "queued", "job_id": job_id, "limit": limit}
-
-                    deadline = asyncio.get_running_loop().time() + max(1.0, timeout_seconds)
-                    while asyncio.get_running_loop().time() < deadline:
-                        runs = await _bff_json(
+                    async def _fetch_runs() -> Dict[str, Any]:
+                        return await _bff_json(
                             "GET",
                             f"/pipelines/{pipeline_id}/runs",
-                            db_name=str(arguments.get("db_name") or "").strip(),
-                            principal_id=str(arguments.get("principal_id") or "").strip() or None,
-                            principal_type=str(arguments.get("principal_type") or "").strip() or None,
+                            db_name=db_name,
+                            principal_id=principal_id,
+                            principal_type=principal_type,
                             params={"limit": 50},
                             timeout_seconds=15.0,
                         )
+
+                    job_id = job_id_arg
+                    reused_existing = False
+                    if not job_id and not force:
+                        # If there's already a queued/running build for this node, reuse it.
+                        runs = await _fetch_runs()
+                        if not runs.get("error"):
+                            runs_data = runs.get("data") if isinstance(runs.get("data"), dict) else {}
+                            run_list = runs_data.get("runs") if isinstance(runs_data.get("runs"), list) else []
+                            for item in run_list:
+                                if not isinstance(item, dict):
+                                    continue
+                                if str(item.get("mode") or "").strip().lower() != "build":
+                                    continue
+                                status_value = str(item.get("status") or "").strip().upper()
+                                if status_value not in {"QUEUED", "RUNNING"}:
+                                    continue
+                                item_node_id = str(item.get("node_id") or "").strip() or None
+                                if item_node_id != node_id:
+                                    continue
+                                candidate = str(item.get("job_id") or "").strip()
+                                if candidate:
+                                    job_id = candidate
+                                    reused_existing = True
+                                    break
+
+                    if not job_id:
+                        enqueue_body: Dict[str, Any] = {"limit": limit}
+                        if node_id:
+                            enqueue_body["node_id"] = node_id
+                        if branch:
+                            enqueue_body["branch"] = branch
+                        resp = await _bff_json(
+                            "POST",
+                            f"/pipelines/{pipeline_id}/build",
+                            db_name=db_name,
+                            principal_id=principal_id,
+                            principal_type=principal_type,
+                            json_body=enqueue_body,
+                            timeout_seconds=30.0,
+                        )
+                        if resp.get("error"):
+                            return resp
+                        data = resp.get("data") if isinstance(resp.get("data"), dict) else {}
+                        job_id = str(data.get("job_id") or "").strip()
+                        if not job_id:
+                            return {"error": "build enqueue did not return job_id", "response": resp}
+
+                    if not wait:
+                        # If the caller provided a job_id, return a one-shot status snapshot.
+                        if job_id_arg:
+                            runs = await _fetch_runs()
+                            if runs.get("error"):
+                                return {
+                                    "status": "queued",
+                                    "job_id": job_id,
+                                    "reused_existing_job": reused_existing,
+                                }
+                            runs_data = runs.get("data") if isinstance(runs.get("data"), dict) else {}
+                            run_list = runs_data.get("runs") if isinstance(runs_data.get("runs"), list) else []
+                            selected_run: Optional[Dict[str, Any]] = None
+                            for item in run_list:
+                                if not isinstance(item, dict):
+                                    continue
+                                if str(item.get("job_id") or "").strip() == job_id:
+                                    selected_run = item
+                                    break
+                            if selected_run:
+                                status_value = str(selected_run.get("status") or "").strip().upper() or "QUEUED"
+                                if status_value in {"SUCCESS", "FAILED"}:
+                                    output_json = (
+                                        selected_run.get("output_json")
+                                        if isinstance(selected_run.get("output_json"), dict)
+                                        else {}
+                                    )
+                                    trimmed = _trim_build_output(output_json, max_rows=6)
+                                    masked = mask_pii(trimmed)
+                                    return {
+                                        "status": status_value.lower(),
+                                        "job_id": job_id,
+                                        "reused_existing_job": reused_existing,
+                                        "artifact_id": output_json.get("artifact_id") if isinstance(output_json, dict) else None,
+                                        "output": masked,
+                                    }
+                                return {
+                                    "status": status_value.lower(),
+                                    "job_id": job_id,
+                                    "reused_existing_job": reused_existing,
+                                }
+                        return {
+                            "status": "queued",
+                            "job_id": job_id,
+                            "reused_existing_job": reused_existing,
+                            "limit": limit,
+                        }
+
+                    deadline = asyncio.get_running_loop().time() + max(1.0, timeout_seconds)
+                    last_status: Optional[str] = None
+                    while asyncio.get_running_loop().time() < deadline:
+                        runs = await _fetch_runs()
                         if runs.get("error"):
                             return runs
                         runs_data = runs.get("data") if isinstance(runs.get("data"), dict) else {}
@@ -2306,6 +2573,7 @@ class PipelineMCPServer:
                             await asyncio.sleep(max(0.2, poll_s))
                             continue
                         status_value = str(selected_run.get("status") or "").strip().upper()
+                        last_status = status_value
                         if status_value in {"SUCCESS", "FAILED"}:
                             output_json = selected_run.get("output_json") if isinstance(selected_run.get("output_json"), dict) else {}
                             trimmed = _trim_build_output(output_json, max_rows=6)
@@ -2313,12 +2581,19 @@ class PipelineMCPServer:
                             return {
                                 "status": status_value.lower(),
                                 "job_id": job_id,
+                                "reused_existing_job": reused_existing,
                                 "artifact_id": output_json.get("artifact_id") if isinstance(output_json, dict) else None,
                                 "output": masked,
                             }
                         await asyncio.sleep(max(0.2, poll_s))
 
-                    return {"status": "timeout", "job_id": job_id, "message": "build still running"}
+                    return {
+                        "status": "timeout",
+                        "job_id": job_id,
+                        "reused_existing_job": reused_existing,
+                        "last_status": last_status,
+                        "message": "build still running",
+                    }
 
                 if name == "pipeline_deploy_promote_build":
                     pipeline_id = str(arguments.get("pipeline_id") or "").strip()
@@ -2334,6 +2609,68 @@ class PipelineMCPServer:
                     dataset_name = str(arguments.get("dataset_name") or "").strip()
                     if not db_name or not dataset_name:
                         return {"status": "invalid", "errors": ["db_name and dataset_name are required"]}
+                    principal_id = str(arguments.get("principal_id") or "").strip() or None
+                    principal_type = str(arguments.get("principal_type") or "").strip() or None
+                    branch = str(arguments.get("branch") or "").strip() or None
+                    definition_json = (
+                        arguments.get("definition_json") if isinstance(arguments.get("definition_json"), dict) else None
+                    )
+                    pipeline_spec_commit_id = str(arguments.get("pipeline_spec_commit_id") or "").strip() or None
+
+                    # Deploy hash mismatches happen when the pipeline definition changes between build and deploy.
+                    # Prefer the exact build snapshot (pipeline_spec_commit_id -> pipeline_versions.definition_json).
+                    if not definition_json:
+                        if not pipeline_spec_commit_id:
+                            runs = await _bff_json(
+                                "GET",
+                                f"/pipelines/{pipeline_id}/runs",
+                                db_name=db_name,
+                                principal_id=principal_id,
+                                principal_type=principal_type,
+                                params={"limit": 50},
+                                timeout_seconds=15.0,
+                            )
+                            if not runs.get("error"):
+                                runs_data = runs.get("data") if isinstance(runs.get("data"), dict) else {}
+                                run_list = runs_data.get("runs") if isinstance(runs_data.get("runs"), list) else []
+                                selected_run: Optional[Dict[str, Any]] = None
+                                for item in run_list:
+                                    if not isinstance(item, dict):
+                                        continue
+                                    if str(item.get("job_id") or "").strip() == build_job_id:
+                                        selected_run = item
+                                        break
+                                if selected_run:
+                                    output_json = (
+                                        selected_run.get("output_json")
+                                        if isinstance(selected_run.get("output_json"), dict)
+                                        else {}
+                                    )
+                                    pipeline_spec_commit_id = (
+                                        str(
+                                            selected_run.get("pipeline_spec_commit_id")
+                                            or output_json.get("pipeline_spec_commit_id")
+                                            or ""
+                                        ).strip()
+                                        or None
+                                    )
+                        if pipeline_spec_commit_id:
+                            try:
+                                pipeline_registry = await self._ensure_pipeline_registry()
+                                version = await pipeline_registry.get_version(
+                                    pipeline_id=pipeline_id,
+                                    lakefs_commit_id=pipeline_spec_commit_id,
+                                    branch=branch,
+                                )
+                                if version:
+                                    definition_json = dict(version.definition_json or {})
+                            except Exception as exc:
+                                logger.warning(
+                                    "pipeline_deploy_promote_build: failed to fetch pipeline version snapshot pipeline_id=%s commit=%s: %s",
+                                    pipeline_id,
+                                    pipeline_spec_commit_id,
+                                    exc,
+                                )
 
                     payload: Dict[str, Any] = {
                         "promote_build": True,
@@ -2342,10 +2679,11 @@ class PipelineMCPServer:
                         "output": {"db_name": db_name, "dataset_name": dataset_name},
                         "replay_on_deploy": bool(arguments.get("replay_on_deploy") or False),
                     }
+                    if definition_json:
+                        payload["definition_json"] = definition_json
                     artifact_id = str(arguments.get("artifact_id") or "").strip() or None
                     if artifact_id:
                         payload["artifact_id"] = artifact_id
-                    branch = str(arguments.get("branch") or "").strip() or None
                     if branch:
                         payload["branch"] = branch
 
@@ -2353,12 +2691,32 @@ class PipelineMCPServer:
                         "POST",
                         f"/pipelines/{pipeline_id}/deploy",
                         db_name=db_name,
-                        principal_id=str(arguments.get("principal_id") or "").strip() or None,
-                        principal_type=str(arguments.get("principal_type") or "").strip() or None,
+                        principal_id=principal_id,
+                        principal_type=principal_type,
                         json_body=payload,
                         timeout_seconds=60.0,
                     )
                     if resp.get("error"):
+                        # Common and expected race: deploy called before build completes.
+                        if resp.get("status_code") == 409 and isinstance(resp.get("response"), dict):
+                            detail = resp.get("response", {}).get("detail")
+                            if isinstance(detail, dict) and str(detail.get("code") or "").strip() == "BUILD_NOT_SUCCESS":
+                                return {
+                                    "status": "not_ready",
+                                    "pipeline_id": pipeline_id,
+                                    "build_job_id": build_job_id,
+                                    "build_status": detail.get("build_status") or detail.get("buildStatus"),
+                                    "errors": detail.get("errors"),
+                                    "message": detail.get("message") or "Build is not successful yet",
+                                }
+                            if isinstance(detail, str) and "definition" in detail.lower() and "match" in detail.lower():
+                                return {
+                                    "status": "conflict",
+                                    "pipeline_id": pipeline_id,
+                                    "code": "DEFINITION_MISMATCH",
+                                    "message": detail,
+                                    "hint": "Pass definition_json (exact build snapshot) or pipeline_spec_commit_id from the build output.",
+                                }
                         return resp
                     data = resp.get("data") if isinstance(resp.get("data"), dict) else {}
                     return {
@@ -2368,6 +2726,8 @@ class PipelineMCPServer:
                         "deployed_commit_id": data.get("deployed_commit_id"),
                         "artifact_id": data.get("artifact_id"),
                         "outputs": data.get("outputs"),
+                        "definition_included": bool(definition_json),
+                        "pipeline_spec_commit_id": pipeline_spec_commit_id,
                     }
 
                 return {"error": f"Unknown tool: {name}"}

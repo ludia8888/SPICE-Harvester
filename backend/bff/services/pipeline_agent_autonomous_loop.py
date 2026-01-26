@@ -1396,6 +1396,20 @@ async def run_pipeline_agent_mcp_autonomous(
                 )
                 stop_reason = "invalid_status"
                 break
+            if tool_name.startswith("pipeline_"):
+                # Pipeline execution tools can be long-running and stateful (queued/running).
+                # If a pipeline tool doesn't report success, stop the batch so the model can react
+                # (wait/poll/repair) instead of blindly continuing with dependent actions.
+                status_value = str(observation.get("status") or "").strip().lower()
+                if status_value and status_value != "success":
+                    logger.info(
+                        "pipeline agent batch stopping: pipeline_status tool=%s step=%s status=%s",
+                        tool_name,
+                        step_idx + 1,
+                        status_value,
+                    )
+                    stop_reason = f"pipeline_status_{status_value}"
+                    break
             if isinstance(errors, list) and errors:
                 logger.info(
                     "pipeline agent batch stopping: validation_errors tool=%s step=%s errors=%s",
