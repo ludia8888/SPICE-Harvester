@@ -93,7 +93,7 @@ async def test_refuter_join_functional_right_detects_duplicate_right_matches_lef
     assert report["status"] == "invalid"
     assert report["gate"] == "BLOCK"
     assert report["hard_failures"][0]["claim_id"] == "jfunc"
-    assert report["hard_failures"][0]["witness"]["description"] == "Non-functional join: left key matches multiple right rows"
+    assert report["hard_failures"][0]["witness"]["description"] == "Non-functional join: right table has duplicate keys"
 
 
 @pytest.mark.asyncio
@@ -290,7 +290,7 @@ async def test_refuter_filter_only_nulls_finds_removed_non_null_row():
     assert report["status"] == "invalid"
     assert report["gate"] == "BLOCK"
     assert report["hard_failures"][0]["claim_id"] == "only_nulls"
-    assert report["hard_failures"][0]["witness"]["description"] == "Filter removed non-null row"
+    assert report["hard_failures"][0]["witness"]["description"] == "Filter removed row with non-null value in target column"
 
 
 @pytest.mark.asyncio

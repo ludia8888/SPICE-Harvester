@@ -274,8 +274,43 @@ async def evaluate_pipeline_joins(
         explosion_ratio = _ratio(output_count, max(left_count, right_count, 1))
         left_missing_ratio = _ratio(left_count - matched_left, left_count)
         right_missing_ratio = _ratio(right_count - matched_right, right_count)
-        left_null_ratio = left_missing_ratio if join_spec.join_type in {"left", "full"} else 0.0
-        right_null_ratio = right_missing_ratio if join_spec.join_type in {"right", "full"} else 0.0
+
+        # FIX (2026-01): Correct NULL introduced ratio semantics.
+        # These ratios indicate how many OUTPUT rows will have NULL values in columns
+        # from the respective side due to unmatched rows:
+        #
+        # - left_null_introduced_ratio: Output rows where LEFT columns are NULL
+        #   This happens in RIGHT JOIN (unmatched right rows) and FULL JOIN
+        # - right_null_introduced_ratio: Output rows where RIGHT columns are NULL
+        #   This happens in LEFT JOIN (unmatched left rows) and FULL JOIN
+        #
+        # Previous bug: Conditions were inverted (checking wrong join types)
+        # and didn't consider actual output row counts.
+        join_type = join_spec.join_type
+
+        # Calculate based on actual join semantics
+        if join_type == "inner":
+            # INNER JOIN: No NULLs introduced from unmatched rows
+            left_null_ratio = 0.0
+            right_null_ratio = 0.0
+        elif join_type == "left":
+            # LEFT JOIN: Keeps all left rows; unmatched left rows get NULL in right columns
+            left_null_ratio = 0.0
+            # Unmatched left rows contribute to right-side NULLs
+            right_null_ratio = _ratio(left_count - matched_left, output_count) if output_count > 0 else 0.0
+        elif join_type == "right":
+            # RIGHT JOIN: Keeps all right rows; unmatched right rows get NULL in left columns
+            # Unmatched right rows contribute to left-side NULLs
+            left_null_ratio = _ratio(right_count - matched_right, output_count) if output_count > 0 else 0.0
+            right_null_ratio = 0.0
+        elif join_type == "full":
+            # FULL OUTER JOIN: Both sides can have NULLs from unmatched rows
+            left_null_ratio = _ratio(right_count - matched_right, output_count) if output_count > 0 else 0.0
+            right_null_ratio = _ratio(left_count - matched_left, output_count) if output_count > 0 else 0.0
+        else:
+            # Unknown join type - assume no NULLs
+            left_null_ratio = 0.0
+            right_null_ratio = 0.0
 
         evaluations.append(
             JoinEvaluation(

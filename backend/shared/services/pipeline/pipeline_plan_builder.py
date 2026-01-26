@@ -80,6 +80,64 @@ def _looks_like_spark_expr(text: str) -> bool:
     return False
 
 
+# SQL keywords that indicate an expression rather than a simple column name
+_SQL_KEYWORDS = frozenset({
+    "select", "from", "where", "and", "or", "not", "in", "is", "null", "like",
+    "between", "case", "when", "then", "else", "end", "cast", "as", "trim",
+    "upper", "lower", "coalesce", "concat", "substring", "length", "abs",
+    "round", "floor", "ceil", "sum", "avg", "count", "min", "max", "distinct",
+})
+
+# Pattern to detect SQL expressions in join keys
+_SQL_EXPRESSION_INDICATORS = re.compile(
+    r"""
+    [\(\)]                          # Parentheses (function calls)
+    | \s+                           # Whitespace (e.g., "TRIM id")
+    | [+\-*/%]                      # Arithmetic operators
+    | ::                            # PostgreSQL casting
+    | \.(?!\d)                      # Dot (table.column) but not decimal numbers
+    | [<>=!]+                       # Comparison operators
+    | \|\|                          # String concatenation
+    | ['"]                          # String literals
+    """,
+    re.VERBOSE
+)
+
+
+def _is_sql_expression(key: str) -> bool:
+    """
+    Detect if a join key is a SQL expression rather than a simple column name.
+
+    FIX (2026-01): More robust detection for SQL expressions that bypass
+    the simple parenthesis check. LLM agents sometimes generate:
+    - "TRIM id" (space-separated functions)
+    - "id + 1" (arithmetic operations)
+    - "customers.id" (table-qualified columns)
+    - "id::text" (PostgreSQL-style casting)
+    - SQL keywords used as function names without parentheses
+
+    Valid column names should be simple identifiers, optionally backtick-quoted.
+    """
+    raw = str(key or "").strip()
+    if not raw:
+        return False
+
+    # Allow backtick-quoted identifiers (Spark style)
+    if raw.startswith("`") and raw.endswith("`") and raw.count("`") == 2:
+        return False
+
+    # Check for obvious SQL expression indicators
+    if _SQL_EXPRESSION_INDICATORS.search(raw):
+        return True
+
+    # Check if the key starts with a SQL keyword (case insensitive)
+    first_word = raw.split()[0].lower() if raw else ""
+    if first_word in _SQL_KEYWORDS:
+        return True
+
+    return False
+
+
 def _definition(plan: Dict[str, Any]) -> Dict[str, Any]:
     plan_obj = _ensure_dict(plan, name="plan")
     definition = plan_obj.get("definition_json")
@@ -425,8 +483,16 @@ def add_join(
     # Joins are compiled as equality on column references. Expressions like
     # `trim(cast(id as string))` must be materialized first via compute/cast tools.
     # Enforce this early so LLM plans don't pass validation only to fail preflight.
+    #
+    # FIX (2026-01): Expanded SQL expression detection beyond just parentheses.
+    # LLM Agents sometimes generate expressions without parentheses:
+    # - "TRIM id" (space-separated function)
+    # - "id + 1" (arithmetic operators)
+    # - "customers.id" (table qualifiers)
+    # - "id::text" (PostgreSQL casting)
+    # - "CASE WHEN..." (CASE expressions)
     for key in list(lk) + list(rk):
-        if "(" in key or ")" in key:
+        if _is_sql_expression(key):
             raise PipelinePlanBuilderError(
                 "join keys must be column names (not SQL expressions). "
                 "Create a computed key column (e.g., order_id_t) using plan_add_compute_assignments or plan_add_cast, "

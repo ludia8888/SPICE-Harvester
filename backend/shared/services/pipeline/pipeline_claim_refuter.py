@@ -149,6 +149,13 @@ def _refute_filter_only_nulls(
     treat_empty_as_null: bool,
     treat_whitespace_as_null: bool,
 ) -> Optional[Dict[str, Any]]:
+    """
+    Refute the claim that a filter only removes rows where target column is NULL.
+
+    FIX (2026-01): Use only target column for row identity comparison.
+    Previously used all columns, which caused false negatives when other columns
+    had different values but the target column was actually NULL.
+    """
     col = str(column or "").strip()
     if not col:
         return {
@@ -165,34 +172,66 @@ def _refute_filter_only_nulls(
             "unverifiable": True,
         }
 
-    cols = list(input_table.columns)
-    in_counts = _bag_counts_for_table(input_table, columns=cols)
-    out_counts = _bag_counts_for_table(output_table, columns=cols)
+    # FIX: Compare rows by target column value, not entire row digest.
+    # This correctly identifies when a non-null value in the target column was removed.
+    #
+    # Build a set of target column values that exist in output
+    output_values: set[tuple[Any, ...]] = set()
+    for row in output_table.rows:
+        # Use tuple for hashability, include row identity columns if available
+        output_values.add((row.get(col),))
 
-    # Find any removed row whose target column is NOT NULL.
-    for digest, in_count in in_counts.items():
-        out_count = out_counts.get(digest, 0)
-        if out_count >= in_count:
-            continue
-        hit = _first_row_by_digest(input_table, columns=cols, digest=digest)
-        if not hit:
-            continue
-        idx, row = hit
+    # Check each input row - if removed and target column is NOT NULL, that's a violation
+    for idx, row in enumerate(input_table.rows):
         value = row.get(col)
+
+        # Check if this specific row exists in output (by checking if value is preserved)
+        # For proper multiset semantics, we track counts
+        pass
+
+    # Alternative approach: directly iterate and check removed rows
+    # Build multiset of (target_col_value, row_index) for input
+    input_value_indices: Dict[Any, List[int]] = {}
+    for idx, row in enumerate(input_table.rows):
+        val = row.get(col)
+        # Normalize for comparison
+        val_key = (val,) if val is not None else (None,)
+        input_value_indices.setdefault(val_key, []).append(idx)
+
+    output_value_counts: Dict[Any, int] = {}
+    for row in output_table.rows:
+        val = row.get(col)
+        val_key = (val,) if val is not None else (None,)
+        output_value_counts[val_key] = output_value_counts.get(val_key, 0) + 1
+
+    # Find removed rows with non-null target column
+    for val_key, indices in input_value_indices.items():
+        input_count = len(indices)
+        output_count = output_value_counts.get(val_key, 0)
+
+        if output_count >= input_count:
+            continue  # All rows with this value are preserved
+
+        # Some rows with this value were removed - check if value is NULL
+        value = val_key[0]
         if not _value_is_null(
             value,
             treat_empty_as_null=treat_empty_as_null,
             treat_whitespace_as_null=treat_whitespace_as_null,
         ):
+            # Non-null value was removed - this is a violation
+            # Find a witness row
+            witness_idx = indices[0]
+            witness_row = input_table.rows[witness_idx]
             return {
-                "description": "Filter removed non-null row",
-                "row_refs": [_row_ref(row, row_index=idx, include_columns=[col])],
+                "description": "Filter removed row with non-null value in target column",
+                "row_refs": [_row_ref(witness_row, row_index=witness_idx, include_columns=[col])],
                 "values": {
                     "column": col,
                     "value": value,
-                    "removed_row_digest": digest,
-                    "input_count": in_count,
-                    "output_count": out_count,
+                    "input_count": input_count,
+                    "output_count": output_count,
+                    "removed_count": input_count - output_count,
                 },
             }
     return None
@@ -326,6 +365,17 @@ def _refute_join_functional_right(
     left_keys: List[str],
     right_keys: List[str],
 ) -> Optional[Dict[str, Any]]:
+    """
+    Refute the claim that the join is functional on the right side (N:1 relationship).
+
+    A functional join means: for any left key value, there is at most one matching right row.
+    This is equivalent to saying the right join keys form a unique key on the right table
+    (at least for the subset of keys that appear in the left table).
+
+    FIX (2026-01): Check for right-side duplicates regardless of left-side match.
+    The functional dependency is a property of the right table's key uniqueness,
+    not dependent on whether left has matching rows.
+    """
     if not left_keys or not right_keys or len(left_keys) != len(right_keys):
         return {
             "description": "JOIN_FUNCTIONAL_RIGHT missing or mismatched join keys",
@@ -343,36 +393,35 @@ def _refute_join_functional_right(
             "unverifiable": True,
         }
 
-    left_index: Dict[Tuple[Any, ...], int] = {}
-    for li, row in enumerate(left.rows):
-        k = tuple(row.get(col) for col in left_keys)
-        if any(v is None for v in k):
-            continue
-        # Store first witness row for this key.
-        left_index.setdefault(k, li)
-
+    # FIX: First check if right table has duplicate keys (regardless of left matches)
+    # This is the core functional dependency check
     first_right: Dict[Tuple[Any, ...], int] = {}
     for ri, row in enumerate(right.rows):
         k = tuple(row.get(col) for col in right_keys)
         if any(v is None for v in k):
             continue
         if k in first_right:
-            li = left_index.get(k)
-            if li is None:
-                continue
+            # Duplicate key found in right table - this violates functional dependency
             r1 = first_right[k]
-            left_row = left.rows[li] if 0 <= li < len(left.rows) else {}
             right_row_1 = right.rows[r1] if 0 <= r1 < len(right.rows) else {}
             return {
-                "description": "Non-functional join: left key matches multiple right rows",
+                "description": "Non-functional join: right table has duplicate keys",
                 "row_refs": [
-                    {"side": "left", **_row_ref(left_row, row_index=li, include_columns=left_keys)},
                     {"side": "right", **_row_ref(right_row_1, row_index=r1, include_columns=right_keys)},
                     {"side": "right", **_row_ref(row, row_index=ri, include_columns=right_keys)},
                 ],
-                "values": {"join_key": list(k), "left_keys": left_keys, "right_keys": right_keys},
+                "values": {
+                    "join_key": list(k),
+                    "left_keys": left_keys,
+                    "right_keys": right_keys,
+                    "note": "Right table has duplicate values for join key, violating N:1 assumption",
+                },
             }
         first_right[k] = ri
+
+    # Optional: Also check if there are left keys that would match multiple right rows
+    # (This is already covered by the above check, but we can provide more context)
+
     return None
 
 
@@ -474,8 +523,49 @@ def _normalize_allowed_normalization(value: Any) -> Tuple[List[str], List[str]]:
 
 
 def _serialize_canonical_decimal(value: float) -> str:
-    # Deterministic, non-scientific canonical form with bounded precision.
-    # This intentionally does NOT preserve trailing zeros (information loss) unless the agent allows it via normalization.
+    """
+    Deterministic, non-scientific canonical form with bounded precision.
+    This intentionally does NOT preserve trailing zeros (information loss)
+    unless the agent allows it via normalization.
+
+    FIX (2026-01): Handle edge cases that cause overflow or unexpected output:
+    - Very large floats (>1e15) that overflow .15f format
+    - Infinity and NaN values
+    - Subnormal numbers near zero
+    """
+    import math
+
+    # Handle special float values
+    if math.isnan(value):
+        return "NaN"
+    if math.isinf(value):
+        return "Infinity" if value > 0 else "-Infinity"
+
+    # For very large numbers, use scientific notation threshold
+    # .15f format can produce extremely long strings for large numbers
+    abs_val = abs(value)
+    if abs_val >= 1e15:
+        # Use repr which handles large floats correctly, then normalize
+        text = repr(value)
+        # Try to parse and reformat if it's in scientific notation
+        if "e" in text.lower():
+            # Keep scientific notation for very large numbers
+            return text
+        # Otherwise strip trailing zeros
+        if "." in text:
+            text = text.rstrip("0").rstrip(".")
+        return text if text not in {"", "-0"} else "0"
+
+    # For very small subnormal numbers, also use repr
+    if 0 < abs_val < 1e-15:
+        text = repr(value)
+        if "e" in text.lower():
+            return text
+        if "." in text:
+            text = text.rstrip("0").rstrip(".")
+        return text if text not in {"", "-0"} else "0"
+
+    # Normal range: use fixed-point notation
     text = format(float(value), ".15f")
     text = text.rstrip("0").rstrip(".")
     if text in {"", "-0"}:
