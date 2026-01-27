@@ -93,6 +93,7 @@ root_doc = "index"
 templates_path = ["_templates"]
 exclude_patterns = [
     "_build",
+    "_archived",
     "Thumbs.db",
     ".DS_Store",
 ]
