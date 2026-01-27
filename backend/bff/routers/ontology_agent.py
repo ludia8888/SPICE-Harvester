@@ -51,13 +51,7 @@ def _get_actor(request: Request) -> str:
 
 async def _get_llm_gateway() -> LLMGateway:
     """Get LLM gateway instance."""
-    settings = get_settings()
-    return LLMGateway(
-        provider=str(settings.llm.llm_provider or "anthropic"),
-        model=str(settings.llm.llm_model or "claude-sonnet-4-20250514"),
-        api_key=str(settings.llm.anthropic_api_key or settings.llm.openai_api_key or ""),
-        max_prompt_chars=int(settings.llm.llm_max_prompt_chars or 60000),
-    )
+    return LLMGateway()
 
 
 async def _get_redis_service() -> Optional[RedisService]:
@@ -109,7 +103,7 @@ async def run_ontology_agent(
 
     # Enforce DB scope if configured
     try:
-        enforce_db_scope(request, body.db_name)
+        enforce_db_scope(request.headers, db_name=body.db_name)
     except HTTPException:
         raise
     except Exception as exc:
