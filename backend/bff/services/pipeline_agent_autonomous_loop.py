@@ -137,7 +137,7 @@ def _tool_alias(tool_name: str) -> str:
       pipeline_build_wait    -> build_wait
     """
     name = str(tool_name or "").strip()
-    for prefix in ("plan_add_", "plan_update_", "plan_", "pipeline_", "context_pack_"):
+    for prefix in ("plan_add_", "plan_update_", "plan_", "pipeline_"):
         if name.startswith(prefix):
             return name[len(prefix) :]
     return name
@@ -226,8 +226,7 @@ class _AgentState:
     pipeline_progress: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     pipeline_events: List[Dict[str, Any]] = field(default_factory=list)
 
-    # Deterministic (tool-produced) context.
-    context_pack: Optional[Dict[str, Any]] = None
+    # Deterministic (tool-produced) context - simplified (context_pack removed).
     null_report: Optional[Dict[str, Any]] = None
     key_inference: Optional[Dict[str, Any]] = None
     type_inference: Optional[Dict[str, Any]] = None
@@ -241,12 +240,6 @@ class _AgentState:
 
 
 _PIPELINE_AGENT_ALLOWED_TOOLS: tuple[str, ...] = (
-    # Context pack + deterministic analysis
-    "context_pack_build",
-    "context_pack_null_report",
-    "context_pack_infer_keys",
-    "context_pack_infer_types",
-    "context_pack_infer_join_plan",
     # Plan builder (mutating, but in-memory only)
     "plan_new",
     "plan_reset",
@@ -393,66 +386,6 @@ def _trim_join_plan(value: Optional[List[Dict[str, Any]]]) -> Optional[List[Dict
         if isinstance(item, dict):
             out.append(item)
     return out
-
-
-def _summarize_context_pack(pack: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    if not isinstance(pack, dict):
-        return {}
-    overview = pack.get("datasets_overview")
-    if not isinstance(overview, list):
-        overview = []
-    selected = pack.get("selected_datasets")
-    if not isinstance(selected, list):
-        selected = []
-
-    def _ds_overview(item: Any) -> Optional[Dict[str, Any]]:
-        if not isinstance(item, dict):
-            return None
-        cols_preview = item.get("columns_preview")
-        if not isinstance(cols_preview, list):
-            cols_preview = []
-        cols_preview = [str(c) for c in cols_preview if isinstance(c, str)]
-        return {
-            "dataset_id": item.get("dataset_id"),
-            "name": item.get("name"),
-            "branch": item.get("branch"),
-            "column_count": item.get("column_count"),
-            "columns_preview": cols_preview[:30],
-        }
-
-    def _ds_selected(item: Any) -> Optional[Dict[str, Any]]:
-        if not isinstance(item, dict):
-            return None
-        cols = item.get("columns")
-        if not isinstance(cols, list):
-            cols = []
-        col_items: List[Dict[str, Any]] = []
-        for col in cols[:60]:
-            if not isinstance(col, dict):
-                continue
-            name = str(col.get("name") or "").strip()
-            if not name:
-                continue
-            col_items.append({"name": name, "type": col.get("type") or col.get("data_type")})
-        return {
-            "dataset_id": item.get("dataset_id"),
-            "name": item.get("name"),
-            "branch": item.get("branch"),
-            "row_count": item.get("row_count"),
-            "columns": col_items,
-        }
-
-    overview_out = [d for d in (_ds_overview(item) for item in overview) if d]
-    selected_out = [d for d in (_ds_selected(item) for item in selected) if d]
-    return {
-        "db_name": pack.get("db_name"),
-        "branch": pack.get("branch"),
-        "datasets_overview": overview_out[:30],
-        "selected_datasets": selected_out[:12],
-        "integration_suggestions_keys": sorted(list((pack.get("integration_suggestions") or {}).keys()))
-        if isinstance(pack.get("integration_suggestions"), dict)
-        else [],
-    }
 
 
 def _summarize_plan(plan_obj: Optional[Dict[str, Any]]) -> Dict[str, Any]:
@@ -713,7 +646,7 @@ def _build_system_prompt(*, allowed_tools: List[str]) -> str:
         "Core rules:\n"
         "- Return ONLY JSON matching the schema. No markdown, no extra text.\n"
         "- Do NOT invent data; prefer tool observations over guessing.\n"
-        "- Tool args MUST NOT include raw `context_pack` or `plan` objects; the server stores them.\n"
+        "- Tool args MUST NOT include raw `plan` objects; the server stores them.\n"
         "- Respect scope: if the user asked ONLY for analysis (e.g., null check), do NOT build a plan.\n"
         "- If planner_hints.require_plan=true, you MUST build and validate a plan (do NOT finish with report-only).\n"
         "- If the user asked for a derived dataset/result, build a plan via plan_* tools and ensure it validates.\n"
@@ -747,9 +680,6 @@ def _build_system_prompt(*, allowed_tools: List[str]) -> str:
         "  You can call `plan_refute_claims` to find counterexamples (witness-based). A PASS means 'not refuted', never 'proven correct'.\n"
         "\n"
         "Common patterns:\n"
-        "- null check: context_pack_null_report(dataset_ids=[...])\n"
-        "- infer PK/FK: context_pack_infer_keys()\n"
-        "- infer casts: context_pack_infer_types(join_plan=...)\n"
         "- join: plan_add_join(left_node_id,right_node_id,left_keys=[...],right_keys=[...],join_type='left|inner')\n"
         "- union: plan_add_union(left_node_id,right_node_id,union_mode='strict|common_only|pad')\n"
         "- ingest permissive: plan_configure_input_read(node_id, mode='PERMISSIVE', corrupt_record_column='_corrupt_record')\n"
@@ -811,7 +741,6 @@ def _build_prompt_header(
         "answers": answers or None,
         "planner_hints": planner_hints or None,
         "task_spec": task_spec or None,
-        "context_pack_summary": _summarize_context_pack(state.context_pack),
     }
 
 
@@ -829,7 +758,6 @@ def _build_compaction_snapshot(
         "answers": answers or None,
         "planner_hints": planner_hints or None,
         "task_spec": task_spec or None,
-        "context_pack_summary": _summarize_context_pack(state.context_pack),
         "null_report": _trim_null_report(state.null_report),
         "key_inference": _trim_key_inference(state.key_inference),
         "type_inference": _trim_type_inference(state.type_inference),
@@ -892,7 +820,6 @@ async def run_pipeline_agent_mcp_autonomous(
     answers: Optional[Dict[str, Any]],
     planner_hints: Optional[Dict[str, Any]],
     task_spec: Optional[Dict[str, Any]] = None,
-    context_pack: Optional[Dict[str, Any]] = None,
     persist_plan: bool = True,
     actor: str,
     tenant_id: str,
@@ -1023,9 +950,6 @@ async def run_pipeline_agent_mcp_autonomous(
         principal_id=principal_id,
         principal_type=principal_type,
     )
-    if isinstance(context_pack, dict) and context_pack:
-        state.context_pack = dict(context_pack)
-        state.last_observation = {"status": "bootstrapped", "context_pack": "provided"}
 
     # Scale iteration budget by dataset count (multi-way joins take more tool calls).
     max_steps = min(60, 24 + max(0, len(state.dataset_ids) - 1) * 8)
@@ -1053,133 +977,6 @@ async def run_pipeline_agent_mcp_autonomous(
 
         try:
             args = _drop_none_values(dict(args or {}))
-            if tool_name == "context_pack_build":
-                if isinstance(state.context_pack, dict):
-                    meaningful = {k for k in args.keys() if k not in {"db_name", "branch", "dataset_ids"}}
-                    if not meaningful:
-                        state.last_observation = {
-                            "status": "noop",
-                            "message": "context_pack is already built; do not call context_pack_build again. Next: run analysis tools (context_pack_null_report / infer_keys / infer_types / infer_join_plan) or finish if you already have enough evidence.",
-                            "context_pack_summary": _summarize_context_pack(state.context_pack),
-                        }
-                        return state.last_observation
-                # Never allow the model to override request scope.
-                scoped: Dict[str, Any] = {**args, "db_name": state.db_name, "dataset_ids": state.dataset_ids}
-                if state.branch:
-                    scoped["branch"] = state.branch
-                payload = await _call_pipeline_tool(
-                    tool_name,
-                    scoped,
-                )
-                pack = payload.get("context_pack") if isinstance(payload, dict) else None
-                state.context_pack = pack if isinstance(pack, dict) else state.context_pack
-                observation = dict(payload) if isinstance(payload, dict) else {"result": payload}
-                observation.pop("context_pack", None)
-                state.last_observation = _mask_tool_observation(observation)
-                return state.last_observation
-
-            # All remaining context_pack_* tools require a context pack.
-            if tool_name.startswith("context_pack_") and tool_name != "context_pack_build":
-                if not isinstance(state.context_pack, dict):
-                    state.last_observation = {"error": "context_pack missing; call context_pack_build first"}
-                    return state.last_observation
-                # Always use the server-side context pack. If the model provides `context_pack` in args,
-                # ignore it to prevent partial/invalid packs from overriding state.
-                args.pop("context_pack", None)
-                if tool_name == "context_pack_null_report" and isinstance(state.null_report, dict):
-                    # If we already computed a null report that covers the requested datasets,
-                    # avoid tool loops and prompt the model to finish.
-                    requested_ids = args.get("dataset_ids")
-                    requested: Optional[set[str]] = None
-                    if isinstance(requested_ids, list):
-                        requested = {str(item).strip() for item in requested_ids if str(item).strip()}
-                    reported_ids: set[str] = set()
-                    datasets = state.null_report.get("datasets")
-                    if isinstance(datasets, list):
-                        for item in datasets:
-                            if not isinstance(item, dict):
-                                continue
-                            ds_id = str(item.get("dataset_id") or "").strip()
-                            if ds_id:
-                                reported_ids.add(ds_id)
-                    other_args = {k for k in args.keys() if k != "dataset_ids"}
-                    if not other_args and (requested is None or requested.issubset(reported_ids)):
-                        state.last_observation = {
-                            "status": "noop",
-                            "message": "null report already computed; finish to return it",
-                            "report": _trim_null_report(state.null_report),
-                        }
-                        return state.last_observation
-                if tool_name == "context_pack_infer_keys" and isinstance(state.key_inference, dict):
-                    other_args = {k for k in args.keys() if k != "dataset_ids"}
-                    if not other_args:
-                        state.last_observation = {
-                            "status": "noop",
-                            "message": "key inference already computed; use it (or finish) instead of re-running",
-                            "inference": _trim_key_inference(state.key_inference),
-                        }
-                        return state.last_observation
-                if tool_name == "context_pack_infer_types" and isinstance(state.type_inference, dict):
-                    other_args = {k for k in args.keys() if k != "dataset_ids"}
-                    if not other_args:
-                        state.last_observation = {
-                            "status": "noop",
-                            "message": "type inference already computed; use it (or finish) instead of re-running",
-                            "inference": _trim_type_inference(state.type_inference),
-                        }
-                        return state.last_observation
-                if tool_name == "context_pack_infer_join_plan" and isinstance(state.join_plan, list):
-                    other_args = {k for k in args.keys() if k != "dataset_ids"}
-                    if not other_args:
-                        state.last_observation = {
-                            "status": "noop",
-                            "message": "join plan already inferred; proceed to build joins (or finish) instead of re-running",
-                            "join_plan": _trim_join_plan(state.join_plan),
-                        }
-                        return state.last_observation
-                payload = await _call_pipeline_tool(tool_name, {**args, "context_pack": state.context_pack})
-                if isinstance(payload, dict) and payload.get("error"):
-                    state.last_observation = _mask_tool_observation(payload)
-                    return state.last_observation
-                if tool_name == "context_pack_null_report":
-                    report = payload.get("report") if isinstance(payload, dict) else None
-                    state.null_report = report if isinstance(report, dict) else state.null_report
-                    state.last_observation = _mask_tool_observation(
-                        {
-                            "status": payload.get("status") if isinstance(payload, dict) else None,
-                            "report": _trim_null_report(state.null_report),
-                        }
-                    )
-                elif tool_name == "context_pack_infer_keys":
-                    inf = payload.get("inference") if isinstance(payload, dict) else None
-                    state.key_inference = inf if isinstance(inf, dict) else state.key_inference
-                    state.last_observation = _mask_tool_observation(
-                        {
-                            "status": payload.get("status") if isinstance(payload, dict) else None,
-                            "inference": _trim_key_inference(state.key_inference),
-                        }
-                    )
-                elif tool_name == "context_pack_infer_types":
-                    inf = payload.get("inference") if isinstance(payload, dict) else None
-                    state.type_inference = inf if isinstance(inf, dict) else state.type_inference
-                    state.last_observation = _mask_tool_observation(
-                        {
-                            "status": payload.get("status") if isinstance(payload, dict) else None,
-                            "inference": _trim_type_inference(state.type_inference),
-                        }
-                    )
-                elif tool_name == "context_pack_infer_join_plan":
-                    inf = payload.get("join_plan") if isinstance(payload, dict) else None
-                    state.join_plan = inf if isinstance(inf, list) else state.join_plan
-                    state.last_observation = _mask_tool_observation(
-                        {
-                            "status": payload.get("status") if isinstance(payload, dict) else None,
-                            "join_plan": _trim_join_plan(state.join_plan),
-                        }
-                    )
-                else:
-                    state.last_observation = _mask_tool_observation(payload if isinstance(payload, dict) else {"result": payload})
-                return state.last_observation
 
             if tool_name == "plan_new":
                 # Treat plan_new as "start over" even if a plan already exists.
@@ -1357,30 +1154,6 @@ async def run_pipeline_agent_mcp_autonomous(
             tool_errors.append(f"{tool_name}: {exc}")
             return state.last_observation
 
-    # Deterministic bootstrap: fetch a compact context pack once so the LLM starts with evidence.
-    # This is safe (read-only) and avoids wasting an iteration on "call context_pack_build".
-    try:
-        dataset_count = len(state.dataset_ids)
-        max_pairs = (dataset_count * (dataset_count - 1)) // 2 if dataset_count > 1 else 0
-        bootstrap_args: Dict[str, Any] = {
-            "db_name": state.db_name,
-            "dataset_ids": state.dataset_ids,
-            "max_selected_datasets": min(12, max(1, dataset_count)),
-            "max_sample_rows": 30,
-        }
-        if state.branch:
-            bootstrap_args["branch"] = state.branch
-        if max_pairs:
-            bootstrap_args["max_join_candidates"] = min(30, max(10, max_pairs))
-        if not isinstance(state.context_pack, dict):
-            pack_payload = await _call_pipeline_tool("context_pack_build", bootstrap_args)
-            pack = pack_payload.get("context_pack") if isinstance(pack_payload, dict) else None
-            if isinstance(pack, dict):
-                state.context_pack = pack
-                state.last_observation = {"status": "bootstrapped", "context_pack": "ready"}
-    except Exception as exc:
-        logger.warning("pipeline agent context_pack bootstrap failed err=%s", exc)
-
     # Initialize append-only prompt log with a stable header (enables prefix caching across iterations).
     state.prompt_items = [
         stable_json_dumps(_build_prompt_header(state=state, answers=answers, planner_hints=planner_hints, task_spec=task_spec))
@@ -1395,7 +1168,6 @@ async def run_pipeline_agent_mcp_autonomous(
             "type": "state",
             "step": step_idx + 1,
             "analysis_status": {
-                "has_context_pack": isinstance(state.context_pack, dict),
                 "has_null_report": isinstance(state.null_report, dict),
                 "has_key_inference": isinstance(state.key_inference, dict),
                 "has_type_inference": isinstance(state.type_inference, dict),
@@ -1550,7 +1322,6 @@ async def run_pipeline_agent_mcp_autonomous(
                     db_name=str(plan_model.data_scope.db_name or ""),
                     branch=str(plan_model.data_scope.branch or "") or None,
                     require_output=True,
-                    context_pack=state.context_pack,
                 )
                 state.plan_obj = validation.plan.model_dump(mode="json")
                 if validation.errors:
@@ -1821,7 +1592,6 @@ async def run_pipeline_agent_mcp_autonomous(
             # If we have a plan, prefer treating "valid + has output" as success even if the
             # model didn't explicitly emit action=finish (loop exhaustion, etc).
             require_output=True,
-            context_pack=state.context_pack,
         )
         pipeline_issue = _pipeline_has_unresolved_status(state)
         final_status = "success" if (not validation.errors and not tool_errors and not pipeline_issue) else "partial"

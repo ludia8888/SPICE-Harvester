@@ -9,7 +9,6 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
-from bff.services.pipeline_context_pack import build_pipeline_context_pack
 from bff.services.pipeline_join_evaluator import evaluate_pipeline_joins
 from bff.services.pipeline_plan_models import PipelinePlanCompileResult
 from bff.services.pipeline_plan_autonomous_compiler import compile_pipeline_plan_mcp_autonomous
@@ -42,8 +41,6 @@ router = APIRouter(prefix="/pipeline-plans", tags=["Pipeline Plans"])
 
 _PREVIEW_SANITIZER = InputSanitizer()
 _SYS_TS_EXPR_RE = re.compile(r"^\s*(?P<col>_sys_ingested_at|_sys_valid_from)\s*=\s*to_timestamp\('.*'\)\s*$")
-_CONTEXT_PACK_CACHE_PREFIX = "pipeline-context-pack"
-_CONTEXT_PACK_CACHE_TTL_SECONDS = 120
 # Join sampling needs to be large enough to avoid false "empty join" results,
 # but small enough to keep preview runs lightweight in dev.
 _JOIN_SAMPLE_MIN_ROWS = 800
@@ -135,12 +132,6 @@ def _resolve_actor(request: Request) -> str:
         or request.headers.get("X-Actor")
         or "system"
     )
-
-
-def _context_pack_cache_key(payload: Dict[str, Any]) -> str:
-    db_name = str(payload.get("db_name") or "default").strip() or "default"
-    digest = sha256_canonical_json_prefixed(payload)
-    return f"{_CONTEXT_PACK_CACHE_PREFIX}:{db_name}:{digest}"
 
 
 def _serialize_run_tables(run_tables: Dict[str, Any], *, limit: int) -> Dict[str, Dict[str, Any]]:
@@ -335,16 +326,6 @@ class PipelinePlanPreviewRequest(BaseModel):
     include_run_tables: bool = Field(default=False)
     run_table_limit: int = Field(default=200, ge=1, le=1000)
 
-class PipelineContextPackRequest(BaseModel):
-    db_name: str = Field(..., min_length=1, max_length=200)
-    branch: str | None = Field(default=None, max_length=200)
-    dataset_ids: list[str] | None = Field(default=None)
-    max_datasets_overview: int = Field(default=20, ge=1, le=100)
-    max_selected_datasets: int = Field(default=6, ge=1, le=20)
-    max_sample_rows: int = Field(default=20, ge=1, le=200)
-    max_join_candidates: int = Field(default=10, ge=1, le=50)
-    max_pk_candidates: int = Field(default=6, ge=1, le=20)
-
 class PipelinePlanInspectPreviewRequest(BaseModel):
     preview: Dict[str, Any] | None = Field(default=None)
     node_id: str | None = Field(default=None, max_length=200)
@@ -395,27 +376,12 @@ async def compile_plan(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     branch = str(data_scope.branch) if data_scope and data_scope.branch else None
 
-    context_pack = None
-    try:
-        dataset_ids = list(data_scope.dataset_ids) if data_scope else []
-        context_pack = await build_pipeline_context_pack(
-            db_name=str(data_scope.db_name) if data_scope and data_scope.db_name else "",
-            branch=str(data_scope.branch) if data_scope and data_scope.branch else None,
-            dataset_ids=dataset_ids or None,
-            dataset_registry=dataset_registry,
-            profile_registry=profile_registry,
-        )
-    except Exception as exc:
-        logger.warning("Failed to build pipeline context pack: %s", exc)
-        context_pack = None
-
     try:
         # The pipeline planner is a single autonomous MCP loop (no multi-agent subflows).
         result: PipelinePlanCompileResult = await compile_pipeline_plan_mcp_autonomous(
             goal=goal,
             data_scope=data_scope,
             answers=answers,
-            context_pack=context_pack,
             planner_hints=planner_hints,
             task_spec=task_spec,
             actor=actor,
@@ -480,65 +446,6 @@ async def compile_plan(
         )
 
     return ApiResponse.success(message="Pipeline plan compiled", data=response_data)
-
-
-@router.post("/context-pack", response_model=ApiResponse)
-async def build_context_pack(
-    body: PipelineContextPackRequest,
-    request: Request,
-    redis_service: RedisServiceDep,
-    dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
-    profile_registry: DatasetProfileRegistry = Depends(get_dataset_profile_registry),
-) -> ApiResponse:
-    payload = sanitize_input(body.model_dump(exclude_none=True))
-    db_name = validate_db_name(str(payload.get("db_name") or "").strip())
-    try:
-        enforce_db_scope(request.headers, db_name=db_name)
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
-
-    cache_key: Optional[str] = None
-    if redis_service:
-        try:
-            cache_key = _context_pack_cache_key(payload)
-            cached = await redis_service.client.get(cache_key)
-            if cached:
-                if isinstance(cached, (bytes, bytearray)):
-                    cached = cached.decode("utf-8", "ignore")
-                cached_pack = json.loads(str(cached))
-                if isinstance(cached_pack, dict):
-                    return ApiResponse.success(message="Pipeline context pack cached", data=cached_pack)
-        except Exception as exc:
-            logger.warning("Context pack cache read failed: %s", exc)
-
-    try:
-        pack = await build_pipeline_context_pack(
-            db_name=db_name,
-            branch=str(payload.get("branch") or "").strip() or None,
-            dataset_ids=payload.get("dataset_ids"),
-            dataset_registry=dataset_registry,
-            profile_registry=profile_registry,
-            max_datasets_overview=int(payload.get("max_datasets_overview") or 20),
-            max_selected_datasets=int(payload.get("max_selected_datasets") or 6),
-            max_sample_rows=int(payload.get("max_sample_rows") or 20),
-            max_join_candidates=int(payload.get("max_join_candidates") or 10),
-            max_pk_candidates=int(payload.get("max_pk_candidates") or 6),
-        )
-    except Exception as exc:
-        logger.error("Failed to build pipeline context pack: %s", exc)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to build context pack") from exc
-
-    if cache_key:
-        try:
-            await redis_service.client.set(
-                cache_key,
-                json.dumps(pack, ensure_ascii=False),
-                ex=_CONTEXT_PACK_CACHE_TTL_SECONDS,
-            )
-        except Exception as exc:
-            logger.warning("Context pack cache write failed: %s", exc)
-
-    return ApiResponse.success(message="Pipeline context pack built", data=pack)
 
 
 @router.get("/{plan_id}", response_model=ApiResponse)

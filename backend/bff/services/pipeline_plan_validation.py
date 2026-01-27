@@ -46,11 +46,8 @@ async def validate_pipeline_plan(
     db_name: str,
     branch: Optional[str],
     require_output: bool = True,
-    context_pack: Optional[Dict[str, Any]] = None,
     task_spec: Optional[PipelineTaskSpec] = None,
 ) -> PipelinePlanValidationResult:
-    _ = context_pack  # reserved for future diagnostics; validation should not mutate based on hints
-
     errors: List[str] = []
     warnings: List[str] = []
 

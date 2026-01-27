@@ -341,17 +341,6 @@
     "max_payload_bytes": 500000
   },
   {
-    "tool_id": "pipeline_plans.context_pack",
-    "method": "POST",
-    "path": "/api/v1/pipeline-plans/context-pack",
-    "risk_level": "read",
-    "requires_approval": false,
-    "requires_idempotency_key": true,
-    "status": "ACTIVE",
-    "roles": [],
-    "max_payload_bytes": 200000
-  },
-  {
     "tool_id": "pipeline_plans.compile",
     "method": "POST",
     "path": "/api/v1/pipeline-plans/compile",

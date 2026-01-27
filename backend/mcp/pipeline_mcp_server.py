@@ -31,7 +31,6 @@ for _path in (str(_backend_root), str(_repo_root)):
     if _path and _path not in sys.path:
         sys.path.append(_path)
 
-from bff.services.pipeline_context_pack import build_pipeline_context_pack  # noqa: E402
 from bff.services.pipeline_join_evaluator import evaluate_pipeline_joins  # noqa: E402
 from bff.services.pipeline_plan_validation import validate_pipeline_plan  # noqa: E402
 from shared.models.pipeline_plan import PipelinePlan  # noqa: E402
@@ -77,10 +76,6 @@ from shared.services.pipeline.pipeline_plan_builder import (  # noqa: E402
     update_node_metadata,
     update_output,
     validate_structure,
-)
-from shared.services.pipeline.pipeline_relationship_inference import (  # noqa: E402
-    infer_join_plan_from_context_pack,
-    infer_keys_from_context_pack,
 )
 from shared.services.pipeline.pipeline_claim_refuter import refute_pipeline_plan_claims  # noqa: E402
 from shared.services.pipeline.pipeline_type_inference import (  # noqa: E402
@@ -209,69 +204,6 @@ def _trim_build_output(output_json: Dict[str, Any], *, max_rows: int = 6) -> Dic
         trimmed_outputs.append(trimmed)
     out["outputs"] = trimmed_outputs
     return out
-
-
-def _build_null_report_from_context_pack(
-    context_pack: Dict[str, Any],
-    *,
-    dataset_ids: Optional[List[str]] = None,
-    max_columns: int = 50,
-) -> Dict[str, Any]:
-    wanted = {str(item).strip() for item in (dataset_ids or []) if str(item).strip()}
-    selected = context_pack.get("selected_datasets") if isinstance(context_pack, dict) else None
-    datasets: list[dict[str, Any]] = []
-    if isinstance(selected, list):
-        for ds in selected:
-            if not isinstance(ds, dict):
-                continue
-            ds_id = str(ds.get("dataset_id") or "").strip()
-            if wanted and ds_id and ds_id not in wanted:
-                continue
-            profiles = ds.get("column_profiles") if isinstance(ds.get("column_profiles"), dict) else {}
-            columns: list[dict[str, Any]] = []
-            for col, prof in profiles.items():
-                if not isinstance(prof, dict):
-                    continue
-                null_ratio = float(prof.get("null_ratio") or 0.0)
-                missing_ratio = float(prof.get("missing_ratio") or 0.0)
-                if null_ratio <= 0 and missing_ratio <= 0:
-                    continue
-                columns.append(
-                    {
-                        "column": str(col),
-                        "null_ratio": round(null_ratio, 4),
-                        "missing_ratio": round(missing_ratio, 4),
-                        "distinct_ratio": prof.get("distinct_ratio"),
-                        "duplicate_ratio": prof.get("duplicate_ratio"),
-                    }
-                )
-            columns.sort(
-                key=lambda item: (
-                    float(item.get("null_ratio") or 0.0),
-                    float(item.get("missing_ratio") or 0.0),
-                ),
-                reverse=True,
-            )
-            columns = columns[: max(0, int(max_columns or 0))]
-            datasets.append(
-                {
-                    "dataset_id": ds_id,
-                    "name": ds.get("name"),
-                    "branch": ds.get("branch"),
-                    "row_count": ds.get("row_count"),
-                    "columns_with_nulls": columns,
-                }
-            )
-    return {
-        "kind": "null_check",
-        "dataset_count": len(datasets),
-        "datasets": datasets,
-        "notes": ["null/missing ratios are based on safe sample rows from the context pack"],
-    }
-
-
-def _coerce_context_pack(context_pack: Any) -> Dict[str, Any]:
-    return context_pack if isinstance(context_pack, dict) else {}
 
 
 # ==============================================================================
@@ -438,173 +370,6 @@ def _normalize_aggregates(value: Any) -> List[Dict[str, Any]]:
     return out
 
 
-def _filter_selected_datasets(context_pack: Dict[str, Any], *, dataset_ids: Optional[List[str]]) -> List[Dict[str, Any]]:
-    selected = context_pack.get("selected_datasets")
-    if not isinstance(selected, list):
-        return []
-    wanted = {str(item).strip() for item in (dataset_ids or []) if str(item).strip()}
-    out: List[Dict[str, Any]] = []
-    for item in selected:
-        if not isinstance(item, dict):
-            continue
-        ds_id = str(item.get("dataset_id") or "").strip()
-        if wanted and ds_id and ds_id not in wanted:
-            continue
-        out.append(item)
-    return out
-
-
-def _context_pack_key_inference(
-    context_pack: Dict[str, Any],
-    *,
-    dataset_ids: Optional[List[str]] = None,
-    max_pk_candidates: int = 6,
-    max_fk_candidates: int = 25,
-) -> Dict[str, Any]:
-    return infer_keys_from_context_pack(
-        context_pack,
-        dataset_ids=dataset_ids,
-        max_pk_candidates=max_pk_candidates,
-        max_fk_candidates=max_fk_candidates,
-    )
-
-
-def _extract_column_type(dataset: Dict[str, Any], column_name: str) -> Optional[str]:
-    columns = dataset.get("columns")
-    if not isinstance(columns, list):
-        return None
-    for col in columns:
-        if not isinstance(col, dict):
-            continue
-        name = str(col.get("name") or "").strip()
-        if not name or name != column_name:
-            continue
-        raw_type = col.get("type") or col.get("data_type")
-        if raw_type:
-            return normalize_declared_type(raw_type)
-    return None
-
-
-def _context_pack_type_inference(
-    context_pack: Dict[str, Any],
-    *,
-    dataset_ids: Optional[List[str]] = None,
-    max_columns: int = 60,
-    max_samples: int = 80,
-    join_plan: Optional[List[Dict[str, Any]]] = None,
-) -> Dict[str, Any]:
-    selected = _filter_selected_datasets(context_pack, dataset_ids=dataset_ids)
-    per_dataset: List[Dict[str, Any]] = []
-    inferred_by_ds: Dict[str, Dict[str, str]] = {}
-
-    for ds in selected:
-        ds_id = str(ds.get("dataset_id") or "").strip()
-        sample_rows = ds.get("sample_rows")
-        if not isinstance(sample_rows, list):
-            sample_rows = []
-        columns = ds.get("columns")
-        if not isinstance(columns, list):
-            columns = []
-
-        col_items: List[Dict[str, Any]] = []
-        inferred_types: Dict[str, str] = {}
-        for col in columns[: max(0, int(max_columns))]:
-            if not isinstance(col, dict):
-                continue
-            name = str(col.get("name") or "").strip()
-            if not name:
-                continue
-            declared = normalize_declared_type(col.get("type") or col.get("data_type") or "xsd:string")
-            values: List[Any] = []
-            for row in sample_rows:
-                if not isinstance(row, dict):
-                    continue
-                values.append(row.get(name))
-            result = infer_xsd_type_with_confidence(values, max_samples=max_samples)
-            inferred = normalize_declared_type(result.suggested_type)
-            inferred_types[name] = inferred
-            mismatch = declared != inferred and float(result.confidence or 0.0) >= 0.95
-            col_items.append(
-                {
-                    "column": name,
-                    "declared_type": declared,
-                    "suggested_type": inferred,
-                    "confidence": float(result.confidence),
-                    "sample_size": int(result.sample_size),
-                    "ratios": result.ratios,
-                    "mismatch": bool(mismatch),
-                }
-            )
-
-        inferred_by_ds[ds_id] = inferred_types
-        per_dataset.append(
-            {
-                "dataset_id": ds.get("dataset_id"),
-                "name": ds.get("name"),
-                "column_count": len(columns),
-                "columns": col_items,
-            }
-        )
-
-    # Suggest minimal casts for join keys when types disagree.
-    join_casts: List[Dict[str, Any]] = []
-    plan_items = [item for item in (join_plan or []) if isinstance(item, dict)]
-    if not plan_items:
-        suggestions = context_pack.get("integration_suggestions")
-        if not isinstance(suggestions, dict):
-            suggestions = {}
-        fk_candidates = suggestions.get("foreign_key_candidates")
-        if not isinstance(fk_candidates, list):
-            fk_candidates = []
-        plan_items = [item for item in fk_candidates[:6] if isinstance(item, dict)]
-
-    for item in plan_items:
-        left_id = str(item.get("left_dataset_id") or item.get("child_dataset_id") or "").strip()
-        right_id = str(item.get("right_dataset_id") or item.get("parent_dataset_id") or "").strip()
-        left_col = str(item.get("left_column") or item.get("child_column") or "").strip()
-        right_col = str(item.get("right_column") or item.get("parent_column") or "").strip()
-        if not left_id or not right_id or not left_col or not right_col:
-            continue
-
-        left_ds = next((ds for ds in selected if str(ds.get("dataset_id") or "").strip() == left_id), None)
-        right_ds = next((ds for ds in selected if str(ds.get("dataset_id") or "").strip() == right_id), None)
-        if not left_ds or not right_ds:
-            continue
-
-        left_type = _extract_column_type(left_ds, left_col) or inferred_by_ds.get(left_id, {}).get(left_col) or "xsd:string"
-        right_type = _extract_column_type(right_ds, right_col) or inferred_by_ds.get(right_id, {}).get(right_col) or "xsd:string"
-        common = common_join_key_type(left_type, right_type)
-        if common == normalize_declared_type(left_type) == normalize_declared_type(right_type):
-            continue
-        for ds_id, col_name, declared in (
-            (left_id, left_col, left_type),
-            (right_id, right_col, right_type),
-        ):
-            if normalize_declared_type(declared) == common:
-                continue
-            join_casts.append(
-                {
-                    "dataset_id": ds_id,
-                    "column": col_name,
-                    "type": common,
-                    "reason": f"join key type alignment ({left_type} vs {right_type})",
-                }
-            )
-
-    deduped: Dict[tuple[str, str, str], Dict[str, Any]] = {}
-    for cast in join_casts:
-        key = (str(cast.get("dataset_id") or ""), str(cast.get("column") or ""), str(cast.get("type") or ""))
-        if not all(key):
-            continue
-        deduped[key] = cast
-
-    return {
-        "datasets": per_dataset,
-        "join_key_cast_suggestions": list(deduped.values()),
-        "notes": ["type inference is sample-based; casts are suggestions only"],
-    }
-
-
 class PipelineMCPServer:
     def __init__(self) -> None:
         self.server = Server("pipeline-mcp-server")
@@ -632,70 +397,6 @@ class PipelineMCPServer:
         @self.server.list_tools()
         async def list_tools() -> List[Tool]:
             tool_specs: List[Dict[str, Any]] = [
-                {
-                    "name": "context_pack_build",
-                    "description": (
-                        "Build a pipeline context pack with schema analysis, sample data, and relationship recommendations. "
-                        "IMPORTANT: All recommendations include 'confidence' metadata. Check 'confidence_level' before trusting: "
-                        ">=0.8 = reliable, 0.5-0.8 = validate recommended, <0.5 = LOW confidence - must validate on full data. "
-                        "The output includes 'agent_guidance' explaining how to interpret scores and when to request validation."
-                    ),
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "db_name": {
-                                "type": "string",
-                                "description": "Database name to analyze",
-                            },
-                            "branch": {
-                                "type": "string",
-                                "description": "lakeFS branch (default: main)",
-                            },
-                            "dataset_ids": {
-                                "type": "array",
-                                "items": {"type": "string"},
-                                "description": "UUIDs of datasets to analyze in detail",
-                            },
-                            "max_datasets_overview": {
-                                "type": "integer",
-                                "description": "Max datasets in overview list (default: 20)",
-                            },
-                            "max_selected_datasets": {
-                                "type": "integer",
-                                "description": "Max datasets for detailed analysis (default: 6)",
-                            },
-                            "max_sample_rows": {
-                                "type": ["integer", "string"],
-                                "description": (
-                                    "Sample rows per dataset. Use 'auto' or omit for dynamic sampling "
-                                    "(recommended - adjusts based on data size for better confidence). "
-                                    "Fixed integer forces exact sample size."
-                                ),
-                            },
-                            "use_dynamic_sampling": {
-                                "type": "boolean",
-                                "description": "Enable dynamic sample size based on total rows (default: true, recommended)",
-                            },
-                            "max_join_candidates": {
-                                "type": "integer",
-                                "description": "Max join key recommendations (default: 10)",
-                            },
-                            "max_pk_candidates": {
-                                "type": "integer",
-                                "description": "Max primary key candidates per dataset (default: 8)",
-                            },
-                            "mask_pii": {
-                                "type": "boolean",
-                                "description": (
-                                    "Mask PII (emails, phone numbers) in sample data. "
-                                    "Default: false (disabled) - Agent sees real data for accurate analysis. "
-                                    "Set to true only if data contains sensitive PII that must not be exposed."
-                                ),
-                            },
-                        },
-                        "required": ["db_name"],
-                    },
-                },
                 {
                     "name": "plan_new",
                     "description": "Create a new PipelinePlan JSON (empty nodes/edges).",
@@ -1314,62 +1015,6 @@ class PipelineMCPServer:
                     },
                 },
                 {
-                    "name": "context_pack_null_report",
-                    "description": "Generate a null/missing report from a context pack (no plan changes).",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "context_pack": {"type": "object"},
-                            "dataset_ids": {"type": "array", "items": {"type": "string"}},
-                            "max_columns": {"type": "integer"},
-                        },
-                        "required": ["context_pack"],
-                    },
-                },
-                {
-                    "name": "context_pack_infer_keys",
-                    "description": "Infer PK/FK candidates from a context pack (deterministic, sample-based).",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "context_pack": {"type": "object"},
-                            "dataset_ids": {"type": "array", "items": {"type": "string"}},
-                            "max_pk_candidates": {"type": "integer"},
-                            "max_fk_candidates": {"type": "integer"},
-                        },
-                        "required": ["context_pack"],
-                    },
-                },
-                {
-                    "name": "context_pack_infer_types",
-                    "description": "Infer column types + join-key cast suggestions from a context pack (deterministic, sample-based).",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "context_pack": {"type": "object"},
-                            "dataset_ids": {"type": "array", "items": {"type": "string"}},
-                            "max_columns": {"type": "integer"},
-                            "max_samples": {"type": "integer"},
-                            "join_plan": {"type": "array", "items": {"type": "object"}},
-                        },
-                        "required": ["context_pack"],
-                    },
-                },
-                {
-                    "name": "context_pack_infer_join_plan",
-                    "description": "Infer a best-effort join plan (spanning tree) from context pack candidates (deterministic, sample-based).",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "context_pack": {"type": "object"},
-                            "dataset_ids": {"type": "array", "items": {"type": "string"}},
-                            "max_joins": {"type": "integer"},
-                            "max_edges": {"type": "integer"},
-                        },
-                        "required": ["context_pack"],
-                    },
-                },
-                {
                     "name": "pipeline_create_from_plan",
                     "description": "Create a Pipeline (control plane) from a PipelinePlan.definition_json. If the pipeline already exists (same db/name/branch), this tool will update it and return the existing pipeline_id (idempotent upsert). Requires admin token; respects principal headers for permissions.",
                     "inputSchema": {
@@ -1481,49 +1126,6 @@ class PipelineMCPServer:
                 return {"error": rate_limit_error, "tool": name, "retry_after_seconds": 60}
 
             try:
-                if name == "context_pack_build":
-                    dataset_registry, profile_registry = await self._ensure_registries()
-                    db_name = str(arguments.get("db_name") or "").strip()
-                    if not db_name:
-                        raise PipelinePlanBuilderError("db_name is required")
-
-                    # Support dynamic sampling: None means auto-determine based on data size
-                    max_sample_rows_arg = arguments.get("max_sample_rows")
-                    if max_sample_rows_arg is None or str(max_sample_rows_arg).strip().lower() in ("auto", "dynamic", ""):
-                        max_sample_rows = None  # triggers dynamic sampling
-                    else:
-                        max_sample_rows = int(max_sample_rows_arg)
-
-                    # Default to dynamic sampling for better Agent intelligence
-                    use_dynamic = arguments.get("use_dynamic_sampling")
-                    if use_dynamic is None:
-                        use_dynamic_sampling = True  # default ON
-                    else:
-                        use_dynamic_sampling = bool(use_dynamic)
-
-                    # PII masking: disabled by default for better Agent intelligence
-                    mask_pii_arg = arguments.get("mask_pii")
-                    if mask_pii_arg is None:
-                        mask_pii_enabled = False  # default OFF for Agent intelligence
-                    else:
-                        mask_pii_enabled = bool(mask_pii_arg)
-
-                    pack = await build_pipeline_context_pack(
-                        db_name=db_name,
-                        branch=str(arguments.get("branch") or "").strip() or None,
-                        dataset_ids=arguments.get("dataset_ids"),
-                        dataset_registry=dataset_registry,
-                        profile_registry=profile_registry,
-                        max_datasets_overview=int(arguments.get("max_datasets_overview") or 20),
-                        max_selected_datasets=int(arguments.get("max_selected_datasets") or 6),
-                        max_sample_rows=max_sample_rows,
-                        max_join_candidates=int(arguments.get("max_join_candidates") or 10),
-                        max_pk_candidates=int(arguments.get("max_pk_candidates") or 8),
-                        use_dynamic_sampling=use_dynamic_sampling,
-                        mask_pii_enabled=mask_pii_enabled,
-                    )
-                    return {"context_pack": pack}
-
                 if name == "plan_new":
                     plan = new_plan(
                         goal=str(arguments.get("goal") or ""),
@@ -2164,7 +1766,6 @@ class PipelineMCPServer:
                         db_name=db_name,
                         branch=str(plan.data_scope.branch or "") or None,
                         require_output=bool(arguments.get("require_output", False)),
-                        context_pack=None,
                     )
                     payload = {
                         "status": "success" if not validation.errors else "invalid",
@@ -2289,55 +1890,6 @@ class PipelineMCPServer:
                         "evaluations": [asdict(item) for item in evaluations],
                         "warnings": list(warnings or []),
                     }
-
-                if name == "context_pack_null_report":
-                    pack = arguments.get("context_pack") or {}
-                    if not isinstance(pack, dict):
-                        return {"error": "context_pack must be an object"}
-                    report = _build_null_report_from_context_pack(
-                        pack,
-                        dataset_ids=arguments.get("dataset_ids"),
-                        max_columns=int(arguments.get("max_columns") or 50),
-                    )
-                    return {"status": "success", "report": report}
-
-                if name == "context_pack_infer_keys":
-                    pack = arguments.get("context_pack") or {}
-                    if not isinstance(pack, dict):
-                        return {"error": "context_pack must be an object"}
-                    inference = _context_pack_key_inference(
-                        pack,
-                        dataset_ids=arguments.get("dataset_ids"),
-                        max_pk_candidates=int(arguments.get("max_pk_candidates") or 6),
-                        max_fk_candidates=int(arguments.get("max_fk_candidates") or 25),
-                    )
-                    return {"status": "success", "inference": inference}
-
-                if name == "context_pack_infer_types":
-                    pack = arguments.get("context_pack") or {}
-                    if not isinstance(pack, dict):
-                        return {"error": "context_pack must be an object"}
-                    join_plan = arguments.get("join_plan") if isinstance(arguments.get("join_plan"), list) else None
-                    inference = _context_pack_type_inference(
-                        pack,
-                        dataset_ids=arguments.get("dataset_ids"),
-                        max_columns=int(arguments.get("max_columns") or 60),
-                        max_samples=int(arguments.get("max_samples") or 80),
-                        join_plan=join_plan,
-                    )
-                    return {"status": "success", "inference": inference}
-
-                if name == "context_pack_infer_join_plan":
-                    pack = arguments.get("context_pack") or {}
-                    if not isinstance(pack, dict):
-                        return {"error": "context_pack must be an object"}
-                    inference = infer_join_plan_from_context_pack(
-                        pack,
-                        dataset_ids=arguments.get("dataset_ids"),
-                        max_joins=int(arguments.get("max_joins") or 12),
-                        max_edges=int(arguments.get("max_edges") or 30),
-                    )
-                    return {"status": "success", "inference": inference}
 
                 if name == "pipeline_create_from_plan":
                     plan_obj = arguments.get("plan") or {}
@@ -2999,7 +2551,7 @@ class PipelineMCPServer:
                 # Enterprise Enhancement: Helpful error for unknown tools
                 similar_tools = [
                     t for t in [
-                        "context_pack_build", "plan_new", "plan_add_input", "plan_add_join",
+                        "plan_new", "plan_add_input", "plan_add_join",
                         "plan_add_filter", "plan_add_cast", "plan_add_output", "plan_validate",
                         "plan_preview", "plan_execute", "pipeline_deploy_promote_build",
                     ]
