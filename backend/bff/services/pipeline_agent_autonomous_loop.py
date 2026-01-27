@@ -750,6 +750,9 @@ def _build_system_prompt(*, allowed_tools: List[str]) -> str:
         "- Create new class: ontology_new -> ontology_add_property (multiple) -> ontology_validate -> ontology_preview -> finish\n"
         "- Modify existing class: ontology_load -> ontology_add_property/ontology_update_property -> ontology_validate -> ontology_update\n"
         "- Do NOT call ontology_create/ontology_update unless explicitly asked to save to database.\n"
+        "- IMPORTANT: For ontology tasks, call action='finish' immediately after ontology_preview succeeds.\n"
+        "  Do NOT wait for user confirmation about primary keys or saving - just finish with the preview result.\n"
+        "  The user can request changes or saving in a follow-up message if needed.\n"
         "\n"
         "Available tools:\n"
         f"{tool_lines}\n"
@@ -1601,6 +1604,45 @@ async def run_pipeline_agent_mcp_autonomous(
                     "plan": None,
                     "preview": None,
                     "report": state.null_report,
+                    "questions": [],
+                    "validation_errors": [],
+                    "validation_warnings": list(tool_warnings),
+                    "planner": {"confidence": float(decision.confidence), "notes": notes},
+                    "llm": (
+                        {
+                            "provider": llm_meta.provider,
+                            "model": llm_meta.model,
+                            "cache_hit": llm_meta.cache_hit,
+                            "latency_ms": llm_meta.latency_ms,
+                        }
+                        if llm_meta
+                        else None
+                    ),
+                }
+
+            # Ontology-only task: finish with ontology result if present
+            if isinstance(state.working_ontology, dict) or isinstance(state.schema_inference, dict):
+                # Get final ontology preview if we have a working ontology
+                final_ontology = state.working_ontology
+                if not final_ontology and state.ontology_session_id:
+                    # Try to get preview
+                    preview_result = await _execute_tool_call(
+                        tool_name="ontology_preview",
+                        args={"session_id": state.ontology_session_id},
+                    )
+                    if isinstance(preview_result, dict) and preview_result.get("status") == "success":
+                        final_ontology = preview_result.get("ontology")
+
+                return {
+                    "run_id": run_id,
+                    "status": "success",
+                    "plan_id": None,
+                    "plan": None,
+                    "preview": None,
+                    "report": None,
+                    "ontology": final_ontology,
+                    "schema_inference": state.schema_inference,
+                    "mapping_suggestions": state.mapping_suggestions,
                     "questions": [],
                     "validation_errors": [],
                     "validation_warnings": list(tool_warnings),
