@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from mcp.server import Server
+from mcp.server import InitializationOptions, Server
 from mcp.server.stdio import stdio_server
 from mcp.types import ServerCapabilities, Tool, ToolsCapability
 
@@ -1354,9 +1354,14 @@ class OntologyMCPServer:
 
 # Entry point for running as MCP server
 async def main() -> None:
+    import os
     server = OntologyMCPServer()
     async with stdio_server() as (read, write):
-        init_options = InitializationOptions(capabilities=ServerCapabilities(tools=ToolsCapability()))
+        init_options = InitializationOptions(
+            server_name="ontology-mcp-server",
+            server_version=os.environ.get("SPICE_VERSION", "0.1.0"),
+            capabilities=ServerCapabilities(tools=ToolsCapability()),
+        )
         await server.server.run(read, write, init_options)
 
 
