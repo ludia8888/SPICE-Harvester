@@ -40,6 +40,7 @@ ACTION_WRITEBACK_DESIGN
 :maxdepth: 2
 :caption: Ontology
 
+ONTOLOGY_AGENT
 Ontology
 ontology_resource_design
 OntologyDeploy_runbook

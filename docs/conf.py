@@ -118,12 +118,12 @@ autodoc_typehints = "description"
 napoleon_google_docstring = True
 napoleon_numpy_docstring = True
 
-# AutoAPI configuration: index the whole repo's Python code without importing modules.
+# AutoAPI configuration: index backend Python packages with proper structure.
 #
-# Note: we include the repo root so standalone scripts (top-level *.py) are also tracked.
-# We aggressively ignore virtualenvs and build artifacts so local environments don't explode the doc build.
+# We target the backend directory specifically to preserve package hierarchy
+# (e.g., bff.services.ontology_agent_models instead of flat ontology_agent_models).
 autoapi_type = "python"
-autoapi_dirs = [str(REPO_ROOT)]
+autoapi_dirs = [str(BACKEND_ROOT)]
 autoapi_root = "reference/autoapi"
 # Keep AutoAPI's own index/toctree generation enabled so its pages are discoverable.
 # We avoid unwanted injection into the root toctree by explicitly linking to it in `docs/index.md`.
@@ -139,13 +139,22 @@ autoapi_ignore = [
     "*/env/*",
     "*/node_modules/*",
     "*/docs/_build/*",
+    "*/tests/*",
+    "*_test.py",
+    "*/test_*.py",
+    "*/conftest.py",
 ]
 autoapi_options = [
     "members",
     "undoc-members",
     "show-inheritance",
     "show-module-summary",
+    "imported-members",
 ]
+# Include class __init__ docstrings and show class content from both class and __init__
+autoapi_python_class_content = "both"
+# Keep the original module names without flattening
+autoapi_keep_files = True
 
 intersphinx_mapping = {
     "python": ("https://docs.python.org/3", None),
@@ -307,11 +316,11 @@ def _on_builder_inited(app) -> None:  # noqa: ANN001
 
 def _autodoc_process_docstring(app, what: str, name: str, obj, options, lines) -> None:  # noqa: ANN001
     """
-    AutoAPI emits docstrings as reStructuredText, but a lot of our repo docstrings are
-    Markdown-ish (``` fences, ** globs, etc) and can break the doc build.
+    Process docstrings for AutoAPI modules.
 
-    Enterprise goal: docs must build reliably without requiring every docstring to be
-    perfectly-valid RST. We keep docstrings readable by rendering them as literal blocks.
+    For docstrings that contain Markdown-style code fences (```), we wrap them
+    in a literal block to prevent RST parsing errors. Otherwise, we preserve
+    the docstring as-is to allow proper rendering of descriptions.
     """
     # AutoAPI emits this event with obj/options set to None (it is not using
     # Sphinx autodoc proper). Avoid mutating real autodoc docstrings.
@@ -320,9 +329,16 @@ def _autodoc_process_docstring(app, what: str, name: str, obj, options, lines) -
     if not lines:
         return
 
-    wrapped: list[str] = [".. code-block:: text", ""]
-    wrapped.extend([f"   {line.rstrip()}" for line in lines])
-    lines[:] = wrapped
+    # Only wrap in code-block if the docstring contains Markdown code fences
+    # that would break RST parsing
+    content = "\n".join(lines)
+    has_code_fence = "```" in content
+    has_problematic_chars = any(c in content for c in ["***", "___", "```"])
+
+    if has_code_fence or has_problematic_chars:
+        wrapped: list[str] = [".. code-block:: text", ""]
+        wrapped.extend([f"   {line.rstrip()}" for line in lines])
+        lines[:] = wrapped
 
 
 def _viewcode_find_source_clamped(app, modname: str):  # noqa: ANN001

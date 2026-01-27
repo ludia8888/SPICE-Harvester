@@ -198,6 +198,8 @@
 
 ## bff
 
+### `backend/bff/__init__.py`
+
 ### `backend/bff/dependencies.py`
 - **Functions**
   - `async get_terminus_service(oms_client)` (line 608): Get TerminusService with modern dependency injection
@@ -989,11 +991,15 @@
   - `async websocket_user_commands(websocket, user_id, client_id, token, manager)` (line 116): 사용자의 모든 Command 실시간 업데이트 구독
   - `async handle_client_message(websocket, client_id, message, manager)` (line 188): 클라이언트로부터 받은 메시지 처리
 
+### `backend/bff/schemas/__init__.py`
+
 ### `backend/bff/schemas/label_mapping_schema.py`
 - **Functions**
   - `get_label_mapping_schema()` (line 9): LabelMapping 클래스 스키마 반환
   - `get_label_mapping_properties()` (line 28): LabelMapping 클래스의 속성들 반환
   - `get_label_mapping_ontology()` (line 120): LabelMapping 전체 온톨로지 반환
+
+### `backend/bff/services/__init__.py`
 
 ### `backend/bff/services/adapter_service.py`
 - **Classes**
@@ -2463,6 +2469,8 @@
 
 ## mcp
 
+### `backend/mcp/__init__.py`
+
 ### `backend/mcp/context7_development.py`
 - **Functions**
   - `get_context7_developer()` (line 362): Get or create Context7 developer instance
@@ -2765,6 +2773,8 @@
     - `async get_command_status_service(container)` (line 148): Get command status service from container
     - `async get_processed_event_registry(container)` (line 209): no docstring
 
+### `backend/oms/entities/__init__.py`
+
 ### `backend/oms/entities/label_mapping.py`
 - **Classes**
   - `LabelMapping` (line 14): 레이블 매핑 엔티티
@@ -2837,6 +2847,8 @@
     - `get_redis_service(self)` (line 326): Get Redis service instance (can be None)
     - `get_command_status_service(self)` (line 330): Get command status service instance (can be None)
     - `get_elasticsearch_service(self)` (line 334): Get Elasticsearch service instance (can be None)
+
+### `backend/oms/middleware/__init__.py`
 
 ### `backend/oms/middleware/auth.py`
 - **Functions**
@@ -4564,6 +4576,8 @@
   - `get_type_inference_service()` (line 28): Get the configured type inference service.
   - `type_inference_dependency()` (line 49): FastAPI dependency function for type inference service.
   - `reset_type_inference_service()` (line 63): Reset the type inference service (mainly for testing).
+
+### `backend/shared/errors/__init__.py`
 
 ### `backend/shared/errors/enterprise_catalog.py`
 - **Functions**
@@ -6992,6 +7006,8 @@
     - `get_deletion_info(self, instance_state)` (line 863): 삭제된 인스턴스의 삭제 정보 반환
 
 ### `backend/shared/setup.py`
+
+### `backend/shared/testing/__init__.py`
 
 ### `backend/shared/testing/config_fixtures.py`
 - **Functions**

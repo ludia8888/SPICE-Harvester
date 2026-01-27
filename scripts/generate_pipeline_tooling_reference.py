@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """
-Generate repo docs that must stay in lockstep with the Pipeline Agent + Pipeline MCP tools.
+Generate repo docs that must stay in lockstep with the Agent + MCP tools.
 
 Outputs (auto-managed):
 - docs/reference/_generated/PIPELINE_MCP_TOOLS.md
 - docs/reference/_generated/PIPELINE_AGENT_ALLOWED_TOOLS.md
+- docs/reference/_generated/ONTOLOGY_MCP_TOOLS.md
+- docs/reference/_generated/ONTOLOGY_AGENT_ALLOWED_TOOLS.md
 
 Why AST parsing (instead of imports)?
 - Avoids import-time side effects (settings/env/optional deps).
@@ -23,15 +25,25 @@ from typing import Any, Dict, List, Sequence, Tuple
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+
+# Pipeline Agent sources
 PIPELINE_MCP_SERVER = REPO_ROOT / "backend" / "mcp" / "pipeline_mcp_server.py"
 PIPELINE_AGENT_LOOP = REPO_ROOT / "backend" / "bff" / "services" / "pipeline_agent_autonomous_loop.py"
+
+# Ontology Agent sources
+ONTOLOGY_MCP_SERVER = REPO_ROOT / "backend" / "mcp" / "ontology_mcp_server.py"
+ONTOLOGY_AGENT_LOOP = REPO_ROOT / "backend" / "bff" / "services" / "ontology_agent_autonomous_loop.py"
 
 OUT_DIR = REPO_ROOT / "docs" / "reference" / "_generated"
 OUT_MCP = OUT_DIR / "PIPELINE_MCP_TOOLS.md"
 OUT_ALLOWED = OUT_DIR / "PIPELINE_AGENT_ALLOWED_TOOLS.md"
+OUT_ONTOLOGY_MCP = OUT_DIR / "ONTOLOGY_MCP_TOOLS.md"
+OUT_ONTOLOGY_ALLOWED = OUT_DIR / "ONTOLOGY_AGENT_ALLOWED_TOOLS.md"
 
 BEGIN = "<!-- BEGIN AUTO-GENERATED: pipeline_tooling_reference -->"
 END = "<!-- END AUTO-GENERATED: pipeline_tooling_reference -->"
+BEGIN_ONTOLOGY = "<!-- BEGIN AUTO-GENERATED: ontology_tooling_reference -->"
+END_ONTOLOGY = "<!-- END AUTO-GENERATED: ontology_tooling_reference -->"
 
 
 def _run_git(args: List[str]) -> str | None:
@@ -145,6 +157,46 @@ def _tool_category(name: str) -> str:
     return "Other"
 
 
+def _ontology_tool_category(name: str) -> str:
+    if name in {"ontology_new", "ontology_load", "ontology_reset"}:
+        return "Initialization"
+    if name in {"ontology_set_class_meta", "ontology_set_abstract"}:
+        return "Class Metadata"
+    if name.startswith("ontology_add_property") or name.startswith("ontology_update_property") or \
+       name.startswith("ontology_remove_property") or name == "ontology_set_primary_key":
+        return "Property Management"
+    if "relationship" in name:
+        return "Relationship Management"
+    if name in {"ontology_infer_schema_from_data", "ontology_suggest_mappings"}:
+        return "Schema Inference"
+    if name.startswith("ontology_validate") or name.startswith("ontology_check"):
+        return "Validation"
+    if name in {"ontology_list_classes", "ontology_get_class", "ontology_search_classes"}:
+        return "Query"
+    if name in {"ontology_create", "ontology_update", "ontology_preview"}:
+        return "Save / Preview"
+    return "Other"
+
+
+def _extract_ontology_agent_allowed_tools() -> Tuple[str, ...]:
+    """Extract ontology agent allowed tools from the autonomous loop."""
+    if not ONTOLOGY_AGENT_LOOP.exists():
+        return ()
+    src = _read_text(ONTOLOGY_AGENT_LOOP)
+    tree = ast.parse(src, filename=str(ONTOLOGY_AGENT_LOOP))
+    try:
+        allowed = _literal_eval_from_annassign(
+            tree,
+            target_name="_ONTOLOGY_AGENT_ALLOWED_TOOLS",
+            expected_node=ast.Tuple,
+        )
+        if not isinstance(allowed, tuple) or not all(isinstance(item, str) for item in allowed):
+            return ()
+        return allowed
+    except ValueError:
+        return ()
+
+
 def _render_mcp_tools_md(tool_specs: List[Dict[str, Any]], *, updated_at: str, rev: str | None) -> str:
     by_cat: Dict[str, List[Dict[str, Any]]] = {}
     for tool in tool_specs:
@@ -238,6 +290,53 @@ def _render_agent_allowed_tools_md(
     return "\n".join(lines)
 
 
+def _render_ontology_allowed_tools_md(
+    allowed: Sequence[str],
+    *,
+    updated_at: str,
+    rev: str | None,
+) -> str:
+    """Render the ontology agent allowed tools markdown."""
+    allowed_set = {str(t).strip() for t in allowed if str(t).strip()}
+
+    # Group by category
+    by_cat: Dict[str, List[str]] = {}
+    for name in allowed_set:
+        cat = _ontology_tool_category(name)
+        by_cat.setdefault(cat, []).append(name)
+
+    lines: List[str] = []
+    lines.append("# Ontology Agent Tool Allowlist")
+    lines.append("")
+    lines.append(BEGIN_ONTOLOGY)
+    lines.append(f"> Updated: {updated_at}")
+    if rev:
+        lines.append(f"> Revision: `{rev}`")
+    lines.append(
+        "> Source of truth: `backend/bff/services/ontology_agent_autonomous_loop.py` (`_ONTOLOGY_AGENT_ALLOWED_TOOLS`)."
+    )
+    lines.append("> Regenerate: `python scripts/generate_pipeline_tooling_reference.py`")
+    lines.append("")
+    lines.append("## Allowed tools by category")
+    lines.append("")
+
+    for cat in ["Initialization", "Class Metadata", "Property Management", "Relationship Management",
+                "Schema Inference", "Validation", "Query", "Save / Preview", "Other"]:
+        if cat not in by_cat:
+            continue
+        lines.append(f"### {cat}")
+        lines.append("")
+        for name in sorted(by_cat[cat]):
+            lines.append(f"- `{name}`")
+        lines.append("")
+
+    lines.append(f"**Total: {len(allowed_set)} tools**")
+    lines.append("")
+    lines.append(END_ONTOLOGY)
+    lines.append("")
+    return "\n".join(lines)
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -259,7 +358,9 @@ def main() -> int:
 
     out_mcp = args.out_dir / OUT_MCP.name
     out_allowed = args.out_dir / OUT_ALLOWED.name
+    out_ontology_allowed = args.out_dir / OUT_ONTOLOGY_ALLOWED.name
 
+    # Pipeline tools
     tool_specs = _extract_mcp_tool_specs()
     allowed_tools = _extract_agent_allowed_tools()
     source_rev, updated_at = _detect_source_revision([PIPELINE_MCP_SERVER, PIPELINE_AGENT_LOOP])
@@ -271,9 +372,22 @@ def main() -> int:
         allowed_tools, mcp_tool_names=mcp_names, updated_at=updated_at, rev=source_rev
     )
 
+    # Ontology tools
+    ontology_allowed_tools = _extract_ontology_agent_allowed_tools()
+    ontology_rev, ontology_updated_at = _detect_source_revision([ONTOLOGY_AGENT_LOOP])
+    ontology_allowed_md = _render_ontology_allowed_tools_md(
+        ontology_allowed_tools, updated_at=ontology_updated_at, rev=ontology_rev
+    )
+
+    outputs = [
+        (out_mcp, mcp_md),
+        (out_allowed, allowed_md),
+        (out_ontology_allowed, ontology_allowed_md),
+    ]
+
     if args.check:
         missing: List[Path] = []
-        for path, content in [(out_mcp, mcp_md), (out_allowed, allowed_md)]:
+        for path, content in outputs:
             existing = path.read_text(encoding="utf-8") if path.exists() else ""
             if existing != content:
                 missing.append(path)
@@ -283,8 +397,8 @@ def main() -> int:
             return 1
         return 0
 
-    _write_if_changed(out_mcp, mcp_md)
-    _write_if_changed(out_allowed, allowed_md)
+    for path, content in outputs:
+        _write_if_changed(path, content)
     return 0
 
 
