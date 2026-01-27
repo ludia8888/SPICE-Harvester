@@ -389,6 +389,45 @@ def _normalize_aggregates(value: Any) -> Tuple[List[Dict[str, Any]], List[str]]:
     return out, warnings
 
 
+def _extract_spark_error_details(run: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Extract error details from a pipeline run's output_json.
+    Returns a dict with error_summary, errors list, and optional stack trace.
+    """
+    output_json = run.get("output_json") if isinstance(run.get("output_json"), dict) else {}
+
+    errors: List[str] = []
+    raw_errors = output_json.get("errors")
+    if isinstance(raw_errors, list):
+        errors = [str(item).strip() for item in raw_errors if str(item).strip()]
+
+    error_summary = output_json.get("error") or output_json.get("error_message") or ""
+    if isinstance(error_summary, dict):
+        error_summary = error_summary.get("message") or str(error_summary)
+
+    # Extract stack trace if available
+    stack_trace = output_json.get("stack_trace") or output_json.get("traceback") or ""
+
+    # Extract exception type if available
+    exception_type = output_json.get("exception_type") or output_json.get("error_type") or ""
+
+    result: Dict[str, Any] = {}
+    if errors:
+        result["errors"] = errors
+    if error_summary:
+        result["error_summary"] = str(error_summary)[:500]
+    if exception_type:
+        result["exception_type"] = str(exception_type)
+    if stack_trace:
+        result["stack_trace"] = str(stack_trace)[:2000]
+
+    # If no errors extracted but status is FAILED, add a generic message
+    if not result:
+        result["error_summary"] = "Job failed (no detailed error message available)"
+
+    return result
+
+
 class PipelineMCPServer:
     def __init__(self) -> None:
         self.server = Server("pipeline-mcp-server")
@@ -1140,6 +1179,47 @@ class PipelineMCPServer:
                         "required": ["pipeline_id", "build_job_id", "node_id", "db_name", "dataset_name"],
                     },
                 },
+                # ── Dataset Lookup Tools ──────────────────────────────────────────
+                {
+                    "name": "dataset_get_by_name",
+                    "description": "Look up a dataset by name and return its dataset_id. Use this when you have a dataset name but need the dataset_id for objectify or other tools.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "db_name": {"type": "string", "description": "Database name"},
+                            "dataset_name": {"type": "string", "description": "Dataset name to look up"},
+                            "branch": {"type": "string", "description": "Branch (default: main)"},
+                        },
+                        "required": ["db_name", "dataset_name"],
+                    },
+                },
+                {
+                    "name": "dataset_get_latest_version",
+                    "description": "Get the latest version of a dataset. Returns version_id, artifact_key, and schema info.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "dataset_id": {"type": "string", "description": "Dataset ID"},
+                        },
+                        "required": ["dataset_id"],
+                    },
+                },
+                {
+                    "name": "dataset_validate_columns",
+                    "description": "Validate that specified columns exist in a dataset's schema. Returns valid/invalid columns and available columns for suggestions. Use this before adding operations that reference specific columns.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "dataset_id": {"type": "string", "description": "Dataset ID to check"},
+                            "columns": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "List of column names to validate",
+                            },
+                        },
+                        "required": ["dataset_id", "columns"],
+                    },
+                },
                 # ── Debugging Tools ──────────────────────────────────────────
                 {
                     "name": "debug_get_errors",
@@ -1277,6 +1357,37 @@ class PipelineMCPServer:
                             "job_id": {"type": "string", "description": "Objectify job ID"},
                         },
                         "required": ["job_id"],
+                    },
+                },
+                {
+                    "name": "objectify_wait",
+                    "description": "Wait for an objectify job to complete. Polls the job status until completion, failure, or timeout. Returns final job status with results.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "job_id": {"type": "string", "description": "Objectify job ID to wait for"},
+                            "timeout_seconds": {"type": "number", "default": 300, "description": "Max seconds to wait (default: 300)"},
+                            "poll_interval_seconds": {"type": "number", "default": 2, "description": "Seconds between status checks (default: 2)"},
+                        },
+                        "required": ["job_id"],
+                    },
+                },
+                {
+                    "name": "ontology_query_instances",
+                    "description": "Query ontology instances by class type. Use this to verify objectify results by counting instances or retrieving sample data. Returns instance count and sample instances.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "db_name": {"type": "string", "description": "Database name"},
+                            "class_id": {"type": "string", "description": "Class type to query (e.g., 'Customer', 'Order')"},
+                            "limit": {"type": "integer", "default": 10, "description": "Max instances to return (default: 10, max: 100)"},
+                            "branch": {"type": "string", "description": "Branch (default: main)"},
+                            "filters": {
+                                "type": "object",
+                                "description": "Optional property filters (e.g., {\"status\": \"active\"})",
+                            },
+                        },
+                        "required": ["db_name", "class_id"],
                     },
                 },
             ]
@@ -2371,12 +2482,16 @@ class PipelineMCPServer:
                                         else {}
                                     )
                                     masked = mask_pii(sample_json)
-                                    return {
+                                    result = {
                                         "status": status_value.lower(),
                                         "job_id": job_id,
                                         "reused_existing_job": reused_existing,
                                         "preview": _trim_preview_payload(masked, max_rows=8),
                                     }
+                                    # Include error details for failed jobs
+                                    if status_value == "FAILED":
+                                        result.update(_extract_spark_error_details(selected_run))
+                                    return result
                                 return {
                                     "status": status_value.lower(),
                                     "job_id": job_id,
@@ -2416,12 +2531,16 @@ class PipelineMCPServer:
                                 else {}
                             )
                             masked = mask_pii(sample_json)
-                            return {
+                            result = {
                                 "status": status_value.lower(),
                                 "job_id": job_id,
                                 "reused_existing_job": reused_existing,
                                 "preview": _trim_preview_payload(masked, max_rows=8),
                             }
+                            # Include error details for failed jobs
+                            if status_value == "FAILED":
+                                result.update(_extract_spark_error_details(selected_run))
+                            return result
                         await asyncio.sleep(max(0.2, poll_s))
 
                     return {
@@ -2536,13 +2655,17 @@ class PipelineMCPServer:
                                     )
                                     trimmed = _trim_build_output(output_json, max_rows=6)
                                     masked = mask_pii(trimmed)
-                                    return {
+                                    result = {
                                         "status": status_value.lower(),
                                         "job_id": job_id,
                                         "reused_existing_job": reused_existing,
                                         "artifact_id": output_json.get("artifact_id") if isinstance(output_json, dict) else None,
                                         "output": masked,
                                     }
+                                    # Include error details for failed jobs
+                                    if status_value == "FAILED":
+                                        result.update(_extract_spark_error_details(selected_run))
+                                    return result
                                 return {
                                     "status": status_value.lower(),
                                     "job_id": job_id,
@@ -2579,13 +2702,17 @@ class PipelineMCPServer:
                             output_json = selected_run.get("output_json") if isinstance(selected_run.get("output_json"), dict) else {}
                             trimmed = _trim_build_output(output_json, max_rows=6)
                             masked = mask_pii(trimmed)
-                            return {
+                            result = {
                                 "status": status_value.lower(),
                                 "job_id": job_id,
                                 "reused_existing_job": reused_existing,
                                 "artifact_id": output_json.get("artifact_id") if isinstance(output_json, dict) else None,
                                 "output": masked,
                             }
+                            # Include error details for failed jobs
+                            if status_value == "FAILED":
+                                result.update(_extract_spark_error_details(selected_run))
+                            return result
                         await asyncio.sleep(max(0.2, poll_s))
 
                     return {
@@ -2737,13 +2864,30 @@ class PipelineMCPServer:
                                 }
                         return resp
                     data = resp.get("data") if isinstance(resp.get("data"), dict) else {}
+                    outputs = data.get("outputs") or []
+
+                    # Extract dataset_ids from outputs for easier downstream use
+                    dataset_ids: List[str] = []
+                    dataset_version_ids: List[str] = []
+                    for output in outputs:
+                        if isinstance(output, dict):
+                            ds_id = str(output.get("dataset_id") or "").strip()
+                            dv_id = str(output.get("dataset_version_id") or "").strip()
+                            if ds_id:
+                                dataset_ids.append(ds_id)
+                            if dv_id:
+                                dataset_version_ids.append(dv_id)
+
                     return {
                         "status": "success",
                         "pipeline_id": data.get("pipeline_id") or pipeline_id,
                         "job_id": data.get("job_id"),
                         "deployed_commit_id": data.get("deployed_commit_id"),
                         "artifact_id": data.get("artifact_id"),
-                        "outputs": data.get("outputs"),
+                        "outputs": outputs,
+                        # Critical: Expose dataset_ids at top level for Agent to easily chain to objectify
+                        "dataset_ids": dataset_ids,
+                        "dataset_version_ids": dataset_version_ids,
                         "definition_included": bool(definition_json),
                         "pipeline_spec_commit_id": pipeline_spec_commit_id,
                     }
@@ -3206,6 +3350,252 @@ class PipelineMCPServer:
                         "rows_failed": job.rows_failed,
                     }
 
+                if name == "objectify_wait":
+                    job_id = str(arguments.get("job_id") or "").strip()
+                    timeout_seconds = float(arguments.get("timeout_seconds") or 300)
+                    poll_interval = float(arguments.get("poll_interval_seconds") or 2)
+
+                    if not job_id:
+                        return _missing_required_params("objectify_wait", ["job_id"], arguments)
+
+                    objectify_registry = await self._ensure_objectify_registry()
+
+                    # Poll until completion or timeout
+                    elapsed = 0.0
+                    final_statuses = {"completed", "failed", "cancelled"}
+
+                    while elapsed < timeout_seconds:
+                        job = await objectify_registry.get_objectify_job(job_id=job_id)
+
+                        if not job:
+                            return {"status": "error", "error": f"Objectify job not found: {job_id}"}
+
+                        job_status = (job.status or "").lower()
+
+                        if job_status in final_statuses:
+                            return {
+                                "status": "success" if job_status == "completed" else "failed",
+                                "job_id": job.job_id,
+                                "job_status": job.status,
+                                "dataset_id": job.dataset_id,
+                                "target_class_id": job.target_class_id,
+                                "created_at": job.created_at.isoformat() if job.created_at else None,
+                                "started_at": job.started_at.isoformat() if job.started_at else None,
+                                "completed_at": job.completed_at.isoformat() if job.completed_at else None,
+                                "error": job.error,
+                                "rows_processed": job.rows_processed,
+                                "rows_failed": job.rows_failed,
+                                "wait_elapsed_seconds": elapsed,
+                            }
+
+                        await asyncio.sleep(poll_interval)
+                        elapsed += poll_interval
+
+                    # Timeout reached
+                    job = await objectify_registry.get_objectify_job(job_id=job_id)
+                    return {
+                        "status": "timeout",
+                        "error": f"Objectify job did not complete within {timeout_seconds}s",
+                        "job_id": job_id,
+                        "job_status": job.status if job else "unknown",
+                        "wait_elapsed_seconds": elapsed,
+                        "hint": "Job may still be running. Call objectify_wait again or use objectify_get_status to check.",
+                    }
+
+                if name == "ontology_query_instances":
+                    db_name = str(arguments.get("db_name") or "").strip()
+                    class_id = str(arguments.get("class_id") or "").strip()
+                    limit = int(arguments.get("limit") or 10)
+                    limit = max(1, min(limit, 100))
+                    branch = str(arguments.get("branch") or "main").strip()
+                    filters = arguments.get("filters") or {}
+
+                    if not db_name or not class_id:
+                        return _missing_required_params("ontology_query_instances", ["db_name", "class_id"], arguments)
+
+                    # Build simple graph query request
+                    query_body: Dict[str, Any] = {
+                        "class_type": class_id,
+                        "limit": limit,
+                    }
+                    if filters and isinstance(filters, dict):
+                        query_body["filters"] = filters
+
+                    try:
+                        resp = await _bff_json(
+                            "POST",
+                            f"/graph-query/{db_name}/simple",
+                            json_body=query_body,
+                            params={"base_branch": branch},
+                            timeout_seconds=30.0,
+                        )
+
+                        if resp.get("error"):
+                            return {
+                                "status": "error",
+                                "error": resp.get("error"),
+                                "db_name": db_name,
+                                "class_id": class_id,
+                            }
+
+                        data = resp.get("data") if isinstance(resp.get("data"), dict) else resp
+                        instances = data.get("instances") or data.get("results") or data.get("rows") or []
+                        total_count = data.get("total_count") or data.get("count") or len(instances)
+
+                        # Mask PII in sample instances
+                        masked_instances = mask_pii(instances[:limit]) if instances else []
+
+                        return {
+                            "status": "success",
+                            "db_name": db_name,
+                            "class_id": class_id,
+                            "branch": branch,
+                            "total_count": total_count,
+                            "returned_count": len(masked_instances),
+                            "instances": masked_instances,
+                        }
+                    except Exception as exc:
+                        logger.warning("ontology_query_instances failed: %s", exc)
+                        return {
+                            "status": "error",
+                            "error": f"Query failed: {str(exc)[:200]}",
+                            "db_name": db_name,
+                            "class_id": class_id,
+                        }
+
+                # ── Dataset Lookup Tools ─────────────────────────────────────
+                if name == "dataset_get_by_name":
+                    db_name = str(arguments.get("db_name") or "").strip()
+                    dataset_name = str(arguments.get("dataset_name") or "").strip()
+                    branch = str(arguments.get("branch") or "main").strip()
+
+                    if not db_name or not dataset_name:
+                        return _missing_required_params("dataset_get_by_name", ["db_name", "dataset_name"], arguments)
+
+                    dataset_registry, _ = await self._ensure_registries()
+                    dataset = await dataset_registry.get_dataset_by_name(
+                        db_name=db_name,
+                        name=dataset_name,
+                        branch=branch,
+                    )
+
+                    if not dataset:
+                        return {
+                            "status": "not_found",
+                            "error": f"Dataset not found: {dataset_name} in {db_name}/{branch}",
+                            "db_name": db_name,
+                            "dataset_name": dataset_name,
+                            "branch": branch,
+                        }
+
+                    return {
+                        "status": "success",
+                        "dataset_id": dataset.dataset_id,
+                        "db_name": dataset.db_name,
+                        "name": dataset.name,
+                        "branch": dataset.branch,
+                        "source_type": dataset.source_type,
+                        "schema": dataset.schema_json,
+                        "created_at": dataset.created_at.isoformat() if dataset.created_at else None,
+                    }
+
+                if name == "dataset_get_latest_version":
+                    dataset_id = str(arguments.get("dataset_id") or "").strip()
+
+                    if not dataset_id:
+                        return _missing_required_params("dataset_get_latest_version", ["dataset_id"], arguments)
+
+                    dataset_registry, _ = await self._ensure_registries()
+                    version = await dataset_registry.get_latest_version(dataset_id=dataset_id)
+
+                    if not version:
+                        return {
+                            "status": "not_found",
+                            "error": f"No version found for dataset: {dataset_id}",
+                            "dataset_id": dataset_id,
+                        }
+
+                    return {
+                        "status": "success",
+                        "version_id": version.version_id,
+                        "dataset_id": version.dataset_id,
+                        "artifact_key": version.artifact_key,
+                        "lakefs_commit_id": version.lakefs_commit_id,
+                        "row_count": version.row_count,
+                        "created_at": version.created_at.isoformat() if version.created_at else None,
+                    }
+
+                if name == "dataset_validate_columns":
+                    dataset_id = str(arguments.get("dataset_id") or "").strip()
+                    columns = arguments.get("columns") or []
+
+                    if not dataset_id:
+                        return _missing_required_params("dataset_validate_columns", ["dataset_id"], arguments)
+                    if not columns or not isinstance(columns, list):
+                        return _missing_required_params("dataset_validate_columns", ["columns"], arguments)
+
+                    # Normalize column names to check
+                    columns_to_check = [str(c).strip() for c in columns if str(c).strip()]
+
+                    dataset_registry, _ = await self._ensure_registries()
+                    dataset = await dataset_registry.get_dataset(dataset_id=dataset_id)
+
+                    if not dataset:
+                        return {
+                            "status": "error",
+                            "error": f"Dataset not found: {dataset_id}",
+                            "dataset_id": dataset_id,
+                        }
+
+                    # Get schema from dataset
+                    schema_json = dataset.schema_json or {}
+                    schema_columns = schema_json.get("columns") or schema_json.get("fields") or []
+
+                    # Extract column names from schema
+                    available_columns: List[str] = []
+                    for col in schema_columns:
+                        if isinstance(col, dict):
+                            col_name = col.get("name") or col.get("column_name") or ""
+                            if col_name:
+                                available_columns.append(str(col_name))
+                        elif isinstance(col, str):
+                            available_columns.append(col)
+
+                    # Validate columns
+                    valid_columns: List[str] = []
+                    invalid_columns: List[str] = []
+                    suggestions: Dict[str, List[str]] = {}
+
+                    available_lower = {c.lower(): c for c in available_columns}
+
+                    for col in columns_to_check:
+                        col_lower = col.lower()
+                        if col in available_columns:
+                            valid_columns.append(col)
+                        elif col_lower in available_lower:
+                            # Case mismatch - suggest the correct case
+                            valid_columns.append(col)
+                            suggestions[col] = [available_lower[col_lower]]
+                        else:
+                            invalid_columns.append(col)
+                            # Find similar column names for suggestions
+                            similar = [
+                                c for c in available_columns
+                                if col_lower in c.lower() or c.lower() in col_lower
+                            ][:3]
+                            if similar:
+                                suggestions[col] = similar
+
+                    return {
+                        "status": "valid" if not invalid_columns else "invalid",
+                        "dataset_id": dataset_id,
+                        "valid_columns": valid_columns,
+                        "invalid_columns": invalid_columns,
+                        "suggestions": suggestions if suggestions else None,
+                        "available_columns": available_columns[:50],  # Limit to first 50
+                        "total_available_columns": len(available_columns),
+                    }
+
                 # Enterprise Enhancement: Helpful error for unknown tools
                 similar_tools = [
                     t for t in [
@@ -3214,6 +3604,9 @@ class PipelineMCPServer:
                         "plan_preview", "plan_execute", "pipeline_deploy_promote_build",
                         "objectify_suggest_mapping", "objectify_create_mapping_spec",
                         "objectify_list_mapping_specs", "objectify_run", "objectify_get_status",
+                        "objectify_wait", "ontology_query_instances",
+                        "dataset_get_by_name", "dataset_get_latest_version",
+                        "dataset_validate_columns",
                     ]
                     if name.lower() in t.lower() or t.lower() in name.lower()
                 ]

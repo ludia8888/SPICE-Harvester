@@ -4912,6 +4912,8 @@ async def deploy_pipeline(
                     {
                         "node_id": item.get("node_id"),
                         "dataset_name": staged_dataset_name,
+                        "dataset_id": dataset.dataset_id,  # Critical: Return dataset_id for downstream tools
+                        "dataset_version_id": dataset_version.version_id,  # Critical: Return version_id for objectify
                         "artifact_key": promoted_artifact_key,
                         "row_count": row_count_int,
                         "delta_row_count": delta_row_count_int,
