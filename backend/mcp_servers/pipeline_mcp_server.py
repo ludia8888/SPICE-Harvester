@@ -38,6 +38,8 @@ from shared.config.settings import get_settings  # noqa: E402
 from shared.services.registries.dataset_profile_registry import DatasetProfileRegistry  # noqa: E402
 from shared.services.registries.dataset_registry import DatasetRegistry  # noqa: E402
 from shared.services.registries.pipeline_registry import PipelineRegistry  # noqa: E402
+from shared.services.registries.objectify_registry import ObjectifyRegistry  # noqa: E402
+from shared.models.objectify_job import ObjectifyJob  # noqa: E402
 from shared.services.pipeline.pipeline_executor import PipelineExecutor  # noqa: E402
 from shared.services.pipeline.pipeline_preview_inspector import inspect_preview  # noqa: E402
 from shared.services.pipeline.pipeline_plan_builder import (  # noqa: E402
@@ -393,6 +395,7 @@ class PipelineMCPServer:
         self._dataset_registry: Optional[DatasetRegistry] = None
         self._profile_registry: Optional[DatasetProfileRegistry] = None
         self._pipeline_registry: Optional[PipelineRegistry] = None
+        self._objectify_registry: Optional[ObjectifyRegistry] = None
         self._setup_handlers()
 
     async def _ensure_registries(self) -> tuple[DatasetRegistry, DatasetProfileRegistry]:
@@ -409,6 +412,12 @@ class PipelineMCPServer:
             self._pipeline_registry = PipelineRegistry()
             await self._pipeline_registry.initialize()
         return self._pipeline_registry
+
+    async def _ensure_objectify_registry(self) -> ObjectifyRegistry:
+        if self._objectify_registry is None:
+            self._objectify_registry = ObjectifyRegistry()
+            await self._objectify_registry.initialize()
+        return self._objectify_registry
 
     def _setup_handlers(self) -> None:
         @self.server.list_tools()
@@ -1185,6 +1194,89 @@ class PipelineMCPServer:
                             "check_joins": {"type": "boolean", "default": True, "description": "Validate join key compatibility"},
                         },
                         "required": ["plan"],
+                    },
+                },
+                # ── Objectify Tools (Dataset → Ontology Instance Transformation) ──────────────────
+                {
+                    "name": "objectify_suggest_mapping",
+                    "description": "Suggest field mappings from dataset columns to ontology class properties. Uses schema matching and naming heuristics. Call this before creating a mapping spec.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "dataset_id": {"type": "string", "description": "Dataset ID to map from"},
+                            "target_class_id": {"type": "string", "description": "Target ontology class ID (e.g., 'Customer', 'Order')"},
+                            "db_name": {"type": "string", "description": "Database name"},
+                            "branch": {"type": "string", "description": "Ontology branch (default: main)"},
+                        },
+                        "required": ["dataset_id", "target_class_id", "db_name"],
+                    },
+                },
+                {
+                    "name": "objectify_create_mapping_spec",
+                    "description": "Create a mapping specification that defines how dataset columns map to ontology class properties. Required before running objectify.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "dataset_id": {"type": "string", "description": "Dataset ID"},
+                            "target_class_id": {"type": "string", "description": "Target ontology class ID"},
+                            "mappings": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "source_field": {"type": "string"},
+                                        "target_field": {"type": "string"},
+                                    },
+                                    "required": ["source_field", "target_field"],
+                                },
+                                "description": "List of column-to-property mappings",
+                            },
+                            "db_name": {"type": "string", "description": "Database name"},
+                            "dataset_branch": {"type": "string", "description": "Dataset branch"},
+                            "auto_sync": {"type": "boolean", "default": True, "description": "Auto-sync on new dataset versions"},
+                            "options": {"type": "object", "description": "Additional options (ontology_branch, batch_size, max_rows)"},
+                        },
+                        "required": ["dataset_id", "target_class_id", "mappings", "db_name"],
+                    },
+                },
+                {
+                    "name": "objectify_list_mapping_specs",
+                    "description": "List existing mapping specifications for a dataset.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "dataset_id": {"type": "string", "description": "Dataset ID"},
+                            "db_name": {"type": "string", "description": "Database name"},
+                            "limit": {"type": "integer", "default": 50, "description": "Max results (default 50)"},
+                        },
+                        "required": ["dataset_id"],
+                    },
+                },
+                {
+                    "name": "objectify_run",
+                    "description": "Execute objectify transformation to convert dataset rows into ontology instances. Requires an active mapping spec.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "dataset_id": {"type": "string", "description": "Dataset ID"},
+                            "mapping_spec_id": {"type": "string", "description": "Mapping spec ID (optional if dataset has active mapping)"},
+                            "dataset_version_id": {"type": "string", "description": "Specific dataset version (optional, uses latest)"},
+                            "db_name": {"type": "string", "description": "Database name"},
+                            "max_rows": {"type": "integer", "description": "Max rows to process"},
+                            "batch_size": {"type": "integer", "description": "Batch size for processing"},
+                        },
+                        "required": ["dataset_id", "db_name"],
+                    },
+                },
+                {
+                    "name": "objectify_get_status",
+                    "description": "Get the status of an objectify job.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "job_id": {"type": "string", "description": "Objectify job ID"},
+                        },
+                        "required": ["job_id"],
                     },
                 },
             ]
@@ -2789,12 +2881,339 @@ class PipelineMCPServer:
                         "edge_count": len(edges),
                     }
 
+                # ── Objectify Tool Handlers ──────────────────────────────────────
+                if name == "objectify_suggest_mapping":
+                    dataset_id = str(arguments.get("dataset_id") or "").strip()
+                    target_class_id = str(arguments.get("target_class_id") or "").strip()
+                    db_name = str(arguments.get("db_name") or "").strip()
+                    branch = str(arguments.get("branch") or "main").strip()
+
+                    if not dataset_id or not target_class_id or not db_name:
+                        return _missing_required_params("objectify_suggest_mapping", ["dataset_id", "target_class_id", "db_name"], arguments)
+
+                    dataset_registry, _ = await self._ensure_registries()
+                    dataset = await dataset_registry.get_dataset(dataset_id)
+                    if not dataset:
+                        return {"status": "error", "error": f"Dataset not found: {dataset_id}"}
+
+                    # Get dataset schema columns
+                    schema_json = dataset.schema_json or {}
+                    columns = schema_json.get("columns", [])
+                    source_columns = []
+                    source_types: Dict[str, str] = {}
+                    for col in columns:
+                        if isinstance(col, dict):
+                            col_name = str(col.get("name") or col.get("column") or "").strip()
+                            col_type = str(col.get("type") or col.get("data_type") or "xsd:string").strip()
+                        else:
+                            col_name = str(col).strip()
+                            col_type = "xsd:string"
+                        if col_name:
+                            source_columns.append(col_name)
+                            source_types[col_name] = col_type
+
+                    # Fetch target class properties from OMS
+                    target_properties: List[Dict[str, Any]] = []
+                    try:
+                        base_url = _bff_api_base_url()
+                        async with httpx.AsyncClient(timeout=30.0) as client:
+                            resp = await client.get(
+                                f"{base_url}/databases/{db_name}/ontology/classes/{target_class_id}",
+                                params={"branch": branch},
+                                headers={"X-Admin-Token": os.environ.get("ADMIN_TOKEN", "")},
+                            )
+                            if resp.status_code == 200:
+                                data = resp.json().get("data", {})
+                                target_properties = data.get("properties", [])
+                    except Exception as exc:
+                        logger.warning("Failed to fetch class properties: %s", exc)
+
+                    # Build suggested mappings using name matching heuristics
+                    suggestions: List[Dict[str, Any]] = []
+                    target_prop_names = {str(p.get("name") or "").strip().lower(): p for p in target_properties if isinstance(p, dict)}
+
+                    for src_col in source_columns:
+                        src_lower = src_col.lower().replace("_", "").replace("-", "")
+                        best_match = None
+                        confidence = 0.0
+
+                        for tgt_name, tgt_prop in target_prop_names.items():
+                            tgt_lower = tgt_name.replace("_", "").replace("-", "")
+
+                            # Exact match
+                            if src_lower == tgt_lower:
+                                best_match = tgt_prop.get("name")
+                                confidence = 1.0
+                                break
+                            # Contains match
+                            if src_lower in tgt_lower or tgt_lower in src_lower:
+                                if confidence < 0.7:
+                                    best_match = tgt_prop.get("name")
+                                    confidence = 0.7
+                            # Common suffixes (id, name, date, etc.)
+                            for suffix in ["id", "name", "date", "time", "count", "amount", "price", "email", "phone"]:
+                                if src_lower.endswith(suffix) and tgt_lower.endswith(suffix):
+                                    if confidence < 0.5:
+                                        best_match = tgt_prop.get("name")
+                                        confidence = 0.5
+
+                        suggestions.append({
+                            "source_field": src_col,
+                            "source_type": source_types.get(src_col, "xsd:string"),
+                            "target_field": best_match,
+                            "target_type": target_prop_names.get((best_match or "").lower(), {}).get("type"),
+                            "confidence": confidence,
+                            "auto_mapped": best_match is not None,
+                        })
+
+                    mapped_count = sum(1 for s in suggestions if s.get("auto_mapped"))
+                    return {
+                        "status": "success",
+                        "dataset_id": dataset_id,
+                        "target_class_id": target_class_id,
+                        "suggestions": suggestions,
+                        "source_columns": source_columns,
+                        "target_properties": [p.get("name") for p in target_properties if isinstance(p, dict)],
+                        "summary": {
+                            "total_source_columns": len(source_columns),
+                            "total_target_properties": len(target_properties),
+                            "auto_mapped": mapped_count,
+                            "unmapped": len(source_columns) - mapped_count,
+                        },
+                    }
+
+                if name == "objectify_create_mapping_spec":
+                    dataset_id = str(arguments.get("dataset_id") or "").strip()
+                    target_class_id = str(arguments.get("target_class_id") or "").strip()
+                    mappings = arguments.get("mappings") or []
+                    db_name = str(arguments.get("db_name") or "").strip()
+                    dataset_branch = str(arguments.get("dataset_branch") or "").strip() or None
+                    auto_sync = bool(arguments.get("auto_sync", True))
+                    options = arguments.get("options") or {}
+
+                    if not dataset_id or not target_class_id or not mappings or not db_name:
+                        return _missing_required_params("objectify_create_mapping_spec", ["dataset_id", "target_class_id", "mappings", "db_name"], arguments)
+
+                    # Validate mappings format
+                    normalized_mappings: List[Dict[str, str]] = []
+                    for m in mappings:
+                        if not isinstance(m, dict):
+                            continue
+                        src = str(m.get("source_field") or "").strip()
+                        tgt = str(m.get("target_field") or "").strip()
+                        if src and tgt:
+                            normalized_mappings.append({"source_field": src, "target_field": tgt})
+
+                    if not normalized_mappings:
+                        return {"status": "error", "error": "No valid mappings provided"}
+
+                    # Get dataset info
+                    dataset_registry, _ = await self._ensure_registries()
+                    dataset = await dataset_registry.get_dataset(dataset_id)
+                    if not dataset:
+                        return {"status": "error", "error": f"Dataset not found: {dataset_id}"}
+
+                    objectify_registry = await self._ensure_objectify_registry()
+
+                    # Create mapping spec
+                    from uuid import uuid4
+                    from shared.utils.schema_hash import compute_schema_hash
+
+                    schema_json = dataset.schema_json or {}
+                    schema_columns = schema_json.get("columns", [])
+                    schema_hash = compute_schema_hash(schema_columns) if schema_columns else None
+
+                    mapping_spec = await objectify_registry.create_mapping_spec(
+                        dataset_id=dataset_id,
+                        dataset_branch=dataset_branch or dataset.branch,
+                        artifact_output_name=dataset.name,
+                        schema_hash=schema_hash,
+                        target_class_id=target_class_id,
+                        mappings=normalized_mappings,
+                        auto_sync=auto_sync,
+                        status="ACTIVE",
+                        options=options,
+                    )
+
+                    return {
+                        "status": "success",
+                        "mapping_spec_id": mapping_spec.mapping_spec_id,
+                        "dataset_id": dataset_id,
+                        "target_class_id": target_class_id,
+                        "mappings_count": len(normalized_mappings),
+                        "auto_sync": auto_sync,
+                        "schema_hash": schema_hash,
+                        "message": f"Mapping spec created. Use objectify_run to execute transformation.",
+                    }
+
+                if name == "objectify_list_mapping_specs":
+                    dataset_id = str(arguments.get("dataset_id") or "").strip()
+                    limit = int(arguments.get("limit") or 50)
+
+                    if not dataset_id:
+                        return _missing_required_params("objectify_list_mapping_specs", ["dataset_id"], arguments)
+
+                    objectify_registry = await self._ensure_objectify_registry()
+                    specs = await objectify_registry.list_mapping_specs(dataset_id=dataset_id, limit=limit)
+
+                    return {
+                        "status": "success",
+                        "dataset_id": dataset_id,
+                        "mapping_specs": [
+                            {
+                                "mapping_spec_id": s.mapping_spec_id,
+                                "target_class_id": s.target_class_id,
+                                "status": s.status,
+                                "auto_sync": s.auto_sync,
+                                "version": s.version,
+                                "created_at": s.created_at.isoformat() if s.created_at else None,
+                            }
+                            for s in specs
+                        ],
+                        "count": len(specs),
+                    }
+
+                if name == "objectify_run":
+                    dataset_id = str(arguments.get("dataset_id") or "").strip()
+                    mapping_spec_id = str(arguments.get("mapping_spec_id") or "").strip() or None
+                    dataset_version_id = str(arguments.get("dataset_version_id") or "").strip() or None
+                    db_name = str(arguments.get("db_name") or "").strip()
+                    max_rows = arguments.get("max_rows")
+                    batch_size = arguments.get("batch_size")
+
+                    if not dataset_id or not db_name:
+                        return _missing_required_params("objectify_run", ["dataset_id", "db_name"], arguments)
+
+                    dataset_registry, _ = await self._ensure_registries()
+                    objectify_registry = await self._ensure_objectify_registry()
+
+                    # Get dataset
+                    dataset = await dataset_registry.get_dataset(dataset_id)
+                    if not dataset:
+                        return {"status": "error", "error": f"Dataset not found: {dataset_id}"}
+
+                    # Get or find mapping spec
+                    mapping_spec = None
+                    if mapping_spec_id:
+                        mapping_spec = await objectify_registry.get_mapping_spec(mapping_spec_id=mapping_spec_id)
+                    else:
+                        # Find active mapping spec for dataset
+                        specs = await objectify_registry.list_mapping_specs(dataset_id=dataset_id, limit=10)
+                        active_specs = [s for s in specs if s.status == "ACTIVE" and s.auto_sync]
+                        if active_specs:
+                            mapping_spec = await objectify_registry.get_mapping_spec(mapping_spec_id=active_specs[0].mapping_spec_id)
+
+                    if not mapping_spec:
+                        return {
+                            "status": "error",
+                            "error": "No active mapping spec found for dataset",
+                            "hint": "Use objectify_create_mapping_spec to create a mapping first",
+                        }
+
+                    # Get dataset version
+                    if dataset_version_id:
+                        version = await dataset_registry.get_version(version_id=dataset_version_id)
+                    else:
+                        version = await dataset_registry.get_latest_version(dataset_id=dataset_id)
+
+                    if not version:
+                        return {"status": "error", "error": "No dataset version found"}
+
+                    # Create objectify job
+                    from uuid import uuid4
+
+                    job_id = str(uuid4())
+                    dedupe_key = objectify_registry.build_dedupe_key(
+                        dataset_id=dataset_id,
+                        dataset_branch=dataset.branch,
+                        mapping_spec_id=mapping_spec.mapping_spec_id,
+                        mapping_spec_version=mapping_spec.version,
+                        dataset_version_id=version.version_id,
+                        artifact_id=None,
+                        artifact_output_name=dataset.name,
+                    )
+
+                    # Check for existing job with same dedupe key
+                    existing = await objectify_registry.get_objectify_job_by_dedupe_key(dedupe_key=dedupe_key)
+                    if existing:
+                        return {
+                            "status": "already_exists",
+                            "job_id": existing.job_id,
+                            "job_status": existing.status,
+                            "message": "An objectify job already exists for this dataset version and mapping spec",
+                        }
+
+                    options: Dict[str, Any] = dict(mapping_spec.options or {})
+                    if max_rows is not None:
+                        options["max_rows"] = int(max_rows)
+                    if batch_size is not None:
+                        options["batch_size"] = int(batch_size)
+
+                    job = ObjectifyJob(
+                        job_id=job_id,
+                        db_name=db_name,
+                        dataset_id=dataset_id,
+                        dataset_version_id=version.version_id,
+                        artifact_output_name=dataset.name,
+                        dedupe_key=dedupe_key,
+                        dataset_branch=dataset.branch,
+                        artifact_key=version.artifact_key or "",
+                        mapping_spec_id=mapping_spec.mapping_spec_id,
+                        mapping_spec_version=mapping_spec.version,
+                        target_class_id=mapping_spec.target_class_id,
+                        ontology_branch=options.get("ontology_branch"),
+                        max_rows=options.get("max_rows"),
+                        batch_size=options.get("batch_size"),
+                        allow_partial=bool(options.get("allow_partial")),
+                        options=options,
+                    )
+
+                    await objectify_registry.enqueue_objectify_job(job=job)
+
+                    return {
+                        "status": "success",
+                        "job_id": job_id,
+                        "dataset_id": dataset_id,
+                        "dataset_version_id": version.version_id,
+                        "mapping_spec_id": mapping_spec.mapping_spec_id,
+                        "target_class_id": mapping_spec.target_class_id,
+                        "message": "Objectify job enqueued. Use objectify_get_status to check progress.",
+                    }
+
+                if name == "objectify_get_status":
+                    job_id = str(arguments.get("job_id") or "").strip()
+
+                    if not job_id:
+                        return _missing_required_params("objectify_get_status", ["job_id"], arguments)
+
+                    objectify_registry = await self._ensure_objectify_registry()
+                    job = await objectify_registry.get_objectify_job(job_id=job_id)
+
+                    if not job:
+                        return {"status": "error", "error": f"Objectify job not found: {job_id}"}
+
+                    return {
+                        "status": "success",
+                        "job_id": job.job_id,
+                        "job_status": job.status,
+                        "dataset_id": job.dataset_id,
+                        "target_class_id": job.target_class_id,
+                        "created_at": job.created_at.isoformat() if job.created_at else None,
+                        "started_at": job.started_at.isoformat() if job.started_at else None,
+                        "completed_at": job.completed_at.isoformat() if job.completed_at else None,
+                        "error": job.error,
+                        "rows_processed": job.rows_processed,
+                        "rows_failed": job.rows_failed,
+                    }
+
                 # Enterprise Enhancement: Helpful error for unknown tools
                 similar_tools = [
                     t for t in [
                         "plan_new", "plan_add_input", "plan_add_join",
                         "plan_add_filter", "plan_add_cast", "plan_add_output", "plan_validate",
                         "plan_preview", "plan_execute", "pipeline_deploy_promote_build",
+                        "objectify_suggest_mapping", "objectify_create_mapping_spec",
+                        "objectify_list_mapping_specs", "objectify_run", "objectify_get_status",
                     ]
                     if name.lower() in t.lower() or t.lower() in name.lower()
                 ]

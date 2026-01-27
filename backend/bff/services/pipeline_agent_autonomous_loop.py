@@ -1467,6 +1467,9 @@ async def run_pipeline_agent_mcp_autonomous(
                     suggested_tools.append("plan_add_join")  # Multiple datasets -> likely need join
                 if planner_hints and planner_hints.get("ontology_mode"):
                     suggested_tools = ["ontology_new", "ontology_infer_schema_from_data"]
+                elif planner_hints and planner_hints.get("objectify_mode"):
+                    # User wants to map dataset to ontology instances
+                    suggested_tools = ["objectify_suggest_mapping", "objectify_create_mapping_spec", "objectify_run"]
                 else:
                     suggested_tools.extend(["plan_add_transform", "plan_add_output"])
                 state.last_observation = _mask_tool_observation(
@@ -1598,6 +1601,21 @@ async def run_pipeline_agent_mcp_autonomous(
                 if tool_name in {"ontology_create", "ontology_update", "ontology_add_property",
                                  "ontology_add_relationship", "ontology_set_primary_key"}:
                     logger.info("ontology tool executed: %s status=%s", tool_name,
+                               payload.get("status") if isinstance(payload, dict) else "unknown")
+
+                state.last_observation = _mask_tool_observation(
+                    payload if isinstance(payload, dict) else {"result": payload}
+                )
+                return state.last_observation
+
+            # ==================== Objectify Tools (Dataset → Ontology Instances) ====================
+            if tool_name.startswith("objectify_"):
+                # Objectify tools are handled by the Pipeline MCP Server
+                payload = await _call_pipeline_tool(tool_name, args)
+
+                # Log objectify tool events for audit trail
+                if tool_name in {"objectify_create_mapping_spec", "objectify_run"}:
+                    logger.info("objectify tool executed: %s status=%s", tool_name,
                                payload.get("status") if isinstance(payload, dict) else "unknown")
 
                 state.last_observation = _mask_tool_observation(
