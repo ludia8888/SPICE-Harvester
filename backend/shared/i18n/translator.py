@@ -192,10 +192,7 @@ def localize_free_text(
         if translated:
             return translated
 
-    # Fallbacks (generic but localized)
-    if api_status:
-        return _generic_api_message(api_status, lang=target)
-    if status_code is not None:
-        return _generic_http_detail(int(status_code), lang=target)
-
+    # Preserve original text when translation unavailable for debugging purposes.
+    # Only use generic fallbacks for truly empty/unknown cases.
+    # This ensures error details like "node_id is required" are visible.
     return text
