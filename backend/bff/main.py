@@ -128,6 +128,7 @@ from bff.routers import (
     object_types,
     objectify,
     ontology,
+    ontology_agent,
     ontology_extensions,
     ops,
     pipeline,
@@ -1035,6 +1036,7 @@ app.include_router(summary.router, prefix="/api/v1")
 app.include_router(pipeline.router, prefix="/api/v1")
 app.include_router(pipeline_plans.router, prefix="/api/v1")
 app.include_router(objectify.router, prefix="/api/v1")
+app.include_router(ontology_agent.router, prefix="/api/v1")
 app.include_router(governance.router, prefix="/api/v1")
 app.include_router(ops.router, prefix="/api/v1")
 app.include_router(graph.router)  # Graph router has its own /api/v1 prefix

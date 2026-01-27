@@ -81,6 +81,20 @@
         ]
       }
     },
+    "ontology": {
+      "command": "python",
+      "args": [
+        "/Users/isihyeon/Desktop/SPICE-Harvester/backend/mcp/ontology_mcp_server.py"
+      ],
+      "config": {
+        "capabilities": [
+          "ontology_management",
+          "schema_inference",
+          "mapping_suggestions",
+          "validation"
+        ]
+      }
+    },
     "elasticsearch": {
       "command": "npx",
       "args": [

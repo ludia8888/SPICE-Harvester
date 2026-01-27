@@ -12,6 +12,20 @@
           "profiling_preview"
         ]
       }
+    },
+    "ontology": {
+      "command": "python",
+      "args": [
+        "backend/mcp/ontology_mcp_server.py"
+      ],
+      "config": {
+        "capabilities": [
+          "ontology_management",
+          "schema_inference",
+          "mapping_suggestions",
+          "validation"
+        ]
+      }
     }
   },
   "globalSettings": {
