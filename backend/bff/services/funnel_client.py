@@ -48,7 +48,13 @@ class FunnelClient:
             response = await self.client.get("/health")
             response.raise_for_status()
             data = response.json()
-            return data.get("status") == "healthy"
+            # Support both formats: {"status":"healthy"} and {"status":"success","data":{"status":"healthy"}}
+            if data.get("status") == "healthy":
+                return True
+            if data.get("status") == "success":
+                inner = data.get("data") or {}
+                return inner.get("status") == "healthy"
+            return False
         except Exception as e:
             logger.error(f"Funnel 헬스 체크 실패: {e}")
             return False
