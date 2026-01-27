@@ -734,6 +734,7 @@ graph TD
 | `object_types.router` | `/api/v1` | - |
 | `objectify.router` | `/api/v1` | - |
 | `ontology.router` | `/api/v1` | - |
+| `ontology_agent.router` | `/api/v1` | - |
 | `ontology_extensions.router` | `/api/v1` | - |
 | `ops.router` | `/api/v1` | - |
 | `pipeline.router` | `/api/v1` | - |

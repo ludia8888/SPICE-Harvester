@@ -1,20 +1,10 @@
 # Pipeline MCP Tool Catalog
 
 <!-- BEGIN AUTO-GENERATED: pipeline_tooling_reference -->
-> Updated: 2026-01-27T02:46:12+09:00
-> Revision: `82993e8f40993e1c3caf44acc3b92566c8ff33b8`
+> Updated: 2026-01-27T09:22:12+09:00
+> Revision: `d4b71b63bfd4c68fb9c677077d4200b7bb236bec`
 > Source of truth: `backend/mcp/pipeline_mcp_server.py` (parsed from the `tool_specs` literal).
 > Regenerate: `python scripts/generate_pipeline_tooling_reference.py`
-
-## Context Pack (analysis hints)
-
-| Tool | Required args | Description |
-| --- | --- | --- |
-| `context_pack_build` | `db_name` | Build a safe pipeline context pack (schemas/samples + join/pk/fk/cast/cleansing hints). |
-| `context_pack_infer_join_plan` | `context_pack` | Infer a best-effort join plan (spanning tree) from context pack candidates (deterministic, sample-based). |
-| `context_pack_infer_keys` | `context_pack` | Infer PK/FK candidates from a context pack (deterministic, sample-based). |
-| `context_pack_infer_types` | `context_pack` | Infer column types + join-key cast suggestions from a context pack (deterministic, sample-based). |
-| `context_pack_null_report` | `context_pack` | Generate a null/missing report from a context pack (no plan changes). |
 
 ## Other
 

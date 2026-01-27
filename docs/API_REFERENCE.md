@@ -168,7 +168,6 @@ python scripts/generate_api_reference.py
 - `GET /api/v1/config/config/validation`
 
 ### Context Tools
-- `POST /api/v1/context-tools/datasets/describe`
 - `POST /api/v1/context-tools/ontology/snapshot`
 
 ### context7
@@ -278,6 +277,9 @@ python scripts/generate_api_reference.py
 - `POST /api/v1/objectify/datasets/{dataset_id}/run`
 - `GET /api/v1/objectify/mapping-specs`
 - `POST /api/v1/objectify/mapping-specs`
+
+### Ontology Agent
+- `POST /api/v1/ontology-agent/runs`
 
 ### Ontology Extensions
 - `GET /api/v1/databases/{db_name}/ontology/action-types`
@@ -395,7 +397,6 @@ python scripts/generate_api_reference.py
 
 ### Pipeline Plans
 - `POST /api/v1/pipeline-plans/compile`
-- `POST /api/v1/pipeline-plans/context-pack`
 - `GET /api/v1/pipeline-plans/{plan_id}`
 - `POST /api/v1/pipeline-plans/{plan_id}/evaluate-joins`
 - `POST /api/v1/pipeline-plans/{plan_id}/inspect-preview`

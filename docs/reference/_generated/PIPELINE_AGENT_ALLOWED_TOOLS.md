@@ -1,18 +1,13 @@
 # Pipeline Agent Tool Allowlist
 
 <!-- BEGIN AUTO-GENERATED: pipeline_tooling_reference -->
-> Updated: 2026-01-27T02:46:12+09:00
-> Revision: `82993e8f40993e1c3caf44acc3b92566c8ff33b8`
+> Updated: 2026-01-27T09:22:12+09:00
+> Revision: `d4b71b63bfd4c68fb9c677077d4200b7bb236bec`
 > Source of truth: `backend/bff/services/pipeline_agent_autonomous_loop.py` (`_PIPELINE_AGENT_ALLOWED_TOOLS`).
 > Regenerate: `python scripts/generate_pipeline_tooling_reference.py`
 
 ## Allowed tools (runtime-enforced)
 
-- `context_pack_build`
-- `context_pack_infer_join_plan`
-- `context_pack_infer_keys`
-- `context_pack_infer_types`
-- `context_pack_null_report`
 - `pipeline_build_wait`
 - `pipeline_create_from_plan`
 - `pipeline_deploy_promote_build`
