@@ -248,6 +248,16 @@ class _AgentState:
     mapping_suggestions: Optional[Dict[str, Any]] = None
 
 
+# ==================== Trimming Constants ====================
+# Consistent limits for tool response trimming to prevent context overflow
+AGENT_TRIM_PREVIEW_ROWS = 10  # Rows in preview results
+AGENT_TRIM_EVALUATIONS = 10  # Max evaluations to return
+AGENT_TRIM_WARNINGS = 30  # Max warnings to return
+AGENT_TRIM_ERRORS = 30  # Max errors to return
+AGENT_TRIM_EVENTS = 50  # Max pipeline events to keep (before compaction)
+AGENT_TRIM_EVENTS_COMPACT = 30  # Events to keep after compaction
+
+
 _PIPELINE_AGENT_ALLOWED_TOOLS: tuple[str, ...] = (
     # Plan builder (mutating, but in-memory only)
     "plan_new",
@@ -629,9 +639,9 @@ def _record_pipeline_event(*, state: _AgentState, tool_name: str, args: Dict[str
         event["warnings"] = list(observation.get("warnings") or [])[:10]
 
     state.pipeline_events.append(_mask_tool_observation(event))
-    # Keep history bounded to avoid prompt bloat.
-    if len(state.pipeline_events) > 80:
-        state.pipeline_events = state.pipeline_events[-40:]
+    # Keep history bounded to avoid prompt bloat (linear trim - always keep most recent)
+    if len(state.pipeline_events) > AGENT_TRIM_EVENTS:
+        state.pipeline_events = state.pipeline_events[-AGENT_TRIM_EVENTS_COMPACT:]
 
     if not node_id:
         # pipeline_build_wait can return output info for multiple output nodes even when node_id was omitted.
@@ -1300,15 +1310,19 @@ async def run_pipeline_agent_mcp_autonomous(
                     texts.append(text.strip())
             if is_error:
                 return {"error": "\n".join(texts).strip() or f"MCP tool error: {tool}"}
+            parse_errors: List[str] = []
             for text in texts:
                 try:
                     parsed = json.loads(text)
-                except Exception:
+                except Exception as parse_exc:
+                    parse_errors.append(f"JSON parse error: {parse_exc}")
                     continue
                 if isinstance(parsed, dict):
                     return parsed
+            if parse_errors:
+                logger.warning("pipeline MCP tool %s returned non-JSON: %s", tool, parse_errors)
             if texts:
-                return {"result": texts[0]}
+                return {"result": texts[0], "_parse_warnings": parse_errors if parse_errors else None}
         raise RuntimeError(f"Unexpected MCP tool result type for {tool}: {type(payload)}")
 
     async def _call_ontology_tool(tool: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
@@ -1337,15 +1351,19 @@ async def run_pipeline_agent_mcp_autonomous(
                     texts.append(text.strip())
             if is_error:
                 return {"error": "\n".join(texts).strip() or f"MCP tool error: {tool}"}
+            parse_errors: List[str] = []
             for text in texts:
                 try:
                     parsed = json.loads(text)
-                except Exception:
+                except Exception as parse_exc:
+                    parse_errors.append(f"JSON parse error: {parse_exc}")
                     continue
                 if isinstance(parsed, dict):
                     return parsed
+            if parse_errors:
+                logger.warning("ontology MCP tool %s returned non-JSON: %s", tool, parse_errors)
             if texts:
-                return {"result": texts[0]}
+                return {"result": texts[0], "_parse_warnings": parse_errors if parse_errors else None}
         raise RuntimeError(f"Unexpected MCP tool result type for {tool}: {type(payload)}")
 
     principal_id = str(user_id or actor or "system").strip() or "system"
@@ -1399,6 +1417,11 @@ async def run_pipeline_agent_mcp_autonomous(
                 # subsequent plan_add_* calls can collide on deterministic node_ids and
                 # permanently wedge the run. Resetting is deterministic and semantics-preserving.
                 had_plan = isinstance(state.plan_obj, dict)
+                had_pipeline = bool(state.pipeline_id)
+                had_analysis = any([
+                    state.null_report, state.key_inference, state.type_inference,
+                    state.join_plan, state.schema_inference, state.mapping_suggestions,
+                ])
                 scoped: Dict[str, Any] = {
                     "goal": state.goal,
                     "db_name": state.db_name,
@@ -1412,21 +1435,47 @@ async def run_pipeline_agent_mcp_autonomous(
                 )
                 plan = payload.get("plan") if isinstance(payload, dict) else None
                 state.plan_obj = plan if isinstance(plan, dict) else None
-                if had_plan or state.pipeline_id:
-                    # Starting a new plan implies a new pipeline lifecycle in this run.
-                    state.pipeline_id = None
-                    state.last_build_job_id = None
-                    state.last_build_artifact_id = None
-                    state.pipeline_progress = {}
-                    state.pipeline_events = []
+
+                # Reset ALL related state when creating a new plan (not just pipeline state)
+                reset_warnings: List[str] = []
+                if had_plan:
+                    reset_warnings.append("Previous plan was discarded")
+                if had_pipeline:
+                    reset_warnings.append(f"Previous pipeline_id={state.pipeline_id} was discarded")
+                if had_analysis:
+                    reset_warnings.append("Previous analysis data (null_report, key_inference, etc.) was discarded")
+
+                # Reset pipeline state
+                state.pipeline_id = None
+                state.last_build_job_id = None
+                state.last_build_artifact_id = None
+                state.pipeline_progress = {}
+                state.pipeline_events = []
+                # Reset analysis state to avoid stale data mixing with new plan
+                state.null_report = None
+                state.key_inference = None
+                state.type_inference = None
+                state.join_plan = None
+                state.schema_inference = None
+                state.mapping_suggestions = None
+
                 observation = dict(payload) if isinstance(payload, dict) else {"result": payload}
                 observation.pop("plan", None)
+                # Dynamic tool suggestions based on context
+                suggested_tools = ["plan_add_input"]  # Always start with input
+                if state.dataset_ids and len(state.dataset_ids) > 1:
+                    suggested_tools.append("plan_add_join")  # Multiple datasets -> likely need join
+                if planner_hints and planner_hints.get("ontology_mode"):
+                    suggested_tools = ["ontology_new", "ontology_infer_schema_from_data"]
+                else:
+                    suggested_tools.extend(["plan_add_transform", "plan_add_output"])
                 state.last_observation = _mask_tool_observation(
                     {
                         **observation,
                         "plan_status": _plan_status(state.plan_obj),
                         "plan_replaced": bool(had_plan),
-                        "next_suggested_tools": ["plan_add_input", "plan_add_join", "plan_add_transform", "plan_add_output"],
+                        "reset_warnings": reset_warnings if reset_warnings else None,
+                        "next_suggested_tools": suggested_tools,
                     }
                 )
                 return state.last_observation
@@ -1544,6 +1593,12 @@ async def run_pipeline_agent_mcp_autonomous(
                 # Track mapping suggestions
                 if tool_name == "ontology_suggest_mappings" and isinstance(payload, dict):
                     state.mapping_suggestions = payload
+
+                # Log ontology tool events for audit trail (similar to pipeline tools)
+                if tool_name in {"ontology_create", "ontology_update", "ontology_add_property",
+                                 "ontology_add_relationship", "ontology_set_primary_key"}:
+                    logger.info("ontology tool executed: %s status=%s", tool_name,
+                               payload.get("status") if isinstance(payload, dict) else "unknown")
 
                 state.last_observation = _mask_tool_observation(
                     payload if isinstance(payload, dict) else {"result": payload}
@@ -1700,7 +1755,7 @@ async def run_pipeline_agent_mcp_autonomous(
                 preview = dict(payload.get("preview") or {})
                 rows = preview.get("rows")
                 if isinstance(rows, list):
-                    preview["rows"] = rows[:5]
+                    preview["rows"] = rows[:AGENT_TRIM_PREVIEW_ROWS]
                 state.last_observation = _mask_tool_observation(
                     {
                         "status": payload.get("status"),
@@ -1713,19 +1768,25 @@ async def run_pipeline_agent_mcp_autonomous(
                 observation = dict(payload) if isinstance(payload, dict) else {"result": payload}
                 observation.pop("plan", None)
                 if isinstance(observation.get("evaluations"), list):
-                    observation["evaluations"] = observation.get("evaluations")[:8]
+                    observation["evaluations"] = observation.get("evaluations")[:AGENT_TRIM_EVALUATIONS]
                 if isinstance(observation.get("warnings"), list):
-                    observation["warnings"] = observation.get("warnings")[:20]
+                    observation["warnings"] = observation.get("warnings")[:AGENT_TRIM_WARNINGS]
                 if isinstance(observation.get("errors"), list):
-                    observation["errors"] = observation.get("errors")[:20]
+                    observation["errors"] = observation.get("errors")[:AGENT_TRIM_ERRORS]
                 state.last_observation = _mask_tool_observation({**observation, "plan_status": _plan_status(state.plan_obj)})
 
             return state.last_observation
 
         except Exception as exc:
-            logger.warning("pipeline agent autonomous tool failed tool=%s err=%s", tool_name, exc)
-            state.last_observation = {"error": str(exc)}
-            tool_errors.append(f"{tool_name}: {exc}")
+            exc_type = type(exc).__name__
+            logger.warning("pipeline agent autonomous tool failed tool=%s err=%s type=%s", tool_name, exc, exc_type, exc_info=True)
+            state.last_observation = {
+                "error": str(exc),
+                "error_type": exc_type,
+                "tool": tool_name,
+                "recoverable": exc_type in {"TimeoutError", "ConnectionError", "HTTPError"},
+            }
+            tool_errors.append(f"{tool_name} [{exc_type}]: {exc}")
             return state.last_observation
 
     # Initialize append-only prompt log with a stable header (enables prefix caching across iterations).

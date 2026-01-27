@@ -223,12 +223,13 @@ class OntologyMCPServer:
                 },
                 {
                     "name": "ontology_set_primary_key",
-                    "description": "Set a property as the primary key.",
+                    "description": "Set a property as the primary key. Use clear_existing=false to support composite keys (multiple primary keys).",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
                             "session_id": {"type": "string"},
                             "property_name": {"type": "string"},
+                            "clear_existing": {"type": "boolean", "default": True, "description": "If true (default), clears other primary keys. Set to false for composite keys."},
                         },
                         "required": ["session_id", "property_name"],
                     },
@@ -244,12 +245,12 @@ class OntologyMCPServer:
                             "predicate": {"type": "string", "description": "Relationship predicate (e.g., hasOrders)"},
                             "target": {"type": "string", "description": "Target class ID"},
                             "label": {"type": "string", "description": "Display label"},
-                            "cardinality": {"type": "string", "description": "1:1, 1:n, n:1, n:m"},
+                            "cardinality": {"type": "string", "enum": ["1:1", "1:n", "n:1", "n:m"], "description": "REQUIRED: Relationship cardinality"},
                             "description": {"type": "string"},
                             "inverse_predicate": {"type": "string"},
                             "inverse_label": {"type": "string"},
                         },
-                        "required": ["session_id", "predicate", "target", "label"],
+                        "required": ["session_id", "predicate", "target", "label", "cardinality"],
                     },
                 },
                 {
@@ -356,14 +357,14 @@ class OntologyMCPServer:
                 # ==================== Query ====================
                 {
                     "name": "ontology_list_classes",
-                    "description": "List all ontology classes in the database.",
+                    "description": "List all ontology classes in the database. Note: Returns up to limit classes (default: 100). Use offset for pagination.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
                             "db_name": {"type": "string"},
                             "branch": {"type": "string"},
-                            "limit": {"type": "integer"},
-                            "offset": {"type": "integer"},
+                            "limit": {"type": "integer", "default": 100, "minimum": 1, "description": "Max classes to return (default: 100)"},
+                            "offset": {"type": "integer", "default": 0, "minimum": 0, "description": "Offset for pagination (default: 0)"},
                         },
                         "required": ["db_name"],
                     },
@@ -383,14 +384,14 @@ class OntologyMCPServer:
                 },
                 {
                     "name": "ontology_search_classes",
-                    "description": "Search ontology classes by label or property names.",
+                    "description": "Search ontology classes by label or property names. Note: Returns up to limit results (default: 20). Uses substring matching.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
                             "db_name": {"type": "string"},
-                            "query": {"type": "string", "description": "Search query"},
+                            "query": {"type": "string", "description": "Search query (substring match on id, label, property names)"},
                             "branch": {"type": "string"},
-                            "limit": {"type": "integer"},
+                            "limit": {"type": "integer", "default": 20, "minimum": 1, "description": "Max results to return (default: 20)"},
                         },
                         "required": ["db_name", "query"],
                     },
@@ -664,6 +665,25 @@ class OntologyMCPServer:
         if not session_id or not name or not prop_type or not label:
             return _build_error_response("ontology_add_property", "session_id, name, type, and label are required")
 
+        # Validate type format (common XSD types and custom types)
+        valid_type_prefixes = {"xsd:", "xs:", "rdf:", "rdfs:", "owl:"}
+        valid_xsd_types = {
+            "xsd:string", "xsd:integer", "xsd:int", "xsd:long", "xsd:short",
+            "xsd:decimal", "xsd:float", "xsd:double", "xsd:boolean",
+            "xsd:date", "xsd:time", "xsd:dateTime", "xsd:duration",
+            "xsd:anyURI", "xsd:base64Binary", "xsd:hexBinary",
+            "string", "integer", "int", "long", "float", "double", "boolean",
+            "date", "datetime", "timestamp", "text", "number", "array", "object",
+        }
+        type_lower = prop_type.lower()
+        is_valid_type = (
+            type_lower in valid_xsd_types
+            or any(prop_type.startswith(prefix) for prefix in valid_type_prefixes)
+        )
+        type_warning = None
+        if not is_valid_type:
+            type_warning = f"Unknown type '{prop_type}'. Common types: xsd:string, xsd:integer, xsd:boolean, xsd:date, xsd:dateTime, xsd:float"
+
         ontology = self._get_or_create_ontology(session_id)
         properties = ontology.get("properties", [])
 
@@ -690,11 +710,14 @@ class OntologyMCPServer:
         properties.append(new_prop)
         ontology["properties"] = properties
 
-        return {
+        result = {
             "status": "success",
             "message": f"Added property '{name}'",
             "property_count": len(properties),
         }
+        if type_warning:
+            result["warnings"] = [type_warning]
+        return result
 
     async def _tool_ontology_update_property(self, args: Dict[str, Any]) -> Dict[str, Any]:
         """Update an existing property."""
@@ -712,6 +735,8 @@ class OntologyMCPServer:
             return _build_error_response("ontology_update_property", f"Property '{name}' not found")
 
         prop = properties[prop_idx]
+        update_warnings: List[str] = []
+
         if "type" in args:
             prop["type"] = _normalize_string(args["type"])
         if "label" in args:
@@ -725,11 +750,33 @@ class OntologyMCPServer:
         if "title_key" in args:
             prop["title_key"] = bool(args["title_key"])
         if "default" in args:
-            prop["default"] = args["default"]
+            default_val = args["default"]
+            prop_type = prop.get("type", "").lower()
+            # Type-check default value
+            if default_val is not None:
+                type_mismatch = False
+                if "int" in prop_type or "long" in prop_type or "short" in prop_type:
+                    if not isinstance(default_val, (int, float)):
+                        type_mismatch = True
+                elif "float" in prop_type or "double" in prop_type or "decimal" in prop_type:
+                    if not isinstance(default_val, (int, float)):
+                        type_mismatch = True
+                elif "bool" in prop_type:
+                    if not isinstance(default_val, bool):
+                        type_mismatch = True
+                if type_mismatch:
+                    update_warnings.append(
+                        f"Default value type may not match property type '{prop.get('type')}': "
+                        f"got {type(default_val).__name__}"
+                    )
+            prop["default"] = default_val
         if "constraints" in args:
             prop["constraints"] = args["constraints"]
 
-        return {"status": "success", "message": f"Updated property '{name}'"}
+        result = {"status": "success", "message": f"Updated property '{name}'"}
+        if update_warnings:
+            result["warnings"] = update_warnings
+        return result
 
     async def _tool_ontology_remove_property(self, args: Dict[str, Any]) -> Dict[str, Any]:
         """Remove a property."""
@@ -753,6 +800,10 @@ class OntologyMCPServer:
         """Set a property as primary key."""
         session_id = _normalize_string(args.get("session_id"))
         property_name = _normalize_string(args.get("property_name"))
+        # Default to True for backward compatibility, but allow composite keys with False
+        clear_existing = args.get("clear_existing", True)
+        if clear_existing is None:
+            clear_existing = True
 
         if not session_id or not property_name:
             return _build_error_response("ontology_set_primary_key", "session_id and property_name are required")
@@ -761,17 +812,29 @@ class OntologyMCPServer:
         properties = ontology.get("properties", [])
 
         found = False
+        existing_pks = []
         for prop in properties:
             if prop.get("name") == property_name:
                 prop["primary_key"] = True
                 found = True
-            else:
+            elif clear_existing:
+                # Only clear other PKs if clear_existing is True
+                if prop.get("primary_key"):
+                    existing_pks.append(prop.get("name"))
                 prop["primary_key"] = False
 
         if not found:
             return _build_error_response("ontology_set_primary_key", f"Property '{property_name}' not found")
 
-        return {"status": "success", "primary_key": property_name}
+        result = {"status": "success", "primary_key": property_name}
+        if clear_existing and existing_pks:
+            result["cleared_primary_keys"] = existing_pks
+            result["note"] = f"Cleared existing primary keys: {existing_pks}. Use clear_existing=false for composite keys."
+        if not clear_existing:
+            # Return all current primary keys
+            all_pks = [p.get("name") for p in properties if p.get("primary_key")]
+            result["all_primary_keys"] = all_pks
+        return result
 
     async def _tool_ontology_add_relationship(self, args: Dict[str, Any]) -> Dict[str, Any]:
         """Add a relationship to the ontology."""
@@ -793,8 +856,12 @@ class OntologyMCPServer:
         if predicate in existing_predicates:
             return _build_error_response("ontology_add_relationship", f"Relationship '{predicate}' already exists")
 
-        cardinality = _normalize_string(args.get("cardinality")) or "1:n"
+        cardinality = _normalize_string(args.get("cardinality"))
         valid_cardinalities = ["1:1", "1:n", "n:1", "n:m"]
+        if not cardinality:
+            return _build_error_response(
+                "ontology_add_relationship", f"cardinality is required. Specify one of: {valid_cardinalities}"
+            )
         if cardinality not in valid_cardinalities:
             return _build_error_response(
                 "ontology_add_relationship", f"Invalid cardinality '{cardinality}'. Use: {valid_cardinalities}"

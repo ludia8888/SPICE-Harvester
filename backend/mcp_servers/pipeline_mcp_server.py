@@ -14,7 +14,7 @@ import os
 import sys
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 from mcp.server import InitializationOptions, Server
@@ -167,7 +167,17 @@ async def _bff_json(
     return payload if isinstance(payload, dict) else {"response": payload}
 
 
-def _trim_preview_payload(preview: Dict[str, Any], *, max_rows: int = 8) -> Dict[str, Any]:
+# ==================== Trimming Constants ====================
+# These control how much data is preserved in tool responses.
+# Consistent limits help LLMs understand data without context overflow.
+TRIM_PREVIEW_ROWS = 10  # Rows in preview results
+TRIM_BUILD_OUTPUT_ROWS = 8  # Rows per output in build results
+TRIM_BUILD_MAX_OUTPUTS = 10  # Max number of outputs in build results
+TRIM_MAX_WARNINGS = 50  # Max warnings to return
+TRIM_MAX_ERRORS = 50  # Max errors to return
+
+
+def _trim_preview_payload(preview: Dict[str, Any], *, max_rows: int = TRIM_PREVIEW_ROWS) -> Dict[str, Any]:
     if not isinstance(preview, dict):
         return {}
     output = dict(preview)
@@ -177,7 +187,7 @@ def _trim_preview_payload(preview: Dict[str, Any], *, max_rows: int = 8) -> Dict
     return output
 
 
-def _trim_build_output(output_json: Dict[str, Any], *, max_rows: int = 6) -> Dict[str, Any]:
+def _trim_build_output(output_json: Dict[str, Any], *, max_rows: int = TRIM_BUILD_OUTPUT_ROWS) -> Dict[str, Any]:
     if not isinstance(output_json, dict):
         return {}
     out: Dict[str, Any] = {k: v for k, v in output_json.items() if k not in {"outputs"}}
@@ -185,7 +195,7 @@ def _trim_build_output(output_json: Dict[str, Any], *, max_rows: int = 6) -> Dic
     if not isinstance(outputs, list):
         return out
     trimmed_outputs: List[Dict[str, Any]] = []
-    for item in outputs[:8]:
+    for item in outputs[:TRIM_BUILD_MAX_OUTPUTS]:
         if not isinstance(item, dict):
             continue
         rows = item.get("rows")
@@ -352,22 +362,29 @@ def _normalize_string_list(value: Any) -> List[str]:
     return out
 
 
-def _normalize_aggregates(value: Any) -> List[Dict[str, Any]]:
+def _normalize_aggregates(value: Any) -> Tuple[List[Dict[str, Any]], List[str]]:
+    """Normalize aggregates list and return (aggregates, warnings)."""
     raw = value if isinstance(value, list) else []
     out: List[Dict[str, Any]] = []
-    for item in raw:
+    warnings: List[str] = []
+    for idx, item in enumerate(raw):
         if not isinstance(item, dict):
+            warnings.append(f"aggregates[{idx}]: skipped non-dict item")
             continue
         column = str(item.get("column") or "").strip()
         op = str(item.get("op") or item.get("function") or item.get("agg") or "").strip().lower()
-        if not column or not op:
+        if not column:
+            warnings.append(f"aggregates[{idx}]: skipped item with missing 'column'")
+            continue
+        if not op:
+            warnings.append(f"aggregates[{idx}]: skipped item with missing 'op' (column={column})")
             continue
         alias = str(item.get("alias") or "").strip() or None
         payload: Dict[str, Any] = {"column": column, "op": op}
         if alias:
             payload["alias"] = alias
         out.append(payload)
-    return out
+    return out, warnings
 
 
 class PipelineMCPServer:
@@ -619,7 +636,7 @@ class PipelineMCPServer:
                 },
                 {
                     "name": "plan_add_join",
-                    "description": "Add a join transform node (LEFT then RIGHT edge order). Cross joins are rejected.",
+                    "description": "Add a join transform node (LEFT then RIGHT edge order). Cross joins are rejected. IMPORTANT: join_type is required - specify 'inner', 'left', 'right', 'full', or 'cross'.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -628,13 +645,13 @@ class PipelineMCPServer:
                             "right_node_id": {"type": "string"},
                             "left_keys": {"type": "array", "items": {"type": "string"}},
                             "right_keys": {"type": "array", "items": {"type": "string"}},
-                            "join_type": {"type": "string"},
+                            "join_type": {"type": "string", "enum": ["inner", "left", "right", "full", "cross"], "description": "REQUIRED: Type of join operation"},
                             "join_hints": {"type": "object", "description": "Optional Spark join hints: {left: 'broadcast', right: 'broadcast'}"},
                             "broadcast_left": {"type": "boolean"},
                             "broadcast_right": {"type": "boolean"},
                             "node_id": {"type": "string"},
                         },
-                        "required": ["plan", "left_node_id", "right_node_id", "left_keys", "right_keys"],
+                        "required": ["plan", "left_node_id", "right_node_id", "left_keys", "right_keys", "join_type"],
                     },
                 },
                 {
@@ -797,18 +814,18 @@ class PipelineMCPServer:
                 },
                 {
                     "name": "plan_add_normalize",
-                    "description": "Add a normalize transform node.",
+                    "description": "Add a normalize transform node. WARNING: Default behavior modifies data (trim=true, empty_to_null=true, whitespace_to_null=true). Set these to false explicitly if you want to preserve original values.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
                             "plan": {"type": "object"},
                             "input_node_id": {"type": "string"},
                             "columns": {"type": "array", "items": {"type": "string"}},
-                            "trim": {"type": "boolean"},
-                            "empty_to_null": {"type": "boolean"},
-                            "whitespace_to_null": {"type": "boolean"},
-                            "lowercase": {"type": "boolean"},
-                            "uppercase": {"type": "boolean"},
+                            "trim": {"type": "boolean", "default": True, "description": "Remove leading/trailing whitespace (default: true)"},
+                            "empty_to_null": {"type": "boolean", "default": True, "description": "Convert empty strings to null (default: true)"},
+                            "whitespace_to_null": {"type": "boolean", "default": True, "description": "Convert whitespace-only strings to null (default: true)"},
+                            "lowercase": {"type": "boolean", "default": False, "description": "Convert to lowercase (default: false)"},
+                            "uppercase": {"type": "boolean", "default": False, "description": "Convert to uppercase (default: false)"},
                             "node_id": {"type": "string"},
                         },
                         "required": ["plan", "input_node_id", "columns"],
@@ -963,28 +980,28 @@ class PipelineMCPServer:
                 },
                 {
                     "name": "plan_preview",
-                    "description": "Preview a plan via the deterministic PipelineExecutor (sample-safe).",
+                    "description": "Preview a plan via the deterministic PipelineExecutor (sample-safe). Note: limit is capped at 200 rows. For larger previews, use pipeline_preview_wait.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
                             "plan": {"type": "object"},
                             "node_id": {"type": "string"},
-                            "limit": {"type": "integer"},
+                            "limit": {"type": "integer", "default": 50, "minimum": 1, "maximum": 200, "description": "Max rows to preview (default: 50, max: 200)"},
                         },
                         "required": ["plan"],
                     },
                 },
                 {
                     "name": "plan_refute_claims",
-                    "description": "Refute plan-embedded claims with concrete counterexamples (witness-based hard gate).",
+                    "description": "Refute plan-embedded claims with concrete counterexamples (witness-based hard gate). Note: Stops after max_hard_failures (default: 5) or max_soft_warnings (default: 20).",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
                             "plan": {"type": "object"},
-                            "sample_limit": {"type": "integer"},
-                            "max_output_rows": {"type": "integer"},
-                            "max_hard_failures": {"type": "integer"},
-                            "max_soft_warnings": {"type": "integer"},
+                            "sample_limit": {"type": "integer", "default": 400, "description": "Sample limit for claim checking (default: 400)"},
+                            "max_output_rows": {"type": "integer", "default": 20000, "description": "Max output rows (default: 20000)"},
+                            "max_hard_failures": {"type": "integer", "default": 5, "description": "Stop after this many hard failures (default: 5)"},
+                            "max_soft_warnings": {"type": "integer", "default": 20, "description": "Stop after this many soft warnings (default: 20)"},
                             "run_tables": {"type": "object"},
                         },
                         "required": ["plan"],
@@ -1050,14 +1067,14 @@ class PipelineMCPServer:
                 },
                 {
                     "name": "pipeline_preview_wait",
-                    "description": "Queue a Spark preview for a Pipeline and optionally wait (poll) until completion. If job_id is provided, this tool will poll that existing job_id without enqueuing a new preview (prevents runaway QUEUED runs).",
+                    "description": "Queue a Spark preview for a Pipeline and optionally wait (poll) until completion. If job_id is provided, this tool will poll that existing job_id without enqueuing a new preview (prevents runaway QUEUED runs). Note: limit is capped at 500 rows.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
                             "pipeline_id": {"type": "string"},
                             "db_name": {"type": "string"},
                             "node_id": {"type": "string"},
-                            "limit": {"type": "integer"},
+                            "limit": {"type": "integer", "default": 200, "minimum": 1, "maximum": 500, "description": "Max rows to preview (default: 200, max: 500)"},
                             "branch": {"type": "string"},
                             "job_id": {"type": "string", "description": "Existing preview job_id to poll (skip enqueue)."},
                             "force": {"type": "boolean", "description": "Force enqueue a new preview even if a matching job is already running."},
@@ -1072,14 +1089,14 @@ class PipelineMCPServer:
                 },
                 {
                     "name": "pipeline_build_wait",
-                    "description": "Queue a Spark build for a Pipeline and optionally wait (poll) until completion. If job_id is provided, this tool will poll that existing job_id without enqueuing a new build (prevents runaway QUEUED runs).",
+                    "description": "Queue a Spark build for a Pipeline and optionally wait (poll) until completion. If job_id is provided, this tool will poll that existing job_id without enqueuing a new build (prevents runaway QUEUED runs). Note: limit is capped at 500 rows.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
                             "pipeline_id": {"type": "string"},
                             "db_name": {"type": "string"},
                             "node_id": {"type": "string"},
-                            "limit": {"type": "integer"},
+                            "limit": {"type": "integer", "default": 200, "minimum": 1, "maximum": 500, "description": "Max rows in output sample (default: 200, max: 500)"},
                             "branch": {"type": "string"},
                             "job_id": {"type": "string", "description": "Existing build job_id to poll (skip enqueue)."},
                             "force": {"type": "boolean", "description": "Force enqueue a new build even if a matching job is already running."},
@@ -1286,14 +1303,32 @@ class PipelineMCPServer:
                             or arguments.get("join_key")
                             or arguments.get("joinKey")
                         )
-                    join_type = arguments.get("join_type") or arguments.get("joinType") or "inner"
+                    join_type = str(arguments.get("join_type") or arguments.get("joinType") or "").strip().lower()
+                    valid_join_types = {"inner", "left", "right", "full", "cross"}
+                    if not join_type:
+                        return {"status": "invalid", "errors": ["join_type is required. Specify one of: inner, left, right, full, cross"]}
+                    if join_type not in valid_join_types:
+                        return {"status": "invalid", "errors": [f"Invalid join_type '{join_type}'. Must be one of: {', '.join(sorted(valid_join_types))}"]}
+                    # Validate key count match
+                    left_keys_list = _normalize_string_list(left_keys)
+                    right_keys_list = _normalize_string_list(right_keys)
+                    if len(left_keys_list) != len(right_keys_list):
+                        return {
+                            "status": "invalid",
+                            "errors": [
+                                f"Join key count mismatch: left_keys has {len(left_keys_list)} keys, "
+                                f"right_keys has {len(right_keys_list)} keys. They must be equal."
+                            ],
+                            "left_keys": left_keys_list,
+                            "right_keys": right_keys_list,
+                        }
                     result = add_join(
                         plan,
                         left_node_id=str(arguments.get("left_node_id") or ""),
                         right_node_id=str(arguments.get("right_node_id") or ""),
-                        left_keys=_normalize_string_list(left_keys),
-                        right_keys=_normalize_string_list(right_keys),
-                        join_type=str(join_type),
+                        left_keys=left_keys_list,
+                        right_keys=right_keys_list,
+                        join_type=join_type,
                         join_hints=arguments.get("join_hints") if isinstance(arguments.get("join_hints"), dict) else None,
                         broadcast_left=bool(arguments.get("broadcast_left") or False),
                         broadcast_right=bool(arguments.get("broadcast_right") or False),
@@ -1305,8 +1340,10 @@ class PipelineMCPServer:
                     plan = arguments.get("plan") or {}
                     input_node_id = str(arguments.get("input_node_id") or "")
                     group_by = _normalize_string_list(arguments.get("group_by") or arguments.get("groupBy") or [])
-                    aggregates = _normalize_aggregates(arguments.get("aggregates") or arguments.get("aggregations") or [])
+                    aggregates, agg_warnings = _normalize_aggregates(arguments.get("aggregates") or arguments.get("aggregations") or [])
                     if not aggregates:
+                        if agg_warnings:
+                            raise PipelinePlanBuilderError(f"aggregates is required (items: {{column,op,alias?}}). Parse warnings: {agg_warnings}")
                         raise PipelinePlanBuilderError("aggregates is required (items: {column,op,alias?})")
                     op = str(arguments.get("operation") or "groupBy").strip() or "groupBy"
                     if op not in {"groupBy", "aggregate"}:
@@ -1318,7 +1355,8 @@ class PipelineMCPServer:
                         metadata={"groupBy": group_by, "aggregates": aggregates},
                         node_id=arguments.get("node_id"),
                     )
-                    return {"plan": result.plan, "node_id": result.node_id, "warnings": list(result.warnings)}
+                    all_warnings = list(result.warnings) + agg_warnings
+                    return {"plan": result.plan, "node_id": result.node_id, "warnings": all_warnings}
 
                 if name == "plan_add_group_by_expr":
                     plan = arguments.get("plan") or {}
@@ -1378,9 +1416,10 @@ class PipelineMCPServer:
                     metadata = arguments.get("metadata") or {}
                     if not isinstance(metadata, dict):
                         metadata = {}
+                    transform_agg_warnings: List[str] = []
                     if not metadata and operation in {"groupBy", "aggregate"}:
                         group_by = _normalize_string_list(arguments.get("group_by") or arguments.get("groupBy") or [])
-                        aggregates = _normalize_aggregates(arguments.get("aggregates") or arguments.get("aggregations") or [])
+                        aggregates, transform_agg_warnings = _normalize_aggregates(arguments.get("aggregates") or arguments.get("aggregations") or [])
                         metadata = {"groupBy": group_by, "aggregates": aggregates}
                     if not metadata and operation == "window":
                         window = arguments.get("window") if isinstance(arguments.get("window"), dict) else None
@@ -1397,7 +1436,8 @@ class PipelineMCPServer:
                         metadata=metadata,
                         node_id=arguments.get("node_id"),
                     )
-                    return {"plan": result.plan, "node_id": result.node_id, "warnings": list(result.warnings)}
+                    all_warnings = list(result.warnings) + transform_agg_warnings
+                    return {"plan": result.plan, "node_id": result.node_id, "warnings": all_warnings}
 
                 if name == "plan_add_sort":
                     plan = arguments.get("plan") or {}
@@ -1441,12 +1481,24 @@ class PipelineMCPServer:
                     index = arguments.get("index") or []
                     if not isinstance(index, list):
                         index = [index]
+                    columns_val = str(arguments.get("columns") or "").strip()
+                    values_val = str(arguments.get("values") or "").strip()
+                    # Validate required fields
+                    pivot_errors: List[str] = []
+                    if not input_node_id:
+                        pivot_errors.append("input_node_id is required")
+                    if not columns_val:
+                        pivot_errors.append("columns is required (column to pivot on)")
+                    if not values_val:
+                        pivot_errors.append("values is required (column to aggregate)")
+                    if pivot_errors:
+                        return {"status": "invalid", "errors": pivot_errors}
                     result = add_pivot(
                         plan,
                         input_node_id=input_node_id,
                         index=[str(item) for item in index],
-                        columns=str(arguments.get("columns") or ""),
-                        values=str(arguments.get("values") or ""),
+                        columns=columns_val,
+                        values=values_val,
                         agg=str(arguments.get("agg") or "sum"),
                         node_id=arguments.get("node_id"),
                     )
@@ -1864,19 +1916,19 @@ class PipelineMCPServer:
                         preview = await executor.preview(definition=definition, db_name=db_name, node_id=node_id, limit=limit)
                     except Exception as exc:
                         # Plan preview runs in a lightweight Python executor that cannot support all Spark SQL
-                        # expressions. This tool is best-effort and must not block execution steps.
-                        merged_warnings = list(warnings or [])
-                        merged_warnings.append(f"plan_preview_failed: {exc}")
+                        # expressions. Return explicit error status instead of hiding as warning.
+                        logger.warning("plan_preview failed: %s", exc, exc_info=True)
                         return {
-                            "status": "warning",
+                            "status": "preview_failed",
+                            "error": str(exc),
+                            "error_type": type(exc).__name__,
                             "preview": {
                                 "row_count": 0,
                                 "columns": [],
                                 "rows": [],
-                                "note": "Plan preview is best-effort and may fail for complex Spark SQL expressions. Use pipeline_preview_wait for Spark-backed truth.",
-                                "preview_error": str(exc),
                             },
-                            "warnings": merged_warnings[:40],
+                            "hint": "Plan preview failed. Use pipeline_preview_wait for Spark-backed execution.",
+                            "warnings": list(warnings or []),
                         }
 
                     preview_masked = mask_pii(preview)
