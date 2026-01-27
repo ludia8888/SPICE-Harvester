@@ -135,9 +135,10 @@ def _tool_alias(tool_name: str) -> str:
     Example:
       plan_add_group_by_expr -> group_by_expr
       pipeline_build_wait    -> build_wait
+      ontology_add_property  -> add_property
     """
     name = str(tool_name or "").strip()
-    for prefix in ("plan_add_", "plan_update_", "plan_", "pipeline_"):
+    for prefix in ("plan_add_", "plan_update_", "plan_", "pipeline_", "ontology_"):
         if name.startswith(prefix):
             return name[len(prefix) :]
     return name
@@ -238,6 +239,12 @@ class _AgentState:
     # Append-only JSONL prompt log to enable provider-side prefix caching.
     prompt_items: List[str] = field(default_factory=list)
 
+    # Ontology state (integrated from ontology agent)
+    ontology_session_id: Optional[str] = None
+    working_ontology: Optional[Dict[str, Any]] = None
+    schema_inference: Optional[Dict[str, Any]] = None
+    mapping_suggestions: Optional[Dict[str, Any]] = None
+
 
 _PIPELINE_AGENT_ALLOWED_TOOLS: tuple[str, ...] = (
     # Plan builder (mutating, but in-memory only)
@@ -291,6 +298,38 @@ _PIPELINE_AGENT_ALLOWED_TOOLS: tuple[str, ...] = (
     "pipeline_preview_wait",
     "pipeline_build_wait",
     "pipeline_deploy_promote_build",
+    # ==================== Ontology Tools (integrated) ====================
+    # Initialization
+    "ontology_new",
+    "ontology_load",
+    "ontology_reset",
+    # Class metadata
+    "ontology_set_class_meta",
+    "ontology_set_abstract",
+    # Property management
+    "ontology_add_property",
+    "ontology_update_property",
+    "ontology_remove_property",
+    "ontology_set_primary_key",
+    # Relationship management
+    "ontology_add_relationship",
+    "ontology_update_relationship",
+    "ontology_remove_relationship",
+    # Schema inference
+    "ontology_infer_schema_from_data",
+    "ontology_suggest_mappings",
+    # Validation
+    "ontology_validate",
+    "ontology_check_relationships",
+    "ontology_check_circular_refs",
+    # Query
+    "ontology_list_classes",
+    "ontology_get_class",
+    "ontology_search_classes",
+    # Save
+    "ontology_create",
+    "ontology_update",
+    "ontology_preview",
 )
 
 
@@ -640,7 +679,7 @@ def _build_system_prompt(*, allowed_tools: List[str]) -> str:
     tool_lines = "\n".join([f"- {name}" for name in allowed_tools])
     return (
         "You are a single autonomous data-engineering agent for SPICE-Harvester.\n"
-        "You can iteratively call tools to inspect datasets (profiling/nulls/keys/types) and optionally build a pipeline plan.\n"
+        "You can iteratively call tools to inspect datasets (profiling/nulls/keys/types), build pipeline plans, and create/modify ontology schemas.\n"
         "The user prompt is an append-only JSONL log (one JSON object per line). The newest lines are the most recent state/observations.\n"
         "\n"
         "Core rules:\n"
@@ -679,7 +718,7 @@ def _build_system_prompt(*, allowed_tools: List[str]) -> str:
         "  For CAST_LOSSLESS claims, include spec.allowed_normalization (e.g., [\"trim\",\"lowercase\"]).\n"
         "  You can call `plan_refute_claims` to find counterexamples (witness-based). A PASS means 'not refuted', never 'proven correct'.\n"
         "\n"
-        "Common patterns:\n"
+        "Pipeline patterns:\n"
         "- join: plan_add_join(left_node_id,right_node_id,left_keys=[...],right_keys=[...],join_type='left|inner')\n"
         "- union: plan_add_union(left_node_id,right_node_id,union_mode='strict|common_only|pad')\n"
         "- ingest permissive: plan_configure_input_read(node_id, mode='PERMISSIVE', corrupt_record_column='_corrupt_record')\n"
@@ -702,6 +741,15 @@ def _build_system_prompt(*, allowed_tools: List[str]) -> str:
         "- deploy from build: pipeline_deploy_promote_build(pipeline_id, build_job_id, node_id, db_name, dataset_name)  # requires approve\n"
         "  - If deploy returns status='replay_required', retry with replay_on_deploy=true OR change dataset_name.\n"
         "  (runtime convenience: after a successful create/build in this run, omitting pipeline_id/build_job_id will use the latest values)\n"
+        "\n"
+        "Ontology patterns (use ontology_session_id from header):\n"
+        "- ontology_new: class_id (required), label (required), description (optional)\n"
+        "- ontology_add_property: name (required), type (required, e.g. xsd:string, xsd:integer, xsd:dateTime), label (required), required, primary_key, title_key\n"
+        "- ontology_add_relationship: predicate (required), target (required), label (required), cardinality (1:1, 1:n, n:1, n:m)\n"
+        "- ontology_infer_schema_from_data: columns (required, string[]), data (required, array of arrays)\n"
+        "- Create new class: ontology_new -> ontology_add_property (multiple) -> ontology_validate -> ontology_preview -> finish\n"
+        "- Modify existing class: ontology_load -> ontology_add_property/ontology_update_property -> ontology_validate -> ontology_update\n"
+        "- Do NOT call ontology_create/ontology_update unless explicitly asked to save to database.\n"
         "\n"
         "Available tools:\n"
         f"{tool_lines}\n"
@@ -734,13 +782,39 @@ def _build_prompt_header(
     planner_hints: Optional[Dict[str, Any]],
     task_spec: Optional[Dict[str, Any]],
 ) -> Dict[str, Any]:
-    return {
+    header: Dict[str, Any] = {
         "type": "header",
         "goal": state.goal,
         "data_scope": {"db_name": state.db_name, "branch": state.branch, "dataset_ids": state.dataset_ids},
         "answers": answers or None,
         "planner_hints": planner_hints or None,
         "task_spec": task_spec or None,
+    }
+    # Include ontology session_id for ontology tools
+    if state.ontology_session_id:
+        header["ontology_session_id"] = state.ontology_session_id
+    return header
+
+
+def _summarize_ontology(ontology: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Create a summary of the working ontology for compaction."""
+    if not isinstance(ontology, dict):
+        return None
+    return {
+        "id": ontology.get("id"),
+        "label": ontology.get("label"),
+        "parent_class": ontology.get("parent_class"),
+        "abstract": ontology.get("abstract", False),
+        "property_count": len(ontology.get("properties") or []),
+        "relationship_count": len(ontology.get("relationships") or []),
+        "properties": [
+            {"name": p.get("name"), "type": p.get("type"), "primary_key": p.get("primary_key", False)}
+            for p in (ontology.get("properties") or [])[:20]
+        ],
+        "relationships": [
+            {"predicate": r.get("predicate"), "target": r.get("target")}
+            for r in (ontology.get("relationships") or [])[:10]
+        ],
     }
 
 
@@ -752,7 +826,7 @@ def _build_compaction_snapshot(
     task_spec: Optional[Dict[str, Any]],
 ) -> Dict[str, Any]:
     # Deterministic compaction snapshot: derived from server-side state, not from model text.
-    return {
+    snapshot: Dict[str, Any] = {
         "goal": state.goal,
         "data_scope": {"db_name": state.db_name, "branch": state.branch, "dataset_ids": state.dataset_ids},
         "answers": answers or None,
@@ -766,6 +840,16 @@ def _build_compaction_snapshot(
         "plan_summary": _summarize_plan(state.plan_obj),
         "last_observation": state.last_observation,
     }
+    # Include ontology state if present
+    if state.ontology_session_id:
+        snapshot["ontology_session_id"] = state.ontology_session_id
+    if state.working_ontology:
+        snapshot["ontology_summary"] = _summarize_ontology(state.working_ontology)
+    if state.schema_inference:
+        snapshot["has_schema_inference"] = True
+    if state.mapping_suggestions:
+        snapshot["has_mapping_suggestions"] = True
+    return snapshot
 
 
 def _maybe_compact_prompt_items(
@@ -940,8 +1024,46 @@ async def run_pipeline_agent_mcp_autonomous(
                 return {"result": texts[0]}
         raise RuntimeError(f"Unexpected MCP tool result type for {tool}: {type(payload)}")
 
+    async def _call_ontology_tool(tool: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+        """Call an ontology MCP tool."""
+        payload = await mcp_manager.call_tool("ontology", tool, arguments)
+        if isinstance(payload, dict):
+            return payload
+        structured = getattr(payload, "structuredContent", None)
+        if isinstance(structured, dict):
+            return structured
+        structured = getattr(payload, "structured_content", None)
+        if isinstance(structured, dict):
+            return structured
+        data = getattr(payload, "data", None)
+        if isinstance(data, dict):
+            return data
+        is_error = bool(getattr(payload, "isError", False) or getattr(payload, "is_error", False))
+        content = getattr(payload, "content", None)
+        if isinstance(content, list) and content:
+            texts: List[str] = []
+            for part in content:
+                text = getattr(part, "text", None)
+                if text is None and isinstance(part, dict):
+                    text = part.get("text")
+                if isinstance(text, str) and text.strip():
+                    texts.append(text.strip())
+            if is_error:
+                return {"error": "\n".join(texts).strip() or f"MCP tool error: {tool}"}
+            for text in texts:
+                try:
+                    parsed = json.loads(text)
+                except Exception:
+                    continue
+                if isinstance(parsed, dict):
+                    return parsed
+            if texts:
+                return {"result": texts[0]}
+        raise RuntimeError(f"Unexpected MCP tool result type for {tool}: {type(payload)}")
+
     principal_id = str(user_id or actor or "system").strip() or "system"
     principal_type = "user"
+    ontology_session_id = f"ontology_{run_id}"
     state = _AgentState(
         db_name=db_name,
         branch=str(data_scope.branch or "").strip() or None,
@@ -949,6 +1071,7 @@ async def run_pipeline_agent_mcp_autonomous(
         goal=str(goal or "").strip(),
         principal_id=principal_id,
         principal_type=principal_type,
+        ontology_session_id=ontology_session_id,
     )
 
     # Scale iteration budget by dataset count (multi-way joins take more tool calls).
@@ -1094,6 +1217,45 @@ async def run_pipeline_agent_mcp_autonomous(
 
                 # Keep observations small; do not embed definition_json.
                 state.last_observation = _mask_tool_observation(payload if isinstance(payload, dict) else {"result": payload})
+                return state.last_observation
+
+            # ==================== Ontology Tools ====================
+            if tool_name.startswith("ontology_"):
+                # Always inject session_id for ontology tools
+                if "session_id" not in args:
+                    args["session_id"] = state.ontology_session_id
+
+                # For tools that need db_name/branch, inject if not provided
+                if tool_name in {
+                    "ontology_load", "ontology_list_classes", "ontology_get_class",
+                    "ontology_search_classes", "ontology_create", "ontology_update",
+                    "ontology_check_relationships", "ontology_check_circular_refs",
+                    "ontology_suggest_mappings",
+                }:
+                    if "db_name" not in args or not args["db_name"]:
+                        args["db_name"] = state.db_name
+                    if "branch" not in args or not args["branch"]:
+                        args["branch"] = state.branch or "main"
+
+                payload = await _call_ontology_tool(tool_name, args)
+
+                # Track working ontology from preview
+                if tool_name == "ontology_preview" and isinstance(payload, dict):
+                    ont = payload.get("ontology")
+                    if isinstance(ont, dict):
+                        state.working_ontology = ont
+
+                # Track schema inference results
+                if tool_name == "ontology_infer_schema_from_data" and isinstance(payload, dict):
+                    state.schema_inference = payload
+
+                # Track mapping suggestions
+                if tool_name == "ontology_suggest_mappings" and isinstance(payload, dict):
+                    state.mapping_suggestions = payload
+
+                state.last_observation = _mask_tool_observation(
+                    payload if isinstance(payload, dict) else {"result": payload}
+                )
                 return state.last_observation
 
             # Plan tools require a plan.
