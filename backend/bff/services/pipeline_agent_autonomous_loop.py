@@ -37,7 +37,9 @@ from shared.services.agent.llm_gateway import (
 from shared.services.agent.llm_quota import enforce_llm_quota
 from shared.services.registries.pipeline_plan_registry import PipelinePlanRegistry
 from shared.services.storage.redis_service import RedisService
+from shared.services.storage.event_store import EventStore
 from shared.utils.llm_safety import mask_pii, stable_json_dumps
+from shared.config.model_context_limits import get_model_context_config
 
 logger = logging.getLogger(__name__)
 
@@ -333,14 +335,35 @@ _PIPELINE_AGENT_ALLOWED_TOOLS: tuple[str, ...] = (
 )
 
 
+def _calculate_trim_limit(total_count: int, default_limit: int, min_limit: int = 3) -> int:
+    """
+    Dynamically calculate trim limit based on data size.
+
+    Rules:
+    - If total <= default_limit: keep all
+    - If total > default_limit: use default_limit
+    - Never go below min_limit
+    """
+    if total_count <= default_limit:
+        return total_count
+    return max(min_limit, default_limit)
+
+
 def _trim_null_report(report: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     if not isinstance(report, dict):
         return None
     datasets = report.get("datasets")
     if not isinstance(datasets, list):
         datasets = []
+
+    # Dynamic limit based on actual data size
+    total = len(datasets)
+    dataset_limit = _calculate_trim_limit(total, default_limit=12)
+    # Adjust column limit based on dataset count
+    column_limit = 30 if total <= 6 else 20 if total <= 12 else 15
+
     trimmed: List[Dict[str, Any]] = []
-    for ds in datasets[:12]:
+    for ds in datasets[:dataset_limit]:
         if not isinstance(ds, dict):
             continue
         cols = ds.get("columns")
@@ -351,7 +374,7 @@ def _trim_null_report(report: Optional[Dict[str, Any]]) -> Optional[Dict[str, An
                 "dataset_id": ds.get("dataset_id"),
                 "name": ds.get("name"),
                 "row_count": ds.get("row_count"),
-                "columns": [c for c in cols[:30] if isinstance(c, dict)],
+                "columns": [c for c in cols[:column_limit] if isinstance(c, dict)],
             }
         )
     return {"datasets": trimmed, "notes": report.get("notes")}
@@ -366,8 +389,16 @@ def _trim_key_inference(value: Optional[Dict[str, Any]]) -> Optional[Dict[str, A
     fk = value.get("foreign_keys")
     if not isinstance(fk, list):
         fk = []
+
+    # Dynamic limits based on data size
+    total_datasets = len(pk)
+    pk_limit = _calculate_trim_limit(total_datasets, default_limit=12)
+    fk_limit = _calculate_trim_limit(len(fk), default_limit=20)
+    # Reduce candidates if many datasets
+    pk_candidates_limit = 3 if total_datasets <= 5 else 2
+
     pk_out: List[Dict[str, Any]] = []
-    for item in pk[:12]:
+    for item in pk[:pk_limit]:
         if not isinstance(item, dict):
             continue
         pk_candidates = item.get("pk_candidates")
@@ -379,10 +410,10 @@ def _trim_key_inference(value: Optional[Dict[str, Any]]) -> Optional[Dict[str, A
                 "name": item.get("name"),
                 "row_count": item.get("row_count"),
                 "best_pk": item.get("best_pk"),
-                "pk_candidates": pk_candidates[:3],
+                "pk_candidates": pk_candidates[:pk_candidates_limit],
             }
         )
-    fk_out = [item for item in fk[:20] if isinstance(item, dict)]
+    fk_out = [item for item in fk[:fk_limit] if isinstance(item, dict)]
     return {"primary_keys": pk_out, "foreign_keys": fk_out, "notes": value.get("notes")}
 
 
@@ -395,8 +426,15 @@ def _trim_type_inference(value: Optional[Dict[str, Any]]) -> Optional[Dict[str, 
     join_casts = value.get("join_key_cast_suggestions")
     if not isinstance(join_casts, list):
         join_casts = []
+
+    # Dynamic limits based on data size
+    total = len(datasets)
+    ds_limit = _calculate_trim_limit(total, default_limit=12)
+    mismatch_limit = 20 if total <= 5 else 15 if total <= 10 else 10
+    cast_limit = _calculate_trim_limit(len(join_casts), default_limit=20)
+
     summarized: List[Dict[str, Any]] = []
-    for ds in datasets[:12]:
+    for ds in datasets[:ds_limit]:
         if not isinstance(ds, dict):
             continue
         cols = ds.get("columns")
@@ -407,12 +445,12 @@ def _trim_type_inference(value: Optional[Dict[str, Any]]) -> Optional[Dict[str, 
             {
                 "dataset_id": ds.get("dataset_id"),
                 "name": ds.get("name"),
-                "mismatched_columns": mismatches[:20],
+                "mismatched_columns": mismatches[:mismatch_limit],
             }
         )
     return {
         "datasets": summarized,
-        "join_key_cast_suggestions": [item for item in join_casts[:20] if isinstance(item, dict)],
+        "join_key_cast_suggestions": [item for item in join_casts[:cast_limit] if isinstance(item, dict)],
         "notes": value.get("notes"),
     }
 
@@ -420,8 +458,10 @@ def _trim_type_inference(value: Optional[Dict[str, Any]]) -> Optional[Dict[str, 
 def _trim_join_plan(value: Optional[List[Dict[str, Any]]]) -> Optional[List[Dict[str, Any]]]:
     if not isinstance(value, list):
         return None
+    total = len(value)
+    limit = _calculate_trim_limit(total, default_limit=20)
     out: List[Dict[str, Any]] = []
-    for item in value[:20]:
+    for item in value[:limit]:
         if isinstance(item, dict):
             out.append(item)
     return out
@@ -855,36 +895,261 @@ def _build_compaction_snapshot(
     return snapshot
 
 
-def _maybe_compact_prompt_items(
+def _progressive_compress_prompt_items(
+    *,
+    state: _AgentState,
+    answers: Optional[Dict[str, Any]],
+    planner_hints: Optional[Dict[str, Any]],
+    task_spec: Optional[Dict[str, Any]],
+    target_chars: int,
+    preserve_recent_n: int = 10,
+) -> List[str]:
+    """
+    Progressive compression: remove oldest items until within target.
+
+    Strategy:
+    1. Always preserve: header (index 0)
+    2. Always preserve: last N items (tool calls + observations)
+    3. Remove from middle, oldest first
+    4. If still over limit, compact to snapshot (fallback)
+
+    Args:
+        state: Current agent state
+        target_chars: Target character limit
+        preserve_recent_n: Number of recent items to always preserve
+
+    Returns:
+        Compressed list of prompt items
+    """
+    items = list(state.prompt_items)
+    if len(items) <= 2:
+        return items
+
+    current_len = sum(len(item) for item in items)
+    if current_len <= target_chars:
+        return items
+
+    # Protect header and recent items
+    header = items[:1]
+    if len(items) > preserve_recent_n + 1:
+        protected_tail = items[-preserve_recent_n:]
+        middle = items[1:-preserve_recent_n]
+    else:
+        protected_tail = items[1:]
+        middle = []
+
+    # Calculate budget for middle section
+    header_len = sum(len(h) for h in header)
+    tail_len = sum(len(t) for t in protected_tail)
+    available_for_middle = target_chars - header_len - tail_len
+
+    # Remove oldest middle items until within budget
+    while middle and sum(len(m) for m in middle) > available_for_middle:
+        middle.pop(0)  # Remove oldest
+
+    result = header + middle + protected_tail
+    result_len = sum(len(r) for r in result)
+
+    # If still over (protected tail too big), fall back to full compaction
+    if result_len > target_chars:
+        snapshot = _build_compaction_snapshot(
+            state=state,
+            answers=answers,
+            planner_hints=planner_hints,
+            task_spec=task_spec,
+        )
+        # Keep last 3 items for immediate context
+        keep_recent = min(3, len(protected_tail))
+        return [
+            stable_json_dumps(_build_prompt_header(
+                state=state,
+                answers=answers,
+                planner_hints=planner_hints,
+                task_spec=task_spec,
+            )),
+            stable_json_dumps({
+                "type": "compaction",
+                "reason": "progressive_fallback",
+                "snapshot": snapshot,
+                "preserved_recent_count": keep_recent,
+                "note": "Progressive compression exhausted; snapshot is authoritative.",
+            }),
+        ] + protected_tail[-keep_recent:] if keep_recent > 0 else [
+            stable_json_dumps(_build_prompt_header(
+                state=state,
+                answers=answers,
+                planner_hints=planner_hints,
+                task_spec=task_spec,
+            )),
+            stable_json_dumps({
+                "type": "compaction",
+                "reason": "progressive_fallback",
+                "snapshot": snapshot,
+                "note": "Progressive compression exhausted; snapshot is authoritative.",
+            }),
+        ]
+
+    return result
+
+
+def _compute_prompt_hash(text: str) -> str:
+    """Compute a short hash of prompt text for identification."""
+    import hashlib
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+
+
+async def _log_pre_compression_state(
+    *,
+    run_id: str,
+    prompt_items: List[str],
+    compression_reason: str,
+    audit_store: Optional[AuditLogStore] = None,
+    event_store: Optional[EventStore] = None,
+) -> None:
+    """
+    Save pre-compression state for debugging.
+
+    Storage:
+    - Metadata to AuditLogStore (PostgreSQL)
+    - Full prompt to EventStore (S3) if available
+
+    Args:
+        run_id: Pipeline run identifier
+        prompt_items: Current prompt items before compression
+        compression_reason: Why compression is happening
+        audit_store: Optional audit log store
+        event_store: Optional event store for S3 storage
+    """
+    from datetime import datetime, timezone
+
+    occurred_at = datetime.now(timezone.utc)
+    full_prompt = "\n".join(prompt_items)
+    prompt_hash = _compute_prompt_hash(full_prompt)
+
+    # Metadata for audit log
+    metadata = {
+        "run_id": run_id,
+        "prompt_item_count": len(prompt_items),
+        "total_chars": len(full_prompt),
+        "prompt_hash": prompt_hash,
+        "compression_reason": compression_reason,
+        "occurred_at": occurred_at.isoformat(),
+    }
+
+    # Log to AuditLogStore
+    if audit_store:
+        try:
+            await audit_store.log(
+                partition_key=f"pipeline_agent:{run_id}",
+                actor="pipeline_agent",
+                action="PROMPT_PRE_COMPRESSION",
+                status="success",
+                resource_type="prompt_snapshot",
+                resource_id=f"compression:{run_id}:{prompt_hash}",
+                metadata=metadata,
+            )
+        except Exception as e:
+            logger.debug(f"Pre-compression audit log failed (non-fatal): {e}")
+
+    # Store full prompt to S3 via EventStore pattern
+    if event_store:
+        try:
+            import aioboto3
+
+            if not hasattr(event_store, "session") or event_store.session is None:
+                event_store.session = aioboto3.Session()
+
+            s3_key = (
+                f"prompt_snapshots/{occurred_at.year:04d}/{occurred_at.month:02d}/"
+                f"{run_id}/pre_compression_{prompt_hash}.jsonl"
+            )
+
+            # Use EventStore's S3 client configuration
+            s3_kwargs = {}
+            if hasattr(event_store, "_s3_client_kwargs"):
+                s3_kwargs = event_store._s3_client_kwargs()
+            elif hasattr(event_store, "endpoint_url"):
+                s3_kwargs = {
+                    "service_name": "s3",
+                    "endpoint_url": event_store.endpoint_url,
+                    "aws_access_key_id": getattr(event_store, "access_key", None),
+                    "aws_secret_access_key": getattr(event_store, "secret_key", None),
+                }
+
+            if s3_kwargs:
+                async with event_store.session.client(**s3_kwargs) as s3:
+                    bucket_name = getattr(event_store, "bucket_name", "spice-event-store")
+                    await s3.put_object(
+                        Bucket=bucket_name,
+                        Key=s3_key,
+                        Body=full_prompt.encode("utf-8"),
+                        ContentType="application/x-jsonlines",
+                        Metadata={
+                            "run-id": run_id,
+                            "prompt-hash": prompt_hash,
+                            "item-count": str(len(prompt_items)),
+                        },
+                    )
+                logger.debug(f"Pre-compression prompt saved to S3: {s3_key}")
+        except Exception as e:
+            logger.debug(f"Pre-compression S3 save failed (non-fatal): {e}")
+
+
+async def _maybe_compact_prompt_items(
     *,
     state: _AgentState,
     answers: Optional[Dict[str, Any]],
     planner_hints: Optional[Dict[str, Any]],
     task_spec: Optional[Dict[str, Any]],
     max_chars: int,
+    run_id: str = "",
+    audit_store: Optional[AuditLogStore] = None,
+    event_store: Optional[EventStore] = None,
 ) -> None:
     """
-    Deterministic compaction: when the append-only log grows too large, replace it with:
-    - a fresh header, plus
-    - a compact authoritative snapshot derived from current server-side state.
+    Improved compaction with progressive compression and pre-compression logging.
+
+    Uses progressive compression (removing oldest items first) before falling back
+    to full snapshot-based compaction. Logs pre-compression state for debugging.
+
+    Args:
+        state: Current agent state (prompt_items will be modified)
+        answers: User answers for clarification
+        planner_hints: Hints for the planner
+        task_spec: Task specification
+        max_chars: Maximum allowed characters
+        run_id: Pipeline run identifier for logging
+        audit_store: Optional audit log store for metadata
+        event_store: Optional event store for S3 storage
     """
     if max_chars <= 0:
         return
+
     current = _prompt_text(state.prompt_items)
     if len(current) <= max_chars:
         return
-    snapshot = _build_compaction_snapshot(state=state, answers=answers, planner_hints=planner_hints, task_spec=task_spec)
-    state.prompt_items = [
-        stable_json_dumps(_build_prompt_header(state=state, answers=answers, planner_hints=planner_hints, task_spec=task_spec)),
-        stable_json_dumps(
-            {
-                "type": "compaction",
-                "reason": "prompt_too_large",
-                "snapshot": snapshot,
-                "note": "Older detailed log was compacted. Treat snapshot as authoritative and continue.",
-            }
-        ),
-    ]
+
+    # Log pre-compression state for debugging
+    if run_id and (audit_store or event_store):
+        await _log_pre_compression_state(
+            run_id=run_id,
+            prompt_items=state.prompt_items,
+            compression_reason=f"prompt_size_{len(current)}_exceeds_{max_chars}",
+            audit_store=audit_store,
+            event_store=event_store,
+        )
+
+    # Calculate target (70% of max to leave room for growth)
+    target_chars = int(max_chars * 0.7)
+
+    # Progressive compression
+    state.prompt_items = _progressive_compress_prompt_items(
+        state=state,
+        answers=answers,
+        planner_hints=planner_hints,
+        task_spec=task_spec,
+        target_chars=target_chars,
+    )
 
 
 def _mask_tool_observation(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -917,6 +1182,7 @@ async def run_pipeline_agent_mcp_autonomous(
     llm_gateway: LLMGateway,
     redis_service: Optional[RedisService],
     audit_store: Optional[AuditLogStore],
+    event_store: Optional[EventStore] = None,
     dataset_registry: DatasetRegistry,
     plan_registry: PipelinePlanRegistry,
 ) -> Dict[str, Any]:
@@ -1100,8 +1366,13 @@ async def run_pipeline_agent_mcp_autonomous(
     allowed_tools = list(_PIPELINE_AGENT_ALLOWED_TOOLS)
     system_prompt = _build_system_prompt(allowed_tools=allowed_tools)
     max_tool_calls_per_step = 20
-    # Keep the user prompt under the LLM gateway hard cap to avoid server-side truncation.
-    prompt_char_limit = int(max(1, int(getattr(llm_gateway, "max_prompt_chars", 20000) or 20000) * 0.9))
+
+    # Dynamic prompt limit based on model context window
+    model_id = str(selected_model or getattr(llm_gateway, "model", "") or "").strip()
+    model_config = get_model_context_config(model_id)
+    gateway_limit = int(getattr(llm_gateway, "max_prompt_chars", 20000) or 20000)
+    # Use the smaller of gateway limit and model's safe prompt chars, then apply 90% buffer
+    prompt_char_limit = int(min(gateway_limit, model_config.safe_prompt_chars) * 0.9)
 
     async def _execute_tool_call(*, tool_name: str, args: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -1356,12 +1627,15 @@ async def run_pipeline_agent_mcp_autonomous(
             "last_observation": state.last_observation,
         }
         state.prompt_items.append(stable_json_dumps(step_state))
-        _maybe_compact_prompt_items(
+        await _maybe_compact_prompt_items(
             state=state,
             answers=answers,
             planner_hints=planner_hints,
             task_spec=task_spec,
             max_chars=prompt_char_limit,
+            run_id=run_id,
+            audit_store=audit_store,
+            event_store=event_store,
         )
         user_prompt = _prompt_text(state.prompt_items)
 
