@@ -1114,6 +1114,62 @@ class PipelineMCPServer:
                         "required": ["pipeline_id", "build_job_id", "node_id", "db_name", "dataset_name"],
                     },
                 },
+                # ── Debugging Tools ──────────────────────────────────────────
+                {
+                    "name": "debug_get_errors",
+                    "description": "Get accumulated errors and warnings from current pipeline run. Use this to see what went wrong.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "include_warnings": {"type": "boolean", "default": True, "description": "Include warnings in addition to errors"},
+                            "limit": {"type": "integer", "default": 50, "description": "Maximum number of errors to return"},
+                        },
+                    },
+                },
+                {
+                    "name": "debug_get_execution_log",
+                    "description": "Get step-by-step execution log of tool calls made during this run. Useful for understanding what happened.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "limit": {"type": "integer", "default": 20, "description": "Maximum number of log entries to return"},
+                            "step": {"type": "integer", "description": "Filter by specific step number"},
+                        },
+                    },
+                },
+                {
+                    "name": "debug_inspect_node",
+                    "description": "Inspect a specific node's configuration, inputs, and outputs in the pipeline plan.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "plan": {"type": "object", "description": "The pipeline plan to inspect"},
+                            "node_id": {"type": "string", "description": "ID of the node to inspect"},
+                            "include_sample": {"type": "boolean", "default": False, "description": "Include sample data if available"},
+                        },
+                        "required": ["plan", "node_id"],
+                    },
+                },
+                {
+                    "name": "debug_explain_failure",
+                    "description": "Analyze accumulated errors and provide diagnostic suggestions with potential fixes.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {},
+                    },
+                },
+                {
+                    "name": "debug_dry_run",
+                    "description": "Validate a pipeline plan without actually executing it. Checks for structural issues, missing references, and join key compatibility.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "plan": {"type": "object", "description": "The pipeline plan to validate"},
+                            "check_joins": {"type": "boolean", "default": True, "description": "Validate join key compatibility"},
+                        },
+                        "required": ["plan"],
+                    },
+                },
             ]
             return [Tool(**spec) for spec in tool_specs]
 
@@ -2546,6 +2602,139 @@ class PipelineMCPServer:
                         "outputs": data.get("outputs"),
                         "definition_included": bool(definition_json),
                         "pipeline_spec_commit_id": pipeline_spec_commit_id,
+                    }
+
+                # ── Debugging Tools ──────────────────────────────────────────
+                # Note: debug_get_errors, debug_get_execution_log, debug_explain_failure
+                # are handled in the agent loop (they need access to agent state).
+
+                if name == "debug_inspect_node":
+                    plan = arguments.get("plan") or {}
+                    node_id = str(arguments.get("node_id") or "").strip()
+                    if not node_id:
+                        return {"status": "error", "error": "node_id is required"}
+
+                    definition = plan.get("definition_json") or {}
+                    nodes = definition.get("nodes") or []
+                    edges = definition.get("edges") or []
+
+                    # Find the target node
+                    node = next((n for n in nodes if n.get("id") == node_id), None)
+                    if not node:
+                        available_nodes = [n.get("id") for n in nodes if n.get("id")]
+                        return {
+                            "status": "error",
+                            "error": f"Node '{node_id}' not found in plan",
+                            "available_nodes": available_nodes[:20],
+                        }
+
+                    # Find input and output edges
+                    input_edges = [e for e in edges if e.get("target") == node_id]
+                    output_edges = [e for e in edges if e.get("source") == node_id]
+
+                    result: Dict[str, Any] = {
+                        "status": "success",
+                        "node_id": node_id,
+                        "node_type": node.get("type"),
+                        "node_config": node.get("data") or node.get("config") or {},
+                        "inputs": [
+                            {"from_node": e.get("source"), "handle": e.get("sourceHandle")}
+                            for e in input_edges
+                        ],
+                        "outputs": [
+                            {"to_node": e.get("target"), "handle": e.get("targetHandle")}
+                            for e in output_edges
+                        ],
+                        "input_count": len(input_edges),
+                        "output_count": len(output_edges),
+                    }
+
+                    # Include sample data if requested and available
+                    if arguments.get("include_sample"):
+                        node_data = node.get("data") or {}
+                        if node_data.get("preview"):
+                            result["sample_data"] = node_data.get("preview")
+
+                    return result
+
+                if name == "debug_dry_run":
+                    plan = arguments.get("plan") or {}
+                    check_joins = arguments.get("check_joins", True)
+
+                    errors: List[str] = []
+                    warnings: List[str] = []
+
+                    # Basic structure validation
+                    if not plan:
+                        errors.append("Plan is empty")
+                        return {"status": "invalid", "errors": errors, "warnings": warnings, "dry_run_passed": False}
+
+                    definition = plan.get("definition_json") or {}
+                    nodes = definition.get("nodes") or []
+                    edges = definition.get("edges") or []
+
+                    if not nodes:
+                        errors.append("Plan has no nodes")
+                    if not edges and len(nodes) > 1:
+                        warnings.append("Plan has multiple nodes but no edges connecting them")
+
+                    # Check for required node types
+                    node_types = [n.get("type") for n in nodes]
+                    has_input = any(t in ("input", "dataset_input", "source") for t in node_types)
+                    has_output = any(t in ("output", "dataset_output", "sink") for t in node_types)
+
+                    if not has_input:
+                        errors.append("Plan has no input/source node")
+                    if not has_output:
+                        warnings.append("Plan has no output/sink node")
+
+                    # Check node references in edges
+                    node_ids = {n.get("id") for n in nodes if n.get("id")}
+                    for edge in edges:
+                        source = edge.get("source")
+                        target = edge.get("target")
+                        if source and source not in node_ids:
+                            errors.append(f"Edge references non-existent source node: {source}")
+                        if target and target not in node_ids:
+                            errors.append(f"Edge references non-existent target node: {target}")
+
+                    # Check join nodes if requested
+                    if check_joins:
+                        for node in nodes:
+                            if node.get("type") == "join":
+                                node_data = node.get("data") or {}
+                                left_key = node_data.get("left_key") or node_data.get("leftKey")
+                                right_key = node_data.get("right_key") or node_data.get("rightKey")
+                                if not left_key:
+                                    errors.append(f"Join node '{node.get('id')}' missing left_key")
+                                if not right_key:
+                                    errors.append(f"Join node '{node.get('id')}' missing right_key")
+
+                    # Check for orphan nodes (no incoming or outgoing edges)
+                    for node in nodes:
+                        nid = node.get("id")
+                        ntype = node.get("type") or ""
+                        has_incoming = any(e.get("target") == nid for e in edges)
+                        has_outgoing = any(e.get("source") == nid for e in edges)
+
+                        # Input nodes don't need incoming edges
+                        if ntype in ("input", "dataset_input", "source") and not has_outgoing:
+                            warnings.append(f"Input node '{nid}' has no outgoing edges")
+                        # Output nodes don't need outgoing edges
+                        elif ntype in ("output", "dataset_output", "sink") and not has_incoming:
+                            warnings.append(f"Output node '{nid}' has no incoming edges")
+                        # Other nodes should have both
+                        elif ntype not in ("input", "dataset_input", "source", "output", "dataset_output", "sink"):
+                            if not has_incoming and not has_outgoing:
+                                warnings.append(f"Node '{nid}' is orphaned (no edges)")
+
+                    return {
+                        "status": "success" if not errors else "invalid",
+                        "errors": errors,
+                        "warnings": warnings,
+                        "dry_run_passed": not errors,
+                        "node_count": len(nodes),
+                        "edge_count": len(edges),
                     }
 
                 # Enterprise Enhancement: Helpful error for unknown tools

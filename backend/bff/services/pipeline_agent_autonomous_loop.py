@@ -332,6 +332,12 @@ _PIPELINE_AGENT_ALLOWED_TOOLS: tuple[str, ...] = (
     "ontology_create",
     "ontology_update",
     "ontology_preview",
+    # ==================== Debugging Tools ====================
+    "debug_get_errors",
+    "debug_get_execution_log",
+    "debug_inspect_node",
+    "debug_explain_failure",
+    "debug_dry_run",
 )
 
 
@@ -1542,6 +1548,126 @@ async def run_pipeline_agent_mcp_autonomous(
                 state.last_observation = _mask_tool_observation(
                     payload if isinstance(payload, dict) else {"result": payload}
                 )
+                return state.last_observation
+
+            # ==================== Debugging Tools ====================
+            if tool_name == "debug_get_errors":
+                include_warnings = args.get("include_warnings", True)
+                limit = int(args.get("limit") or 50)
+                errors_list = list(tool_errors)[-limit:] if tool_errors else []
+                warnings_list = list(tool_warnings)[-limit:] if include_warnings and tool_warnings else []
+                state.last_observation = {
+                    "status": "success",
+                    "errors": errors_list,
+                    "warnings": warnings_list,
+                    "error_count": len(tool_errors),
+                    "warning_count": len(tool_warnings) if include_warnings else 0,
+                }
+                return state.last_observation
+
+            if tool_name == "debug_get_execution_log":
+                limit = int(args.get("limit") or 20)
+                step_filter = args.get("step")
+                log_entries: List[Dict[str, Any]] = []
+                for item in state.prompt_items:
+                    try:
+                        parsed = json.loads(item)
+                        item_type = parsed.get("type")
+                        item_step = parsed.get("step")
+                        if item_type in {"tool_call", "tool_output", "tool_calls", "tool_outputs"}:
+                            if step_filter is None or item_step == step_filter:
+                                entry: Dict[str, Any] = {
+                                    "type": item_type,
+                                    "step": item_step,
+                                }
+                                if item_type in {"tool_call", "tool_calls"}:
+                                    entry["tool"] = parsed.get("tool") or parsed.get("tools")
+                                if item_type in {"tool_output", "tool_outputs"}:
+                                    # Include status but trim large payloads
+                                    obs = parsed.get("observation") or parsed.get("observations")
+                                    if isinstance(obs, dict):
+                                        entry["status"] = obs.get("status")
+                                        entry["error"] = obs.get("error")
+                                    elif isinstance(obs, list):
+                                        entry["count"] = len(obs)
+                                log_entries.append(entry)
+                    except (json.JSONDecodeError, TypeError):
+                        continue
+                state.last_observation = {
+                    "status": "success",
+                    "log": log_entries[-limit:],
+                    "total_entries": len(log_entries),
+                    "current_step": step_idx + 1,
+                }
+                return state.last_observation
+
+            if tool_name == "debug_explain_failure":
+                diagnosis: List[Dict[str, str]] = []
+                for error in list(tool_errors)[-10:]:
+                    error_lower = str(error).lower()
+                    if "not found" in error_lower or "does not exist" in error_lower:
+                        diagnosis.append({
+                            "error": str(error),
+                            "cause": "Resource not found",
+                            "fix": "Check spelling and verify the resource exists",
+                        })
+                    elif "type" in error_lower and ("mismatch" in error_lower or "incompatible" in error_lower):
+                        diagnosis.append({
+                            "error": str(error),
+                            "cause": "Type mismatch",
+                            "fix": "Add a cast operation to convert types",
+                        })
+                    elif "join" in error_lower:
+                        diagnosis.append({
+                            "error": str(error),
+                            "cause": "Join key issue",
+                            "fix": "Verify join keys exist and have compatible types",
+                        })
+                    elif "permission" in error_lower or "denied" in error_lower:
+                        diagnosis.append({
+                            "error": str(error),
+                            "cause": "Permission denied",
+                            "fix": "Check user permissions for the resource",
+                        })
+                    elif "timeout" in error_lower:
+                        diagnosis.append({
+                            "error": str(error),
+                            "cause": "Operation timed out",
+                            "fix": "Reduce data size or increase timeout",
+                        })
+                    else:
+                        diagnosis.append({
+                            "error": str(error),
+                            "cause": "Unknown",
+                            "fix": "Review error details and check logs",
+                        })
+                state.last_observation = {
+                    "status": "success",
+                    "diagnosis": diagnosis,
+                    "total_errors": len(tool_errors),
+                    "total_warnings": len(tool_warnings),
+                    "suggestion": "Use debug_get_errors to see all errors, debug_get_execution_log to trace tool calls",
+                }
+                return state.last_observation
+
+            if tool_name == "debug_inspect_node":
+                # Pass to MCP with current plan
+                plan_to_inspect = args.get("plan") or state.plan_obj
+                if not isinstance(plan_to_inspect, dict):
+                    state.last_observation = {"error": "No plan available; call plan_new first or provide plan argument"}
+                    return state.last_observation
+                payload = await _call_pipeline_tool(tool_name, {**args, "plan": plan_to_inspect})
+                state.last_observation = _mask_tool_observation(payload if isinstance(payload, dict) else {"result": payload})
+                return state.last_observation
+
+            if tool_name == "debug_dry_run":
+                # Pass to MCP with current plan
+                plan_to_validate = args.get("plan") or state.plan_obj
+                if not isinstance(plan_to_validate, dict):
+                    state.last_observation = {"error": "No plan available; call plan_new first or provide plan argument"}
+                    return state.last_observation
+                payload = await _call_pipeline_tool(tool_name, {**args, "plan": plan_to_validate})
+                state.last_observation = _mask_tool_observation(payload if isinstance(payload, dict) else {"result": payload})
                 return state.last_observation
 
             # Plan tools require a plan.
