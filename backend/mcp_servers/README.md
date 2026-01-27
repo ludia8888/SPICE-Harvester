@@ -24,7 +24,7 @@ Main configuration file defining all MCP servers:
 - **git**: Version control server
 
 Docker 환경에서는 호스트 경로/컨테이너 경로가 달라서 `mcp-config.json`을 그대로 쓰기 어렵습니다.
-이 repo는 `backend/mcp/mcp-config.docker.json`을 제공하며, `backend/docker-compose.yml`에서
+이 repo는 `backend/mcp_servers/mcp-config.docker.json`을 제공하며, `backend/docker-compose.yml`에서
 이를 `/app/mcp-config.json`로 마운트합니다.
 
 ### 2. TerminusDB MCP Server (`terminus_mcp_server.py`)
@@ -91,14 +91,14 @@ PIPELINE_PLAN_LLM_ENABLED=true
 ```
 
 Docker 환경에서는 `MCP_CONFIG_PATH=/app/mcp-config.json` 처럼 컨테이너 내부 경로를 사용하세요.
-이 repo는 기본적으로 `backend/docker-compose.yml`에서 `backend/mcp/mcp-config.docker.json`을 `/app/mcp-config.json`로 마운트합니다.
+이 repo는 기본적으로 `backend/docker-compose.yml`에서 `backend/mcp_servers/mcp-config.docker.json`을 `/app/mcp-config.json`로 마운트합니다.
 
 ### 3. Start MCP Servers
 
 #### Option A: Manual Start
 ```bash
 # Start TerminusDB MCP Server
-python backend/mcp/terminus_mcp_server.py
+python backend/mcp_servers/terminus_mcp_server.py
 
 # Context7 server starts automatically when accessed
 ```
@@ -110,7 +110,7 @@ Add to `docker-compose.yml`:
 mcp-terminus:
   build:
     context: .
-    dockerfile: ./backend/mcp/Dockerfile
+    dockerfile: ./backend/mcp_servers/Dockerfile
   container_name: spice_mcp_terminus
   environment:
     - TERMINUS_SERVER_URL=http://terminusdb:6363

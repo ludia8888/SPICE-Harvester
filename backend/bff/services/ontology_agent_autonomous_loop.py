@@ -294,9 +294,9 @@ async def run_ontology_agent_autonomous(
     # Lazy MCP import
     try:
         try:
-            from mcp.mcp_client import get_mcp_manager
+            from mcp_servers.mcp_client import get_mcp_manager
         except Exception:
-            from backend.mcp.mcp_client import get_mcp_manager
+            from backend.mcp_servers.mcp_client import get_mcp_manager
     except Exception as exc:
         return {
             "run_id": run_id,

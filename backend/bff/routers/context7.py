@@ -13,7 +13,7 @@ from bff.dependencies import OMSClientDep
 from bff.services.oms_client import OMSClient
 
 if TYPE_CHECKING:  # pragma: no cover
-    from mcp.mcp_client import Context7Client as Context7Client  # noqa: F401
+    from mcp_servers.mcp_client import Context7Client as Context7Client  # noqa: F401
 else:
     Context7Client = Any  # type: ignore[misc,assignment]
 
@@ -31,7 +31,7 @@ def _context7_unavailable_exc() -> HTTPException:
 
 async def get_context7_client() -> Any:
     try:
-        from mcp.mcp_client import get_context7_client as _get_context7_client
+        from mcp_servers.mcp_client import get_context7_client as _get_context7_client
     except Exception:
         raise _context7_unavailable_exc()
     try:
@@ -295,7 +295,7 @@ async def check_context7_health(
     """
     try:
         # Try to list available tools as health check
-        from mcp.mcp_client import get_mcp_manager
+        from mcp_servers.mcp_client import get_mcp_manager
         mcp_manager = get_mcp_manager()
         
         tools = await mcp_manager.list_tools("context7")

@@ -499,7 +499,7 @@ services:
     volumes:
       - bff_data:/app/data
       # Use a container-safe MCP config (the repo-root mcp-config.json contains host absolute paths).
-      - ./mcp/mcp-config.docker.json:/app/mcp-config.json:ro
+      - ./mcp_servers/mcp-config.docker.json:/app/mcp-config.json:ro
       - ../scripts/llm_mocks:/app/llm_mocks:ro
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8002/api/v1/health"]

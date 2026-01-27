@@ -886,9 +886,9 @@ async def run_pipeline_agent_mcp_autonomous(
     # Lazy import: MCP is optional in some envs.
     try:
         try:
-            from mcp.mcp_client import get_mcp_manager  # type: ignore[import-not-found]
+            from mcp_servers.mcp_client import get_mcp_manager  # type: ignore[import-not-found]
         except Exception:  # pragma: no cover
-            from backend.mcp.mcp_client import get_mcp_manager  # type: ignore[import-not-found]
+            from backend.mcp_servers.mcp_client import get_mcp_manager  # type: ignore[import-not-found]
     except Exception as exc:
         return {
             "run_id": run_id,

@@ -51,7 +51,7 @@
     "terminusdb": {
       "command": "python",
       "args": [
-        "/Users/isihyeon/Desktop/SPICE-Harvester/backend/mcp/terminus_mcp_server.py"
+        "/Users/isihyeon/Desktop/SPICE-Harvester/backend/mcp_servers/terminus_mcp_server.py"
       ],
       "env": {
         "TERMINUS_SERVER_URL": "http://localhost:6363",
@@ -71,7 +71,7 @@
     "pipeline": {
       "command": "python",
       "args": [
-        "/Users/isihyeon/Desktop/SPICE-Harvester/backend/mcp/pipeline_mcp_server.py"
+        "/Users/isihyeon/Desktop/SPICE-Harvester/backend/mcp_servers/pipeline_mcp_server.py"
       ],
       "config": {
         "capabilities": [
@@ -84,7 +84,7 @@
     "ontology": {
       "command": "python",
       "args": [
-        "/Users/isihyeon/Desktop/SPICE-Harvester/backend/mcp/ontology_mcp_server.py"
+        "/Users/isihyeon/Desktop/SPICE-Harvester/backend/mcp_servers/ontology_mcp_server.py"
       ],
       "config": {
         "capabilities": [

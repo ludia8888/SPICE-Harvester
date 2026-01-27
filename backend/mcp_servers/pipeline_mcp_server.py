@@ -22,8 +22,8 @@ from mcp.server.stdio import stdio_server
 from mcp.types import ServerCapabilities, Tool, ToolsCapability
 
 # Import paths depend on whether we run from source (repo layout) or from a container image.
-# - repo layout: <repo>/backend/mcp -> add <repo>/backend
-# - container layout: /app/backend/mcp -> add /app (bff lives at /app/bff)
+# - repo layout: <repo>/backend/mcp_servers -> add <repo>/backend
+# - container layout: /app/backend/mcp_servers -> add /app (bff lives at /app/bff)
 _this_file = Path(__file__).resolve()
 _backend_root = _this_file.parents[1]
 _repo_root = _this_file.parents[2] if len(_this_file.parents) > 2 else _backend_root

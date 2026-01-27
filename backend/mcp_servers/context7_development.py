@@ -8,7 +8,7 @@ import logging
 from typing import Any, Dict, List, Optional, Tuple
 from datetime import datetime, timezone
 
-from backend.mcp.mcp_client import get_context7_client, Context7Client
+from backend.mcp_servers.mcp_client import get_context7_client, Context7Client
 
 logger = logging.getLogger(__name__)
 

@@ -17,8 +17,8 @@ RUN pip install --upgrade pip setuptools wheel
 COPY shared /app/shared
 RUN mkdir -p /app/backend
 
-# Copy MCP modules for backend.mcp imports
-COPY mcp /app/backend/mcp
+# Copy MCP modules for backend.mcp_servers imports
+COPY mcp_servers /app/backend/mcp_servers
 
 # Install shared package (temporarily hide pyproject.toml to force setup.py usage)
 RUN cd /app/shared && mv pyproject.toml pyproject.toml.bak && cd /app && pip install ./shared && cd /app/shared && mv pyproject.toml.bak pyproject.toml
