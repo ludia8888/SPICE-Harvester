@@ -1,27 +1,47 @@
 """
 Ontology Agent API Router
 
-Provides the POST /api/v1/ontology-agent/runs endpoint for
-autonomous ontology schema creation/mapping via natural language.
+Convenience endpoint for pure ontology tasks.
+Delegates to Pipeline Agent with empty dataset_ids.
+
+For combined pipeline + ontology tasks, use /api/v1/agent/pipeline-runs directly.
 """
 
 import logging
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from pydantic import BaseModel, Field
 
 from shared.models.requests import ApiResponse
+from shared.models.pipeline_plan import PipelinePlanDataScope
 from shared.security.auth_utils import enforce_db_scope
 from shared.services.agent.llm_gateway import LLMGateway
 from shared.services.core.audit_log_store import AuditLogStore
+from shared.services.registries.dataset_registry import DatasetRegistry
+from shared.services.registries.pipeline_plan_registry import PipelinePlanRegistry
 from shared.services.storage.redis_service import RedisService, create_redis_service_legacy
 from shared.config.settings import get_settings
-from bff.services.ontology_agent_models import OntologyAgentRunRequest, OntologyAgentRunResponse
-from bff.services.ontology_agent_autonomous_loop import run_ontology_agent_autonomous
+from bff.services.pipeline_agent_autonomous_loop import run_pipeline_agent_mcp_autonomous
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/ontology-agent", tags=["Ontology Agent"])
+
+
+class OntologyAgentRunRequest(BaseModel):
+    """Request body for ontology agent runs."""
+
+    goal: str = Field(..., description="Natural language goal for ontology creation/modification")
+    db_name: str = Field(..., description="Database name")
+    branch: str = Field(default="main", description="Branch name")
+    target_class_id: Optional[str] = Field(default=None, description="Target class ID for modification")
+    dataset_sample: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Sample data for schema inference: {columns: [], data: [[]]}",
+    )
+    answers: Optional[Dict[str, Any]] = Field(default=None, description="Answers to clarification questions")
+    selected_model: Optional[str] = Field(default=None, description="LLM model to use")
 
 
 def _get_tenant_id(request: Request) -> str:
@@ -49,27 +69,6 @@ def _get_actor(request: Request) -> str:
     ).strip()
 
 
-async def _get_llm_gateway() -> LLMGateway:
-    """Get LLM gateway instance."""
-    return LLMGateway()
-
-
-async def _get_redis_service() -> Optional[RedisService]:
-    """Get Redis service if available."""
-    try:
-        return create_redis_service_legacy()
-    except Exception:
-        return None
-
-
-async def _get_audit_store() -> Optional[AuditLogStore]:
-    """Get audit store if available."""
-    try:
-        return AuditLogStore()
-    except Exception:
-        return None
-
-
 @router.post(
     "/runs",
     response_model=ApiResponse,
@@ -77,6 +76,9 @@ async def _get_audit_store() -> Optional[AuditLogStore]:
     description="""
     Execute the autonomous ontology agent to create or modify ontology schemas
     based on natural language instructions.
+
+    This is a convenience endpoint that delegates to the Pipeline Agent with empty dataset_ids.
+    For combined pipeline + ontology tasks, use /api/v1/agent/pipeline-runs directly.
 
     Example goals:
     - "이 데이터셋으로 Customer 클래스 만들어줘"
@@ -89,13 +91,7 @@ async def run_ontology_agent(
     body: OntologyAgentRunRequest,
 ) -> ApiResponse:
     """
-    Run the autonomous ontology agent.
-
-    The agent will:
-    1. Parse the natural language goal
-    2. Use available tools to build/modify ontology schemas
-    3. Validate the schema before saving
-    4. Return the created/modified ontology or ask clarification questions
+    Run the autonomous ontology agent by delegating to Pipeline Agent.
     """
     tenant_id = _get_tenant_id(request)
     user_id = _get_user_id(request)
@@ -113,39 +109,67 @@ async def run_ontology_agent(
         )
 
     # Get services
-    llm_gateway = await _get_llm_gateway()
-    redis_service = await _get_redis_service()
-    audit_store = await _get_audit_store()
+    llm_gateway = LLMGateway()
+    try:
+        redis_service = create_redis_service_legacy()
+    except Exception:
+        redis_service = None
+    try:
+        audit_store = AuditLogStore()
+    except Exception:
+        audit_store = None
 
-    # Get data policies from settings
+    # Get registries (required by pipeline agent, but won't be used for ontology-only)
+    dataset_registry = DatasetRegistry()
+    plan_registry = PipelinePlanRegistry()
+
+    # Get settings
     settings = get_settings()
-    data_policies = None
-    if hasattr(settings, "data_policies"):
-        data_policies = getattr(settings, "data_policies", None)
+    data_policies = getattr(settings, "data_policies", None)
+    allowed_models = list(settings.llm.allowed_models or []) if hasattr(settings.llm, "allowed_models") else None
 
-    # Get allowed/selected models
-    selected_model = body.selected_model
-    allowed_models = None
-    if hasattr(settings.llm, "allowed_models"):
-        allowed_models = list(settings.llm.allowed_models or [])
+    # Build goal with ontology hint if sample data provided
+    goal = body.goal
+    if body.dataset_sample:
+        # Append sample data context to help the agent
+        columns = body.dataset_sample.get("columns", [])
+        if columns and "컬럼" not in goal and "column" not in goal.lower():
+            goal = f"{goal} (컬럼: {', '.join(columns)})"
+
+    # Build planner hints for ontology task
+    planner_hints = {
+        "ontology_mode": True,
+        "target_class_id": body.target_class_id,
+    }
+
+    # Build task spec with sample data if provided
+    task_spec = None
+    if body.dataset_sample:
+        task_spec = {"dataset_sample": body.dataset_sample}
 
     try:
-        result = await run_ontology_agent_autonomous(
-            goal=body.goal,
-            db_name=body.db_name,
-            branch=body.branch,
-            target_class_id=body.target_class_id,
-            dataset_sample=body.dataset_sample,
+        result = await run_pipeline_agent_mcp_autonomous(
+            goal=goal,
+            data_scope=PipelinePlanDataScope(
+                db_name=body.db_name,
+                branch=body.branch,
+                dataset_ids=[],  # Empty for ontology-only tasks
+            ),
             answers=body.answers,
+            planner_hints=planner_hints,
+            task_spec=task_spec,
+            persist_plan=False,  # Don't persist pipeline plan for ontology-only
             actor=actor,
             tenant_id=tenant_id,
             user_id=user_id,
             data_policies=data_policies,
-            selected_model=selected_model,
+            selected_model=body.selected_model,
             allowed_models=allowed_models,
             llm_gateway=llm_gateway,
             redis_service=redis_service,
             audit_store=audit_store,
+            dataset_registry=dataset_registry,
+            plan_registry=plan_registry,
         )
 
         # Map status to API response status
@@ -163,12 +187,17 @@ async def run_ontology_agent(
             api_status = "error"
             message = "Ontology agent failed"
 
+        # Extract ontology from result (may be in different places depending on agent state)
+        ontology = result.get("ontology")
+        if not ontology and isinstance(result.get("report"), dict):
+            ontology = result["report"].get("ontology")
+
         return ApiResponse(
             status=api_status,
             message=message,
             data={
                 "run_id": result.get("run_id"),
-                "ontology": result.get("ontology"),
+                "ontology": ontology,
                 "questions": result.get("questions", []),
                 "validation_errors": result.get("validation_errors", []),
                 "validation_warnings": result.get("validation_warnings", []),

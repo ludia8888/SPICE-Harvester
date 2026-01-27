@@ -947,7 +947,19 @@ async def run_pipeline_agent_mcp_autonomous(
         }
 
     dataset_ids = [str(item).strip() for item in (data_scope.dataset_ids or []) if str(item).strip()]
-    if not dataset_ids:
+
+    # Check if this is an ontology-only task (no datasets needed)
+    goal_lower = str(goal or "").lower()
+    is_ontology_only_task = (
+        not dataset_ids
+        and any(kw in goal_lower for kw in (
+            "ontology", "온톨로지", "클래스", "class", "스키마", "schema",
+            "property", "속성", "relationship", "관계",
+        ))
+    )
+
+    # Require dataset_ids only for pipeline tasks (not ontology-only)
+    if not dataset_ids and not is_ontology_only_task:
         return {
             "run_id": run_id,
             "status": "clarification_required",
