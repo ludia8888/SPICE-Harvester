@@ -3036,7 +3036,7 @@ class PipelineMCPServer:
                         return _missing_required_params("objectify_suggest_mapping", ["dataset_id", "target_class_id", "db_name"], arguments)
 
                     dataset_registry, _ = await self._ensure_registries()
-                    dataset = await dataset_registry.get_dataset(dataset_id)
+                    dataset = await dataset_registry.get_dataset(dataset_id=dataset_id)
                     if not dataset:
                         return {"status": "error", "error": f"Dataset not found: {dataset_id}"}
 
@@ -3153,7 +3153,7 @@ class PipelineMCPServer:
 
                     # Get dataset info
                     dataset_registry, _ = await self._ensure_registries()
-                    dataset = await dataset_registry.get_dataset(dataset_id)
+                    dataset = await dataset_registry.get_dataset(dataset_id=dataset_id)
                     if not dataset:
                         return {"status": "error", "error": f"Dataset not found: {dataset_id}"}
 
@@ -3232,7 +3232,7 @@ class PipelineMCPServer:
                     objectify_registry = await self._ensure_objectify_registry()
 
                     # Get dataset
-                    dataset = await dataset_registry.get_dataset(dataset_id)
+                    dataset = await dataset_registry.get_dataset(dataset_id=dataset_id)
                     if not dataset:
                         return {"status": "error", "error": f"Dataset not found: {dataset_id}"}
 
@@ -3336,6 +3336,8 @@ class PipelineMCPServer:
                     if not job:
                         return {"status": "error", "error": f"Objectify job not found: {job_id}"}
 
+                    # Extract statistics from report if available
+                    report = job.report or {}
                     return {
                         "status": "success",
                         "job_id": job.job_id,
@@ -3343,11 +3345,12 @@ class PipelineMCPServer:
                         "dataset_id": job.dataset_id,
                         "target_class_id": job.target_class_id,
                         "created_at": job.created_at.isoformat() if job.created_at else None,
-                        "started_at": job.started_at.isoformat() if job.started_at else None,
+                        "updated_at": job.updated_at.isoformat() if job.updated_at else None,
                         "completed_at": job.completed_at.isoformat() if job.completed_at else None,
                         "error": job.error,
-                        "rows_processed": job.rows_processed,
-                        "rows_failed": job.rows_failed,
+                        "rows_processed": report.get("rows_processed"),
+                        "rows_failed": report.get("rows_failed"),
+                        "instances_created": report.get("instances_created"),
                     }
 
                 if name == "objectify_wait":
@@ -3373,6 +3376,8 @@ class PipelineMCPServer:
                         job_status = (job.status or "").lower()
 
                         if job_status in final_statuses:
+                            # Extract statistics from report if available
+                            report = job.report or {}
                             return {
                                 "status": "success" if job_status == "completed" else "failed",
                                 "job_id": job.job_id,
@@ -3380,11 +3385,12 @@ class PipelineMCPServer:
                                 "dataset_id": job.dataset_id,
                                 "target_class_id": job.target_class_id,
                                 "created_at": job.created_at.isoformat() if job.created_at else None,
-                                "started_at": job.started_at.isoformat() if job.started_at else None,
+                                "updated_at": job.updated_at.isoformat() if job.updated_at else None,
                                 "completed_at": job.completed_at.isoformat() if job.completed_at else None,
                                 "error": job.error,
-                                "rows_processed": job.rows_processed,
-                                "rows_failed": job.rows_failed,
+                                "rows_processed": report.get("rows_processed"),
+                                "rows_failed": report.get("rows_failed"),
+                                "instances_created": report.get("instances_created"),
                                 "wait_elapsed_seconds": elapsed,
                             }
 

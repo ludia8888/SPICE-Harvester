@@ -342,6 +342,19 @@ _PIPELINE_AGENT_ALLOWED_TOOLS: tuple[str, ...] = (
     "ontology_create",
     "ontology_update",
     "ontology_preview",
+    # ==================== Objectify Tools (Dataset -> Ontology Instances) ====================
+    "objectify_suggest_mapping",
+    "objectify_create_mapping_spec",
+    "objectify_list_mapping_specs",
+    "objectify_run",
+    "objectify_get_status",
+    "objectify_wait",
+    # Instance query for objectify verification
+    "ontology_query_instances",
+    # Dataset lookup by name
+    "dataset_get_by_name",
+    "dataset_get_latest_version",
+    "dataset_validate_columns",
     # ==================== Debugging Tools ====================
     "debug_get_errors",
     "debug_get_execution_log",
@@ -809,6 +822,23 @@ def _build_system_prompt(*, allowed_tools: List[str]) -> str:
         "- IMPORTANT: For ontology tasks, call action='finish' immediately after ontology_preview succeeds.\n"
         "  Do NOT wait for user confirmation about primary keys or saving - just finish with the preview result.\n"
         "  The user can request changes or saving in a follow-up message if needed.\n"
+        "\n"
+        "Objectify patterns (Dataset → Ontology Instances transformation):\n"
+        "- Use objectify tools when the goal is to transform dataset rows into ontology object instances.\n"
+        "- Do NOT use plan_add_transform with operation='objectify' - that operation does not exist.\n"
+        "- Objectify workflow:\n"
+        "  1. (Optional) Create ontology class if it doesn't exist: ontology_new -> ontology_add_property (multiple) -> ontology_create\n"
+        "  2. Get mapping suggestions: objectify_suggest_mapping(dataset_id, target_class_id, db_name)\n"
+        "  3. Create mapping spec: objectify_create_mapping_spec(dataset_id, target_class_id, mappings, db_name)\n"
+        "  4. Run objectify: objectify_run(dataset_id, db_name) -> returns job_id\n"
+        "  5. Wait for completion: objectify_wait(job_id) -> wait for job to complete\n"
+        "  6. Verify results: ontology_query_instances(db_name, class_id) -> check created instances\n"
+        "- Key args:\n"
+        "  - objectify_suggest_mapping: dataset_id, target_class_id, db_name\n"
+        "  - objectify_create_mapping_spec: dataset_id, target_class_id, mappings (array of {source_field, target_field}), db_name\n"
+        "  - objectify_run: dataset_id, db_name, mapping_spec_id (optional)\n"
+        "  - objectify_wait: job_id, timeout_seconds (default 300)\n"
+        "  - ontology_query_instances: db_name, class_id, limit (default 10)\n"
         "\n"
         "Available tools:\n"
         f"{tool_lines}\n"
@@ -1618,6 +1648,24 @@ async def run_pipeline_agent_mcp_autonomous(
                     logger.info("objectify tool executed: %s status=%s", tool_name,
                                payload.get("status") if isinstance(payload, dict) else "unknown")
 
+                state.last_observation = _mask_tool_observation(
+                    payload if isinstance(payload, dict) else {"result": payload}
+                )
+                return state.last_observation
+
+            # ==================== Dataset Lookup Tools ====================
+            if tool_name in {"dataset_get_by_name", "dataset_get_latest_version", "dataset_validate_columns"}:
+                # Dataset lookup tools are handled by the Pipeline MCP Server
+                payload = await _call_pipeline_tool(tool_name, args)
+                state.last_observation = _mask_tool_observation(
+                    payload if isinstance(payload, dict) else {"result": payload}
+                )
+                return state.last_observation
+
+            # ==================== Ontology Query Tools ====================
+            if tool_name == "ontology_query_instances":
+                # Query ontology instances - handled by the Pipeline MCP Server
+                payload = await _call_pipeline_tool(tool_name, args)
                 state.last_observation = _mask_tool_observation(
                     payload if isinstance(payload, dict) else {"result": payload}
                 )
