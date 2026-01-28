@@ -3876,6 +3876,41 @@ class AgentRetentionWorkerSettings(BaseSettings):
         return value or None
 
 
+class SchemaChangeMonitorSettings(BaseSettings):
+    """Schema change monitor settings for proactive drift detection."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="SCHEMA_MONITOR_",
+        env_file=_ENV_FILE,
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+    enabled: bool = Field(
+        default=False,
+        description="Enable schema change monitor (SCHEMA_MONITOR_ENABLED)",
+    )
+    check_interval_seconds: int = Field(
+        default=300,
+        description="Schema check interval in seconds (SCHEMA_MONITOR_CHECK_INTERVAL_SECONDS)",
+    )
+    cooldown_seconds: int = Field(
+        default=3600,
+        description="Notification cooldown in seconds (SCHEMA_MONITOR_COOLDOWN_SECONDS)",
+    )
+
+    @field_validator("check_interval_seconds", mode="before")
+    @classmethod
+    def clamp_check_interval(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=300, min_value=60, max_value=86_400)
+
+    @field_validator("cooldown_seconds", mode="before")
+    @classmethod
+    def clamp_cooldown(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=3600, min_value=60, max_value=86_400)
+
+
 class ChaosSettings(BaseSettings):
     """Chaos/fault injection settings (test-only)."""
 
@@ -3966,6 +4001,7 @@ class WorkersSettings(BaseSettings):
     writeback_materializer: WritebackMaterializerSettings = Field(default_factory=WritebackMaterializerSettings)
     event_publisher: EventPublisherSettings = Field(default_factory=EventPublisherSettings)
     agent_retention: AgentRetentionWorkerSettings = Field(default_factory=AgentRetentionWorkerSettings)
+    schema_change_monitor: SchemaChangeMonitorSettings = Field(default_factory=SchemaChangeMonitorSettings)
 
 
 

@@ -5,9 +5,12 @@ Objectify job payload shared between BFF and objectify worker.
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Literal, Optional
 
 from pydantic import BaseModel, Field, model_validator
+
+# Execution mode type for incremental processing
+ExecutionMode = Literal["full", "incremental", "delta"]
 
 
 class ObjectifyJob(BaseModel):
@@ -32,6 +35,24 @@ class ObjectifyJob(BaseModel):
     allow_partial: bool = Field(default=False, description="Allow partial import when rows fail validation")
     options: Dict[str, Any] = Field(default_factory=dict)
     requested_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    # Incremental processing fields
+    execution_mode: ExecutionMode = Field(
+        default="full",
+        description="Execution mode: 'full' (default), 'incremental' (watermark-based), or 'delta' (LakeFS diff-based)",
+    )
+    watermark_column: Optional[str] = Field(
+        default=None,
+        description="Column to use for watermark-based incremental processing (e.g., 'updated_at')",
+    )
+    previous_watermark: Optional[str] = Field(
+        default=None,
+        description="Previous watermark value for incremental processing",
+    )
+    base_commit_id: Optional[str] = Field(
+        default=None,
+        description="Base LakeFS commit ID for delta-based processing",
+    )
 
     @model_validator(mode="after")
     def _validate_inputs(self) -> "ObjectifyJob":

@@ -22,6 +22,27 @@ from shared.models.objectify_job import ObjectifyJob
 from shared.utils.json_utils import coerce_json_dataset, normalize_json_payload
 
 
+class OCCConflictError(RuntimeError):
+    """Raised when optimistic concurrency control check fails."""
+
+    def __init__(
+        self,
+        *,
+        table: str,
+        record_id: str,
+        expected_version: int,
+        actual_version: Optional[int] = None,
+    ):
+        self.table = table
+        self.record_id = record_id
+        self.expected_version = expected_version
+        self.actual_version = actual_version
+        super().__init__(
+            f"OCC conflict: {table}[{record_id}] expected version {expected_version}, "
+            f"actual version {actual_version}"
+        )
+
+
 def _coerce_json_list(value: Any) -> List[Dict[str, Any]]:
     if value is None:
         return []
@@ -61,11 +82,12 @@ class OntologyMappingSpecRecord:
     mappings: List[Dict[str, Any]]
     target_field_types: Dict[str, str]
     status: str
-    version: int
+    version: int  # Business version (user-visible)
     auto_sync: bool
     options: Dict[str, Any]
     created_at: datetime
     updated_at: datetime
+    occ_version: int = 1  # Optimistic concurrency control version
 
 
 @dataclass(frozen=True)
@@ -87,6 +109,7 @@ class ObjectifyJobRecord:
     created_at: datetime
     updated_at: datetime
     completed_at: Optional[datetime]
+    occ_version: int = 1  # Optimistic concurrency control version
 
 
 @dataclass(frozen=True)
@@ -558,18 +581,24 @@ class ObjectifyRegistry:
         *,
         dataset_id: Optional[str] = None,
         include_inactive: bool = False,
+        limit: int = 100,
     ) -> List[OntologyMappingSpecRecord]:
         if not self._pool:
             raise RuntimeError("ObjectifyRegistry not connected")
         clause = ""
         params: List[Any] = []
+        param_idx = 1
         if dataset_id:
-            clause = "WHERE dataset_id = $1::uuid"
+            clause = f"WHERE dataset_id = ${param_idx}::uuid"
             params.append(dataset_id)
+            param_idx += 1
             if not include_inactive:
                 clause += " AND status = 'ACTIVE'"
         elif not include_inactive:
             clause = "WHERE status = 'ACTIVE'"
+        # Add limit parameter
+        limit_clause = f"LIMIT ${param_idx}"
+        params.append(max(1, min(limit, 1000)))  # Clamp between 1 and 1000
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(
                 f"""
@@ -580,6 +609,7 @@ class ObjectifyRegistry:
                 FROM {self._schema}.ontology_mapping_specs
                 {clause}
                 ORDER BY created_at DESC
+                {limit_clause}
                 """,
                 *params,
             )
@@ -1125,7 +1155,7 @@ class ObjectifyRegistry:
                 SELECT job_id, mapping_spec_id, mapping_spec_version, dedupe_key, dataset_id, dataset_version_id,
                        artifact_id, artifact_output_name,
                        dataset_branch, target_class_id, status, command_id, error, report,
-                       created_at, updated_at, completed_at
+                       created_at, updated_at, completed_at, COALESCE(version, 1) as version
                 FROM {self._schema}.objectify_jobs
                 WHERE job_id = $1::uuid
                 """,
@@ -1151,6 +1181,7 @@ class ObjectifyRegistry:
                 created_at=row["created_at"],
                 updated_at=row["updated_at"],
                 completed_at=row["completed_at"],
+                occ_version=int(row["version"]),
             )
 
     async def get_objectify_job_by_dedupe_key(self, *, dedupe_key: str) -> Optional[ObjectifyJobRecord]:
@@ -1165,7 +1196,7 @@ class ObjectifyRegistry:
                 SELECT job_id, mapping_spec_id, mapping_spec_version, dedupe_key, dataset_id, dataset_version_id,
                        artifact_id, artifact_output_name,
                        dataset_branch, target_class_id, status, command_id, error, report,
-                       created_at, updated_at, completed_at
+                       created_at, updated_at, completed_at, COALESCE(version, 1) as version
                 FROM {self._schema}.objectify_jobs
                 WHERE dedupe_key = $1
                 ORDER BY created_at DESC
@@ -1193,6 +1224,7 @@ class ObjectifyRegistry:
                 created_at=row["created_at"],
                 updated_at=row["updated_at"],
                 completed_at=row["completed_at"],
+                occ_version=int(row["version"]),
             )
 
     async def find_objectify_job(
@@ -1317,32 +1349,94 @@ class ObjectifyRegistry:
         error: Optional[str] = None,
         report: Optional[Dict[str, Any]] = None,
         completed_at: Optional[datetime] = None,
+        expected_version: Optional[int] = None,
     ) -> Optional[ObjectifyJobRecord]:
+        """
+        Update objectify job status with optional OCC.
+
+        Args:
+            job_id: Job ID to update
+            status: New status
+            command_id: Optional command ID
+            error: Optional error message
+            report: Optional report data
+            completed_at: Optional completion timestamp
+            expected_version: If provided, OCC check is performed. Raises OCCConflictError on mismatch.
+
+        Returns:
+            Updated ObjectifyJobRecord or None if not found
+
+        Raises:
+            OCCConflictError: If expected_version is provided and doesn't match current version
+        """
         if not self._pool:
             raise RuntimeError("ObjectifyRegistry not connected")
         async with self._pool.acquire() as conn:
-            row = await conn.fetchrow(
-                f"""
-                UPDATE {self._schema}.objectify_jobs
-                SET status = $2,
-                    command_id = COALESCE($3, command_id),
-                    error = COALESCE($4, error),
-                    report = COALESCE($5::jsonb, report),
-                    completed_at = COALESCE($6, completed_at),
-                    updated_at = NOW()
-                WHERE job_id = $1::uuid
-                RETURNING job_id, mapping_spec_id, mapping_spec_version, dedupe_key, dataset_id, dataset_version_id,
-                          artifact_id, artifact_output_name,
-                          dataset_branch, target_class_id, status, command_id, error, report,
-                          created_at, updated_at, completed_at
-                """,
-                job_id,
-                status,
-                command_id,
-                error,
-                normalize_json_payload(report) if report is not None else None,
-                completed_at,
-            )
+            # Build query with optional OCC check
+            if expected_version is not None:
+                row = await conn.fetchrow(
+                    f"""
+                    UPDATE {self._schema}.objectify_jobs
+                    SET status = $2,
+                        command_id = COALESCE($3, command_id),
+                        error = COALESCE($4, error),
+                        report = COALESCE($5::jsonb, report),
+                        completed_at = COALESCE($6, completed_at),
+                        version = COALESCE(version, 1) + 1,
+                        updated_at = NOW()
+                    WHERE job_id = $1::uuid
+                      AND COALESCE(version, 1) = $7
+                    RETURNING job_id, mapping_spec_id, mapping_spec_version, dedupe_key, dataset_id, dataset_version_id,
+                              artifact_id, artifact_output_name,
+                              dataset_branch, target_class_id, status, command_id, error, report,
+                              created_at, updated_at, completed_at, COALESCE(version, 1) as version
+                    """,
+                    job_id,
+                    status,
+                    command_id,
+                    error,
+                    normalize_json_payload(report) if report is not None else None,
+                    completed_at,
+                    expected_version,
+                )
+                if not row:
+                    # Check if record exists to distinguish between not found and OCC conflict
+                    current = await conn.fetchrow(
+                        f"SELECT COALESCE(version, 1) as version FROM {self._schema}.objectify_jobs WHERE job_id = $1::uuid",
+                        job_id,
+                    )
+                    if current:
+                        raise OCCConflictError(
+                            table="objectify_jobs",
+                            record_id=job_id,
+                            expected_version=expected_version,
+                            actual_version=int(current["version"]),
+                        )
+                    return None
+            else:
+                row = await conn.fetchrow(
+                    f"""
+                    UPDATE {self._schema}.objectify_jobs
+                    SET status = $2,
+                        command_id = COALESCE($3, command_id),
+                        error = COALESCE($4, error),
+                        report = COALESCE($5::jsonb, report),
+                        completed_at = COALESCE($6, completed_at),
+                        version = COALESCE(version, 1) + 1,
+                        updated_at = NOW()
+                    WHERE job_id = $1::uuid
+                    RETURNING job_id, mapping_spec_id, mapping_spec_version, dedupe_key, dataset_id, dataset_version_id,
+                              artifact_id, artifact_output_name,
+                              dataset_branch, target_class_id, status, command_id, error, report,
+                              created_at, updated_at, completed_at, COALESCE(version, 1) as version
+                    """,
+                    job_id,
+                    status,
+                    command_id,
+                    error,
+                    normalize_json_payload(report) if report is not None else None,
+                    completed_at,
+                )
             if not row:
                 return None
             return ObjectifyJobRecord(
@@ -1363,4 +1457,190 @@ class ObjectifyRegistry:
                 created_at=row["created_at"],
                 updated_at=row["updated_at"],
                 completed_at=row["completed_at"],
+                occ_version=int(row.get("version", 1)),
             )
+
+    # ============================================================
+    # Incremental Objectify - Watermark Methods
+    # ============================================================
+
+    async def get_watermark(
+        self,
+        *,
+        mapping_spec_id: str,
+        dataset_branch: str = "main",
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Get the watermark state for a mapping spec.
+
+        Returns:
+            Watermark state dict or None if not found
+        """
+        if not self._pool:
+            raise RuntimeError("ObjectifyRegistry not connected")
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT watermark_id, mapping_spec_id, dataset_branch,
+                       watermark_column, watermark_value, dataset_version_id,
+                       lakefs_commit_id, rows_processed, created_at, updated_at
+                FROM objectify_watermarks
+                WHERE mapping_spec_id = $1::uuid AND dataset_branch = $2
+                """,
+                mapping_spec_id,
+                dataset_branch,
+            )
+            if not row:
+                return None
+            return {
+                "watermark_id": str(row["watermark_id"]),
+                "mapping_spec_id": str(row["mapping_spec_id"]),
+                "dataset_branch": row["dataset_branch"],
+                "watermark_column": row["watermark_column"],
+                "watermark_value": row["watermark_value"],
+                "dataset_version_id": str(row["dataset_version_id"]) if row["dataset_version_id"] else None,
+                "lakefs_commit_id": row["lakefs_commit_id"],
+                "rows_processed": row["rows_processed"],
+                "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+                "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
+            }
+
+    async def update_watermark(
+        self,
+        *,
+        mapping_spec_id: str,
+        dataset_branch: str = "main",
+        watermark_column: str,
+        watermark_value: str,
+        dataset_version_id: Optional[str] = None,
+        lakefs_commit_id: Optional[str] = None,
+        rows_processed: int = 0,
+    ) -> Dict[str, Any]:
+        """
+        Update or create watermark state for a mapping spec.
+
+        Uses UPSERT to handle both create and update cases.
+        """
+        if not self._pool:
+            raise RuntimeError("ObjectifyRegistry not connected")
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                INSERT INTO objectify_watermarks (
+                    watermark_id, mapping_spec_id, dataset_branch,
+                    watermark_column, watermark_value, dataset_version_id,
+                    lakefs_commit_id, rows_processed, created_at, updated_at
+                ) VALUES (
+                    gen_random_uuid(), $1::uuid, $2, $3, $4, $5::uuid, $6, $7, NOW(), NOW()
+                )
+                ON CONFLICT (mapping_spec_id, dataset_branch)
+                DO UPDATE SET
+                    watermark_column = $3,
+                    watermark_value = $4,
+                    dataset_version_id = $5::uuid,
+                    lakefs_commit_id = $6,
+                    rows_processed = objectify_watermarks.rows_processed + $7,
+                    updated_at = NOW()
+                RETURNING watermark_id, mapping_spec_id, dataset_branch,
+                          watermark_column, watermark_value, dataset_version_id,
+                          lakefs_commit_id, rows_processed, created_at, updated_at
+                """,
+                mapping_spec_id,
+                dataset_branch,
+                watermark_column,
+                watermark_value,
+                dataset_version_id,
+                lakefs_commit_id,
+                rows_processed,
+            )
+            return {
+                "watermark_id": str(row["watermark_id"]),
+                "mapping_spec_id": str(row["mapping_spec_id"]),
+                "dataset_branch": row["dataset_branch"],
+                "watermark_column": row["watermark_column"],
+                "watermark_value": row["watermark_value"],
+                "dataset_version_id": str(row["dataset_version_id"]) if row["dataset_version_id"] else None,
+                "lakefs_commit_id": row["lakefs_commit_id"],
+                "rows_processed": row["rows_processed"],
+                "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+                "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
+            }
+
+    async def delete_watermark(
+        self,
+        *,
+        mapping_spec_id: str,
+        dataset_branch: str = "main",
+    ) -> bool:
+        """
+        Delete watermark state (for full refresh reset).
+
+        Returns:
+            True if deleted, False if not found
+        """
+        if not self._pool:
+            raise RuntimeError("ObjectifyRegistry not connected")
+        async with self._pool.acquire() as conn:
+            result = await conn.execute(
+                """
+                DELETE FROM objectify_watermarks
+                WHERE mapping_spec_id = $1::uuid AND dataset_branch = $2
+                """,
+                mapping_spec_id,
+                dataset_branch,
+            )
+            return result == "DELETE 1"
+
+    async def get_all_watermarks(
+        self,
+        *,
+        mapping_spec_id: Optional[str] = None,
+        limit: int = 100,
+    ) -> List[Dict[str, Any]]:
+        """
+        Get all watermarks, optionally filtered by mapping spec.
+        """
+        if not self._pool:
+            raise RuntimeError("ObjectifyRegistry not connected")
+        async with self._pool.acquire() as conn:
+            if mapping_spec_id:
+                rows = await conn.fetch(
+                    """
+                    SELECT watermark_id, mapping_spec_id, dataset_branch,
+                           watermark_column, watermark_value, dataset_version_id,
+                           lakefs_commit_id, rows_processed, created_at, updated_at
+                    FROM objectify_watermarks
+                    WHERE mapping_spec_id = $1::uuid
+                    ORDER BY updated_at DESC
+                    LIMIT $2
+                    """,
+                    mapping_spec_id,
+                    limit,
+                )
+            else:
+                rows = await conn.fetch(
+                    """
+                    SELECT watermark_id, mapping_spec_id, dataset_branch,
+                           watermark_column, watermark_value, dataset_version_id,
+                           lakefs_commit_id, rows_processed, created_at, updated_at
+                    FROM objectify_watermarks
+                    ORDER BY updated_at DESC
+                    LIMIT $1
+                    """,
+                    limit,
+                )
+            return [
+                {
+                    "watermark_id": str(row["watermark_id"]),
+                    "mapping_spec_id": str(row["mapping_spec_id"]),
+                    "dataset_branch": row["dataset_branch"],
+                    "watermark_column": row["watermark_column"],
+                    "watermark_value": row["watermark_value"],
+                    "dataset_version_id": str(row["dataset_version_id"]) if row["dataset_version_id"] else None,
+                    "lakefs_commit_id": row["lakefs_commit_id"],
+                    "rows_processed": row["rows_processed"],
+                    "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+                    "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
+                }
+                for row in rows
+            ]

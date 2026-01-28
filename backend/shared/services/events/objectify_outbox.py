@@ -15,6 +15,7 @@ from shared.observability.context_propagation import (
     attach_context_from_carrier,
     carrier_from_envelope_metadata,
     kafka_headers_from_envelope_metadata,
+    kafka_headers_with_dedup,
 )
 from shared.observability.tracing import get_tracing_service
 from shared.services.registries.objectify_registry import ObjectifyOutboxItem, ObjectifyRegistry
@@ -87,18 +88,41 @@ class ObjectifyOutboxPublisher:
         return datetime.now(timezone.utc) + timedelta(seconds=delay)
 
     async def _publish_batch(self, batch: list[ObjectifyOutboxItem]) -> None:
+        """
+        Publish a batch of outbox items with atomic delivery tracking.
+
+        Critical Fix (Gap 3): Track individual message delivery status via callbacks
+        to ensure we only mark messages as published when Kafka broker confirms receipt.
+        """
         if not batch:
             return
-        delivery_errors: dict[str, str] = {}
 
-        def _cb(err, _msg, outbox_id: str) -> None:
+        # Track delivery status for each message (success or error)
+        # Using dict to store either None (success) or error string
+        delivery_results: dict[str, Optional[str]] = {}
+        pending_count = len(batch)
+
+        def _on_delivery(err, _msg, outbox_id: str) -> None:
+            nonlocal pending_count
             if err is not None:
-                delivery_errors[outbox_id] = str(err)
+                delivery_results[outbox_id] = str(err)
+            else:
+                # Explicitly track successful delivery
+                delivery_results[outbox_id] = None
+            pending_count -= 1
 
         for item in batch:
             payload = json.dumps(item.payload, ensure_ascii=False, default=str).encode("utf-8")
-            key = item.job_id.encode("utf-8")
-            headers = kafka_headers_from_envelope_metadata(item.payload)
+            # Critical Fix (Gap 5): Use dataset_id as partition key for ordering guarantee
+            # All objectify jobs for the same dataset will go to the same partition
+            aggregate_id = item.payload.get("dataset_id") if isinstance(item.payload, dict) else None
+            key = (aggregate_id or item.job_id).encode("utf-8")
+            # Use kafka_headers_with_dedup for idempotent message processing
+            headers = kafka_headers_with_dedup(
+                item.payload,
+                event_id=item.job_id,
+                aggregate_id=aggregate_id,
+            )
             carrier = carrier_from_envelope_metadata(item.payload)
             with attach_context_from_carrier(carrier, service_name="objectify-outbox"):
                 with self.tracing.span(
@@ -115,33 +139,51 @@ class ObjectifyOutboxPublisher:
                         value=payload,
                         key=key,
                         headers=headers or None,
-                        on_delivery=lambda err, msg, outbox_id=item.outbox_id: _cb(err, msg, outbox_id),
+                        on_delivery=lambda err, msg, oid=item.outbox_id: _on_delivery(err, msg, oid),
                     )
 
+        # Flush and poll until all callbacks are received or timeout
         remaining = await asyncio.to_thread(self.producer.flush, self.flush_timeout_seconds)
+
+        # Additional poll to ensure all callbacks are processed
+        if pending_count > 0:
+            await asyncio.to_thread(self.producer.poll, 1.0)
+
         if remaining != 0:
             logger.warning("Objectify outbox flush incomplete (remaining=%s)", remaining)
 
+        # Process each message based on its delivery callback result
         for item in batch:
-            err = delivery_errors.get(item.outbox_id)
-            if err:
-                attempts = int(item.publish_attempts) + 1
-                await self.registry.mark_objectify_outbox_failed(
-                    outbox_id=item.outbox_id,
-                    error=err,
-                    next_attempt_at=self._next_attempt_at(attempts),
-                )
-            elif remaining == 0:
-                await self.registry.mark_objectify_outbox_published(
-                    outbox_id=item.outbox_id,
-                    job_id=item.job_id,
-                )
+            outbox_id = item.outbox_id
+
+            if outbox_id in delivery_results:
+                err = delivery_results[outbox_id]
+                if err is None:
+                    # Callback confirmed successful delivery
+                    await self.registry.mark_objectify_outbox_published(
+                        outbox_id=outbox_id,
+                        job_id=item.job_id,
+                    )
+                else:
+                    # Callback returned an error
+                    attempts = int(item.publish_attempts) + 1
+                    await self.registry.mark_objectify_outbox_failed(
+                        outbox_id=outbox_id,
+                        error=err,
+                        next_attempt_at=self._next_attempt_at(attempts),
+                    )
             else:
+                # No callback received - delivery status unknown
+                # Mark as failed to retry (safe approach)
                 attempts = int(item.publish_attempts) + 1
                 await self.registry.mark_objectify_outbox_failed(
-                    outbox_id=item.outbox_id,
-                    error="flush incomplete; delivery unknown",
+                    outbox_id=outbox_id,
+                    error="delivery callback not received; status unknown",
                     next_attempt_at=self._next_attempt_at(attempts),
+                )
+                logger.warning(
+                    "Outbox item %s delivery callback not received after flush",
+                    outbox_id,
                 )
 
     async def flush_once(self) -> None:

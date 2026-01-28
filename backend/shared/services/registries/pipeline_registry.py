@@ -33,6 +33,26 @@ class PipelineMergeNotSupportedError(RuntimeError):
     pass
 
 
+class PipelineOCCConflictError(RuntimeError):
+    """Raised when optimistic concurrency control detects a version conflict."""
+
+    def __init__(
+        self,
+        *,
+        pipeline_id: str,
+        expected_version: int,
+        actual_version: Optional[int] = None,
+    ) -> None:
+        self.pipeline_id = pipeline_id
+        self.expected_version = expected_version
+        self.actual_version = actual_version
+        msg = f"Pipeline OCC conflict (pipeline_id={pipeline_id}, expected version {expected_version}"
+        if actual_version is not None:
+            msg += f", actual version {actual_version}"
+        msg += ")"
+        super().__init__(msg)
+
+
 class PipelineAlreadyExistsError(RuntimeError):
     def __init__(self, *, db_name: str, name: str, branch: str) -> None:
         super().__init__(f"Pipeline already exists (db_name={db_name} name={name} branch={branch})")
@@ -199,6 +219,7 @@ def _row_to_pipeline_record(row: asyncpg.Record) -> PipelineRecord:
         last_scheduled_at=row["last_scheduled_at"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
+        occ_version=int(row.get("version", 1) or 1),
     )
 
 
@@ -237,6 +258,7 @@ class PipelineRecord:
     last_scheduled_at: Optional[datetime]
     created_at: datetime
     updated_at: datetime
+    occ_version: int = 1  # Optimistic Concurrency Control version
 
 
 @dataclass(frozen=True)
@@ -1716,7 +1738,7 @@ class PipelineRegistry:
                       last_preview_sample, last_preview_nodes,
                       last_build_status, last_build_at, last_build_output,
                        deployed_at, deployed_commit_id, schedule_interval_seconds, schedule_cron, last_scheduled_at,
-                       created_at, updated_at
+                       created_at, updated_at, version
                 FROM {self._schema}.pipelines
                 WHERE pipeline_id = $1
                 """,
@@ -1747,7 +1769,7 @@ class PipelineRegistry:
                       last_preview_sample, last_preview_nodes,
                       last_build_status, last_build_at, last_build_output,
                        deployed_at, deployed_commit_id, schedule_interval_seconds, schedule_cron, last_scheduled_at,
-                       created_at, updated_at
+                       created_at, updated_at, version
                 FROM {self._schema}.pipelines
                 WHERE db_name = $1 AND name = $2 AND branch = $3
                 """,
@@ -1778,7 +1800,15 @@ class PipelineRegistry:
         proposal_reviewed_at: Optional[datetime] = None,
         proposal_review_comment: Optional[str] = None,
         proposal_bundle: Optional[Dict[str, Any]] = None,
+        expected_version: Optional[int] = None,
     ) -> PipelineRecord:
+        """
+        Update pipeline with Optimistic Concurrency Control.
+
+        Args:
+            expected_version: If provided, OCC check is performed.
+                             Raises PipelineOCCConflictError if version mismatch.
+        """
         if not self._pool:
             raise RuntimeError("PipelineRegistry not connected")
         fields: List[str] = []
@@ -1826,14 +1856,21 @@ class PipelineRegistry:
             return pipeline
 
         values.append(pipeline_id)
-        set_clause = ", ".join(fields) + ", updated_at = NOW()"
+        # Increment version on each update
+        set_clause = ", ".join(fields) + ", version = version + 1, updated_at = NOW()"
+
+        # Build WHERE clause with optional OCC check
+        where_clause = f"pipeline_id = ${len(values)}"
+        if expected_version is not None:
+            values.append(expected_version)
+            where_clause += f" AND version = ${len(values)}"
 
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
                 f"""
                 UPDATE {self._schema}.pipelines
                 SET {set_clause}
-                WHERE pipeline_id = ${len(values)}
+                WHERE {where_clause}
                 RETURNING pipeline_id, db_name, name, description, pipeline_type, location, status,
                           branch, lakefs_repository,
                           proposal_status, proposal_title, proposal_description,
@@ -1843,11 +1880,23 @@ class PipelineRegistry:
                           last_preview_sample, last_preview_nodes,
                           last_build_status, last_build_at, last_build_output,
                           deployed_at, deployed_commit_id, schedule_interval_seconds, schedule_cron, last_scheduled_at,
-                          created_at, updated_at
+                          created_at, updated_at, version
                 """,
                 *values,
             )
             if not row:
+                if expected_version is not None:
+                    # OCC conflict - fetch current version for error message
+                    current = await conn.fetchrow(
+                        f"SELECT version FROM {self._schema}.pipelines WHERE pipeline_id = $1",
+                        pipeline_id,
+                    )
+                    actual_version = int(current["version"]) if current else None
+                    raise PipelineOCCConflictError(
+                        pipeline_id=pipeline_id,
+                        expected_version=expected_version,
+                        actual_version=actual_version,
+                    )
                 raise RuntimeError("Failed to update pipeline")
             return _row_to_pipeline_record(row)
 

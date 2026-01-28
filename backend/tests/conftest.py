@@ -47,8 +47,9 @@ def pytest_configure() -> None:
     if "ELASTICSEARCH_PORT" not in os.environ:
         os.environ["ELASTICSEARCH_PORT"] = os.getenv("ELASTICSEARCH_PORT_HOST", "9200")
     kafka_port = _env_or_dotenv(dotenv, "KAFKA_PORT_HOST", "39092")
-    postgres_port = _env_or_dotenv(dotenv, "POSTGRES_PORT_HOST", "55433")
-    redis_port = _env_or_dotenv(dotenv, "REDIS_PORT_HOST", "6380")
+    # Use docker-compose.yml defaults for local dev infrastructure
+    postgres_port = _env_or_dotenv(dotenv, "POSTGRES_PORT_HOST", "5433")
+    redis_port = _env_or_dotenv(dotenv, "REDIS_PORT_HOST", "6379")
     minio_port = _env_or_dotenv(dotenv, "MINIO_PORT_HOST", "9002")
     lakefs_port = _env_or_dotenv(dotenv, "LAKEFS_PORT_HOST", "48080")
 

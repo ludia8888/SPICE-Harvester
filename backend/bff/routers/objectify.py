@@ -1231,3 +1231,290 @@ async def run_objectify(
     except Exception as exc:
         logger.error("Failed to enqueue objectify job: %s", exc)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
+
+
+# ============================================================
+# Enterprise Features: FK Detection, Incremental Objectify
+# ============================================================
+
+
+class DetectRelationshipsRequest(BaseModel):
+    confidence_threshold: float = Field(default=0.6, ge=0.0, le=1.0)
+    include_sample_analysis: bool = Field(default=True)
+
+
+class DetectRelationshipsResponse(BaseModel):
+    patterns: List[Dict[str, Any]] = Field(default_factory=list)
+    suggestions: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+@router.post(
+    "/databases/{db_name}/datasets/{dataset_id}/detect-relationships",
+    summary="Detect FK relationships in a dataset",
+    description="Analyzes dataset columns to detect potential foreign key relationships based on naming conventions and value overlap.",
+)
+async def detect_relationships(
+    db_name: str,
+    dataset_id: str,
+    request: Request,
+    body: DetectRelationshipsRequest = DetectRelationshipsRequest(),
+    branch: str = Query(default="main"),
+    dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
+) -> Dict[str, Any]:
+    """Detect potential FK relationships in a dataset."""
+    db_name = sanitize_input(db_name)
+    dataset_id = sanitize_input(dataset_id)
+    await _require_db_role(request, db_name=db_name, roles=DATA_ENGINEER_ROLES)
+
+    try:
+        from shared.services.pipeline.fk_pattern_detector import (
+            ForeignKeyPatternDetector,
+            FKDetectionConfig,
+            TargetCandidate,
+        )
+
+        # Get source dataset
+        dataset = await dataset_registry.get_dataset(dataset_id=dataset_id)
+        if not dataset:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Dataset not found: {dataset_id}",
+            )
+
+        schema = dataset.schema_json or {}
+        columns = schema.get("columns") or schema.get("fields") or []
+
+        # Get other datasets as target candidates
+        all_datasets = await dataset_registry.list_datasets(
+            db_name=db_name, branch=branch, limit=200
+        )
+        target_candidates = []
+        for ds in all_datasets:
+            if ds.dataset_id == dataset_id:
+                continue
+            ds_schema = ds.schema_json or {}
+            ds_columns = ds_schema.get("columns") or ds_schema.get("fields") or []
+            pk_cols = [c.get("name") for c in ds_columns if c.get("name", "").lower() in ("id", "pk")]
+            if not pk_cols and ds_columns:
+                pk_cols = [ds_columns[0].get("name", "id")]
+            target_candidates.append(TargetCandidate(
+                candidate_type="dataset",
+                candidate_id=ds.dataset_id,
+                candidate_name=ds.name or ds.dataset_id,
+                pk_columns=pk_cols,
+            ))
+
+        # Detect FK patterns
+        config = FKDetectionConfig(min_confidence=body.confidence_threshold)
+        detector = ForeignKeyPatternDetector(config)
+        patterns = detector.detect_patterns(
+            source_dataset_id=dataset_id,
+            source_schema=columns,
+            target_candidates=target_candidates,
+        )
+
+        # Generate link type suggestions
+        suggestions = []
+        for pattern in patterns:
+            suggestion = detector.suggest_link_type(pattern)
+            suggestions.append(suggestion)
+
+        return ApiResponse.success(
+            message=f"Detected {len(patterns)} potential FK relationships",
+            data={
+                "dataset_id": dataset_id,
+                "db_name": db_name,
+                "patterns_found": len(patterns),
+                "patterns": [
+                    {
+                        "source_column": p.source_column,
+                        "target_dataset_id": p.target_dataset_id,
+                        "target_object_type": p.target_object_type,
+                        "target_pk_field": p.target_pk_field,
+                        "confidence": p.confidence,
+                        "detection_method": p.detection_method,
+                        "reasons": p.reasons,
+                    }
+                    for p in patterns
+                ],
+                "suggestions": suggestions,
+            },
+        ).to_dict()
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("detect_relationships failed: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
+        )
+
+
+class TriggerIncrementalRequest(BaseModel):
+    execution_mode: str = Field(default="incremental", pattern="^(full|incremental|delta)$")
+    watermark_column: Optional[str] = None
+    force_full_refresh: bool = Field(default=False)
+    max_rows: Optional[int] = None
+    batch_size: Optional[int] = None
+
+
+@router.post(
+    "/mapping-specs/{mapping_spec_id}/trigger-incremental",
+    summary="Trigger incremental objectify",
+    description="Trigger objectify in incremental mode, processing only rows changed since last run.",
+)
+async def trigger_incremental_objectify(
+    mapping_spec_id: str,
+    request: Request,
+    body: TriggerIncrementalRequest = TriggerIncrementalRequest(),
+    branch: str = Query(default="main"),
+    dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
+    objectify_registry: ObjectifyRegistry = Depends(get_objectify_registry),
+    job_queue: ObjectifyJobQueue = Depends(get_objectify_job_queue),
+) -> Dict[str, Any]:
+    """Trigger objectify with incremental execution mode."""
+    mapping_spec_id = sanitize_input(mapping_spec_id)
+
+    try:
+        mapping_spec = await objectify_registry.get_mapping_spec(mapping_spec_id=mapping_spec_id)
+        if not mapping_spec:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Mapping spec not found: {mapping_spec_id}",
+            )
+
+        dataset = await dataset_registry.get_dataset(dataset_id=str(mapping_spec.dataset_id))
+        if not dataset:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Dataset not found: {mapping_spec.dataset_id}",
+            )
+
+        await _require_db_role(request, db_name=dataset.db_name, roles=DATA_ENGINEER_ROLES)
+
+        # Handle watermark
+        if body.force_full_refresh:
+            await objectify_registry.delete_watermark(
+                mapping_spec_id=mapping_spec_id,
+                dataset_branch=branch,
+            )
+            previous_watermark = None
+        else:
+            watermark = await objectify_registry.get_watermark(
+                mapping_spec_id=mapping_spec_id,
+                dataset_branch=branch,
+            )
+            previous_watermark = watermark.get("watermark_value") if watermark else None
+
+        # Get latest dataset version
+        version = await dataset_registry.get_latest_version(dataset_id=str(mapping_spec.dataset_id))
+        if not version:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No dataset version available",
+            )
+
+        # Build job with incremental options
+        job_id = str(uuid4())
+        options = dict(mapping_spec.options or {})
+        options["execution_mode"] = body.execution_mode
+        if body.watermark_column:
+            options["watermark_column"] = body.watermark_column
+        if previous_watermark:
+            options["previous_watermark"] = previous_watermark
+
+        dedupe_key = objectify_registry.build_dedupe_key(
+            dataset_id=str(mapping_spec.dataset_id),
+            dataset_branch=dataset.branch,
+            mapping_spec_id=mapping_spec.mapping_spec_id,
+            mapping_spec_version=mapping_spec.version,
+            dataset_version_id=version.version_id,
+        )
+
+        job = ObjectifyJob(
+            job_id=job_id,
+            db_name=dataset.db_name,
+            dataset_id=str(mapping_spec.dataset_id),
+            dataset_version_id=version.version_id,
+            dedupe_key=dedupe_key,
+            dataset_branch=dataset.branch,
+            artifact_key=version.artifact_key,
+            mapping_spec_id=mapping_spec.mapping_spec_id,
+            mapping_spec_version=mapping_spec.version,
+            target_class_id=mapping_spec.target_class_id,
+            max_rows=body.max_rows or options.get("max_rows"),
+            batch_size=body.batch_size or options.get("batch_size"),
+            options=options,
+        )
+
+        await job_queue.publish(job, require_delivery=False)
+
+        return ApiResponse.success(
+            message=f"Incremental objectify job queued ({body.execution_mode} mode)",
+            data={
+                "job_id": job_id,
+                "mapping_spec_id": mapping_spec_id,
+                "execution_mode": body.execution_mode,
+                "watermark_column": body.watermark_column,
+                "previous_watermark": previous_watermark,
+                "status": "QUEUED",
+            },
+        ).to_dict()
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("trigger_incremental_objectify failed: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
+        )
+
+
+@router.get(
+    "/mapping-specs/{mapping_spec_id}/watermark",
+    summary="Get objectify watermark",
+    description="Get the current watermark state for a mapping spec.",
+)
+async def get_mapping_spec_watermark(
+    mapping_spec_id: str,
+    request: Request,
+    branch: str = Query(default="main"),
+    objectify_registry: ObjectifyRegistry = Depends(get_objectify_registry),
+) -> Dict[str, Any]:
+    """Get watermark state for incremental objectify."""
+    mapping_spec_id = sanitize_input(mapping_spec_id)
+
+    try:
+        watermark = await objectify_registry.get_watermark(
+            mapping_spec_id=mapping_spec_id,
+            dataset_branch=branch,
+        )
+
+        if not watermark:
+            return ApiResponse.success(
+                message="No watermark found",
+                data={
+                    "mapping_spec_id": mapping_spec_id,
+                    "branch": branch,
+                    "watermark": None,
+                    "message": "Objectify has not run in incremental mode yet",
+                },
+            ).to_dict()
+
+        return ApiResponse.success(
+            message="Watermark retrieved",
+            data={
+                "mapping_spec_id": mapping_spec_id,
+                "branch": branch,
+                "watermark": watermark,
+            },
+        ).to_dict()
+
+    except Exception as exc:
+        logger.error("get_mapping_spec_watermark failed: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
+        )

@@ -192,6 +192,45 @@ def kafka_headers_from_envelope_metadata(payload_or_metadata: Optional[Mapping[s
     return kafka_headers_from_carrier(carrier)
 
 
+def kafka_headers_with_dedup(
+    payload_or_metadata: Optional[Mapping[str, Any]],
+    *,
+    dedup_id: Optional[str] = None,
+    event_id: Optional[str] = None,
+    aggregate_id: Optional[str] = None,
+) -> list[Tuple[str, bytes]]:
+    """
+    Build Kafka headers with deduplication ID for idempotent message processing.
+
+    Args:
+        payload_or_metadata: Payload or metadata dict for trace context extraction
+        dedup_id: Explicit deduplication ID (if not provided, computed from event_id/aggregate_id)
+        event_id: Event ID for dedup key computation
+        aggregate_id: Aggregate ID for dedup key computation
+
+    Returns:
+        List of Kafka header tuples including dedup-id header
+    """
+    headers = kafka_headers_from_envelope_metadata(payload_or_metadata)
+
+    # Compute or use provided dedup_id
+    if not dedup_id:
+        if event_id:
+            dedup_id = f"{aggregate_id or 'global'}:{event_id}"
+        elif payload_or_metadata:
+            # Try to extract from payload
+            if isinstance(payload_or_metadata, Mapping):
+                event_id = payload_or_metadata.get("event_id") or payload_or_metadata.get("job_id")
+                aggregate_id = payload_or_metadata.get("aggregate_id") or payload_or_metadata.get("dataset_id") or payload_or_metadata.get("pipeline_id")
+                if event_id:
+                    dedup_id = f"{aggregate_id or 'global'}:{event_id}"
+
+    if dedup_id:
+        headers.append(("dedup-id", dedup_id.encode("utf-8")))
+
+    return headers
+
+
 def kafka_headers_from_current_context() -> list[Tuple[str, bytes]]:
     """
     Build Kafka headers (W3C Trace Context + baggage) from the current OTel context.

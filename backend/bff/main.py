@@ -89,7 +89,9 @@ from shared.security.input_sanitizer import (
 from shared.utils.label_mapper import LabelMapper
 from shared.dependencies import configure_type_inference_service
 from shared.services.storage.redis_service import create_redis_service
-from shared.services.core.websocket_service import get_notification_service
+from shared.services.core.websocket_service import get_notification_service, get_connection_manager
+from shared.services.core.schema_change_monitor import SchemaChangeMonitor, MonitorConfig
+from shared.services.core.schema_drift_detector import SchemaDriftDetector
 
 # Rate limiting middleware
 from shared.middleware.rate_limiter import rate_limit, RateLimitPresets, RateLimiter
@@ -134,6 +136,7 @@ from bff.routers import (
     pipeline,
     pipeline_plans,
     query,
+    schema_changes,
     summary,
     tasks,
     websocket,
@@ -810,7 +813,34 @@ async def lifespan(app: FastAPI):
             app.state.agent_retention_task = agent_retention_task
             app.state.agent_retention_stop = agent_retention_stop
 
-        # 6. Middleware setup is handled during app creation (service_factory)
+        # 7. Start Schema Change Monitor for proactive schema drift detection
+        schema_monitor_config = getattr(settings.workers, "schema_change_monitor", None)
+        enable_schema_monitor = bool(schema_monitor_config and getattr(schema_monitor_config, "enabled", False))
+        if enable_schema_monitor:
+            try:
+                dataset_registry = _bff_container.get_dataset_registry()
+                objectify_registry = _bff_container.get_objectify_registry()
+                redis_service = await container.get_or_none("RedisService")
+                ws_notification_service = get_notification_service(redis_service) if redis_service else None
+
+                monitor_config = MonitorConfig(
+                    check_interval_seconds=int(getattr(schema_monitor_config, "check_interval_seconds", 300)),
+                    notification_cooldown_seconds=int(getattr(schema_monitor_config, "cooldown_seconds", 3600)),
+                )
+                schema_monitor = SchemaChangeMonitor(
+                    drift_detector=SchemaDriftDetector(),
+                    dataset_registry=dataset_registry,
+                    objectify_registry=objectify_registry,
+                    config=monitor_config,
+                    websocket_service=ws_notification_service,
+                )
+                await schema_monitor.start()
+                app.state.schema_change_monitor = schema_monitor
+                logger.info("Schema Change Monitor started (interval=%ds)", monitor_config.check_interval_seconds)
+            except Exception as exc:
+                logger.warning("Failed to start Schema Change Monitor: %s", exc)
+
+        # 8. Middleware setup is handled during app creation (service_factory)
         logger.info("BFF Service startup completed successfully")
         
         yield
@@ -830,6 +860,14 @@ async def lifespan(app: FastAPI):
                 await agent_retention_task
             except Exception as exc:
                 logger.warning("Agent retention worker shutdown failed: %s", exc)
+
+        # Stop Schema Change Monitor
+        if hasattr(app.state, "schema_change_monitor") and app.state.schema_change_monitor:
+            try:
+                await app.state.schema_change_monitor.stop()
+                logger.info("Schema Change Monitor stopped")
+            except Exception as exc:
+                logger.warning("Schema Change Monitor shutdown failed: %s", exc)
 
         if dataset_reconcile_stop is not None:
             dataset_reconcile_stop.set()
@@ -1038,6 +1076,7 @@ app.include_router(pipeline_plans.router, prefix="/api/v1")
 app.include_router(objectify.router, prefix="/api/v1")
 app.include_router(ontology_agent.router, prefix="/api/v1")
 app.include_router(governance.router, prefix="/api/v1")
+app.include_router(schema_changes.router, prefix="/api/v1")
 app.include_router(ops.router, prefix="/api/v1")
 app.include_router(graph.router)  # Graph router has its own /api/v1 prefix
 

@@ -2051,6 +2051,29 @@ def _require_idempotency_key(request: Optional[Request]) -> str:
     return key
 
 
+def _get_idempotency_key(request: Optional[Request]) -> Optional[str]:
+    """Get optional idempotency key from request headers."""
+    if request is None:
+        return None
+    key = (
+        request.headers.get("Idempotency-Key")
+        or request.headers.get("X-Idempotency-Key")
+        or ""
+    ).strip()
+    return key or None
+
+
+def _require_pipeline_idempotency_key(request: Optional[Request], *, operation: str) -> str:
+    """Require idempotency key for pipeline mutation operations."""
+    key = _get_idempotency_key(request)
+    if not key:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Idempotency-Key header is required for {operation} operations",
+        )
+    return key
+
+
 def _build_ingest_request_fingerprint(payload: Dict[str, Any]) -> str:
     try:
         serialized = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
@@ -2306,6 +2329,8 @@ async def submit_pipeline_proposal(
     request: Request = None,
 ) -> ApiResponse:
     try:
+        # Require idempotency key for proposal submission
+        idempotency_key = _require_pipeline_idempotency_key(request, operation="proposal submit")
         await _ensure_pipeline_permission(
             pipeline_registry,
             pipeline_id=pipeline_id,
@@ -2380,6 +2405,8 @@ async def approve_pipeline_proposal(
     request: Request = None,
 ) -> ApiResponse:
     try:
+        # Require idempotency key for proposal approval
+        idempotency_key = _require_pipeline_idempotency_key(request, operation="proposal approve")
         await _ensure_pipeline_permission(
             pipeline_registry,
             pipeline_id=pipeline_id,
@@ -2465,6 +2492,8 @@ async def reject_pipeline_proposal(
     request: Request = None,
 ) -> ApiResponse:
     try:
+        # Require idempotency key for proposal rejection
+        idempotency_key = _require_pipeline_idempotency_key(request, operation="proposal reject")
         await _ensure_pipeline_permission(
             pipeline_registry,
             pipeline_id=pipeline_id,
@@ -3241,6 +3270,8 @@ async def create_pipeline(
 ) -> ApiResponse:
     sanitized: Dict[str, Any] = {}
     try:
+        # Require idempotency key for create operations
+        idempotency_key = _require_pipeline_idempotency_key(request, operation="pipeline create")
         sanitized = sanitize_input(payload)
         pipeline_id: Optional[str] = None
         raw_pipeline_id = sanitized.get("pipeline_id") or sanitized.get("pipelineId")
@@ -3658,6 +3689,8 @@ async def preview_pipeline(
     request: Request = None,
 ) -> ApiResponse:
     try:
+        # Require idempotency key for preview operations
+        idempotency_key = _require_pipeline_idempotency_key(request, operation="pipeline preview")
         await _ensure_pipeline_permission(
             pipeline_registry,
             pipeline_id=pipeline_id,
@@ -3919,6 +3952,8 @@ async def build_pipeline(
     request: Request = None,
 ) -> ApiResponse:
     try:
+        # Require idempotency key for build operations
+        idempotency_key = _require_pipeline_idempotency_key(request, operation="pipeline build")
         await _ensure_pipeline_permission(
             pipeline_registry,
             pipeline_id=pipeline_id,
@@ -4120,6 +4155,8 @@ async def deploy_pipeline(
     audit_store: AuditLogStoreDep,
 ) -> ApiResponse:
     try:
+        # Require idempotency key for deploy operations
+        idempotency_key = _require_pipeline_idempotency_key(request, operation="pipeline deploy")
         await _ensure_pipeline_permission(
             pipeline_registry,
             pipeline_id=pipeline_id,

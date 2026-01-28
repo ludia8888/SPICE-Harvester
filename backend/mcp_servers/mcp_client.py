@@ -149,6 +149,17 @@ class MCPClientManager:
         if server_name in self.clients:
             del self.clients[server_name]
         logger.info("Disconnected from MCP server: %s", server_name)
+
+    async def reconnect_server(self, server_name: str) -> Optional[ClientSession]:
+        """
+        Reconnect to a server to refresh the tool list cache.
+
+        This is needed because MCP ClientSession caches the tool list during
+        initialize(), so new tools added to the server won't be available
+        until a reconnect.
+        """
+        await self.disconnect_server(server_name)
+        return await self.connect_server(server_name)
     
     async def call_tool(
         self,

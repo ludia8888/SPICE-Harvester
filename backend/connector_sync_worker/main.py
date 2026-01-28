@@ -24,7 +24,9 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
 import httpx
-from confluent_kafka import Consumer, KafkaError, Producer
+from confluent_kafka import KafkaError, Producer
+
+from shared.services.kafka.safe_consumer import SafeKafkaConsumer, ConsumerState
 
 from data_connector.google_sheets.service import GoogleSheetsService
 from data_connector.google_sheets.utils import normalize_sheet_data
@@ -118,18 +120,17 @@ class ConnectorSyncWorker:
             logger.warning("No BFF auth token configured; BFF calls may fail (set ADMIN_TOKEN/BFF_ADMIN_TOKEN).")
         self.http = httpx.AsyncClient(timeout=60.0, headers=headers)
 
-        # Kafka consumer
-        self.consumer = Consumer(
-            {
-                "bootstrap.servers": settings.database.kafka_servers,
-                "group.id": self.group_id,
-                "auto.offset.reset": "earliest",
-                "enable.auto.commit": False,
-                "session.timeout.ms": 45000,
-                "max.poll.interval.ms": 300000,
-            }
+        # Use SafeKafkaConsumer for strong consistency guarantees
+        self.consumer = SafeKafkaConsumer(
+            group_id=self.group_id,
+            topics=[self.topic],
+            service_name="connector-sync-worker",
+            max_poll_interval_ms=300000,
+            session_timeout_ms=45000,
+            on_revoke=self._on_partitions_revoked,
+            on_assign=self._on_partitions_assigned,
         )
-        await self._consumer_call(self.consumer.subscribe, [self.topic])
+        self._rebalance_in_progress = False
 
         # DLQ producer (best-effort)
         self.dlq_producer = Producer(
@@ -145,6 +146,22 @@ class ConnectorSyncWorker:
         )
 
         logger.info(f"✅ ConnectorSyncWorker initialized (topic={self.topic}, group={self.group_id})")
+
+    def _on_partitions_revoked(self, partitions: list) -> None:
+        """Handle partition revocation during rebalance."""
+        self._rebalance_in_progress = True
+        logger.info(
+            "Connector sync worker partitions revoked: %s",
+            [(p.topic, p.partition) for p in partitions],
+        )
+
+    def _on_partitions_assigned(self, partitions: list) -> None:
+        """Handle partition assignment during rebalance."""
+        self._rebalance_in_progress = False
+        logger.info(
+            "Connector sync worker partitions assigned: %s",
+            [(p.topic, p.partition) for p in partitions],
+        )
 
     async def close(self) -> None:
         if self.http:

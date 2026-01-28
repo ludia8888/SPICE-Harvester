@@ -375,27 +375,32 @@ def _collect_required_field_issues(resource_type: str, spec: Dict[str, Any]) -> 
                 missing_fields=["backing_source"],
             )
         if isinstance(backing_source, dict):
-            if not str(backing_source.get("kind") or "").strip():
-                _append_spec_issue(
-                    issues,
-                    message="object_type backing_source requires kind",
-                    missing_fields=["backing_source.kind"],
-                )
-            if not str(backing_source.get("ref") or "").strip():
-                _append_spec_issue(
-                    issues,
-                    message="object_type backing_source requires ref",
-                    missing_fields=["backing_source.ref"],
-                )
-            schema_hash = backing_source.get("schema_hash") or backing_source.get("schemaHash")
-            if not str(schema_hash or "").strip():
-                _append_spec_issue(
-                    issues,
-                    message="object_type backing_source requires schema_hash",
-                    missing_fields=["backing_source.schema_hash"],
-                )
+            # If dataset_id is provided, allow skipping kind/ref/schema_hash
+            # These can be resolved later when objectify runs
+            has_dataset_id = bool(str(backing_source.get("dataset_id") or "").strip())
+            if not has_dataset_id:
+                if not str(backing_source.get("kind") or "").strip():
+                    _append_spec_issue(
+                        issues,
+                        message="object_type backing_source requires kind",
+                        missing_fields=["backing_source.kind"],
+                    )
+                if not str(backing_source.get("ref") or "").strip():
+                    _append_spec_issue(
+                        issues,
+                        message="object_type backing_source requires ref",
+                        missing_fields=["backing_source.ref"],
+                    )
+                schema_hash = backing_source.get("schema_hash") or backing_source.get("schemaHash")
+                if not str(schema_hash or "").strip():
+                    _append_spec_issue(
+                        issues,
+                        message="object_type backing_source requires schema_hash",
+                        missing_fields=["backing_source.schema_hash"],
+                    )
             status_value = str(spec.get("status") or "ACTIVE").strip().upper()
-            if status_value == "ACTIVE":
+            # Skip version_id requirement when dataset_id is provided (will be resolved by objectify)
+            if status_value == "ACTIVE" and not has_dataset_id:
                 version_id = (
                     backing_source.get("version_id")
                     or backing_source.get("versionId")

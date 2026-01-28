@@ -169,6 +169,40 @@ async def _bff_json(
     return payload if isinstance(payload, dict) else {"response": payload}
 
 
+def _oms_api_base_url() -> str:
+    """Get OMS API base URL from environment."""
+    return os.getenv("OMS_BASE_URL", "http://oms:8000").rstrip("/")
+
+
+async def _oms_json(
+    method: str,
+    path: str,
+    *,
+    params: Optional[Dict[str, Any]] = None,
+    json_body: Optional[Dict[str, Any]] = None,
+    timeout_seconds: float = 30.0,
+) -> Dict[str, Any]:
+    """Make an HTTP request to OMS API and return JSON response."""
+    base = _oms_api_base_url()
+    url = f"{base}{path}"
+    headers = {"Content-Type": "application/json", "Accept": "application/json"}
+    async with httpx.AsyncClient(timeout=timeout_seconds) as client:
+        resp = await client.request(method, url, headers=headers, json=json_body, params=params)
+    try:
+        payload = resp.json()
+    except Exception:
+        payload = {"raw": (resp.text or "").strip()}
+    if resp.status_code >= 400:
+        detail = payload.get("detail") if isinstance(payload, dict) else None
+        message = payload.get("message") if isinstance(payload, dict) else None
+        return {
+            "error": message or detail or f"OMS {method} {path} failed ({resp.status_code})",
+            "status_code": resp.status_code,
+            "response": payload,
+        }
+    return payload if isinstance(payload, dict) else {"response": payload}
+
+
 # ==================== Trimming Constants ====================
 # These control how much data is preserved in tool responses.
 # Consistent limits help LLMs understand data without context overflow.
@@ -435,6 +469,7 @@ class PipelineMCPServer:
         self._profile_registry: Optional[DatasetProfileRegistry] = None
         self._pipeline_registry: Optional[PipelineRegistry] = None
         self._objectify_registry: Optional[ObjectifyRegistry] = None
+        self.websocket_service: Optional[Any] = None  # For schema drift broadcasts
         self._setup_handlers()
 
     async def _ensure_registries(self) -> tuple[DatasetRegistry, DatasetProfileRegistry]:
@@ -457,6 +492,18 @@ class PipelineMCPServer:
             self._objectify_registry = ObjectifyRegistry()
             await self._objectify_registry.initialize()
         return self._objectify_registry
+
+    async def _ensure_websocket_service(self) -> Optional[Any]:
+        """Lazy-init WebSocket service for schema drift broadcasts."""
+        if self.websocket_service is None:
+            try:
+                from shared.services.storage.redis_service import create_redis_service
+                from shared.services.core.websocket_service import get_notification_service
+                redis_service = create_redis_service()
+                self.websocket_service = get_notification_service(redis_service)
+            except Exception as exc:
+                logger.warning("WebSocket service unavailable for MCP: %s", exc)
+        return self.websocket_service
 
     def _setup_handlers(self) -> None:
         @self.server.list_tools()
@@ -1373,6 +1420,30 @@ class PipelineMCPServer:
                     },
                 },
                 {
+                    "name": "ontology_register_object_type",
+                    "description": "Register an ontology class as an object_type resource for objectify. REQUIRED before running objectify. Creates the object_type contract with pk_spec and backing_source configuration.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "db_name": {"type": "string", "description": "Database name"},
+                            "class_id": {"type": "string", "description": "Ontology class ID (e.g., 'Customer')"},
+                            "dataset_id": {"type": "string", "description": "Backing dataset ID for the object type"},
+                            "primary_key": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "Primary key field(s) (e.g., ['customer_id'])",
+                            },
+                            "title_key": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "Title key field(s) - displayed as instance title (e.g., ['customer_id'])",
+                            },
+                            "branch": {"type": "string", "description": "Branch (default: main)"},
+                        },
+                        "required": ["db_name", "class_id", "dataset_id", "primary_key", "title_key"],
+                    },
+                },
+                {
                     "name": "ontology_query_instances",
                     "description": "Query ontology instances by class type. Use this to verify objectify results by counting instances or retrieving sample data. Returns instance count and sample instances.",
                     "inputSchema": {
@@ -1390,11 +1461,119 @@ class PipelineMCPServer:
                         "required": ["db_name", "class_id"],
                     },
                 },
+                # ============================================================
+                # Enterprise Features: FK Detection, Incremental Objectify, Schema Drift
+                # ============================================================
+                {
+                    "name": "detect_foreign_keys",
+                    "description": "Detect potential FK relationships in a dataset based on naming conventions and value overlap analysis. Returns detected FK patterns with confidence scores.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "db_name": {"type": "string", "description": "Database name"},
+                            "dataset_id": {"type": "string", "description": "Dataset ID to analyze"},
+                            "confidence_threshold": {"type": "number", "default": 0.6, "description": "Minimum confidence (0-1) to report"},
+                            "include_sample_analysis": {"type": "boolean", "default": True, "description": "Include value overlap analysis"},
+                            "branch": {"type": "string", "default": "main"},
+                        },
+                        "required": ["db_name", "dataset_id"],
+                    },
+                },
+                {
+                    "name": "create_link_type_from_fk",
+                    "description": "Create a link_type from a detected FK pattern. Generates the relationship spec and link_type definition.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "db_name": {"type": "string", "description": "Database name"},
+                            "fk_pattern": {
+                                "type": "object",
+                                "description": "FK pattern from detect_foreign_keys result",
+                            },
+                            "source_class_id": {"type": "string", "description": "Source ontology class ID"},
+                            "target_class_id": {"type": "string", "description": "Target ontology class ID"},
+                            "predicate": {"type": "string", "description": "Relationship predicate (e.g., 'hasCustomer')"},
+                            "cardinality": {
+                                "type": "string",
+                                "enum": ["1:1", "1:n", "n:1", "n:m"],
+                                "default": "n:1",
+                            },
+                            "branch": {"type": "string", "default": "main"},
+                        },
+                        "required": ["db_name", "fk_pattern", "source_class_id", "target_class_id"],
+                    },
+                },
+                {
+                    "name": "trigger_incremental_objectify",
+                    "description": "Trigger objectify in incremental mode (watermark or delta). Processes only changed rows since last run.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "db_name": {"type": "string", "description": "Database name"},
+                            "mapping_spec_id": {"type": "string", "description": "Mapping spec ID"},
+                            "execution_mode": {
+                                "type": "string",
+                                "enum": ["full", "incremental", "delta"],
+                                "default": "incremental",
+                                "description": "Execution mode: full (all rows), incremental (watermark-based), delta (LakeFS diff)",
+                            },
+                            "watermark_column": {"type": "string", "description": "Column for watermark filtering (required for incremental mode)"},
+                            "force_full_refresh": {"type": "boolean", "default": False, "description": "Reset watermark and run full refresh"},
+                            "branch": {"type": "string", "default": "main"},
+                        },
+                        "required": ["db_name", "mapping_spec_id"],
+                    },
+                },
+                {
+                    "name": "get_objectify_watermark",
+                    "description": "Get the current watermark state for a mapping spec. Shows last processed watermark value and timestamp.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "mapping_spec_id": {"type": "string", "description": "Mapping spec ID"},
+                            "dataset_branch": {"type": "string", "default": "main"},
+                        },
+                        "required": ["mapping_spec_id"],
+                    },
+                },
+                {
+                    "name": "check_schema_drift",
+                    "description": "Check if dataset schema has drifted from mapping spec expectations. Detects column additions, removals, type changes.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "db_name": {"type": "string", "description": "Database name"},
+                            "mapping_spec_id": {"type": "string", "description": "Mapping spec ID to check"},
+                            "dataset_version_id": {"type": "string", "description": "Specific version to check (default: latest)"},
+                        },
+                        "required": ["db_name", "mapping_spec_id"],
+                    },
+                },
+                {
+                    "name": "list_schema_changes",
+                    "description": "List recent schema changes for a dataset or mapping spec. Shows drift history with severity and change details.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "db_name": {"type": "string", "description": "Database name"},
+                            "subject_type": {
+                                "type": "string",
+                                "enum": ["dataset", "mapping_spec"],
+                                "description": "Type of subject to query",
+                            },
+                            "subject_id": {"type": "string", "description": "Subject ID (dataset_id or mapping_spec_id)"},
+                            "severity": {"type": "string", "enum": ["info", "warning", "breaking"], "description": "Filter by severity"},
+                            "limit": {"type": "integer", "default": 20, "description": "Max records to return"},
+                        },
+                        "required": ["db_name", "subject_type", "subject_id"],
+                    },
+                },
             ]
             return [Tool(**spec) for spec in tool_specs]
 
         @self.server.call_tool()
         async def call_tool(name: str, arguments: Dict[str, Any]) -> Any:
+            logger.info("call_tool invoked: name=%s", name)
             # Enterprise Enhancement (2026-01): Rate limiting to prevent runaway loops
             rate_limit_error = _rate_limiter.check_and_record(name)
             if rate_limit_error:
@@ -3163,9 +3342,30 @@ class PipelineMCPServer:
                     from uuid import uuid4
                     from shared.utils.schema_hash import compute_schema_hash
 
+                    # Try to get schema_hash from dataset.schema_json first
                     schema_json = dataset.schema_json or {}
                     schema_columns = schema_json.get("columns", [])
                     schema_hash = compute_schema_hash(schema_columns) if schema_columns else None
+
+                    # If not available, try to get from latest version
+                    if not schema_hash:
+                        latest_version = await dataset_registry.get_latest_version(dataset_id=dataset_id)
+                        if latest_version:
+                            # Version has schema_hash attribute
+                            schema_hash = getattr(latest_version, "schema_hash", None)
+                            # If still not available, try to compute from version's sample_json
+                            if not schema_hash and hasattr(latest_version, "sample_json"):
+                                sample_json = latest_version.sample_json or {}
+                                sample_columns = sample_json.get("columns", [])
+                                schema_hash = compute_schema_hash(sample_columns) if sample_columns else None
+
+                    if not schema_hash:
+                        return {
+                            "status": "error",
+                            "error": "Cannot determine schema_hash for dataset",
+                            "hint": "Dataset has no schema information. Try uploading a new version with schema.",
+                            "dataset_id": dataset_id,
+                        }
 
                     mapping_spec = await objectify_registry.create_mapping_spec(
                         dataset_id=dataset_id,
@@ -3408,6 +3608,110 @@ class PipelineMCPServer:
                         "hint": "Job may still be running. Call objectify_wait again or use objectify_get_status to check.",
                     }
 
+                if name == "ontology_register_object_type":
+                    logger.info("ontology_register_object_type handler reached! name=%s", name)
+                    db_name = str(arguments.get("db_name") or "").strip()
+                    class_id = str(arguments.get("class_id") or "").strip()
+                    dataset_id = str(arguments.get("dataset_id") or "").strip()
+                    primary_key = arguments.get("primary_key") or []
+                    title_key = arguments.get("title_key") or []
+                    branch = str(arguments.get("branch") or "main").strip()
+
+                    if not db_name or not class_id or not dataset_id:
+                        return _missing_required_params(
+                            "ontology_register_object_type",
+                            ["db_name", "class_id", "dataset_id", "primary_key", "title_key"],
+                            arguments,
+                        )
+
+                    # Normalize key fields
+                    pk_list = [str(k).strip() for k in primary_key if str(k).strip()] if isinstance(primary_key, list) else [str(primary_key).strip()]
+                    title_list = [str(k).strip() for k in title_key if str(k).strip()] if isinstance(title_key, list) else [str(title_key).strip()]
+
+                    if not pk_list:
+                        return {"status": "error", "error": "primary_key must be a non-empty list of field names"}
+                    if not title_list:
+                        return {"status": "error", "error": "title_key must be a non-empty list of field names"}
+
+                    try:
+                        # First, get the current head commit for optimistic concurrency
+                        # Use /head endpoint (same as objectify_worker)
+                        head_resp = await _oms_json(
+                            "GET",
+                            f"/api/v1/version/{db_name}/head",
+                            params={"branch": branch},
+                        )
+                        head_data = head_resp.get("data") if isinstance(head_resp.get("data"), dict) else {}
+                        head_commit = head_data.get("head_commit_id") or head_data.get("commit") or head_data.get("head_commit") or ""
+                        if not head_commit:
+                            return {"status": "error", "error": f"No head commit found for branch '{branch}'. Please create an ontology class first."}
+
+                        # Build the object_type resource payload
+                        object_type_payload: Dict[str, Any] = {
+                            "id": class_id,
+                            "label": class_id,
+                            "description": f"Object type contract for {class_id}",
+                            "spec": {
+                                "status": "ACTIVE",
+                                "pk_spec": {
+                                    "primary_key": pk_list,
+                                    "title_key": title_list,
+                                },
+                                "backing_source": {
+                                    "dataset_id": dataset_id,
+                                },
+                            },
+                        }
+
+                        # Create or update the object_type resource
+                        # Try POST first (create new), fall back to PUT (update existing)
+                        resp = await _oms_json(
+                            "POST",
+                            f"/api/v1/database/{db_name}/ontology/resources/object_type",
+                            params={"branch": branch, "expected_head_commit": head_commit},
+                            json_body=object_type_payload,
+                            timeout_seconds=30.0,
+                        )
+
+                        # If POST fails with 409 Conflict (already exists), try PUT to update
+                        if resp.get("error") and "409" in str(resp.get("error")):
+                            logger.info("object_type exists, updating with PUT")
+                            resp = await _oms_json(
+                                "PUT",
+                                f"/api/v1/database/{db_name}/ontology/resources/object_type/{class_id}",
+                                params={"branch": branch, "expected_head_commit": head_commit},
+                                json_body=object_type_payload,
+                                timeout_seconds=30.0,
+                            )
+
+                        if resp.get("error"):
+                            return {
+                                "status": "error",
+                                "error": resp.get("error"),
+                                "db_name": db_name,
+                                "class_id": class_id,
+                            }
+
+                        return {
+                            "status": "success",
+                            "message": f"Object type '{class_id}' registered successfully",
+                            "db_name": db_name,
+                            "class_id": class_id,
+                            "dataset_id": dataset_id,
+                            "primary_key": pk_list,
+                            "title_key": title_list,
+                            "hint": "You can now run objectify_run to create instances",
+                        }
+
+                    except Exception as exc:
+                        logger.error("ontology_register_object_type failed: %s", exc)
+                        return {
+                            "status": "error",
+                            "error": str(exc),
+                            "db_name": db_name,
+                            "class_id": class_id,
+                        }
+
                 if name == "ontology_query_instances":
                     db_name = str(arguments.get("db_name") or "").strip()
                     class_id = str(arguments.get("class_id") or "").strip()
@@ -3468,6 +3772,388 @@ class PipelineMCPServer:
                             "db_name": db_name,
                             "class_id": class_id,
                         }
+
+                # ── Enterprise Features: FK Detection, Incremental Objectify, Schema Drift ──
+                if name == "detect_foreign_keys":
+                    db_name = str(arguments.get("db_name") or "").strip()
+                    dataset_id = str(arguments.get("dataset_id") or "").strip()
+                    confidence_threshold = float(arguments.get("confidence_threshold") or 0.6)
+                    include_sample = bool(arguments.get("include_sample_analysis", True))
+                    branch = str(arguments.get("branch") or "main").strip()
+
+                    if not db_name or not dataset_id:
+                        return _missing_required_params("detect_foreign_keys", ["db_name", "dataset_id"], arguments)
+
+                    try:
+                        from shared.services.pipeline.fk_pattern_detector import (
+                            ForeignKeyPatternDetector,
+                            FKDetectionConfig,
+                            TargetCandidate,
+                        )
+
+                        dataset_registry, _ = await self._ensure_registries()
+                        dataset = await dataset_registry.get_dataset(dataset_id=dataset_id)
+
+                        if not dataset:
+                            return {"status": "error", "error": f"Dataset not found: {dataset_id}"}
+
+                        schema = dataset.schema_json or {}
+                        columns = schema.get("columns") or schema.get("fields") or []
+
+                        # Get other datasets/object_types as target candidates
+                        datasets = await dataset_registry.list_datasets(db_name=db_name, branch=branch, limit=100)
+                        target_candidates = []
+                        for ds in datasets:
+                            if ds.dataset_id == dataset_id:
+                                continue
+                            ds_schema = ds.schema_json or {}
+                            ds_columns = ds_schema.get("columns") or ds_schema.get("fields") or []
+                            pk_cols = [c.get("name") for c in ds_columns if c.get("name", "").lower() in ("id", "pk")]
+                            if not pk_cols and ds_columns:
+                                pk_cols = [ds_columns[0].get("name", "id")]
+                            target_candidates.append(TargetCandidate(
+                                candidate_type="dataset",
+                                candidate_id=ds.dataset_id,
+                                candidate_name=ds.name or ds.dataset_id,
+                                pk_columns=pk_cols,
+                            ))
+
+                        config = FKDetectionConfig(min_confidence=confidence_threshold)
+                        detector = ForeignKeyPatternDetector(config)
+                        patterns = detector.detect_patterns(
+                            source_dataset_id=dataset_id,
+                            source_schema=columns,
+                            target_candidates=target_candidates,
+                        )
+
+                        return {
+                            "status": "success",
+                            "dataset_id": dataset_id,
+                            "db_name": db_name,
+                            "patterns_found": len(patterns),
+                            "patterns": [
+                                {
+                                    "source_column": p.source_column,
+                                    "target_dataset_id": p.target_dataset_id,
+                                    "target_object_type": p.target_object_type,
+                                    "target_pk_field": p.target_pk_field,
+                                    "confidence": p.confidence,
+                                    "detection_method": p.detection_method,
+                                    "reasons": p.reasons,
+                                }
+                                for p in patterns
+                            ],
+                        }
+                    except Exception as exc:
+                        logger.warning("detect_foreign_keys failed: %s", exc)
+                        return {"status": "error", "error": str(exc)[:300]}
+
+                if name == "create_link_type_from_fk":
+                    db_name = str(arguments.get("db_name") or "").strip()
+                    fk_pattern = arguments.get("fk_pattern") or {}
+                    source_class_id = str(arguments.get("source_class_id") or "").strip()
+                    target_class_id = str(arguments.get("target_class_id") or "").strip()
+                    predicate = str(arguments.get("predicate") or "").strip()
+                    cardinality = str(arguments.get("cardinality") or "n:1").strip()
+                    branch = str(arguments.get("branch") or "main").strip()
+
+                    if not db_name or not fk_pattern or not source_class_id or not target_class_id:
+                        return _missing_required_params(
+                            "create_link_type_from_fk",
+                            ["db_name", "fk_pattern", "source_class_id", "target_class_id"],
+                            arguments,
+                        )
+
+                    # Generate predicate if not provided
+                    if not predicate:
+                        source_col = fk_pattern.get("source_column", "")
+                        import re
+                        name_part = re.sub(r"(_id|_fk|_key|Id|Fk)$", "", source_col)
+                        predicate = "has" + "".join(w.capitalize() for w in name_part.split("_"))
+
+                    try:
+                        link_type_body = {
+                            "predicate": predicate,
+                            "source_class": source_class_id,
+                            "target_class": target_class_id,
+                            "cardinality": cardinality,
+                            "relationship_spec": {
+                                "spec_type": "foreign_key",
+                                "source_column": fk_pattern.get("source_column"),
+                                "target_pk_field": fk_pattern.get("target_pk_field") or "id",
+                            },
+                        }
+
+                        resp = await _bff_json(
+                            "POST",
+                            f"/databases/{db_name}/link-types",
+                            json_body=link_type_body,
+                            params={"branch": branch},
+                            timeout_seconds=30.0,
+                        )
+
+                        if resp.get("error"):
+                            return {"status": "error", "error": resp.get("error"), "db_name": db_name}
+
+                        return {
+                            "status": "success",
+                            "link_type_created": True,
+                            "predicate": predicate,
+                            "source_class": source_class_id,
+                            "target_class": target_class_id,
+                            "cardinality": cardinality,
+                        }
+                    except Exception as exc:
+                        logger.warning("create_link_type_from_fk failed: %s", exc)
+                        return {"status": "error", "error": str(exc)[:300]}
+
+                if name == "trigger_incremental_objectify":
+                    db_name = str(arguments.get("db_name") or "").strip()
+                    mapping_spec_id = str(arguments.get("mapping_spec_id") or "").strip()
+                    execution_mode = str(arguments.get("execution_mode") or "incremental").strip()
+                    watermark_column = str(arguments.get("watermark_column") or "").strip()
+                    force_full = bool(arguments.get("force_full_refresh", False))
+                    branch = str(arguments.get("branch") or "main").strip()
+
+                    if not db_name or not mapping_spec_id:
+                        return _missing_required_params(
+                            "trigger_incremental_objectify",
+                            ["db_name", "mapping_spec_id"],
+                            arguments,
+                        )
+
+                    try:
+                        objectify_registry = await self._ensure_objectify_registry()
+
+                        # Reset watermark if force_full
+                        if force_full:
+                            await objectify_registry.delete_watermark(
+                                mapping_spec_id=mapping_spec_id,
+                                dataset_branch=branch,
+                            )
+
+                        # Get current watermark
+                        watermark = await objectify_registry.get_watermark(
+                            mapping_spec_id=mapping_spec_id,
+                            dataset_branch=branch,
+                        )
+
+                        # Build trigger request with execution mode
+                        trigger_body = {
+                            "execution_mode": execution_mode,
+                            "watermark_column": watermark_column or (watermark.get("watermark_column") if watermark else None),
+                            "previous_watermark": watermark.get("watermark_value") if watermark and not force_full else None,
+                        }
+
+                        resp = await _bff_json(
+                            "POST",
+                            f"/objectify/mapping-specs/{mapping_spec_id}/trigger",
+                            json_body=trigger_body,
+                            params={"branch": branch},
+                            timeout_seconds=60.0,
+                        )
+
+                        if resp.get("error"):
+                            return {"status": "error", "error": resp.get("error")}
+
+                        return {
+                            "status": "success",
+                            "mapping_spec_id": mapping_spec_id,
+                            "execution_mode": execution_mode,
+                            "watermark_column": trigger_body.get("watermark_column"),
+                            "previous_watermark": trigger_body.get("previous_watermark"),
+                            "job_id": resp.get("job_id") or resp.get("data", {}).get("job_id"),
+                        }
+                    except Exception as exc:
+                        logger.warning("trigger_incremental_objectify failed: %s", exc)
+                        return {"status": "error", "error": str(exc)[:300]}
+
+                if name == "get_objectify_watermark":
+                    mapping_spec_id = str(arguments.get("mapping_spec_id") or "").strip()
+                    dataset_branch = str(arguments.get("dataset_branch") or "main").strip()
+
+                    if not mapping_spec_id:
+                        return _missing_required_params("get_objectify_watermark", ["mapping_spec_id"], arguments)
+
+                    try:
+                        objectify_registry = await self._ensure_objectify_registry()
+                        watermark = await objectify_registry.get_watermark(
+                            mapping_spec_id=mapping_spec_id,
+                            dataset_branch=dataset_branch,
+                        )
+
+                        if not watermark:
+                            return {
+                                "status": "not_found",
+                                "mapping_spec_id": mapping_spec_id,
+                                "message": "No watermark found - objectify has not run in incremental mode yet",
+                            }
+
+                        return {
+                            "status": "success",
+                            **watermark,
+                        }
+                    except Exception as exc:
+                        logger.warning("get_objectify_watermark failed: %s", exc)
+                        return {"status": "error", "error": str(exc)[:300]}
+
+                if name == "check_schema_drift":
+                    db_name = str(arguments.get("db_name") or "").strip()
+                    mapping_spec_id = str(arguments.get("mapping_spec_id") or "").strip()
+                    dataset_version_id = str(arguments.get("dataset_version_id") or "").strip() or None
+
+                    if not db_name or not mapping_spec_id:
+                        return _missing_required_params("check_schema_drift", ["db_name", "mapping_spec_id"], arguments)
+
+                    try:
+                        from shared.services.core.schema_drift_detector import SchemaDriftDetector
+
+                        objectify_registry = await self._ensure_objectify_registry()
+                        dataset_registry, _ = await self._ensure_registries()
+
+                        spec = await objectify_registry.get_mapping_spec(mapping_spec_id=mapping_spec_id)
+                        if not spec:
+                            return {"status": "error", "error": f"Mapping spec not found: {mapping_spec_id}"}
+
+                        dataset = await dataset_registry.get_dataset(dataset_id=str(spec.dataset_id))
+                        if not dataset:
+                            return {"status": "error", "error": f"Dataset not found: {spec.dataset_id}"}
+
+                        if dataset_version_id:
+                            version = await dataset_registry.get_version(version_id=dataset_version_id)
+                        else:
+                            version = await dataset_registry.get_latest_version(dataset_id=str(spec.dataset_id))
+
+                        if not version:
+                            return {"status": "error", "error": "No dataset version found"}
+
+                        current_schema = version.schema_json or {}
+                        current_columns = current_schema.get("columns") or current_schema.get("fields") or []
+
+                        detector = SchemaDriftDetector()
+                        drift = detector.detect_drift(
+                            subject_type="dataset",
+                            subject_id=str(spec.dataset_id),
+                            db_name=db_name,
+                            current_schema=current_columns,
+                            previous_hash=spec.schema_hash,
+                        )
+
+                        if not drift:
+                            return {
+                                "status": "compatible",
+                                "mapping_spec_id": mapping_spec_id,
+                                "message": "Schema matches expected state - no drift detected",
+                                "current_hash": version.schema_hash,
+                            }
+
+                        # Broadcast schema drift via WebSocket for real-time notifications
+                        try:
+                            drift_payload = detector.to_notification_payload(drift)
+                            ws_service = await self._ensure_websocket_service()
+                            if ws_service:
+                                await ws_service.publish_schema_drift(
+                                    db_name=db_name,
+                                    drift_payload=drift_payload,
+                                )
+                                logger.info("Schema drift broadcast sent for %s/%s", db_name, mapping_spec_id)
+                        except Exception as ws_exc:
+                            logger.warning("Failed to broadcast schema drift: %s", ws_exc)
+
+                        return {
+                            "status": "drift_detected",
+                            "mapping_spec_id": mapping_spec_id,
+                            "severity": drift.severity,
+                            "drift_type": drift.drift_type,
+                            "change_summary": drift.change_summary,
+                            "changes": [
+                                {
+                                    "change_type": c.change_type,
+                                    "column_name": c.column_name,
+                                    "impact": c.impact,
+                                }
+                                for c in drift.changes
+                            ],
+                            "is_breaking": drift.is_breaking,
+                            "current_hash": drift.current_hash,
+                            "previous_hash": drift.previous_hash,
+                        }
+                    except Exception as exc:
+                        logger.warning("check_schema_drift failed: %s", exc)
+                        return {"status": "error", "error": str(exc)[:300]}
+
+                if name == "list_schema_changes":
+                    db_name = str(arguments.get("db_name") or "").strip()
+                    subject_type = str(arguments.get("subject_type") or "").strip()
+                    subject_id = str(arguments.get("subject_id") or "").strip()
+                    severity = str(arguments.get("severity") or "").strip() or None
+                    limit = int(arguments.get("limit") or 20)
+
+                    if not db_name or not subject_type or not subject_id:
+                        return _missing_required_params(
+                            "list_schema_changes",
+                            ["db_name", "subject_type", "subject_id"],
+                            arguments,
+                        )
+
+                    try:
+                        # Query schema_drift_history table
+                        dataset_registry, _ = await self._ensure_registries()
+                        pool = dataset_registry._pool
+
+                        query = """
+                            SELECT drift_id, subject_type, subject_id, db_name,
+                                   previous_hash, current_hash, drift_type, severity,
+                                   changes, detected_at, acknowledged_at
+                            FROM schema_drift_history
+                            WHERE db_name = $1 AND subject_type = $2 AND subject_id = $3
+                        """
+                        params = [db_name, subject_type, subject_id]
+
+                        if severity:
+                            query += " AND severity = $4"
+                            params.append(severity)
+
+                        query += " ORDER BY detected_at DESC LIMIT $" + str(len(params) + 1)
+                        params.append(limit)
+
+                        async with pool.acquire() as conn:
+                            rows = await conn.fetch(query, *params)
+
+                        changes = [
+                            {
+                                "drift_id": str(row["drift_id"]),
+                                "drift_type": row["drift_type"],
+                                "severity": row["severity"],
+                                "changes": row["changes"],
+                                "detected_at": row["detected_at"].isoformat() if row["detected_at"] else None,
+                                "acknowledged": row["acknowledged_at"] is not None,
+                            }
+                            for row in rows
+                        ]
+
+                        return {
+                            "status": "success",
+                            "db_name": db_name,
+                            "subject_type": subject_type,
+                            "subject_id": subject_id,
+                            "total_changes": len(changes),
+                            "changes": changes,
+                        }
+                    except Exception as exc:
+                        logger.warning("list_schema_changes failed: %s", exc)
+                        # Table might not exist yet
+                        if "does not exist" in str(exc):
+                            return {
+                                "status": "success",
+                                "db_name": db_name,
+                                "subject_type": subject_type,
+                                "subject_id": subject_id,
+                                "total_changes": 0,
+                                "changes": [],
+                                "message": "No schema change history available",
+                            }
+                        return {"status": "error", "error": str(exc)[:300]}
 
                 # ── Dataset Lookup Tools ─────────────────────────────────────
                 if name == "dataset_get_by_name":

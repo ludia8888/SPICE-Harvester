@@ -22,7 +22,9 @@ from typing import Any, Dict, List, Optional
 from uuid import UUID, uuid4
 
 import httpx
-from confluent_kafka import Consumer, KafkaError, Producer, TopicPartition
+from confluent_kafka import KafkaError, Producer, TopicPartition
+
+from shared.services.kafka.safe_consumer import SafeKafkaConsumer, ConsumerState
 
 try:
     from pyspark.sql import DataFrame, SparkSession  # type: ignore
@@ -438,17 +440,18 @@ class PipelineWorker:
 
         self.spark = self._create_spark_session()
 
-        self.consumer = Consumer(
-            {
-                "bootstrap.servers": settings.database.kafka_servers,
-                "group.id": self.group_id,
-                "auto.offset.reset": "earliest",
-                "enable.auto.commit": False,
-                "session.timeout.ms": 45000,
-                "max.poll.interval.ms": int(self.max_poll_interval_ms),
-            }
+        # Use SafeKafkaConsumer for strong consistency guarantees
+        # Critical: Enforces isolation.level=read_committed and proper rebalance handling
+        self.consumer = SafeKafkaConsumer(
+            group_id=self.group_id,
+            topics=[self.topic],
+            service_name="pipeline-worker",
+            max_poll_interval_ms=int(self.max_poll_interval_ms),
+            session_timeout_ms=45000,
+            on_revoke=self._on_partitions_revoked,
+            on_assign=self._on_partitions_assigned,
         )
-        self.consumer.subscribe([self.topic])
+        self._rebalance_in_progress = False
         logger.info("PipelineWorker initialized (topic=%s)", self.topic)
 
         self.dlq_producer = Producer(
@@ -461,6 +464,24 @@ class PipelineWorker:
                 "linger.ms": 20,
                 "compression.type": "snappy",
             }
+        )
+
+    def _on_partitions_revoked(self, partitions: list) -> None:
+        """Handle partition revocation during rebalance."""
+        self._rebalance_in_progress = True
+        logger.info(
+            "Pipeline worker partitions revoked: %s",
+            [(p.topic, p.partition) for p in partitions],
+        )
+        # Stop any in-progress heartbeat tasks - the ProcessedEventRegistry
+        # will handle lease expiry for any abandoned processing
+
+    def _on_partitions_assigned(self, partitions: list) -> None:
+        """Handle partition assignment during rebalance."""
+        self._rebalance_in_progress = False
+        logger.info(
+            "Pipeline worker partitions assigned: %s",
+            [(p.topic, p.partition) for p in partitions],
         )
 
     async def close(self) -> None:
@@ -591,6 +612,11 @@ class PipelineWorker:
         self.running = True
         try:
             while self.running:
+                # Skip processing during rebalance to prevent duplicate processing
+                if self._rebalance_in_progress or (self.consumer and self.consumer.is_rebalancing):
+                    await asyncio.sleep(0.1)
+                    continue
+
                 msg = self.consumer.poll(1.0) if self.consumer else None
                 if msg is None:
                     await asyncio.sleep(0.1)
@@ -620,7 +646,7 @@ class PipelineWorker:
                         attempt_count=None,
                     )
                     if self.consumer:
-                        self.consumer.commit(msg)
+                        self.consumer.commit_sync(msg)
                     continue
 
                 try:
@@ -636,7 +662,7 @@ class PipelineWorker:
                         attempt_count=None,
                     )
                     if self.consumer:
-                        self.consumer.commit(msg)
+                        self.consumer.commit_sync(msg)
                     continue
 
                 job: Optional[PipelineJob] = None
@@ -661,7 +687,7 @@ class PipelineWorker:
                             exc_info=True,
                         )
                     if self.consumer:
-                        self.consumer.commit(msg)
+                        self.consumer.commit_sync(msg)
                     continue
 
                 start = time.monotonic()
@@ -687,15 +713,17 @@ class PipelineWorker:
                             if not self.processed:
                                 raise RuntimeError("ProcessedEventRegistry not available")
 
+                            # Use sequence_number for aggregate ordering if available
                             claim = await self.processed.claim(
                                 handler=self.handler,
                                 event_id=job.job_id,
                                 aggregate_id=job.pipeline_id,
+                                sequence_number=getattr(job, "sequence_number", None),
                             )
 
                             if claim.decision in {ClaimDecision.DUPLICATE_DONE, ClaimDecision.STALE}:
                                 if self.consumer:
-                                    self.consumer.commit(msg)
+                                    self.consumer.commit_sync(msg)
                                 continue
 
                             if claim.decision == ClaimDecision.IN_PROGRESS:
@@ -718,7 +746,7 @@ class PipelineWorker:
                             logger.info("Pipeline job complete (job_id=%s pipeline_id=%s)", job.job_id, job.pipeline_id)
                             await self.processed.mark_done(handler=self.handler, event_id=job.job_id)
                             if self.consumer:
-                                self.consumer.commit(msg)
+                                self.consumer.commit_sync(msg)
                             try:
                                 self.metrics.record_event(
                                     "PIPELINE_JOB",
@@ -775,7 +803,7 @@ class PipelineWorker:
                                     attempt_count=attempt_count,
                                 )
                                 if self.consumer:
-                                    self.consumer.commit(msg)
+                                    self.consumer.commit_sync(msg)
                                 continue
 
                             backoff_s = min(self.backoff_max, int(self.backoff_base * (2 ** max(0, attempt_count - 1))))

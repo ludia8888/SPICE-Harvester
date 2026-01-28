@@ -16,7 +16,7 @@ from confluent_kafka import Producer
 from shared.config.app_config import AppConfig
 from shared.config.settings import get_settings
 from shared.models.pipeline_job import PipelineJob
-from shared.observability.context_propagation import kafka_headers_from_current_context
+from shared.observability.context_propagation import kafka_headers_from_current_context, kafka_headers_with_dedup
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +48,13 @@ class PipelineJobQueue:
         payload = job.model_dump(mode="json")
         key = job.pipeline_id.encode("utf-8")
         value = json.dumps(payload, ensure_ascii=False, default=str).encode("utf-8")
-        headers = kafka_headers_from_current_context()
+        # Use kafka_headers_with_dedup for idempotent message processing
+        headers = kafka_headers_with_dedup(
+            payload,
+            event_id=job.job_id,
+            aggregate_id=job.pipeline_id,
+            dedup_id=job.dedupe_key,  # Use PipelineJob's dedupe_key if available
+        )
 
         loop = asyncio.get_running_loop()
 

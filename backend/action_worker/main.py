@@ -20,7 +20,9 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import NAMESPACE_URL, UUID, uuid5
 
-from confluent_kafka import Consumer, KafkaError, Producer, TopicPartition
+from confluent_kafka import KafkaError, Producer, TopicPartition
+
+from shared.services.kafka.safe_consumer import SafeKafkaConsumer, ConsumerState
 
 from oms.services.async_terminus import AsyncTerminusService
 from oms.services.ontology_resources import OntologyResourceService
@@ -178,18 +180,19 @@ class ActionWorker:
         validate_lease_settings()
 
         group_id = (AppConfig.ACTION_WORKER_GROUP or "action-worker-group").strip()
-        self.consumer = Consumer(
-            {
-                "bootstrap.servers": self.kafka_servers,
-                "group.id": group_id,
-                "auto.offset.reset": "earliest",
-                "enable.auto.commit": False,
-                "max.poll.interval.ms": 300000,
-                "session.timeout.ms": 45000,
-            }
+        topic = AppConfig.ACTION_COMMANDS_TOPIC
+        # Use SafeKafkaConsumer for strong consistency guarantees
+        self.consumer = SafeKafkaConsumer(
+            group_id=group_id,
+            topics=[topic],
+            service_name="action-worker",
+            max_poll_interval_ms=300000,
+            session_timeout_ms=45000,
+            on_revoke=self._on_partitions_revoked,
+            on_assign=self._on_partitions_assigned,
         )
-        self.consumer.subscribe([AppConfig.ACTION_COMMANDS_TOPIC])
-        logger.info("ActionWorker subscribed to topic=%s group=%s", AppConfig.ACTION_COMMANDS_TOPIC, group_id)
+        self._rebalance_in_progress = False
+        logger.info("ActionWorker subscribed to topic=%s group=%s", topic, group_id)
 
         settings = get_settings()
         cfg = settings.workers.action
@@ -243,6 +246,22 @@ class ActionWorker:
         )
         self.terminus = AsyncTerminusService(connection_info)
 
+    def _on_partitions_revoked(self, partitions: list) -> None:
+        """Handle partition revocation during rebalance."""
+        self._rebalance_in_progress = True
+        logger.info(
+            "Action worker partitions revoked: %s",
+            [(p.topic, p.partition) for p in partitions],
+        )
+
+    def _on_partitions_assigned(self, partitions: list) -> None:
+        """Handle partition assignment during rebalance."""
+        self._rebalance_in_progress = False
+        logger.info(
+            "Action worker partitions assigned: %s",
+            [(p.topic, p.partition) for p in partitions],
+        )
+
     async def shutdown(self) -> None:
         self.running = False
         if self.consumer:
@@ -268,7 +287,7 @@ class ActionWorker:
     async def _commit(self, msg: Any) -> None:
         if not self.consumer:
             return
-        await asyncio.to_thread(self.consumer.commit, message=msg, asynchronous=False)
+        await asyncio.to_thread(self.consumer.commit_sync, msg)
 
     async def _seek_retry(self, msg: Any) -> None:
         if not self.consumer:

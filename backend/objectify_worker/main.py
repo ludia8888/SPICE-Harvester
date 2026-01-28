@@ -19,7 +19,9 @@ from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
 from uuid import NAMESPACE_URL, uuid5
 
 import httpx
-from confluent_kafka import Consumer, KafkaError, Producer, TopicPartition
+from confluent_kafka import KafkaError, Producer, TopicPartition
+
+from shared.services.kafka.safe_consumer import SafeKafkaConsumer, ConsumerState
 
 from shared.config.app_config import AppConfig
 from shared.config.settings import get_settings
@@ -43,6 +45,11 @@ from shared.errors.error_envelope import build_error_envelope
 from shared.security.auth_utils import get_expected_token
 from shared.validators import get_validator
 from shared.validators.constraint_validator import ConstraintValidator
+from shared.services.pipeline.objectify_delta_utils import (
+    ObjectifyDeltaComputer,
+    DeltaResult,
+    create_delta_computer_for_mapping_spec,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -529,17 +536,18 @@ class ObjectifyWorker:
             headers["X-Admin-Token"] = token
         self.http = httpx.AsyncClient(base_url=settings.services.oms_base_url, timeout=60.0, headers=headers)
 
-        self.consumer = Consumer(
-            {
-                "bootstrap.servers": settings.database.kafka_servers,
-                "group.id": self.group_id,
-                "auto.offset.reset": "earliest",
-                "enable.auto.commit": False,
-                "max.poll.interval.ms": 300000,
-                "session.timeout.ms": 45000,
-            }
+        # Use SafeKafkaConsumer for strong consistency guarantees
+        # Critical: Enforces isolation.level=read_committed and proper rebalance handling
+        self.consumer = SafeKafkaConsumer(
+            group_id=self.group_id,
+            topics=[self.topic],
+            service_name="objectify-worker",
+            max_poll_interval_ms=300000,
+            session_timeout_ms=45000,
+            on_revoke=self._on_partitions_revoked,
+            on_assign=self._on_partitions_assigned,
         )
-        self.consumer.subscribe([self.topic])
+        self._rebalance_in_progress = False
 
         self.dlq_producer = Producer(
             {
@@ -551,6 +559,24 @@ class ObjectifyWorker:
                 "linger.ms": 20,
                 "compression.type": "snappy",
             }
+        )
+
+    def _on_partitions_revoked(self, partitions: list) -> None:
+        """Handle partition revocation during rebalance."""
+        self._rebalance_in_progress = True
+        logger.info(
+            "Objectify worker partitions revoked: %s",
+            [(p.topic, p.partition) for p in partitions],
+        )
+        # Stop any in-progress heartbeat tasks - the ProcessedEventRegistry
+        # will handle lease expiry for any abandoned processing
+
+    def _on_partitions_assigned(self, partitions: list) -> None:
+        """Handle partition assignment during rebalance."""
+        self._rebalance_in_progress = False
+        logger.info(
+            "Objectify worker partitions assigned: %s",
+            [(p.topic, p.partition) for p in partitions],
         )
 
     async def close(self) -> None:
@@ -588,6 +614,11 @@ class ObjectifyWorker:
         logger.info("ObjectifyWorker started (topic=%s)", self.topic)
         try:
             while self.running:
+                # Skip processing during rebalance to prevent duplicate processing
+                if self._rebalance_in_progress or self.consumer.is_rebalancing:
+                    await asyncio.sleep(0.1)
+                    continue
+
                 msg = self.consumer.poll(1.0)
                 if msg is None:
                     await asyncio.sleep(0)
@@ -632,7 +663,7 @@ class ObjectifyWorker:
                         except Exception as exc:
                             self.tracing.record_exception(exc)
                             logger.exception("Invalid objectify payload; skipping: %s", exc)
-                            self.consumer.commit(message=msg, asynchronous=False)
+                            self.consumer.commit_sync(msg)
                             continue
 
                         claim = None
@@ -641,13 +672,16 @@ class ObjectifyWorker:
                             if not self.processed:
                                 raise RuntimeError("ProcessedEventRegistry not initialized")
 
+                            # Use mapping_spec_version as sequence_number for aggregate ordering
+                            # This ensures jobs for the same dataset are processed in version order
                             claim = await self.processed.claim(
                                 handler=self.handler,
                                 event_id=job.job_id,
                                 aggregate_id=job.dataset_id,
+                                sequence_number=job.mapping_spec_version,
                             )
                             if claim.decision in {ClaimDecision.DUPLICATE_DONE, ClaimDecision.STALE}:
-                                self.consumer.commit(message=msg, asynchronous=False)
+                                self.consumer.commit_sync(msg)
                                 continue
                             if claim.decision == ClaimDecision.IN_PROGRESS:
                                 await asyncio.sleep(2)
@@ -661,7 +695,7 @@ class ObjectifyWorker:
                             await self._process_job(job)
                             if self.processed:
                                 await self.processed.mark_done(handler=self.handler, event_id=job.job_id)
-                            self.consumer.commit(message=msg, asynchronous=False)
+                            self.consumer.commit_sync(msg)
                             try:
                                 self.metrics.record_event(
                                     "OBJECTIFY_JOB",
@@ -719,7 +753,7 @@ class ObjectifyWorker:
                                     error=err,
                                     attempt_count=attempt_count,
                                 )
-                                self.consumer.commit(message=msg, asynchronous=False)
+                                self.consumer.commit_sync(msg)
                                 continue
 
                             backoff_s = min(self.backoff_max, int(self.backoff_base * (2 ** max(0, attempt_count - 1))))
@@ -1416,15 +1450,69 @@ class ObjectifyWorker:
         lineage_remaining = self.lineage_max_links
         seen_row_keys: set[str] = set()
 
+        # Incremental processing setup
+        execution_mode = job.execution_mode or options.get("execution_mode", "full")
+        watermark_column = job.watermark_column or options.get("watermark_column")
+        previous_watermark = job.previous_watermark
+        latest_watermark: Optional[str] = None
+        delta_computer: Optional[ObjectifyDeltaComputer] = None
+
+        if execution_mode in ("incremental", "delta") and watermark_column:
+            delta_computer = create_delta_computer_for_mapping_spec(
+                vars(mapping_spec) if hasattr(mapping_spec, "__dict__") else dict(mapping_spec or {})
+            )
+            logger.info(
+                "Incremental objectify mode enabled: execution_mode=%s, watermark_column=%s, previous=%s",
+                execution_mode, watermark_column, previous_watermark,
+            )
+
         async for columns, rows, row_offset in self._iter_dataset_batches(
             job=job,
             options=options,
             row_batch_size=row_batch_size,
-            max_rows=max_rows,
+            max_rows=max_rows if not delta_computer else None,  # Filter manually in incremental mode
         ):
             if not rows:
                 continue
+
+            # Incremental filtering: skip rows that haven't changed since previous watermark
+            if delta_computer and watermark_column:
+                col_map = {col: idx for idx, col in enumerate(columns)}
+                wm_col_idx = col_map.get(watermark_column)
+
+                if wm_col_idx is not None:
+                    filtered_rows: List[List[Any]] = []
+                    for row in rows:
+                        row_wm = row[wm_col_idx] if wm_col_idx < len(row) else None
+                        if row_wm is None:
+                            continue  # Skip rows with null watermark
+                        if previous_watermark is not None:
+                            cmp = delta_computer._compare_watermarks(row_wm, previous_watermark)
+                            if cmp <= 0:
+                                continue  # Skip rows not newer than previous watermark
+                        filtered_rows.append(row)
+                        # Track max watermark
+                        if latest_watermark is None:
+                            latest_watermark = str(row_wm)
+                        elif delta_computer._compare_watermarks(row_wm, latest_watermark) > 0:
+                            latest_watermark = str(row_wm)
+
+                    rows = filtered_rows
+                    if not rows:
+                        continue
+
+                    # Apply max_rows limit in incremental mode
+                    if max_rows and total_rows_seen + len(rows) > max_rows:
+                        rows = rows[:max(0, max_rows - total_rows_seen)]
+                        if not rows:
+                            break
+
             total_rows_seen += len(rows)
+
+            # Check max_rows limit
+            if max_rows and total_rows_seen > max_rows:
+                break
+
             batch = self._build_instances_with_validation(
                 columns=columns,
                 rows=rows,
@@ -1576,6 +1664,13 @@ class ObjectifyWorker:
             },
         )
         await self._update_object_type_active_version(job=job, mapping_spec=mapping_spec)
+
+        # Update watermark after successful incremental job
+        if execution_mode in ("incremental", "delta") and latest_watermark:
+            await self._update_watermark_after_job(
+                job=job,
+                new_watermark=latest_watermark,
+            )
 
     async def _bulk_create_instances(
         self,
@@ -2092,6 +2187,140 @@ class ObjectifyWorker:
 
         if rows:
             yield columns, rows, row_offset
+
+    async def _iter_dataset_batches_incremental(
+        self,
+        *,
+        job: ObjectifyJob,
+        options: Dict[str, Any],
+        row_batch_size: int,
+        max_rows: Optional[int],
+        mapping_spec: Any,
+    ) -> AsyncIterator[Tuple[List[str], List[List[Any]], int, Optional[str]]]:
+        """
+        Iterate dataset batches with incremental filtering.
+
+        Yields: (columns, rows, row_offset, new_watermark)
+        """
+        execution_mode = job.execution_mode or "full"
+        watermark_column = job.watermark_column or options.get("watermark_column")
+        previous_watermark = job.previous_watermark
+
+        # For full mode, delegate to standard iterator
+        if execution_mode == "full" or not watermark_column:
+            async for columns, rows, row_offset in self._iter_dataset_batches(
+                job=job,
+                options=options,
+                row_batch_size=row_batch_size,
+                max_rows=max_rows,
+            ):
+                yield columns, rows, row_offset, None
+            return
+
+        # Create delta computer for incremental processing
+        delta_computer = create_delta_computer_for_mapping_spec(
+            vars(mapping_spec) if hasattr(mapping_spec, "__dict__") else dict(mapping_spec or {})
+        )
+
+        max_watermark: Optional[Any] = previous_watermark
+        total_yielded = 0
+
+        async for columns, rows, row_offset in self._iter_dataset_batches(
+            job=job,
+            options=options,
+            row_batch_size=row_batch_size,
+            max_rows=None,  # We filter rows ourselves
+        ):
+            if not rows:
+                continue
+
+            # Convert rows to dicts for watermark filtering
+            col_map = {col: idx for idx, col in enumerate(columns)}
+            wm_col_idx = col_map.get(watermark_column)
+
+            if wm_col_idx is None:
+                # Watermark column not found, yield all rows
+                logger.warning(
+                    "Watermark column %s not found in dataset columns; falling back to full mode",
+                    watermark_column,
+                )
+                yield columns, rows, row_offset, None
+                total_yielded += len(rows)
+                if max_rows and total_yielded >= max_rows:
+                    break
+                continue
+
+            # Filter rows by watermark
+            filtered_rows: List[List[Any]] = []
+            for row in rows:
+                row_wm = row[wm_col_idx] if wm_col_idx < len(row) else None
+
+                # Skip rows with null watermark
+                if row_wm is None:
+                    continue
+
+                # Compare with previous watermark
+                if previous_watermark is not None:
+                    cmp = delta_computer._compare_watermarks(row_wm, previous_watermark)
+                    if cmp <= 0:
+                        # Row is not newer than previous watermark, skip
+                        continue
+
+                filtered_rows.append(row)
+
+                # Track max watermark
+                if max_watermark is None:
+                    max_watermark = row_wm
+                elif delta_computer._compare_watermarks(row_wm, max_watermark) > 0:
+                    max_watermark = row_wm
+
+            if filtered_rows:
+                # Apply max_rows limit if specified
+                if max_rows and total_yielded + len(filtered_rows) > max_rows:
+                    remaining = max_rows - total_yielded
+                    filtered_rows = filtered_rows[:remaining]
+
+                yield columns, filtered_rows, row_offset, str(max_watermark) if max_watermark else None
+                total_yielded += len(filtered_rows)
+
+                if max_rows and total_yielded >= max_rows:
+                    break
+
+        # Final yield with max watermark if no rows were yielded
+        if total_yielded == 0 and max_watermark and max_watermark != previous_watermark:
+            logger.info(
+                "Incremental objectify: no new rows found (max_watermark=%s, previous=%s)",
+                max_watermark, previous_watermark,
+            )
+
+    async def _update_watermark_after_job(
+        self,
+        *,
+        job: ObjectifyJob,
+        new_watermark: Optional[str],
+    ) -> None:
+        """Update watermark in registry after successful incremental job."""
+        if not self.objectify_registry or not new_watermark:
+            return
+
+        watermark_column = job.watermark_column or job.options.get("watermark_column")
+        if not watermark_column:
+            return
+
+        try:
+            await self.objectify_registry.update_watermark(
+                mapping_spec_id=job.mapping_spec_id,
+                dataset_branch=job.dataset_branch,
+                watermark_column=watermark_column,
+                watermark_value=new_watermark,
+                lakefs_commit_id=job.dataset_version_id,
+            )
+            logger.info(
+                "Updated watermark for mapping_spec %s: %s=%s",
+                job.mapping_spec_id, watermark_column, new_watermark,
+            )
+        except Exception as e:
+            logger.error("Failed to update watermark: %s", e)
 
     def _build_instances_with_validation(
         self,

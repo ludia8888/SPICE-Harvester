@@ -349,6 +349,8 @@ _PIPELINE_AGENT_ALLOWED_TOOLS: tuple[str, ...] = (
     "objectify_run",
     "objectify_get_status",
     "objectify_wait",
+    # Object type registration (REQUIRED before objectify_run)
+    "ontology_register_object_type",
     # Instance query for objectify verification
     "ontology_query_instances",
     # Dataset lookup by name
@@ -826,16 +828,19 @@ def _build_system_prompt(*, allowed_tools: List[str]) -> str:
         "Objectify patterns (Dataset → Ontology Instances transformation):\n"
         "- Use objectify tools when the goal is to transform dataset rows into ontology object instances.\n"
         "- Do NOT use plan_add_transform with operation='objectify' - that operation does not exist.\n"
+        "- CRITICAL: You MUST call ontology_register_object_type BEFORE objectify_run. Without it, objectify will fail!\n"
         "- Objectify workflow:\n"
         "  1. (Optional) Create ontology class if it doesn't exist: ontology_new -> ontology_add_property (multiple) -> ontology_create\n"
         "  2. Get mapping suggestions: objectify_suggest_mapping(dataset_id, target_class_id, db_name)\n"
         "  3. Create mapping spec: objectify_create_mapping_spec(dataset_id, target_class_id, mappings, db_name)\n"
-        "  4. Run objectify: objectify_run(dataset_id, db_name) -> returns job_id\n"
-        "  5. Wait for completion: objectify_wait(job_id) -> wait for job to complete\n"
-        "  6. Verify results: ontology_query_instances(db_name, class_id) -> check created instances\n"
+        "  4. REQUIRED: Register object type: ontology_register_object_type(db_name, class_id, dataset_id, primary_key, title_key)\n"
+        "  5. Run objectify: objectify_run(dataset_id, db_name) -> returns job_id\n"
+        "  6. Wait for completion: objectify_wait(job_id) -> wait for job to complete\n"
+        "  7. Verify results: ontology_query_instances(db_name, class_id) -> check created instances\n"
         "- Key args:\n"
         "  - objectify_suggest_mapping: dataset_id, target_class_id, db_name\n"
         "  - objectify_create_mapping_spec: dataset_id, target_class_id, mappings (array of {source_field, target_field}), db_name\n"
+        "  - ontology_register_object_type: db_name, class_id, dataset_id, primary_key (e.g., ['customer_id']), title_key (e.g., ['customer_id'])\n"
         "  - objectify_run: dataset_id, db_name, mapping_spec_id (optional)\n"
         "  - objectify_wait: job_id, timeout_seconds (default 300)\n"
         "  - ontology_query_instances: db_name, class_id, limit (default 10)\n"
@@ -1594,7 +1599,12 @@ async def run_pipeline_agent_mcp_autonomous(
                 return state.last_observation
 
             # ==================== Ontology Tools ====================
-            if tool_name.startswith("ontology_"):
+            # Note: ontology_register_object_type and ontology_query_instances are handled
+            # by the Pipeline MCP Server, not the Ontology MCP Server. They're handled below.
+            if tool_name.startswith("ontology_") and tool_name not in {
+                "ontology_register_object_type",
+                "ontology_query_instances",
+            }:
                 # Always inject session_id for ontology tools
                 if "session_id" not in args:
                     args["session_id"] = state.ontology_session_id
@@ -1612,6 +1622,16 @@ async def run_pipeline_agent_mcp_autonomous(
                         args["branch"] = state.branch or "main"
 
                 payload = await _call_ontology_tool(tool_name, args)
+
+                # Auto-fallback: If ontology_create fails with 409 Conflict, try ontology_update
+                if tool_name == "ontology_create" and isinstance(payload, dict):
+                    error_msg = str(payload.get("error") or "")
+                    if "409" in error_msg or "Conflict" in error_msg:
+                        logger.info("ontology_create got 409 Conflict, auto-retrying with ontology_update")
+                        # Retry with ontology_update using same args
+                        payload = await _call_ontology_tool("ontology_update", args)
+                        if isinstance(payload, dict) and payload.get("status") == "success":
+                            logger.info("ontology_update succeeded after 409 fallback")
 
                 # Track working ontology from preview
                 if tool_name == "ontology_preview" and isinstance(payload, dict):
@@ -1666,6 +1686,18 @@ async def run_pipeline_agent_mcp_autonomous(
             if tool_name == "ontology_query_instances":
                 # Query ontology instances - handled by the Pipeline MCP Server
                 payload = await _call_pipeline_tool(tool_name, args)
+                state.last_observation = _mask_tool_observation(
+                    payload if isinstance(payload, dict) else {"result": payload}
+                )
+                return state.last_observation
+
+            # ==================== Object Type Registration ====================
+            if tool_name == "ontology_register_object_type":
+                # Register object_type resource for objectify - handled by Pipeline MCP Server
+                payload = await _call_pipeline_tool(tool_name, args)
+                if isinstance(payload, dict):
+                    logger.info("ontology_register_object_type executed: status=%s class_id=%s",
+                               payload.get("status"), args.get("class_id"))
                 state.last_observation = _mask_tool_observation(
                     payload if isinstance(payload, dict) else {"result": payload}
                 )

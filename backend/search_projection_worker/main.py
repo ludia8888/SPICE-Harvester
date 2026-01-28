@@ -12,7 +12,9 @@ import time
 from datetime import datetime, timezone
 from typing import Optional
 
-from confluent_kafka import Consumer, KafkaError, Producer, TopicPartition
+from confluent_kafka import KafkaError, Producer, TopicPartition
+
+from shared.services.kafka.safe_consumer import SafeKafkaConsumer, ConsumerState
 from elasticsearch.exceptions import ApiError as ElasticsearchException, RequestError, ConnectionError as ESConnectionError
 
 from shared.config.app_config import AppConfig
@@ -71,17 +73,17 @@ class SearchProjectionWorker:
         except Exception as exc:
             logger.warning("Failed to ensure search index exists: %s", exc)
 
-        self.consumer = Consumer(
-            {
-                "bootstrap.servers": settings.database.kafka_servers,
-                "group.id": self.group_id,
-                "auto.offset.reset": "earliest",
-                "enable.auto.commit": False,
-                "max.poll.interval.ms": 300000,
-                "session.timeout.ms": 45000,
-            }
+        # Use SafeKafkaConsumer for strong consistency guarantees
+        self.consumer = SafeKafkaConsumer(
+            group_id=self.group_id,
+            topics=[self.topic],
+            service_name="search-projection-worker",
+            max_poll_interval_ms=300000,
+            session_timeout_ms=45000,
+            on_revoke=self._on_partitions_revoked,
+            on_assign=self._on_partitions_assigned,
         )
-        self.consumer.subscribe([self.topic])
+        self._rebalance_in_progress = False
 
         service_name = settings.observability.service_name or "search-projection-worker"
         self.dlq_producer = Producer(
@@ -94,6 +96,22 @@ class SearchProjectionWorker:
                 "linger.ms": 20,
                 "compression.type": "snappy",
             }
+        )
+
+    def _on_partitions_revoked(self, partitions: list) -> None:
+        """Handle partition revocation during rebalance."""
+        self._rebalance_in_progress = True
+        logger.info(
+            "Search projection worker partitions revoked: %s",
+            [(p.topic, p.partition) for p in partitions],
+        )
+
+    def _on_partitions_assigned(self, partitions: list) -> None:
+        """Handle partition assignment during rebalance."""
+        self._rebalance_in_progress = False
+        logger.info(
+            "Search projection worker partitions assigned: %s",
+            [(p.topic, p.partition) for p in partitions],
         )
 
     async def close(self) -> None:
@@ -140,7 +158,7 @@ class SearchProjectionWorker:
                     envelope = EventEnvelope.model_validate_json(payload)
                 except Exception as exc:
                     logger.exception("Invalid event envelope; skipping: %s", exc)
-                    self.consumer.commit(message=msg, asynchronous=False)
+                    self.consumer.commit_sync(msg)
                     continue
 
                 claim = None
@@ -177,7 +195,7 @@ class SearchProjectionWorker:
                                 sequence_number=envelope.sequence_number,
                             )
                             if claim.decision in {ClaimDecision.DUPLICATE_DONE, ClaimDecision.STALE}:
-                                self.consumer.commit(message=msg, asynchronous=False)
+                                self.consumer.commit_sync(msg)
                                 continue
                             if claim.decision == ClaimDecision.IN_PROGRESS:
                                 await asyncio.sleep(2)
@@ -196,7 +214,7 @@ class SearchProjectionWorker:
                                     aggregate_id=str(envelope.aggregate_id or ""),
                                     sequence_number=envelope.sequence_number,
                                 )
-                            self.consumer.commit(message=msg, asynchronous=False)
+                            self.consumer.commit_sync(msg)
                             try:
                                 self.metrics.record_event(
                                     str(envelope.event_type),
@@ -231,7 +249,7 @@ class SearchProjectionWorker:
                             error=err,
                             attempt_count=attempt_count,
                         )
-                        self.consumer.commit(message=msg, asynchronous=False)
+                        self.consumer.commit_sync(msg)
                         continue
 
                     backoff_s = min(self.backoff_max, int(self.backoff_base * (2 ** max(0, attempt_count - 1))))
