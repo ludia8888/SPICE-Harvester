@@ -15,17 +15,18 @@ import os
 import shutil
 import tempfile
 import time
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from functools import reduce
 import operator
-from typing import Any, Callable, Dict, List, Optional, TypeVar
+from typing import Any, Callable, Deque, Dict, List, Optional, TypeVar
 from uuid import UUID, uuid4
 
 import httpx
 from confluent_kafka import KafkaError, Producer, TopicPartition
 
-from shared.services.kafka.safe_consumer import SafeKafkaConsumer, ConsumerState
+from shared.services.kafka.safe_consumer import SafeKafkaConsumer
 
 try:
     from pyspark.sql import DataFrame, SparkSession  # type: ignore
@@ -314,7 +315,7 @@ class PipelineWorker:
         # entire Kafka partition. Keep this short for pipeline jobs and rely on heartbeats.
         self.processed_event_lease_timeout_seconds = pipeline_settings.processed_event_lease_timeout_seconds
 
-        self.consumer: Optional[Consumer] = None
+        self.consumer: Optional[SafeKafkaConsumer] = None
         self.dlq_producer: Optional[Producer] = None
         self.dataset_registry: Optional[DatasetRegistry] = None
         self.pipeline_registry: Optional[PipelineRegistry] = None
@@ -349,6 +350,8 @@ class PipelineWorker:
         self._rebalance_in_progress = False
         self._revoked_partitions: set[tuple[str, int]] = set()
         self._inflight_by_partition: Dict[tuple[str, int], asyncio.Task] = {}
+        self._pending_by_partition: Dict[tuple[str, int], Deque[Any]] = {}
+        self._dlq_lock = asyncio.Lock()
         self.tracing = get_tracing_service("pipeline-worker")
         self.metrics = get_metrics_collector("pipeline-worker")
 
@@ -472,6 +475,7 @@ class PipelineWorker:
         self._rebalance_in_progress = False
         self._revoked_partitions.clear()
         self._inflight_by_partition.clear()
+        self._pending_by_partition.clear()
         logger.info("PipelineWorker initialized (topic=%s)", self.topic)
 
         self.dlq_producer = Producer(
@@ -499,6 +503,7 @@ class PipelineWorker:
             task = self._inflight_by_partition.get(key)
             if task:
                 task.cancel()
+            self._pending_by_partition.pop(key, None)
 
     def _on_partitions_assigned(self, partitions: list) -> None:
         """Handle partition assignment during rebalance."""
@@ -519,6 +524,7 @@ class PipelineWorker:
         if self.consumer:
             self.consumer.close()
             self.consumer = None
+        self._pending_by_partition.clear()
         if self.dlq_producer:
             try:
                 self.dlq_producer.flush(5)
@@ -695,6 +701,36 @@ class PipelineWorker:
             logger.error("Spark action failed (%s)", label, exc_info=True)
             raise
 
+    def _start_message_task(self, msg: Any) -> None:
+        if not self.consumer:
+            return
+
+        topic = str(msg.topic())
+        partition = int(msg.partition())
+        key = (topic, partition)
+
+        if key in self._inflight_by_partition:
+            pending = self._pending_by_partition.setdefault(key, deque())
+            pending.append(msg)
+            return
+
+        try:
+            self.consumer.pause([TopicPartition(topic, partition)])
+        except Exception as exc:
+            logger.warning(
+                "Failed to pause pipeline partition (topic=%s partition=%s): %s",
+                topic,
+                partition,
+                exc,
+            )
+
+        task = asyncio.create_task(
+            self._handle_kafka_message(msg),
+            name=f"pipeline:{topic}:{partition}:{msg.offset()}",
+        )
+        self._inflight_by_partition[key] = task
+        task.add_done_callback(self._log_background_task_exception)
+
     async def run(self) -> None:
         await self.initialize()
         self.running = True
@@ -721,38 +757,33 @@ class PipelineWorker:
                     logger.error("Kafka error: %s", msg.error())
                     continue
 
-                key = (msg.topic(), int(msg.partition()))
+                topic = str(msg.topic())
+                partition = int(msg.partition())
+                key = (topic, partition)
+
                 if key in self._inflight_by_partition:
-                    logger.warning(
-                        "Received pipeline message while partition busy; rewinding (topic=%s partition=%s offset=%s)",
-                        msg.topic(),
-                        msg.partition(),
-                        msg.offset(),
-                    )
-                    try:
-                        self.consumer.seek(TopicPartition(msg.topic(), msg.partition(), msg.offset()))
-                        self.consumer.pause([TopicPartition(msg.topic(), msg.partition())])
-                    except Exception as exc:
-                        logger.warning("Failed to rewind/pause busy partition: %s", exc)
-                    await asyncio.sleep(0.1)
+                    pending = self._pending_by_partition.setdefault(key, deque())
+                    pending.append(msg)
+                    if len(pending) in {1, 10, 50, 100}:
+                        logger.info(
+                            "Buffered pipeline message while partition busy (topic=%s partition=%s pending=%s offset=%s)",
+                            topic,
+                            partition,
+                            len(pending),
+                            msg.offset(),
+                        )
                     continue
 
-                try:
-                    self.consumer.pause([TopicPartition(msg.topic(), msg.partition())])
-                except Exception as exc:
-                    logger.warning(
-                        "Failed to pause pipeline partition (topic=%s partition=%s): %s",
-                        msg.topic(),
-                        msg.partition(),
-                        exc,
-                    )
+                pending = self._pending_by_partition.get(key)
+                if pending and len(pending) > 0:
+                    pending.append(msg)
+                    msg_to_process = pending.popleft()
+                    if len(pending) == 0:
+                        self._pending_by_partition.pop(key, None)
+                else:
+                    msg_to_process = msg
 
-                task = asyncio.create_task(
-                    self._handle_kafka_message(msg),
-                    name=f"pipeline:{msg.topic()}:{msg.partition()}:{msg.offset()}",
-                )
-                self._inflight_by_partition[key] = task
-                task.add_done_callback(self._log_background_task_exception)
+                self._start_message_task(msg_to_process)
         finally:
             inflight = list(self._inflight_by_partition.values())
             for task in inflight:
@@ -789,6 +820,7 @@ class PipelineWorker:
         claim = None
         heartbeat_task: Optional[asyncio.Task] = None
         start = time.monotonic()
+        committed = False
 
         try:
             try:
@@ -804,6 +836,7 @@ class PipelineWorker:
                     job=None,
                     attempt_count=None,
                 )
+                committed = True
                 self.consumer.commit_sync(msg)
                 return
 
@@ -819,6 +852,7 @@ class PipelineWorker:
                     job=None,
                     attempt_count=None,
                 )
+                committed = True
                 self.consumer.commit_sync(msg)
                 return
 
@@ -842,6 +876,7 @@ class PipelineWorker:
                         record_exc,
                         exc_info=True,
                     )
+                committed = True
                 self.consumer.commit_sync(msg)
                 return
 
@@ -872,6 +907,7 @@ class PipelineWorker:
                     )
 
                     if claim.decision in {ClaimDecision.DUPLICATE_DONE, ClaimDecision.STALE}:
+                        committed = True
                         self.consumer.commit_sync(msg)
                         return
 
@@ -898,6 +934,7 @@ class PipelineWorker:
                             job.pipeline_id,
                         )
                         await self.processed.mark_done(handler=self.handler, event_id=job.job_id)
+                        committed = True
                         self.consumer.commit_sync(msg)
                         try:
                             self.metrics.record_event(
@@ -934,17 +971,16 @@ class PipelineWorker:
                                 raise SystemExit(1) from restart_exc
 
                         attempt_count = int(getattr(claim, "attempt_count", 1) or 1)
-                        if self.processed and job:
-                            try:
-                                await self.processed.mark_failed(
-                                    handler=self.handler,
-                                    event_id=job.job_id,
-                                    error=err,
-                                )
-                            except Exception as mark_err:
-                                logger.warning("Failed to mark pipeline job failed: %s", mark_err)
-
                         if attempt_count >= self.max_retries:
+                            if self.processed and job:
+                                try:
+                                    await self.processed.mark_failed(
+                                        handler=self.handler,
+                                        event_id=job.job_id,
+                                        error=err,
+                                    )
+                                except Exception as mark_err:
+                                    logger.warning("Failed to mark pipeline job failed: %s", mark_err)
                             logger.error(
                                 "Pipeline job max retries exceeded; sending to DLQ (job_id=%s attempt=%s)",
                                 getattr(job, "job_id", None),
@@ -959,8 +995,19 @@ class PipelineWorker:
                                 job=job,
                                 attempt_count=attempt_count,
                             )
+                            committed = True
                             self.consumer.commit_sync(msg)
                             return
+
+                        if self.processed and job:
+                            try:
+                                await self.processed.mark_retrying(
+                                    handler=self.handler,
+                                    event_id=job.job_id,
+                                    error=err,
+                                )
+                            except Exception as mark_err:
+                                logger.warning("Failed to mark pipeline job retrying: %s", mark_err)
 
                         backoff_s = min(self.backoff_max, int(self.backoff_base * (2 ** max(0, attempt_count - 1))))
                         logger.warning(
@@ -984,7 +1031,16 @@ class PipelineWorker:
                                 pass
         finally:
             self._inflight_by_partition.pop(key, None)
-            if self.consumer and key not in self._revoked_partitions:
+            if not self.consumer:
+                return
+            if key in self._revoked_partitions:
+                self._pending_by_partition.pop(key, None)
+                return
+
+            if not committed:
+                # We are rewinding (seek) and will retry this message; do not process buffered
+                # newer offsets as it could commit past an unprocessed message.
+                self._pending_by_partition.pop(key, None)
                 try:
                     self.consumer.resume([TopicPartition(topic, partition)])
                 except Exception as exc:
@@ -994,6 +1050,25 @@ class PipelineWorker:
                         partition,
                         exc,
                     )
+                return
+
+            pending = self._pending_by_partition.get(key)
+            if pending and len(pending) > 0:
+                next_msg = pending.popleft()
+                if len(pending) == 0:
+                    self._pending_by_partition.pop(key, None)
+                self._start_message_task(next_msg)
+                return
+
+            try:
+                self.consumer.resume([TopicPartition(topic, partition)])
+            except Exception as exc:
+                logger.warning(
+                    "Failed to resume pipeline partition (topic=%s partition=%s): %s",
+                    topic,
+                    partition,
+                    exc,
+                )
 
     async def _heartbeat_loop(self, *, handler: str, event_id: str) -> None:
         if not self.processed:
@@ -1050,8 +1125,10 @@ class PipelineWorker:
             key = f"{msg.topic()}:{msg.partition()}:{msg.offset()}".encode("utf-8")
             value = json.dumps(dlq_message, ensure_ascii=False, default=str).encode("utf-8")
             headers = kafka_headers_from_current_context()
-            self.dlq_producer.produce(self.dlq_topic, key=key, value=value, headers=headers or None)
-            self.dlq_producer.flush(10)
+            async with self._dlq_lock:
+                self.dlq_producer.produce(self.dlq_topic, key=key, value=value, headers=headers or None)
+                self.dlq_producer.poll(0)
+                await asyncio.to_thread(self.dlq_producer.flush, 10)
             logger.info("Sent message to pipeline DLQ (topic=%s stage=%s)", self.dlq_topic, stage)
         except Exception as exc:
             logger.error("Failed to send message to pipeline DLQ (stage=%s): %s", stage, exc)

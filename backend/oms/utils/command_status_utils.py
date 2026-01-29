@@ -7,6 +7,8 @@ def map_registry_status(status_value: str) -> CommandStatus:
     status_value = (status_value or "").lower()
     if status_value == "processing":
         return CommandStatus.PROCESSING
+    if status_value == "retrying":
+        return CommandStatus.RETRYING
     if status_value == "done":
         return CommandStatus.COMPLETED
     if status_value == "failed":

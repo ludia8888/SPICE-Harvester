@@ -272,7 +272,7 @@ class ProcessedEventRegistry:
                                 attempt_count=attempt_count,
                                 existing_status=status,
                             )
-                    elif status == "failed":
+                    elif status in {"failed", "retrying"}:
                         retried = await conn.fetchrow(
                             f"""
                             UPDATE {self._schema}.processed_events
@@ -281,13 +281,17 @@ class ProcessedEventRegistry:
                                 heartbeat_at = NOW(),
                                 owner = $3,
                                 attempt_count = attempt_count + 1,
-                                last_error = NULL
-                            WHERE handler = $1 AND event_id = $2 AND status = 'failed'
+                                last_error = NULL,
+                                processed_at = NULL
+                            WHERE handler = $1
+                              AND event_id = $2
+                              AND status = ANY($4::text[])
                             RETURNING attempt_count
                             """,
                             handler,
                             event_id,
                             self._owner,
+                            ["failed", "retrying"],
                         )
                         if retried:
                             inserted = retried
@@ -389,7 +393,7 @@ class ProcessedEventRegistry:
 
         def _rank(row) -> tuple[int, datetime]:
             status = str(row["status"])
-            order = {"failed": 4, "processing": 3, "done": 2, "skipped_stale": 1}.get(status, 0)
+            order = {"failed": 4, "retrying": 3, "processing": 3, "done": 2, "skipped_stale": 1}.get(status, 0)
             ts = (
                 row["processed_at"]
                 or row["heartbeat_at"]
@@ -515,6 +519,62 @@ class ProcessedEventRegistry:
                 return
             raise RuntimeError(
                 "mark_failed rejected "
+                f"(handler={handler}, event_id={event_id}, "
+                f"status={existing.get('status') if existing else None}, "
+                f"owner={existing.get('owner') if existing else None})"
+            )
+
+    async def mark_retrying(
+        self,
+        *,
+        handler: str,
+        event_id: str,
+        error: str,
+    ) -> None:
+        """
+        Mark a claimed event as retrying without finalizing it as failed.
+
+        This is used for transient errors where the worker intends to retry soon.
+        """
+        if not self._pool:
+            raise RuntimeError("ProcessedEventRegistry not connected")
+
+        async with self._pool.acquire() as conn:
+            updated = await conn.fetchrow(
+                f"""
+                UPDATE {self._schema}.processed_events
+                SET status = 'retrying',
+                    processed_at = NULL,
+                    heartbeat_at = NOW(),
+                    last_error = $3
+                WHERE handler = $1
+                  AND event_id = $2
+                  AND status = 'processing'
+                  AND owner = $4
+                RETURNING 1
+                """,
+                handler,
+                event_id,
+                error[:4000] if error else None,
+                self._owner,
+            )
+            if updated:
+                return
+
+            # If we lost the lease/owner or the event is already finalized, never overwrite.
+            existing = await conn.fetchrow(
+                f"""
+                SELECT status, owner
+                FROM {self._schema}.processed_events
+                WHERE handler = $1 AND event_id = $2
+                """,
+                handler,
+                event_id,
+            )
+            if existing and str(existing["status"]) in {"done", "skipped_stale"}:
+                return
+            raise RuntimeError(
+                "mark_retrying rejected "
                 f"(handler={handler}, event_id={event_id}, "
                 f"status={existing.get('status') if existing else None}, "
                 f"owner={existing.get('owner') if existing else None})"
