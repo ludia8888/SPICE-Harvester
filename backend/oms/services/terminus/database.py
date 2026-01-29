@@ -55,6 +55,12 @@ class DatabaseService(BaseTerminusService):
         try:
             await self.create_database(db_name, description)
             self._db_cache.add(db_name)
+        except DuplicateOntologyError:
+            # Idempotency / concurrency safety:
+            # - Another worker may have created the DB between our existence check and create.
+            # - Or the existence check may have transiently failed (e.g., RemoteProtocolError).
+            self._db_cache.add(db_name)
+            logger.info("Database '%s' already exists; continuing", db_name)
         except Exception as e:
             logger.error(f"Error ensuring database exists: {e}")
             raise DatabaseError(f"데이터베이스 생성/확인 실패: {e}")

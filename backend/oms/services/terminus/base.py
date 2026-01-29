@@ -18,7 +18,10 @@ logger = logging.getLogger(__name__)
 
 
 async_terminus_retry = build_async_retry(
-    retry_exceptions=(httpx.ConnectError, httpx.TimeoutException),
+    # Enterprise hardening:
+    # - httpx.TransportError covers RemoteProtocolError ("Server disconnected ..."), ReadError, ConnectError, etc.
+    # - We also retry our wrapped ConnectionError type raised by _make_request for timeouts/connect failures.
+    retry_exceptions=(httpx.TransportError, httpx.TimeoutException, TerminusConnectionError),
     backoff="linear",
     logger=logger,
     on_failure=lambda exc, retries: TerminusConnectionError(f"연결 실패 (재시도 {retries}회): {exc}"),

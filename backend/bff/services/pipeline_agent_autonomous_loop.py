@@ -890,6 +890,55 @@ def _build_prompt_header(
     return header
 
 
+def _build_user_prompt(
+    *,
+    state: _AgentState,
+    answers: Optional[Dict[str, Any]],
+    planner_hints: Optional[Dict[str, Any]],
+    task_spec: Optional[Dict[str, Any]],
+    target_chars: int = 50000,
+) -> str:
+    """
+    Backward-compatible prompt builder for the SSE streaming agent path.
+
+    The non-streaming autonomous loop builds an append-only `state.prompt_items` log and compacts it
+    deterministically. Some streaming code paths still call `_build_user_prompt`; keep this helper as
+    a thin wrapper so both implementations share the same header + compaction mechanics.
+    """
+    if not state.prompt_items:
+        state.prompt_items.append(
+            stable_json_dumps(
+                _build_prompt_header(
+                    state=state,
+                    answers=answers,
+                    planner_hints=planner_hints,
+                    task_spec=task_spec,
+                )
+            )
+        )
+        if state.last_observation:
+            state.prompt_items.append(
+                stable_json_dumps(
+                    {
+                        "type": "bootstrap_observation",
+                        "observation": _mask_tool_observation(state.last_observation),
+                    }
+                )
+            )
+
+    if target_chars and target_chars > 0:
+        current = _prompt_text(state.prompt_items)
+        if len(current) > int(target_chars):
+            state.prompt_items = _progressive_compress_prompt_items(
+                state=state,
+                answers=answers,
+                planner_hints=planner_hints,
+                task_spec=task_spec,
+                target_chars=int(target_chars),
+            )
+    return _prompt_text(state.prompt_items)
+
+
 def _summarize_ontology(ontology: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     """Create a summary of the working ontology for compaction."""
     if not isinstance(ontology, dict):
@@ -2261,12 +2310,18 @@ async def run_pipeline_agent_mcp_autonomous(
             batch_last_by_alias[_tool_alias(tool_name)] = observation
             errors = observation.get("errors")
             if observation.get("error"):
+                error_text = str(observation.get("error") or "").strip()
                 logger.info(
-                    "pipeline agent batch stopping: tool_error tool=%s step=%s observation=%s",
+                    "pipeline agent batch tool_error tool=%s step=%s observation=%s",
                     tool_name,
                     step_idx + 1,
                     _mask_tool_observation(dict(observation)),
                 )
+                # Do NOT abort the entire batch on a single non-fatal tool error.
+                # This commonly happens when LLM mocks/models include an optional context tool
+                # alongside required plan mutations (plan_new/plan_add_*).
+                if error_text.startswith("tool not allowed:"):
+                    continue
                 stop_reason = "tool_error"
                 break
             if observation.get("status") == "invalid":
@@ -2580,20 +2635,11 @@ async def run_pipeline_agent_streaming(
     )
 
     # 모델 설정
-    model = selected_model or "claude-sonnet"
     max_steps = 30
     max_tool_calls_per_step = 20
 
-    # 허용된 도구 목록
-    allowed_tools = [
-        "plan_new", "plan_add_input", "plan_add_transform", "plan_add_filter",
-        "plan_add_join", "plan_add_union", "plan_add_compute_column", "plan_add_compute_assignments",
-        "plan_add_select_expr", "plan_add_group_by", "plan_add_group_by_expr",
-        "plan_add_window_expr", "plan_add_sort", "plan_add_explode", "plan_add_pivot",
-        "plan_add_output", "plan_preview", "plan_validate",
-        "dataset_profile", "dataset_null_check", "dataset_key_inference", "dataset_type_inference",
-    ]
-
+    # 허용된 도구 목록: non-streaming agent와 동일하게 유지 (드리프트 방지)
+    allowed_tools = list(_PIPELINE_AGENT_ALLOWED_TOOLS)
     system_prompt = _build_system_prompt(allowed_tools=allowed_tools)
 
     # 메인 루프
@@ -2607,28 +2653,31 @@ async def run_pipeline_agent_streaming(
             target_chars=50000,
         )
 
-        # LLM 호출
+        # LLM 호출 (JSON 스키마 검증 포함)
         try:
-            response_text, llm_meta = await llm_gateway.complete(
+            decision, llm_meta = await llm_gateway.complete_json(
+                task="PIPELINE_AGENT_AUTONOMOUS_STEP_V1",
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
-                model=model,
-                response_format={"type": "json_object"},
+                response_model=AutonomousPipelineAgentDecision,
+                model=selected_model,
+                allowed_models=allowed_models,
+                redis_service=redis_service,
+                audit_store=audit_store,
+                audit_partition_key=f"pipeline_agent_stream:{run_id}",
+                audit_actor=actor,
+                audit_resource_id=run_id,
+                audit_metadata={
+                    "kind": "pipeline_agent_streaming",
+                    "tenant_id": tenant_id,
+                    "user_id": user_id,
+                    "step": step_idx + 1,
+                },
             )
-        except Exception as exc:
+        except (LLMOutputValidationError, LLMRequestError, LLMUnavailableError) as exc:
             yield StreamEvent(
                 event_type="error",
-                data={"error": f"LLM error: {exc}", "run_id": run_id, "step": step_idx + 1}
-            )
-            break
-
-        # 응답 파싱
-        try:
-            decision = AutonomousPipelineAgentDecision.model_validate_json(response_text)
-        except Exception as exc:
-            yield StreamEvent(
-                event_type="error",
-                data={"error": f"Invalid LLM response: {exc}", "run_id": run_id, "step": step_idx + 1}
+                data={"error": f"LLM error: {exc}", "run_id": run_id, "step": step_idx + 1},
             )
             break
 
@@ -2722,18 +2771,38 @@ async def run_pipeline_agent_streaming(
 
             # 도구 실행
             try:
-                # plan 관련 도구 처리
-                if tool_name == "plan_new":
-                    payload = await _call_pipeline_tool(tool_name, args)
+                # Enterprise safety: enforce the same allowlist used by the non-streaming agent.
+                if tool_name not in allowed_tools:
+                    observation = {"error": f"tool not allowed: {tool_name}"}
+                # plan_new: LLM mocks often send empty args; fill required scope deterministically.
+                elif tool_name == "plan_new":
+                    scoped_args: Dict[str, Any] = {
+                        "goal": goal,
+                        "db_name": db_name,
+                        "dataset_ids": dataset_ids,
+                        "branch": state.branch,
+                    }
+                    payload = await _call_pipeline_tool(tool_name, scoped_args)
                     plan = payload.get("plan") if isinstance(payload, dict) else None
                     state.plan_obj = plan if isinstance(plan, dict) else None
                     observation = dict(payload) if isinstance(payload, dict) else {"result": payload}
                     observation.pop("plan", None)
-
-                elif tool_name.startswith("plan_add_") or tool_name in {"plan_preview", "plan_validate"}:
+                # Any plan_* tool requires the current in-memory plan.
+                elif tool_name.startswith("plan_"):
                     if not isinstance(state.plan_obj, dict):
                         observation = {"error": "plan is not initialized; call plan_new first"}
                     else:
+                        # If node_id is omitted for plan_preview, attach the preview to the last node by default
+                        # so the UI can show it when clicking that node.
+                        if tool_name == "plan_preview" and not args.get("node_id") and isinstance(state.plan_obj, dict):
+                            definition = state.plan_obj.get("definition_json", {})
+                            nodes = definition.get("nodes", [])
+                            if isinstance(nodes, list) and nodes:
+                                last_node = nodes[-1] if isinstance(nodes[-1], dict) else None
+                                fallback_node_id = str((last_node or {}).get("id") or "").strip()
+                                if fallback_node_id:
+                                    args["node_id"] = fallback_node_id
+
                         args_with_plan = {**args, "plan": state.plan_obj}
                         payload = await _call_pipeline_tool(tool_name, args_with_plan)
 
@@ -2764,8 +2833,8 @@ async def run_pipeline_agent_streaming(
                     }
                 )
 
-                # plan_add_* 도구 후 plan_update 이벤트
-                if tool_name.startswith("plan_add_") and isinstance(state.plan_obj, dict):
+                # plan 도구 후 plan_update 이벤트
+                if tool_name.startswith("plan_") and isinstance(state.plan_obj, dict) and not observation.get("error"):
                     definition = state.plan_obj.get("definition_json", {})
                     nodes = definition.get("nodes", [])
                     edges = definition.get("edges", [])
@@ -2792,6 +2861,13 @@ async def run_pipeline_agent_streaming(
                 if tool_name == "plan_preview" and isinstance(observation, dict) and not observation.get("error"):
                     preview_data = observation.get("preview") or observation.get("result") or observation
                     node_id = args.get("node_id")
+                    if not node_id and isinstance(state.plan_obj, dict):
+                        definition = state.plan_obj.get("definition_json", {})
+                        nodes = definition.get("nodes", [])
+                        if isinstance(nodes, list) and nodes:
+                            last_node = nodes[-1] if isinstance(nodes[-1], dict) else None
+                            fallback_node_id = str((last_node or {}).get("id") or "").strip()
+                            node_id = fallback_node_id or node_id
 
                     # preview 데이터 구조 추출
                     preview_columns = []
@@ -2825,9 +2901,8 @@ async def run_pipeline_agent_streaming(
                         }
                     )
 
-                # 에러 발생 시 중단
-                if observation.get("error"):
-                    break
+                # NOTE: Do NOT abort the batch on a single tool error. The LLM may recover within the same
+                # step (batched tool calls) or in the next step. Errors are surfaced via tool_end events.
 
             except Exception as exc:
                 yield StreamEvent(

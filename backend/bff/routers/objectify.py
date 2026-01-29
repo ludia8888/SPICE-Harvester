@@ -1537,8 +1537,14 @@ async def run_objectify_dag(
                 data={"run_id": run_id, "branch": branch, "ordered_classes": ordered, "plan": plan},
             ).to_dict()
 
+        import asyncio
+        import time
+
         queued: List[Dict[str, Any]] = []
-        for class_id in ordered:
+        job_ids_by_class: Dict[str, str] = {}
+        deduped_by_class: Dict[str, bool] = {}
+
+        async def _enqueue_class_job(class_id: str) -> str:
             info = class_infos[class_id]
             mapping_spec = info["mapping_spec"]
             dataset_id = info["dataset_id"]
@@ -1557,18 +1563,9 @@ async def run_objectify_dag(
             )
             existing = await objectify_registry.get_objectify_job_by_dedupe_key(dedupe_key=dedupe_key)
             if existing:
-                queued.append(
-                    {
-                        "class_id": class_id,
-                        "job_id": existing.job_id,
-                        "mapping_spec_id": mapping_spec.mapping_spec_id,
-                        "dataset_id": dataset_id,
-                        "dataset_version_id": dataset_version_id,
-                        "status": existing.status,
-                        "deduped": True,
-                    }
-                )
-                continue
+                job_ids_by_class[class_id] = existing.job_id
+                deduped_by_class[class_id] = True
+                return existing.job_id
 
             job_id = str(uuid4())
             options = dict(mapping_spec.options or {})
@@ -1598,6 +1595,145 @@ async def run_objectify_dag(
                 options=options,
             )
             await job_queue.publish(job, require_delivery=False)
+            job_ids_by_class[class_id] = job_id
+            deduped_by_class[class_id] = False
+            return job_id
+
+        def _extract_command_status(payload: Any) -> str:
+            if not isinstance(payload, dict):
+                return ""
+            data = payload.get("data") if isinstance(payload.get("data"), dict) else None
+            raw = payload.get("status")
+            if data and data.get("status") is not None:
+                raw = data.get("status")
+            return str(raw or "").strip().upper()
+
+        async def _wait_for_objectify_submitted(
+            job_id: str,
+            *,
+            timeout_seconds: int = 600,
+        ) -> List[str]:
+            deadline = time.monotonic() + float(timeout_seconds)
+            last_status: Optional[str] = None
+            while time.monotonic() < deadline:
+                record = await objectify_registry.get_objectify_job(job_id=job_id)
+                if not record:
+                    await asyncio.sleep(0.5)
+                    continue
+                status_value = str(record.status or "").strip().upper()
+                last_status = status_value
+                if status_value in {"SUBMITTED", "COMPLETED"}:
+                    report = record.report or {}
+                    command_ids = report.get("command_ids") if isinstance(report, dict) else None
+                    if not isinstance(command_ids, list):
+                        command_ids = []
+                    normalized = [str(cid).strip() for cid in command_ids if str(cid).strip()]
+                    # Back-compat: some producers may only populate the top-level command_id column.
+                    if not normalized and getattr(record, "command_id", None):
+                        normalized = [str(record.command_id).strip()]
+                    if not normalized:
+                        raise RuntimeError(
+                            f"Objectify job submitted without command_ids (job_id={job_id} status={status_value})"
+                        )
+                    return normalized
+                if status_value in {"FAILED", "CANCELLED"}:
+                    raise RuntimeError(f"Objectify job failed (job_id={job_id} error={record.error})")
+                await asyncio.sleep(0.5)
+            raise TimeoutError(f"Timed out waiting for objectify job submission (job_id={job_id} last={last_status})")
+
+        async def _wait_for_command_terminal(
+            command_id: str,
+            *,
+            timeout_seconds: int = 600,
+        ) -> None:
+            deadline = time.monotonic() + float(timeout_seconds)
+            last_status: Optional[str] = None
+            while time.monotonic() < deadline:
+                try:
+                    payload = await oms_client.get(f"/api/v1/commands/{command_id}/status")
+                except httpx.HTTPStatusError as exc:
+                    status_code = getattr(getattr(exc, "response", None), "status_code", None)
+                    if status_code == status.HTTP_404_NOT_FOUND:
+                        await asyncio.sleep(0.5)
+                        continue
+                    raise
+                status_value = _extract_command_status(payload)
+                last_status = status_value or last_status
+                if status_value == "COMPLETED":
+                    return
+                if status_value in {"FAILED", "CANCELLED"}:
+                    raise RuntimeError(f"Command failed (command_id={command_id} status={status_value})")
+                await asyncio.sleep(0.5)
+            raise TimeoutError(
+                f"Timed out waiting for command completion (command_id={command_id} last={last_status})"
+            )
+
+        async def _wait_for_class_ready(class_id: str) -> None:
+            job_id = job_ids_by_class.get(class_id)
+            if not job_id:
+                raise RuntimeError(f"Missing job_id for class {class_id}")
+            command_ids = await _wait_for_objectify_submitted(job_id)
+            for command_id in command_ids:
+                await _wait_for_command_terminal(command_id)
+
+        async def _run_ready_orchestrator(initial_classes: List[str]) -> None:
+            deps = {c: set(deps_by_class.get(c, set())) for c in ordered}
+            started: set[str] = set(initial_classes)
+            completed: set[str] = set()
+            inflight: Dict[str, asyncio.Task] = {}
+
+            for class_id in initial_classes:
+                inflight[class_id] = asyncio.create_task(
+                    _wait_for_class_ready(class_id),
+                    name=f"objectify-dag:{db_name}:{run_id}:{class_id}",
+                )
+
+            while len(completed) < len(ordered):
+                # Enqueue any newly-ready classes immediately (Foundry-style frontier scheduling).
+                for class_id in ordered:
+                    if class_id in started:
+                        continue
+                    if deps.get(class_id, set()) <= completed:
+                        await _enqueue_class_job(class_id)
+                        started.add(class_id)
+                        inflight[class_id] = asyncio.create_task(
+                            _wait_for_class_ready(class_id),
+                            name=f"objectify-dag:{db_name}:{run_id}:{class_id}",
+                        )
+
+                if not inflight:
+                    remaining = [c for c in ordered if c not in completed]
+                    raise RuntimeError(f"Objectify DAG deadlocked (remaining={remaining})")
+
+                done, _pending = await asyncio.wait(
+                    list(inflight.values()),
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                for task in done:
+                    finished_class: Optional[str] = None
+                    for class_id, inflight_task in inflight.items():
+                        if inflight_task is task:
+                            finished_class = class_id
+                            break
+                    if finished_class is None:
+                        continue
+                    del inflight[finished_class]
+                    await task  # propagate exception
+                    completed.add(finished_class)
+
+        initial_ready = [c for c in ordered if not deps_by_class.get(c)]
+        if not initial_ready:
+            initial_ready = [ordered[0]]
+
+        # Enqueue only the initial frontier synchronously to avoid blocking the request.
+        for class_id in initial_ready:
+            info = class_infos[class_id]
+            mapping_spec = info["mapping_spec"]
+            dataset_id = info["dataset_id"]
+            dataset_branch = info["dataset_branch"]
+            dataset_version_id = info["dataset_version_id"]
+            job_id = await _enqueue_class_job(class_id)
+            record = await objectify_registry.get_objectify_job(job_id=job_id)
             queued.append(
                 {
                     "class_id": class_id,
@@ -1605,10 +1741,30 @@ async def run_objectify_dag(
                     "mapping_spec_id": mapping_spec.mapping_spec_id,
                     "dataset_id": dataset_id,
                     "dataset_version_id": dataset_version_id,
-                    "status": "QUEUED",
-                    "deduped": False,
+                    "status": record.status if record else "QUEUED",
+                    "deduped": bool(deduped_by_class.get(class_id)),
                 }
             )
+
+        orchestrator_task = asyncio.create_task(
+            _run_ready_orchestrator(initial_ready),
+            name=f"objectify-dag:{db_name}:{run_id}",
+        )
+
+        def _log_orchestrator_result(task: asyncio.Task) -> None:
+            try:
+                exc = task.exception()
+            except asyncio.CancelledError:
+                return
+            except Exception as exc:
+                logger.warning("Objectify DAG task introspection failed: %s", exc)
+                return
+            if exc:
+                logger.error("Objectify DAG orchestration failed (db=%s run_id=%s): %s", db_name, run_id, exc, exc_info=True)
+            else:
+                logger.info("Objectify DAG orchestration completed (db=%s run_id=%s)", db_name, run_id)
+
+        orchestrator_task.add_done_callback(_log_orchestrator_result)
 
         return ApiResponse.success(
             message="Objectify DAG queued",

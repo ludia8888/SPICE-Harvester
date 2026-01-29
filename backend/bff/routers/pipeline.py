@@ -19,6 +19,7 @@ from urllib.parse import quote
 from uuid import UUID, uuid4
 
 import asyncpg
+import httpx
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Path, Query, Request, UploadFile, status
 from pydantic import BaseModel, Field
 
@@ -4258,8 +4259,69 @@ async def build_pipeline(
             if isinstance(head_response, dict) and head_response.get("status") == "success":
                 data = head_response.get("data") if isinstance(head_response.get("data"), dict) else {}
                 ontology_head_commit_id = str(data.get("head_commit_id") or "").strip() or None
+        except httpx.HTTPStatusError as exc:
+            # Enterprise safety: if the ontology branch doesn't exist yet, create it and retry once.
+            # This prevents "build succeeds but deploy fails" due to missing ontology.commit in build output.
+            status_code = getattr(getattr(exc, "response", None), "status_code", None)
+            if status_code == 404 and ontology_branch != "main":
+                try:
+                    try:
+                        await oms_client.create_branch(
+                            db_name,
+                            {"branch_name": ontology_branch, "from_branch": "main"},
+                        )
+                    except httpx.HTTPStatusError as create_exc:
+                        create_status = getattr(getattr(create_exc, "response", None), "status_code", None)
+                        # Branch may already exist (race). Still retry head resolution below.
+                        if create_status != 409:
+                            raise
+
+                    backoff_seconds = 0.15
+                    for attempt in range(5):
+                        try:
+                            head_response = await oms_client.get_version_head(db_name, branch=ontology_branch)
+                            if isinstance(head_response, dict) and head_response.get("status") == "success":
+                                data = head_response.get("data") if isinstance(head_response.get("data"), dict) else {}
+                                ontology_head_commit_id = str(data.get("head_commit_id") or "").strip() or None
+                            if ontology_head_commit_id:
+                                break
+                        except httpx.HTTPStatusError as head_exc:
+                            head_status = getattr(getattr(head_exc, "response", None), "status_code", None)
+                            if head_status == 404 and attempt < 4:
+                                await asyncio.sleep(backoff_seconds)
+                                backoff_seconds = min(backoff_seconds * 2, 1.0)
+                                continue
+                            raise
+                        if attempt < 4 and not ontology_head_commit_id:
+                            await asyncio.sleep(backoff_seconds)
+                            backoff_seconds = min(backoff_seconds * 2, 1.0)
+                except Exception as inner_exc:
+                    logger.warning(
+                        "Failed to ensure ontology branch (db=%s branch=%s): %s",
+                        db_name,
+                        ontology_branch,
+                        inner_exc,
+                    )
+            else:
+                logger.warning(
+                    "Failed to resolve ontology head commit (db=%s branch=%s http=%s): %s",
+                    db_name,
+                    ontology_branch,
+                    status_code,
+                    exc,
+                )
         except Exception as exc:
             logger.warning("Failed to resolve ontology head commit (db=%s branch=%s): %s", db_name, ontology_branch, exc)
+
+        if not ontology_head_commit_id:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "ONTOLOGY_VERSION_UNKNOWN",
+                    "message": "Ontology head commit is unknown; create/publish ontology on this branch before building pipelines",
+                    "branch": ontology_branch,
+                },
+            )
 
         build_definition = dict(definition_json)
         build_definition["__build_meta__"] = {

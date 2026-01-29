@@ -139,8 +139,15 @@ class ObjectifyOutboxPublisher:
                     if isinstance(options, dict)
                     else str(item.payload.get("run_id") or "").strip()
                 )
+                target_class_id = str(item.payload.get("target_class_id") or "").strip()
                 if run_id and aggregate_id:
-                    ordering_key = f"{aggregate_id}:{run_id}"
+                    # Foundry-style: preserve order within a run *per class* to allow
+                    # DAG-level parallelism across independent classes, while keeping
+                    # db+branch+run_id scoped ordering for each class.
+                    if target_class_id:
+                        ordering_key = f"{aggregate_id}:{run_id}:{target_class_id}"
+                    else:
+                        ordering_key = f"{aggregate_id}:{run_id}"
             key = (ordering_key or aggregate_id or item.job_id).encode("utf-8")
             # Use kafka_headers_with_dedup for idempotent message processing
             headers = kafka_headers_with_dedup(

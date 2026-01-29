@@ -811,12 +811,20 @@ class ObjectifyWorker:
                                     job=job,
                                     context={"attempt_count": attempt_count, "retryable": retryable},
                                 )
+                                # IMPORTANT: Do not mark the job as FAILED (terminal) for retryable errors.
+                                # The worker will re-seek and retry the same Kafka message; callers (including the
+                                # DAG orchestrator) must be able to distinguish "will retry" vs "final failure".
+                                job_status = "FAILED"
+                                completed_at: Optional[datetime] = datetime.now(timezone.utc)
+                                if retryable and attempt_count < self.max_retries:
+                                    job_status = "RETRYING"
+                                    completed_at = None
                                 await self.objectify_registry.update_objectify_job_status(
                                     job_id=job.job_id,
-                                    status="FAILED",
+                                    status=job_status,
                                     error=err[:4000],
                                     report=report_payload,
-                                    completed_at=datetime.now(timezone.utc),
+                                    completed_at=completed_at,
                                 )
                             except Exception as status_err:
                                 logger.warning(

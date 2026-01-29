@@ -15,10 +15,11 @@ import os
 import shutil
 import tempfile
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from functools import reduce
 import operator
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, TypeVar
 from uuid import UUID, uuid4
 
 import httpx
@@ -114,6 +115,8 @@ _SENSITIVE_CONF_TOKENS = (
     "aws_secret",
     "credentials",
 )
+
+T = TypeVar("T")
 
 
 def _resolve_code_version() -> Optional[str]:
@@ -324,6 +327,7 @@ class PipelineWorker:
         self.sheets: Optional[GoogleSheetsService] = None
         self.http: Optional[httpx.AsyncClient] = None
         self.spark: Optional[SparkSession] = None
+        self._spark_executor: Optional[ThreadPoolExecutor] = None
         self.redis: Optional[RedisService] = None
         self.lock_enabled = pipeline_settings.locks_enabled
         self.lock_required = pipeline_settings.locks_required
@@ -338,6 +342,13 @@ class PipelineWorker:
         self.processed_event_heartbeat_interval_seconds = settings.event_sourcing.processed_event_heartbeat_interval_seconds
         self.service_name = (settings.observability.service_name or "").strip() or None
         self.bff_admin_token = (settings.clients.bff_admin_token or "").strip() or None
+
+        # Consumer safety (enterprise):
+        # - Keep Kafka polling responsive even when Spark actions take minutes.
+        # - Track in-flight message handlers per partition and pause/resume partitions.
+        self._rebalance_in_progress = False
+        self._revoked_partitions: set[tuple[str, int]] = set()
+        self._inflight_by_partition: Dict[tuple[str, int], asyncio.Task] = {}
         self.tracing = get_tracing_service("pipeline-worker")
         self.metrics = get_metrics_collector("pipeline-worker")
 
@@ -439,6 +450,13 @@ class PipelineWorker:
                 self.lock_enabled = False
 
         self.spark = self._create_spark_session()
+        if not self._spark_executor:
+            max_workers = int(os.getenv("PIPELINE_SPARK_EXECUTOR_THREADS", "1") or "1")
+            max_workers = max(1, max_workers)
+            self._spark_executor = ThreadPoolExecutor(
+                max_workers=max_workers,
+                thread_name_prefix="pipeline-spark",
+            )
 
         # Use SafeKafkaConsumer for strong consistency guarantees
         # Critical: Enforces isolation.level=read_committed and proper rebalance handling
@@ -452,6 +470,8 @@ class PipelineWorker:
             on_assign=self._on_partitions_assigned,
         )
         self._rebalance_in_progress = False
+        self._revoked_partitions.clear()
+        self._inflight_by_partition.clear()
         logger.info("PipelineWorker initialized (topic=%s)", self.topic)
 
         self.dlq_producer = Producer(
@@ -473,8 +493,12 @@ class PipelineWorker:
             "Pipeline worker partitions revoked: %s",
             [(p.topic, p.partition) for p in partitions],
         )
-        # Stop any in-progress heartbeat tasks - the ProcessedEventRegistry
-        # will handle lease expiry for any abandoned processing
+        revoked = {(p.topic, int(p.partition)) for p in partitions}
+        self._revoked_partitions |= revoked
+        for key in revoked:
+            task = self._inflight_by_partition.get(key)
+            if task:
+                task.cancel()
 
     def _on_partitions_assigned(self, partitions: list) -> None:
         """Handle partition assignment during rebalance."""
@@ -483,6 +507,13 @@ class PipelineWorker:
             "Pipeline worker partitions assigned: %s",
             [(p.topic, p.partition) for p in partitions],
         )
+        for p in partitions:
+            self._revoked_partitions.discard((p.topic, int(p.partition)))
+        try:
+            if self.consumer and partitions:
+                self.consumer.resume([TopicPartition(p.topic, p.partition) for p in partitions])
+        except Exception as exc:
+            logger.warning("Failed to resume pipeline partitions after assign: %s", exc)
 
     async def close(self) -> None:
         if self.consumer:
@@ -521,6 +552,12 @@ class PipelineWorker:
         if self.spark:
             self.spark.stop()
             self.spark = None
+        if self._spark_executor:
+            try:
+                self._spark_executor.shutdown(wait=False, cancel_futures=True)
+            except TypeError:
+                self._spark_executor.shutdown(wait=False)
+            self._spark_executor = None
 
     def _create_spark_session(self) -> SparkSession:
         return (
@@ -601,25 +638,82 @@ class PipelineWorker:
         try:
             from pyspark import SparkContext
 
-            SparkSession._instantiatedContext = None  # type: ignore[attr-defined]
-            SparkContext._active_spark_context = None  # type: ignore[attr-defined]
+            # Best-effort reset of PySpark globals so builder.getOrCreate() doesn't
+            # try to reuse a dead gateway/JVM after Py4JNetworkError/ConnectionRefusedError.
+            for attr in (
+                "_instantiatedContext",
+                "_activeSession",
+                "_defaultSession",
+            ):
+                if hasattr(SparkSession, attr):
+                    setattr(SparkSession, attr, None)
+            for attr in (
+                "_active_spark_context",
+                "_gateway",
+                "_jvm",
+            ):
+                if hasattr(SparkContext, attr):
+                    setattr(SparkContext, attr, None)
         except Exception:
             pass
         self.spark = self._create_spark_session()
+
+    @staticmethod
+    def _is_spark_gateway_error(exc: BaseException) -> bool:
+        if isinstance(exc, (ConnectionRefusedError, BrokenPipeError)):
+            return True
+        msg = str(exc)
+        if "SparkConf does not exist in the JVM" in msg:
+            return True
+        if "Answer from Java side is empty" in msg:
+            return True
+        if "GatewayClient" in msg and "Connection refused" in msg:
+            return True
+        try:
+            from py4j.java_gateway import Py4JJavaError  # type: ignore
+            from py4j.protocol import Py4JError, Py4JNetworkError  # type: ignore
+        except Exception:
+            return False
+        return isinstance(exc, (Py4JError, Py4JNetworkError, Py4JJavaError))
+
+    async def _run_spark(self, fn: Callable[[], T], *, label: str) -> T:
+        """
+        Run a blocking Spark action off the main event loop.
+
+        Why:
+        - Spark actions (count/collect/write) can take minutes.
+        - If they run on the asyncio event loop thread, the Kafka consumer cannot poll
+          and can get kicked out of the group (rebalance / max.poll.interval).
+        """
+        executor = self._spark_executor
+        if executor is None:
+            return fn()
+        loop = asyncio.get_running_loop()
+        try:
+            return await loop.run_in_executor(executor, fn)
+        except Exception:
+            logger.error("Spark action failed (%s)", label, exc_info=True)
+            raise
 
     async def run(self) -> None:
         await self.initialize()
         self.running = True
         try:
             while self.running:
-                # Skip processing during rebalance to prevent duplicate processing
-                if self._rebalance_in_progress or (self.consumer and self.consumer.is_rebalancing):
-                    await asyncio.sleep(0.1)
+                if not self.consumer:
+                    await asyncio.sleep(0.2)
                     continue
 
-                msg = self.consumer.poll(1.0) if self.consumer else None
+                # Poll frequently to keep group membership even while Spark jobs run.
+                try:
+                    msg = self.consumer.poll(0.25)
+                except Exception as exc:
+                    logger.warning("Kafka poll failed (will retry): %s", exc, exc_info=True)
+                    await asyncio.sleep(1.0)
+                    continue
+
                 if msg is None:
-                    await asyncio.sleep(0.1)
+                    await asyncio.sleep(0)
                     continue
                 if msg.error():
                     if msg.error().code() == KafkaError._PARTITION_EOF:
@@ -627,207 +721,279 @@ class PipelineWorker:
                     logger.error("Kafka error: %s", msg.error())
                     continue
 
-                kafka_headers = msg.headers()
-                raw_value: Optional[bytes] = None
-                raw_text: Optional[str] = None
-                payload: Optional[Dict[str, Any]] = None
-
-                try:
-                    raw_value = msg.value()
-                    raw_text = raw_value.decode("utf-8")
-                except Exception as exc:
-                    await self._send_to_dlq(
-                        msg=msg,
-                        stage="decode",
-                        error=str(exc),
-                        payload_text=None,
-                        payload_obj=None,
-                        job=None,
-                        attempt_count=None,
-                    )
-                    if self.consumer:
-                        self.consumer.commit_sync(msg)
-                    continue
-
-                try:
-                    payload = json.loads(raw_text)
-                except Exception as exc:
-                    await self._send_to_dlq(
-                        msg=msg,
-                        stage="json",
-                        error=str(exc),
-                        payload_text=raw_text,
-                        payload_obj=None,
-                        job=None,
-                        attempt_count=None,
-                    )
-                    if self.consumer:
-                        self.consumer.commit_sync(msg)
-                    continue
-
-                job: Optional[PipelineJob] = None
-                try:
-                    job = PipelineJob.model_validate(payload)
-                except Exception as exc:
-                    await self._send_to_dlq(
-                        msg=msg,
-                        stage="validate",
-                        error=str(exc),
-                        payload_text=raw_text,
-                        payload_obj=payload,
-                        job=None,
-                        attempt_count=None,
+                key = (msg.topic(), int(msg.partition()))
+                if key in self._inflight_by_partition:
+                    logger.warning(
+                        "Received pipeline message while partition busy; rewinding (topic=%s partition=%s offset=%s)",
+                        msg.topic(),
+                        msg.partition(),
+                        msg.offset(),
                     )
                     try:
-                        await self._best_effort_record_invalid_job(payload, error=str(exc))
-                    except Exception as record_exc:
-                        logger.warning(
-                            "Failed to record invalid pipeline job (best-effort): %s",
-                            record_exc,
-                            exc_info=True,
-                        )
-                    if self.consumer:
-                        self.consumer.commit_sync(msg)
+                        self.consumer.seek(TopicPartition(msg.topic(), msg.partition(), msg.offset()))
+                        self.consumer.pause([TopicPartition(msg.topic(), msg.partition())])
+                    except Exception as exc:
+                        logger.warning("Failed to rewind/pause busy partition: %s", exc)
+                    await asyncio.sleep(0.1)
                     continue
 
-                start = time.monotonic()
-                with attach_context_from_kafka(kafka_headers=kafka_headers, service_name="pipeline-worker"):
-                    with self.tracing.span(
-                        "pipeline_worker.process_job",
-                        attributes={
-                            "messaging.system": "kafka",
-                            "messaging.destination": msg.topic(),
-                            "messaging.destination_kind": "topic",
-                            "messaging.kafka.partition": msg.partition(),
-                            "messaging.kafka.offset": msg.offset(),
-                            "pipeline.job_id": job.job_id,
-                            "pipeline.pipeline_id": job.pipeline_id,
-                            "pipeline.db_name": job.db_name,
-                            "pipeline.branch": job.branch,
-                            "pipeline.mode": getattr(job, "mode", None),
-                        },
-                    ):
-                        claim = None
-                        heartbeat_task: Optional[asyncio.Task] = None
+                try:
+                    self.consumer.pause([TopicPartition(msg.topic(), msg.partition())])
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to pause pipeline partition (topic=%s partition=%s): %s",
+                        msg.topic(),
+                        msg.partition(),
+                        exc,
+                    )
+
+                task = asyncio.create_task(
+                    self._handle_kafka_message(msg),
+                    name=f"pipeline:{msg.topic()}:{msg.partition()}:{msg.offset()}",
+                )
+                self._inflight_by_partition[key] = task
+                task.add_done_callback(self._log_background_task_exception)
+        finally:
+            inflight = list(self._inflight_by_partition.values())
+            for task in inflight:
+                task.cancel()
+            if inflight:
+                await asyncio.gather(*inflight, return_exceptions=True)
+            await self.close()
+
+    def _log_background_task_exception(self, task: asyncio.Task) -> None:
+        try:
+            exc = task.exception()
+        except asyncio.CancelledError:
+            return
+        except Exception as exc:
+            logger.warning("Background task introspection failed: %s", exc)
+            return
+        if exc:
+            logger.error("Pipeline background task crashed: %s", exc, exc_info=True)
+
+    async def _handle_kafka_message(self, msg: Any) -> None:
+        if not self.consumer:
+            return
+
+        topic = str(msg.topic())
+        partition = int(msg.partition())
+        offset = int(msg.offset())
+        key = (topic, partition)
+
+        kafka_headers = msg.headers()
+        raw_value: Optional[bytes] = None
+        raw_text: Optional[str] = None
+        payload: Optional[Dict[str, Any]] = None
+        job: Optional[PipelineJob] = None
+        claim = None
+        heartbeat_task: Optional[asyncio.Task] = None
+        start = time.monotonic()
+
+        try:
+            try:
+                raw_value = msg.value()
+                raw_text = raw_value.decode("utf-8")
+            except Exception as exc:
+                await self._send_to_dlq(
+                    msg=msg,
+                    stage="decode",
+                    error=str(exc),
+                    payload_text=None,
+                    payload_obj=None,
+                    job=None,
+                    attempt_count=None,
+                )
+                self.consumer.commit_sync(msg)
+                return
+
+            try:
+                payload = json.loads(raw_text)
+            except Exception as exc:
+                await self._send_to_dlq(
+                    msg=msg,
+                    stage="json",
+                    error=str(exc),
+                    payload_text=raw_text,
+                    payload_obj=None,
+                    job=None,
+                    attempt_count=None,
+                )
+                self.consumer.commit_sync(msg)
+                return
+
+            try:
+                job = PipelineJob.model_validate(payload)
+            except Exception as exc:
+                await self._send_to_dlq(
+                    msg=msg,
+                    stage="validate",
+                    error=str(exc),
+                    payload_text=raw_text,
+                    payload_obj=payload,
+                    job=None,
+                    attempt_count=None,
+                )
+                try:
+                    await self._best_effort_record_invalid_job(payload, error=str(exc))
+                except Exception as record_exc:
+                    logger.warning(
+                        "Failed to record invalid pipeline job (best-effort): %s",
+                        record_exc,
+                        exc_info=True,
+                    )
+                self.consumer.commit_sync(msg)
+                return
+
+            with attach_context_from_kafka(kafka_headers=kafka_headers, service_name="pipeline-worker"):
+                with self.tracing.span(
+                    "pipeline_worker.process_job",
+                    attributes={
+                        "messaging.system": "kafka",
+                        "messaging.destination": topic,
+                        "messaging.destination_kind": "topic",
+                        "messaging.kafka.partition": partition,
+                        "messaging.kafka.offset": offset,
+                        "pipeline.job_id": job.job_id,
+                        "pipeline.pipeline_id": job.pipeline_id,
+                        "pipeline.db_name": job.db_name,
+                        "pipeline.branch": job.branch,
+                        "pipeline.mode": getattr(job, "mode", None),
+                    },
+                ):
+                    if not self.processed:
+                        raise RuntimeError("ProcessedEventRegistry not available")
+
+                    claim = await self.processed.claim(
+                        handler=self.handler,
+                        event_id=job.job_id,
+                        aggregate_id=job.pipeline_id,
+                        sequence_number=getattr(job, "sequence_number", None),
+                    )
+
+                    if claim.decision in {ClaimDecision.DUPLICATE_DONE, ClaimDecision.STALE}:
+                        self.consumer.commit_sync(msg)
+                        return
+
+                    if claim.decision == ClaimDecision.IN_PROGRESS:
+                        await asyncio.sleep(2)
+                        self.consumer.seek(TopicPartition(topic, partition, offset))
+                        return
+
+                    heartbeat_task = asyncio.create_task(
+                        self._heartbeat_loop(handler=self.handler, event_id=job.job_id)
+                    )
+
+                    try:
+                        logger.info(
+                            "Executing pipeline job (job_id=%s pipeline_id=%s mode=%s)",
+                            job.job_id,
+                            job.pipeline_id,
+                            getattr(job, "mode", None),
+                        )
+                        await self._execute_job(job)
+                        logger.info(
+                            "Pipeline job complete (job_id=%s pipeline_id=%s)",
+                            job.job_id,
+                            job.pipeline_id,
+                        )
+                        await self.processed.mark_done(handler=self.handler, event_id=job.job_id)
+                        self.consumer.commit_sync(msg)
                         try:
-                            if not self.processed:
-                                raise RuntimeError("ProcessedEventRegistry not available")
-
-                            # Use sequence_number for aggregate ordering if available
-                            claim = await self.processed.claim(
-                                handler=self.handler,
-                                event_id=job.job_id,
-                                aggregate_id=job.pipeline_id,
-                                sequence_number=getattr(job, "sequence_number", None),
+                            self.metrics.record_event(
+                                "PIPELINE_JOB",
+                                action="processed",
+                                duration=time.monotonic() - start,
                             )
-
-                            if claim.decision in {ClaimDecision.DUPLICATE_DONE, ClaimDecision.STALE}:
-                                if self.consumer:
-                                    self.consumer.commit_sync(msg)
-                                continue
-
-                            if claim.decision == ClaimDecision.IN_PROGRESS:
-                                await asyncio.sleep(2)
-                                if self.consumer:
-                                    self.consumer.seek(TopicPartition(msg.topic(), msg.partition(), msg.offset()))
-                                continue
-
-                            heartbeat_task = asyncio.create_task(
-                                self._heartbeat_loop(handler=self.handler, event_id=job.job_id)
-                            )
-
-                            logger.info(
-                                "Executing pipeline job (job_id=%s pipeline_id=%s mode=%s)",
-                                job.job_id,
-                                job.pipeline_id,
-                                getattr(job, "mode", None),
-                            )
-                            await self._execute_job(job)
-                            logger.info("Pipeline job complete (job_id=%s pipeline_id=%s)", job.job_id, job.pipeline_id)
-                            await self.processed.mark_done(handler=self.handler, event_id=job.job_id)
-                            if self.consumer:
-                                self.consumer.commit_sync(msg)
+                        except Exception:
+                            pass
+                        return
+                    except Exception as exc:
+                        err = str(exc)
+                        if self._is_spark_gateway_error(exc):
                             try:
-                                self.metrics.record_event(
-                                    "PIPELINE_JOB",
-                                    action="processed",
-                                    duration=time.monotonic() - start,
+                                self._restart_spark_session()
+                            except Exception as restart_exc:
+                                err = f"{err} (spark_restart_failed: {restart_exc})"
+                                if self.processed and job:
+                                    try:
+                                        await self.processed.mark_failed(
+                                            handler=self.handler,
+                                            event_id=job.job_id,
+                                            error=err,
+                                        )
+                                    except Exception as mark_err:
+                                        logger.warning(
+                                            "Failed to mark pipeline job failed before restart: %s",
+                                            mark_err,
+                                        )
+                                logger.warning(
+                                    "Failed to restart Spark session after connection refusal: %s",
+                                    restart_exc,
                                 )
-                            except Exception:
-                                pass
-                        except Exception as exc:
-                            err = str(exc)
-                            if isinstance(exc, ConnectionRefusedError):
-                                try:
-                                    self._restart_spark_session()
-                                except Exception as restart_exc:
-                                    # If the Spark JVM is dead and we cannot restart it, we must NOT leave the
-                                    # processed_events lease stuck in "processing" (it blocks the Kafka partition
-                                    # until lease expiry). Mark the job failed (best-effort) before forcing a restart.
-                                    err = f"{err} (spark_restart_failed: {restart_exc})"
-                                    if self.processed and job:
-                                        try:
-                                            await self.processed.mark_failed(
-                                                handler=self.handler,
-                                                event_id=job.job_id,
-                                                error=err,
-                                            )
-                                        except Exception as mark_err:
-                                            logger.warning(
-                                                "Failed to mark pipeline job failed before restart: %s", mark_err
-                                            )
-                                    logger.warning(
-                                        "Failed to restart Spark session after connection refusal: %s", restart_exc
-                                    )
-                                    raise SystemExit(1) from restart_exc
-                            attempt_count = int(getattr(claim, "attempt_count", 1) or 1)
-                            if self.processed and job:
-                                try:
-                                    await self.processed.mark_failed(handler=self.handler, event_id=job.job_id, error=err)
-                                except Exception as mark_err:
-                                    logger.warning("Failed to mark pipeline job failed: %s", mark_err)
+                                raise SystemExit(1) from restart_exc
 
-                            if attempt_count >= self.max_retries:
-                                logger.error(
-                                    "Pipeline job max retries exceeded; sending to DLQ (job_id=%s attempt=%s)",
-                                    getattr(job, "job_id", None),
-                                    attempt_count,
-                                )
-                                await self._send_to_dlq(
-                                    msg=msg,
-                                    stage="execute",
+                        attempt_count = int(getattr(claim, "attempt_count", 1) or 1)
+                        if self.processed and job:
+                            try:
+                                await self.processed.mark_failed(
+                                    handler=self.handler,
+                                    event_id=job.job_id,
                                     error=err,
-                                    payload_text=raw_text,
-                                    payload_obj=payload,
-                                    job=job,
-                                    attempt_count=attempt_count,
                                 )
-                                if self.consumer:
-                                    self.consumer.commit_sync(msg)
-                                continue
+                            except Exception as mark_err:
+                                logger.warning("Failed to mark pipeline job failed: %s", mark_err)
 
-                            backoff_s = min(self.backoff_max, int(self.backoff_base * (2 ** max(0, attempt_count - 1))))
-                            logger.warning(
-                                "Pipeline job failed; will retry (job_id=%s attempt=%s backoff=%ss): %s",
+                        if attempt_count >= self.max_retries:
+                            logger.error(
+                                "Pipeline job max retries exceeded; sending to DLQ (job_id=%s attempt=%s)",
                                 getattr(job, "job_id", None),
                                 attempt_count,
-                                backoff_s,
-                                err,
                             )
-                            await asyncio.sleep(backoff_s)
-                            if self.consumer:
-                                self.consumer.seek(TopicPartition(msg.topic(), msg.partition(), msg.offset()))
-                        finally:
-                            if heartbeat_task:
-                                heartbeat_task.cancel()
-                                try:
-                                    await heartbeat_task
-                                except asyncio.CancelledError:
-                                    pass
-                                except Exception:
-                                    pass
+                            await self._send_to_dlq(
+                                msg=msg,
+                                stage="execute",
+                                error=err,
+                                payload_text=raw_text,
+                                payload_obj=payload,
+                                job=job,
+                                attempt_count=attempt_count,
+                            )
+                            self.consumer.commit_sync(msg)
+                            return
+
+                        backoff_s = min(self.backoff_max, int(self.backoff_base * (2 ** max(0, attempt_count - 1))))
+                        logger.warning(
+                            "Pipeline job failed; will retry (job_id=%s attempt=%s backoff=%ss): %s",
+                            getattr(job, "job_id", None),
+                            attempt_count,
+                            backoff_s,
+                            err,
+                        )
+                        await asyncio.sleep(backoff_s)
+                        self.consumer.seek(TopicPartition(topic, partition, offset))
+                        return
+                    finally:
+                        if heartbeat_task:
+                            heartbeat_task.cancel()
+                            try:
+                                await heartbeat_task
+                            except asyncio.CancelledError:
+                                pass
+                            except Exception:
+                                pass
         finally:
-            await self.close()
+            self._inflight_by_partition.pop(key, None)
+            if self.consumer and key not in self._revoked_partitions:
+                try:
+                    self.consumer.resume([TopicPartition(topic, partition)])
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to resume pipeline partition (topic=%s partition=%s): %s",
+                        topic,
+                        partition,
+                        exc,
+                    )
 
     async def _heartbeat_loop(self, *, handler: str, event_id: str) -> None:
         if not self.processed:
@@ -1016,6 +1182,27 @@ class PipelineWorker:
         order_run = [node_id for node_id in order if node_id in required_node_ids]
 
         resolved_pipeline_id = await self._resolve_pipeline_id(job)
+        if resolved_pipeline_id:
+            try:
+                pipeline_record = await self.pipeline_registry.get_pipeline(pipeline_id=resolved_pipeline_id)
+            except Exception as exc:
+                logger.warning(
+                    "Failed to resolve pipeline record (pipeline_id=%s job_id=%s): %s",
+                    resolved_pipeline_id,
+                    job.job_id,
+                    exc,
+                )
+                pipeline_record = None
+            if not pipeline_record:
+                # Enterprise safety: scheduled/queued jobs can outlive the pipeline row
+                # (e.g. smoke tests clean up immediately). This is non-retryable.
+                logger.warning(
+                    "Dropping stale pipeline job for missing pipeline (pipeline_id=%s job_id=%s mode=%s)",
+                    resolved_pipeline_id,
+                    job.job_id,
+                    getattr(job, "mode", None),
+                )
+                return
         pipeline_ref = resolved_pipeline_id or str(job.pipeline_id)
         watermark_column = _resolve_watermark_column(
             incremental=resolve_incremental_config(definition),
@@ -1319,10 +1506,13 @@ class PipelineWorker:
                     df = self._apply_transform(metadata, inputs, parameters)
 
                 table_ops = self._build_table_ops(df)
-                schema_errors = validate_schema_checks(
-                    table_ops,
-                    metadata.get("schemaChecks") or [],
-                    error_prefix=f"schema check failed ({node_id}): ",
+                schema_errors = await self._run_spark(
+                    lambda: validate_schema_checks(
+                        table_ops,
+                        metadata.get("schemaChecks") or [],
+                        error_prefix=f"schema check failed ({node_id}): ",
+                    ),
+                    label=f"schema_checks:{node_id}",
                 )
                 if schema_errors:
                     schema_payload = self._build_error_payload(
@@ -1379,10 +1569,13 @@ class PipelineWorker:
                 primary_id = target_node_ids[0] if target_node_ids else None
                 output_df = tables.get(primary_id) if primary_id else self._empty_dataframe()
                 schema_columns = _schema_from_dataframe(output_df)
-                row_count = int(output_df.count())
+                row_count = int(await self._run_spark(lambda: output_df.count(), label=f"count:preview:{primary_id}"))
                 schema_contract = definition.get("schemaContract") or definition.get("schema_contract") or []
                 output_ops = self._build_table_ops(output_df)
-                contract_errors = validate_schema_contract(output_ops, schema_contract)
+                contract_errors = await self._run_spark(
+                    lambda: validate_schema_contract(output_ops, schema_contract),
+                    label=f"schema_contract:preview:{primary_id}",
+                )
                 if contract_errors:
                     contract_payload = self._build_error_payload(
                         message="Pipeline schema contract failed",
@@ -1463,9 +1656,9 @@ class PipelineWorker:
                     pk_columns=pk_columns,
                     available_columns=available_columns,
                 )
-                expectation_errors = pk_semantic_errors + validate_expectations(
-                    output_ops,
-                    expectations,
+                expectation_errors = pk_semantic_errors + await self._run_spark(
+                    lambda: validate_expectations(output_ops, expectations),
+                    label=f"expectations:preview:{primary_id}",
                 )
                 fk_errors = await self._evaluate_fk_expectations(
                     expectations=expectations,
@@ -1475,7 +1668,10 @@ class PipelineWorker:
                     temp_dirs=temp_dirs,
                 )
                 expectation_errors = expectation_errors + fk_errors
-                sample_rows = output_df.limit(preview_limit).collect()
+                sample_rows = await self._run_spark(
+                    lambda: output_df.limit(preview_limit).collect(),
+                    label=f"collect:preview:{primary_id}",
+                )
                 output_sample = [row.asDict(recursive=True) for row in sample_rows]
                 column_stats = compute_column_stats(rows=output_sample, columns=schema_columns)
                 sample_payload: Dict[str, Any] = {
@@ -1576,12 +1772,17 @@ class PipelineWorker:
                         except Exception:
                             pass
                     schema_columns = _schema_from_dataframe(output_df)
-                    delta_row_count = int(output_df.count())
+                    delta_row_count = int(
+                        await self._run_spark(lambda: output_df.count(), label=f"count:build:{node_id}")
+                    )
                     if delta_row_count > 0:
                         has_output_rows = True
                     schema_contract = definition.get("schemaContract") or definition.get("schema_contract") or []
                     output_ops = self._build_table_ops(output_df)
-                    contract_errors = validate_schema_contract(output_ops, schema_contract)
+                    contract_errors = await self._run_spark(
+                        lambda: validate_schema_contract(output_ops, schema_contract),
+                        label=f"schema_contract:build:{node_id}",
+                    )
                     if contract_errors:
                         contract_payload = self._build_error_payload(
                             message="Pipeline schema contract failed",
@@ -1656,9 +1857,9 @@ class PipelineWorker:
                         pk_columns=pk_columns,
                         available_columns=available_columns,
                     )
-                    expectation_errors = pk_semantic_errors + validate_expectations(
-                        output_ops,
-                        expectations,
+                    expectation_errors = pk_semantic_errors + await self._run_spark(
+                        lambda: validate_expectations(output_ops, expectations),
+                        label=f"expectations:build:{node_id}",
                     )
                     fk_errors = await self._evaluate_fk_expectations(
                         expectations=expectations,
@@ -1707,7 +1908,10 @@ class PipelineWorker:
                     )
                     dataset_name = str(output_name or job.output_dataset_name)
                     schema_hash = _hash_schema_columns(schema_columns)
-                    sample_rows = output_df.limit(preview_limit).collect()
+                    sample_rows = await self._run_spark(
+                        lambda: output_df.limit(preview_limit).collect(),
+                        label=f"collect:build:{node_id}",
+                    )
                     output_sample = [row.asDict(recursive=True) for row in sample_rows]
                     column_stats = compute_column_stats(rows=output_sample, columns=schema_columns)
 
@@ -1924,12 +2128,17 @@ class PipelineWorker:
                     lock.raise_if_lost()
                 output_df = tables.get(node_id, self._empty_dataframe())
                 schema_columns = _schema_from_dataframe(output_df)
-                delta_row_count = int(output_df.count())
+                delta_row_count = int(
+                    await self._run_spark(lambda: output_df.count(), label=f"count:deploy:{node_id}")
+                )
                 if delta_row_count > 0:
                     has_output_rows = True
                 schema_contract = definition.get("schemaContract") or definition.get("schema_contract") or []
                 output_ops = self._build_table_ops(output_df)
-                contract_errors = validate_schema_contract(output_ops, schema_contract)
+                contract_errors = await self._run_spark(
+                    lambda: validate_schema_contract(output_ops, schema_contract),
+                    label=f"schema_contract:deploy:{node_id}",
+                )
                 if contract_errors:
                     contract_payload = self._build_error_payload(
                         message="Pipeline schema contract failed",
@@ -2008,9 +2217,9 @@ class PipelineWorker:
                     pk_columns=pk_columns,
                     available_columns=available_columns,
                 )
-                expectation_errors = pk_semantic_errors + validate_expectations(
-                    output_ops,
-                    expectations,
+                expectation_errors = pk_semantic_errors + await self._run_spark(
+                    lambda: validate_expectations(output_ops, expectations),
+                    label=f"expectations:deploy:{node_id}",
                 )
                 fk_errors = await self._evaluate_fk_expectations(
                     expectations=expectations,
@@ -2056,7 +2265,10 @@ class PipelineWorker:
                     logger.error("Pipeline expectations failed: %s", expectation_errors)
                     return
 
-                sample_rows = output_df.limit(preview_limit).collect()
+                sample_rows = await self._run_spark(
+                    lambda: output_df.limit(preview_limit).collect(),
+                    label=f"collect:deploy:{node_id}",
+                )
                 output_sample = [row.asDict(recursive=True) for row in sample_rows]
 
                 output_format = _resolve_output_format(definition=definition, output_metadata=metadata)
@@ -2730,9 +2942,15 @@ class PipelineWorker:
             if resolved_partition_cols:
                 writer = writer.partitionBy(*resolved_partition_cols)
             if resolved_format == "parquet":
-                writer.parquet(output_path)
+                await self._run_spark(
+                    lambda: writer.parquet(output_path),
+                    label=f"write_parquet:{normalized_prefix}",
+                )
             else:
-                writer.json(output_path)
+                await self._run_spark(
+                    lambda: writer.json(output_path),
+                    label=f"write_json:{normalized_prefix}",
+                )
             part_files = _list_part_files(
                 output_path,
                 extensions={".parquet"} if resolved_format == "parquet" else {".json"},
@@ -2850,7 +3068,10 @@ class PipelineWorker:
 
         # External inputs (no DatasetRegistry selection) are loaded directly via Spark read config.
         if not dataset_id and not dataset_name:
-            df = self._load_external_input_dataframe(read_config, node_id=node_id)
+            df = await self._run_spark(
+                lambda: self._load_external_input_dataframe(read_config, node_id=node_id),
+                label=f"external_input:{node_id}",
+            )
             if input_snapshots is not None:
                 fmt = str(read_config.get("format") or read_config.get("file_format") or read_config.get("fileFormat") or "").strip().lower() or None
                 options = self._normalize_read_options(read_config)
@@ -2990,17 +3211,22 @@ class PipelineWorker:
                         if watermark_after is not None:
                             snapshot["watermark_after"] = watermark_after
                         try:
-                            watermark_max = df.agg(
-                                F.max(F.col(resolved_watermark_column)).alias("watermark_max")
-                            ).collect()[0]["watermark_max"]
+                            watermark_max = await self._run_spark(
+                                lambda: df.agg(F.max(F.col(resolved_watermark_column)).alias("watermark_max"))
+                                .collect()[0]["watermark_max"],
+                                label=f"watermark_max:diff:{node_id}",
+                            )
                         except Exception:
                             watermark_max = None
                         snapshot["watermark_max"] = watermark_max
                         if watermark_max is not None:
-                            snapshot["watermark_keys"] = self._collect_watermark_keys(
-                                df,
-                                watermark_column=resolved_watermark_column,
-                                watermark_value=watermark_max,
+                            snapshot["watermark_keys"] = await self._run_spark(
+                                lambda: self._collect_watermark_keys(
+                                    df,
+                                    watermark_column=resolved_watermark_column,
+                                    watermark_value=watermark_max,
+                                ),
+                                label=f"watermark_keys:diff:{node_id}",
                             )
                         input_snapshots.append(snapshot)
                 elif input_snapshots is not None:
@@ -3056,16 +3282,21 @@ class PipelineWorker:
                 watermark_after=watermark_after,
                 watermark_keys=watermark_keys,
             )
-            watermark_max = df.agg(F.max(F.col(resolved_watermark_column)).alias("watermark_max")).collect()[0][
-                "watermark_max"
-            ]
+            watermark_max = await self._run_spark(
+                lambda: df.agg(F.max(F.col(resolved_watermark_column)).alias("watermark_max"))
+                .collect()[0]["watermark_max"],
+                label=f"watermark_max:{node_id}",
+            )
             if snapshot is not None:
                 snapshot["watermark_max"] = watermark_max
                 if watermark_max is not None:
-                    snapshot["watermark_keys"] = self._collect_watermark_keys(
-                        df,
-                        watermark_column=resolved_watermark_column,
-                        watermark_value=watermark_max,
+                    snapshot["watermark_keys"] = await self._run_spark(
+                        lambda: self._collect_watermark_keys(
+                            df,
+                            watermark_column=resolved_watermark_column,
+                            watermark_value=watermark_max,
+                        ),
+                        label=f"watermark_keys:{node_id}",
                     )
 
         if snapshot is not None:
@@ -3242,7 +3473,7 @@ class PipelineWorker:
         if not local_paths:
             return self._empty_dataframe()
         reader = self.spark.read.option("basePath", temp_dir)
-        return reader.parquet(*local_paths)
+        return await self._run_spark(lambda: reader.parquet(*local_paths), label="read_parquet_keys")
 
     async def _load_media_prefix_dataframe(self, bucket: str, key: str, *, node_id: str) -> DataFrame:
         """
@@ -3290,7 +3521,10 @@ class PipelineWorker:
 
         if not rows:
             return self._empty_dataframe()
-        return self.spark.createDataFrame(rows)
+        return await self._run_spark(
+            lambda: self.spark.createDataFrame(rows),
+            label=f"create_df:media:{node_id}",
+        )
 
     async def _resolve_pipeline_id(self, job: PipelineJob) -> Optional[str]:
         if not self.pipeline_registry:
@@ -3924,7 +4158,10 @@ class PipelineWorker:
                     operator.and_,
                     [left[col] == right[ref_col] for col, ref_col in zip(columns, ref_columns)],
                 )
-            missing_count = left.join(right, join_cond, how="left_anti").count()
+            missing_count = await self._run_spark(
+                lambda: left.join(right, join_cond, how="left_anti").count(),
+                label="fk_exists:missing_count",
+            )
             if missing_count:
                 ref_label = spec["dataset_name"] or spec["dataset_id"] or "reference"
                 errors.append(
@@ -4124,7 +4361,10 @@ class PipelineWorker:
             return await self._load_prefix_dataframe(bucket, key, temp_dirs, read_config=read_config)
 
         file_path = await self._download_object(bucket, key, temp_dirs)
-        return self._read_local_file(file_path, read_config=read_config)
+        return await self._run_spark(
+            lambda: self._read_local_file(file_path, read_config=read_config),
+            label=f"read_local_file:{os.path.basename(file_path)}",
+        )
 
     async def _load_prefix_dataframe(
         self,
@@ -4175,18 +4415,29 @@ class PipelineWorker:
         has_excel = any(path.endswith((".xlsx", ".xlsm")) for path in local_paths)
 
         if forced_format == "parquet" or (not forced_format and has_parquet):
-            return reader.parquet(temp_dir)
+            return await self._run_spark(lambda: reader.parquet(temp_dir), label="read_prefix:parquet")
         if forced_format == "json" or (not forced_format and has_json):
-            return reader.json(temp_dir)
+            return await self._run_spark(lambda: reader.json(temp_dir), label="read_prefix:json")
         if forced_format == "csv" or (not forced_format and has_csv):
             if "header" not in options:
                 reader = reader.option("header", "true")
-            return self._strip_bom_headers(reader.csv(temp_dir))
+            return await self._run_spark(
+                lambda: self._strip_bom_headers(reader.csv(temp_dir)),
+                label="read_prefix:csv",
+            )
         if forced_format in {"excel", "xlsx"} or (not forced_format and has_excel):
-            return self._load_excel_path(next(path for path in local_paths if path.endswith((".xlsx", ".xlsm"))))
+            return await self._run_spark(
+                lambda: self._load_excel_path(
+                    next(path for path in local_paths if path.endswith((".xlsx", ".xlsm")))
+                ),
+                label="read_prefix:excel",
+            )
         if forced_format:
             # Best-effort generic reader for formats provided by the Spark runtime (orc/text/avro/etc).
-            return reader.format(forced_format).load(temp_dir)
+            return await self._run_spark(
+                lambda: reader.format(forced_format).load(temp_dir),
+                label=f"read_prefix:{forced_format}",
+            )
 
         extensions = sorted({os.path.splitext(path)[1] for path in local_paths if os.path.splitext(path)[1]})
         raise ValueError(
@@ -4197,10 +4448,14 @@ class PipelineWorker:
         if not self.storage:
             raise RuntimeError("Storage service not available")
         directory = os.path.dirname(local_path)
-        if directory:
-            os.makedirs(directory, exist_ok=True)
-        with open(local_path, "wb") as handle:
-            self.storage.client.download_fileobj(bucket, key, handle)
+
+        def _download() -> None:
+            if directory:
+                os.makedirs(directory, exist_ok=True)
+            with open(local_path, "wb") as handle:
+                self.storage.client.download_fileobj(bucket, key, handle)
+
+        await asyncio.to_thread(_download)
 
     async def _download_object(
         self,

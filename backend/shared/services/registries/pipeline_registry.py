@@ -22,6 +22,7 @@ from shared.services.storage.lakefs_client import (
     LakeFSConfig,
     LakeFSConflictError,
     LakeFSError,
+    LakeFSNotFoundError,
 )
 from shared.services.storage.lakefs_storage_service import LakeFSStorageService
 from shared.utils.path_utils import safe_path_segment
@@ -542,6 +543,41 @@ class PipelineRegistry:
             secret_key=creds.secret_access_key,
             use_ssl=endpoint.startswith("https"),
         )
+
+    async def ensure_lakefs_branch(
+        self,
+        *,
+        repository: str,
+        branch: str,
+        source: str = "main",
+        user_id: Optional[str] = None,
+    ) -> None:
+        """
+        Ensure the target lakeFS branch exists before attempting S3-gateway writes.
+
+        lakeFS S3 Gateway requires the branch to exist; otherwise PutObject can fail with
+        confusing "NoSuchBucket" errors (because branch resolution happens inside the gateway).
+        """
+        repository = str(repository).strip()
+        branch = str(branch).strip()
+        source = str(source).strip() or "main"
+        if not repository:
+            raise ValueError("repository is required")
+        if not branch:
+            raise ValueError("branch is required")
+
+        lakefs_client = await self.get_lakefs_client(user_id=user_id)
+        try:
+            await lakefs_client.get_branch_head_commit_id(repository=repository, branch=branch)
+            return
+        except LakeFSNotFoundError:
+            pass
+
+        try:
+            await lakefs_client.create_branch(repository=repository, name=branch, source=source)
+        except LakeFSConflictError:
+            # Safe under concurrency: branch already created by another caller.
+            return
 
     def _resolve_repository(self, *, pipeline: PipelineRecord) -> str:
         repo = (pipeline.lakefs_repository or "").strip()
@@ -1920,6 +1956,13 @@ class PipelineRegistry:
 
         resolved_branch = (branch or pipeline.branch or "main").strip() or "main"
         repository = self._resolve_repository(pipeline=pipeline)
+
+        await self.ensure_lakefs_branch(
+            repository=repository,
+            branch=resolved_branch,
+            source="main",
+            user_id=user_id,
+        )
 
         definition_key = _definition_object_key(db_name=pipeline.db_name, pipeline_name=pipeline.name)
         checksum = await (await self.get_lakefs_storage(user_id=user_id)).save_json(

@@ -516,43 +516,46 @@ services:
       timeout: 10s
       retries: 5
 
-  # Agent Service (tool runner) - DEPRECATED: Legacy service, no longer used
-  # The BFF now uses /agent/pipeline-runs with MCP autonomous loop instead
-  # agent:
-  #   build:
-  #     context: .
-  #     dockerfile: ./agent/Dockerfile
-  #   container_name: spice_agent
-  #   environment:
-  #     - AGENT_BFF_BASE_URL=http://bff:8002
-  #     - AGENT_REQUIRE_EVENT_STORE=true
-  #     - AGENT_SERVICE_NAME=agent
-  #     - AGENT_TOOL_TIMEOUT_SECONDS=180
-  #     - POSTGRES_HOST=postgres
-  #     - POSTGRES_PORT=5432
-  #     - POSTGRES_USER=${POSTGRES_USER:-spiceadmin}
-  #     - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-spicepass123}
-  #     - POSTGRES_DB=${POSTGRES_DB:-spicedb}
-  #     - MINIO_ENDPOINT_URL=http://spice-minio:9000
-  #     - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
-  #     - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-minioadmin123}
-  #     - EVENT_STORE_BUCKET=${AGENT_EVENT_STORE_BUCKET:-spice-agent-store}
-  #     - AGENT_BFF_TOKEN=${BFF_AGENT_TOKEN:-spice-dev-agent-token}
-  #     - LOG_LEVEL=INFO
-  #     - DOCKER_CONTAINER=true
-  #   depends_on:
-  #     - bff
-  #     - postgres
-  #     - minio
-  #   networks:
-  #     - spice_network
-  #   ports:
-  #     - "${AGENT_PORT_HOST:-8004}:8004"
-  #   healthcheck:
-  #     test: ["CMD", "curl", "-f", "http://localhost:8004/health"]
-  #     interval: 30s
-  #     timeout: 10s
-  #     retries: 5
+  # Agent Service (tool runner).
+  #
+  # NOTE: Pipeline Agent runs are primarily handled in the BFF now
+  # (/api/v1/agent/pipeline-runs + /stream), but we keep this service for
+  # compatibility (health checks, legacy flows, and production gate expectations).
+  agent:
+    build:
+      context: .
+      dockerfile: ./agent/Dockerfile
+    container_name: spice_agent
+    environment:
+      - AGENT_BFF_BASE_URL=http://bff:8002
+      - AGENT_REQUIRE_EVENT_STORE=true
+      - AGENT_SERVICE_NAME=agent
+      - AGENT_TOOL_TIMEOUT_SECONDS=180
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=${POSTGRES_USER:-spiceadmin}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-spicepass123}
+      - POSTGRES_DB=${POSTGRES_DB:-spicedb}
+      - MINIO_ENDPOINT_URL=http://spice-minio:9000
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-minioadmin123}
+      - EVENT_STORE_BUCKET=${AGENT_EVENT_STORE_BUCKET:-spice-agent-store}
+      - AGENT_BFF_TOKEN=${BFF_AGENT_TOKEN:-spice-dev-agent-token}
+      - LOG_LEVEL=INFO
+      - DOCKER_CONTAINER=true
+    depends_on:
+      - bff
+      - postgres
+      - minio
+    networks:
+      - spice_network
+    ports:
+      - "${AGENT_PORT_HOST:-8004}:8004"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8004/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
 
   # Connector Trigger Service (polls + emits connector-updates)
   connector-trigger-service:

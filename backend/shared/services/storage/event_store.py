@@ -357,7 +357,7 @@ class EventStore:
             - For the first write on that branch, we must seed from the base branch's last sequence
               so `expected_seq` reflects the inherited state (OCC correctness).
             """
-            seed = await self.get_aggregate_version(event.aggregate_type, event.aggregate_id)
+            seed = await self.get_aggregate_version(event.aggregate_type, event.aggregate_id, allow_full_scan=False)
             if seed:
                 return int(seed)
 
@@ -391,7 +391,14 @@ class EventStore:
                 return int(seed or 0)
 
             try:
-                return int(await self.get_aggregate_version(event.aggregate_type, base_aggregate_id) or 0)
+                return int(
+                    await self.get_aggregate_version(
+                        event.aggregate_type,
+                        base_aggregate_id,
+                        allow_full_scan=False,
+                    )
+                    or 0
+                )
             except Exception:
                 return int(seed or 0)
 
@@ -949,7 +956,9 @@ class EventStore:
     async def get_aggregate_version(
         self,
         aggregate_type: str,
-        aggregate_id: str
+        aggregate_id: str,
+        *,
+        allow_full_scan: bool = True,
     ) -> int:
         """
         Get the current version of an aggregate (max sequence_number).
@@ -980,7 +989,11 @@ class EventStore:
         except Exception as e:
             logger.warning(f"Failed to read aggregate index for {aggregate_type}/{aggregate_id}: {e}")
 
-        # Fallback: legacy streams without indexes (slow).
+        # Fallback: legacy streams without indexes (slow and unbounded). In production paths we generally
+        # want to avoid a full bucket scan because it can block unrelated requests under load.
+        if not allow_full_scan:
+            return 0
+
         events = await self.get_events(aggregate_type, aggregate_id)
         return max((e.sequence_number or 0) for e in events) if events else 0
     
