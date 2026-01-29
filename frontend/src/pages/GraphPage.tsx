@@ -21,16 +21,19 @@ import {
   NodePalette,
   TransformPresets,
   PipelineWizardDialog,
+  CreatePipelineDialog,
   UdfManageDialog,
   DatasetSelectDialog,
   DatasetNode,
   TransformNode,
   type PaletteNode,
+  type CreatePipelineDialogValues,
   type TransformPreset,
   type TransformType,
 } from '../components/pipeline'
 import { UploadFilesDialog } from '../components/UploadFilesDialog'
 import {
+  createPipeline,
   buildPipeline,
   deployPipeline,
   getPipeline,
@@ -156,6 +159,22 @@ const mapBackendOperationToTransformType = (type?: string, operation?: string): 
   }
 
   return operationMap[op] || 'compute'
+}
+
+const normalizeBackendOperation = (value: unknown): string => {
+  const raw = typeof value === 'string' ? value.trim() : String(value ?? '').trim()
+  if (!raw) {
+    return ''
+  }
+  const lowered = raw.toLowerCase()
+  if (['group_by', 'groupby'].includes(lowered)) {
+    return 'groupBy'
+  }
+  if (['regex_replace', 'regexreplace', 'regex-replace', 'regex'].includes(lowered)) {
+    return 'regexReplace'
+  }
+  // Canonical operations are case-sensitive for groupBy/regexReplace; everything else is lower-case.
+  return lowered
 }
 
 // Agent 플랜 응답을 ReactFlow 노드/엣지로 변환
@@ -1162,7 +1181,7 @@ const hydrateFlowNodesWithDatasets = (flowNodes: FlowNode[], datasets: DatasetRe
     return flowNodes
   }
   return flowNodes.map((node) => {
-    if (node.type !== 'input') {
+    if (node.type !== 'input' && node.type !== 'datasetInput') {
       return node
     }
     const dataset = resolveDatasetForNode(node, datasets)
@@ -1178,7 +1197,19 @@ const hydrateFlowNodesWithDatasets = (flowNodes: FlowNode[], datasets: DatasetRe
     if (!data.label || data.label === node.id) {
       data.label = dataset.name
     }
-    return { ...node, data }
+    if (typeof data.columnCount !== 'number') {
+      const schemaColumns = extractSchemaColumns(dataset.schema_json)
+      if (schemaColumns.length > 0) {
+        data.columnCount = schemaColumns.length
+      }
+    }
+    if (!data.sourceType) {
+      data.sourceType = dataset.source_type
+    }
+    if (!data.stage) {
+      data.stage = dataset.stage || 'raw'
+    }
+    return { ...node, type: 'datasetInput', data }
   })
 }
 
@@ -1323,21 +1354,67 @@ const buildFlowFromDefinition = (definition: PipelineDetailRecord['definition_js
         return null
       }
       const typedNode = node as DefinitionNode
-      const data: Record<string, unknown> = { label: buildNodeLabel(typedNode) }
-      if (isRecord(typedNode.metadata)) {
-        data.metadata = typedNode.metadata
+      const meta = isRecord(typedNode.metadata) ? typedNode.metadata : {}
+      const nodeType = String(typedNode.type || '').trim()
+      const nodeTypeLower = nodeType.toLowerCase()
+
+      const position = { x: 0, y: index * 120 }
+
+      if (nodeTypeLower === 'input' || nodeTypeLower === 'read_dataset') {
+        return {
+          id: node.id,
+          type: 'datasetInput',
+          position,
+          data: {
+            label: buildNodeLabel(typedNode),
+            metadata: meta,
+            stage: 'raw',
+          },
+          sourcePosition: Position.Right,
+          targetPosition: Position.Left,
+        }
       }
-      const flowNode: FlowNode = {
+
+      if (nodeTypeLower === 'output') {
+        const outputName = String(meta.outputName || meta.output_name || buildNodeLabel(typedNode) || node.id)
+        return {
+          id: node.id,
+          type: 'transform',
+          position,
+          data: {
+            label: outputName,
+            transformType: 'output',
+            config: meta,
+          },
+          sourcePosition: Position.Right,
+          targetPosition: Position.Left,
+        }
+      }
+
+      const operation = normalizeBackendOperation(meta.operation || typedNode.operation || '')
+      const transformType = mapBackendOperationToTransformType(nodeTypeLower || 'transform', operation) || 'compute'
+      const label = (() => {
+        if (transformType === 'groupBy') {
+          return 'Group By'
+        }
+        if (transformType === 'regexReplace') {
+          return 'Regex Replace'
+        }
+        return transformType.charAt(0).toUpperCase() + transformType.slice(1)
+      })()
+
+      return {
         id: node.id,
-        data,
-        position: { x: 0, y: index * 120 },
+        type: 'transform',
+        position,
+        data: {
+          label,
+          transformType,
+          config: meta,
+        },
         sourcePosition: Position.Right,
         targetPosition: Position.Left,
       }
-      if (typedNode.type === 'input' || typedNode.type === 'output') {
-        flowNode.type = typedNode.type
-      }
-      return flowNode
     })
     .filter((node): node is FlowNode => node !== null)
 
@@ -1444,15 +1521,57 @@ const buildDefinitionDraft = (
 
   const nextNodes = nodes.map((node) => {
     const existing = baseNodesById.get(node.id)
+    const data = isRecord(node.data) ? node.data : {}
+
+    const uiType = String(node.type || '').trim()
+    const uiTypeLower = uiType.toLowerCase()
+
+    let backendType = 'transform'
+    let metadata: Record<string, unknown> | null = null
+
+    if (uiType === 'datasetInput' || uiTypeLower === 'input') {
+      backendType = 'input'
+      metadata = isRecord(data.metadata) ? { ...data.metadata } : {}
+    } else if (uiType === 'transform') {
+      const transformType = typeof data.transformType === 'string' ? data.transformType : ''
+      backendType = transformType === 'output' ? 'output' : 'transform'
+      const metaCandidate = isRecord(data.config) ? data.config : isRecord(data.metadata) ? data.metadata : {}
+      metadata = { ...metaCandidate }
+
+      // Ensure backend gets a canonical operation string when required.
+      const opCandidate = (metadata as Record<string, unknown>).operation ?? transformType
+      const normalizedOperation = normalizeBackendOperation(opCandidate)
+      if (normalizedOperation) {
+        ;(metadata as Record<string, unknown>).operation = normalizedOperation
+      }
+    } else if (uiTypeLower === 'output') {
+      backendType = 'output'
+      metadata = isRecord(data.metadata) ? { ...data.metadata } : {}
+    } else {
+      backendType = 'transform'
+      metadata = isRecord(data.metadata) ? { ...data.metadata } : isRecord(data.config) ? { ...data.config } : {}
+      const normalizedOperation = normalizeBackendOperation((metadata as Record<string, unknown>).operation ?? uiType)
+      if (normalizedOperation) {
+        ;(metadata as Record<string, unknown>).operation = normalizedOperation
+      }
+    }
+
+    const metaPayload = metadata ?? {}
+    const hasMetadata = Object.keys(metaPayload).length > 0
+
     if (existing) {
-      return existing
+      const merged: Record<string, unknown> = { ...existing }
+      merged.type = backendType
+      if (hasMetadata) {
+        const existingMeta = isRecord(existing.metadata) ? existing.metadata : {}
+        merged.metadata = { ...existingMeta, ...metaPayload }
+      }
+      return merged
     }
-    const fresh: Record<string, unknown> = { id: node.id }
-    if (node.type) {
-      fresh.type = node.type
-    }
-    if (isRecord(node.data) && isRecord(node.data.metadata)) {
-      fresh.metadata = node.data.metadata
+
+    const fresh: Record<string, unknown> = { id: node.id, type: backendType }
+    if (hasMetadata) {
+      fresh.metadata = metaPayload
     }
     return fresh
   })
@@ -1510,6 +1629,14 @@ export const GraphPage = () => {
   const [isUdfDialogOpen, setIsUdfDialogOpen] = useState(false)
   const [isDatasetSelectOpen, setIsDatasetSelectOpen] = useState(false)
   const [isFileUploadOpen, setIsFileUploadOpen] = useState(false)
+  const [selectedBranch, setSelectedBranch] = useState<string>('dev')
+  const [isCreatePipelineDialogOpen, setCreatePipelineDialogOpen] = useState(false)
+  const [createPipelineDefaults, setCreatePipelineDefaults] = useState<{ name: string; branch: string }>({
+    name: '',
+    branch: 'dev',
+  })
+  const [isCreatingPipeline, setIsCreatingPipeline] = useState(false)
+  const [createPipelineError, setCreatePipelineError] = useState<string | null>(null)
   const [nodes, setNodes, onNodesChange] = useNodesState<FlowNode[]>([])
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge[]>([])
   const nodesRef = useRef<FlowNode[]>([])
@@ -1552,13 +1679,59 @@ export const GraphPage = () => {
     queryFn: () => listPipelines(activeDbName),
     enabled: Boolean(activeDbName),
   })
+  const branchOptions = useMemo(() => {
+    const branches = new Set<string>()
+    pipelines.forEach((pipeline) => {
+      const branch = String(pipeline.branch || 'main').trim() || 'main'
+      branches.add(branch)
+    })
+    branches.add('main')
+    // Encourage a working branch even when no pipelines exist yet.
+    if (!branches.has('dev')) {
+      branches.add('dev')
+    }
+    const list = Array.from(branches)
+    list.sort((left, right) => {
+      if (left === right) return 0
+      if (left === 'main') return -1
+      if (right === 'main') return 1
+      return left.localeCompare(right)
+    })
+    return list
+  }, [pipelines])
+
+  useEffect(() => {
+    if (!activeDbName) {
+      setSelectedBranch('dev')
+      return
+    }
+    setSelectedBranch((current) => {
+      if (current && branchOptions.includes(current)) {
+        return current
+      }
+      if (branchOptions.includes('dev')) {
+        return 'dev'
+      }
+      return branchOptions[0] ?? 'main'
+    })
+  }, [activeDbName, branchOptions])
+
+  const pipelinesForSelectedBranch = useMemo(() => {
+    if (!selectedBranch) {
+      return pipelines
+    }
+    return pipelines.filter((pipeline) => String(pipeline.branch || 'main').trim() === selectedBranch)
+  }, [pipelines, selectedBranch])
+
   const primaryPipeline = useMemo<PipelineRecord | null>(() => {
-    if (pipelines.length === 0) {
+    if (pipelinesForSelectedBranch.length === 0) {
       return null
     }
-    const sorted = [...pipelines].sort((left, right) => parseTimestamp(right.updated_at) - parseTimestamp(left.updated_at))
+    const sorted = [...pipelinesForSelectedBranch].sort(
+      (left, right) => parseTimestamp(right.updated_at) - parseTimestamp(left.updated_at),
+    )
     return sorted[0] ?? null
-  }, [pipelines])
+  }, [pipelinesForSelectedBranch])
   const { data: pipelineDetail = null } = useQuery({
     queryKey: ['pipeline-detail', primaryPipeline?.pipeline_id],
     queryFn: () => getPipeline(primaryPipeline?.pipeline_id ?? '', { dbName: activeDbName }),
@@ -1594,7 +1767,7 @@ export const GraphPage = () => {
   )
   const pipelineType = (primaryPipeline?.pipeline_type || 'batch').toLowerCase()
   const pipelineTypeLabel = pipelineType.includes('stream') ? 'Streaming' : 'Batch'
-  const pipelineBranchName = pipelineDetail?.branch || primaryPipeline?.branch || 'main'
+  const pipelineBranchName = selectedBranch || pipelineDetail?.branch || primaryPipeline?.branch || 'main'
   const pipelineBranchLabel = pipelineBranchName === 'main' ? 'Main' : pipelineBranchName
   const isStreamingPipeline = pipelineType.includes('stream')
   const latestBuildArtifact = useMemo<PipelineArtifactRecord | null>(() => {
@@ -2053,7 +2226,7 @@ export const GraphPage = () => {
   }, [isPanMode, isSelectMode, isRemoveMode])
 
   const handleConnect = useCallback((connection: Connection) => {
-    setEdges((current) => addEdge(connection, current))
+    setEdges((current) => addEdge({ ...connection, type: 'straight', style: edgeStyle }, current))
     setDefinitionDirty(true)
   }, [setEdges])
 
@@ -2304,6 +2477,7 @@ export const GraphPage = () => {
           edgesRef.current = nextEdges
           setNodes(laidOutNodes)
           setEdges(nextEdges)
+          setDefinitionDirty(true)
 
           // 새 노드로 뷰 이동 (ReactFlow 내부 상태 반영을 위해 다음 tick에서 수행)
           setTimeout(() => {
@@ -2469,23 +2643,62 @@ export const GraphPage = () => {
     const centerX = viewport ? -viewport.x / viewport.zoom + 400 : 400
     const centerY = viewport ? -viewport.y / viewport.zoom + 200 : 200
 
-    // 백엔드 파이프라인 정의 구조에 맞게 노드 생성
-    const newNode: FlowNode = {
-      id: newNodeId,
-      type: paletteNode.category === 'input' ? 'input' : paletteNode.category === 'output' ? 'output' : 'default',
-      position: { x: centerX, y: centerY },
-      sourcePosition: Position.Right,
-      targetPosition: Position.Left,
-      data: {
-        label: paletteNode.label,
-        metadata: paletteNode.category === 'transform' ? {
+    const position = { x: centerX, y: centerY }
+    const category = paletteNode.category
+    const transformOperation = normalizeBackendOperation(paletteNode.transformType || paletteNode.id)
+
+    const newNode: FlowNode = (() => {
+      if (category === 'output') {
+        return {
+          id: newNodeId,
           type: 'transform',
-          operation: paletteNode.transformType,  // 백엔드 변환 타입
-        } : {
-          type: paletteNode.category,
+          position,
+          sourcePosition: Position.Right,
+          targetPosition: Position.Left,
+          data: {
+            label: paletteNode.label || 'Output',
+            transformType: 'output',
+            config: {
+              outputName: paletteNode.label || 'Output',
+              operation: 'output',
+            },
+          },
+        }
+      }
+
+      if (category === 'transform') {
+        const transformType =
+          mapBackendOperationToTransformType('transform', transformOperation) || ('compute' as TransformType)
+        return {
+          id: newNodeId,
+          type: 'transform',
+          position,
+          sourcePosition: Position.Right,
+          targetPosition: Position.Left,
+          data: {
+            label: paletteNode.label,
+            transformType,
+            description: paletteNode.description,
+            config: {
+              operation: transformOperation || transformType,
+            },
+          },
+        }
+      }
+
+      return {
+        id: newNodeId,
+        type: 'datasetInput',
+        position,
+        sourcePosition: Position.Right,
+        targetPosition: Position.Left,
+        data: {
+          label: paletteNode.label,
+          stage: 'raw',
+          metadata: { inputType: paletteNode.id },
         },
-      },
-    }
+      }
+    })()
 
     setNodes((nds) => [...nds, newNode])
     setDefinitionDirty(true)
@@ -2498,19 +2711,20 @@ export const GraphPage = () => {
     const centerX = viewport ? -viewport.x / viewport.zoom + 400 : 400
     const centerY = viewport ? -viewport.y / viewport.zoom + 200 : 200
 
+    const schemaColumns = extractSchemaColumns(dataset.schema_json)
     const newNode: FlowNode = {
       id: newNodeId,
-      type: 'input',
+      type: 'datasetInput',
       position: { x: centerX, y: centerY },
       sourcePosition: Position.Right,
       targetPosition: Position.Left,
       data: {
         label: dataset.name,
-        metadata: {
-          type: 'input',
-          datasetId: dataset.dataset_id,
-          datasetName: dataset.name,
-        },
+        columnCount: schemaColumns.length || undefined,
+        rowCount: dataset.row_count,
+        sourceType: dataset.source_type,
+        stage: dataset.stage || 'raw',
+        metadata: { datasetId: dataset.dataset_id, datasetName: dataset.name },
       },
     }
 
@@ -2525,18 +2739,21 @@ export const GraphPage = () => {
     const centerX = viewport ? -viewport.x / viewport.zoom + 400 : 400
     const centerY = viewport ? -viewport.y / viewport.zoom + 200 : 200
 
-    // 백엔드 파이프라인 정의 구조에 맞게 변환 노드 생성
+    const operation = normalizeBackendOperation(preset.transformType)
+    const transformType = mapBackendOperationToTransformType('transform', operation) || ('compute' as TransformType)
+
     const newNode: FlowNode = {
       id: newNodeId,
-      type: 'default',
+      type: 'transform',
       position: { x: centerX, y: centerY },
       sourcePosition: Position.Right,
       targetPosition: Position.Left,
       data: {
         label: preset.label,
-        metadata: {
-          type: 'transform',
-          operation: preset.transformType,  // 백엔드 변환 타입
+        transformType,
+        description: preset.description,
+        config: {
+          operation: operation || transformType,
         },
       },
     }
@@ -2544,6 +2761,23 @@ export const GraphPage = () => {
     setNodes((nds) => [...nds, newNode])
     setDefinitionDirty(true)
   }, [reactFlowInstance, setNodes])
+
+  const openCreatePipelineDialog = useCallback(
+    (overrides?: Partial<{ name: string; branch: string }>) => {
+      if (!activeDbName) {
+        return
+      }
+      const dateTag = new Date().toISOString().slice(0, 10).replace(/-/g, '')
+      const slugBase = activeDbName.replace(/[^a-zA-Z0-9_-]+/g, '_').replace(/^_+|_+$/g, '')
+      const defaultName = overrides?.name || `${slugBase || 'pipeline'}_${dateTag}`
+      const defaultBranch =
+        (overrides?.branch || (selectedBranch && selectedBranch !== 'main' ? selectedBranch : 'dev')).trim() || 'dev'
+      setCreatePipelineDefaults({ name: defaultName, branch: defaultBranch })
+      setCreatePipelineError(null)
+      setCreatePipelineDialogOpen(true)
+    },
+    [activeDbName, selectedBranch],
+  )
 
   // 마법사 완료 핸들러
   const handleWizardComplete = useCallback((config: {
@@ -2562,15 +2796,17 @@ export const GraphPage = () => {
     const inputNodeId = `input-${baseTime}`
     newNodes.push({
       id: inputNodeId,
-      type: 'input',
+      type: 'datasetInput',
       position: { x: 100, y: 200 },
       sourcePosition: Position.Right,
       targetPosition: Position.Left,
       data: {
         label: config.selectedDataset?.name || (config.inputType === 'file' ? '파일 업로드' : 'API 연결'),
+        stage: 'raw',
         metadata: {
           inputType: config.inputType,
           datasetId: config.selectedDataset?.id,
+          datasetName: config.selectedDataset?.name,
         },
       },
     })
@@ -2579,15 +2815,15 @@ export const GraphPage = () => {
     const transformNodeId = `transform-${baseTime}`
     newNodes.push({
       id: transformNodeId,
-      type: 'default',
+      type: 'transform',
       position: { x: 400, y: 200 },
       sourcePosition: Position.Right,
       targetPosition: Position.Left,
       data: {
         label: config.transformGoal,
-        metadata: {
-          transformGoal: config.transformGoal,
-        },
+        transformType: 'compute',
+        description: 'Draft transform',
+        config: { operation: 'compute', goal: config.transformGoal },
       },
     })
 
@@ -2595,30 +2831,20 @@ export const GraphPage = () => {
     const outputNodeId = `output-${baseTime}`
     newNodes.push({
       id: outputNodeId,
-      type: 'output',
+      type: 'transform',
       position: { x: 700, y: 200 },
       sourcePosition: Position.Right,
       targetPosition: Position.Left,
       data: {
         label: config.outputName,
-        metadata: {
-          outputType: config.outputType,
-          outputName: config.outputName,
-        },
+        transformType: 'output',
+        config: { operation: 'output', outputType: config.outputType, outputName: config.outputName },
       },
     })
 
     // 엣지 연결
-    newEdges.push({
-      id: `edge-${inputNodeId}-${transformNodeId}`,
-      source: inputNodeId,
-      target: transformNodeId,
-    })
-    newEdges.push({
-      id: `edge-${transformNodeId}-${outputNodeId}`,
-      source: transformNodeId,
-      target: outputNodeId,
-    })
+    newEdges.push(createEdge(`edge-${inputNodeId}-${transformNodeId}`, inputNodeId, transformNodeId))
+    newEdges.push(createEdge(`edge-${transformNodeId}-${outputNodeId}`, transformNodeId, outputNodeId))
 
     setNodes((nds) => [...nds, ...newNodes])
     setEdges((eds) => [...eds, ...newEdges])
@@ -2629,10 +2855,10 @@ export const GraphPage = () => {
   }, [setNodes, setEdges])
 
   const savePipelineDefinition = useCallback(async () => {
-    if (!primaryPipeline || !pipelineDetail) {
+    if (!primaryPipeline) {
       return false
     }
-    const draft = buildDefinitionDraft(pipelineDetail.definition_json, nodes, edges)
+    const draft = buildDefinitionDraft(pipelineDetail?.definition_json, nodes, edges)
     setIsSaving(true)
     try {
       await updatePipeline(primaryPipeline.pipeline_id, {
@@ -2645,6 +2871,7 @@ export const GraphPage = () => {
       return true
     } catch (error) {
       console.error('Failed to save pipeline definition', error)
+      window.alert('Failed to save pipeline definition.')
       return false
     } finally {
       setIsSaving(false)
@@ -2652,8 +2879,49 @@ export const GraphPage = () => {
   }, [primaryPipeline, pipelineDetail, nodes, edges, activeDbName, queryClient])
 
   const handleSave = useCallback(() => {
-    void savePipelineDefinition()
-  }, [savePipelineDefinition])
+    if (!activeDbName) {
+      window.alert('먼저 프로젝트를 선택해주세요.')
+      return
+    }
+    if (primaryPipeline) {
+      void savePipelineDefinition()
+      return
+    }
+    if (definitionDirty) {
+      openCreatePipelineDialog()
+    }
+  }, [activeDbName, primaryPipeline, definitionDirty, openCreatePipelineDialog, savePipelineDefinition])
+
+  const handleCreatePipeline = useCallback(
+    async (values: CreatePipelineDialogValues) => {
+      if (!activeDbName) {
+        return
+      }
+      setIsCreatingPipeline(true)
+      setCreatePipelineError(null)
+      try {
+        const draft = buildDefinitionDraft(undefined, nodesRef.current, edgesRef.current)
+        await createPipeline({
+          dbName: activeDbName,
+          name: values.name,
+          pipelineType,
+          branch: values.branch,
+          description: 'Created from Pipeline Builder',
+          definitionJson: draft,
+        })
+        await queryClient.invalidateQueries({ queryKey: ['pipelines', activeDbName] })
+        setSelectedBranch(values.branch)
+        setDefinitionDirty(false)
+        setCreatePipelineDialogOpen(false)
+      } catch (error) {
+        console.error('Failed to create pipeline', error)
+        setCreatePipelineError(error instanceof Error ? error.message : String(error))
+      } finally {
+        setIsCreatingPipeline(false)
+      }
+    },
+    [activeDbName, pipelineType, queryClient],
+  )
 
   const handlePropose = useCallback(async () => {
     if (!primaryPipeline) {
@@ -2993,10 +3261,37 @@ export const GraphPage = () => {
         <Popover
           content={
             <Menu>
-              <MenuItem icon="git-branch" text="main" label="default" />
-              <MenuItem icon="git-branch" text="dev" />
+              {branchOptions.map((branch) => {
+                const isActive = branch === selectedBranch
+                const label = branch === 'main' ? 'default' : undefined
+                return (
+                  <MenuItem
+                    key={branch}
+                    icon={isActive ? 'small-tick' : 'git-branch'}
+                    text={branch}
+                    label={label}
+                    disabled={isActive}
+                    onClick={() => {
+                      if (definitionDirty) {
+                        const confirmed = window.confirm(
+                          '저장되지 않은 변경사항이 있습니다. 브랜치를 전환하면 변경사항이 사라집니다. 계속할까요?',
+                        )
+                        if (!confirmed) {
+                          return
+                        }
+                        setDefinitionDirty(false)
+                      }
+                      setSelectedBranch(branch)
+                    }}
+                  />
+                )
+              })}
               <MenuDivider />
-              <MenuItem icon="add" text="새 브랜치 생성..." />
+              <MenuItem
+                icon="add"
+                text="새 파이프라인 생성..."
+                onClick={() => openCreatePipelineDialog({ branch: selectedBranch === 'main' ? 'dev' : selectedBranch })}
+              />
             </Menu>
           }
           placement="bottom"
@@ -3019,7 +3314,7 @@ export const GraphPage = () => {
           intent="success"
           onClick={handleSave}
           loading={isSaving}
-          disabled={!definitionDirty || !primaryPipeline}
+          disabled={!definitionDirty || !activeDbName}
           className="pipeline-save-button"
         />
 
@@ -3698,6 +3993,22 @@ export const GraphPage = () => {
           </aside>
         </div>
       </div>
+
+      <CreatePipelineDialog
+        isOpen={isCreatePipelineDialogOpen}
+        defaultName={createPipelineDefaults.name}
+        defaultBranch={createPipelineDefaults.branch}
+        isSubmitting={isCreatingPipeline}
+        error={createPipelineError}
+        onClose={() => {
+          if (isCreatingPipeline) {
+            return
+          }
+          setCreatePipelineDialogOpen(false)
+          setCreatePipelineError(null)
+        }}
+        onSubmit={handleCreatePipeline}
+      />
 
       {/* 파이프라인 마법사 다이얼로그 */}
       <PipelineWizardDialog

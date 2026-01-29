@@ -634,6 +634,7 @@ export const submitPipelineProposal = async (
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'Idempotency-Key': createIdempotencyKey(),
         ...(params.dbName
           ? {
               'X-DB-Name': params.dbName,
@@ -702,6 +703,7 @@ export const deployPipeline = async (
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'Idempotency-Key': createIdempotencyKey(),
         ...(params.dbName
           ? {
               'X-DB-Name': params.dbName,
@@ -727,6 +729,9 @@ export const createPipeline = async (params: {
   name: string
   pipelineType: string
   location?: string
+  branch?: string
+  description?: string
+  definitionJson?: PipelineDefinition
 }) => {
   const data = await requestApi<PipelineCreatePayload>(
     '/api/v1/pipelines',
@@ -734,6 +739,7 @@ export const createPipeline = async (params: {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'Idempotency-Key': createIdempotencyKey(),
         'X-DB-Name': params.dbName,
         'X-Project': params.dbName,
       },
@@ -742,6 +748,9 @@ export const createPipeline = async (params: {
         name: params.name,
         pipeline_type: params.pipelineType,
         location: params.location,
+        branch: params.branch,
+        description: params.description,
+        definition_json: params.definitionJson,
       }),
     },
     'Failed to create pipeline',
