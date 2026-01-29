@@ -1,0 +1,16 @@
+alert_id,alert_type,severity,entity_type,entity_id,title,description,created_at,status,assigned_to,resolved_at,resolution_notes
+ALT-2024-001,Fraud Detection,Critical,Transaction,TXN-000019,Suspicious Wire Transfer,Large wire transfer to offshore account detected,2024-02-21T02:35:00Z,Open,AML Team,null,null
+ALT-2024-002,Inventory,High,Product,PRD-016,Low Stock Alert,Lithium Carbonate inventory below reorder point,2024-02-20T08:00:00Z,In Progress,Supply Chain,null,null
+ALT-2024-003,Credit Risk,High,Account,ACC-10020,Credit Limit Breach,Account suspended due to credit violations,2024-01-30T16:05:00Z,Resolved,Credit Team,2024-02-05T10:00:00Z,Payment plan established
+ALT-2024-004,Supply Chain,Medium,Vendor,VND-004,Contract Expiring,Vendor contract expires in 7 days,2024-02-21T00:00:00Z,Open,Procurement,null,null
+ALT-2024-005,Quality,High,Facility,FAC-007,Capacity Warning,Battery plant operating at 94% capacity,2024-02-19T14:00:00Z,In Progress,Operations,null,null
+ALT-2024-006,Compliance,Medium,Customer,CUST-005,KYC Review Required,Annual KYC review overdue by 30 days,2024-02-15T09:00:00Z,Open,Compliance,null,null
+ALT-2024-007,Fraud Detection,High,Transaction,TXN-000006,Large Pending Wire,Unusual large wire transfer pending review,2024-02-20T16:35:00Z,In Progress,AML Team,null,null
+ALT-2024-008,Shipment,Medium,Shipment,SHP-2024-0001,Delay Risk,Shipment may miss estimated arrival due to port congestion,2024-02-22T06:00:00Z,Open,Logistics,null,null
+ALT-2024-009,Price Anomaly,Low,Product,PRD-017,Market Price Spike,Cobalt price increased 15% in 7 days,2024-02-20T00:00:00Z,Acknowledged,Procurement,null,null
+ALT-2024-010,Security,Critical,Facility,FAC-005,Access Anomaly,Unusual after-hours access detected at R&D Center,2024-02-21T03:15:00Z,In Progress,Security,null,null
+ALT-2024-011,Financial,High,Customer,CUST-003,Payment Overdue,Invoice payment overdue by 45 days,2024-02-18T09:00:00Z,Open,Collections,null,null
+ALT-2024-012,Operational,Medium,Facility,FAC-002,Maintenance Due,Scheduled maintenance overdue for blast furnace,2024-02-19T00:00:00Z,In Progress,Maintenance,null,null
+ALT-2024-013,Regulatory,High,Customer,CUST-009,Sanctions Check,Customer requires enhanced due diligence review,2024-02-21T10:00:00Z,Open,Compliance,null,null
+ALT-2024-014,Supply Chain,Low,Order,ORD-2024-0012,Lead Time Risk,Order may face delay due to raw material shortage,2024-02-21T08:00:00Z,Acknowledged,Supply Chain,null,null
+ALT-2024-015,System,Medium,Facility,FAC-003,System Latency,WMS response time degraded by 40%,2024-02-21T11:30:00Z,In Progress,IT Operations,null,null

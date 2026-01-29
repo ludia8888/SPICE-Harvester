@@ -1,7 +1,8 @@
 import { defineConfig } from 'vitest/config'
-import react from '@vitejs/plugin-react'
+import react from '@vitejs/plugin-react-swc'
 
 export default defineConfig({
+  esbuild: { jsx: 'automatic' },
   plugins: [react()],
   server: {
     port: 5173,
@@ -20,7 +21,7 @@ export default defineConfig({
     include: ['tests/**/*.{test,spec}.{ts,tsx}'],
     css: false,
     coverage: {
-      provider: 'v8',
+      provider: 'istanbul',
       reporter: ['text', 'lcov'],
       lines: 90,
       functions: 90,

@@ -321,7 +321,7 @@ export const ConnectorsPage = () => {
         onClose={() => setPreviewOpen(false)}
         title={previewTarget ? `Preview: ${previewTarget.sheet_title || previewTarget.sheet_id}` : 'Preview'}
         icon="th"
-        className="bp5-dark"
+        className="bp6-dark"
       >
         <div style={{ padding: 20 }}>
           {isPreviewLoading ? (

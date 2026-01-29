@@ -22,6 +22,7 @@ SUPPORTED_TRANSFORMS = frozenset(
         "dedupe",
         "sort",
         "union",
+        "udf",
     }
 )
 

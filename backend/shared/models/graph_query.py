@@ -18,6 +18,7 @@ class GraphHop(BaseModel):
 
     predicate: str  # Relationship predicate (e.g., "owned_by")
     target_class: str  # Target class id (e.g., "Client")
+    reverse: bool = False  # Traverse relationship in reverse direction (target -> source)
 
 
 class GraphQueryRequest(BaseModel):

@@ -17,7 +17,6 @@ import json
 import logging
 import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
 from typing import Optional
 
 from confluent_kafka import Producer
@@ -79,6 +78,8 @@ class ConnectorTriggerService:
             "retry.backoff.ms": 100,
             "linger.ms": 20,
             "compression.type": "snappy",
+            "enable.idempotence": True,
+            "max.in.flight.requests.per.connection": 5,
         }
         self.producer = Producer(kafka_config)
 

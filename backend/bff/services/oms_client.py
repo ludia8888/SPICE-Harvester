@@ -4,6 +4,7 @@ BFF에서 OMS와 통신하기 위한 HTTP 클라이언트
 """
 
 import logging
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 import httpx
@@ -23,6 +24,14 @@ from shared.models.ontology import (
 logger = logging.getLogger(__name__)
 
 SERVICE_NAME = "BFF"
+
+
+@dataclass(frozen=True)
+class OntologyRef:
+    """Minimal ontology reference used by BFF validation flows."""
+
+    id: str
+    type: str  # "Class" | "Property"
 
 
 class OMSClient:
@@ -238,6 +247,51 @@ class OMSClient:
         except Exception as e:
             logger.error(f"온톨로지 목록 조회 실패 ({db_name}): {e}")
             raise
+
+    async def get_ontologies(self, db_name: str, *, branch: str = "main") -> List[OntologyRef]:
+        """
+        Compatibility helper for BFF callers that need a flattened view of:
+        - Class IDs
+        - Property IDs (derived from class properties)
+
+        Returns:
+            List[OntologyRef] where each ref has `.id` and `.type` ("Class" or "Property").
+        """
+        payload = await self.list_ontologies(db_name, branch=branch)
+        data = payload.get("data") if isinstance(payload, dict) else None
+        ontologies = (data or {}).get("ontologies") if isinstance(data, dict) else None
+        if ontologies is None:
+            # Keep the error explicit; callers treat exceptions as upstream failures.
+            raise ValueError("Unexpected OMS response shape: missing data.ontologies")
+
+        refs: List[OntologyRef] = []
+        for ontology in ontologies:
+            if not isinstance(ontology, dict):
+                continue
+
+            class_id = (
+                ontology.get("id")
+                or ontology.get("@id")
+                or ontology.get("class_id")
+                or ontology.get("classId")
+                or ontology.get("name")
+            )
+            if class_id:
+                refs.append(OntologyRef(id=str(class_id), type="Class"))
+
+            for prop in ontology.get("properties") or []:
+                if not isinstance(prop, dict):
+                    continue
+                prop_id = (
+                    prop.get("name")
+                    or prop.get("property_id")
+                    or prop.get("propertyId")
+                    or prop.get("id")
+                )
+                if prop_id:
+                    refs.append(OntologyRef(id=str(prop_id), type="Property"))
+
+        return refs
 
     async def list_branches(self, db_name: str) -> Dict[str, Any]:
         """브랜치 목록 조회"""

@@ -1,0 +1,16 @@
+vendor_id,name,country,city,category,contact_email,phone,rating,contract_start,contract_end,payment_terms,risk_tier,annual_volume
+VND-001,Samsung SDI,KR,Ulsan,Battery,procurement@samsungsdi.com,+82-52-000-0001,4.8,2022-01-01,2025-12-31,Net 45,Low,125000000
+VND-002,LG Chem,KR,Cheongju,Chemicals,supply@lgchem.com,+82-43-000-0001,4.6,2021-06-01,2024-05-31,Net 30,Low,89000000
+VND-003,POSCO,KR,Pohang,Steel,b2b@posco.com,+82-54-000-0001,4.7,2020-01-01,2025-12-31,Net 60,Low,245000000
+VND-004,Foxconn,TW,New Taipei,Electronics,vendor@foxconn.com,+886-2-0000-0001,4.2,2022-03-01,2024-02-28,Net 30,Medium,567000000
+VND-005,CATL,CN,Ningde,Battery,sales@catl.com,+86-593-000-0001,4.4,2023-01-01,2025-12-31,Net 45,Medium,340000000
+VND-006,Bosch,DE,Stuttgart,Automotive Parts,supply@bosch.com,+49-711-000-0001,4.9,2021-01-01,2026-12-31,Net 30,Low,178000000
+VND-007,Denso,JP,Kariya,Automotive Parts,procurement@denso.co.jp,+81-566-00-0001,4.7,2022-06-01,2025-05-31,Net 45,Low,156000000
+VND-008,Panasonic,JP,Osaka,Electronics,b2b@panasonic.jp,+81-6-0000-0001,4.5,2021-09-01,2024-08-31,Net 30,Low,234000000
+VND-009,BYD,CN,Shenzhen,Battery,vendor@byd.com,+86-755-000-0001,4.1,2023-06-01,2026-05-31,Net 60,Medium,289000000
+VND-010,Hyundai Mobis,KR,Seoul,Automotive Parts,supply@mobis.co.kr,+82-2-000-0001,4.6,2020-01-01,2025-12-31,Net 30,Low,312000000
+VND-011,Continental AG,DE,Hanover,Automotive Parts,procurement@continental.com,+49-511-000-0001,4.5,2022-01-01,2025-12-31,Net 45,Low,145000000
+VND-012,Sumitomo,JP,Tokyo,Chemicals,sales@sumitomo.co.jp,+81-3-0000-0001,4.3,2021-03-01,2024-02-28,Net 30,Low,98000000
+VND-013,BASF,DE,Ludwigshafen,Chemicals,supply@basf.com,+49-621-000-0001,4.8,2020-06-01,2025-05-31,Net 45,Low,167000000
+VND-014,SK Innovation,KR,Seoul,Battery,b2b@skinnovation.com,+82-2-000-0002,4.4,2022-09-01,2025-08-31,Net 30,Low,198000000
+VND-015,Murata,JP,Kyoto,Electronics,vendor@murata.co.jp,+81-75-000-0001,4.6,2023-01-01,2025-12-31,Net 30,Low,123000000

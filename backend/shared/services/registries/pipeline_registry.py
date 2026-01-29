@@ -3154,6 +3154,28 @@ class PipelineRegistry:
             created_at=row["created_at"],
         )
 
+    async def list_udfs(self, *, db_name: str) -> list[PipelineUdfRecord]:
+        """List all UDFs for a database."""
+        if not self._pool:
+            raise RuntimeError("PipelineRegistry not connected")
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"SELECT * FROM {self._schema}.pipeline_udfs WHERE db_name = $1 ORDER BY name ASC",
+                str(db_name),
+            )
+        return [
+            PipelineUdfRecord(
+                udf_id=str(row["udf_id"]),
+                db_name=row["db_name"],
+                name=row["name"],
+                description=row["description"],
+                latest_version=int(row["latest_version"] or 1),
+                created_at=row["created_at"],
+                updated_at=row["updated_at"],
+            )
+            for row in rows
+        ]
+
     async def get_udf(self, *, udf_id: str) -> Optional[PipelineUdfRecord]:
         if not self._pool:
             raise RuntimeError("PipelineRegistry not connected")

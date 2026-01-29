@@ -96,7 +96,7 @@ class ObjectifyWorker:
         self.dlq_topic = (AppConfig.OBJECTIFY_JOBS_DLQ_TOPIC or "objectify-jobs-dlq").strip() or "objectify-jobs-dlq"
         self.group_id = (AppConfig.OBJECTIFY_JOBS_GROUP or "objectify-worker-group").strip()
         self.handler = str(cfg.worker_handler or "objectify_worker").strip() or "objectify_worker"
-        self.consumer: Optional[Consumer] = None
+        self.consumer: Optional[SafeKafkaConsumer] = None
         self.dlq_producer: Optional[Producer] = None
         self.dataset_registry: Optional[DatasetRegistry] = None
         self.objectify_registry: Optional[ObjectifyRegistry] = None
@@ -115,8 +115,12 @@ class ObjectifyWorker:
         self.max_retries = int(cfg.max_retries)
         self.backoff_base = int(cfg.backoff_base_seconds)
         self.backoff_max = int(cfg.backoff_max_seconds)
+        self.ontology_pk_validation_mode = str(cfg.ontology_pk_validation_mode or "warn").strip().lower() or "warn"
         self.tracing = get_tracing_service("objectify-worker")
         self.metrics = get_metrics_collector("objectify-worker")
+        self._revoked_partitions: set[tuple[str, int]] = set()
+        self._inflight_by_partition: Dict[tuple[str, int], asyncio.Task] = {}
+        self._rebalance_in_progress = False
 
     def _build_error_report(
         self,
@@ -547,7 +551,6 @@ class ObjectifyWorker:
             on_revoke=self._on_partitions_revoked,
             on_assign=self._on_partitions_assigned,
         )
-        self._rebalance_in_progress = False
 
         self.dlq_producer = Producer(
             {
@@ -568,8 +571,12 @@ class ObjectifyWorker:
             "Objectify worker partitions revoked: %s",
             [(p.topic, p.partition) for p in partitions],
         )
-        # Stop any in-progress heartbeat tasks - the ProcessedEventRegistry
-        # will handle lease expiry for any abandoned processing
+        revoked = {(p.topic, p.partition) for p in partitions}
+        self._revoked_partitions |= revoked
+        for key in revoked:
+            task = self._inflight_by_partition.get(key)
+            if task:
+                task.cancel()
 
     def _on_partitions_assigned(self, partitions: list) -> None:
         """Handle partition assignment during rebalance."""
@@ -578,6 +585,13 @@ class ObjectifyWorker:
             "Objectify worker partitions assigned: %s",
             [(p.topic, p.partition) for p in partitions],
         )
+        for p in partitions:
+            self._revoked_partitions.discard((p.topic, p.partition))
+        try:
+            if self.consumer and partitions:
+                self.consumer.resume([TopicPartition(p.topic, p.partition) for p in partitions])
+        except Exception as exc:
+            logger.warning("Failed to resume objectify partitions after assign: %s", exc)
 
     async def close(self) -> None:
         if self.consumer:
@@ -614,12 +628,19 @@ class ObjectifyWorker:
         logger.info("ObjectifyWorker started (topic=%s)", self.topic)
         try:
             while self.running:
-                # Skip processing during rebalance to prevent duplicate processing
-                if self._rebalance_in_progress or self.consumer.is_rebalancing:
-                    await asyncio.sleep(0.1)
+                if not self.consumer:
+                    await asyncio.sleep(0.2)
                     continue
 
-                msg = self.consumer.poll(1.0)
+                # Poll frequently to maintain consumer group membership even while
+                # long-running jobs are executing in background tasks.
+                try:
+                    msg = self.consumer.poll(0.25)
+                except Exception as exc:
+                    logger.warning("Kafka poll failed (will retry): %s", exc, exc_info=True)
+                    await asyncio.sleep(1.0)
+                    continue
+
                 if msg is None:
                     await asyncio.sleep(0)
                     continue
@@ -628,153 +649,241 @@ class ObjectifyWorker:
                         continue
                     logger.error("Kafka error: %s", msg.error())
                     continue
-
-                kafka_headers = msg.headers()
-                payload = msg.value()
-                if not payload:
+                key = (msg.topic(), int(msg.partition()))
+                if key in self._inflight_by_partition:
+                    # Should never happen because we pause partitions while processing, but
+                    # be defensive: rewind and keep the partition paused.
+                    logger.warning(
+                        "Received objectify message while partition busy; rewinding (topic=%s partition=%s offset=%s)",
+                        msg.topic(),
+                        msg.partition(),
+                        msg.offset(),
+                    )
+                    try:
+                        self.consumer.seek(TopicPartition(msg.topic(), msg.partition(), msg.offset()))
+                        self.consumer.pause([TopicPartition(msg.topic(), msg.partition())])
+                    except Exception as exc:
+                        logger.warning("Failed to rewind/pause busy partition: %s", exc)
+                    await asyncio.sleep(0.1)
                     continue
 
-                start = time.monotonic()
-                with attach_context_from_kafka(kafka_headers=kafka_headers, service_name="objectify-worker"):
-                    with self.tracing.span(
-                        "objectify_worker.process_message",
-                        attributes={
-                            "messaging.system": "kafka",
-                            "messaging.destination": msg.topic(),
-                            "messaging.destination_kind": "topic",
-                            "messaging.kafka.partition": msg.partition(),
-                            "messaging.kafka.offset": msg.offset(),
-                        },
-                    ):
-                        raw_text: Optional[str] = None
-                        job: Optional[ObjectifyJob] = None
-                        try:
-                            raw_text = (
-                                payload.decode("utf-8", errors="replace")
-                                if isinstance(payload, (bytes, bytearray))
-                                else None
-                            )
-                            job = ObjectifyJob.model_validate_json(payload)
-                            self.tracing.set_span_attribute("objectify.job_id", job.job_id)
-                            self.tracing.set_span_attribute("objectify.dataset_id", job.dataset_id)
-                            self.tracing.set_span_attribute("objectify.dataset_version_id", job.dataset_version_id)
-                            self.tracing.set_span_attribute("objectify.mapping_spec_id", job.mapping_spec_id)
-                            self.tracing.set_span_attribute("objectify.mapping_spec_version", job.mapping_spec_version)
-                        except Exception as exc:
-                            self.tracing.record_exception(exc)
-                            logger.exception("Invalid objectify payload; skipping: %s", exc)
+                try:
+                    self.consumer.pause([TopicPartition(msg.topic(), msg.partition())])
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to pause objectify partition (topic=%s partition=%s): %s",
+                        msg.topic(),
+                        msg.partition(),
+                        exc,
+                    )
+
+                task = asyncio.create_task(
+                    self._handle_kafka_message(msg),
+                    name=f"objectify:{msg.topic()}:{msg.partition()}:{msg.offset()}",
+                )
+                self._inflight_by_partition[key] = task
+                task.add_done_callback(self._log_background_task_exception)
+        finally:
+            inflight = list(self._inflight_by_partition.values())
+            for task in inflight:
+                task.cancel()
+            if inflight:
+                await asyncio.gather(*inflight, return_exceptions=True)
+            await self.close()
+
+    def _log_background_task_exception(self, task: asyncio.Task) -> None:
+        try:
+            exc = task.exception()
+        except asyncio.CancelledError:
+            return
+        except Exception as exc:
+            logger.warning("Background task introspection failed: %s", exc)
+            return
+        if exc:
+            logger.error("Background task crashed: %s", exc, exc_info=True)
+
+    async def _handle_kafka_message(self, msg: Any) -> None:
+        if not self.consumer:
+            return
+
+        topic = str(msg.topic())
+        partition = int(msg.partition())
+        offset = int(msg.offset())
+        key = (topic, partition)
+
+        kafka_headers = msg.headers()
+        payload = msg.value()
+        raw_text: Optional[str] = None
+        job: Optional[ObjectifyJob] = None
+        heartbeat_task: Optional[asyncio.Task] = None
+        claim = None
+        start = time.monotonic()
+
+        try:
+            if not payload:
+                self.consumer.commit_sync(msg)
+                return
+
+            with attach_context_from_kafka(kafka_headers=kafka_headers, service_name="objectify-worker"):
+                with self.tracing.span(
+                    "objectify_worker.process_message",
+                    attributes={
+                        "messaging.system": "kafka",
+                        "messaging.destination": topic,
+                        "messaging.destination_kind": "topic",
+                        "messaging.kafka.partition": partition,
+                        "messaging.kafka.offset": offset,
+                    },
+                ):
+                    try:
+                        raw_text = (
+                            payload.decode("utf-8", errors="replace")
+                            if isinstance(payload, (bytes, bytearray))
+                            else None
+                        )
+                        job = ObjectifyJob.model_validate_json(payload)
+                        self.tracing.set_span_attribute("objectify.job_id", job.job_id)
+                        self.tracing.set_span_attribute("objectify.dataset_id", job.dataset_id)
+                        self.tracing.set_span_attribute("objectify.dataset_version_id", job.dataset_version_id)
+                        self.tracing.set_span_attribute("objectify.mapping_spec_id", job.mapping_spec_id)
+                        self.tracing.set_span_attribute("objectify.mapping_spec_version", job.mapping_spec_version)
+                    except Exception as exc:
+                        self.tracing.record_exception(exc)
+                        logger.exception("Invalid objectify payload; skipping: %s", exc)
+                        self.consumer.commit_sync(msg)
+                        return
+
+                    try:
+                        if not self.processed:
+                            raise RuntimeError("ProcessedEventRegistry not initialized")
+
+                        claim = await self.processed.claim(
+                            handler=self.handler,
+                            event_id=job.job_id,
+                            aggregate_id=job.dataset_id,
+                            sequence_number=job.mapping_spec_version,
+                        )
+                        if claim.decision in {ClaimDecision.DUPLICATE_DONE, ClaimDecision.STALE}:
                             self.consumer.commit_sync(msg)
-                            continue
+                            return
+                        if claim.decision == ClaimDecision.IN_PROGRESS:
+                            await asyncio.sleep(2)
+                            self.consumer.seek(TopicPartition(topic, partition, offset))
+                            return
 
-                        claim = None
-                        heartbeat_task: Optional[asyncio.Task] = None
+                        heartbeat_task = asyncio.create_task(
+                            self._heartbeat_loop(handler=self.handler, event_id=job.job_id)
+                        )
+
+                        await self._process_job(job)
+                        if self.processed:
+                            await self.processed.mark_done(handler=self.handler, event_id=job.job_id)
+                        self.consumer.commit_sync(msg)
                         try:
-                            if not self.processed:
-                                raise RuntimeError("ProcessedEventRegistry not initialized")
-
-                            # Use mapping_spec_version as sequence_number for aggregate ordering
-                            # This ensures jobs for the same dataset are processed in version order
-                            claim = await self.processed.claim(
-                                handler=self.handler,
-                                event_id=job.job_id,
-                                aggregate_id=job.dataset_id,
-                                sequence_number=job.mapping_spec_version,
+                            self.metrics.record_event(
+                                "OBJECTIFY_JOB",
+                                action="processed",
+                                duration=time.monotonic() - start,
                             )
-                            if claim.decision in {ClaimDecision.DUPLICATE_DONE, ClaimDecision.STALE}:
-                                self.consumer.commit_sync(msg)
-                                continue
-                            if claim.decision == ClaimDecision.IN_PROGRESS:
-                                await asyncio.sleep(2)
-                                self.consumer.seek(TopicPartition(msg.topic(), msg.partition(), msg.offset()))
-                                continue
-
-                            heartbeat_task = asyncio.create_task(
-                                self._heartbeat_loop(handler=self.handler, event_id=job.job_id)
-                            )
-
-                            await self._process_job(job)
-                            if self.processed:
-                                await self.processed.mark_done(handler=self.handler, event_id=job.job_id)
-                            self.consumer.commit_sync(msg)
+                        except Exception:
+                            pass
+                    except asyncio.CancelledError:
+                        if self.processed and job:
                             try:
-                                self.metrics.record_event(
-                                    "OBJECTIFY_JOB",
-                                    action="processed",
-                                    duration=time.monotonic() - start,
+                                await self.processed.mark_failed(
+                                    handler=self.handler,
+                                    event_id=job.job_id,
+                                    error="cancelled",
                                 )
-                            except Exception:
-                                pass
-                        except Exception as exc:
-                            self.tracing.record_exception(exc)
-                            err = str(exc)
-                            retryable = self._is_retryable_error(exc)
-                            attempt_count = int(getattr(claim, "attempt_count", 1) or 1)
+                            except Exception as mark_err:
+                                logger.warning("Failed to mark cancelled objectify job failed: %s", mark_err)
+                        raise
+                    except Exception as exc:
+                        self.tracing.record_exception(exc)
+                        err = str(exc)
+                        retryable = self._is_retryable_error(exc)
+                        attempt_count = int(getattr(claim, "attempt_count", 1) or 1)
 
-                            if self.objectify_registry and job:
-                                try:
-                                    report_payload = self._build_error_report(
-                                        error=err,
-                                        job=job,
-                                        context={"attempt_count": attempt_count, "retryable": retryable},
-                                    )
-                                    await self.objectify_registry.update_objectify_job_status(
-                                        job_id=job.job_id,
-                                        status="FAILED",
-                                        error=err[:4000],
-                                        report=report_payload,
-                                        completed_at=datetime.now(timezone.utc),
-                                    )
-                                except Exception as status_err:
-                                    logger.warning(
-                                        "Failed to persist objectify failure status (job_id=%s): %s",
-                                        job.job_id,
-                                        status_err,
-                                        exc_info=True,
-                                    )
-
-                            if self.processed and job:
-                                try:
-                                    await self.processed.mark_failed(handler=self.handler, event_id=job.job_id, error=err)
-                                except Exception as mark_err:
-                                    logger.warning("Failed to mark objectify job failed: %s", mark_err)
-
-                            if not retryable:
-                                attempt_count = self.max_retries
-
-                            if attempt_count >= self.max_retries:
-                                logger.error(
-                                    "Objectify job max retries exceeded; sending to DLQ (job_id=%s attempt=%s)",
-                                    job.job_id if job else None,
-                                    attempt_count,
-                                )
-                                await self._send_to_dlq(
-                                    job=job,
-                                    raw_payload=raw_text,
+                        if self.objectify_registry and job:
+                            try:
+                                report_payload = self._build_error_report(
                                     error=err,
-                                    attempt_count=attempt_count,
+                                    job=job,
+                                    context={"attempt_count": attempt_count, "retryable": retryable},
                                 )
-                                self.consumer.commit_sync(msg)
-                                continue
+                                await self.objectify_registry.update_objectify_job_status(
+                                    job_id=job.job_id,
+                                    status="FAILED",
+                                    error=err[:4000],
+                                    report=report_payload,
+                                    completed_at=datetime.now(timezone.utc),
+                                )
+                            except Exception as status_err:
+                                logger.warning(
+                                    "Failed to persist objectify failure status (job_id=%s): %s",
+                                    job.job_id,
+                                    status_err,
+                                    exc_info=True,
+                                )
 
-                            backoff_s = min(self.backoff_max, int(self.backoff_base * (2 ** max(0, attempt_count - 1))))
-                            logger.warning(
-                                "Objectify job failed; will retry (job_id=%s attempt=%s backoff=%ss): %s",
+                        if self.processed and job:
+                            try:
+                                await self.processed.mark_failed(handler=self.handler, event_id=job.job_id, error=err)
+                            except Exception as mark_err:
+                                logger.warning("Failed to mark objectify job failed: %s", mark_err)
+
+                        if not retryable:
+                            attempt_count = self.max_retries
+
+                        if attempt_count >= self.max_retries:
+                            logger.error(
+                                "Objectify job max retries exceeded; sending to DLQ (job_id=%s attempt=%s)",
                                 job.job_id if job else None,
                                 attempt_count,
-                                backoff_s,
-                                err,
                             )
-                            await asyncio.sleep(backoff_s)
-                            self.consumer.seek(TopicPartition(msg.topic(), msg.partition(), msg.offset()))
-                        finally:
-                            if heartbeat_task:
-                                heartbeat_task.cancel()
-                                try:
-                                    await heartbeat_task
-                                except asyncio.CancelledError:
-                                    pass
+                            await self._send_to_dlq(
+                                job=job,
+                                raw_payload=raw_text,
+                                error=err,
+                                attempt_count=attempt_count,
+                            )
+                            self.consumer.commit_sync(msg)
+                            return
+
+                        backoff_s = min(
+                            self.backoff_max,
+                            int(self.backoff_base * (2 ** max(0, attempt_count - 1))),
+                        )
+                        logger.warning(
+                            "Objectify job failed; will retry (job_id=%s attempt=%s backoff=%ss): %s",
+                            job.job_id if job else None,
+                            attempt_count,
+                            backoff_s,
+                            err,
+                        )
+                        await asyncio.sleep(backoff_s)
+                        self.consumer.seek(TopicPartition(topic, partition, offset))
+                        return
         finally:
-            await self.close()
+            if heartbeat_task:
+                heartbeat_task.cancel()
+                try:
+                    await heartbeat_task
+                except asyncio.CancelledError:
+                    pass
+            try:
+                if self.consumer and key not in self._revoked_partitions:
+                    self.consumer.resume([TopicPartition(topic, partition)])
+            except Exception as exc:
+                logger.warning(
+                    "Failed to resume objectify partition (topic=%s partition=%s): %s",
+                    topic,
+                    partition,
+                    exc,
+                )
+            current = self._inflight_by_partition.get(key)
+            if current is asyncio.current_task():
+                self._inflight_by_partition.pop(key, None)
 
     async def _process_job(self, job: ObjectifyJob) -> None:
         if not self.objectify_registry or not self.dataset_registry:
@@ -1173,6 +1282,56 @@ class ObjectifyWorker:
                 },
             )
 
+        warnings: List[Dict[str, Any]] = []
+
+        def _extract_ontology_pk_targets(payload: Any) -> List[str]:
+            """Extract ontology-declared primaryKey fields in order (best-effort)."""
+            data = self._normalize_ontology_payload(payload)
+            meta = data.get("metadata") if isinstance(data, dict) else None
+            if isinstance(meta, dict):
+                key_spec = meta.get("key_spec") or meta.get("keySpec") or meta.get("key_specification")
+                if isinstance(key_spec, dict):
+                    raw_pk = (
+                        key_spec.get("primary_key")
+                        or key_spec.get("primaryKey")
+                        or key_spec.get("primaryKeys")
+                        or []
+                    )
+                    if isinstance(raw_pk, list):
+                        ordered = [str(v).strip() for v in raw_pk if str(v).strip()]
+                        if ordered:
+                            return ordered
+            props = data.get("properties") if isinstance(data, dict) else None
+            out: List[str] = []
+            seen: set[str] = set()
+            if isinstance(props, list):
+                for prop in props:
+                    if not isinstance(prop, dict):
+                        continue
+                    if not bool(prop.get("primary_key") or prop.get("primaryKey")):
+                        continue
+                    name = str(prop.get("name") or "").strip()
+                    if name and name not in seen:
+                        seen.add(name)
+                        out.append(name)
+            return out
+
+        # P0 (enterprise-safe): object_type.pk_spec is the operational source of truth.
+        # If ontology still carries primaryKey metadata (e.g. round-trip preserved), we validate it
+        # against pk_spec as an additional contract check (warn/fail configurable).
+        ontology_pk_targets = _extract_ontology_pk_targets(ontology_payload)
+        if ontology_pk_targets and ontology_pk_targets != object_type_pk_targets:
+            issue = {
+                "code": "ONTOLOGY_OBJECT_TYPE_PRIMARY_KEY_MISMATCH",
+                "expected": object_type_pk_targets,
+                "observed": ontology_pk_targets,
+                "message": "Ontology primaryKey does not match object_type pk_spec (fields+order)",
+            }
+            if self.ontology_pk_validation_mode == "fail":
+                await _fail_job("validation_failed", report={"errors": [issue]})
+            if self.ontology_pk_validation_mode == "warn":
+                warnings.append(issue)
+
         pk_fields = self._normalize_pk_fields(
             options.get("primary_key_fields")
             or options.get("primary_keys")
@@ -1181,25 +1340,29 @@ class ObjectifyWorker:
             or options.get("primary_key_columns")
             or options.get("row_pk_columns")
         )
-        pk_targets = self._normalize_pk_fields(
+        requested_pk_targets = self._normalize_pk_fields(
             options.get("primary_key_targets") or options.get("target_primary_keys")
         )
-        if pk_targets and set(pk_targets) != set(object_type_pk_targets):
-            await _fail_job(
-                "validation_failed",
-                report={
-                    "errors": [
-                        {
-                            "code": "OBJECT_TYPE_PRIMARY_KEY_MISMATCH",
-                            "expected": object_type_pk_targets,
-                            "observed": pk_targets,
-                            "message": "Object type primary key does not match mapping spec options",
-                        }
-                    ]
-                },
-            )
-        if not pk_targets:
-            pk_targets = object_type_pk_targets or sorted(explicit_pk_targets)
+        if requested_pk_targets and requested_pk_targets != object_type_pk_targets:
+            if set(requested_pk_targets) == set(object_type_pk_targets):
+                warnings.append(
+                    {
+                        "code": "OBJECTIFY_PRIMARY_KEY_ORDER_OVERRIDE_IGNORED",
+                        "expected": object_type_pk_targets,
+                        "observed": requested_pk_targets,
+                        "message": "Ignoring primary key order override; using object_type pk_spec order",
+                    }
+                )
+            else:
+                warnings.append(
+                    {
+                        "code": "OBJECTIFY_PRIMARY_KEY_OVERRIDE_IGNORED",
+                        "expected": object_type_pk_targets,
+                        "observed": requested_pk_targets,
+                        "message": "Ignoring primary key override; using object_type pk_spec",
+                    }
+                )
+        pk_targets = object_type_pk_targets or sorted(explicit_pk_targets)
 
         key_spec = await self.dataset_registry.get_key_spec_for_dataset(
             dataset_id=job.dataset_id,
@@ -1605,7 +1768,13 @@ class ObjectifyWorker:
 
             for idx in range(0, len(instances), batch_size):
                 batch = instances[idx : idx + batch_size]
-                resp = await self._bulk_create_instances(job, batch, ontology_version=ontology_version)
+                resp = await self._bulk_create_instances(
+                    job,
+                    batch,
+                    ontology_version=ontology_version,
+                    objectify_pk_fields=pk_targets,
+                    objectify_instance_id_field=instance_id_field,
+                )
                 command_id = resp.get("command_id") if isinstance(resp, dict) else None
                 if command_id:
                     command_ids.append(str(command_id))
@@ -1645,6 +1814,8 @@ class ObjectifyWorker:
             report={
                 "total_rows": total_rows,
                 "prepared_instances": prepared_instances,
+                "warnings": warnings[:200],
+                "validation": {"warnings": warnings[:200]},
                 "errors": (errors or validation_errors)[:200],
                 "error_row_indices": (error_rows or validation_error_rows)[:200],
                 "command_ids": command_ids,
@@ -1660,6 +1831,7 @@ class ObjectifyWorker:
                 "total_rows": total_rows,
                 "prepared_instances": prepared_instances,
                 "command_ids": command_ids,
+                "warning_count": len(warnings),
                 "error_count": len(errors or validation_errors or []),
             },
         )
@@ -1678,6 +1850,8 @@ class ObjectifyWorker:
         instances: List[Dict[str, Any]],
         *,
         ontology_version: Optional[Dict[str, str]] = None,
+        objectify_pk_fields: Optional[List[str]] = None,
+        objectify_instance_id_field: Optional[str] = None,
     ) -> Dict[str, Any]:
         if not self.http:
             raise RuntimeError("OMS client not initialized")
@@ -1692,6 +1866,10 @@ class ObjectifyWorker:
             "artifact_output_name": job.artifact_output_name,
             "options": job.options,
         }
+        if objectify_pk_fields:
+            metadata["objectify_pk_fields"] = [str(v).strip() for v in objectify_pk_fields if str(v).strip()]
+        if objectify_instance_id_field:
+            metadata["objectify_instance_id_field"] = str(objectify_instance_id_field).strip()
         if ontology_version:
             metadata["ontology"] = ontology_version
         resp = await self.http.post(

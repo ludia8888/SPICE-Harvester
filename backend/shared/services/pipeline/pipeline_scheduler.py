@@ -99,6 +99,11 @@ class PipelineScheduler:
                 pass
         now = _utcnow()
         for pipeline in pipelines:
+            pipeline_id = str(pipeline.get("pipeline_id") or "").strip()
+            if not pipeline_id:
+                logger.warning("PipelineScheduler: scheduled pipeline missing pipeline_id (row=%s)", pipeline)
+                continue
+
             interval = pipeline.get("schedule_interval_seconds")
             cron = pipeline.get("schedule_cron")
             last_run = pipeline.get("last_scheduled_at")
@@ -233,8 +238,8 @@ class PipelineScheduler:
             if dependency_trigger and schedule_trigger:
                 trigger_reason = "schedule_and_dependency"
             job = PipelineJob(
-                job_id=f"schedule-{pipeline['pipeline_id']}-{int(now.timestamp())}",
-                pipeline_id=pipeline["pipeline_id"],
+                job_id=f"schedule-{pipeline_id}-{int(now.timestamp())}",
+                pipeline_id=pipeline_id,
                 db_name=pipeline["db_name"],
                 pipeline_type=pipeline.get("pipeline_type") or "batch",
                 definition_json=definition,
@@ -251,7 +256,7 @@ class PipelineScheduler:
                     attributes={
                         "messaging.system": "kafka",
                         "messaging.destination": getattr(self.queue, "topic", "pipeline-jobs"),
-                        "pipeline.id": str(pipeline.get("pipeline_id") or ""),
+                        "pipeline.id": pipeline_id,
                         "pipeline.job_id": job.job_id,
                         "pipeline.db_name": str(pipeline.get("db_name") or ""),
                         "pipeline.branch": str(pipeline.get("branch") or ""),
@@ -274,10 +279,10 @@ class PipelineScheduler:
                         pass
                 await emit_pipeline_control_plane_event(
                     event_type="PIPELINE_SCHEDULE_TRIGGERED",
-                    pipeline_id=str(pipeline.get("pipeline_id") or ""),
+                    pipeline_id=pipeline_id,
                     event_id=f"schedule-triggered-{job.job_id}",
                     data={
-                        "pipeline_id": str(pipeline.get("pipeline_id") or ""),
+                        "pipeline_id": pipeline_id,
                         "job_id": job.job_id,
                         "db_name": pipeline.get("db_name"),
                         "branch": pipeline.get("branch"),
@@ -286,7 +291,7 @@ class PipelineScheduler:
                         "dependencies": dependency_evaluation.details if dependency_evaluation else None,
                     },
                 )
-                await self.registry.record_schedule_tick(pipeline_id=pipeline["pipeline_id"], scheduled_at=now)
+                await self.registry.record_schedule_tick(pipeline_id=pipeline_id, scheduled_at=now)
 
     async def _record_scheduler_config_error(
         self,

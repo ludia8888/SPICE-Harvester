@@ -19,7 +19,7 @@ from urllib.parse import quote
 from uuid import UUID, uuid4
 
 import asyncpg
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Path, Query, Request, UploadFile, status
 from pydantic import BaseModel, Field
 
 from shared.models.requests import ApiResponse
@@ -1897,6 +1897,7 @@ async def _compute_funnel_analysis_from_sample(sample_json: Any) -> Dict[str, An
     try:
         from bff.services.funnel_client import FunnelClient
 
+        settings = get_settings()
         async with FunnelClient() as funnel_client:
             analysis = await funnel_client.analyze_dataset(
                 {
@@ -1904,14 +1905,24 @@ async def _compute_funnel_analysis_from_sample(sample_json: Any) -> Dict[str, An
                     "columns": columns,
                     "sample_size": min(len(rows), 500) if rows else 0,
                     "include_complex_types": True,
-                }
+                },
+                timeout_seconds=float(settings.services.funnel_infer_timeout_seconds),
             )
         analysis_payload = analysis if isinstance(analysis, dict) else None
         inferred_schema = (analysis_payload or {}).get("columns") or []
         return _build_funnel_analysis_payload(analysis_payload, inferred_schema)
     except Exception as exc:
         logger.warning("Funnel analysis failed: %s", exc)
-        return _build_funnel_analysis_payload(None, [])
+        from shared.services.pipeline.pipeline_funnel_fallback import build_funnel_analysis_fallback
+
+        fallback = build_funnel_analysis_fallback(
+            columns=columns,
+            rows=rows,
+            include_complex_types=True,
+            error=str(exc),
+            stage="bff",
+        )
+        return _build_funnel_analysis_payload(fallback, fallback.get("columns") or [])
 
 
 def _detect_csv_delimiter(sample: str) -> str:
@@ -2907,6 +2918,214 @@ async def create_pipeline_branch(
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pipeline not found")
         logger.error(f"Failed to create pipeline branch: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=message)
+
+
+# ============================================================================
+# UDF (User Defined Function) API Endpoints
+# ============================================================================
+
+
+class UdfCreateRequest(BaseModel):
+    name: str
+    code: str
+    description: Optional[str] = None
+
+
+class UdfVersionCreateRequest(BaseModel):
+    code: str
+
+
+class UdfResponse(BaseModel):
+    udf_id: str
+    db_name: str
+    name: str
+    description: Optional[str]
+    latest_version: int
+    created_at: str
+    updated_at: str
+
+
+class UdfVersionResponse(BaseModel):
+    version_id: str
+    udf_id: str
+    version: int
+    code: str
+    created_at: str
+
+
+@router.post("/udfs", response_model=ApiResponse)
+@trace_endpoint("create_udf")
+async def create_udf(
+    body: UdfCreateRequest,
+    db_name: str = Query(..., description="Database name"),
+    pipeline_registry: PipelineRegistry = Depends(get_pipeline_registry),
+) -> ApiResponse:
+    """Create a new UDF (User Defined Function)."""
+    try:
+        db_name = validate_db_name(db_name)
+        udf = await pipeline_registry.create_udf(
+            db_name=db_name,
+            name=body.name.strip(),
+            code=body.code,
+            description=body.description,
+        )
+        return ApiResponse.success(
+            message="UDF created",
+            data={
+                "udf_id": udf.udf_id,
+                "db_name": udf.db_name,
+                "name": udf.name,
+                "description": udf.description,
+                "latest_version": udf.latest_version,
+                "created_at": udf.created_at.isoformat() if udf.created_at else None,
+                "updated_at": udf.updated_at.isoformat() if udf.updated_at else None,
+            }
+        ).to_dict()
+    except Exception as e:
+        logger.error(f"Failed to create UDF: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.get("/udfs", response_model=ApiResponse)
+@trace_endpoint("list_udfs")
+async def list_udfs(
+    db_name: str = Query(..., description="Database name"),
+    pipeline_registry: PipelineRegistry = Depends(get_pipeline_registry),
+) -> ApiResponse:
+    """List all UDFs for a database."""
+    try:
+        db_name = validate_db_name(db_name)
+        udfs = await pipeline_registry.list_udfs(db_name=db_name)
+        return ApiResponse.success(
+            message="UDFs retrieved",
+            data={
+                "udfs": [
+                    {
+                        "udf_id": udf.udf_id,
+                        "db_name": udf.db_name,
+                        "name": udf.name,
+                        "description": udf.description,
+                        "latest_version": udf.latest_version,
+                        "created_at": udf.created_at.isoformat() if udf.created_at else None,
+                        "updated_at": udf.updated_at.isoformat() if udf.updated_at else None,
+                    }
+                    for udf in udfs
+                ]
+            },
+        ).to_dict()
+    except Exception as e:
+        logger.error(f"Failed to list UDFs: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.get("/udfs/{udf_id}", response_model=ApiResponse)
+@trace_endpoint("get_udf")
+async def get_udf(
+    udf_id: str = Path(..., description="UDF ID"),
+    pipeline_registry: PipelineRegistry = Depends(get_pipeline_registry),
+) -> ApiResponse:
+    """Get UDF details including latest version code."""
+    try:
+        try:
+            udf_id = str(UUID(str(udf_id)))
+        except Exception:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="UDF not found")
+        udf = await pipeline_registry.get_udf(udf_id=udf_id)
+        if not udf:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="UDF not found")
+
+        latest_version = await pipeline_registry.get_udf_latest_version(udf_id=udf_id)
+
+        return ApiResponse.success(
+            message="UDF retrieved",
+            data={
+                "udf_id": udf.udf_id,
+                "db_name": udf.db_name,
+                "name": udf.name,
+                "description": udf.description,
+                "latest_version": udf.latest_version,
+                "created_at": udf.created_at.isoformat() if udf.created_at else None,
+                "updated_at": udf.updated_at.isoformat() if udf.updated_at else None,
+                "code": latest_version.code if latest_version else None,
+            }
+        ).to_dict()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get UDF: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.post("/udfs/{udf_id}/versions", response_model=ApiResponse)
+@trace_endpoint("create_udf_version")
+async def create_udf_version(
+    body: UdfVersionCreateRequest,
+    udf_id: str = Path(..., description="UDF ID"),
+    pipeline_registry: PipelineRegistry = Depends(get_pipeline_registry),
+) -> ApiResponse:
+    """Create a new version of an existing UDF."""
+    try:
+        try:
+            udf_id = str(UUID(str(udf_id)))
+        except Exception:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="UDF not found")
+        udf = await pipeline_registry.get_udf(udf_id=udf_id)
+        if not udf:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="UDF not found")
+
+        version = await pipeline_registry.create_udf_version(
+            udf_id=udf_id,
+            code=body.code,
+        )
+        return ApiResponse.success(
+            message="UDF version created",
+            data={
+                "version_id": version.version_id,
+                "udf_id": version.udf_id,
+                "version": version.version,
+                "code": version.code,
+                "created_at": version.created_at.isoformat() if version.created_at else None,
+            }
+        ).to_dict()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to create UDF version: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.get("/udfs/{udf_id}/versions/{version}", response_model=ApiResponse)
+@trace_endpoint("get_udf_version")
+async def get_udf_version(
+    udf_id: str = Path(..., description="UDF ID"),
+    version: int = Path(..., description="Version number"),
+    pipeline_registry: PipelineRegistry = Depends(get_pipeline_registry),
+) -> ApiResponse:
+    """Get a specific version of a UDF."""
+    try:
+        try:
+            udf_id = str(UUID(str(udf_id)))
+        except Exception:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="UDF version not found")
+        udf_version = await pipeline_registry.get_udf_version(udf_id=udf_id, version=version)
+        if not udf_version:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="UDF version not found")
+
+        return ApiResponse.success(
+            message="UDF version retrieved",
+            data={
+                "version_id": udf_version.version_id,
+                "udf_id": udf_version.udf_id,
+                "version": udf_version.version,
+                "code": udf_version.code,
+                "created_at": udf_version.created_at.isoformat() if udf_version.created_at else None,
+            }
+        ).to_dict()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get UDF version: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
 @router.get("/{pipeline_id}", response_model=ApiResponse)
@@ -5597,6 +5816,7 @@ async def upload_excel_dataset(
         inferred_schema: list[Dict[str, Any]] = []
         analysis_payload: Optional[Dict[str, Any]] = None
 
+        settings = get_settings()
         async with FunnelClient() as funnel_client:
             result, content_hash = await funnel_client.excel_to_structure_preview_stream(
                 fileobj=upload_stream,
@@ -5618,7 +5838,8 @@ async def upload_excel_dataset(
                             "columns": columns,
                             "sample_size": min(len(preview_rows), 500),
                             "include_complex_types": True,
-                        }
+                        },
+                        timeout_seconds=float(settings.services.funnel_infer_timeout_seconds),
                     )
                     analysis_payload = analysis if isinstance(analysis, dict) else None
                 except Exception as exc:
@@ -5972,6 +6193,7 @@ async def upload_csv_dataset(
         try:
             from bff.services.funnel_client import FunnelClient
 
+            settings = get_settings()
             async with FunnelClient() as funnel_client:
                 analysis = await funnel_client.analyze_dataset(
                     {
@@ -5979,12 +6201,23 @@ async def upload_csv_dataset(
                         "columns": columns,
                         "sample_size": min(len(preview_rows), 500),
                         "include_complex_types": True,
-                    }
+                    },
+                    timeout_seconds=float(settings.services.funnel_infer_timeout_seconds),
                 )
             analysis_payload = analysis if isinstance(analysis, dict) else None
             inferred_schema = (analysis_payload or {}).get("columns") or []
         except Exception as exc:
             logger.warning(f"CSV type inference failed: {exc}")
+            from shared.services.pipeline.pipeline_funnel_fallback import build_funnel_analysis_fallback
+
+            analysis_payload = build_funnel_analysis_fallback(
+                columns=columns,
+                rows=preview_rows,
+                include_complex_types=True,
+                error=str(exc),
+                stage="bff",
+            )
+            inferred_schema = (analysis_payload or {}).get("columns") or []
 
         funnel_analysis = _build_funnel_analysis_payload(analysis_payload, inferred_schema)
         schema_columns = _build_schema_columns(columns, inferred_schema)

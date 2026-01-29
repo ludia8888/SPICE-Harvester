@@ -15,15 +15,21 @@ const buildItems = (overrides?: Partial<RailItem>[]) => {
 }
 
 describe('SidebarRail', () => {
-  it('renders primary items and puts the AI agent in the footer', () => {
+  it('renders primary items including the AI agent', () => {
     render(<SidebarRail items={buildItems()} />)
 
     expect(screen.getByTitle('Home')).toBeInTheDocument()
     expect(screen.getByTitle('Files')).toBeInTheDocument()
 
+    const railContent = document.querySelector('.rail-content')
+    expect(railContent).not.toBeNull()
+    if (!railContent) {
+      return
+    }
+
     const aiButton = screen.getByTitle('AI Agent')
     expect(aiButton).toBeInTheDocument()
-    expect(aiButton.className).toContain('rail-item-ai')
+    expect(railContent).toContainElement(aiButton)
   })
 
   it('fires hover and click callbacks', () => {

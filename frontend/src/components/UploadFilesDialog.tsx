@@ -372,7 +372,7 @@ export const UploadFilesDialog = ({ isOpen, onClose, activeFolderId }: UploadFil
       onClose={handleCloseUploadDialog}
       title={uploadDialogTitle}
       icon={uploadDialogIcon}
-      className="upload-dialog bp5-dark"
+      className="upload-dialog bp6-dark"
     >
       <div className="upload-dialog-body">
         {isUploading ? (

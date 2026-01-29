@@ -13,6 +13,8 @@ Design goals:
 """
 
 from __future__ import annotations
+
+import json
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -22,8 +24,44 @@ import asyncpg
 
 from shared.config.settings import get_settings
 from shared.models.event_envelope import EventEnvelope
-from shared.utils.json_utils import coerce_json_strict
+from shared.utils.json_utils import coerce_json_strict, normalize_json_payload
 from shared.utils.time_utils import utcnow
+
+
+def _parse_json_dict(value: Any) -> Dict[str, Any]:
+    if value is None:
+        return {}
+    if isinstance(value, dict):
+        return dict(value)
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return {}
+        try:
+            parsed = json.loads(raw)
+        except Exception:
+            return {}
+        return dict(parsed) if isinstance(parsed, dict) else {}
+    return {}
+
+
+def _parse_json_list_of_dicts(value: Any) -> List[Dict[str, Any]]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [dict(item) for item in value if isinstance(item, dict)]
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return []
+        try:
+            parsed = json.loads(raw)
+        except Exception:
+            return []
+        if isinstance(parsed, list):
+            return [dict(item) for item in parsed if isinstance(item, dict)]
+        return []
+    return []
 
 
 @dataclass(frozen=True)
@@ -241,6 +279,7 @@ class ConnectorRegistry:
             raise ValueError("source_id is required")
 
         config_json = coerce_json_strict(config_json)
+        config_payload = normalize_json_payload(config_json)
 
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
@@ -256,7 +295,7 @@ class ConnectorRegistry:
                 st,
                 sid,
                 bool(enabled),
-                config_json,
+                config_payload,
             )
             if not row:
                 raise RuntimeError("Failed to upsert connector source")
@@ -264,7 +303,7 @@ class ConnectorRegistry:
                 source_type=str(row["source_type"]),
                 source_id=str(row["source_id"]),
                 enabled=bool(row["enabled"]),
-                config_json=dict(row["config_json"] or {}),
+                config_json=_parse_json_dict(row["config_json"]),
                 created_at=row["created_at"],
                 updated_at=row["updated_at"],
             )
@@ -308,7 +347,7 @@ class ConnectorRegistry:
                 source_type=str(row["source_type"]),
                 source_id=str(row["source_id"]),
                 enabled=bool(row["enabled"]),
-                config_json=dict(row["config_json"] or {}),
+                config_json=_parse_json_dict(row["config_json"]),
                 created_at=row["created_at"],
                 updated_at=row["updated_at"],
             )
@@ -345,7 +384,7 @@ class ConnectorRegistry:
                         source_type=str(r["source_type"]),
                         source_id=str(r["source_id"]),
                         enabled=bool(r["enabled"]),
-                        config_json=dict(r["config_json"] or {}),
+                        config_json=_parse_json_dict(r["config_json"]),
                         created_at=r["created_at"],
                         updated_at=r["updated_at"],
                     )
@@ -382,6 +421,7 @@ class ConnectorRegistry:
         field_mappings = field_mappings or []
         if not isinstance(field_mappings, list):
             raise TypeError("field_mappings must be a list")
+        field_mappings_payload = normalize_json_payload(field_mappings)
 
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
@@ -410,7 +450,7 @@ class ConnectorRegistry:
                 (target_db_name or "").strip() or None,
                 (target_branch or "").strip() or None,
                 (target_class_label or "").strip() or None,
-                field_mappings,
+                field_mappings_payload,
             )
             if not row:
                 raise RuntimeError("Failed to upsert connector mapping")
@@ -423,7 +463,7 @@ class ConnectorRegistry:
                 target_db_name=row["target_db_name"],
                 target_branch=row["target_branch"],
                 target_class_label=row["target_class_label"],
-                field_mappings=list(row["field_mappings"] or []),
+                field_mappings=_parse_json_list_of_dicts(row["field_mappings"]),
                 created_at=row["created_at"],
                 updated_at=row["updated_at"],
             )
@@ -455,7 +495,7 @@ class ConnectorRegistry:
                 target_db_name=row["target_db_name"],
                 target_branch=row["target_branch"],
                 target_class_label=row["target_class_label"],
-                field_mappings=list(row["field_mappings"] or []),
+                field_mappings=_parse_json_list_of_dicts(row["field_mappings"]),
                 created_at=row["created_at"],
                 updated_at=row["updated_at"],
             )
@@ -488,6 +528,18 @@ class ConnectorRegistry:
 
         async with self._pool.acquire() as conn:
             async with conn.transaction():
+                # Ensure the connector source exists before touching state/outbox tables.
+                # These tables are FK-linked to connector_sources for referential integrity.
+                await conn.execute(
+                    f"""
+                    INSERT INTO {self._schema}.connector_sources (source_type, source_id)
+                    VALUES ($1, $2)
+                    ON CONFLICT (source_type, source_id) DO NOTHING
+                    """,
+                    st,
+                    sid,
+                )
+
                 state = await conn.fetchrow(
                     f"""
                     SELECT last_seen_cursor, last_emitted_seq
@@ -571,7 +623,7 @@ class ConnectorRegistry:
                     st,
                     sid,
                     seq,
-                    envelope.model_dump(mode="json"),
+                    normalize_json_payload(envelope.model_dump(mode="json")),
                     now,
                 )
 
@@ -619,7 +671,7 @@ class ConnectorRegistry:
                             source_type=str(r["source_type"]),
                             source_id=str(r["source_id"]),
                             sequence_number=int(r["sequence_number"]) if r["sequence_number"] is not None else None,
-                            payload=dict(r["payload"] or {}),
+                            payload=_parse_json_dict(r["payload"]),
                             status="publishing",
                             publish_attempts=int(r["publish_attempts"] or 0) + 1,
                             created_at=r["created_at"],

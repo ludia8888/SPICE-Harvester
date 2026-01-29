@@ -16,7 +16,7 @@ from confluent_kafka import Producer
 from shared.config.app_config import AppConfig
 from shared.config.settings import get_settings
 from shared.models.pipeline_job import PipelineJob
-from shared.observability.context_propagation import kafka_headers_from_current_context, kafka_headers_with_dedup
+from shared.observability.context_propagation import kafka_headers_with_dedup
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +39,8 @@ class PipelineJobQueue:
                     "retry.backoff.ms": 100,
                     "linger.ms": 10,
                     "compression.type": "snappy",
+                    "enable.idempotence": True,
+                    "max.in.flight.requests.per.connection": 5,
                 }
             )
         return self._producer

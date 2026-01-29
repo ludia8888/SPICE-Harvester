@@ -684,7 +684,11 @@ class EventPublisher:
                             checkpoint_dirty = True
                         continue
 
-                    key_bytes = (idx_data.get("aggregate_id") or idx_data.get("event_id") or "").encode("utf-8")
+                    # Partitioning contract (enterprise DAG ingest):
+                    # - Prefer explicit ordering_key when present (keeps aggregate_id semantics intact)
+                    # - Fallback to aggregate_id/event_id for backward compatibility
+                    partition_key = idx_data.get("ordering_key") or idx_data.get("aggregate_id") or idx_data.get("event_id") or ""
+                    key_bytes = str(partition_key).encode("utf-8")
                     meta_obj: Optional[Dict[str, Any]] = None
                     if env and isinstance(env.metadata, dict):
                         meta_obj = env.metadata

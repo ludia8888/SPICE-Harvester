@@ -192,7 +192,7 @@ async def execute_graph_query(
     try:
         # Validate database name
         db_name = validate_db_name(db_name)
-        resolved_base_branch = validate_branch_name(branch or base_branch or "main")
+        resolved_terminus_branch = validate_branch_name(branch or base_branch or "main")
 
         classes_in_query = [str(query.start_class or "").strip()] + [
             str(hop.target_class or "").strip() for hop in (query.hops or [])
@@ -208,11 +208,28 @@ async def execute_graph_query(
         elif writeback_enabled:
             resolved_overlay_branch = AppConfig.get_ontology_writeback_branch(db_name)
 
-        overlay_required = writeback_enabled or bool(requested_overlay)
-        overlay_status = "DISABLED" if not resolved_overlay_branch else "ACTIVE"
+        virtualization_base_branch = "main"
+        try:
+            virtualization_base_branch = validate_branch_name(get_settings().branch_virtualization.base_branch)
+        except Exception:
+            virtualization_base_branch = "main"
+
+        effective_es_base_branch = resolved_terminus_branch
+        effective_es_overlay_branch = resolved_overlay_branch
+        branch_virtualization_active = False
+        if resolved_terminus_branch != virtualization_base_branch and not requested_overlay:
+            branch_virtualization_active = True
+            effective_es_base_branch = virtualization_base_branch
+            effective_es_overlay_branch = resolved_terminus_branch
+
+        overlay_active = bool(
+            effective_es_overlay_branch and effective_es_overlay_branch != effective_es_base_branch
+        )
+        overlay_required = bool(overlay_active and query.include_documents)
+        overlay_status = "ACTIVE" if overlay_active else "DISABLED"
         
-        # Convert hops to tuple format expected by service
-        hops_tuples = [(hop.predicate, hop.target_class) for hop in query.hops]
+        # Convert hops to tuple format expected by service (predicate, target_class, reverse)
+        hops_tuples = [(hop.predicate, hop.target_class, bool(getattr(hop, "reverse", False))) for hop in query.hops]
         
         logger.info(f"📊 Graph query on {db_name}: {query.start_class} -> {hops_tuples}")
         
@@ -220,9 +237,10 @@ async def execute_graph_query(
         try:
             result = await graph_service.multi_hop_query(
                 db_name=db_name,
-                base_branch=resolved_base_branch,
-                overlay_branch=resolved_overlay_branch,
-                strict_overlay=bool(overlay_required and query.include_documents),
+                base_branch=effective_es_base_branch,
+                overlay_branch=effective_es_overlay_branch,
+                terminus_branch=resolved_terminus_branch,
+                strict_overlay=bool(overlay_required),
                 start_class=query.start_class,
                 hops=hops_tuples,
                 filters=query.filters,
@@ -237,17 +255,19 @@ async def execute_graph_query(
                 include_audit=query.include_audit,
             )
         except Exception as e:
-            if overlay_required and query.include_documents:
+            if overlay_required:
                 raise HTTPException(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                     detail={
                         "error": "overlay_degraded",
                         "message": "Overlay index unavailable; cannot serve authoritative view.",
-                        "base_branch": resolved_base_branch,
-                        "overlay_branch": resolved_overlay_branch,
+                        "base_branch": resolved_terminus_branch,
+                        "overlay_branch": effective_es_overlay_branch,
                         "overlay_status": "DEGRADED",
                         "writeback_enabled": writeback_enabled,
                         "writeback_edits_present": None,
+                        "branch_virtualization_active": branch_virtualization_active,
+                        "es_base_branch": effective_es_base_branch,
                     },
                 ) from e
             raise
@@ -282,7 +302,7 @@ async def execute_graph_query(
                 for node in raw_nodes:
                     terminus_id = str(node.get("terminus_id") or node.get("id") or "")
                     if terminus_id:
-                        art = LineageStore.node_artifact("terminus", db_name, resolved_base_branch, terminus_id)
+                        art = LineageStore.node_artifact("terminus", db_name, resolved_terminus_branch, terminus_id)
                         terminus_artifact_by_node_id[terminus_id] = art
                         terminus_artifacts.append(art)
 
@@ -321,7 +341,7 @@ async def execute_graph_query(
             provenance: Optional[Dict[str, Any]] = None
             if query.include_provenance and terminus_id:
                 terminus_art = terminus_artifact_by_node_id.get(terminus_id) or LineageStore.node_artifact(
-                    "terminus", db_name, resolved_base_branch, terminus_id
+                    "terminus", db_name, resolved_terminus_branch, terminus_id
                 )
                 es_key = f"{es_ref.get('index')}/{es_ref.get('id')}"
                 es_art = es_artifact_by_node_id.get(es_key) or (
@@ -378,7 +398,7 @@ async def execute_graph_query(
                 # Relationships come from the source node's Terminus document; attribute to its last write event.
                 from_node = str(edge.get("from") or "")
                 if from_node:
-                    terminus_art = LineageStore.node_artifact("terminus", db_name, resolved_base_branch, from_node)
+                    terminus_art = LineageStore.node_artifact("terminus", db_name, resolved_terminus_branch, from_node)
                     edge_prov = {"terminus": terminus_latest.get(terminus_art)}
             edges.append(
                 GraphEdge(
@@ -404,8 +424,8 @@ async def execute_graph_query(
         }
         
         response = GraphQueryResponse(
-            base_branch=resolved_base_branch,
-            overlay_branch=resolved_overlay_branch,
+            base_branch=resolved_terminus_branch,
+            overlay_branch=effective_es_overlay_branch,
             overlay_status=overlay_status,
             writeback_enabled=writeback_enabled,
             nodes=nodes,
@@ -414,10 +434,14 @@ async def execute_graph_query(
             index_summary=index_summary,
             query={
                 "start_class": query.start_class,
-                "hops": [{"predicate": h[0], "target_class": h[1]} for h in hops_tuples],
+                "hops": [{"predicate": h[0], "target_class": h[1], "reverse": bool(h[2])} for h in hops_tuples],
                 "filters": query.filters,
-                "base_branch": resolved_base_branch,
-                "overlay_branch": resolved_overlay_branch,
+                "base_branch": resolved_terminus_branch,
+                "overlay_branch": effective_es_overlay_branch,
+                "terminus_branch": resolved_terminus_branch,
+                "es_base_branch": effective_es_base_branch,
+                "es_overlay_branch": effective_es_overlay_branch,
+                "branch_virtualization_active": branch_virtualization_active,
                 "limit": query.limit,
                 "offset": query.offset,
                 "max_nodes": query.max_nodes,
@@ -481,7 +505,7 @@ async def execute_simple_graph_query(
     try:
         # Validate database name
         db_name = validate_db_name(db_name)
-        resolved_base_branch = validate_branch_name(branch or base_branch or "main")
+        resolved_terminus_branch = validate_branch_name(branch or base_branch or "main")
 
         writeback_enabled = bool(
             AppConfig.WRITEBACK_READ_OVERLAY and AppConfig.is_writeback_enabled_object_type(str(query.class_name))
@@ -492,7 +516,25 @@ async def execute_simple_graph_query(
             resolved_overlay_branch = validate_branch_name(requested_overlay)
         elif writeback_enabled:
             resolved_overlay_branch = AppConfig.get_ontology_writeback_branch(db_name)
-        overlay_required = writeback_enabled or bool(requested_overlay)
+
+        virtualization_base_branch = "main"
+        try:
+            virtualization_base_branch = validate_branch_name(get_settings().branch_virtualization.base_branch)
+        except Exception:
+            virtualization_base_branch = "main"
+
+        effective_es_base_branch = resolved_terminus_branch
+        effective_es_overlay_branch = resolved_overlay_branch
+        branch_virtualization_active = False
+        if resolved_terminus_branch != virtualization_base_branch and not requested_overlay:
+            branch_virtualization_active = True
+            effective_es_base_branch = virtualization_base_branch
+            effective_es_overlay_branch = resolved_terminus_branch
+
+        overlay_active = bool(
+            effective_es_overlay_branch and effective_es_overlay_branch != effective_es_base_branch
+        )
+        overlay_required = bool(overlay_active)
         
         logger.info(f"📊 Simple graph query on {db_name}: {query.class_name}")
         
@@ -500,8 +542,9 @@ async def execute_simple_graph_query(
         try:
             result = await graph_service.simple_graph_query(
                 db_name=db_name,
-                base_branch=resolved_base_branch,
-                overlay_branch=resolved_overlay_branch,
+                base_branch=effective_es_base_branch,
+                overlay_branch=effective_es_overlay_branch,
+                terminus_branch=resolved_terminus_branch,
                 strict_overlay=bool(overlay_required),
                 class_name=query.class_name,
                 filters=query.filters,
@@ -513,11 +556,13 @@ async def execute_simple_graph_query(
                     detail={
                         "error": "overlay_degraded",
                         "message": "Overlay index unavailable; cannot serve authoritative view.",
-                        "base_branch": resolved_base_branch,
-                        "overlay_branch": resolved_overlay_branch,
+                        "base_branch": resolved_terminus_branch,
+                        "overlay_branch": effective_es_overlay_branch,
                         "overlay_status": "DEGRADED",
                         "writeback_enabled": writeback_enabled,
                         "writeback_edits_present": None,
+                        "branch_virtualization_active": branch_virtualization_active,
+                        "es_base_branch": effective_es_base_branch,
                     },
                 ) from e
             raise
@@ -538,11 +583,19 @@ async def execute_simple_graph_query(
         
         logger.info(f"✅ Simple query complete: {result.get('count', 0)} documents")
 
-        result["base_branch"] = resolved_base_branch
-        result["overlay_branch"] = resolved_overlay_branch
-        result["overlay_status"] = "DISABLED" if not resolved_overlay_branch else "ACTIVE"
+        result["base_branch"] = resolved_terminus_branch
+        result["overlay_branch"] = effective_es_overlay_branch
+        result["overlay_status"] = (
+            "ACTIVE"
+            if (effective_es_overlay_branch and effective_es_overlay_branch != effective_es_base_branch)
+            else "DISABLED"
+        )
         result["writeback_enabled"] = writeback_enabled
         result["writeback_edits_present"] = None
+        result["terminus_branch"] = resolved_terminus_branch
+        result["es_base_branch"] = effective_es_base_branch
+        result["es_overlay_branch"] = effective_es_overlay_branch
+        result["branch_virtualization_active"] = branch_virtualization_active
         return result
         
     except ValueError as e:
@@ -584,7 +637,7 @@ async def execute_multi_hop_query(
     try:
         # Validate database name
         db_name = validate_db_name(db_name)
-        resolved_base_branch = validate_branch_name(branch or base_branch or "main")
+        resolved_terminus_branch = validate_branch_name(branch or base_branch or "main")
         
         start_class = query.get("start_class")
         hops = query.get("hops", [])
@@ -612,22 +665,38 @@ async def execute_multi_hop_query(
             resolved_overlay_branch = validate_branch_name(requested_overlay)
         elif writeback_enabled:
             resolved_overlay_branch = AppConfig.get_ontology_writeback_branch(db_name)
-        overlay_required = writeback_enabled or bool(requested_overlay)
+
+        virtualization_base_branch = "main"
+        try:
+            virtualization_base_branch = validate_branch_name(get_settings().branch_virtualization.base_branch)
+        except Exception:
+            virtualization_base_branch = "main"
+
+        effective_es_base_branch = resolved_terminus_branch
+        effective_es_overlay_branch = resolved_overlay_branch
+        branch_virtualization_active = False
+        if resolved_terminus_branch != virtualization_base_branch and not requested_overlay:
+            branch_virtualization_active = True
+            effective_es_base_branch = virtualization_base_branch
+            effective_es_overlay_branch = resolved_terminus_branch
+
+        overlay_active = bool(
+            effective_es_overlay_branch and effective_es_overlay_branch != effective_es_base_branch
+        )
+        overlay_required = bool(overlay_active and include_documents)
         
         logger.info(f"🚀 Multi-hop query: {start_class} -> {hops}")
-        
-        # Convert hop list to proper format
-        hop_tuples = [(h[0], h[1]) for h in hops] if hops else []
         
         # Execute multi-hop query
         try:
             result = await graph_service.multi_hop_query(
                 db_name=db_name,
-                base_branch=resolved_base_branch,
-                overlay_branch=resolved_overlay_branch,
-                strict_overlay=bool(overlay_required and include_documents),
+                base_branch=effective_es_base_branch,
+                overlay_branch=effective_es_overlay_branch,
+                terminus_branch=resolved_terminus_branch,
+                strict_overlay=bool(overlay_required),
                 start_class=start_class,
-                hops=hop_tuples,
+                hops=hops or [],
                 filters=filters,
                 limit=limit,
                 include_documents=include_documents,
@@ -640,11 +709,13 @@ async def execute_multi_hop_query(
                     detail={
                         "error": "overlay_degraded",
                         "message": "Overlay index unavailable; cannot serve authoritative view.",
-                        "base_branch": resolved_base_branch,
-                        "overlay_branch": resolved_overlay_branch,
+                        "base_branch": resolved_terminus_branch,
+                        "overlay_branch": effective_es_overlay_branch,
                         "overlay_status": "DEGRADED",
                         "writeback_enabled": writeback_enabled,
                         "writeback_edits_present": None,
+                        "branch_virtualization_active": branch_virtualization_active,
+                        "es_base_branch": effective_es_base_branch,
                     },
                 ) from e
             raise
@@ -671,6 +742,19 @@ async def execute_multi_hop_query(
         result["nodes"] = filtered_nodes
         result["edges"] = raw_edges
         result["count"] = len(filtered_nodes)
+        result["base_branch"] = resolved_terminus_branch
+        result["overlay_branch"] = effective_es_overlay_branch
+        result["overlay_status"] = (
+            "ACTIVE"
+            if (effective_es_overlay_branch and effective_es_overlay_branch != effective_es_base_branch)
+            else "DISABLED"
+        )
+        result["writeback_enabled"] = writeback_enabled
+        result["writeback_edits_present"] = None
+        result["terminus_branch"] = resolved_terminus_branch
+        result["es_base_branch"] = effective_es_base_branch
+        result["es_overlay_branch"] = effective_es_overlay_branch
+        result["branch_virtualization_active"] = branch_virtualization_active
         
         return {
             "status": "success",

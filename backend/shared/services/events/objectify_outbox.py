@@ -113,10 +113,35 @@ class ObjectifyOutboxPublisher:
 
         for item in batch:
             payload = json.dumps(item.payload, ensure_ascii=False, default=str).encode("utf-8")
-            # Critical Fix (Gap 5): Use dataset_id as partition key for ordering guarantee
-            # All objectify jobs for the same dataset will go to the same partition
-            aggregate_id = item.payload.get("dataset_id") if isinstance(item.payload, dict) else None
-            key = (aggregate_id or item.job_id).encode("utf-8")
+            # Ordering contract: partition by db+branch to preserve dependency order across
+            # multiple datasets within the same database/branch (enterprise DAG ingest).
+            #
+            # Enterprise evolution (Foundry-style):
+            # - If a run_id is present, scope ordering to that run to preserve throughput.
+            # - Otherwise fall back to db+branch ordering for legacy callers.
+            aggregate_id = None
+            if isinstance(item.payload, dict):
+                db_name = str(item.payload.get("db_name") or "").strip()
+                # NOTE: "branch" here must match the target branch used by objectify/instances.
+                # Objectify writes to `ontology_branch` when set, otherwise `dataset_branch`.
+                branch = str(
+                    item.payload.get("ontology_branch")
+                    or item.payload.get("dataset_branch")
+                    or "main"
+                ).strip() or "main"
+                if db_name:
+                    aggregate_id = f"{db_name}:{branch}"
+            ordering_key = aggregate_id
+            if isinstance(item.payload, dict):
+                options = item.payload.get("options") if isinstance(item.payload.get("options"), dict) else {}
+                run_id = (
+                    str(options.get("run_id") or item.payload.get("run_id") or "").strip()
+                    if isinstance(options, dict)
+                    else str(item.payload.get("run_id") or "").strip()
+                )
+                if run_id and aggregate_id:
+                    ordering_key = f"{aggregate_id}:{run_id}"
+            key = (ordering_key or aggregate_id or item.job_id).encode("utf-8")
             # Use kafka_headers_with_dedup for idempotent message processing
             headers = kafka_headers_with_dedup(
                 item.payload,

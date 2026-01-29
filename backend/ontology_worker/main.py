@@ -14,18 +14,16 @@ from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 from uuid import uuid5, NAMESPACE_URL
 
-from confluent_kafka import Consumer, Producer, KafkaError, KafkaException, TopicPartition
-import asyncpg
+from confluent_kafka import Producer, KafkaError, TopicPartition
 
 from shared.config.app_config import AppConfig
 from shared.config.settings import get_settings
 from shared.models.commands import (
-    BaseCommand, CommandType, CommandStatus, 
-    OntologyCommand, DatabaseCommand, BranchCommand
+    CommandType,
 )
 from shared.models.events import (
     BaseEvent, EventType,
-    OntologyEvent, DatabaseEvent, BranchEvent,
+    OntologyEvent, DatabaseEvent,
     CommandFailedEvent
 )
 from shared.models.event_envelope import EventEnvelope
@@ -40,14 +38,16 @@ from shared.services.registries.processed_event_registry import (
     validate_registry_enabled,
     validate_lease_settings,
 )
+from shared.services.kafka.safe_consumer import SafeKafkaConsumer
 from shared.services.registries.lineage_store import LineageStore
 from shared.services.core.audit_log_store import AuditLogStore
+from shared.services.registries.ontology_key_spec_registry import OntologyKeySpecRegistry
 from shared.security.input_sanitizer import validate_branch_name
 from shared.utils.ontology_version import resolve_ontology_version
 from oms.exceptions import DuplicateOntologyError, DatabaseError
 
 # Observability imports
-from shared.observability.tracing import get_tracing_service, trace_endpoint
+from shared.observability.tracing import get_tracing_service
 from shared.observability.metrics import get_metrics_collector
 from shared.observability.context_propagation import (
     attach_context_from_kafka,
@@ -78,7 +78,7 @@ class OntologyWorker:
         self.enable_processed_event_registry = bool(settings.event_sourcing.enable_processed_event_registry)
         self.enable_lineage = bool(settings.observability.enable_lineage)
         self.enable_audit_logs = bool(settings.observability.enable_audit_logs)
-        self.consumer: Optional[Consumer] = None
+        self.consumer: Optional[SafeKafkaConsumer] = None
         self.producer: Optional[Producer] = None
         self.dlq_producer: Optional[Producer] = None
         self.dlq_topic = AppConfig.ONTOLOGY_COMMANDS_DLQ_TOPIC
@@ -92,9 +92,48 @@ class OntologyWorker:
         self.processed_event_registry: Optional[ProcessedEventRegistry] = None
         self.lineage_store: Optional[LineageStore] = None
         self.audit_store: Optional[AuditLogStore] = None
+        self.key_spec_registry: Optional[OntologyKeySpecRegistry] = OntologyKeySpecRegistry()
         self.tracing_service = None
         self.metrics_collector = None
         self._consumer_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="ontology-worker-kafka")
+
+    @staticmethod
+    def _extract_key_spec_from_payload(payload: Dict[str, Any]) -> tuple[list[str], list[str]]:
+        """
+        Extract ordered primary/title keys from an ontology payload.
+
+        Policy (enterprise-safe):
+        - Prefer explicit per-property flags (primaryKey/titleKey) to preserve order.
+        - If flags are missing but payload.metadata.key_spec exists, use it as a fallback.
+        """
+        props = payload.get("properties") or []
+        pk_fields: list[str] = []
+        title_fields: list[str] = []
+        if isinstance(props, list):
+            for item in props:
+                if not isinstance(item, dict):
+                    continue
+                name = str(item.get("name") or "").strip()
+                if not name:
+                    continue
+                if bool(item.get("primaryKey") or item.get("primary_key")):
+                    pk_fields.append(name)
+                if bool(item.get("titleKey") or item.get("title_key")):
+                    title_fields.append(name)
+
+        if pk_fields or title_fields:
+            return pk_fields, title_fields
+
+        meta = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+        key_spec = meta.get("key_spec") if isinstance(meta, dict) else None
+        if isinstance(key_spec, dict):
+            raw_pk = key_spec.get("primary_key") or key_spec.get("primaryKey") or []
+            raw_title = key_spec.get("title_key") or key_spec.get("titleKey") or []
+            if isinstance(raw_pk, list):
+                pk_fields = [str(v).strip() for v in raw_pk if str(v).strip()]
+            if isinstance(raw_title, list):
+                title_fields = [str(v).strip() for v in raw_title if str(v).strip()]
+        return pk_fields, title_fields
 
     async def _wait_for_database_exists(self, *, db_name: str, expected: bool, timeout_seconds: int = 20) -> None:
         if not self.terminus_service:
@@ -134,17 +173,14 @@ class OntologyWorker:
 
         group_id = (AppConfig.ONTOLOGY_WORKER_GROUP or "ontology-worker-group").strip()
 
-        # Kafka Consumer 설정
+        # Kafka Consumer (strong consistency: read_committed + rebalance-safe offsets)
         self.consumer = await self._consumer_call(
-            Consumer,
-            {
-                'bootstrap.servers': self.kafka_servers,
-                'group.id': group_id,
-                'auto.offset.reset': 'earliest',
-                'enable.auto.commit': False,
-                'max.poll.interval.ms': 300000,  # 5분
-                'session.timeout.ms': 45000,  # 45초
-            },
+            SafeKafkaConsumer,
+            group_id,
+            [AppConfig.ONTOLOGY_COMMANDS_TOPIC, AppConfig.DATABASE_COMMANDS_TOPIC],
+            "ontology-worker",
+            max_poll_interval_ms=300000,
+            session_timeout_ms=45000,
         )
         
         # Kafka Producer 설정 (Event 발행용)
@@ -213,12 +249,6 @@ class OntologyWorker:
             except Exception as e:
                 logger.warning(f"⚠️ AuditLogStore unavailable (continuing without audit logs): {e}")
                 self.audit_store = None
-        
-        # Command 토픽 구독 - 온톨로지와 데이터베이스 명령 모두 처리
-        await self._consumer_call(
-            self.consumer.subscribe,
-            [AppConfig.ONTOLOGY_COMMANDS_TOPIC, AppConfig.DATABASE_COMMANDS_TOPIC],
-        )
         
         # Initialize OpenTelemetry
         self.tracing_service = get_tracing_service("ontology-worker")
@@ -354,7 +384,7 @@ class OntologyWorker:
         sys.stdout.flush()
         
         payload = command_data.get('payload', {}) or {}
-        db_name = payload.get('db_name')  # Fixed: get db_name from payload
+        db_name = payload.get('db_name') or command_data.get("db_name")  # payload-first (historical)
         command_id = command_data.get('command_id')
         branch = validate_branch_name(payload.get("branch") or command_data.get("branch") or "main")
         
@@ -427,6 +457,29 @@ class OntologyWorker:
                     raise
 
             class_id = payload.get("class_id")
+            if db_name and class_id and self.key_spec_registry:
+                try:
+                    pk_fields, title_fields = self._extract_key_spec_from_payload(payload)
+                    await self.key_spec_registry.upsert_key_spec(
+                        db_name=str(db_name),
+                        branch=str(branch),
+                        class_id=str(class_id),
+                        primary_key=pk_fields,
+                        title_key=title_fields,
+                    )
+                except Exception as exc:
+                    # Hard fail: without key_spec we cannot provide a reliable primaryKey/titleKey contract.
+                    # This is retry-safe because Terminus writes are idempotent and the next retry will
+                    # re-attempt the key_spec upsert.
+                    logger.error(
+                        "Failed to upsert ontology key_spec (db=%s branch=%s class_id=%s): %s",
+                        db_name,
+                        branch,
+                        class_id,
+                        exc,
+                        exc_info=True,
+                    )
+                    raise RuntimeError("ontology_key_spec_upsert_failed") from exc
             ontology_version = await resolve_ontology_version(
                 self.terminus_service, db_name=db_name, branch=branch, logger=logger
             )
@@ -530,8 +583,8 @@ class OntologyWorker:
             
     async def handle_update_ontology(self, command_data: Dict[str, Any]) -> None:
         """온톨로지 업데이트 처리"""
-        db_name = command_data.get('db_name')
         payload = command_data.get('payload', {}) or {}
+        db_name = payload.get('db_name') or command_data.get("db_name")
         branch = validate_branch_name(payload.get("branch") or command_data.get("branch") or "main")
         class_id = payload.get('class_id')
         updates = payload.get('updates', {})
@@ -609,6 +662,27 @@ class OntologyWorker:
             ontology_version = await resolve_ontology_version(
                 self.terminus_service, db_name=db_name, branch=branch, logger=logger
             )
+
+            if db_name and class_id and self.key_spec_registry:
+                try:
+                    pk_fields, title_fields = self._extract_key_spec_from_payload(merged_data)
+                    await self.key_spec_registry.upsert_key_spec(
+                        db_name=str(db_name),
+                        branch=str(branch),
+                        class_id=str(class_id),
+                        primary_key=pk_fields,
+                        title_key=title_fields,
+                    )
+                except Exception as exc:
+                    logger.error(
+                        "Failed to upsert ontology key_spec after update (db=%s branch=%s class_id=%s): %s",
+                        db_name,
+                        branch,
+                        class_id,
+                        exc,
+                        exc_info=True,
+                    )
+                    raise RuntimeError("ontology_key_spec_upsert_failed") from exc
             if command_id and class_id and self.lineage_store:
                 try:
                     await self.lineage_store.record_link(
@@ -705,8 +779,8 @@ class OntologyWorker:
             
     async def handle_delete_ontology(self, command_data: Dict[str, Any]) -> None:
         """온톨로지 삭제 처리"""
-        db_name = command_data.get('db_name')
         payload = command_data.get('payload', {}) or {}
+        db_name = payload.get('db_name') or command_data.get("db_name")
         branch = validate_branch_name(payload.get("branch") or command_data.get("branch") or "main")
         class_id = payload.get('class_id')
         command_id = command_data.get('command_id')
@@ -756,6 +830,24 @@ class OntologyWorker:
             ontology_version = await resolve_ontology_version(
                 self.terminus_service, db_name=db_name, branch=branch, logger=logger
             )
+
+            if db_name and class_id and self.key_spec_registry:
+                try:
+                    await self.key_spec_registry.delete_key_spec(
+                        db_name=str(db_name),
+                        branch=str(branch),
+                        class_id=str(class_id),
+                    )
+                except Exception as exc:
+                    logger.error(
+                        "Failed to delete ontology key_spec (db=%s branch=%s class_id=%s): %s",
+                        db_name,
+                        branch,
+                        class_id,
+                        exc,
+                        exc_info=True,
+                    )
+                    raise RuntimeError("ontology_key_spec_delete_failed") from exc
 
             if command_id and class_id and self.lineage_store:
                 try:
@@ -1332,6 +1424,9 @@ class OntologyWorker:
 
         if self.processed_event_registry:
             await self.processed_event_registry.close()
+        if self.key_spec_registry:
+            with suppress(Exception):
+                await self.key_spec_registry.close()
         self._consumer_executor.shutdown(wait=True, cancel_futures=True)
             
         logger.info("Ontology Worker shut down successfully")

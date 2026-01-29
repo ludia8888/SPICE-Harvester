@@ -173,7 +173,7 @@ describe('bff api helpers', () => {
     const { uploadDataset } = await loadModule()
     const file = new File(['data'], 'notes.txt', { type: 'text/plain' })
     await expect(uploadDataset({ dbName: 'core', file, mode: 'structured' })).rejects.toThrow(
-      'Only .csv or .xlsx files are supported for structured uploads.',
+      'Only .csv, .xls, .xlsx, or .xlsm files are supported for structured uploads.',
     )
   })
 })

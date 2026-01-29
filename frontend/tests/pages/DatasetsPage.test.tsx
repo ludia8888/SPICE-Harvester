@@ -10,6 +10,7 @@ const apiMocks = {
   listDatasets: vi.fn(),
   createDatabase: vi.fn(),
   deleteDatabase: vi.fn(),
+  getDatasetRawFile: vi.fn(),
   uploadDataset: vi.fn(),
   approveDatasetSchema: vi.fn(),
 }
@@ -19,6 +20,8 @@ vi.mock('../../src/api/bff', () => ({
   listDatasets: (dbName: string) => apiMocks.listDatasets(dbName),
   createDatabase: (name: string, description?: string) => apiMocks.createDatabase(name, description),
   deleteDatabase: (name: string) => apiMocks.deleteDatabase(name),
+  getDatasetRawFile: (params: { dbName: string; datasetId: string; fileName?: string }) =>
+    apiMocks.getDatasetRawFile(params),
   uploadDataset: (params: { dbName: string; file: File; mode: string }) => apiMocks.uploadDataset(params),
   approveDatasetSchema: (params: { ingestRequestId: string; dbName: string; schemaJson?: unknown }) =>
     apiMocks.approveDatasetSchema(params),
@@ -49,6 +52,12 @@ describe('DatasetsPage', () => {
         updated_at: '2024-01-02T10:00:00Z',
       },
     ])
+    apiMocks.getDatasetRawFile.mockResolvedValue({
+      dataset_id: 'ds-1',
+      filename: 'orders.csv',
+      encoding: 'utf-8',
+      content: 'id,name\n1,example',
+    })
     apiMocks.createDatabase.mockResolvedValue({ name: 'new_project', description: 'New Project' })
   })
 
@@ -74,8 +83,10 @@ describe('DatasetsPage', () => {
     const fileRow = screen.getByText('orders')
     fireEvent.click(fileRow)
 
-    expect(await screen.findByText('File: orders')).toBeInTheDocument()
-    expect(screen.getByText('Source: csv')).toBeInTheDocument()
+    expect(await screen.findByText('Raw file content')).toBeInTheDocument()
+    expect(screen.getByText('File')).toBeInTheDocument()
+    expect(screen.getByText('Source')).toBeInTheDocument()
+    expect(screen.getByText('csv')).toBeInTheDocument()
   })
 
   it('shows empty project state when no datasets exist', async () => {
@@ -110,7 +121,7 @@ describe('DatasetsPage', () => {
     }
 
     fireEvent.keyDown(fileRow, { key: ' ' })
-    expect(await screen.findByText('File: orders')).toBeInTheDocument()
+    expect(await screen.findByText('Raw file content')).toBeInTheDocument()
   })
 
   it('toggles favorites and creates a project', async () => {
@@ -366,7 +377,6 @@ describe('DatasetsPage', () => {
 
     const projectRowAgain = await screen.findByText('Core Data')
     fireEvent.click(projectRowAgain)
-    await screen.findByText('Files')
     const actionsButton = await screen.findByRole('button', { name: 'Actions' })
     fireEvent.click(actionsButton)
     fireEvent.click(screen.getByText('Delete project'))

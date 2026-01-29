@@ -15,9 +15,6 @@ type SidebarRailProps = {
 }
 
 export const SidebarRail = ({ items, onHoverChange }: SidebarRailProps) => {
-  const aiAgentItem = items.find((item) => item.id === 'ai-agent')
-  const primaryItems = items.filter((item) => item.id !== 'ai-agent')
-
   return (
     <aside
       className="sidebar-rail"
@@ -25,7 +22,7 @@ export const SidebarRail = ({ items, onHoverChange }: SidebarRailProps) => {
       onMouseLeave={() => onHoverChange?.(false)}
     >
       <div className="rail-content">
-        {primaryItems.map((item) => (
+        {items.map((item) => (
           <button
             key={item.id}
             className={`rail-item ${item.active ? 'is-active' : ''}`}
@@ -41,16 +38,6 @@ export const SidebarRail = ({ items, onHoverChange }: SidebarRailProps) => {
       <div className="rail-spacer" />
 
       <div className="rail-footer">
-        {aiAgentItem ? (
-          <button
-            className={`rail-item rail-item-ai ${aiAgentItem.active ? 'is-active' : ''}`}
-            onClick={aiAgentItem.onClick}
-            title={aiAgentItem.label}
-          >
-            <Icon icon={aiAgentItem.icon as IconName} className="rail-icon" />
-            <span className="rail-label">{aiAgentItem.label}</span>
-          </button>
-        ) : null}
         <button className="rail-item" title="Settings">
           <Icon icon="cog" className="rail-icon" />
           <span className="rail-label">Settings</span>

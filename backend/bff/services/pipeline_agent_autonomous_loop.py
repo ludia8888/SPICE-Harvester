@@ -2442,3 +2442,441 @@ async def run_pipeline_agent_mcp_autonomous(
             else None
         ),
     }
+
+
+# ==================== SSE Streaming Version ====================
+
+@dataclass
+class StreamEvent:
+    """SSE 이벤트 데이터 구조"""
+    event_type: str  # tool_start, tool_end, plan_update, node_added, error, complete
+    data: Dict[str, Any]
+
+
+async def run_pipeline_agent_streaming(
+    *,
+    goal: str,
+    data_scope: PipelinePlanDataScope,
+    answers: Optional[Dict[str, Any]],
+    planner_hints: Optional[Dict[str, Any]],
+    task_spec: Optional[Dict[str, Any]] = None,
+    persist_plan: bool = True,
+    actor: str,
+    tenant_id: str,
+    user_id: Optional[str],
+    data_policies: Optional[Dict[str, Any]],
+    selected_model: Optional[str],
+    allowed_models: Optional[List[str]],
+    llm_gateway: LLMGateway,
+    redis_service: Optional[RedisService],
+    audit_store: Optional[AuditLogStore],
+    event_store: Optional[EventStore] = None,
+    dataset_registry: DatasetRegistry,
+    plan_registry: PipelinePlanRegistry,
+):
+    """
+    SSE 스트리밍 버전의 Pipeline Agent.
+
+    도구 호출마다 이벤트를 yield하여 실시간 UI 업데이트를 가능하게 합니다.
+
+    Yields:
+        StreamEvent: 각 도구 호출/완료/플랜 업데이트 이벤트
+    """
+    run_id = str(uuid4())
+    plan_id: Optional[str] = None
+
+    db_name = str(data_scope.db_name or "").strip()
+    if not db_name:
+        yield StreamEvent(
+            event_type="error",
+            data={"error": "data_scope.db_name is required", "run_id": run_id}
+        )
+        return
+
+    dataset_ids = [str(item).strip() for item in (data_scope.dataset_ids or []) if str(item).strip()]
+
+    goal_lower = str(goal or "").lower()
+    is_ontology_only_task = (
+        not dataset_ids
+        and any(kw in goal_lower for kw in (
+            "ontology", "온톨로지", "클래스", "class", "스키마", "schema",
+            "property", "속성", "relationship", "관계",
+        ))
+    )
+
+    if not dataset_ids and not is_ontology_only_task:
+        yield StreamEvent(
+            event_type="error",
+            data={"error": "data_scope.dataset_ids is required", "run_id": run_id}
+        )
+        return
+
+    # MCP 클라이언트 가져오기
+    try:
+        try:
+            from mcp_servers.mcp_client import get_mcp_manager
+        except Exception:
+            from backend.mcp_servers.mcp_client import get_mcp_manager
+    except Exception as exc:
+        yield StreamEvent(
+            event_type="error",
+            data={"error": f"MCP client unavailable: {exc}", "run_id": run_id}
+        )
+        return
+
+    mcp_manager = get_mcp_manager()
+
+    # 시작 이벤트
+    yield StreamEvent(
+        event_type="start",
+        data={
+            "run_id": run_id,
+            "goal": goal,
+            "db_name": db_name,
+            "dataset_ids": dataset_ids,
+        }
+    )
+
+    # MCP 도구 호출 헬퍼
+    async def _call_pipeline_tool(tool: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+        payload = await mcp_manager.call_tool("pipeline", tool, arguments)
+        if isinstance(payload, dict):
+            return payload
+        structured = getattr(payload, "structuredContent", None) or getattr(payload, "structured_content", None)
+        if isinstance(structured, dict):
+            return structured
+        data = getattr(payload, "data", None)
+        if isinstance(data, dict):
+            return data
+        is_error = bool(getattr(payload, "isError", False) or getattr(payload, "is_error", False))
+        content = getattr(payload, "content", None)
+        if isinstance(content, list) and content:
+            texts = []
+            for part in content:
+                text = getattr(part, "text", None) or (part.get("text") if isinstance(part, dict) else None)
+                if isinstance(text, str) and text.strip():
+                    texts.append(text.strip())
+            if is_error:
+                return {"error": "\n".join(texts).strip() or f"MCP tool error: {tool}"}
+            for text in texts:
+                try:
+                    parsed = json.loads(text)
+                    if isinstance(parsed, dict):
+                        return parsed
+                except Exception:
+                    continue
+            if texts:
+                return {"result": texts[0]}
+        raise RuntimeError(f"Unexpected MCP tool result type for {tool}: {type(payload)}")
+
+    # 상태 초기화
+    state = _AgentState(
+        goal=goal,
+        db_name=db_name,
+        branch=str(data_scope.branch or "") or "main",
+        dataset_ids=dataset_ids,
+        principal_id=user_id or actor,
+        principal_type="user" if user_id else "system",
+    )
+
+    # 모델 설정
+    model = selected_model or "claude-sonnet"
+    max_steps = 30
+    max_tool_calls_per_step = 20
+
+    # 허용된 도구 목록
+    allowed_tools = [
+        "plan_new", "plan_add_input", "plan_add_transform", "plan_add_filter",
+        "plan_add_join", "plan_add_union", "plan_add_compute_column", "plan_add_compute_assignments",
+        "plan_add_select_expr", "plan_add_group_by", "plan_add_group_by_expr",
+        "plan_add_window_expr", "plan_add_sort", "plan_add_explode", "plan_add_pivot",
+        "plan_add_output", "plan_preview", "plan_validate",
+        "dataset_profile", "dataset_null_check", "dataset_key_inference", "dataset_type_inference",
+    ]
+
+    system_prompt = _build_system_prompt(allowed_tools=allowed_tools)
+
+    # 메인 루프
+    for step_idx in range(max_steps):
+        # 프롬프트 구성
+        user_prompt = _build_user_prompt(
+            state=state,
+            answers=answers,
+            planner_hints=planner_hints,
+            task_spec=task_spec,
+            target_chars=50000,
+        )
+
+        # LLM 호출
+        try:
+            response_text, llm_meta = await llm_gateway.complete(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                model=model,
+                response_format={"type": "json_object"},
+            )
+        except Exception as exc:
+            yield StreamEvent(
+                event_type="error",
+                data={"error": f"LLM error: {exc}", "run_id": run_id, "step": step_idx + 1}
+            )
+            break
+
+        # 응답 파싱
+        try:
+            decision = AutonomousPipelineAgentDecision.model_validate_json(response_text)
+        except Exception as exc:
+            yield StreamEvent(
+                event_type="error",
+                data={"error": f"Invalid LLM response: {exc}", "run_id": run_id, "step": step_idx + 1}
+            )
+            break
+
+        # clarify 액션
+        if decision.action == "clarify":
+            yield StreamEvent(
+                event_type="clarification",
+                data={
+                    "run_id": run_id,
+                    "questions": [q.model_dump() for q in decision.questions],
+                    "plan": state.plan_obj,
+                }
+            )
+            return
+
+        # finish 액션
+        if decision.action == "finish":
+            if isinstance(state.plan_obj, dict):
+                try:
+                    plan_model = PipelinePlan.model_validate(state.plan_obj)
+                    validation = await validate_pipeline_plan(
+                        plan=plan_model,
+                        dataset_registry=dataset_registry,
+                        db_name=db_name,
+                        branch=state.branch,
+                        require_output=True,
+                    )
+
+                    if not plan_id:
+                        plan_id = str(uuid4())
+
+                    if persist_plan:
+                        await plan_registry.upsert_plan(
+                            plan_id=plan_id,
+                            tenant_id=tenant_id,
+                            status="COMPILED" if not validation.errors else "DRAFT",
+                            goal=goal,
+                            db_name=db_name,
+                            branch=state.branch,
+                            plan=validation.plan.model_dump(mode="json"),
+                            created_by=actor,
+                        )
+
+                    yield StreamEvent(
+                        event_type="complete",
+                        data={
+                            "run_id": run_id,
+                            "status": "success" if not validation.errors else "partial",
+                            "plan_id": plan_id,
+                            "plan": validation.plan.model_dump(mode="json"),
+                            "validation_errors": list(validation.errors or []),
+                            "validation_warnings": list(validation.warnings or []),
+                        }
+                    )
+                    return
+                except Exception as exc:
+                    yield StreamEvent(
+                        event_type="error",
+                        data={"error": f"Plan validation failed: {exc}", "run_id": run_id}
+                    )
+                    return
+            else:
+                yield StreamEvent(
+                    event_type="error",
+                    data={"error": "Cannot finish: no plan created", "run_id": run_id}
+                )
+                continue
+
+        # call_tool 액션
+        tool_calls = list(decision.tool_calls or [])
+        if not tool_calls:
+            tool_calls = [AutonomousPipelineAgentToolCall(tool=str(decision.tool or ""), args=dict(decision.args or {}))]
+
+        for call in tool_calls[:max_tool_calls_per_step]:
+            tool_name = str(call.tool or "").strip()
+            if not tool_name:
+                continue
+
+            args = dict(call.args or {})
+
+            # 도구 시작 이벤트
+            yield StreamEvent(
+                event_type="tool_start",
+                data={
+                    "run_id": run_id,
+                    "step": step_idx + 1,
+                    "tool": tool_name,
+                    "args": {k: v for k, v in args.items() if k != "plan"},  # plan 제외
+                }
+            )
+
+            # 도구 실행
+            try:
+                # plan 관련 도구 처리
+                if tool_name == "plan_new":
+                    payload = await _call_pipeline_tool(tool_name, args)
+                    plan = payload.get("plan") if isinstance(payload, dict) else None
+                    state.plan_obj = plan if isinstance(plan, dict) else None
+                    observation = dict(payload) if isinstance(payload, dict) else {"result": payload}
+                    observation.pop("plan", None)
+
+                elif tool_name.startswith("plan_add_") or tool_name in {"plan_preview", "plan_validate"}:
+                    if not isinstance(state.plan_obj, dict):
+                        observation = {"error": "plan is not initialized; call plan_new first"}
+                    else:
+                        args_with_plan = {**args, "plan": state.plan_obj}
+                        payload = await _call_pipeline_tool(tool_name, args_with_plan)
+
+                        # plan 업데이트
+                        if isinstance(payload, dict) and "plan" in payload:
+                            plan = payload.get("plan")
+                            if isinstance(plan, dict):
+                                state.plan_obj = plan
+
+                        observation = dict(payload) if isinstance(payload, dict) else {"result": payload}
+                        observation.pop("plan", None)
+                else:
+                    # 기타 도구
+                    payload = await _call_pipeline_tool(tool_name, args)
+                    observation = dict(payload) if isinstance(payload, dict) else {"result": payload}
+
+                state.last_observation = observation
+
+                # 도구 완료 이벤트
+                yield StreamEvent(
+                    event_type="tool_end",
+                    data={
+                        "run_id": run_id,
+                        "step": step_idx + 1,
+                        "tool": tool_name,
+                        "success": not observation.get("error"),
+                        "observation": _mask_tool_observation(observation),
+                    }
+                )
+
+                # plan_add_* 도구 후 plan_update 이벤트
+                if tool_name.startswith("plan_add_") and isinstance(state.plan_obj, dict):
+                    definition = state.plan_obj.get("definition_json", {})
+                    nodes = definition.get("nodes", [])
+                    edges = definition.get("edges", [])
+
+                    yield StreamEvent(
+                        event_type="plan_update",
+                        data={
+                            "run_id": run_id,
+                            "step": step_idx + 1,
+                            "tool": tool_name,
+                            "plan": {
+                                "definition_json": {
+                                    "nodes": nodes,
+                                    "edges": edges,
+                                },
+                                "outputs": state.plan_obj.get("outputs", []),
+                            },
+                            "node_count": len(nodes),
+                            "edge_count": len(edges),
+                        }
+                    )
+
+                # plan_preview 도구 후 preview_update 이벤트
+                if tool_name == "plan_preview" and isinstance(observation, dict) and not observation.get("error"):
+                    preview_data = observation.get("preview") or observation.get("result") or observation
+                    node_id = args.get("node_id")
+
+                    # preview 데이터 구조 추출
+                    preview_columns = []
+                    preview_rows = []
+
+                    if isinstance(preview_data, dict):
+                        # columns 추출
+                        raw_columns = preview_data.get("columns", [])
+                        if isinstance(raw_columns, list):
+                            preview_columns = [
+                                {"name": str(c.get("name") or c) if isinstance(c, dict) else str(c), "type": str(c.get("type", "string")) if isinstance(c, dict) else "string"}
+                                for c in raw_columns
+                            ]
+
+                        # rows 추출
+                        raw_rows = preview_data.get("rows", preview_data.get("data", []))
+                        if isinstance(raw_rows, list):
+                            preview_rows = raw_rows[:100]  # 최대 100행
+
+                    yield StreamEvent(
+                        event_type="preview_update",
+                        data={
+                            "run_id": run_id,
+                            "step": step_idx + 1,
+                            "node_id": node_id,
+                            "preview": {
+                                "columns": preview_columns,
+                                "rows": preview_rows,
+                                "row_count": len(preview_rows),
+                            },
+                        }
+                    )
+
+                # 에러 발생 시 중단
+                if observation.get("error"):
+                    break
+
+            except Exception as exc:
+                yield StreamEvent(
+                    event_type="tool_end",
+                    data={
+                        "run_id": run_id,
+                        "step": step_idx + 1,
+                        "tool": tool_name,
+                        "success": False,
+                        "error": str(exc),
+                    }
+                )
+                break
+
+        # 프롬프트에 관찰 결과 추가
+        state.prompt_items.append(stable_json_dumps({
+            "type": "tool_output",
+            "step": step_idx + 1,
+            "output": state.last_observation,
+        }))
+
+    # 루프 종료 (최대 스텝 도달)
+    if isinstance(state.plan_obj, dict):
+        try:
+            plan_model = PipelinePlan.model_validate(state.plan_obj)
+            if not plan_id:
+                plan_id = str(uuid4())
+
+            yield StreamEvent(
+                event_type="complete",
+                data={
+                    "run_id": run_id,
+                    "status": "partial",
+                    "plan_id": plan_id,
+                    "plan": plan_model.model_dump(mode="json"),
+                    "message": "Max steps reached",
+                }
+            )
+        except Exception as exc:
+            yield StreamEvent(
+                event_type="error",
+                data={"error": f"Final plan validation failed: {exc}", "run_id": run_id}
+            )
+    else:
+        yield StreamEvent(
+            event_type="complete",
+            data={
+                "run_id": run_id,
+                "status": "failed",
+                "error": "No plan created",
+            }
+        )

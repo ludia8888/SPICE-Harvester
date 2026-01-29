@@ -59,7 +59,12 @@ class FunnelClient:
             logger.error(f"Funnel 헬스 체크 실패: {e}")
             return False
 
-    async def analyze_dataset(self, request_data: Dict[str, Any]) -> Dict[str, Any]:
+    async def analyze_dataset(
+        self,
+        request_data: Dict[str, Any],
+        *,
+        timeout_seconds: Optional[float] = None,
+    ) -> Dict[str, Any]:
         """
         데이터셋 타입 분석
 
@@ -70,7 +75,11 @@ class FunnelClient:
             DatasetAnalysisResponse 형태의 분석 결과
         """
         try:
-            response = await self.client.post("/api/v1/funnel/analyze", json=request_data)
+            response = await self.client.post(
+                "/api/v1/funnel/analyze",
+                json=request_data,
+                timeout=timeout_seconds,
+            )
             response.raise_for_status()
             return response.json()
         except Exception as e:

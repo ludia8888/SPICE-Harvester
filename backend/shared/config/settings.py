@@ -422,6 +422,10 @@ class ServiceSettings(BaseSettings):
         default=120.0,
         description="Funnel excel timeout seconds (FUNNEL_EXCEL_TIMEOUT_SECONDS; fallback FUNNEL_CLIENT_TIMEOUT_SECONDS)",
     )
+    funnel_infer_timeout_seconds: float = Field(
+        default=8.0,
+        description="Funnel dataset analysis timeout seconds (FUNNEL_INFER_TIMEOUT_SECONDS; fallback FUNNEL_CLIENT_TIMEOUT_SECONDS)",
+    )
 
     @field_validator("oms_base_url_override", mode="before")
     @classmethod
@@ -471,6 +475,23 @@ class ServiceSettings(BaseSettings):
         except Exception:
             return 120.0
         return max(5.0, min(value, 3600.0))
+
+    @field_validator("funnel_infer_timeout_seconds", mode="before")
+    @classmethod
+    def resolve_funnel_infer_timeout(cls, v):  # noqa: ANN001
+        if os.getenv("FUNNEL_INFER_TIMEOUT_SECONDS") not in (None, ""):
+            return v
+        fallback = (os.getenv("FUNNEL_CLIENT_TIMEOUT_SECONDS") or "").strip()
+        return fallback or v
+
+    @field_validator("funnel_infer_timeout_seconds", mode="before")
+    @classmethod
+    def clamp_funnel_infer_timeout(cls, v):  # noqa: ANN001
+        try:
+            value = float(v)
+        except Exception:
+            return 8.0
+        return max(0.5, min(value, 120.0))
 
     @property
     def oms_base_url(self) -> str:
@@ -3103,6 +3124,13 @@ class ObjectifySettings(BaseSettings):
         default=60,
         description="Backoff max seconds (OBJECTIFY_BACKOFF_MAX_SECONDS)",
     )
+    ontology_pk_validation_mode: str = Field(
+        default="warn",
+        description=(
+            "When ontology schema declares primaryKey, validate object_type pk_spec matches "
+            "(fields + order). Modes: off|warn|fail (OBJECTIFY_ONTOLOGY_PK_VALIDATION_MODE)."
+        ),
+    )
 
     @field_validator("worker_handler", mode="before")
     @classmethod
@@ -3155,6 +3183,20 @@ class ObjectifySettings(BaseSettings):
     @classmethod
     def clamp_backoff_max_seconds(cls, v):  # noqa: ANN001
         return _clamp_int(v, default=60, min_value=1, max_value=3600)
+
+    @field_validator("ontology_pk_validation_mode", mode="before")
+    @classmethod
+    def normalize_ontology_pk_validation_mode(cls, v):  # noqa: ANN001
+        raw = str(v or "").strip().lower()
+        if not raw:
+            return "warn"
+        if raw in {"0", "false", "off", "disabled", "none"}:
+            return "off"
+        if raw in {"1", "true", "on", "enabled", "warn", "warning"}:
+            return "warn"
+        if raw in {"fail", "error", "strict"}:
+            return "fail"
+        raise ValueError("ontology_pk_validation_mode must be one of: off, warn, fail")
 
     @property
     def bulk_update_batch_size_effective(self) -> int:

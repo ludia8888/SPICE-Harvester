@@ -104,13 +104,14 @@ async def _post_with_retry(
     url: str,
     *,
     json_payload: dict,
+    headers: Optional[dict[str, str]] = None,
     retries: int = 5,
     retry_sleep: float = 2.0,
 ) -> httpx.Response:
     last_response: Optional[httpx.Response] = None
     for attempt in range(retries):
         try:
-            response = await client.post(url, json=json_payload)
+            response = await client.post(url, json=json_payload, headers=headers)
         except httpx.HTTPError:
             if attempt + 1 >= retries:
                 raise
@@ -511,6 +512,7 @@ async def test_pipeline_transform_cleansing_and_validation_e2e() -> None:
             "settings": {"engine": "Batch"},
         }
 
+        cleanse_create_key = f"e2e:{db_name}:pipeline:create:cleanse"
         cleanse_pipeline = await client.post(
             f"{BFF_URL}/api/v1/pipelines",
             json={
@@ -522,15 +524,18 @@ async def test_pipeline_transform_cleansing_and_validation_e2e() -> None:
                 "pipeline_type": "batch",
                 "definition_json": cleanse_definition,
             },
+            headers={"Idempotency-Key": cleanse_create_key},
         )
         cleanse_pipeline.raise_for_status()
         cleanse_pipeline_id = str(((cleanse_pipeline.json().get("data") or {}) or {}).get("pipeline", {}).get("pipeline_id") or "")
         assert cleanse_pipeline_id
 
+        cleanse_build_key = f"e2e:{db_name}:pipeline:build:cleanse:out1"
         build_clean = await _post_with_retry(
             client,
             f"{BFF_URL}/api/v1/pipelines/{cleanse_pipeline_id}/build",
             json_payload={"db_name": db_name, "node_id": "out1", "limit": 50},
+            headers={"Idempotency-Key": cleanse_build_key},
         )
         build_clean.raise_for_status()
         clean_job_id = str(((build_clean.json().get("data") or {}) or {}).get("job_id") or "")
@@ -589,6 +594,7 @@ async def test_pipeline_transform_cleansing_and_validation_e2e() -> None:
             "settings": {"engine": "Batch"},
         }
 
+        bad_create_key = f"e2e:{db_name}:pipeline:create:bad_records"
         bad_pipeline = await client.post(
             f"{BFF_URL}/api/v1/pipelines",
             json={
@@ -600,15 +606,18 @@ async def test_pipeline_transform_cleansing_and_validation_e2e() -> None:
                 "pipeline_type": "batch",
                 "definition_json": bad_definition,
             },
+            headers={"Idempotency-Key": bad_create_key},
         )
         bad_pipeline.raise_for_status()
         bad_pipeline_id = str(((bad_pipeline.json().get("data") or {}) or {}).get("pipeline", {}).get("pipeline_id") or "")
         assert bad_pipeline_id
 
+        bad_build_key = f"e2e:{db_name}:pipeline:build:bad_records:out1"
         build_bad = await _post_with_retry(
             client,
             f"{BFF_URL}/api/v1/pipelines/{bad_pipeline_id}/build",
             json_payload={"db_name": db_name, "node_id": "out1", "limit": 50},
+            headers={"Idempotency-Key": bad_build_key},
         )
         build_bad.raise_for_status()
         bad_job_id = str(((build_bad.json().get("data") or {}) or {}).get("job_id") or "")
@@ -643,6 +652,7 @@ async def test_pipeline_transform_cleansing_and_validation_e2e() -> None:
             "settings": {"engine": "Batch"},
         }
 
+        schema_create_key = f"e2e:{db_name}:pipeline:create:schema_mismatch"
         schema_pipeline = await client.post(
             f"{BFF_URL}/api/v1/pipelines",
             json={
@@ -654,15 +664,18 @@ async def test_pipeline_transform_cleansing_and_validation_e2e() -> None:
                 "pipeline_type": "batch",
                 "definition_json": schema_definition,
             },
+            headers={"Idempotency-Key": schema_create_key},
         )
         schema_pipeline.raise_for_status()
         schema_pipeline_id = str(((schema_pipeline.json().get("data") or {}) or {}).get("pipeline", {}).get("pipeline_id") or "")
         assert schema_pipeline_id
 
+        schema_build_key = f"e2e:{db_name}:pipeline:build:schema_mismatch:out1"
         build_schema = await _post_with_retry(
             client,
             f"{BFF_URL}/api/v1/pipelines/{schema_pipeline_id}/build",
             json_payload={"db_name": db_name, "node_id": "out1", "limit": 10},
+            headers={"Idempotency-Key": schema_build_key},
         )
         if build_schema.status_code == 409:
             detail = build_schema.json().get("detail") if isinstance(build_schema.json(), dict) else {}

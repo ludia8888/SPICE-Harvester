@@ -407,7 +407,7 @@ async def import_mappings(
         logger.error(f"Unexpected error in mapping import: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"매핑 가져오기 실패: 서버 오류가 발생했습니다",
+            detail="매핑 가져오기 실패: 서버 오류가 발생했습니다",
         )
 
 
@@ -558,11 +558,11 @@ async def validate_mappings(
             len(validation_details["conflicts"]) == 0
         )
         
-        status = "success" if validation_passed else "warning"
+        result_status = "success" if validation_passed else "warning"
         message = "매핑 검증 완료" if validation_passed else "매핑 검증 중 문제 발견"
         
         return {
-            "status": status,
+            "status": result_status,
             "message": message,
             "data": {
                 "database": db_name,

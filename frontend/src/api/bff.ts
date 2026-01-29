@@ -1,3 +1,33 @@
+// Mock 모드 설정 - .env에서 VITE_MOCK_API=true로 설정
+export const isMockMode = import.meta.env.VITE_MOCK_API === 'true'
+
+type MockDataModule = typeof import('./mockData')
+
+let mockDataModulePromise: Promise<MockDataModule> | null = null
+const MOCK_DATA_SPECIFIER = './mockData'
+
+const DEFAULT_MOCK_DELAY_MS = import.meta.env.MODE === 'test' ? 0 : 300
+const MOCK_DELAY_MS = (() => {
+  const configured = import.meta.env.VITE_MOCK_API_DELAY_MS
+  if (!configured) {
+    return DEFAULT_MOCK_DELAY_MS
+  }
+  const parsed = Number.parseInt(configured, 10)
+  return Number.isFinite(parsed) ? parsed : DEFAULT_MOCK_DELAY_MS
+})()
+
+const loadMockData = async () => {
+  if (!mockDataModulePromise) {
+    const specifier = MOCK_DATA_SPECIFIER
+    mockDataModulePromise = (import(/* @vite-ignore */ specifier) as Promise<MockDataModule>).catch((err) => {
+      throw new Error(
+        `VITE_MOCK_API=true but the mock data module (${MOCK_DATA_SPECIFIER}) could not be loaded: ${String(err)}`,
+      )
+    })
+  }
+  return mockDataModulePromise
+}
+
 export type ApiResponse<T> = {
   status: string
   message?: string
@@ -41,6 +71,7 @@ export type DatasetRecord = {
   row_count?: number
   sample_json?: Record<string, unknown>
   version_created_at?: string
+  stage?: 'raw' | 'clean'
 }
 
 export type DatasetRawFile = {
@@ -331,6 +362,11 @@ const inferUploadEndpoint = (mode: UploadMode, fileName: string) => {
 }
 
 export const listDatabases = async () => {
+  if (isMockMode) {
+    const mockData = await loadMockData()
+    await mockData.mockDelay(MOCK_DELAY_MS)
+    return mockData.mockDatabases
+  }
   const data = await requestApi<DatabaseListPayload>('/api/v1/databases', undefined, 'Failed to load databases')
   return data.databases ?? []
 }
@@ -355,9 +391,16 @@ export const deleteDatabase = async (name: string) => {
   return data
 }
 
-export const listDatasets = async (dbName: string) => {
+export const listDatasets = async (dbName: string, stage?: 'raw' | 'clean') => {
+  if (isMockMode) {
+    const mockData = await loadMockData()
+    await mockData.mockDelay(MOCK_DELAY_MS)
+    return mockData.mockDatasets.filter(d => d.db_name === dbName)
+  }
+  // stage 파라미터가 있으면 해당 stage만, 없으면 전체 (raw + clean)
+  const stageParam = stage ? `&stage=${stage}` : ''
   const data = await requestApi<DatasetListPayload>(
-    `/api/v1/pipelines/datasets?db_name=${encodeURIComponent(dbName)}`,
+    `/api/v1/pipelines/datasets?db_name=${encodeURIComponent(dbName)}${stageParam}`,
     {
       headers: {
         'X-DB-Name': dbName,
@@ -375,6 +418,20 @@ export const getDatasetRawFile = async (params: {
   fileName?: string
   fileIndex?: number
 }) => {
+  if (isMockMode) {
+    const mockData = await loadMockData()
+    await mockData.mockDelay(MOCK_DELAY_MS)
+    // Mock raw file data based on dataset
+    const dataset = mockData.mockDatasets.find(d => d.dataset_id === params.datasetId)
+    if (!dataset) return null
+    return {
+      dataset_id: params.datasetId,
+      filename: `${dataset.name}.csv`,
+      content_type: 'text/csv',
+      encoding: 'utf-8',
+      content: mockData.getMockRawContent(params.datasetId),
+    } as DatasetRawFile
+  }
   const query = new URLSearchParams()
   if (params.fileName) {
     query.set('file_name', params.fileName)
@@ -396,7 +453,41 @@ export const getDatasetRawFile = async (params: {
   return data.file ?? null
 }
 
+// Transform Node Preview API
+export type TransformPreviewResponse = {
+  node_id: string
+  schema_json: { columns: Array<{ name: string; type?: string }> }
+  sample_json: { rows: Record<string, unknown>[] }
+  row_count: number
+}
+
+export const getTransformPreview = async (
+  dbName: string,
+  nodeId: string
+): Promise<TransformPreviewResponse | null> => {
+  try {
+    const data = await requestApi<TransformPreviewResponse>(
+      `/api/v1/pipelines/transform-preview/${encodeURIComponent(nodeId)}`,
+      {
+        headers: {
+          'X-DB-Name': dbName,
+          'X-Project': dbName,
+        },
+      },
+      'Failed to load transform preview',
+    )
+    return data
+  } catch {
+    return null
+  }
+}
+
 export const listPipelines = async (dbName: string) => {
+  if (isMockMode) {
+    const mockData = await loadMockData()
+    await mockData.mockDelay(MOCK_DELAY_MS)
+    return mockData.mockPipelines.filter(p => p.db_name === dbName || dbName === 'demo-project')
+  }
   const data = await requestApi<PipelineListPayload>(
     `/api/v1/pipelines?db_name=${encodeURIComponent(dbName)}`,
     {
@@ -414,6 +505,11 @@ export const listPipelineArtifacts = async (
   pipelineId: string,
   params?: { mode?: string; limit?: number; dbName?: string },
 ) => {
+  if (isMockMode) {
+    const mockData = await loadMockData()
+    await mockData.mockDelay(MOCK_DELAY_MS)
+    return mockData.mockPipelineArtifacts.filter(a => a.pipeline_id === pipelineId)
+  }
   const query = new URLSearchParams()
   if (params?.mode) {
     query.set('mode', params.mode)
@@ -555,6 +651,38 @@ export const submitPipelineProposal = async (
     'Failed to submit proposal',
   )
   return data.proposal ?? null
+}
+
+export const buildPipeline = async (
+  pipelineId: string,
+  params: {
+    nodeId?: string
+    limit?: number
+    dbName?: string
+  },
+) => {
+  const data = await requestApi<{ job_id?: string; artifact_id?: string }>(
+    `/api/v1/pipelines/${pipelineId}/build`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Idempotency-Key': `build-${pipelineId}-${Date.now()}`,
+        ...(params.dbName
+          ? {
+              'X-DB-Name': params.dbName,
+              'X-Project': params.dbName,
+            }
+          : {}),
+      },
+      body: JSON.stringify({
+        node_id: params.nodeId,
+        limit: params.limit ?? 200,
+      }),
+    },
+    'Failed to build pipeline',
+  )
+  return data
 }
 
 export const deployPipeline = async (
@@ -859,6 +987,251 @@ export const runPipelineAgent = async (payload: {
   return data
 }
 
+// === Pipeline Agent SSE Streaming Types ===
+export type AgentStreamEventType =
+  | 'start'
+  | 'tool_start'
+  | 'tool_end'
+  | 'plan_update'
+  | 'preview_update'
+  | 'clarification'
+  | 'error'
+  | 'complete'
+
+export type AgentStreamEvent = {
+  type: AgentStreamEventType
+  data: {
+    run_id?: string
+    step?: number
+    tool?: string
+    args?: Record<string, unknown>
+    success?: boolean
+    observation?: Record<string, unknown>
+    error?: string
+    plan?: {
+      definition_json?: {
+        nodes?: Array<{
+          id?: string
+          type?: string
+          operation?: string
+          metadata?: Record<string, unknown>
+        }>
+        edges?: Array<{
+          id?: string
+          from?: string
+          to?: string
+        }>
+      }
+      outputs?: Array<Record<string, unknown>>
+    }
+    plan_id?: string
+    status?: string
+    node_count?: number
+    edge_count?: number
+    questions?: Array<Record<string, unknown>>
+    validation_errors?: string[]
+    validation_warnings?: string[]
+    // preview_update 이벤트용
+    preview?: {
+      columns?: Array<{ name: string; type?: string }>
+      rows?: Array<Record<string, unknown>>
+      row_count?: number
+    }
+    [key: string]: unknown
+  }
+}
+
+export type AgentStreamCallbacks = {
+  onStart?: (data: AgentStreamEvent['data']) => void
+  onToolStart?: (data: AgentStreamEvent['data']) => void
+  onToolEnd?: (data: AgentStreamEvent['data']) => void
+  onPlanUpdate?: (data: AgentStreamEvent['data']) => void
+  onPreviewUpdate?: (data: AgentStreamEvent['data']) => void
+  onClarification?: (data: AgentStreamEvent['data']) => void
+  onError?: (data: AgentStreamEvent['data']) => void
+  onComplete?: (data: AgentStreamEvent['data']) => void
+}
+
+// SSE 스트리밍 Pipeline Agent 실행
+export const runPipelineAgentStreaming = (
+  payload: {
+    goal: string
+    data_scope: Record<string, unknown>
+    planner_hints?: Record<string, unknown>
+    answers?: Record<string, unknown>
+    apply_specs?: boolean
+    max_transform?: number
+    max_cleansing?: number
+    max_repairs?: number
+  },
+  callbacks: AgentStreamCallbacks,
+): { abort: () => void } => {
+  const controller = new AbortController()
+
+  const splitSseBuffer = (buffer: string): { frames: string[]; remainder: string } => {
+    // SSE frames are separated by a blank line, which can be "\n\n" or "\r\n\r\n".
+    // We normalize by detecting the earliest delimiter occurrence and iterating.
+    const frames: string[] = []
+    let rest = buffer
+    while (true) {
+      const lfIndex = rest.indexOf('\n\n')
+      const crlfIndex = rest.indexOf('\r\n\r\n')
+      let index = -1
+      let delimLen = 0
+      if (lfIndex !== -1 && (crlfIndex === -1 || lfIndex < crlfIndex)) {
+        index = lfIndex
+        delimLen = 2
+      } else if (crlfIndex !== -1) {
+        index = crlfIndex
+        delimLen = 4
+      }
+
+      if (index === -1) {
+        break
+      }
+      const frame = rest.slice(0, index)
+      if (frame.trim().length > 0) {
+        frames.push(frame)
+      }
+      rest = rest.slice(index + delimLen)
+    }
+    return { frames, remainder: rest }
+  }
+
+  const parseSseFrame = (frame: string): AgentStreamEvent | null => {
+    // Supports multi-line `data:` payloads and CRLF.
+    let eventType: string | null = null
+    const dataLines: string[] = []
+    const lines = frame.split(/\r?\n/)
+    for (const rawLine of lines) {
+      const line = rawLine ?? ''
+      if (!line) continue
+      if (line.startsWith(':')) {
+        // Comment line per SSE spec.
+        continue
+      }
+      if (line.startsWith('event:')) {
+        eventType = line.slice('event:'.length).trim()
+        continue
+      }
+      if (line.startsWith('data:')) {
+        dataLines.push(line.slice('data:'.length).trimStart())
+        continue
+      }
+      // Ignore id:/retry: and unknown fields for now.
+    }
+
+    if (!eventType || dataLines.length === 0) {
+      return null
+    }
+
+    const dataText = dataLines.join('\n')
+    try {
+      const data = JSON.parse(dataText)
+      return { type: eventType as AgentStreamEventType, data }
+    } catch {
+      // Some events may not be JSON-encoded; treat as error-friendly raw payload.
+      return { type: eventType as AgentStreamEventType, data: { raw: dataText } }
+    }
+  }
+
+  const fetchSSE = async () => {
+    const headers: HeadersInit = {
+      'Content-Type': 'application/json',
+      'Accept': 'text/event-stream',
+    }
+    if (API_TOKEN) {
+      headers['Authorization'] = `Bearer ${API_TOKEN}`
+    }
+    if (API_USER_ID) {
+      headers['X-User-ID'] = API_USER_ID
+    }
+    if (API_USER_NAME) {
+      headers['X-User-Name'] = API_USER_NAME
+    }
+
+    try {
+      const response = await fetch(buildUrl('/api/v1/agent/pipeline-runs/stream'), {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+      })
+
+      if (!response.ok) {
+        const errorText = await response.text()
+        callbacks.onError?.({ error: errorText || response.statusText })
+        return
+      }
+
+      const reader = response.body?.getReader()
+      if (!reader) {
+        callbacks.onError?.({ error: 'No response body' })
+        return
+      }
+
+      const decoder = new TextDecoder()
+      let buffer = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+
+        const { frames, remainder } = splitSseBuffer(buffer)
+        buffer = remainder
+        for (const frame of frames) {
+          const parsed = parseSseFrame(frame)
+          if (!parsed) {
+            continue
+          }
+          const data = parsed.data
+          switch (parsed.type) {
+            case 'start':
+              callbacks.onStart?.(data)
+              break
+            case 'tool_start':
+              callbacks.onToolStart?.(data)
+              break
+            case 'tool_end':
+              callbacks.onToolEnd?.(data)
+              break
+            case 'plan_update':
+              callbacks.onPlanUpdate?.(data)
+              break
+            case 'preview_update':
+              callbacks.onPreviewUpdate?.(data)
+              break
+            case 'clarification':
+              callbacks.onClarification?.(data)
+              break
+            case 'error':
+              callbacks.onError?.(data)
+              break
+            case 'complete':
+              callbacks.onComplete?.(data)
+              break
+            default:
+              // Unknown event types are ignored to keep smoke streaming resilient.
+              break
+          }
+        }
+      }
+    } catch (error) {
+      if ((error as Error).name !== 'AbortError') {
+        callbacks.onError?.({ error: (error as Error).message })
+      }
+    }
+  }
+
+  fetchSSE()
+
+  return {
+    abort: () => controller.abort(),
+  }
+}
+
 export const previewPipelinePlan = async (
   planId: string,
   payload: {
@@ -900,6 +1273,603 @@ export const runGraphQuery = async (dbName: string, payload: Record<string, unkn
       body: JSON.stringify(payload),
     },
     'Graph query failed',
+  )
+  return data
+}
+
+// === Lineage Types ===
+export type LineageNode = {
+  id: string
+  label: string
+  type: 'dataset' | 'pipeline' | 'object' | 'report' | 'source'
+  metadata?: Record<string, unknown>
+}
+
+export type LineageEdge = {
+  id: string
+  source: string
+  target: string
+  label?: string
+}
+
+export type LineageGraphResponse = {
+  nodes: LineageNode[]
+  edges: LineageEdge[]
+  rootId: string
+}
+
+export type LineageImpactResponse = {
+  affectedReports: number
+  affectedPipelines: number
+  lastUpdated?: string
+  downstream: Array<{ id: string; name: string; type: string }>
+}
+
+// === Instance/Explorer Types ===
+export type OntologyClass = {
+  id: string
+  label: string
+  description?: string
+  propertyCount?: number
+  instanceCount?: number
+}
+
+export type Instance = {
+  id: string
+  classId: string
+  label: string
+  properties: Record<string, unknown>
+  createdAt?: string
+  updatedAt?: string
+}
+
+export type InstanceListResponse = {
+  instances: Instance[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export type Relationship = {
+  id: string
+  predicate: string
+  predicateLabel?: string
+  sourceId: string
+  sourceLabel: string
+  sourceClass: string
+  targetId: string
+  targetLabel: string
+  targetClass: string
+  properties?: Record<string, unknown>
+}
+
+export type NLQueryResponse = {
+  results: Array<Record<string, unknown>>
+  columns: string[]
+  query?: string
+  explanation?: string
+  totalCount?: number
+}
+
+// === Action Types ===
+export type ActionParameter = {
+  name: string
+  label: string
+  type: 'string' | 'number' | 'boolean' | 'select' | 'instance'
+  required?: boolean
+  options?: Array<{ value: string; label: string }>
+  instanceClassId?: string
+  defaultValue?: unknown
+  description?: string
+}
+
+export type ActionType = {
+  id: string
+  name: string
+  description?: string
+  targetClass?: string
+  parameters: ActionParameter[]
+  createdAt?: string
+  updatedAt?: string
+}
+
+export type ActionTypeDetail = ActionType & {
+  examples?: Array<{ description: string; params: Record<string, unknown> }>
+  relatedActions?: string[]
+}
+
+export type SimulationResult = {
+  success: boolean
+  changes: Array<{
+    entityId: string
+    entityLabel: string
+    field: string
+    before: unknown
+    after: unknown
+  }>
+  warnings?: string[]
+  errors?: string[]
+}
+
+export type ExecutionResult = {
+  success: boolean
+  executionId: string
+  timestamp: string
+  changes: Array<{
+    entityId: string
+    entityLabel: string
+    field: string
+    before: unknown
+    after: unknown
+  }>
+  errors?: string[]
+}
+
+export type ActionLog = {
+  id: string
+  actionTypeId: string
+  actionTypeName: string
+  executedBy: string
+  executedAt: string
+  status: 'success' | 'failed' | 'pending'
+  params: Record<string, unknown>
+  result?: Record<string, unknown>
+}
+
+// === Link Type Types ===
+export type LinkType = {
+  id: string
+  name: string
+  predicate: string
+  sourceClassId: string
+  sourceClassName: string
+  targetClassId: string
+  targetClassName: string
+  cardinality?: 'one-to-one' | 'one-to-many' | 'many-to-many'
+  description?: string
+}
+
+export type LinkTypeDetail = LinkType & {
+  properties?: Array<{ name: string; type: string }>
+  instanceCount?: number
+}
+
+// === Detected Relationships (Objectify) ===
+export type DetectedRelationship = {
+  sourceColumn: string
+  targetDataset: string
+  targetColumn: string
+  confidence: number
+  suggestedPredicate?: string
+}
+
+export type DetectedRelationships = {
+  datasetId: string
+  relationships: DetectedRelationship[]
+}
+
+// === Lineage API ===
+export const getLineageGraph = async (params: {
+  dbName: string
+  rootId: string
+  direction?: 'both' | 'upstream' | 'downstream'
+  maxDepth?: number
+  maxNodes?: number
+}) => {
+  const query = new URLSearchParams()
+  query.set('root_id', params.rootId)
+  if (params.direction) {
+    query.set('direction', params.direction)
+  }
+  if (params.maxDepth !== undefined) {
+    query.set('max_depth', String(params.maxDepth))
+  }
+  if (params.maxNodes !== undefined) {
+    query.set('max_nodes', String(params.maxNodes))
+  }
+  const encoded = encodeURIComponent(params.dbName)
+  const data = await requestApi<LineageGraphResponse>(
+    `/api/v1/lineage/${encoded}?${query.toString()}`,
+    {
+      headers: {
+        'X-DB-Name': params.dbName,
+        'X-Project': params.dbName,
+      },
+    },
+    '계보 정보를 불러오는데 실패했습니다',
+  )
+  return data
+}
+
+export const getLineageImpact = async (dbName: string, rootId: string) => {
+  const encoded = encodeURIComponent(dbName)
+  const data = await requestApi<LineageImpactResponse>(
+    `/api/v1/lineage/${encoded}/impact?root_id=${encodeURIComponent(rootId)}`,
+    {
+      headers: {
+        'X-DB-Name': dbName,
+        'X-Project': dbName,
+      },
+    },
+    '영향 분석을 불러오는데 실패했습니다',
+  )
+  return data
+}
+
+// === Instance/Explorer API ===
+export const listOntologyClasses = async (dbName: string) => {
+  if (isMockMode) {
+    const mockData = await loadMockData()
+    await mockData.mockDelay(MOCK_DELAY_MS)
+    return mockData.mockOntologyClasses
+  }
+  const encoded = encodeURIComponent(dbName)
+  const data = await requestApi<{ classes: OntologyClass[] }>(
+    `/api/v1/ontology/${encoded}/classes`,
+    {
+      headers: {
+        'X-DB-Name': dbName,
+        'X-Project': dbName,
+      },
+    },
+    '클래스 목록을 불러오는데 실패했습니다',
+  )
+  return data.classes ?? []
+}
+
+export const listInstances = async (
+  dbName: string,
+  classId: string,
+  params?: { search?: string; limit?: number; offset?: number },
+) => {
+  const query = new URLSearchParams()
+  if (params?.search) {
+    query.set('search', params.search)
+  }
+  if (params?.limit !== undefined) {
+    query.set('limit', String(params.limit))
+  }
+  if (params?.offset !== undefined) {
+    query.set('offset', String(params.offset))
+  }
+  const encoded = encodeURIComponent(dbName)
+  const classEncoded = encodeURIComponent(classId)
+  const suffix = query.toString()
+  const path = suffix
+    ? `/api/v1/ontology/${encoded}/classes/${classEncoded}/instances?${suffix}`
+    : `/api/v1/ontology/${encoded}/classes/${classEncoded}/instances`
+  const data = await requestApi<InstanceListResponse>(
+    path,
+    {
+      headers: {
+        'X-DB-Name': dbName,
+        'X-Project': dbName,
+      },
+    },
+    '인스턴스 목록을 불러오는데 실패했습니다',
+  )
+  return data
+}
+
+export const getInstance = async (dbName: string, classId: string, instanceId: string) => {
+  const encoded = encodeURIComponent(dbName)
+  const classEncoded = encodeURIComponent(classId)
+  const instanceEncoded = encodeURIComponent(instanceId)
+  const data = await requestApi<{ instance: Instance }>(
+    `/api/v1/ontology/${encoded}/classes/${classEncoded}/instances/${instanceEncoded}`,
+    {
+      headers: {
+        'X-DB-Name': dbName,
+        'X-Project': dbName,
+      },
+    },
+    '인스턴스 정보를 불러오는데 실패했습니다',
+  )
+  return data.instance
+}
+
+export const getInstanceRelationships = async (
+  dbName: string,
+  classId: string,
+  instanceId: string,
+) => {
+  const encoded = encodeURIComponent(dbName)
+  const classEncoded = encodeURIComponent(classId)
+  const instanceEncoded = encodeURIComponent(instanceId)
+  const data = await requestApi<{ relationships: Relationship[] }>(
+    `/api/v1/ontology/${encoded}/classes/${classEncoded}/instances/${instanceEncoded}/relationships`,
+    {
+      headers: {
+        'X-DB-Name': dbName,
+        'X-Project': dbName,
+      },
+    },
+    '관계 정보를 불러오는데 실패했습니다',
+  )
+  return data.relationships ?? []
+}
+
+// === Natural Language Query API ===
+export const naturalLanguageQuery = async (dbName: string, question: string) => {
+  const encoded = encodeURIComponent(dbName)
+  const data = await requestApi<NLQueryResponse>(
+    `/api/v1/ai/nl-query/${encoded}`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': createIdempotencyKey(),
+        'X-DB-Name': dbName,
+        'X-Project': dbName,
+      },
+      body: JSON.stringify({ question }),
+    },
+    '자연어 쿼리 실행에 실패했습니다',
+  )
+  return data
+}
+
+// === Action API ===
+export const listActionTypes = async (dbName: string) => {
+  if (isMockMode) {
+    const mockData = await loadMockData()
+    await mockData.mockDelay(MOCK_DELAY_MS)
+    return mockData.mockActionTypes
+  }
+  const encoded = encodeURIComponent(dbName)
+  const data = await requestApi<{ actionTypes: ActionType[] }>(
+    `/api/v1/ontology/${encoded}/action-types`,
+    {
+      headers: {
+        'X-DB-Name': dbName,
+        'X-Project': dbName,
+      },
+    },
+    'Action 목록을 불러오는데 실패했습니다',
+  )
+  return data.actionTypes ?? []
+}
+
+export const getActionType = async (dbName: string, actionTypeId: string) => {
+  const encoded = encodeURIComponent(dbName)
+  const actionEncoded = encodeURIComponent(actionTypeId)
+  const data = await requestApi<{ actionType: ActionTypeDetail }>(
+    `/api/v1/ontology/${encoded}/action-types/${actionEncoded}`,
+    {
+      headers: {
+        'X-DB-Name': dbName,
+        'X-Project': dbName,
+      },
+    },
+    'Action 정보를 불러오는데 실패했습니다',
+  )
+  return data.actionType
+}
+
+export const simulateAction = async (
+  dbName: string,
+  actionTypeId: string,
+  params: Record<string, unknown>,
+) => {
+  const encoded = encodeURIComponent(dbName)
+  const actionEncoded = encodeURIComponent(actionTypeId)
+  const data = await requestApi<SimulationResult>(
+    `/api/v1/ontology/${encoded}/action-types/${actionEncoded}/simulate`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': createIdempotencyKey(),
+        'X-DB-Name': dbName,
+        'X-Project': dbName,
+      },
+      body: JSON.stringify({ params }),
+    },
+    '시뮬레이션 실행에 실패했습니다',
+  )
+  return data
+}
+
+export const executeAction = async (
+  dbName: string,
+  actionTypeId: string,
+  params: Record<string, unknown>,
+) => {
+  const encoded = encodeURIComponent(dbName)
+  const actionEncoded = encodeURIComponent(actionTypeId)
+  const data = await requestApi<ExecutionResult>(
+    `/api/v1/ontology/${encoded}/action-types/${actionEncoded}/execute`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': createIdempotencyKey(),
+        'X-DB-Name': dbName,
+        'X-Project': dbName,
+      },
+      body: JSON.stringify({ params }),
+    },
+    'Action 실행에 실패했습니다',
+  )
+  return data
+}
+
+export const listActionLogs = async (dbName: string, params?: { limit?: number; offset?: number }) => {
+  const query = new URLSearchParams()
+  if (params?.limit !== undefined) {
+    query.set('limit', String(params.limit))
+  }
+  if (params?.offset !== undefined) {
+    query.set('offset', String(params.offset))
+  }
+  const encoded = encodeURIComponent(dbName)
+  const suffix = query.toString()
+  const path = suffix
+    ? `/api/v1/ontology/${encoded}/action-logs?${suffix}`
+    : `/api/v1/ontology/${encoded}/action-logs`
+  const data = await requestApi<{ logs: ActionLog[] }>(
+    path,
+    {
+      headers: {
+        'X-DB-Name': dbName,
+        'X-Project': dbName,
+      },
+    },
+    'Action 기록을 불러오는데 실패했습니다',
+  )
+  return data.logs ?? []
+}
+
+// === Link Type API ===
+export const listLinkTypes = async (dbName: string) => {
+  if (isMockMode) {
+    const mockData = await loadMockData()
+    await mockData.mockDelay(MOCK_DELAY_MS)
+    return mockData.mockLinkTypes
+  }
+  const encoded = encodeURIComponent(dbName)
+  const data = await requestApi<{ linkTypes: LinkType[] }>(
+    `/api/v1/ontology/${encoded}/link-types`,
+    {
+      headers: {
+        'X-DB-Name': dbName,
+        'X-Project': dbName,
+      },
+    },
+    'Link Type 목록을 불러오는데 실패했습니다',
+  )
+  return data.linkTypes ?? []
+}
+
+export const getLinkType = async (dbName: string, linkTypeId: string) => {
+  const encoded = encodeURIComponent(dbName)
+  const linkEncoded = encodeURIComponent(linkTypeId)
+  const data = await requestApi<{ linkType: LinkTypeDetail }>(
+    `/api/v1/ontology/${encoded}/link-types/${linkEncoded}`,
+    {
+      headers: {
+        'X-DB-Name': dbName,
+        'X-Project': dbName,
+      },
+    },
+    'Link Type 정보를 불러오는데 실패했습니다',
+  )
+  return data.linkType
+}
+
+// === Objectify API ===
+export const detectRelationships = async (dbName: string, datasetId: string) => {
+  const encoded = encodeURIComponent(dbName)
+  const datasetEncoded = encodeURIComponent(datasetId)
+  const data = await requestApi<DetectedRelationships>(
+    `/api/v1/ontology/${encoded}/datasets/${datasetEncoded}/detect-relationships`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': createIdempotencyKey(),
+        'X-DB-Name': dbName,
+        'X-Project': dbName,
+      },
+    },
+    '관계 감지에 실패했습니다',
+  )
+  return data
+}
+
+// === UDF (User Defined Function) API ===
+export type UdfRecord = {
+  udf_id: string
+  db_name: string
+  name: string
+  description?: string
+  latest_version: number
+  created_at?: string
+  updated_at?: string
+  code?: string
+}
+
+export type UdfVersionRecord = {
+  version_id: string
+  udf_id: string
+  version: number
+  code: string
+  created_at?: string
+}
+
+export const listUdfs = async (dbName: string): Promise<UdfRecord[]> => {
+  if (isMockMode) {
+    const mockData = await loadMockData()
+    await mockData.mockDelay(MOCK_DELAY_MS)
+    return mockData.mockUdfs.filter(u => u.db_name === dbName || dbName === 'demo-project')
+  }
+  const data = await requestApi<UdfRecord[]>(
+    `/api/v1/pipelines/udfs?db_name=${encodeURIComponent(dbName)}`,
+    {
+      method: 'GET',
+      headers: {
+        'X-DB-Name': dbName,
+        'X-Project': dbName,
+      },
+    },
+    'UDF 목록 조회에 실패했습니다',
+  )
+  return data
+}
+
+export const createUdf = async (
+  dbName: string,
+  params: { name: string; code: string; description?: string },
+): Promise<UdfRecord> => {
+  const data = await requestApi<UdfRecord>(
+    `/api/v1/pipelines/udfs?db_name=${encodeURIComponent(dbName)}`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-DB-Name': dbName,
+        'X-Project': dbName,
+      },
+      body: JSON.stringify(params),
+    },
+    'UDF 생성에 실패했습니다',
+  )
+  return data
+}
+
+export const getUdf = async (udfId: string): Promise<UdfRecord> => {
+  const data = await requestApi<UdfRecord>(
+    `/api/v1/pipelines/udfs/${encodeURIComponent(udfId)}`,
+    { method: 'GET' },
+    'UDF 조회에 실패했습니다',
+  )
+  return data
+}
+
+export const createUdfVersion = async (
+  udfId: string,
+  code: string,
+): Promise<UdfVersionRecord> => {
+  const data = await requestApi<UdfVersionRecord>(
+    `/api/v1/pipelines/udfs/${encodeURIComponent(udfId)}/versions`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code }),
+    },
+    'UDF 버전 생성에 실패했습니다',
+  )
+  return data
+}
+
+export const getUdfVersion = async (
+  udfId: string,
+  version: number,
+): Promise<UdfVersionRecord> => {
+  const data = await requestApi<UdfVersionRecord>(
+    `/api/v1/pipelines/udfs/${encodeURIComponent(udfId)}/versions/${version}`,
+    { method: 'GET' },
+    'UDF 버전 조회에 실패했습니다',
   )
   return data
 }

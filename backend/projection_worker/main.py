@@ -13,7 +13,7 @@ from contextlib import suppress
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
 
-from confluent_kafka import Consumer, Producer, KafkaError, KafkaException, TopicPartition
+from confluent_kafka import Producer, KafkaError, TopicPartition
 
 from shared.config.search_config import (
     get_instances_index_name,
@@ -25,9 +25,7 @@ from shared.config.app_config import AppConfig
 from shared.config.settings import get_settings
 from shared.models.event_envelope import EventEnvelope
 from shared.models.events import (
-    BaseEvent, EventType,
-    InstanceEvent,
-    OntologyEvent
+    EventType,
 )
 from shared.services.storage.redis_service import RedisService, create_redis_service
 from shared.services.storage.elasticsearch_service import ElasticsearchService, create_elasticsearch_service
@@ -39,6 +37,7 @@ from shared.services.registries.processed_event_registry import (
     validate_registry_enabled,
     validate_lease_settings,
 )
+from shared.services.kafka.safe_consumer import SafeKafkaConsumer
 from shared.services.registries.lineage_store import LineageStore
 from shared.services.core.audit_log_store import AuditLogStore
 from shared.utils.chaos import maybe_crash
@@ -81,7 +80,7 @@ class ProjectionWorker:
 
         self.running = False
         self.kafka_servers = settings.database.kafka_servers
-        self.consumer: Optional[Consumer] = None
+        self.consumer: Optional[SafeKafkaConsumer] = None
         self.producer: Optional[Producer] = None
         self.redis_service: Optional[RedisService] = None
         self.elasticsearch_service: Optional[ElasticsearchService] = None
@@ -371,17 +370,15 @@ class ProjectionWorker:
 
         group_id = (AppConfig.PROJECTION_WORKER_GROUP or "projection-worker-group").strip()
 
-        # Kafka Consumer 설정 (멀티 토픽 구독)
+        # Kafka Consumer (strong consistency: read_committed + rebalance-safe offsets)
+        topics = [AppConfig.INSTANCE_EVENTS_TOPIC, AppConfig.ONTOLOGY_EVENTS_TOPIC, AppConfig.ACTION_EVENTS_TOPIC]
         self.consumer = await self._consumer_call(
-            Consumer,
-            {
-                'bootstrap.servers': self.kafka_servers,
-                'group.id': group_id,
-                'auto.offset.reset': 'earliest',
-                'enable.auto.commit': False,
-                'max.poll.interval.ms': 300000,  # 5분
-                'session.timeout.ms': 45000,  # 45초
-            },
+            SafeKafkaConsumer,
+            group_id,
+            topics,
+            "projection-worker",
+            max_poll_interval_ms=300000,
+            session_timeout_ms=45000,
         )
         
         # Kafka Producer 설정 (실패 이벤트 발행용)
@@ -441,9 +438,6 @@ class ProjectionWorker:
         # 인덱스 생성 및 매핑 설정
         await self._setup_indices()
         
-        # 토픽 구독
-        topics = [AppConfig.INSTANCE_EVENTS_TOPIC, AppConfig.ONTOLOGY_EVENTS_TOPIC, AppConfig.ACTION_EVENTS_TOPIC]
-        await self._consumer_call(self.consumer.subscribe, topics)
         logger.info(f"Subscribed to topics: {topics}")
         
         # Initialize OpenTelemetry
@@ -486,9 +480,16 @@ class ProjectionWorker:
             index_name = get_ontologies_index_name(db_name, branch=branch)
             mapping = self.ontologies_mapping
             
-        # 이미 생성된 인덱스는 스킵
+        # Fast path: if we *think* we've already created it, confirm it still exists.
+        # ES indices can be deleted between runs (or reset in CI/local gate), so the cache must be resilient.
         if index_name in self.created_indices:
-            return index_name
+            try:
+                if await self.elasticsearch_service.index_exists(index_name):
+                    return index_name
+            except Exception:
+                # Fall through to recreate on any transient ES error.
+                pass
+            self.created_indices.discard(index_name)
             
         try:
             if not await self.elasticsearch_service.index_exists(index_name):
@@ -980,7 +981,7 @@ class ProjectionWorker:
                     overlay_index,
                     effective,
                     doc_id=overlay_id,
-                    refresh=True,
+                    refresh=False,
                     version=incoming_seq,
                     version_type="external_gte",
                 )
@@ -1086,7 +1087,7 @@ class ProjectionWorker:
                     index_name,
                     doc,
                     doc_id=instance_id,
-                    refresh=True,
+                    refresh=False,
                     version=incoming_seq,
                     version_type="external_gte" if incoming_seq is not None else None,
                     op_type="create" if incoming_seq is None else None,
@@ -1262,7 +1263,7 @@ class ProjectionWorker:
                         index_name,
                         doc,
                         doc_id=instance_id,
-                        refresh=True,
+                        refresh=False,
                         version=incoming_seq,
                         version_type="external_gte",
                     )
@@ -1271,7 +1272,7 @@ class ProjectionWorker:
                         index_name,
                         doc,
                         doc_id=instance_id,
-                        refresh=True,
+                        refresh=False,
                         op_type="create",
                     )
             except Exception as e:
@@ -1422,7 +1423,7 @@ class ProjectionWorker:
                         index_name,
                         tombstone_doc,
                         doc_id=instance_id,
-                        refresh=True,
+                        refresh=False,
                         version=incoming_seq,
                         version_type="external_gte",
                     )
@@ -1531,7 +1532,7 @@ class ProjectionWorker:
                 success = await self.elasticsearch_service.delete_document(
                     index_name,
                     instance_id,
-                    refresh=True,
+                    refresh=False,
                     version=incoming_seq,
                     version_type="external_gte",
                 )
@@ -1692,7 +1693,7 @@ class ProjectionWorker:
                     index_name,
                     doc,
                     doc_id=class_id,
-                    refresh=True,
+                    refresh=False,
                     version=incoming_seq,
                     version_type="external_gte" if incoming_seq is not None else None,
                     op_type="create" if incoming_seq is None else None,
@@ -1884,7 +1885,7 @@ class ProjectionWorker:
                         index_name,
                         doc,
                         doc_id=class_id,
-                        refresh=True,
+                        refresh=False,
                         version=incoming_seq,
                         version_type="external_gte",
                     )
@@ -1893,7 +1894,7 @@ class ProjectionWorker:
                         index_name,
                         doc,
                         doc_id=class_id,
-                        refresh=True,
+                        refresh=False,
                         op_type="create",
                     )
             except Exception as e:
@@ -2053,7 +2054,7 @@ class ProjectionWorker:
                         index_name,
                         tombstone_doc,
                         doc_id=class_id,
-                        refresh=True,
+                        refresh=False,
                         version=incoming_seq,
                         version_type="external_gte",
                     )
@@ -2165,7 +2166,7 @@ class ProjectionWorker:
                 success = await self.elasticsearch_service.delete_document(
                     index_name,
                     class_id,
-                    refresh=True,
+                    refresh=False,
                     version=incoming_seq,
                     version_type="external_gte",
                 )
@@ -2270,7 +2271,7 @@ class ProjectionWorker:
                 metadata_index,
                 metadata_doc,
                 doc_id=db_name,
-                refresh=True
+                refresh=False
             )
             
             logger.info(f"Database creation processed: {db_name}, indices prepared and metadata indexed")
@@ -2340,7 +2341,7 @@ class ProjectionWorker:
                         'deleted_by': event_data.get('occurred_by', 'system'),
                         'deletion_event_id': event_id
                     },
-                    refresh=True
+                    refresh=False
                 )
             
             # 생성된 인덱스 캐시에서 제거

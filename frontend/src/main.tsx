@@ -3,6 +3,8 @@ import { createRoot } from 'react-dom/client'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import '@blueprintjs/core/lib/css/blueprint.css'
 import '@blueprintjs/icons/lib/css/blueprint-icons.css'
+import '@blueprintjs/select/lib/css/blueprint-select.css'
+import 'reactflow/dist/style.css'
 import './styles.css'
 import { AppShell } from './app/AppShell'
 

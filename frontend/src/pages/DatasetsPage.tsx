@@ -98,7 +98,7 @@ const normalizeDatabaseRecord = (record: DatabaseRecord | string): FolderRecord 
     (Array.isArray(record.datasets) ? record.datasets.length : undefined)
 
   return {
-    id: name,
+    id: record.db_name || name,
     name: displayName || name,
     description: shouldUseDescriptionAsName ? undefined : description,
     updatedAt: record.updated_at || record.created_at,
@@ -355,7 +355,6 @@ export const DatasetsPage = () => {
   const databasesQuery = useQuery({ queryKey: ['databases'], queryFn: listDatabases })
   const setActiveNav = useAppStore((state) => state.setActiveNav)
   const setPipelineContext = useAppStore((state) => state.setPipelineContext)
-  const setAiAgentOpen = useAppStore((state) => state.setAiAgentOpen)
   const currentUserId = (import.meta.env.VITE_USER_ID as string | undefined) ?? 'system'
   const recentsStorageKey = `${RECENTS_STORAGE_PREFIX}.${currentUserId || 'system'}`
   const [activeFolderId, setActiveFolderId] = useState<string | null>(null)
@@ -738,11 +737,6 @@ export const DatasetsPage = () => {
       }
       setCreateMenuOpen(false)
       setActiveNav('pipeline')
-      return
-    }
-    if (optionId === 'aip-agent') {
-      setCreateMenuOpen(false)
-      setAiAgentOpen(true)
       return
     }
     if (optionId === 'aip-logic') {
@@ -1145,7 +1139,7 @@ export const DatasetsPage = () => {
         onClose={handleCloseCreateMenu}
         title="Create"
         icon="add"
-        className="create-dialog bp5-dark"
+        className="create-dialog bp6-dark"
       >
         <div className="create-dialog-body">
           <div className="create-dialog-search">
@@ -1199,7 +1193,7 @@ export const DatasetsPage = () => {
         onClose={handleCloseCreateFolder}
         title="New project"
         icon="folder-new"
-        className="folder-dialog bp5-dark"
+        className="folder-dialog bp6-dark"
       >
           <div className="folder-dialog-body">
             <FormGroup label="Project name" labelFor="folder-name-input">
@@ -1234,7 +1228,7 @@ export const DatasetsPage = () => {
         onClose={handleCloseDeleteProject}
         title="Delete project"
         icon="trash"
-        className="folder-dialog bp5-dark"
+        className="folder-dialog bp6-dark"
       >
         <div className="folder-dialog-body">
           <Text>

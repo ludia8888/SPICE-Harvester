@@ -127,31 +127,65 @@ class GraphFederationServiceWOQL:
             return value_def
         return None
 
+    @staticmethod
+    def _normalize_hops(hops: Any) -> List[Tuple[str, str, bool]]:
+        """
+        Normalize hop specs into a stable (predicate, target_class, reverse) tuple list.
+
+        Supports:
+        - [(predicate, target_class), ...]
+        - [(predicate, target_class, reverse_bool), ...]
+        - [{"predicate": ..., "target_class": ..., "reverse": ...}, ...]
+        """
+        output: List[Tuple[str, str, bool]] = []
+        if not isinstance(hops, list):
+            return output
+        for hop in hops:
+            predicate = None
+            target_class = None
+            reverse = False
+            if isinstance(hop, (tuple, list)) and len(hop) >= 2:
+                predicate = hop[0]
+                target_class = hop[1]
+                if len(hop) >= 3:
+                    reverse = bool(hop[2])
+            elif isinstance(hop, dict):
+                predicate = hop.get("predicate")
+                target_class = hop.get("target_class") or hop.get("targetClass")
+                reverse = bool(hop.get("reverse", False))
+            if not predicate or not target_class:
+                continue
+            output.append((str(predicate), str(target_class), reverse))
+        return output
+
     async def _validate_hop_semantics(
         self,
         *,
         db_name: str,
         branch: str,
         start_class: str,
-        hops: List[Tuple[str, str]],
+        hops: List[Tuple[str, str, bool]],
     ) -> None:
         current_class = start_class
-        for predicate, target_class in hops:
+        for predicate, target_class, reverse in hops:
+            domain_class = target_class if reverse else current_class
+            expected_range = current_class if reverse else target_class
             schema_doc = await self._fetch_schema_class_doc(
-                db_name=db_name, class_id=current_class, branch=branch
+                db_name=db_name, class_id=domain_class, branch=branch
             )
             if not schema_doc:
-                raise ValueError(f"Schema class not found: {current_class}")
+                raise ValueError(f"Schema class not found: {domain_class}")
 
             if predicate not in schema_doc:
-                raise ValueError(f"Unknown predicate '{predicate}' for domain '{current_class}'")
+                raise ValueError(f"Unknown predicate '{predicate}' for domain '{domain_class}'")
 
             rng = self._schema_range_for_predicate(schema_doc, predicate)
             if not rng:
-                raise ValueError(f"Predicate '{predicate}' on '{current_class}' is not a relationship")
-            if str(rng) != str(target_class):
+                raise ValueError(f"Predicate '{predicate}' on '{domain_class}' is not a relationship")
+            if str(rng) != str(expected_range):
                 raise ValueError(
-                    f"Predicate '{predicate}' range mismatch: domain={current_class} expected_range={rng} requested={target_class}"
+                    f"Predicate '{predicate}' range mismatch: "
+                    f"domain={domain_class} expected_range={rng} requested={expected_range}"
                 )
 
             current_class = target_class
@@ -161,9 +195,10 @@ class GraphFederationServiceWOQL:
         *,
         db_name: str,
         start_class: str,
-        hops: List[Tuple[str, str]],  # [(predicate, target_class), ...]
+        hops: List[Any],  # [(predicate, target_class[, reverse]), ...] or dicts
         base_branch: str = "main",
         overlay_branch: Optional[str] = None,
+        terminus_branch: Optional[str] = None,
         strict_overlay: bool = False,
         filters: Optional[Dict[str, Any]] = None,
         limit: int = 100,
@@ -180,11 +215,17 @@ class GraphFederationServiceWOQL:
         Execute multi-hop graph query with ES federation using REAL WOQL
         """
         base_branch = validate_branch_name(base_branch or "main")
-        logger.info(f"🔥 REAL WOQL Multi-hop query: {start_class} -> {hops} (base_branch={base_branch}, overlay_branch={overlay_branch})")
+        terminus_branch = validate_branch_name(terminus_branch or base_branch or "main")
+        logger.info(
+            f"🔥 REAL WOQL Multi-hop query: {start_class} -> {hops} "
+            f"(terminus_branch={terminus_branch}, es_base_branch={base_branch}, overlay_branch={overlay_branch})"
+        )
+
+        normalized_hops = self._normalize_hops(hops)
 
         graph_settings = get_settings().graph_query
         max_hops = int(graph_settings.max_hops)
-        if len(hops) > max_hops:
+        if len(normalized_hops) > max_hops:
             raise ValueError(f"Too many hops (max={max_hops})")
 
         limit = max(1, min(int(limit), int(graph_settings.max_limit)))
@@ -197,13 +238,16 @@ class GraphFederationServiceWOQL:
         max_paths = min(max_paths, int(graph_settings.max_paths))
 
         enforce_semantics = bool(graph_settings.enforce_semantics)
-        if enforce_semantics and hops:
+        if enforce_semantics and normalized_hops:
             await self._validate_hop_semantics(
-                db_name=db_name, branch=base_branch, start_class=start_class, hops=hops
+                db_name=db_name,
+                branch=terminus_branch,
+                start_class=start_class,
+                hops=normalized_hops,
             )
         
         # Step 1: Build WOQL query for graph traversal
-        woql_query, hop_variables = self._build_multi_hop_woql(start_class, hops, filters)
+        woql_query, hop_variables = self._build_multi_hop_woql(start_class, normalized_hops, filters)
 
         # Pagination/limits: apply Start (offset) then Limit (page size)
         if offset:
@@ -211,7 +255,7 @@ class GraphFederationServiceWOQL:
         woql_query = {"@type": "Limit", "limit": limit, "query": woql_query}
         
         # Step 2: Execute WOQL query
-        branch_path = self._terminus_branch_path(base_branch)
+        branch_path = self._terminus_branch_path(terminus_branch)
         async with httpx.AsyncClient() as client:
             request_body = {"query": woql_query}
             
@@ -251,21 +295,24 @@ class GraphFederationServiceWOQL:
                     path_node_ids: List[str] = [start_id]
                     path_edges: List[Dict[str, str]] = []
                     prev_id = start_id
-                    predicates: List[str] = []
-                    for predicate, _target_class, target_var in hop_variables:
+                    predicate_specs: List[Tuple[str, bool]] = []
+                    for predicate, _target_class, target_var, reverse in hop_variables:
                         target_id = binding.get(target_var)
                         if not target_id:
                             break
                         path_node_ids.append(target_id)
-                        path_edges.append({"from": prev_id, "to": target_id, "predicate": predicate})
-                        predicates.append(predicate)
+                        if reverse:
+                            path_edges.append({"from": target_id, "to": prev_id, "predicate": predicate})
+                        else:
+                            path_edges.append({"from": prev_id, "to": target_id, "predicate": predicate})
+                        predicate_specs.append((predicate, bool(reverse)))
                         prev_id = target_id
 
                     if no_cycles and len(set(path_node_ids)) != len(path_node_ids):
                         if "cycle_filtered(no_cycles=true)" not in warnings:
                             warnings.append("cycle_filtered(no_cycles=true)")
                     else:
-                        key = (tuple(path_node_ids), tuple(predicates))
+                        key = (tuple(path_node_ids), tuple(predicate_specs))
                         if key not in seen_paths:
                             seen_paths.add(key)
                             paths.append({"nodes": path_node_ids, "edges": path_edges})
@@ -305,7 +352,7 @@ class GraphFederationServiceWOQL:
             prev_var = start_var
             prev_id = binding.get(start_var)
             
-            for predicate, target_class, target_var in hop_variables:
+            for predicate, target_class, target_var, reverse in hop_variables:
                 if target_var in binding:
                     target_id = binding[target_var]
                     # Use terminus_id for ES lookup (same as graph node ID)
@@ -335,11 +382,10 @@ class GraphFederationServiceWOQL:
                     # Add edge
                     if prev_id:
                         if len(edges) < max_edges:
-                            edges.append({
-                                "from": prev_id,
-                                "to": target_id,
-                                "predicate": predicate
-                            })
+                            if reverse:
+                                edges.append({"from": target_id, "to": prev_id, "predicate": predicate})
+                            else:
+                                edges.append({"from": prev_id, "to": target_id, "predicate": predicate})
                         else:
                             warnings.append(f"edge_limit_reached(max_edges={max_edges})")
                     
@@ -449,6 +495,7 @@ class GraphFederationServiceWOQL:
         class_name: str,
         base_branch: str = "main",
         overlay_branch: Optional[str] = None,
+        terminus_branch: Optional[str] = None,
         strict_overlay: bool = False,
         filters: Optional[Dict[str, Any]] = None,
         include_documents: bool = True,
@@ -460,7 +507,11 @@ class GraphFederationServiceWOQL:
         Elasticsearch has full domain data
         """
         base_branch = validate_branch_name(base_branch or "main")
-        logger.info(f"📊 Query: {class_name} via WOQL -> ES enrichment")
+        terminus_branch = validate_branch_name(terminus_branch or base_branch or "main")
+        logger.info(
+            f"📊 Query: {class_name} via WOQL -> ES enrichment "
+            f"(terminus_branch={terminus_branch}, es_base_branch={base_branch}, overlay_branch={overlay_branch})"
+        )
         
         # Lightweight principle: lightweight nodes in TerminusDB, full data in ES
         # Step 1: Query TerminusDB for instance IDs using WOQL
@@ -472,7 +523,7 @@ class GraphFederationServiceWOQL:
         es_doc_ids = []
         try:
             import httpx
-            branch_path = self._terminus_branch_path(base_branch)
+            branch_path = self._terminus_branch_path(terminus_branch)
             async with httpx.AsyncClient() as client:
                 request_body = {"query": woql_query}
                 response = await client.post(
@@ -574,28 +625,28 @@ class GraphFederationServiceWOQL:
     def _build_multi_hop_woql(
         self,
         start_class: str,
-        hops: List[Tuple[str, str]],
+        hops: List[Tuple[str, str, bool]],
         filters: Optional[Dict[str, Any]] = None
-    ) -> Tuple[Dict[str, Any], List[Tuple[str, str, str]]]:
+    ) -> Tuple[Dict[str, Any], List[Tuple[str, str, str, bool]]]:
         """Build WOQL query for multi-hop traversal"""
         
         # Build variable list with meaningful names
         variables = [f"v:{start_class}"]
         hop_variables = []  # Track variable names for each hop
         
-        for i, (predicate, target_class) in enumerate(hops):
+        for i, (predicate, target_class, reverse) in enumerate(hops):
             # Create meaningful variable name like v:RelatedClient instead of v:Client0
             if i == 0:
                 var_name = f"v:Related{target_class}"
             else:
                 var_name = f"v:{target_class}_{i}"
             variables.append(var_name)
-            hop_variables.append((predicate, target_class, var_name))
+            hop_variables.append((predicate, target_class, var_name, reverse))
 
         # Display fields: always include PK and name (optional) for each node var.
         # These are stored in Terminus (graph) so UIs can render stable summaries even if ES is missing.
         node_vars: List[Tuple[str, str]] = [(f"v:{start_class}", start_class)] + [
-            (target_var, target_class) for _, target_class, target_var in hop_variables
+            (target_var, target_class) for _, target_class, target_var, _reverse in hop_variables
         ]
         for node_var, cls in node_vars:
             variables.append(f"{node_var}_pk")
@@ -624,13 +675,15 @@ class GraphFederationServiceWOQL:
         
         # Add hop conditions
         current_var = f"v:{start_class}"
-        for predicate, target_class, target_var in hop_variables:
-            # Relationship triple
+        for predicate, target_class, target_var, reverse in hop_variables:
+            # Relationship triple (supports reverse traversal)
+            subject_var = target_var if reverse else current_var
+            object_var = current_var if reverse else target_var
             and_conditions.append({
                 "@type": "Triple",
-                "subject": {"variable": current_var},
+                "subject": {"variable": subject_var},
                 "predicate": {"node": f"@schema:{predicate}"},
-                "object": {"variable": target_var}
+                "object": {"variable": object_var}
             })
             
             # Target class type check

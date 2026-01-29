@@ -1010,6 +1010,8 @@ class EventStore:
             "s3_key": key,
             "schema_version": event.schema_version,
             "kafka_topic": event.metadata.get("kafka_topic") if isinstance(event.metadata, dict) else None,
+            # Optional Kafka partitioning override (keeps aggregate_id semantics intact).
+            "ordering_key": event.metadata.get("ordering_key") if isinstance(event.metadata, dict) else None,
         }
 
         aggregate_index_key = (

@@ -11,15 +11,15 @@ CRITICAL: All workers MUST use this consumer instead of raw confluent_kafka.Cons
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import threading
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Any, Callable, Dict, List, Optional
 
-from confluent_kafka import Consumer, TopicPartition, OFFSET_STORED
+from confluent_kafka import Consumer, TopicPartition
 
 from shared.config.settings import get_settings
 
@@ -166,10 +166,14 @@ class SafeKafkaConsumer:
             service_name="my-worker",
         )
 
-        for msg in consumer.poll_messages():
+        while True:
+            msg = consumer.poll(timeout=1.0)
+            if msg is None:
+                continue
+            if msg.error():
+                continue
             process(msg)
-            consumer.mark_processed(msg)
-            consumer.commit_if_ready()
+            consumer.commit_sync(msg)
     """
 
     # Critical settings that MUST be enforced
@@ -307,6 +311,30 @@ class SafeKafkaConsumer:
 
         return msg
 
+    def wait_for_assignment(self, *, timeout_seconds: float = 10.0) -> bool:
+        """
+        Block until partitions are assigned (or timeout).
+
+        NOTE: Creating a confluent_kafka.Consumer does not immediately join the consumer group. Partition
+        assignment happens only after polling. Tests and workers that rely on `auto.offset.reset=latest`
+        should call this before producing signals they want to observe.
+        """
+        deadline = time.monotonic() + float(timeout_seconds)
+        while time.monotonic() < deadline:
+            try:
+                self._consumer.poll(0.1)
+            except Exception:
+                # Keep trying; transient broker/DNS issues can resolve shortly after startup.
+                time.sleep(0.1)
+                continue
+            try:
+                if self._consumer.assignment():
+                    return True
+            except Exception:
+                pass
+            time.sleep(0.1)
+        return False
+
     def mark_processed(self, msg: Any) -> None:
         """
         Mark a message as successfully processed.
@@ -324,27 +352,63 @@ class SafeKafkaConsumer:
                     TopicPartition(msg.topic(), msg.partition(), msg.offset() + 1)
                 )
 
-    def commit(self, msg: Optional[Any] = None, asynchronous: bool = False) -> None:
+    def commit(
+        self,
+        message: Optional[Any] = None,
+        offsets: Optional[List[TopicPartition]] = None,
+        asynchronous: bool = False,
+        *,
+        msg: Optional[Any] = None,
+    ) -> None:
         """
         Commit offsets.
 
         Args:
-            msg: Specific message to commit (if None, commits all pending)
+            message: Specific message to commit (if None, commits all pending)
+            offsets: Explicit offsets to commit (TopicPartition list)
             asynchronous: Whether to commit asynchronously
+            msg: Backwards-compatible alias for `message`
         """
+        if msg is not None:
+            if message is not None:
+                raise TypeError("Provide only one of 'message' or 'msg'")
+            message = msg
+        if message is not None and offsets is not None:
+            raise TypeError("Provide only one of 'message' or 'offsets'")
+
         if self._state == ConsumerState.REBALANCING:
             logger.warning("Skipping commit during rebalance")
             return
 
         with self._lock:
-            if msg:
-                self._consumer.commit(message=msg, asynchronous=asynchronous)
-                # Update last committed
-                key = (msg.topic(), msg.partition())
+            if message is not None:
+                # Treat explicit commit as successful processing for partition-state bookkeeping.
+                key = (message.topic(), message.partition())
                 state = self._partition_states.get(key)
                 if state:
-                    state.last_committed = msg.offset()
-            elif self._pending_commits:
+                    state.processing = False
+                    state.current_offset = message.offset()
+                    state.pending_offset = message.offset()
+
+                self._consumer.commit(message=message, asynchronous=asynchronous)
+
+                if state:
+                    state.last_committed = message.offset()
+                return
+
+            if offsets is not None:
+                self._consumer.commit(offsets=offsets, asynchronous=asynchronous)
+                for tp in offsets:
+                    key = (tp.topic, tp.partition)
+                    state = self._partition_states.get(key)
+                    if state:
+                        state.last_committed = tp.offset - 1
+                        state.processing = False
+                        state.current_offset = tp.offset - 1
+                        state.pending_offset = tp.offset - 1
+                return
+
+            if self._pending_commits:
                 self._consumer.commit(offsets=self._pending_commits, asynchronous=asynchronous)
                 # Update last committed for all
                 for tp in self._pending_commits:
@@ -352,11 +416,32 @@ class SafeKafkaConsumer:
                     state = self._partition_states.get(key)
                     if state:
                         state.last_committed = tp.offset - 1
+                        state.processing = False
+                        state.current_offset = tp.offset - 1
+                        state.pending_offset = tp.offset - 1
                 self._pending_commits.clear()
 
     def commit_sync(self, msg: Any) -> None:
         """Synchronously commit a specific message offset."""
-        self.commit(msg=msg, asynchronous=False)
+        self.commit(message=msg, asynchronous=False)
+
+    def seek(self, partition: TopicPartition) -> None:
+        """
+        Seek to a specific offset for a partition.
+
+        NOTE: This is used by workers to retry the current message (poison handling / backoff).
+        """
+        with self._lock:
+            key = (partition.topic, partition.partition)
+            state = self._partition_states.get(key)
+            if state:
+                # We are explicitly rewinding/positioning; clear any in-flight bookkeeping.
+                state.processing = False
+                state.pending_offset = None
+                # Best-effort: reflect the next message that will be delivered after seek.
+                if partition.offset is not None and partition.offset >= 0:
+                    state.current_offset = partition.offset - 1
+        self._consumer.seek(partition)
 
     def close(self, timeout: float = 10.0) -> None:
         """
@@ -398,6 +483,18 @@ class SafeKafkaConsumer:
     def position(self, partitions: List[TopicPartition]) -> List[TopicPartition]:
         """Get current position for partitions."""
         return self._consumer.position(partitions)
+
+    def pause(self, partitions: List[TopicPartition]) -> None:
+        """Pause fetching from the provided partitions (backpressure)."""
+        if self._state in {ConsumerState.CLOSED}:
+            return
+        self._consumer.pause(partitions)
+
+    def resume(self, partitions: List[TopicPartition]) -> None:
+        """Resume fetching from the provided partitions (backpressure)."""
+        if self._state in {ConsumerState.CLOSED}:
+            return
+        self._consumer.resume(partitions)
 
 
 def create_safe_consumer(

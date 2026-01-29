@@ -1,0 +1,21 @@
+product_id,name,category,subcategory,unit_price,currency,unit_cost,inventory_qty,reorder_point,lead_time_days,vendor_id,status
+PRD-001,NCM Battery Cell 21700,Battery,Lithium-Ion,45000,KRW,32000,125000,50000,14,VND-001,Active
+PRD-002,LFP Battery Pack 60kWh,Battery,Lithium-Iron,8500000,KRW,6200000,2500,1000,21,VND-005,Active
+PRD-003,High-Tensile Steel Coil,Raw Material,Steel,890000,KRW,720000,8500,3000,7,VND-003,Active
+PRD-004,Automotive Semiconductor,Electronics,Chips,125000,KRW,89000,45000,15000,45,VND-004,Active
+PRD-005,EV Motor Assembly,Component,Drivetrain,2450000,KRW,1890000,3200,1200,28,VND-010,Active
+PRD-006,Brake System Kit,Component,Safety,680000,KRW,520000,8900,3500,14,VND-006,Active
+PRD-007,MLCC Capacitor 0402,Electronics,Passive,450,KRW,320,2500000,1000000,21,VND-015,Active
+PRD-008,Thermal Interface Material,Material,Chemicals,125000,KRW,89000,12000,5000,10,VND-013,Active
+PRD-009,Battery Management System,Electronics,Control,890000,KRW,680000,5600,2000,35,VND-014,Active
+PRD-010,Suspension Module,Component,Chassis,1250000,KRW,980000,4200,1500,21,VND-011,Active
+PRD-011,Display Panel 12.3",Electronics,Display,450000,KRW,340000,8900,3000,28,VND-008,Active
+PRD-012,Wiring Harness Set,Component,Electrical,320000,KRW,245000,15000,6000,14,VND-007,Active
+PRD-013,Polymer Electrolyte,Material,Chemicals,680000,KRW,520000,6500,2500,18,VND-002,Active
+PRD-014,Aluminum Die Cast Frame,Raw Material,Metal,125000,KRW,95000,22000,8000,10,VND-003,Active
+PRD-015,Camera Module ADAS,Electronics,Sensors,580000,KRW,420000,12500,5000,35,VND-007,Active
+PRD-016,Lithium Carbonate,Raw Material,Chemicals,89000,KRW,68000,45000,15000,21,VND-012,Low Stock
+PRD-017,Cobalt Sulfate,Raw Material,Chemicals,125000,KRW,98000,18000,8000,28,VND-012,Active
+PRD-018,Graphite Anode Material,Material,Battery,56000,KRW,42000,85000,30000,14,VND-009,Active
+PRD-019,Separator Film,Material,Battery,32000,KRW,24000,120000,50000,10,VND-002,Active
+PRD-020,Cooling System Assembly,Component,Thermal,890000,KRW,680000,4500,1800,21,VND-006,Active

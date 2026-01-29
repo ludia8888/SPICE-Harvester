@@ -98,13 +98,14 @@ async def _post_with_retry(
     url: str,
     *,
     json_payload: dict,
+    headers: Optional[dict[str, str]] = None,
     retries: int = 5,
     retry_sleep: float = 3.0,
 ) -> httpx.Response:
     last_response: Optional[httpx.Response] = None
     for attempt in range(retries):
         try:
-            response = await client.post(url, json=json_payload)
+            response = await client.post(url, json=json_payload, headers=headers)
         except httpx.HTTPError:
             if attempt + 1 >= retries:
                 raise
@@ -458,6 +459,7 @@ async def test_pipeline_objectify_es_projection() -> None:
             "settings": {"engine": "Batch"},
         }
 
+        pipeline_create_key = f"e2e:{db_name}:pipeline:create:raw_to_clean"
         create_pipeline = await client.post(
             f"{BFF_URL}/api/v1/pipelines",
             json={
@@ -469,16 +471,19 @@ async def test_pipeline_objectify_es_projection() -> None:
                 "pipeline_type": "batch",
                 "definition_json": definition_json,
             },
+            headers={"Idempotency-Key": pipeline_create_key},
         )
         create_pipeline.raise_for_status()
         pipeline = (create_pipeline.json().get("data") or {}).get("pipeline") or {}
         pipeline_id = str(pipeline.get("pipeline_id") or "")
         assert pipeline_id
 
+        pipeline_build_key = f"e2e:{db_name}:pipeline:build:raw_to_clean:out1"
         build_resp = await _post_with_retry(
             client,
             f"{BFF_URL}/api/v1/pipelines/{pipeline_id}/build",
             json_payload={"db_name": db_name, "node_id": "out1", "limit": 10},
+            headers={"Idempotency-Key": pipeline_build_key},
         )
         build_resp.raise_for_status()
         build_job_id = str(((build_resp.json().get("data") or {}) or {}).get("job_id") or "")

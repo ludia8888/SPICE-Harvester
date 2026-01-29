@@ -129,6 +129,8 @@ class FunnelHTTPTypeInferenceAdapter(TypeInferenceInterface):
         단일 컬럼 분석을 위한 비동기 헬퍼 메서드
         """
         try:
+            from shared.config.settings import get_settings
+
             request_data = {
                 "data": data,
                 "columns": headers,
@@ -136,15 +138,27 @@ class FunnelHTTPTypeInferenceAdapter(TypeInferenceInterface):
                 "include_complex_types": include_complex_types,
             }
 
-            response = await self.funnel_client.analyze_dataset(request_data)
+            settings = get_settings()
+            response = await self.funnel_client.analyze_dataset(
+                request_data,
+                timeout_seconds=float(settings.services.funnel_infer_timeout_seconds),
+            )
 
             # Funnel 응답을 Interface 형식으로 변환
             return [self._convert_funnel_column_result(col) for col in response.get("columns", [])]
 
         except Exception as e:
             logger.error(f"Funnel 서비스 분석 실패: {e}")
-            # 기본값 반환
-            return []
+            from shared.services.pipeline.pipeline_funnel_fallback import build_funnel_analysis_fallback
+
+            fallback = build_funnel_analysis_fallback(
+                columns=headers,
+                rows=data,
+                include_complex_types=include_complex_types,
+                error=str(e),
+                stage="bff",
+            )
+            return [InterfaceColumnResult(**col) for col in (fallback.get("columns") or [])]
 
     async def _analyze_dataset_async(
         self,
@@ -157,6 +171,8 @@ class FunnelHTTPTypeInferenceAdapter(TypeInferenceInterface):
         데이터셋 분석을 위한 비동기 헬퍼 메서드
         """
         try:
+            from shared.config.settings import get_settings
+
             request_data = {
                 "data": data,
                 "columns": headers,
@@ -164,15 +180,27 @@ class FunnelHTTPTypeInferenceAdapter(TypeInferenceInterface):
                 "include_complex_types": include_complex_types,
             }
 
-            response = await self.funnel_client.analyze_dataset(request_data)
+            settings = get_settings()
+            response = await self.funnel_client.analyze_dataset(
+                request_data,
+                timeout_seconds=float(settings.services.funnel_infer_timeout_seconds),
+            )
 
             # Funnel 응답을 Interface 형식으로 변환
             return [self._convert_funnel_column_result(col) for col in response.get("columns", [])]
 
         except Exception as e:
             logger.error(f"Funnel 서비스 분석 실패: {e}")
-            # 기본값 반환
-            return []
+            from shared.services.pipeline.pipeline_funnel_fallback import build_funnel_analysis_fallback
+
+            fallback = build_funnel_analysis_fallback(
+                columns=headers,
+                rows=data,
+                include_complex_types=include_complex_types,
+                error=str(e),
+                stage="bff",
+            )
+            return [InterfaceColumnResult(**col) for col in (fallback.get("columns") or [])]
 
     def _convert_funnel_column_result(self, funnel_result: Dict[str, Any]) -> InterfaceColumnResult:
         """

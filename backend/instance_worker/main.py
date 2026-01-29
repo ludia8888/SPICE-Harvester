@@ -25,8 +25,7 @@ from datetime import datetime, timezone
 from typing import Dict, Any, Optional, Set, List, Union
 from uuid import uuid4, uuid5, NAMESPACE_URL
 
-from confluent_kafka import Consumer, Producer, KafkaError, TopicPartition
-import redis
+from confluent_kafka import Producer, KafkaError, TopicPartition
 import boto3
 import httpx
 from botocore.exceptions import ClientError
@@ -54,6 +53,7 @@ from shared.services.registries.processed_event_registry import (
     validate_registry_enabled,
     validate_lease_settings,
 )
+from shared.services.kafka.safe_consumer import SafeKafkaConsumer
 from shared.services.registries.lineage_store import LineageStore
 from shared.services.core.audit_log_store import AuditLogStore
 from shared.services.registries.dataset_registry import DatasetRegistry
@@ -91,7 +91,7 @@ class StrictInstanceWorker:
         self.running = False
         self.kafka_servers = settings.database.kafka_servers
         self.enable_event_sourcing = bool(settings.event_sourcing.enable_event_sourcing)
-        self.consumer = None
+        self.consumer: Optional[SafeKafkaConsumer] = None
         self.producer = None
         self.dlq_producer: Optional[Producer] = None
         self.dlq_topic = AppConfig.INSTANCE_COMMANDS_DLQ_TOPIC
@@ -162,18 +162,15 @@ class StrictInstanceWorker:
         validate_lease_settings()
         settings = get_settings()
         
-        # Kafka Consumer - stable consumer group (at-least-once with manual commit)
+        # Kafka Consumer (strong consistency: read_committed + rebalance-safe offsets)
         group_id = (AppConfig.INSTANCE_WORKER_GROUP or "instance-worker-group").strip()
         self.consumer = await self._consumer_call(
-            Consumer,
-            {
-                'bootstrap.servers': self.kafka_servers,
-                'group.id': group_id,
-                'auto.offset.reset': 'earliest',  # Read from beginning
-                'enable.auto.commit': False,
-                'max.poll.interval.ms': 300000,  # 5 minutes
-                'session.timeout.ms': 45000,  # 45 seconds
-            },
+            SafeKafkaConsumer,
+            group_id,
+            [AppConfig.INSTANCE_COMMANDS_TOPIC],
+            "instance-worker",
+            max_poll_interval_ms=300000,
+            session_timeout_ms=45000,
         )
         logger.info(f"Using consumer group: {group_id}")
         
@@ -293,9 +290,6 @@ class StrictInstanceWorker:
             except Exception as e:
                 logger.warning(f"⚠️ AuditLogStore unavailable (continuing without audit logs): {e}")
                 self.audit_store = None
-        
-        # Subscribe to Kafka topic
-        await self._consumer_call(self.consumer.subscribe, [AppConfig.INSTANCE_COMMANDS_TOPIC])
         
         logger.info("✅ STRICT Instance Worker initialized")
 
@@ -762,11 +756,37 @@ class StrictInstanceWorker:
             "@type": class_id,
         }
 
+        # Do NOT blindly inject `{class}_id` into graph documents: user-defined schemas may use
+        # a different primary-key field (e.g., `call_id`) or even a non-`*_id` field (e.g., `phone`).
+        # Injecting unknown properties causes Terminus schema check failures.
         primary_key_field = f"{class_id.lower()}_id"
-        graph_node[primary_key_field] = payload.get(primary_key_field, primary_key_value)
+        if primary_key_field in payload:
+            current = payload.get(primary_key_field)
+            if current is None or (isinstance(current, str) and not current.strip()):
+                graph_node[primary_key_field] = primary_key_value
+            else:
+                graph_node[primary_key_field] = current
+        else:
+            for key, value in payload.items():
+                if not key.endswith("_id") or value is None:
+                    continue
+                value_str = str(value).strip()
+                if not value_str:
+                    continue
+                graph_node[key] = value
+                break
 
         for rel_field, rel_target in relationships.items():
-            graph_node[rel_field] = rel_target
+            # Relationship fields must be *references* (not embedded documents).
+            # TerminusDB link properties accept the "<Class>/<id>" string form; using
+            # {"@id": "..."} can be interpreted as an inline doc and trigger schema
+            # validation on the target type.
+            if isinstance(rel_target, str):
+                graph_node[rel_field] = rel_target
+            elif isinstance(rel_target, list):
+                graph_node[rel_field] = [item for item in rel_target if isinstance(item, str) and item.strip()]
+            else:
+                graph_node[rel_field] = rel_target
 
         for field in await self.extract_required_properties(db_name, class_id, branch=branch):
             if field in graph_node:
@@ -836,6 +856,13 @@ class StrictInstanceWorker:
 
             if existing:
                 logger.info(f"✅ TerminusDB node already exists (idempotent create): {terminus_id}")
+                await self.terminus_service.update_instance(
+                    db_name,
+                    class_id,
+                    terminus_id,
+                    graph_node,
+                    branch=branch,
+                )
             else:
                 if self.audit_store:
                     try:
@@ -1341,6 +1368,25 @@ class StrictInstanceWorker:
             created_count = 0
             sample_instance_ids: List[str] = []
 
+            def _coerce_pk_fields(value: Any) -> List[str]:
+                if not value:
+                    return []
+                if isinstance(value, str):
+                    field = value.strip()
+                    return [field] if field else []
+                if isinstance(value, list):
+                    fields: List[str] = []
+                    for item in value:
+                        if isinstance(item, str) and item.strip():
+                            fields.append(item.strip())
+                    return fields
+                return []
+
+            objectify_pk_fields = _coerce_pk_fields(command_meta.get("objectify_pk_fields"))
+            if not objectify_pk_fields:
+                # Backward/alternate key support (best-effort).
+                objectify_pk_fields = _coerce_pk_fields(command_meta.get("objectify_instance_id_field"))
+
             for idx, inst in enumerate(raw_instances):
                 if not isinstance(inst, dict):
                     raise ValueError(f"instances[{idx}] must be an object")
@@ -1349,14 +1395,51 @@ class StrictInstanceWorker:
 
                 # Prefer explicit primary-key fields. Fall back to deterministic per-row ID so retries don't duplicate.
                 candidate = inst_payload.get(expected_key)
+                instance_id_source_key: Optional[str] = expected_key if candidate else None
                 if candidate:
                     instance_id = str(candidate)
                 else:
                     instance_id = None
                     for key, value in inst_payload.items():
-                        if key.endswith("_id") and value:
-                            instance_id = str(value)
-                            break
+                        if not key.endswith("_id"):
+                            continue
+                        if value is None:
+                            continue
+                        value_str = str(value).strip()
+                        if not value_str:
+                            continue
+                        instance_id = value_str
+                        instance_id_source_key = key
+                        break
+
+                    if not instance_id and is_objectify:
+                        # Objectify contract: derive stable instance ID from declared PK fields.
+                        pk_fields = objectify_pk_fields
+                        if not pk_fields:
+                            raise ValueError(f"Primary key is required for objectify bulk create ({class_id})")
+                        values: List[str] = []
+                        for field in pk_fields:
+                            raw = inst_payload.get(field)
+                            if raw is None:
+                                raise ValueError(
+                                    f"Primary key is required for objectify bulk create ({class_id}): missing '{field}'"
+                                )
+                            raw_str = str(raw).strip()
+                            if not raw_str:
+                                raise ValueError(
+                                    f"Primary key is required for objectify bulk create ({class_id}): blank '{field}'"
+                                )
+                            values.append(raw_str)
+
+                        proposed = values[0] if len(values) == 1 else ":".join(values)
+                        try:
+                            validate_instance_id(proposed)
+                        except Exception:
+                            suffix = uuid5(NAMESPACE_URL, f"objectify:{class_id}:{'|'.join(values)}").hex[:12]
+                            proposed = f"{class_id.lower()}_{suffix}"
+                        instance_id = proposed
+                        instance_id_source_key = None
+
                     if not instance_id:
                         if is_objectify:
                             raise ValueError(f"Primary key is required for objectify bulk create ({class_id})")
@@ -1365,7 +1448,14 @@ class StrictInstanceWorker:
                         inst_payload[expected_key] = instance_id
 
                 validate_instance_id(instance_id)
-                inst_payload.setdefault(expected_key, instance_id)
+                # Avoid injecting `{class}_id` into payloads that don't declare it (schema check would fail),
+                # while still preserving the conventional id field when it's explicitly present.
+                if expected_key in inst_payload:
+                    current = inst_payload.get(expected_key)
+                    if current is None or (isinstance(current, str) and not current.strip()):
+                        inst_payload[expected_key] = instance_id
+                elif instance_id_source_key == expected_key:
+                    inst_payload[expected_key] = instance_id
 
                 command_log = {
                     "command_id": str(command_id),
@@ -2023,6 +2113,7 @@ class StrictInstanceWorker:
         class_id = command.get("class_id")
         command_id = command.get("command_id")
         branch = validate_branch_name(command.get("branch") or "main")
+        is_objectify = self._is_objectify_command(command)
 
         await self.set_command_status(command_id, "processing")
 
@@ -2260,6 +2351,7 @@ class StrictInstanceWorker:
                 "service": "instance_worker",
                 "command_id": command_id,
                 "ontology": ontology_version,
+                "objectify": bool(is_objectify),
                 "run_id": self.run_id,
                 "code_sha": self.code_sha,
             },
@@ -2573,7 +2665,7 @@ class StrictInstanceWorker:
         msg = str(exc).lower()
         # TerminusDB schema failures can be transient under at-least-once + cross-aggregate reordering.
         # Example: Product references Customer that hasn't been created yet.
-        if "references_untyped_object" in msg:
+        if "references_untyped_object" in msg or "no_unique_type_for_document" in msg:
             return True
         non_retryable_markers = [
             "aggregate_id mismatch",
@@ -2899,6 +2991,23 @@ class StrictInstanceWorker:
                 retryable = self._is_retryable_error(e)
                 attempt_count = int(registry_attempt_count or 1)
                 max_attempts = self.max_retry_attempts
+                backoff_cap_seconds: float = 60.0
+
+                # Narrow + long retry budget for out-of-order relationship materialization.
+                # We only extend retries for Terminus SchemaCheckFailure witness "references_untyped_object".
+                # Everything else should fail fast to surface real schema/contract bugs.
+                err_msg = str(e)
+                err_msg_norm = err_msg.lower()
+                if "references_untyped_object" in err_msg_norm or "no_unique_type_for_document" in err_msg_norm:
+                    with suppress(Exception):
+                        max_attempts = max(
+                            max_attempts,
+                            int(os.getenv("INSTANCE_WORKER_UNTYPED_REF_MAX_RETRY_ATTEMPTS", "30") or 30),
+                        )
+                    with suppress(Exception):
+                        backoff_cap_seconds = float(
+                            os.getenv("INSTANCE_WORKER_UNTYPED_REF_BACKOFF_MAX_SECONDS", "15") or 15
+                        )
 
                 if retryable and attempt_count < max_attempts:
                     try:
@@ -2912,7 +3021,7 @@ class StrictInstanceWorker:
                             f"Failed to set command status to retrying for {command_id}: {status_err}",
                             exc_info=True,
                         )
-                    backoff_s = min(2 ** max(attempt_count - 1, 0), 60)
+                    backoff_s = min(float(2 ** max(attempt_count - 1, 0)), backoff_cap_seconds)
                     logger.warning(
                         f"Retrying command event_id={registry_event_id} in {backoff_s}s "
                         f"(attempt {attempt_count}/{max_attempts})"

@@ -254,6 +254,8 @@ OBJECTIFY_JOBS_TOPIC=objectify-jobs
 OBJECTIFY_JOBS_DLQ_TOPIC=objectify-jobs-dlq
 OBJECTIFY_MAX_RETRIES=5
 OBJECTIFY_ROW_BATCH_SIZE=1000
+# PK contract hardening (P1): validate ontology primaryKey vs object_type.pk_spec (off|warn|fail)
+OBJECTIFY_ONTOLOGY_PK_VALIDATION_MODE=warn
 ```
 
 ## Commands (Instance/Ontology/Action)

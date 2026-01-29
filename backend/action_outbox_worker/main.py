@@ -14,7 +14,6 @@ It is intentionally idempotent and safe to run continuously.
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import signal
 import time
@@ -113,11 +112,7 @@ class ActionOutboxWorker:
         settings = get_settings()
         if settings.event_sourcing.enable_processed_event_registry:
             self.processed_event_registry = ProcessedEventRegistry()
-            try:
-                await self.processed_event_registry.connect()
-            except Exception as e:
-                logger.warning("ProcessedEventRegistry unavailable; continuing without durable claims: %s", e)
-                self.processed_event_registry = None
+            await self.processed_event_registry.connect()
 
         self.lakefs_client = LakeFSClient()
         self.lakefs_storage = create_lakefs_storage_service(settings)

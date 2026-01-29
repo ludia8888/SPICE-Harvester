@@ -1,0 +1,19 @@
+customer_id,name,email,phone,tier,country,city,registration_date,last_activity,total_spent,risk_score
+CUST-001,김철수,kim.cs@example.com,+82-10-1234-5678,Gold,KR,Seoul,2022-03-15,2024-02-20,15420000,0.12
+CUST-002,이영희,lee.yh@example.com,+82-10-2345-6789,Platinum,KR,Busan,2021-08-22,2024-02-19,28750000,0.08
+CUST-003,박민수,park.ms@example.com,+82-10-3456-7890,Silver,KR,Daegu,2023-01-10,2024-02-18,4280000,0.25
+CUST-004,정수진,jung.sj@example.com,+82-10-4567-8901,Gold,KR,Incheon,2022-06-05,2024-02-21,12890000,0.15
+CUST-005,최동훈,choi.dh@example.com,+82-10-5678-9012,Bronze,KR,Gwangju,2023-07-20,2024-02-15,1250000,0.42
+CUST-006,John Smith,j.smith@acme.com,+1-555-0101,Enterprise,US,New York,2021-01-15,2024-02-21,89500000,0.05
+CUST-007,Sarah Johnson,s.johnson@globex.com,+1-555-0102,Enterprise,US,Los Angeles,2020-11-20,2024-02-20,125000000,0.03
+CUST-008,田中太郎,tanaka@example.jp,+81-90-1234-5678,Gold,JP,Tokyo,2022-04-10,2024-02-19,22400000,0.10
+CUST-009,王明,wang.m@example.cn,+86-138-0000-0001,Platinum,CN,Shanghai,2021-09-08,2024-02-21,45600000,0.07
+CUST-010,Hans Mueller,h.mueller@example.de,+49-170-1234567,Gold,DE,Berlin,2022-02-28,2024-02-18,18900000,0.11
+CUST-011,홍길동,hong.gd@example.com,+82-10-6789-0123,Silver,KR,Seoul,2023-03-15,2024-02-17,3450000,0.30
+CUST-012,강민정,kang.mj@example.com,+82-10-7890-1234,Gold,KR,Seoul,2022-09-10,2024-02-21,14200000,0.14
+CUST-013,Emma Wilson,e.wilson@techcorp.com,+1-555-0103,Enterprise,US,Chicago,2021-05-22,2024-02-20,67800000,0.06
+CUST-014,佐藤花子,sato@example.jp,+81-80-9876-5432,Silver,JP,Osaka,2023-02-14,2024-02-16,5670000,0.22
+CUST-015,李华,li.h@example.cn,+86-139-0000-0002,Gold,CN,Beijing,2022-07-30,2024-02-19,19800000,0.09
+CUST-017,김민호,kim.mh@example.com,+82-10-8765-4321,Gold,KR,Seoul,2023-05-10,2024-02-20,8500000,0.15
+CUST-019,박서연,park.sy@example.com,+82-10-9876-5432,Gold,KR,Jeju,2022-11-15,2024-02-21,11200000,0.13
+CUST-020,최유진,choi.yj@example.com,+82-10-1111-2222,Platinum,KR,Seoul,2021-12-01,2024-02-20,35000000,0.06

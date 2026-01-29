@@ -22,7 +22,7 @@ from uuid import NAMESPACE_URL, UUID, uuid5
 
 from confluent_kafka import KafkaError, Producer, TopicPartition
 
-from shared.services.kafka.safe_consumer import SafeKafkaConsumer, ConsumerState
+from shared.services.kafka.safe_consumer import SafeKafkaConsumer
 
 from oms.services.async_terminus import AsyncTerminusService
 from oms.services.ontology_resources import OntologyResourceService
@@ -159,7 +159,7 @@ class ActionWorker:
         self.tracing = get_tracing_service("action-worker")
         self.metrics = get_metrics_collector("action-worker")
         self.kafka_servers = settings.database.kafka_servers
-        self.consumer: Optional[Consumer] = None
+        self.consumer: Optional[SafeKafkaConsumer] = None
         self.dlq_producer: Optional[Producer] = None
         self.dlq_topic = AppConfig.ACTION_COMMANDS_DLQ_TOPIC
         self.dlq_flush_timeout_seconds = float(cfg.dlq_flush_timeout_seconds)
@@ -213,11 +213,7 @@ class ActionWorker:
 
         if self.enable_processed_event_registry:
             self.processed_event_registry = ProcessedEventRegistry()
-            try:
-                await self.processed_event_registry.connect()
-            except Exception as e:
-                logger.warning("ProcessedEventRegistry unavailable; continuing without durable idempotency: %s", e)
-                self.processed_event_registry = None
+            await self.processed_event_registry.connect()
 
         await event_store.connect()
         await self.action_logs.connect()

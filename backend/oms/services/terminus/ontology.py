@@ -3,6 +3,7 @@ Ontology Service for TerminusDB
 온톨로지/스키마 CRUD 작업 서비스
 """
 
+import contextlib
 import logging
 from typing import Any, Dict, List, Optional, Union
 from datetime import datetime, timezone
@@ -18,6 +19,7 @@ from oms.exceptions import (
 from shared.models.ontology import OntologyBase, OntologyResponse, Property, Relationship
 from shared.models.common import DataType
 from shared.utils.language import coerce_localized_text, select_localized_text
+from shared.services.registries.ontology_key_spec_registry import OntologyKeySpecRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -33,13 +35,62 @@ class OntologyService(BaseTerminusService):
         super().__init__(*args, **kwargs)
         # DatabaseService 인스턴스 (데이터베이스 존재 확인용)
         self.db_service = DatabaseService(*args, **kwargs)
+        self._key_spec_registry = OntologyKeySpecRegistry()
 
     async def disconnect(self) -> None:
         # Close nested db_service first to avoid leaking its httpx client in short-lived contexts/tests.
         try:
+            with contextlib.suppress(Exception):
+                await self._key_spec_registry.close()
             await self.db_service.disconnect()
         finally:
             await super().disconnect()
+
+    async def _overlay_key_spec(self, *, db_name: str, branch: str, ontology: OntologyResponse) -> None:
+        """
+        Overlay ordered key spec from Postgres registry into an ontology response.
+
+        Terminus schema docs may drop per-property metadata, so this restores primaryKey/titleKey flags
+        deterministically for read callers.
+        """
+        if not ontology or not getattr(ontology, "id", None):
+            return
+        try:
+            spec = await self._key_spec_registry.get_key_spec(
+                db_name=db_name,
+                branch=branch,
+                class_id=str(ontology.id),
+            )
+        except Exception as exc:
+            logger.warning(
+                "Ontology key_spec overlay failed (db=%s branch=%s class_id=%s): %s",
+                db_name,
+                branch,
+                getattr(ontology, "id", None),
+                exc,
+            )
+            return
+        if not spec:
+            return
+
+        pk_set = set(spec.primary_key)
+        title_set = set(spec.title_key)
+        for prop in list(ontology.properties or []):
+            try:
+                prop_name = str(getattr(prop, "name", "") or "")
+            except Exception:
+                continue
+            if not prop_name:
+                continue
+            try:
+                prop.primary_key = prop_name in pk_set
+                prop.title_key = prop_name in title_set
+            except Exception:
+                continue
+
+        meta = ontology.metadata if isinstance(ontology.metadata, dict) else {}
+        meta["key_spec"] = {"primary_key": list(spec.primary_key), "title_key": list(spec.title_key)}
+        ontology.metadata = meta
     
     async def create_ontology(
         self,
@@ -88,6 +139,71 @@ class OntologyService(BaseTerminusService):
                 documentation["metadata"] = metadata_payload
                 if metadata_payload.get("internal"):
                     documentation["@internal"] = True
+            else:
+                documentation["metadata"] = {}
+
+            # Preserve key spec ordering at the class level.
+            #
+            # TerminusDB may store required scalar properties as a bare type string (e.g. "xsd:string"),
+            # which prevents per-property documentation (including primaryKey/titleKey) from round-tripping.
+            # Storing the ordered key spec here allows us to reconstruct key flags on read and enables
+            # future "ontology primaryKey as the single source of truth" safely.
+            pk_fields = [prop.name for prop in (ontology.properties or []) if getattr(prop, "primary_key", False)]
+            title_fields = [prop.name for prop in (ontology.properties or []) if getattr(prop, "title_key", False)]
+            computed_key_spec = {
+                "primary_key": pk_fields,
+                "title_key": title_fields,
+            }
+            doc_meta = documentation.get("metadata")
+            if not isinstance(doc_meta, dict):
+                doc_meta = {}
+
+            existing_key_spec = doc_meta.get("key_spec") if isinstance(doc_meta, dict) else None
+            normalized_existing_key_spec: Optional[Dict[str, List[str]]] = None
+            if isinstance(existing_key_spec, dict):
+                raw_pk = (
+                    existing_key_spec.get("primary_key")
+                    or existing_key_spec.get("primaryKey")
+                    or existing_key_spec.get("primaryKeys")
+                    or []
+                )
+                raw_title = (
+                    existing_key_spec.get("title_key")
+                    or existing_key_spec.get("titleKey")
+                    or existing_key_spec.get("titleKeys")
+                    or []
+                )
+                normalized_existing_key_spec = {
+                    "primary_key": [str(v).strip() for v in raw_pk if str(v).strip()] if isinstance(raw_pk, list) else [],
+                    "title_key": [str(v).strip() for v in raw_title if str(v).strip()] if isinstance(raw_title, list) else [],
+                }
+
+            # Enterprise-safe policy:
+            # - Prefer property flags as the source of truth when present.
+            # - If metadata.key_spec exists and differs, warn and overwrite.
+            # - If property flags are missing but metadata.key_spec exists, preserve metadata (warn) to avoid disruption.
+            if pk_fields or title_fields:
+                if normalized_existing_key_spec is not None and normalized_existing_key_spec != computed_key_spec:
+                    logger.warning(
+                        "Overwriting ontology metadata.key_spec based on property flags (ontology_id=%s, existing=%s, computed=%s)",
+                        ontology.id,
+                        normalized_existing_key_spec,
+                        computed_key_spec,
+                    )
+                elif existing_key_spec is not None and normalized_existing_key_spec is None:
+                    logger.warning(
+                        "Overwriting ontology metadata.key_spec (non-dict) based on property flags (ontology_id=%s, existing_type=%s)",
+                        ontology.id,
+                        type(existing_key_spec).__name__,
+                    )
+                doc_meta["key_spec"] = computed_key_spec
+                documentation["metadata"] = doc_meta
+            else:
+                if normalized_existing_key_spec is not None and (normalized_existing_key_spec.get("primary_key") or normalized_existing_key_spec.get("title_key")):
+                    logger.warning(
+                        "Ontology properties do not declare primaryKey/titleKey flags; preserving existing metadata.key_spec (ontology_id=%s)",
+                        ontology.id,
+                    )
 
             # 스키마 문서 생성 - TerminusDB format
             schema_doc = {
@@ -256,7 +372,9 @@ class OntologyService(BaseTerminusService):
                 result = result[0]
             
             # 결과 파싱
-            return self._parse_ontology_document(result)
+            ontology = self._parse_ontology_document(result)
+            await self._overlay_key_spec(db_name=db_name, branch=branch, ontology=ontology)
+            return ontology
             
         except Exception as e:
             logger.error(f"Failed to get ontology: {e}")
@@ -329,7 +447,39 @@ class OntologyService(BaseTerminusService):
                 if offset == 0 and limit > 0:
                     ontology = self._parse_ontology_document(result)
                     ontologies.append(ontology)
-            
+
+            # Overlay key specs in one batch for performance (enterprise contract).
+            try:
+                class_ids = [str(o.id) for o in ontologies if getattr(o, "id", None)]
+                index = await self._key_spec_registry.get_key_spec_index(
+                    db_name=db_name,
+                    branch=branch,
+                    class_ids=class_ids,
+                )
+                for ontology in ontologies:
+                    spec = index.get(str(getattr(ontology, "id", "") or ""))
+                    if not spec:
+                        continue
+                    pk_set = set(spec.primary_key)
+                    title_set = set(spec.title_key)
+                    for prop in list(ontology.properties or []):
+                        prop_name = str(getattr(prop, "name", "") or "")
+                        if not prop_name:
+                            continue
+                        prop.primary_key = prop_name in pk_set
+                        prop.title_key = prop_name in title_set
+                    meta = ontology.metadata if isinstance(ontology.metadata, dict) else {}
+                    meta["key_spec"] = {"primary_key": list(spec.primary_key), "title_key": list(spec.title_key)}
+                    ontology.metadata = meta
+            except Exception as exc:
+                logger.warning(
+                    "Ontology key_spec batch overlay failed (db=%s branch=%s count=%s): %s",
+                    db_name,
+                    branch,
+                    len(ontologies),
+                    exc,
+                )
+
             return ontologies
             
         except Exception as e:
@@ -564,6 +714,29 @@ class OntologyService(BaseTerminusService):
             if documentation.get("@internal"):
                 metadata["internal"] = True
 
+        key_spec = metadata.get("key_spec") if isinstance(metadata, dict) else None
+        pk_fields: List[str] = []
+        title_fields: List[str] = []
+        if isinstance(key_spec, dict):
+            raw_pk = (
+                key_spec.get("primary_key")
+                or key_spec.get("primaryKey")
+                or key_spec.get("primaryKeys")
+                or []
+            )
+            raw_title = (
+                key_spec.get("title_key")
+                or key_spec.get("titleKey")
+                or key_spec.get("titleKeys")
+                or []
+            )
+            if isinstance(raw_pk, list):
+                pk_fields = [str(v).strip() for v in raw_pk if str(v).strip()]
+            if isinstance(raw_title, list):
+                title_fields = [str(v).strip() for v in raw_title if str(v).strip()]
+        pk_field_set = set(pk_fields)
+        title_field_set = set(title_fields)
+
         ontology = OntologyResponse(
             id=ontology_id,
             label=label_i18n if isinstance(label_i18n, dict) and label_i18n else documentation.get("@label", ontology_id),
@@ -590,6 +763,8 @@ class OntologyService(BaseTerminusService):
                             label=key,
                             description=None,
                             required=True,
+                            primary_key=key in pk_field_set,
+                            title_key=key in title_field_set,
                         )
                     )
                 else:
@@ -630,6 +805,8 @@ class OntologyService(BaseTerminusService):
                             if isinstance(required_flag, bool)
                             else value.get("@type") != "Optional"
                         )
+                        primary_key_flag = bool(prop_doc.get("primary_key") or prop_doc.get("primaryKey") or (key in pk_field_set))
+                        title_key_flag = bool(prop_doc.get("title_key") or prop_doc.get("titleKey") or (key in title_field_set))
                         prop = Property(
                             name=key,
                             type=prop_type,  # Prefer documented raw type (array/struct/etc) over terminus class
@@ -641,8 +818,8 @@ class OntologyService(BaseTerminusService):
                             description=raw_comment,
                             required=prop_required,
                             constraints=prop_doc.get("constraints") or {},
-                            primary_key=bool(prop_doc.get("primary_key") or prop_doc.get("primaryKey")),
-                            title_key=bool(prop_doc.get("title_key") or prop_doc.get("titleKey")),
+                            primary_key=primary_key_flag,
+                            title_key=title_key_flag,
                             value_type_ref=prop_doc.get("value_type_ref") or prop_doc.get("valueTypeRef"),
                             shared_property_ref=prop_doc.get("shared_property_ref") or prop_doc.get("sharedPropertyRef"),
                             items=prop_doc.get("items"),

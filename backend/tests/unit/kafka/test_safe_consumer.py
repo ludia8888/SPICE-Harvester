@@ -211,7 +211,7 @@ class TestSafeKafkaConsumerIntegration:
         mock_settings.return_value.database.kafka_servers = "localhost:9092"
 
         # Create consumer
-        consumer = SafeKafkaConsumer(
+        SafeKafkaConsumer(
             group_id="test-group",
             topics=["test-topic"],
             service_name="test-service",
@@ -234,7 +234,7 @@ class TestSafeKafkaConsumerIntegration:
         mock_settings.return_value.database.kafka_servers = "localhost:9092"
 
         # Try to override enforced settings
-        consumer = SafeKafkaConsumer(
+        SafeKafkaConsumer(
             group_id="test-group",
             topics=["test-topic"],
             service_name="test-service",
@@ -269,3 +269,63 @@ class TestSafeKafkaConsumerIntegration:
         assert consumer.is_rebalancing is False
         consumer._state = ConsumerState.REBALANCING
         assert consumer.is_rebalancing is True
+
+    @patch("shared.services.kafka.safe_consumer.Consumer")
+    @patch("shared.services.kafka.safe_consumer.get_settings")
+    def test_commit_message_marks_partition_processed(self, mock_settings, mock_consumer_class) -> None:
+        """commit(message=...) should clear processing state (rebalance-safe bookkeeping)."""
+        from shared.services.kafka.safe_consumer import SafeKafkaConsumer, PartitionState
+
+        mock_settings.return_value.database.kafka_servers = "localhost:9092"
+        mock_kafka_consumer = MagicMock()
+        mock_consumer_class.return_value = mock_kafka_consumer
+
+        consumer = SafeKafkaConsumer(
+            group_id="test-group",
+            topics=["test-topic"],
+            service_name="test-service",
+        )
+
+        key = ("test-topic", 0)
+        consumer._partition_states[key] = PartitionState(topic="test-topic", partition=0, pending_offset=123, processing=True)
+
+        msg = MagicMock()
+        msg.topic.return_value = "test-topic"
+        msg.partition.return_value = 0
+        msg.offset.return_value = 123
+
+        consumer.commit(message=msg, asynchronous=False)
+
+        mock_kafka_consumer.commit.assert_called_with(message=msg, asynchronous=False)
+        state = consumer._partition_states[key]
+        assert state.processing is False
+        assert state.current_offset == 123
+        assert state.last_committed == 123
+
+    @patch("shared.services.kafka.safe_consumer.Consumer")
+    @patch("shared.services.kafka.safe_consumer.get_settings")
+    def test_seek_delegates_and_clears_inflight_state(self, mock_settings, mock_consumer_class) -> None:
+        """seek() should delegate and clear in-flight state to avoid stale bookkeeping."""
+        from shared.services.kafka.safe_consumer import SafeKafkaConsumer, PartitionState
+        from confluent_kafka import TopicPartition
+
+        mock_settings.return_value.database.kafka_servers = "localhost:9092"
+        mock_kafka_consumer = MagicMock()
+        mock_consumer_class.return_value = mock_kafka_consumer
+
+        consumer = SafeKafkaConsumer(
+            group_id="test-group",
+            topics=["test-topic"],
+            service_name="test-service",
+        )
+
+        key = ("test-topic", 0)
+        consumer._partition_states[key] = PartitionState(topic="test-topic", partition=0, pending_offset=123, processing=True)
+
+        tp = TopicPartition("test-topic", 0, 123)
+        consumer.seek(tp)
+
+        mock_kafka_consumer.seek.assert_called_with(tp)
+        state = consumer._partition_states[key]
+        assert state.processing is False
+        assert state.pending_offset is None

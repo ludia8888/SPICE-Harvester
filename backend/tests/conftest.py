@@ -50,7 +50,7 @@ def pytest_configure() -> None:
     # Use docker-compose.yml defaults for local dev infrastructure
     postgres_port = _env_or_dotenv(dotenv, "POSTGRES_PORT_HOST", "5433")
     redis_port = _env_or_dotenv(dotenv, "REDIS_PORT_HOST", "6379")
-    minio_port = _env_or_dotenv(dotenv, "MINIO_PORT_HOST", "9002")
+    minio_port = _env_or_dotenv(dotenv, "MINIO_PORT_HOST", "9000")
     lakefs_port = _env_or_dotenv(dotenv, "LAKEFS_PORT_HOST", "48080")
 
     os.environ.setdefault("KAFKA_BOOTSTRAP_SERVERS", f"127.0.0.1:{kafka_port}")
@@ -61,7 +61,6 @@ def pytest_configure() -> None:
     os.environ.setdefault("REDIS_URL", f"redis://:spicepass123@localhost:{redis_port}/0")
     os.environ.setdefault("REDIS_HOST", "localhost")
     os.environ.setdefault("REDIS_PORT", redis_port)
-    # MinIO host port is intentionally not 9000 to avoid clashing with any local MinIO.
     os.environ.setdefault("MINIO_ENDPOINT_URL", f"http://localhost:{minio_port}")
     os.environ.setdefault("MINIO_ACCESS_KEY", "minioadmin")
     os.environ.setdefault("MINIO_SECRET_KEY", "minioadmin123")

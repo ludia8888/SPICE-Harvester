@@ -334,6 +334,7 @@ class SmokeContext:
     legacy_class_id: str
     instance_id: str
     command_ids: Dict[str, str]
+    udf_id: str
     pipeline_id: Optional[str] = None
     dataset_id: Optional[str] = None
     dataset_version_id: Optional[str] = None
@@ -445,6 +446,7 @@ def _format_path(template: str, ctx: SmokeContext, *, overrides: Optional[Dict[s
         "class_id": ctx.class_id,
         "class_label": ctx.class_id,
         "instance_id": ctx.instance_id,
+        "udf_id": ctx.udf_id,
         "command_id": ctx.command_ids.get("create_database") or next(iter(ctx.command_ids.values()), ""),
         "sheet_id": "0000000000000000000000000000000000000000",
         "task_id": "00000000-0000-0000-0000-000000000000",
@@ -455,12 +457,15 @@ def _format_path(template: str, ctx: SmokeContext, *, overrides: Optional[Dict[s
         "ingest_request_id": ctx.ingest_request_id or "00000000-0000-0000-0000-000000000000",
         "connection_id": ctx.connection_id or "missing_connection",
         "link_type_id": ctx.link_type_id or "missing_link_type",
+        "mapping_spec_id": "00000000-0000-0000-0000-000000000000",
         "resource_id": "missing_resource",
         "proposal_id": "00000000-0000-0000-0000-000000000000",
         "action_type_id": ctx.action_type_id or "missing_action_type",
         "action_log_id": ctx.action_log_id or "00000000-0000-0000-0000-000000000000",
         "simulation_id": ctx.simulation_id or "00000000-0000-0000-0000-000000000000",
         "version": str(ctx.simulation_version or 1),
+        "drift_id": "00000000-0000-0000-0000-000000000000",
+        "subscription_id": "00000000-0000-0000-0000-000000000000",
         # Agent control-plane placeholders
         "session_id": ctx.agent_session_id or "00000000-0000-0000-0000-000000000000",
         "plan_id": ctx.agent_plan_id or "00000000-0000-0000-0000-000000000000",
@@ -592,6 +597,17 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
         }
         return RequestPlan(op.method, op.path, url, (200, 400, 422, 429), json_body=body, auth_mode="delegated_user")
 
+    if key == ("POST", "/api/v1/agent/pipeline-runs/stream"):
+        url = f"{BFF_URL}{op.path}"
+        # Validation-only: avoid opening a streaming response in the smoke harness.
+        # Missing required fields -> 422 (no tool execution / no side effects).
+        return RequestPlan(op.method, op.path, url, (422,), json_body={}, auth_mode="delegated_user")
+
+    if key == ("POST", "/api/v1/ontology-agent/runs"):
+        url = f"{BFF_URL}{op.path}"
+        # Intentionally invalid -> 422 without invoking the autonomous agent / LLM.
+        return RequestPlan(op.method, op.path, url, (422,), json_body={})
+
     # ---------- Context Tools (User JWT required) ----------
     if key == ("POST", "/api/v1/context-tools/datasets/describe"):
         url = f"{BFF_URL}{op.path}"
@@ -671,6 +687,30 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
     if key == ("GET", "/api/v1/pipelines/proposals"):
         url = f"{BFF_URL}{op.path}"
         return RequestPlan(op.method, op.path, url, (200,), params={"db_name": ctx.db_name})
+
+    # ---------- Pipeline UDFs (read-only + validation-only) ----------
+    if key == ("GET", "/api/v1/pipelines/udfs"):
+        url = f"{BFF_URL}{op.path}"
+        return RequestPlan(op.method, op.path, url, (200,), params={"db_name": ctx.db_name})
+
+    if key == ("GET", "/api/v1/pipelines/udfs/{udf_id}"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
+        # Deterministic missing resource to avoid write side-effects.
+        return RequestPlan(op.method, op.path, url, (404,))
+
+    if key == ("GET", "/api/v1/pipelines/udfs/{udf_id}/versions/{version}"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'udf_id': 'udf_smoke', 'version': '1'})}"
+        return RequestPlan(op.method, op.path, url, (404,))
+
+    if key == ("POST", "/api/v1/pipelines/udfs"):
+        url = f"{BFF_URL}{op.path}"
+        # Validation-only: missing required fields -> 422 (no writes).
+        return RequestPlan(op.method, op.path, url, (422,), params={"db_name": ctx.db_name}, json_body={})
+
+    if key == ("POST", "/api/v1/pipelines/udfs/{udf_id}/versions"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
+        # Validation-only: missing required fields -> 422 (no writes).
+        return RequestPlan(op.method, op.path, url, (422,), json_body={})
 
     if key == ("POST", "/api/v1/pipelines"):
         url = f"{BFF_URL}{op.path}"
@@ -854,6 +894,30 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
             "auto_sync": False,
         }
         return RequestPlan(op.method, op.path, url, (201, 400, 404, 409), json_body=body, headers=headers)
+
+    if key == ("POST", "/api/v1/objectify/databases/{db_name}/run-dag"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
+        headers = {"X-DB-Name": ctx.db_name, "X-User-ID": "openapi-smoke", "X-User-Type": "user"}
+        # Dry-run only (no writes). Many environments won't have object_type contracts; expect a clean 409.
+        body = {"class_ids": [ctx.class_id], "branch": "main", "include_dependencies": True, "dry_run": True}
+        return RequestPlan(op.method, op.path, url, (200, 403, 404, 409, 422), json_body=body, headers=headers)
+
+    if key == ("POST", "/api/v1/objectify/databases/{db_name}/datasets/{dataset_id}/detect-relationships"):
+        # Use a fresh dataset_id to avoid triggering expensive analysis; the route should fail fast with 404.
+        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'dataset_id': str(uuid.uuid4())})}"
+        headers = {"X-DB-Name": ctx.db_name}
+        return RequestPlan(op.method, op.path, url, (404, 403), json_body={}, headers=headers)
+
+    if key == ("POST", "/api/v1/objectify/mapping-specs/{mapping_spec_id}/trigger-incremental"):
+        # Use a fresh mapping_spec_id to avoid enqueueing any jobs; the route must return a clean 404.
+        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'mapping_spec_id': str(uuid.uuid4())})}"
+        body = {"execution_mode": "incremental"}
+        return RequestPlan(op.method, op.path, url, (404, 403), json_body=body)
+
+    if key == ("GET", "/api/v1/objectify/mapping-specs/{mapping_spec_id}/watermark"):
+        # Watermark lookup is read-only and should never 5xx.
+        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'mapping_spec_id': str(uuid.uuid4())})}"
+        return RequestPlan(op.method, op.path, url, (200,))
 
     if key == ("POST", "/api/v1/backing-datasources"):
         url = f"{BFF_URL}{op.path}"
@@ -1499,6 +1563,45 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
         url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'sheet_id': 'not_registered_smoke'})}"
         return RequestPlan(op.method, op.path, url, (404, 400, 200))
 
+    # ---------- Schema Changes ----------
+    if key == ("GET", "/api/v1/schema-changes/history"):
+        url = f"{BFF_URL}{op.path}"
+        params = {"db_name": ctx.db_name, "limit": 5, "offset": 0}
+        return RequestPlan(op.method, op.path, url, (200,), params=params)
+
+    if key == ("PUT", "/api/v1/schema-changes/drifts/{drift_id}/acknowledge"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'drift_id': str(uuid.uuid4())})}"
+        body = {"acknowledged_by": "openapi_smoke"}
+        return RequestPlan(op.method, op.path, url, (404, 403), json_body=body)
+
+    if key == ("POST", "/api/v1/schema-changes/subscriptions"):
+        url = f"{BFF_URL}{op.path}"
+        # Use a deterministic subject_id to keep this idempotent (unique constraint is user_id+subject_type+subject_id).
+        headers = {"X-User-Id": "openapi_smoke"}
+        body = {
+            "subject_type": "object_type",
+            "subject_id": ctx.class_id,
+            "db_name": ctx.db_name,
+            "severity_filter": ["warning", "breaking"],
+            "notification_channels": ["websocket"],
+        }
+        return RequestPlan(op.method, op.path, url, (200, 403, 422), json_body=body, headers=headers)
+
+    if key == ("DELETE", "/api/v1/schema-changes/subscriptions/{subscription_id}"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'subscription_id': str(uuid.uuid4())})}"
+        headers = {"X-User-Id": "openapi_smoke"}
+        return RequestPlan(op.method, op.path, url, (404, 403, 200), headers=headers)
+
+    if key == ("GET", "/api/v1/schema-changes/mappings/{mapping_spec_id}/compatibility"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'mapping_spec_id': str(uuid.uuid4())})}"
+        params = {"db_name": ctx.db_name}
+        return RequestPlan(op.method, op.path, url, (404, 200), params=params)
+
+    if key == ("GET", "/api/v1/schema-changes/stats"):
+        url = f"{BFF_URL}{op.path}"
+        params = {"db_name": ctx.db_name, "days": 30}
+        return RequestPlan(op.method, op.path, url, (200,), params=params)
+
     if key == ("DELETE", "/api/v1/data-connectors/google-sheets/{sheet_id}"):
         url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'sheet_id': 'not_registered_smoke'})}"
         return RequestPlan(op.method, op.path, url, (404, 400, 200))
@@ -1506,6 +1609,23 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
     if key == ("DELETE", "/api/v1/data-connectors/google-sheets/connections/{connection_id}"):
         url = f"{BFF_URL}{_format_path(op.path, ctx)}"
         return RequestPlan(op.method, op.path, url, (200, 404))
+
+    # ---------- Pipeline Plans ----------
+    if key == ("POST", "/api/v1/pipeline-plans/compile"):
+        url = f"{BFF_URL}{op.path}"
+        # Intentionally omit data_scope so the handler fails fast (400) without invoking the planner.
+        # If the planner is disabled, it must degrade to a clear 503 (not 500).
+        body = {"goal": "openapi smoke pipeline plan compile"}
+        return RequestPlan(op.method, op.path, url, (400, 503), json_body=body, allow_5xx=True)
+
+    if key in {
+        ("POST", "/api/v1/pipeline-plans/{plan_id}/preview"),
+        ("POST", "/api/v1/pipeline-plans/{plan_id}/inspect-preview"),
+        ("POST", "/api/v1/pipeline-plans/{plan_id}/evaluate-joins"),
+    }:
+        # Use a fresh UUID so the plan is guaranteed to be missing -> deterministic 404.
+        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'plan_id': str(uuid.uuid4())})}"
+        return RequestPlan(op.method, op.path, url, (404, 400, 422), json_body={})
 
     # ---------- Actions (writeback) ----------
     if key == ("POST", "/api/v1/databases/{db_name}/actions/{action_type_id}/submit"):
@@ -1530,6 +1650,11 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
         return RequestPlan(op.method, op.path, url, (200, 400, 403, 404, 409, 422), json_body=body)
 
     # ---------- AI (LLM) ----------
+    if key == ("POST", "/api/v1/ai/intent"):
+        url = f"{BFF_URL}{op.path}"
+        # Intentionally invalid -> 422 without invoking the LLM router.
+        return RequestPlan(op.method, op.path, url, (422,), json_body={})
+
     if key in {("POST", "/api/v1/ai/query/{db_name}"), ("POST", "/api/v1/ai/translate/query-plan/{db_name}")}:
         url = f"{BFF_URL}{_format_path(op.path, ctx)}"
         body = {"question": "List Product by product_id", "mode": "auto", "branch": "main", "limit": 5}
@@ -1664,6 +1789,7 @@ async def test_openapi_stable_contract_smoke():
         legacy_class_id="LegacySmokeClass",
         instance_id=f"prod_{unique}",
         command_ids={},
+        udf_id="udf_smoke",
         action_type_id=f"RenameProduct_{unique}",
     )
 
@@ -2213,7 +2339,7 @@ async def test_openapi_stable_contract_smoke():
                 if isinstance(pipeline, dict):
                     ctx.pipeline_id = pipeline.get("pipeline_id") or ctx.pipeline_id
 
-        except Exception as e:
+        except Exception:
             # Setup failure is fatal; without it, most OpenAPI ops can't be exercised meaningfully.
             raise
 

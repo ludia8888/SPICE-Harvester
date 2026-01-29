@@ -421,7 +421,7 @@ async def check_mapping_compatibility(
         objectify_registry = await get_objectify_registry()
 
         # Get mapping spec
-        mapping_spec = await objectify_registry.get_mapping_spec_by_id(mapping_spec_id)
+        mapping_spec = await objectify_registry.get_mapping_spec(mapping_spec_id=mapping_spec_id)
         if not mapping_spec:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -431,21 +431,40 @@ async def check_mapping_compatibility(
         # Get dataset schema
         dataset_id = mapping_spec.dataset_id
         if dataset_version_id:
-            version = await dataset_registry.get_dataset_version(dataset_version_id)
+            version = await dataset_registry.get_version(version_id=dataset_version_id)
             if not version:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail=f"Dataset version {dataset_version_id} not found",
                 )
-            current_schema = version.get("schema") or []
+            sample = version.sample_json or {}
+            if isinstance(sample, dict) and isinstance(sample.get("columns"), list):
+                current_schema = sample.get("columns") or []
+            else:
+                schema_json = sample.get("schema_json") if isinstance(sample, dict) else None
+                current_schema = (schema_json or {}).get("columns") if isinstance(schema_json, dict) else []
         else:
-            dataset = await dataset_registry.get_dataset(db_name, dataset_id)
-            if not dataset:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Dataset {dataset_id} not found",
-                )
-            current_schema = dataset.get("schema") or []
+            version = await dataset_registry.get_latest_version(dataset_id=str(dataset_id))
+            if version:
+                sample = version.sample_json or {}
+                if isinstance(sample, dict) and isinstance(sample.get("columns"), list):
+                    current_schema = sample.get("columns") or []
+                else:
+                    schema_json = sample.get("schema_json") if isinstance(sample, dict) else None
+                    current_schema = (schema_json or {}).get("columns") if isinstance(schema_json, dict) else []
+            else:
+                dataset = await dataset_registry.get_dataset(dataset_id=str(dataset_id))
+                if not dataset:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail=f"Dataset {dataset_id} not found",
+                    )
+                schema_json = dataset.schema_json or {}
+                current_schema = schema_json.get("columns") or schema_json.get("fields") or []
+
+        if not isinstance(current_schema, list):
+            current_schema = []
+        current_schema = [c for c in current_schema if isinstance(c, dict)]
 
         # Use the mapping spec's expected schema hash if available
         expected_hash = getattr(mapping_spec, "expected_schema_hash", None) or mapping_spec.schema_hash

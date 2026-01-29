@@ -6,7 +6,7 @@ import { useAppStore } from '../src/state/store'
 export const createTestQueryClient = () =>
   new QueryClient({
     defaultOptions: {
-      queries: { retry: false },
+      queries: { retry: false, gcTime: Infinity, staleTime: Infinity },
       mutations: { retry: false },
     },
   })

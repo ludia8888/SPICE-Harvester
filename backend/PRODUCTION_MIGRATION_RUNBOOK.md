@@ -144,6 +144,34 @@ curl -fsS http://localhost:8000/health | jq .
 - Commands carry `expected_seq`.
 - OMS returns **409 Conflict** on mismatch (prevents accepting a command that would overwrite a newer state).
 
+### Ontology key_spec registry (primaryKey/titleKey)
+- **Fact**: TerminusDB schema documents may discard per-property metadata (e.g., `primaryKey`/`titleKey`).
+- Therefore, primary keys cannot be made authoritative using Terminus schema alone.
+- We persist the ordered key spec in Postgres table `ontology_key_specs` keyed by `(db_name, branch, class_id)`:
+  - `primary_key: [..]` (order-preserving)
+  - `title_key: [..]`
+- Write path: `ontology_worker` upserts on create/update and deletes on delete.
+- Read path: OMS overlays `metadata.key_spec` + property flags back into `GET /database/{db}/ontology/*` responses.
+
+### Objectify run ordering (DAG ingest)
+- Strong consistency requires **node-first, edge-later** ordering across objectify jobs.
+- BFF DAG orchestrator assigns a `run_id` and enqueues jobs in topological order.
+- Kafka partitioning:
+  - If `run_id` is present, objectify outbox partitions by `db_name:branch:run_id` (ordering within a run).
+  - Otherwise it falls back to `db_name:branch` (legacy safety).
+
+### PK validation rollout policy (warn → fail)
+- Start with: `OBJECTIFY_ONTOLOGY_PK_VALIDATION_MODE=warn`
+- Observation window: **2 weeks** (or a full business cycle), under real production traffic.
+- Promotion rule:
+  - If ontology PK mismatch warnings remain **0** for the full window → switch to `fail`.
+  - If any warnings occur:
+    - Treat as a contract violation: fix ontology key_spec / object_type.pk_spec alignment first.
+    - Restart the observation window after remediation.
+- Signals:
+  - objectify job report: `report.validation.warnings`
+  - gate result: `warning_count` for `scope=objectify_job`
+
 ---
 
 ## Troubleshooting

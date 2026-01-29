@@ -65,10 +65,7 @@ const buildPipelineReply = (response: Record<string, unknown>, status: string, r
 const normalizeLabel = (value: string) => value.trim().toLowerCase()
 
 export const AIAgentPage = () => {
-  const activeNav = useAppStore((state) => state.activeNav)
   const pipelineContext = useAppStore((state) => state.pipelineContext)
-  const aiAgentContext = useAppStore((state) => state.aiAgentContext)
-  const isAiAgentOpen = useAppStore((state) => state.isAiAgentOpen)
   const pipelineAgentRequest = useAppStore((state) => state.pipelineAgentRequest)
   const setPipelineAgentRequest = useAppStore((state) => state.setPipelineAgentRequest)
   const pipelineAgentQuestions = useAppStore((state) => state.pipelineAgentQuestions)
@@ -83,13 +80,12 @@ export const AIAgentPage = () => {
   const pendingReplyIdRef = useRef<string | null>(null)
   const isSendingRef = useRef(false)
 
-  const isAgentVisible = isAiAgentOpen || activeNav === 'ai-agent'
   const activeDbName = pipelineContext?.folderId ?? ''
 
   const { data: datasets = [] } = useQuery({
     queryKey: ['datasets', activeDbName],
     queryFn: () => listDatasets(activeDbName),
-    enabled: Boolean(activeDbName) && isAgentVisible,
+    enabled: Boolean(activeDbName),
   })
 
   const datasetsById = useMemo(() => {
@@ -105,26 +101,6 @@ export const AIAgentPage = () => {
     })
     return map
   }, [datasets])
-
-  const datasetIdsForNodes = useMemo(() => {
-    const ids = new Set<string>()
-    aiAgentContext.nodes.forEach((node) => {
-      const direct = datasetsById.get(node.id)
-      if (direct) {
-        ids.add(direct.dataset_id)
-        return
-      }
-      const label = normalizeLabel(node.label)
-      if (!label) {
-        return
-      }
-      const byName = datasetsByName.get(label)
-      if (byName) {
-        ids.add(byName.dataset_id)
-      }
-    })
-    return Array.from(ids)
-  }, [aiAgentContext.nodes, datasetsById, datasetsByName])
 
   const resolveAssistantMessage = (reply: string, pendingId: string) => {
     const timestamp = new Date().toISOString()
@@ -202,8 +178,7 @@ export const AIAgentPage = () => {
     }
 
     const fallbackDatasetIds = datasets.map((dataset) => dataset.dataset_id)
-    const selectedDatasetIds = datasetIdsForNodes.length > 0 ? datasetIdsForNodes : fallbackDatasetIds
-    const uniqueDatasetIds = Array.from(new Set(selectedDatasetIds.filter(Boolean)))
+    const uniqueDatasetIds = Array.from(new Set(fallbackDatasetIds.filter(Boolean)))
     if (uniqueDatasetIds.length === 0) {
       resolveAssistantMessage(
         'No datasets available for pipeline agent. Select datasets or upload datasets first.',
@@ -244,6 +219,10 @@ export const AIAgentPage = () => {
   }
 
   const canSend = draft.trim().length > 0 && !isSending
+
+  // Suppress unused variable warnings
+  void datasetsById
+  void datasetsByName
 
   return (
     <div className="ai-agent">
@@ -298,4 +277,3 @@ export const AIAgentPage = () => {
     </div>
   )
 }
-

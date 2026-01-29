@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 
 from shared.models.objectify_job import ObjectifyJob
 from shared.models.requests import ApiResponse
-from shared.security.input_sanitizer import sanitize_input, validate_class_id
+from shared.security.input_sanitizer import sanitize_input, validate_branch_name, validate_class_id
 from shared.security.auth_utils import enforce_db_scope
 from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.services.registries.objectify_registry import ObjectifyRegistry
@@ -124,6 +124,20 @@ class TriggerObjectifyRequest(BaseModel):
     max_rows: Optional[int] = Field(default=None)
     allow_partial: bool = Field(default=False)
     options: Optional[Dict[str, Any]] = Field(default=None)
+
+
+class RunObjectifyDAGRequest(BaseModel):
+    """Topologically enqueue objectify jobs based on mapping-spec relationship dependencies."""
+
+    class_ids: List[str] = Field(..., min_length=1, description="Target ontology class ids to objectify")
+    branch: str = Field(default="main", description="Ontology branch to use for all jobs")
+    include_dependencies: bool = Field(
+        default=True,
+        description="If true, automatically include transitive dependencies referenced via relationships",
+    )
+    max_depth: int = Field(default=10, ge=0, le=50, description="Max dependency expansion depth")
+    dry_run: bool = Field(default=False, description="If true, only returns the computed plan (no jobs queued)")
+    options: Optional[Dict[str, Any]] = Field(default=None, description="Options merged into each job options")
 
 
 def _match_output_name(output: Dict[str, Any], name: str) -> bool:
@@ -1230,6 +1244,393 @@ async def run_objectify(
         raise
     except Exception as exc:
         logger.error("Failed to enqueue objectify job: %s", exc)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
+
+
+@router.post("/databases/{db_name}/run-dag", response_model=Dict[str, Any])
+async def run_objectify_dag(
+    db_name: str,
+    body: RunObjectifyDAGRequest,
+    request: Request,
+    dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
+    objectify_registry: ObjectifyRegistry = Depends(get_objectify_registry),
+    job_queue: ObjectifyJobQueue = Depends(get_objectify_job_queue),
+    oms_client: OMSClient = OMSClientDep,
+) -> Dict[str, Any]:
+    """
+    Enterprise helper: enqueue multiple objectify jobs in dependency order.
+
+    Dependency graph is derived from:
+    - Ontology relationships (predicate -> target class)
+    - Mapping spec mappings that target relationship predicates
+    """
+    try:
+        db_name = sanitize_input(db_name)
+        enforce_db_scope(request.headers, db_name=db_name)
+        await _require_db_role(request, db_name=db_name, roles=DATA_ENGINEER_ROLES)
+
+        branch = validate_branch_name(body.branch or "main")
+        include_dependencies = bool(body.include_dependencies)
+        max_depth = int(body.max_depth or 0)
+        run_id = uuid4().hex
+        override_options = body.options if isinstance(body.options, dict) else {}
+
+        from collections import defaultdict, deque
+
+        class_infos: Dict[str, Dict[str, Any]] = {}
+        deps_by_class: Dict[str, set[str]] = defaultdict(set)  # class -> deps
+        dependents_by_class: Dict[str, set[str]] = defaultdict(set)  # dep -> dependents
+        missing_deps_by_class: Dict[str, set[str]] = defaultdict(set)
+
+        async def _fetch_object_type_contract(class_id: str) -> Dict[str, Any]:
+            try:
+                resp = await oms_client.get_ontology_resource(
+                    db_name,
+                    resource_type="object_type",
+                    resource_id=class_id,
+                    branch=branch,
+                )
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code == status.HTTP_404_NOT_FOUND:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail={"code": "OBJECT_TYPE_CONTRACT_MISSING", "class_id": class_id},
+                    ) from exc
+                raise
+            resource = _extract_resource_payload(resp)
+            spec = resource.get("spec") if isinstance(resource.get("spec"), dict) else {}
+            return {"resource": resource, "spec": spec}
+
+        async def _resolve_mapping_spec_for_object_type(
+            *,
+            class_id: str,
+            backing_source: Dict[str, Any],
+        ):
+            dataset_id = str(backing_source.get("dataset_id") or "").strip()
+            dataset_branch = str(backing_source.get("branch") or "main").strip() or "main"
+            schema_hash = str(
+                backing_source.get("schema_hash") or backing_source.get("schemaHash") or ""
+            ).strip() or None
+            if not dataset_id:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={"code": "OBJECT_TYPE_BACKING_DATASET_MISSING", "class_id": class_id},
+                )
+
+            mapping_spec = await objectify_registry.get_active_mapping_spec(
+                dataset_id=dataset_id,
+                dataset_branch=dataset_branch,
+                target_class_id=class_id,
+                schema_hash=schema_hash,
+            )
+            if not mapping_spec and schema_hash:
+                # Best-effort fallback: allow orchestration to proceed if schema_hash is absent in older specs.
+                mapping_spec = await objectify_registry.get_active_mapping_spec(
+                    dataset_id=dataset_id,
+                    dataset_branch=dataset_branch,
+                    target_class_id=class_id,
+                )
+            if not mapping_spec:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={
+                        "code": "MAPPING_SPEC_NOT_FOUND",
+                        "class_id": class_id,
+                        "dataset_id": dataset_id,
+                        "dataset_branch": dataset_branch,
+                        "schema_hash": schema_hash,
+                    },
+                )
+            return mapping_spec, dataset_id, dataset_branch
+
+        async def _fetch_relationship_targets(class_id: str) -> Dict[str, str]:
+            ontology_payload = await oms_client.get_ontology(db_name, class_id, branch=branch)
+            _, rel_map = _extract_ontology_fields(ontology_payload)
+            targets: Dict[str, str] = {}
+            for predicate, rel in rel_map.items():
+                if not isinstance(rel, dict):
+                    continue
+                target = str(
+                    rel.get("target")
+                    or rel.get("target_class")
+                    or rel.get("targetClass")
+                    or rel.get("target_class_id")
+                    or ""
+                ).strip()
+                if predicate and target:
+                    targets[predicate] = target
+            return targets
+
+        async def _load_class_info(class_id: str) -> Dict[str, Any]:
+            if class_id in class_infos:
+                return class_infos[class_id]
+
+            class_id = validate_class_id(class_id)
+            contract = await _fetch_object_type_contract(class_id)
+            spec = contract.get("spec") if isinstance(contract.get("spec"), dict) else {}
+            backing_source = (
+                spec.get("backing_source") if isinstance(spec.get("backing_source"), dict) else {}
+            )
+            mapping_spec, dataset_id, dataset_branch = await _resolve_mapping_spec_for_object_type(
+                class_id=class_id,
+                backing_source=backing_source,
+            )
+
+            dataset_version_id = str(backing_source.get("dataset_version_id") or "").strip() or None
+            version = None
+            if dataset_version_id:
+                version = await dataset_registry.get_version(version_id=dataset_version_id)
+                if not version or str(getattr(version, "dataset_id", "")) != dataset_id:
+                    version = None
+            if not version:
+                version = await dataset_registry.get_latest_version(dataset_id=dataset_id)
+            if not version or not getattr(version, "artifact_key", None):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={"code": "DATASET_VERSION_MISSING", "class_id": class_id, "dataset_id": dataset_id},
+                )
+
+            rel_targets = await _fetch_relationship_targets(class_id)
+            info = {
+                "class_id": class_id,
+                "object_type": contract.get("resource") or {},
+                "object_type_spec": spec,
+                "backing_source": backing_source,
+                "dataset_id": dataset_id,
+                "dataset_branch": dataset_branch,
+                "dataset_version_id": str(getattr(version, "version_id", "")),
+                "artifact_key": str(getattr(version, "artifact_key", "")),
+                "mapping_spec": mapping_spec,
+                "relationship_targets": rel_targets,  # predicate -> target class
+            }
+            class_infos[class_id] = info
+            return info
+
+        # Build dependency closure
+        start = [validate_class_id(c) for c in (body.class_ids or []) if str(c).strip()]
+        if not start:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="class_ids is required")
+        requested_set = set(start)
+
+        queue = deque([(c, 0) for c in start])
+        while queue:
+            current, depth = queue.popleft()
+            info = await _load_class_info(current)
+            mapping_spec = info["mapping_spec"]
+            rel_targets = info["relationship_targets"]
+
+            for mapping in (mapping_spec.mappings or []):
+                if not isinstance(mapping, dict):
+                    continue
+                target_field = str(mapping.get("target_field") or "").strip()
+                if not target_field:
+                    continue
+                dep_class = rel_targets.get(target_field)
+                if not dep_class:
+                    continue
+                dep_class = validate_class_id(dep_class)
+                deps_by_class[current].add(dep_class)
+                dependents_by_class[dep_class].add(current)
+                if include_dependencies:
+                    if dep_class not in class_infos and depth < max_depth:
+                        queue.append((dep_class, depth + 1))
+                    elif dep_class not in class_infos and depth >= max_depth:
+                        missing_deps_by_class[current].add(dep_class)
+                else:
+                    if dep_class not in requested_set:
+                        missing_deps_by_class[current].add(dep_class)
+
+        if missing_deps_by_class:
+            missing_detail = {cls: sorted(deps) for cls, deps in missing_deps_by_class.items() if deps}
+            if missing_detail:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={
+                        "code": "OBJECTIFY_DAG_DEPENDENCIES_MISSING",
+                        "message": (
+                            "Missing dependency classes for safe objectify ordering. "
+                            "Re-run with include_dependencies=true or include the dependencies in class_ids."
+                        ),
+                        "missing_dependencies": missing_detail,
+                        "requested_classes": sorted(requested_set),
+                        "branch": branch,
+                        "max_depth": max_depth,
+                    },
+                )
+
+        # Topological sort (Kahn) with deterministic priority:
+        # Prefer classes that unblock earlier requested roots first.
+        #
+        # Note: Objectify jobs for a db:branch are typically serialized by Kafka key, so the enqueue order
+        # materially impacts time-to-first-result. We therefore bias the ordering towards the user's
+        # requested class_ids (and their dependency chain) rather than arbitrary lexicographic order.
+        import heapq
+
+        all_classes = sorted(class_infos.keys())
+        in_degree: Dict[str, int] = {c: len(deps_by_class.get(c, set())) for c in all_classes}
+
+        start_order = {class_id: idx for idx, class_id in enumerate(start)}
+        default_rank = len(start_order) + 1000
+        priority_rank: Dict[str, int] = {c: default_rank for c in all_classes}
+
+        rank_queue = deque()
+        for class_id, rank in start_order.items():
+            if class_id not in priority_rank:
+                continue
+            if rank < priority_rank[class_id]:
+                priority_rank[class_id] = rank
+                rank_queue.append(class_id)
+
+        # Propagate root priority to upstream dependencies (Transaction -> BankAccount -> Person).
+        while rank_queue:
+            node = rank_queue.popleft()
+            node_rank = priority_rank.get(node, default_rank)
+            for dep in deps_by_class.get(node, set()):
+                if dep not in priority_rank:
+                    continue
+                if node_rank < priority_rank[dep]:
+                    priority_rank[dep] = node_rank
+                    rank_queue.append(dep)
+
+        ready: list[tuple[int, str]] = []
+        for class_id in all_classes:
+            if in_degree.get(class_id, 0) == 0:
+                heapq.heappush(ready, (priority_rank.get(class_id, default_rank), class_id))
+
+        ordered: List[str] = []
+        while ready:
+            _, node = heapq.heappop(ready)
+            ordered.append(node)
+            for dependent in sorted(dependents_by_class.get(node, set())):
+                if dependent not in in_degree:
+                    continue
+                in_degree[dependent] -= 1
+                if in_degree[dependent] == 0:
+                    heapq.heappush(ready, (priority_rank.get(dependent, default_rank), dependent))
+
+        if len(ordered) != len(all_classes):
+            remaining = sorted([c for c in all_classes if in_degree.get(c, 0) > 0])
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "OBJECTIFY_DAG_CYCLE_DETECTED",
+                    "message": "Cycle detected in objectify dependency graph; cannot compute safe order",
+                    "remaining": remaining,
+                },
+            )
+
+        plan = [
+            {
+                "class_id": class_id,
+                "dataset_id": class_infos[class_id]["dataset_id"],
+                "dataset_branch": class_infos[class_id]["dataset_branch"],
+                "dataset_version_id": class_infos[class_id]["dataset_version_id"],
+                "mapping_spec_id": class_infos[class_id]["mapping_spec"].mapping_spec_id,
+                "mapping_spec_version": class_infos[class_id]["mapping_spec"].version,
+            }
+            for class_id in ordered
+        ]
+
+        if body.dry_run:
+            return ApiResponse.success(
+                message="Objectify DAG plan computed (dry_run)",
+                data={"run_id": run_id, "branch": branch, "ordered_classes": ordered, "plan": plan},
+            ).to_dict()
+
+        queued: List[Dict[str, Any]] = []
+        for class_id in ordered:
+            info = class_infos[class_id]
+            mapping_spec = info["mapping_spec"]
+            dataset_id = info["dataset_id"]
+            dataset_branch = info["dataset_branch"]
+            dataset_version_id = info["dataset_version_id"]
+            artifact_key = info["artifact_key"]
+
+            dedupe_key = objectify_registry.build_dedupe_key(
+                dataset_id=dataset_id,
+                dataset_branch=dataset_branch,
+                mapping_spec_id=mapping_spec.mapping_spec_id,
+                mapping_spec_version=mapping_spec.version,
+                dataset_version_id=dataset_version_id,
+                artifact_id=None,
+                artifact_output_name=mapping_spec.artifact_output_name,
+            )
+            existing = await objectify_registry.get_objectify_job_by_dedupe_key(dedupe_key=dedupe_key)
+            if existing:
+                queued.append(
+                    {
+                        "class_id": class_id,
+                        "job_id": existing.job_id,
+                        "mapping_spec_id": mapping_spec.mapping_spec_id,
+                        "dataset_id": dataset_id,
+                        "dataset_version_id": dataset_version_id,
+                        "status": existing.status,
+                        "deduped": True,
+                    }
+                )
+                continue
+
+            job_id = str(uuid4())
+            options = dict(mapping_spec.options or {})
+            options.update(override_options)
+            options.setdefault("run_id", run_id)
+            options.setdefault("orchestrator", "dag")
+            options.setdefault("dag_branch", branch)
+            options.setdefault("dag_root_classes", start)
+            options.setdefault("include_dependencies", include_dependencies)
+
+            job = ObjectifyJob(
+                job_id=job_id,
+                db_name=db_name,
+                dataset_id=dataset_id,
+                dataset_version_id=dataset_version_id,
+                artifact_output_name=mapping_spec.artifact_output_name,
+                dedupe_key=dedupe_key,
+                dataset_branch=dataset_branch,
+                artifact_key=artifact_key,
+                mapping_spec_id=mapping_spec.mapping_spec_id,
+                mapping_spec_version=mapping_spec.version,
+                target_class_id=class_id,
+                ontology_branch=branch,
+                max_rows=options.get("max_rows"),
+                batch_size=options.get("batch_size"),
+                allow_partial=bool(options.get("allow_partial")),
+                options=options,
+            )
+            await job_queue.publish(job, require_delivery=False)
+            queued.append(
+                {
+                    "class_id": class_id,
+                    "job_id": job_id,
+                    "mapping_spec_id": mapping_spec.mapping_spec_id,
+                    "dataset_id": dataset_id,
+                    "dataset_version_id": dataset_version_id,
+                    "status": "QUEUED",
+                    "deduped": False,
+                }
+            )
+
+        return ApiResponse.success(
+            message="Objectify DAG queued",
+            data={
+                "run_id": run_id,
+                "branch": branch,
+                "ordered_classes": ordered,
+                "plan": plan,
+                "jobs": queued,
+            },
+        ).to_dict()
+    except httpx.HTTPStatusError as exc:
+        detail: Any
+        try:
+            detail = exc.response.json()
+        except Exception:
+            detail = exc.response.text
+        raise HTTPException(status_code=exc.response.status_code, detail=detail) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("Failed to orchestrate objectify DAG: %s", exc)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
 
 

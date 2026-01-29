@@ -115,11 +115,20 @@ async def _fallback_from_registry(
 
 async def _append_command_event(command: InstanceCommand, *, event_store, topic: str, actor: Optional[str]) -> None:
     """Store command as an immutable event in S3/MinIO for the publisher to relay to Kafka."""
+    # Ordering contract: for ingestion/enterprise DAG workflows, we partition instance command
+    # delivery by db+branch so dependent classes are processed in enqueue order. We keep
+    # aggregate_id semantics intact (debugging/idempotency) and expose ordering_key separately.
+    branch = validate_branch_name(command.branch or "main")
+    ordering_key = None
+    if isinstance(command.metadata, dict):
+        ordering_key = str(command.metadata.get("ordering_key") or "").strip() or None
+    if not ordering_key:
+        ordering_key = f"{command.db_name}:{branch}"
     envelope = EventEnvelope.from_command(
         command,
         actor=actor,
         kafka_topic=topic,
-        metadata={"service": "oms", "mode": "event_sourcing"},
+        metadata={"service": "oms", "mode": "event_sourcing", "ordering_key": ordering_key},
     )
     await event_store.append_event(envelope)
     logger.info(f"Stored command event {envelope.event_id} (seq={envelope.sequence_number}) to Event Store")

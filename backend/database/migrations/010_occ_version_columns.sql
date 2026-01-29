@@ -2,6 +2,9 @@
 -- Description: Add version columns for Optimistic Concurrency Control (OCC)
 -- Date: 2024-01-28
 
+-- Ensure shared/core schema exists (some environments rely on init scripts; keep migration self-contained).
+CREATE SCHEMA IF NOT EXISTS spice_core;
+
 -- ============================================================
 -- 1. Add version column to objectify_jobs
 -- ============================================================

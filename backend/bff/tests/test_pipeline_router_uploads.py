@@ -313,7 +313,7 @@ class _FakeFunnelClient:
     async def __aexit__(self, exc_type, exc, tb):
         return False
 
-    async def analyze_dataset(self, payload):
+    async def analyze_dataset(self, payload, *, timeout_seconds=None):  # noqa: ARG002
         return {
             "columns": [
                 {
@@ -343,6 +343,17 @@ class _FakeFunnelClient:
             "source_metadata": {"sheet": "Sheet1"},
         }
         return {"preview": preview}, "hash-123"
+
+
+class _FailingFunnelClient:
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+    async def analyze_dataset(self, payload, *, timeout_seconds=None):  # noqa: ARG002
+        raise RuntimeError("funnel down")
 
 
 def _build_request(headers: dict[str, str]) -> Request:
@@ -390,6 +401,8 @@ async def test_upload_csv_dataset_creates_version(monkeypatch):
 
     import bff.services.funnel_client as funnel_client
 
+    monkeypatch.setenv("PIPELINE_LOCKS_ENABLED", "false")
+    monkeypatch.setenv("PIPELINE_LOCKS_REQUIRED", "false")
     monkeypatch.setattr(pipeline_router, "flush_dataset_ingest_outbox", _noop_flush)
     monkeypatch.setattr(funnel_client, "FunnelClient", _FakeFunnelClient)
 
@@ -428,12 +441,66 @@ async def test_upload_csv_dataset_creates_version(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_upload_csv_dataset_funnel_failure_uses_fallback(monkeypatch):
+    async def _noop_flush(**_):
+        return None
+
+    import bff.services.funnel_client as funnel_client
+
+    monkeypatch.setenv("PIPELINE_LOCKS_ENABLED", "false")
+    monkeypatch.setenv("PIPELINE_LOCKS_REQUIRED", "false")
+    monkeypatch.setattr(pipeline_router, "flush_dataset_ingest_outbox", _noop_flush)
+    monkeypatch.setattr(funnel_client, "FunnelClient", _FailingFunnelClient)
+
+    pipeline_registry = _FakePipelineRegistry()
+    dataset_registry = _FakeDatasetRegistry()
+
+    csv_bytes = b"id,name\n1,Ada\n2,Ben\n"
+    upload = UploadFile(filename="people.csv", file=io.BytesIO(csv_bytes))
+    request = _build_request(
+        {
+            "Idempotency-Key": "idem-fallback",
+            "X-DB-Name": "core-db",
+            "X-User-ID": "user-1",
+        }
+    )
+
+    response = await pipeline_router.upload_csv_dataset(
+        db_name="core-db",
+        branch="main",
+        file=upload,
+        dataset_name="people",
+        description="People dataset",
+        delimiter=",",
+        has_header=True,
+        request=request,
+        pipeline_registry=pipeline_registry,
+        dataset_registry=dataset_registry,
+        objectify_registry=None,
+        objectify_job_queue=None,
+        lineage_store=None,
+    )
+
+    assert response["status"] == "success"
+    funnel_analysis = response["data"]["funnel_analysis"]
+    assert funnel_analysis.get("columns"), "Expected fallback columns when Funnel is unavailable"
+    codes = {
+        item.get("code")
+        for item in (funnel_analysis.get("risk_summary") or [])
+        if isinstance(item, dict)
+    }
+    assert "FUNNEL_UNAVAILABLE" in codes
+
+
+@pytest.mark.asyncio
 async def test_upload_excel_dataset_commits_preview(monkeypatch):
     async def _noop_flush(**_):
         return None
 
     import bff.services.funnel_client as funnel_client
 
+    monkeypatch.setenv("PIPELINE_LOCKS_ENABLED", "false")
+    monkeypatch.setenv("PIPELINE_LOCKS_REQUIRED", "false")
     monkeypatch.setattr(pipeline_router, "flush_dataset_ingest_outbox", _noop_flush)
     monkeypatch.setattr(funnel_client, "FunnelClient", _FakeFunnelClient)
 
@@ -552,6 +619,52 @@ async def test_get_ingest_request_includes_funnel_analysis(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_get_ingest_request_funnel_failure_uses_fallback(monkeypatch):
+    import bff.services.funnel_client as funnel_client
+
+    monkeypatch.setattr(funnel_client, "FunnelClient", _FailingFunnelClient)
+
+    dataset_registry = _FakeDatasetRegistry()
+    dataset = await dataset_registry.create_dataset(
+        db_name="core-db",
+        name="incoming",
+        description=None,
+        source_type="csv_upload",
+        source_ref="upload.csv",
+        schema_json={},
+        branch="main",
+    )
+    ingest_request, _ = await dataset_registry.create_ingest_request(
+        dataset_id=dataset.dataset_id,
+        db_name=dataset.db_name,
+        branch=dataset.branch,
+        idempotency_key="idem-read-fallback",
+        request_fingerprint="fingerprint",
+        schema_json={"columns": [{"name": "id", "type": "xsd:integer"}]},
+        sample_json={"columns": [{"name": "id"}], "rows": [{"id": "1"}, {"id": "2"}]},
+        row_count=2,
+        source_metadata={"source_type": "csv"},
+    )
+    request = _build_request({"X-DB-Name": "core-db"})
+
+    response = await pipeline_router.get_dataset_ingest_request(
+        ingest_request_id=ingest_request.ingest_request_id,
+        request=request,
+        dataset_registry=dataset_registry,
+    )
+
+    assert response["status"] == "success"
+    funnel_analysis = response["data"]["funnel_analysis"]
+    assert funnel_analysis.get("columns"), "Expected fallback analysis columns"
+    codes = {
+        item.get("code")
+        for item in (funnel_analysis.get("risk_summary") or [])
+        if isinstance(item, dict)
+    }
+    assert "FUNNEL_UNAVAILABLE" in codes
+
+
+@pytest.mark.asyncio
 async def test_reanalyze_dataset_version_returns_funnel_analysis(monkeypatch):
     import bff.services.funnel_client as funnel_client
 
@@ -594,6 +707,8 @@ async def test_upload_media_dataset_stores_files(monkeypatch):
     async def _noop_flush(**_):
         return None
 
+    monkeypatch.setenv("PIPELINE_LOCKS_ENABLED", "false")
+    monkeypatch.setenv("PIPELINE_LOCKS_REQUIRED", "false")
     monkeypatch.setattr(pipeline_router, "flush_dataset_ingest_outbox", _noop_flush)
 
     pipeline_registry = _FakePipelineRegistry()

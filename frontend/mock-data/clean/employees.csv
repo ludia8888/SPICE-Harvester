@@ -1,0 +1,21 @@
+employee_id,name,email,department,title,facility_id,manager_id,hire_date,salary,currency,status,clearance_level
+EMP-001,김영수,kim.ys@company.com,Operations,Plant Manager,FAC-001,EMP-010,2015-03-15,125000000,KRW,Active,Level 4
+EMP-002,박철호,park.ch@company.com,Operations,Mill Supervisor,FAC-002,EMP-010,2012-06-01,98000000,KRW,Active,Level 4
+EMP-003,이민정,lee.mj@company.com,Logistics,Distribution Manager,FAC-003,EMP-011,2019-09-10,85000000,KRW,Active,Level 3
+EMP-004,최항만,choi.hm@company.com,Logistics,Terminal Director,FAC-004,EMP-011,2010-01-01,115000000,KRW,Active,Level 4
+EMP-005,정연구,jung.yg@company.com,R&D,Research Director,FAC-005,EMP-012,2018-11-20,135000000,KRW,Active,Level 5
+EMP-006,김조립,kim.jl@company.com,Operations,Assembly Manager,FAC-006,EMP-010,2016-04-01,92000000,KRW,Active,Level 3
+EMP-007,박배터리,park.bt@company.com,Operations,Battery Plant Director,FAC-007,EMP-010,2020-08-15,108000000,KRW,Active,Level 4
+EMP-008,王物流,wang.wl@company.cn,Logistics,China Warehouse Manager,FAC-008,EMP-011,2018-03-01,680000,CNY,Active,Level 3
+EMP-009,田中倉庫,tanaka.sk@company.jp,Logistics,Japan Parts Manager,FAC-009,EMP-011,2017-07-01,12500000,JPY,Active,Level 3
+EMP-010,John Miller,j.miller@company.com,Operations,VP Operations,FAC-010,EMP-015,2014-02-15,250000,USD,Active,Level 5
+EMP-011,Hans Weber,h.weber@company.de,Logistics,VP Supply Chain,FAC-011,EMP-015,2019-05-01,185000,EUR,Active,Level 5
+EMP-012,김부품,kim.bp@company.com,Operations,Component Plant Manager,FAC-012,EMP-010,2018-01-10,88000000,KRW,Active,Level 3
+EMP-013,이항공,lee.hg@company.com,Logistics,Air Cargo Manager,FAC-013,EMP-011,2021-12-01,78000000,KRW,Active,Level 3
+EMP-014,박생산,park.ss@company.com,Operations,Production Director,FAC-014,EMP-010,2021-06-01,95000000,KRW,Active,Level 4
+EMP-015,최경영,choi.ky@company.com,Executive,COO,null,null,2008-01-01,350000000,KRW,Active,Level 5
+EMP-016,김보안,kim.ba@company.com,Security,Security Manager,FAC-005,EMP-015,2019-06-15,75000000,KRW,Active,Level 4
+EMP-017,이준수,lee.js@company.com,Compliance,Compliance Officer,null,EMP-015,2020-03-01,95000000,KRW,Active,Level 4
+EMP-018,박재무,park.jm@company.com,Finance,CFO,null,null,2010-05-01,280000000,KRW,Active,Level 5
+EMP-019,정구매,jung.gm@company.com,Procurement,Procurement Director,null,EMP-015,2017-08-01,105000000,KRW,Active,Level 4
+EMP-020,최화학,choi.hh@company.com,Operations,Chemical Plant Director,FAC-015,EMP-010,2013-09-01,112000000,KRW,Active,Level 4

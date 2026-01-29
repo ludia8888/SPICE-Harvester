@@ -271,7 +271,7 @@ async def test_oms_end_to_end_smoke():
                 "label": "Product",
                 "description": "Product for OMS smoke test",
                 "properties": [
-                    {"name": "product_id", "type": "string", "label": "Product ID", "required": True},
+                    {"name": "product_id", "type": "string", "label": "Product ID", "required": True, "primaryKey": True},
                     {"name": "name", "type": "string", "label": "Name", "required": True, "titleKey": True},
                 ],
                 "relationships": [],
@@ -320,6 +320,25 @@ async def test_oms_end_to_end_smoke():
                     await _wait_for_command_completed(session, command_id=str(ontology_command_id))
 
             await _wait_for_ontology_present(session, db_name=db_name, ontology_id=class_id, branch=write_branch)
+
+            # Enterprise contract:
+            # TerminusDB schema documents may discard custom per-property metadata, so OMS overlays
+            # key_spec from a separate registry to preserve primaryKey/titleKey on reads.
+            async with session.get(
+                f"{OMS_URL}/api/v1/database/{db_name}/ontology/{class_id}",
+                params={"branch": write_branch},
+            ) as resp:
+                assert resp.status == 200
+                payload = await resp.json()
+                data = payload.get("data") or {}
+                props = data.get("properties") or []
+                product = next((p for p in props if isinstance(p, dict) and p.get("name") == "product_id"), None)
+                name_prop = next((p for p in props if isinstance(p, dict) and p.get("name") == "name"), None)
+                assert product is not None, payload
+                assert product.get("required") is True, payload
+                assert bool(product.get("primaryKey") or product.get("primary_key")) is True, payload
+                assert name_prop is not None, payload
+                assert bool(name_prop.get("titleKey") or name_prop.get("title_key")) is True, payload
 
             # 5) Async instance create (event sourcing) + read-side count
             async with session.post(

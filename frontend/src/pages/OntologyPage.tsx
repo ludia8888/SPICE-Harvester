@@ -1,6 +1,28 @@
-import { useMemo, useState } from 'react'
-import { Button, Card, Icon, InputGroup, Popover, Text } from '@blueprintjs/core'
+import { useCallback, useMemo, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { Button, Card, Icon, InputGroup, Popover, Spinner, Text } from '@blueprintjs/core'
 import type { IconName } from '@blueprintjs/icons'
+import { useAppStore } from '../state/store'
+import {
+  listActionTypes,
+  getActionType,
+  simulateAction,
+  executeAction,
+  listActionLogs,
+  listOntologyClasses,
+  listLinkTypes,
+  type ActionType,
+  type ActionTypeDetail as ActionTypeDetailType,
+} from '../api/bff'
+import {
+  ActionTypeList,
+  ActionTypeDetail,
+  ActionForm,
+  SimulationPreview,
+  ActionHistory,
+  ObjectTypeList,
+  LinkTypeList,
+} from '../components/ontology'
 
 type ResourceType =
   | 'Object type'
@@ -26,8 +48,10 @@ type ResourceCategory =
 
 type OntologyResource = {
   id: string
+  resourceId: string
   name: string
   type: ResourceType
+  category: ResourceCategory
 }
 
 type CreateItem = {
@@ -60,53 +84,6 @@ const resourceTypeLabels: Record<ResourceCategory, ResourceType> = {
   interfaces: 'Interface',
   'value-types': 'Value type',
   functions: 'Function',
-}
-
-const buildResourceList = (
-  category: ResourceCategory,
-  count: number,
-  seed: Array<{ id: string; name: string }> = [],
-): OntologyResource[] => {
-  const label = resourceTypeLabels[category]
-  const base = seed.slice(0, count).map((item) => ({ ...item, type: label }))
-  const remainder = Math.max(count - base.length, 0)
-  const generated = Array.from({ length: remainder }, (_, index) => ({
-    id: `${category}-${index + base.length + 1}`,
-    name: `${label} ${index + base.length + 1}`,
-    type: label,
-  }))
-  return [...base, ...generated]
-}
-
-const ontologyResourceCatalog: Record<ResourceCategory, OntologyResource[]> = {
-  'object-types': buildResourceList('object-types', 17, [
-    { id: 'object:facility', name: 'Facility' },
-    { id: 'object:vendor', name: 'Vendor' },
-  ]),
-  properties: buildResourceList('properties', 1, [{ id: 'property:address', name: 'Address' }]),
-  'shared-properties': buildResourceList('shared-properties', 0),
-  'link-types': buildResourceList('link-types', 13, [{ id: 'link:facility_vendor', name: 'Facility ↔ Vendor' }]),
-  'action-types': buildResourceList('action-types', 19),
-  groups: buildResourceList('groups', 0),
-  interfaces: buildResourceList('interfaces', 0),
-  'value-types': buildResourceList('value-types', 0),
-  functions: buildResourceList('functions', 147, [
-    { id: 'function:normalize_address', name: 'Normalize Address' },
-  ]),
-}
-
-const ontologyResources: OntologyResource[] = Object.values(ontologyResourceCatalog).flat()
-
-const resourceCounts: Record<ResourceCategory, number> = {
-  'object-types': ontologyResourceCatalog['object-types'].length,
-  properties: ontologyResourceCatalog.properties.length,
-  'shared-properties': ontologyResourceCatalog['shared-properties'].length,
-  'link-types': ontologyResourceCatalog['link-types'].length,
-  'action-types': ontologyResourceCatalog['action-types'].length,
-  groups: ontologyResourceCatalog.groups.length,
-  interfaces: ontologyResourceCatalog.interfaces.length,
-  'value-types': ontologyResourceCatalog['value-types'].length,
-  functions: ontologyResourceCatalog.functions.length,
 }
 
 const createMenuItems: CreateItem[] = [
@@ -165,18 +142,6 @@ const primaryNavItems: OntologyNavItem[] = [
   { id: 'history', label: 'History', icon: 'history' },
 ]
 
-const resourceNavItems: OntologyNavItem[] = [
-  { id: 'object-types', label: 'Object types', icon: 'cube', count: resourceCounts['object-types'] },
-  { id: 'properties', label: 'Properties', icon: 'property', count: resourceCounts.properties },
-  { id: 'shared-properties', label: 'Shared properties', icon: 'layers', count: resourceCounts['shared-properties'] },
-  { id: 'link-types', label: 'Link types', icon: 'link', count: resourceCounts['link-types'] },
-  { id: 'action-types', label: 'Action types', icon: 'flash', count: resourceCounts['action-types'] },
-  { id: 'groups', label: 'Groups', icon: 'group-objects', count: resourceCounts.groups },
-  { id: 'interfaces', label: 'Interfaces', icon: 'grid', count: resourceCounts.interfaces },
-  { id: 'value-types', label: 'Value types', icon: 'tag', count: resourceCounts['value-types'] },
-  { id: 'functions', label: 'Functions', icon: 'function', count: resourceCounts.functions },
-]
-
 const operationsNavItems: OntologyNavItem[] = [
   { id: 'health-issues', label: 'Health issues', icon: 'issue' },
   { id: 'cleanup', label: 'Cleanup', icon: 'clean' },
@@ -194,48 +159,33 @@ const ontologyContentMap: Record<string, OntologyContent> = {
     description: '온톨로지 변경 이력을 추적합니다.',
     details: ['누가/언제/무엇을 변경했는지 확인합니다.', '운영 사고를 방지하기 위한 감사 로그 역할을 합니다.'],
   },
-  'object-types': {
-    title: `Object types (${resourceCounts['object-types']})`,
-    description: '도메인의 명사에 해당하는 핵심 객체 정의입니다.',
-    details: ['고유 ID 규칙, 속성, 링크, 액션을 포함합니다.'],
-  },
   properties: {
-    title: `Properties (${resourceCounts.properties})`,
+    title: 'Properties',
     description: '오브젝트 타입에 붙는 속성 정의입니다.',
     details: ['타입, 필수 여부, 제약 조건을 포함합니다.'],
   },
   'shared-properties': {
-    title: `Shared properties (${resourceCounts['shared-properties']})`,
+    title: 'Shared properties',
     description: '여러 타입에서 재사용 가능한 공통 속성 정의입니다.',
     details: ['중복 정의를 줄이고 일관성을 유지합니다.'],
   },
-  'link-types': {
-    title: `Link types (${resourceCounts['link-types']})`,
-    description: '오브젝트 간 관계(엣지 타입)를 정의합니다.',
-    details: ['방향성, 카디널리티, 링크 속성을 포함합니다.'],
-  },
-  'action-types': {
-    title: `Action types (${resourceCounts['action-types']})`,
-    description: '오브젝트/링크에 가능한 행동 정의입니다.',
-    details: ['업무 트랜잭션 및 자동화 단위로 활용됩니다.'],
-  },
   groups: {
-    title: `Groups (${resourceCounts.groups})`,
+    title: 'Groups',
     description: '도메인별 리소스를 묶어 관리하는 구조입니다.',
     details: ['큰 온톨로지를 모듈화하는 데 사용합니다.'],
   },
   interfaces: {
-    title: `Interfaces (${resourceCounts.interfaces})`,
+    title: 'Interfaces',
     description: '공통 계약을 정의해 여러 타입이 채택하게 합니다.',
     details: ['객체지향의 interface와 유사합니다.'],
   },
   'value-types': {
-    title: `Value types (${resourceCounts['value-types']})`,
+    title: 'Value types',
     description: '도메인 값 타입을 정의합니다.',
     details: ['예: Money, Address, GeoPoint 같은 값 타입을 포함합니다.'],
   },
   functions: {
-    title: `Functions (${resourceCounts.functions})`,
+    title: 'Functions',
     description: '온톨로지 위에서 쓰는 계산/파생 로직입니다.',
     details: ['UI 표시값, 규칙/알림/액션 트리거에 사용됩니다.'],
   },
@@ -257,9 +207,96 @@ const ontologyContentMap: Record<string, OntologyContent> = {
 }
 
 export const OntologyPage = () => {
+  const pipelineContext = useAppStore((state) => state.pipelineContext)
+  const selectedActionTypeId = useAppStore((state) => state.selectedActionTypeId)
+  const setSelectedActionTypeId = useAppStore((state) => state.setSelectedActionTypeId)
+  const actionSimulationResult = useAppStore((state) => state.actionSimulationResult)
+  const setActionSimulationResult = useAppStore((state) => state.setActionSimulationResult)
+
   const [searchQuery, setSearchQuery] = useState('')
   const [isSearchFocused, setSearchFocused] = useState(false)
   const [activeNavId, setActiveNavId] = useState('discover')
+  const [selectedObjectTypeId, setSelectedObjectTypeId] = useState<string | null>(null)
+  const [selectedLinkTypeId, setSelectedLinkTypeId] = useState<string | null>(null)
+  const [selectedActionDetail, setSelectedActionDetail] = useState<ActionTypeDetailType | null>(null)
+  const [isSimulating, setIsSimulating] = useState(false)
+  const [isExecuting, setIsExecuting] = useState(false)
+
+  const activeDbName = pipelineContext?.folderId ?? ''
+
+  // Queries
+  const { data: apiActionTypes = [], isLoading: isLoadingActionTypes } = useQuery({
+    queryKey: ['action-types', activeDbName],
+    queryFn: () => listActionTypes(activeDbName),
+    enabled: Boolean(activeDbName),
+  })
+
+  const { data: actionLogs = [], isLoading: isLoadingActionLogs } = useQuery({
+    queryKey: ['action-logs', activeDbName],
+    queryFn: () => listActionLogs(activeDbName),
+    enabled: Boolean(activeDbName) && activeNavId === 'action-types',
+  })
+
+  const { data: apiObjectTypes = [], isLoading: isLoadingObjectTypes } = useQuery({
+    queryKey: ['ontology-classes', activeDbName],
+    queryFn: () => listOntologyClasses(activeDbName),
+    enabled: Boolean(activeDbName),
+  })
+
+  const { data: apiLinkTypes = [], isLoading: isLoadingLinkTypes } = useQuery({
+    queryKey: ['link-types', activeDbName],
+    queryFn: () => listLinkTypes(activeDbName),
+    enabled: Boolean(activeDbName),
+  })
+
+  const ontologyResources = useMemo<OntologyResource[]>(() => {
+    const resources: OntologyResource[] = []
+
+    apiObjectTypes.forEach((objectType) => {
+      resources.push({
+        id: `object-types:${objectType.id}`,
+        resourceId: objectType.id,
+        name: objectType.label,
+        type: resourceTypeLabels['object-types'],
+        category: 'object-types',
+      })
+    })
+
+    apiLinkTypes.forEach((linkType) => {
+      resources.push({
+        id: `link-types:${linkType.id}`,
+        resourceId: linkType.id,
+        name: linkType.name,
+        type: resourceTypeLabels['link-types'],
+        category: 'link-types',
+      })
+    })
+
+    apiActionTypes.forEach((actionType) => {
+      resources.push({
+        id: `action-types:${actionType.id}`,
+        resourceId: actionType.id,
+        name: actionType.name,
+        type: resourceTypeLabels['action-types'],
+        category: 'action-types',
+      })
+    })
+
+    return resources
+  }, [apiActionTypes, apiLinkTypes, apiObjectTypes])
+
+  const resourceNavItems: OntologyNavItem[] = useMemo(() => [
+    { id: 'object-types', label: 'Object types', icon: 'cube', count: isLoadingObjectTypes ? undefined : apiObjectTypes.length },
+    { id: 'link-types', label: 'Link types', icon: 'link', count: isLoadingLinkTypes ? undefined : apiLinkTypes.length },
+    { id: 'action-types', label: 'Action types', icon: 'flash', count: isLoadingActionTypes ? undefined : apiActionTypes.length },
+    { id: 'properties', label: 'Properties', icon: 'property' },
+    { id: 'shared-properties', label: 'Shared properties', icon: 'layers' },
+    { id: 'groups', label: 'Groups', icon: 'group-objects' },
+    { id: 'interfaces', label: 'Interfaces', icon: 'grid' },
+    { id: 'value-types', label: 'Value types', icon: 'tag' },
+    { id: 'functions', label: 'Functions', icon: 'function' },
+  ], [apiActionTypes.length, apiLinkTypes.length, apiObjectTypes.length, isLoadingActionTypes, isLoadingLinkTypes, isLoadingObjectTypes])
+
   const activeContent = ontologyContentMap[activeNavId]
 
   const filteredResources = useMemo(() => {
@@ -268,14 +305,98 @@ export const OntologyPage = () => {
       return []
     }
     return ontologyResources.filter((resource) => resource.name.toLowerCase().includes(query))
-  }, [searchQuery])
+  }, [ontologyResources, searchQuery])
 
   const showResults = isSearchFocused && searchQuery.trim().length > 0
+  const isSearchLoading = isLoadingActionTypes || isLoadingObjectTypes || isLoadingLinkTypes
 
   const handleSelectResource = (resource: OntologyResource) => {
     setSearchQuery(resource.name)
     setSearchFocused(false)
+
+    if (resource.category === 'object-types') {
+      setSelectedObjectTypeId(resource.resourceId)
+      setActiveNavId('object-types')
+      return
+    }
+    if (resource.category === 'link-types') {
+      setSelectedLinkTypeId(resource.resourceId)
+      setActiveNavId('link-types')
+      return
+    }
+    if (resource.category === 'action-types') {
+      const match = apiActionTypes.find((a) => a.id === resource.resourceId)
+      if (match) {
+        void handleSelectActionType(match)
+        setActiveNavId('action-types')
+      }
+    }
   }
+
+  const handleSelectActionType = useCallback(async (actionType: ActionType) => {
+    setSelectedActionTypeId(actionType.id)
+    setActionSimulationResult(null)
+
+    if (activeDbName) {
+      try {
+        const detail = await getActionType(activeDbName, actionType.id)
+        setSelectedActionDetail(detail)
+      } catch {
+        setSelectedActionDetail({
+          ...actionType,
+          examples: [],
+        })
+      }
+    }
+  }, [activeDbName, setSelectedActionTypeId, setActionSimulationResult])
+
+  const handleSimulate = useCallback(async (params: Record<string, unknown>) => {
+    if (!activeDbName || !selectedActionTypeId) return
+
+    setIsSimulating(true)
+    try {
+      const result = await simulateAction(activeDbName, selectedActionTypeId, params)
+      setActionSimulationResult(result)
+    } catch (error) {
+      setActionSimulationResult({
+        success: false,
+        changes: [],
+        errors: [error instanceof Error ? error.message : '시뮬레이션에 실패했습니다'],
+      })
+    } finally {
+      setIsSimulating(false)
+    }
+  }, [activeDbName, selectedActionTypeId, setActionSimulationResult])
+
+  const handleExecute = useCallback(async (params: Record<string, unknown>) => {
+    if (!activeDbName || !selectedActionTypeId) return
+
+    setIsExecuting(true)
+    try {
+      await executeAction(activeDbName, selectedActionTypeId, params)
+      setActionSimulationResult(null)
+    } catch (error) {
+      setActionSimulationResult({
+        success: false,
+        changes: [],
+        errors: [error instanceof Error ? error.message : 'Action 실행에 실패했습니다'],
+      })
+    } finally {
+      setIsExecuting(false)
+    }
+  }, [activeDbName, selectedActionTypeId, setActionSimulationResult])
+
+  const handleConfirmSimulation = useCallback(() => {
+    if (selectedActionDetail) {
+      const defaultParams: Record<string, unknown> = {}
+      selectedActionDetail.parameters.forEach((p) => {
+        if (p.defaultValue !== undefined) {
+          defaultParams[p.name] = p.defaultValue
+        }
+      })
+      handleExecute(defaultParams)
+    }
+  }, [selectedActionDetail, handleExecute])
 
   const createMenu = (
     <div className="ontology-create-menu" role="menu">
@@ -292,6 +413,162 @@ export const OntologyPage = () => {
       ))}
     </div>
   )
+
+  const renderActionTypesContent = () => (
+    <div className="ontology-action-types-content">
+      <div className="ontology-action-types-layout">
+        <div className="ontology-action-types-list">
+          <ActionTypeList
+            actionTypes={apiActionTypes}
+            selectedId={selectedActionTypeId}
+            onSelect={handleSelectActionType}
+            isLoading={isLoadingActionTypes}
+          />
+        </div>
+        <div className="ontology-action-types-detail">
+          {selectedActionDetail ? (
+            <>
+              <ActionTypeDetail actionType={selectedActionDetail} />
+              <ActionForm
+                actionType={selectedActionDetail}
+                onSimulate={handleSimulate}
+                onExecute={handleExecute}
+                isSimulating={isSimulating}
+                isExecuting={isExecuting}
+              />
+            </>
+          ) : (
+            <div className="ontology-action-types-empty">
+              <Icon icon="flash" size={32} />
+              <span>Action을 선택하면 상세 정보와 실행 옵션이 표시됩니다</span>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {actionSimulationResult && (
+        <SimulationPreview
+          result={actionSimulationResult}
+          onConfirm={handleConfirmSimulation}
+          onCancel={() => setActionSimulationResult(null)}
+          isExecuting={isExecuting}
+        />
+      )}
+
+      <ActionHistory logs={actionLogs} isLoading={isLoadingActionLogs} />
+    </div>
+  )
+
+  const renderObjectTypesContent = () => (
+    <div className="ontology-object-types-content">
+      <div className="ontology-object-types-layout">
+        <div className="ontology-object-types-list">
+          <ObjectTypeList
+            objectTypes={apiObjectTypes}
+            selectedId={selectedObjectTypeId}
+            onSelect={(obj) => setSelectedObjectTypeId(obj.id)}
+            isLoading={isLoadingObjectTypes}
+          />
+        </div>
+        <div className="ontology-object-types-detail">
+          {selectedObjectTypeId ? (
+            <Card className="card">
+              <div className="ontology-object-detail-header">
+                <Icon icon="cube" size={16} />
+                <span>{apiObjectTypes.find((o) => o.id === selectedObjectTypeId)?.label}</span>
+              </div>
+              <p className="ontology-object-detail-desc">
+                {apiObjectTypes.find((o) => o.id === selectedObjectTypeId)?.description || '설명 없음'}
+              </p>
+            </Card>
+          ) : (
+            <div className="ontology-object-types-empty">
+              <Icon icon="cube" size={32} />
+              <span>Object type을 선택하면 상세 정보가 표시됩니다</span>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+
+  const renderLinkTypesContent = () => (
+    <div className="ontology-link-types-content">
+      <div className="ontology-link-types-layout">
+        <div className="ontology-link-types-list">
+          <LinkTypeList
+            linkTypes={apiLinkTypes}
+            selectedId={selectedLinkTypeId}
+            onSelect={(link) => setSelectedLinkTypeId(link.id)}
+            isLoading={isLoadingLinkTypes}
+          />
+        </div>
+        <div className="ontology-link-types-detail">
+          {selectedLinkTypeId ? (
+            <Card className="card">
+              <div className="ontology-link-detail-header">
+                <Icon icon="link" size={16} />
+                <span>{apiLinkTypes.find((l) => l.id === selectedLinkTypeId)?.name}</span>
+              </div>
+              <div className="ontology-link-detail-visual">
+                <span>{apiLinkTypes.find((l) => l.id === selectedLinkTypeId)?.sourceClassName}</span>
+                <Icon icon="arrow-right" size={14} />
+                <span>{apiLinkTypes.find((l) => l.id === selectedLinkTypeId)?.targetClassName}</span>
+              </div>
+            </Card>
+          ) : (
+            <div className="ontology-link-types-empty">
+              <Icon icon="link" size={32} />
+              <span>Link type을 선택하면 관계 정보가 표시됩니다</span>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+
+  const renderContent = () => {
+    if (activeNavId === 'action-types' && activeDbName) {
+      return renderActionTypesContent()
+    }
+
+    if (activeNavId === 'object-types' && activeDbName) {
+      return renderObjectTypesContent()
+    }
+
+    if (activeNavId === 'link-types' && activeDbName) {
+      return renderLinkTypesContent()
+    }
+
+    // Default content for other tabs
+    return (
+      <Card className="card ontology-content">
+        <div className="ontology-content-header">
+          <Text className="ontology-content-title">{activeContent?.title || activeNavId}</Text>
+          <Text className="ontology-content-description">{activeContent?.description || ''}</Text>
+        </div>
+        {activeContent?.details?.length ? (
+          <ul className="ontology-content-list">
+            {activeContent.details.map((detail) => (
+              <li key={detail}>{detail}</li>
+            ))}
+          </ul>
+        ) : null}
+      </Card>
+    )
+  }
+
+  if (!activeDbName) {
+    return (
+      <div className="page ontology-page">
+        <div className="ontology-empty-state">
+          <Icon icon="cube" size={48} />
+          <h2>프로젝트를 선택해주세요</h2>
+          <p>Files에서 프로젝트를 선택하면 온톨로지를 관리할 수 있습니다</p>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="page ontology-page">
@@ -316,7 +593,12 @@ export const OntologyPage = () => {
               onMouseDown={(event) => event.preventDefault()}
               role="listbox"
             >
-              {filteredResources.length > 0 ? (
+              {isSearchLoading && filteredResources.length === 0 ? (
+                <div className="ontology-search-loading">
+                  <Spinner size={18} />
+                  <span>Loading resources...</span>
+                </div>
+              ) : filteredResources.length > 0 ? (
                 filteredResources.map((resource) => (
                   <button
                     key={resource.id}
@@ -390,21 +672,7 @@ export const OntologyPage = () => {
             ))}
           </div>
         </aside>
-        <div className="ontology-main">
-          <Card className="card ontology-content">
-            <div className="ontology-content-header">
-              <Text className="ontology-content-title">{activeContent.title}</Text>
-              <Text className="ontology-content-description">{activeContent.description}</Text>
-            </div>
-            {activeContent.details?.length ? (
-              <ul className="ontology-content-list">
-                {activeContent.details.map((detail) => (
-                  <li key={detail}>{detail}</li>
-                ))}
-              </ul>
-            ) : null}
-          </Card>
-        </div>
+        <div className="ontology-main">{renderContent()}</div>
       </div>
     </div>
   )

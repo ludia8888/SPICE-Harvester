@@ -73,12 +73,17 @@ services:
     platform: ${ELASTICSEARCH_PLATFORM:-linux/amd64}
     environment:
       - discovery.type=single-node
+      # Dev/test only: keep ES lightweight but stable.
+      # NOTE: 128m heap is often too small for the full production gate (many indices), causing shard recovery stalls.
+      - xpack.ml.enabled=false
+      - cluster.routing.allocation.disk.threshold_enabled=false
       - xpack.security.enabled=false
       - xpack.security.enrollment.enabled=false
       - xpack.security.http.ssl.enabled=false
       - xpack.security.transport.ssl.enabled=false
       - bootstrap.memory_lock=true
-      - "ES_JAVA_OPTS=-Xms256m -Xmx256m"
+      # NOTE: For the full production gate, prefer >=512m heap. Override via `ES_JAVA_OPTS`.
+      - "ES_JAVA_OPTS=${ES_JAVA_OPTS:--Xms512m -Xmx512m}"
       - http.host=0.0.0.0
     ulimits:
       memlock:
@@ -96,6 +101,7 @@ services:
       timeout: 30s
       retries: 5
       start_period: 60s
+    restart: unless-stopped
 
   # Kafka
   kafka:
@@ -103,6 +109,8 @@ services:
     container_name: spice_kafka
     environment:
       KAFKA_BROKER_ID: 1
+      # Dev/test: keep Kafka lightweight to avoid Docker Desktop OOM kills during full E2E runs.
+      KAFKA_HEAP_OPTS: "-Xms256m -Xmx256m"
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
       KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:29092,PLAINTEXT_HOST://0.0.0.0:9092
@@ -124,6 +132,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
+    restart: unless-stopped
 
   # Zookeeper
   zookeeper:
@@ -348,7 +357,7 @@ services:
       - DOCKER_CONTAINER=true
       - OMS_REQUIRE_AUTH=${OMS_REQUIRE_AUTH:-true}
       # Dev convenience: allow treating all requests as master when enabled (development only).
-      - DEV_MASTER_AUTH_ENABLED=${DEV_MASTER_AUTH_ENABLED:-true}
+      - DEV_MASTER_AUTH_ENABLED=${DEV_MASTER_AUTH_ENABLED:-false}
       - ADMIN_TOKEN=${ADMIN_TOKEN:?ADMIN_TOKEN is required}
       # Dev-stack default: allow direct writes on protected branches (smoke/E2E tests + README flow).
       # Set to true in environments that require proposal workflow on protected branches (main/prod).
@@ -456,7 +465,7 @@ services:
       - BFF_REQUIRE_DB_SCOPE=${BFF_REQUIRE_DB_SCOPE:-false}
       - ENABLE_DATASET_INGEST_RECONCILER=false
       # Dev convenience: allow treating all requests as master when enabled (development only).
-      - DEV_MASTER_AUTH_ENABLED=${DEV_MASTER_AUTH_ENABLED:-true}
+      - DEV_MASTER_AUTH_ENABLED=${DEV_MASTER_AUTH_ENABLED:-false}
       - ADMIN_TOKEN=${ADMIN_TOKEN:?ADMIN_TOKEN is required}
       # Event Store / Dataset artifacts (S3/MinIO)
       - MINIO_ENDPOINT_URL=http://spice-minio:9000
@@ -507,42 +516,43 @@ services:
       timeout: 10s
       retries: 5
 
-  # Agent Service (tool runner)
-  agent:
-    build:
-      context: .
-      dockerfile: ./agent/Dockerfile
-    container_name: spice_agent
-    environment:
-      - AGENT_BFF_BASE_URL=http://bff:8002
-      - AGENT_REQUIRE_EVENT_STORE=true
-      - AGENT_SERVICE_NAME=agent
-      - AGENT_TOOL_TIMEOUT_SECONDS=180
-      - POSTGRES_HOST=postgres
-      - POSTGRES_PORT=5432
-      - POSTGRES_USER=${POSTGRES_USER:-spiceadmin}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-spicepass123}
-      - POSTGRES_DB=${POSTGRES_DB:-spicedb}
-      - MINIO_ENDPOINT_URL=http://spice-minio:9000
-      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
-      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-minioadmin123}
-      - EVENT_STORE_BUCKET=${AGENT_EVENT_STORE_BUCKET:-spice-agent-store}
-      - AGENT_BFF_TOKEN=${BFF_AGENT_TOKEN:-spice-dev-agent-token}
-      - LOG_LEVEL=INFO
-      - DOCKER_CONTAINER=true
-    depends_on:
-      - bff
-      - postgres
-      - minio
-    networks:
-      - spice_network
-    ports:
-      - "${AGENT_PORT_HOST:-8004}:8004"
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8004/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
+  # Agent Service (tool runner) - DEPRECATED: Legacy service, no longer used
+  # The BFF now uses /agent/pipeline-runs with MCP autonomous loop instead
+  # agent:
+  #   build:
+  #     context: .
+  #     dockerfile: ./agent/Dockerfile
+  #   container_name: spice_agent
+  #   environment:
+  #     - AGENT_BFF_BASE_URL=http://bff:8002
+  #     - AGENT_REQUIRE_EVENT_STORE=true
+  #     - AGENT_SERVICE_NAME=agent
+  #     - AGENT_TOOL_TIMEOUT_SECONDS=180
+  #     - POSTGRES_HOST=postgres
+  #     - POSTGRES_PORT=5432
+  #     - POSTGRES_USER=${POSTGRES_USER:-spiceadmin}
+  #     - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-spicepass123}
+  #     - POSTGRES_DB=${POSTGRES_DB:-spicedb}
+  #     - MINIO_ENDPOINT_URL=http://spice-minio:9000
+  #     - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
+  #     - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-minioadmin123}
+  #     - EVENT_STORE_BUCKET=${AGENT_EVENT_STORE_BUCKET:-spice-agent-store}
+  #     - AGENT_BFF_TOKEN=${BFF_AGENT_TOKEN:-spice-dev-agent-token}
+  #     - LOG_LEVEL=INFO
+  #     - DOCKER_CONTAINER=true
+  #   depends_on:
+  #     - bff
+  #     - postgres
+  #     - minio
+  #   networks:
+  #     - spice_network
+  #   ports:
+  #     - "${AGENT_PORT_HOST:-8004}:8004"
+  #   healthcheck:
+  #     test: ["CMD", "curl", "-f", "http://localhost:8004/health"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 5
 
   # Connector Trigger Service (polls + emits connector-updates)
   connector-trigger-service:

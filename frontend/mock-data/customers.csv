@@ -1,0 +1,22 @@
+customer_id,name,email,phone,tier,country,city,registration_date,last_activity,total_spent,risk_score
+CUST-001,김철수,kim.cs@example.com,010-1234-5678,Gold,KR,서울,2022-03-15,2024-02-20,15420000,0.12
+CUST-002,이영희,lee.yh@example.com,010-2345-6789,Platinum,KR,부산,2021-08-22,2024-02-19,28750000,0.08
+CUST-003,박민수,park.ms@example.com,010-3456-7890,silver,KR,대구,2023-01-10,2024-02-18,4280000,0.25
+CUST-004,정수진,,010-4567-8901,Gold,KR,인천,2022-06-05,2024-02-21,12890000,0.15
+CUST-005,최동훈,choi.dh@example.com,010-5678-9012,Bronze,KR,광주,2023-07-20,2024-02-15,1250000,0.42
+CUST-006,John Smith,j.smith@acme.com,+1-555-0101,enterprise,US,New York,2021-01-15,2024-02-21,89500000,0.05
+CUST-007,Sarah Johnson,s.johnson@globex.com,+1-555-0102,Enterprise,US,Los Angeles,2020-11-20,2024-02-20,125000000,0.03
+CUST-008,田中太郎,tanaka@example.jp,+81-90-1234-5678,Gold,JP,Tokyo,2022-04-10,2024-02-19,22400000,0.10
+CUST-009,王明,wang.m@example.cn,+86-138-0000-0001,Platinum,CN,Shanghai,2021-09-08,2024-02-21,45600000,0.07
+CUST-010,Hans Mueller,h.mueller@example.de,+49-170-1234567,Gold,DE,Berlin,2022-02-28,2024-02-18,18900000,0.11
+CUST-011,홍길동,hong.gd@example.com,010-6789-0123,Silver,KR,서울,2023-03-15,2024-02-17,3450000,0.30
+CUST-012,강민정,kang.mj@example.com,010-7890-1234,Gold,KR,서울,2022-09-10,2024-02-21,14200000,0.14
+CUST-013,Emma Wilson,e.wilson@techcorp.com,+1-555-0103,Enterprise,US,Chicago,2021-05-22,2024-02-20,67800000,0.06
+CUST-014,佐藤花子,sato@example.jp,+81-80-9876-5432,Silver,JP,Osaka,2023-02-14,2024-02-16,5670000,0.22
+CUST-015,李华,li.h@example.cn,+86-139-0000-0002,Gold,CN,Beijing,2022-07-30,2024-02-19,19800000,0.09
+,Unknown,invalid-email,N/A,unknown,,,,,,-999
+CUST-017,  김민호  ,kim.mh@example.com,01087654321,GOLD,kr,Seoul,23-05-10,2024-02-20,8500000,
+CUST-002,이영희,lee.yh@example.com,010-2345-6789,Platinum,KR,부산,2021-08-22,2024-02-19,28750000,0.08
+CUST-018,Test User,test@test,000-0000-0000,null,NULL,null,null,null,0,0
+CUST-019,박서연,park.sy@example.com,010 9876 5432,Gold,KR,제주,2022/11/15,2024-02-21,11200000,0.13
+CUST-020,최유진,choi.yj@example.com,+82-10-1111-2222,Platinum,Korea,SEOUL,2021-12-01,2024-02-20,35000000,0.06

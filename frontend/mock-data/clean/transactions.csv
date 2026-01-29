@@ -1,0 +1,28 @@
+transaction_id,from_account,to_account,amount,currency,transaction_type,status,timestamp,description,risk_flag,category
+TXN-000001,ACC-10001,ACC-10003,500000,KRW,Transfer,Completed,2024-02-20T09:15:23Z,Monthly rent payment,false,Housing
+TXN-000002,ACC-10002,ACC-10001,2000000,KRW,Transfer,Completed,2024-02-20T10:30:45Z,Savings withdrawal,false,Internal
+TXN-000003,ACC-10004,EXTERNAL,1250000,KRW,Purchase,Completed,2024-02-19T14:22:10Z,Samsung Electronics,false,Electronics
+TXN-000004,ACC-10009,ACC-10012,150000,USD,Wire,Completed,2024-02-21T08:00:00Z,Trade settlement,false,Business
+TXN-000005,ACC-10006,EXTERNAL,890000,KRW,Purchase,Completed,2024-02-21T11:45:30Z,Hyundai Service Center,false,Automotive
+TXN-000006,ACC-10010,ACC-10016,2500000,USD,Wire,Pending,2024-02-20T16:30:00Z,Project payment,true,Business
+TXN-000007,ACC-10003,EXTERNAL,45000,KRW,ATM,Completed,2024-02-18T19:20:15Z,Cash withdrawal,false,Cash
+TXN-000008,ACC-10011,EXTERNAL,125000,JPY,Purchase,Completed,2024-02-19T12:10:00Z,Amazon Japan,false,Shopping
+TXN-000009,ACC-10001,ACC-10014,1500000,KRW,Transfer,Completed,2024-02-20T15:00:00Z,Family support,false,Personal
+TXN-000010,ACC-10012,EXTERNAL,8500000,CNY,Wire,Completed,2024-02-21T03:45:00Z,Supplier payment,false,Business
+TXN-000011,ACC-10015,EXTERNAL,350000,KRW,Purchase,Completed,2024-02-21T09:30:00Z,Coupang order,false,Shopping
+TXN-000012,ACC-10008,EXTERNAL,125000,KRW,Purchase,Declined,2024-02-15T20:15:00Z,Online gaming,true,Entertainment
+TXN-000013,ACC-10013,EXTERNAL,450,EUR,Purchase,Completed,2024-02-18T14:00:00Z,Lufthansa ticket,false,Travel
+TXN-000014,ACC-10007,EXTERNAL,5000000,KRW,Investment,Completed,2024-02-10T10:00:00Z,Stock purchase - KOSPI,false,Investment
+TXN-000015,ACC-10019,ACC-10012,5000000,CNY,Wire,Completed,2024-02-19T06:30:00Z,Inter-company transfer,false,Business
+TXN-000016,ACC-10004,EXTERNAL,2800000,KRW,Purchase,Completed,2024-02-19T17:45:00Z,Lotte Department Store,false,Shopping
+TXN-000017,ACC-10001,EXTERNAL,150000,KRW,Utility,Completed,2024-02-20T00:00:00Z,KEPCO electricity,false,Utilities
+TXN-000018,ACC-10005,EXTERNAL,50000,KRW,Purchase,Completed,2024-02-15T13:20:00Z,GS25 convenience store,false,Food
+TXN-000019,ACC-10009,EXTERNAL,450000,USD,Wire,Flagged,2024-02-21T02:30:00Z,Unknown recipient - Cayman,true,Suspicious
+TXN-000020,ACC-10018,EXTERNAL,89000,JPY,Purchase,Completed,2024-02-16T11:00:00Z,Uniqlo Osaka,false,Shopping
+TXN-000021,ACC-10020,EXTERNAL,500000,KRW,Purchase,Declined,2024-01-30T16:00:00Z,Credit limit exceeded,true,Shopping
+TXN-000022,ACC-10006,ACC-10001,3000000,KRW,Transfer,Completed,2024-02-21T14:30:00Z,Loan repayment,false,Loan
+TXN-000023,ACC-10010,EXTERNAL,125000,USD,Purchase,Completed,2024-02-20T09:00:00Z,AWS monthly bill,false,Technology
+TXN-000024,ACC-10016,EXTERNAL,89000,USD,Purchase,Completed,2024-02-20T12:15:00Z,Microsoft Azure,false,Technology
+TXN-000025,ACC-10011,ACC-10018,500000,JPY,Transfer,Completed,2024-02-19T15:00:00Z,Gift transfer,false,Personal
+TXN-000027,ACC-10001,EXTERNAL,50000,KRW,Refund,Completed,2024-02-21T10:30:00Z,Product return,false,Shopping
+TXN-000028,ACC-10003,EXTERNAL,1000000,KRW,Transfer,Completed,2024-02-20T00:00:00Z,Internal move,false,Internal

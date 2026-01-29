@@ -933,6 +933,7 @@ async def start_pipelining_google_sheet(
         try:
             from bff.services.funnel_client import FunnelClient
 
+            settings = get_settings()
             async with FunnelClient() as funnel_client:
                 analysis = await funnel_client.analyze_dataset(
                     {
@@ -940,12 +941,23 @@ async def start_pipelining_google_sheet(
                         "columns": columns or [],
                         "sample_size": min(len(sample_rows or []), 500),
                         "include_complex_types": True,
-                    }
+                    },
+                    timeout_seconds=float(settings.services.funnel_infer_timeout_seconds),
                 )
             analysis_payload = analysis if isinstance(analysis, dict) else None
             inferred_schema = (analysis_payload or {}).get("columns") or []
         except Exception as exc:
             logger.warning(f"Google Sheets type inference failed: {exc}")
+            from shared.services.pipeline.pipeline_funnel_fallback import build_funnel_analysis_fallback
+
+            analysis_payload = build_funnel_analysis_fallback(
+                columns=columns or [],
+                rows=sample_rows or [],
+                include_complex_types=True,
+                error=str(exc),
+                stage="bff",
+            )
+            inferred_schema = (analysis_payload or {}).get("columns") or []
 
         funnel_analysis = dict(analysis_payload or {})
         if "columns" not in funnel_analysis and inferred_schema:
@@ -960,6 +972,8 @@ async def start_pipelining_google_sheet(
             }
 
         schema_columns = []
+        from shared.models.common import DataType
+
         for column in columns or []:
             inferred_type = None
             for item in inferred_schema:
@@ -974,7 +988,10 @@ async def start_pipelining_google_sheet(
                     if isinstance(inferred_payload, dict):
                         inferred_type = inferred_payload.get("type")
                 break
-            schema_columns.append({"name": column, "type": inferred_type or "xsd:string"})
+            resolved_type = inferred_type or "xsd:string"
+            if isinstance(resolved_type, str) and not resolved_type.startswith("xsd:"):
+                resolved_type = DataType.get_base_type(resolved_type)
+            schema_columns.append({"name": column, "type": resolved_type})
 
         source_ref = f"google_sheets:{sheet_id_resolved}"
         dataset = await dataset_registry.get_dataset_by_source_ref(
