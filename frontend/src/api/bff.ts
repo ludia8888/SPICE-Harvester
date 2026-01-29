@@ -1150,6 +1150,15 @@ export const runPipelineAgentStreaming = (
       headers['X-User-Name'] = API_USER_NAME
     }
 
+    // Enterprise hardening: satisfy BFF db-scope enforcement when enabled.
+    const scopeDbName =
+      typeof payload.data_scope?.['db_name'] === 'string' ? payload.data_scope['db_name'] : undefined
+    const dbName = String(scopeDbName ?? '').trim()
+    if (dbName) {
+      headers['X-DB-Name'] = dbName
+      headers['X-Project'] = dbName
+    }
+
     try {
       const response = await fetch(buildUrl('/api/v1/agent/pipeline-runs/stream'), {
         method: 'POST',
