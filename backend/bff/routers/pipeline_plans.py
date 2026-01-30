@@ -29,6 +29,7 @@ from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.services.registries.dataset_profile_registry import DatasetProfileRegistry
 from shared.services.pipeline.pipeline_executor import PipelineExecutor
 from shared.services.pipeline.pipeline_preview_inspector import inspect_preview
+from shared.services.pipeline.pipeline_preview_policy import evaluate_preview_policy
 from shared.utils.canonical_json import sha256_canonical_json_prefixed
 from shared.services.registries.pipeline_plan_registry import PipelinePlanRegistry
 from shared.services.registries.pipeline_registry import PipelineRegistry
@@ -547,6 +548,33 @@ async def preview_plan(
         preview_meta["sample_limit"] = sample_limit
     preview_definition["__preview_meta__"] = preview_meta
 
+    preview_policy = evaluate_preview_policy(preview_definition)
+    policy_level = str(preview_policy.get("level") or "allow").strip().lower()
+    if policy_level == "deny":
+        return ApiResponse.warning(
+            message="Pipeline preview denied by policy",
+            data={
+                "preflight": validation.preflight,
+                "preview_status": "preview_denied",
+                "preview_policy": preview_policy,
+                "hint": "Fix the denied operations (see preview_policy) before preview/build/deploy.",
+                "preview": {"columns": [], "rows": [], "row_count": 0},
+                "definition_digest": _definition_digest(preview_definition),
+            },
+        )
+    if policy_level == "require_spark":
+        return ApiResponse.warning(
+            message="Pipeline preview requires Spark-backed execution",
+            data={
+                "preflight": validation.preflight,
+                "preview_status": "requires_spark_preview",
+                "preview_policy": preview_policy,
+                "hint": "This plan uses Spark semantics that the lightweight preview engine cannot validate safely. Use Build to verify.",
+                "preview": {"columns": [], "rows": [], "row_count": 0},
+                "definition_digest": _definition_digest(preview_definition),
+            },
+        )
+
     actor_user_id = (request.headers.get("X-User-ID") or "").strip() or None
     storage_service = None
     try:
@@ -581,6 +609,8 @@ async def preview_plan(
             data={
                 "preflight": validation.preflight,
                 "error": str(exc),
+                "preview_status": "preview_failed",
+                "preview_policy": preview_policy,
             },
         )
 
@@ -588,6 +618,8 @@ async def preview_plan(
         "preflight": validation.preflight,
         "preview": preview,
         "definition_digest": definition_digest,
+        "preview_status": "success",
+        "preview_policy": preview_policy,
     }
     if run_tables_payload is not None:
         data["run_tables"] = run_tables_payload

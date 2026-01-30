@@ -42,6 +42,7 @@ from shared.services.registries.objectify_registry import ObjectifyRegistry  # n
 from shared.models.objectify_job import ObjectifyJob  # noqa: E402
 from shared.services.pipeline.pipeline_executor import PipelineExecutor  # noqa: E402
 from shared.services.pipeline.pipeline_preview_inspector import inspect_preview  # noqa: E402
+from shared.services.pipeline.pipeline_preview_policy import evaluate_preview_policy  # noqa: E402
 from shared.services.pipeline.pipeline_plan_builder import (  # noqa: E402
     PipelinePlanBuilderError,
     add_edge,
@@ -85,10 +86,38 @@ from shared.services.pipeline.pipeline_type_inference import (  # noqa: E402
     infer_xsd_type_with_confidence,
     normalize_declared_type,
 )
+from shared.errors.error_envelope import build_error_envelope  # noqa: E402
+from shared.errors.error_types import ErrorCategory, ErrorCode  # noqa: E402
 from shared.utils.llm_safety import mask_pii  # noqa: E402
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
+
+
+def _tool_error(
+    message: str,
+    *,
+    detail: Optional[str] = None,
+    status_code: int = 400,
+    code: ErrorCode = ErrorCode.REQUEST_VALIDATION_FAILED,
+    category: ErrorCategory = ErrorCategory.INPUT,
+    external_code: Optional[str] = None,
+    context: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    payload = build_error_envelope(
+        service_name="pipeline_mcp_server",
+        message=str(message),
+        detail=str(detail) if detail is not None else str(message),
+        code=code,
+        category=category,
+        status_code=status_code,
+        external_code=external_code,
+        context=context,
+        prefer_status_code=True,
+    )
+    # Many tool consumers (agent loop) treat `error` as the canonical signal for failure.
+    payload["error"] = str(message)
+    return payload
 
 
 def _bff_api_base_url() -> str:
@@ -2294,6 +2323,34 @@ class PipelineMCPServer:
                     preview_meta["sample_limit"] = max(1, min(limit, 200))
                     definition["__preview_meta__"] = preview_meta
 
+                    preview_policy = evaluate_preview_policy(definition)
+                    policy_level = str(preview_policy.get("level") or "allow").strip().lower()
+                    if policy_level == "deny":
+                        return {
+                            "status": "preview_denied",
+                            "error": "Plan preview denied by policy.",
+                            "preview_policy": preview_policy,
+                            "preview": {
+                                "row_count": 0,
+                                "columns": [],
+                                "rows": [],
+                            },
+                            "hint": "Fix the denied operations (see preview_policy) before preview/build/deploy.",
+                            "warnings": list(warnings or []),
+                        }
+                    if policy_level == "require_spark":
+                        return {
+                            "status": "requires_spark_preview",
+                            "preview_policy": preview_policy,
+                            "preview": {
+                                "row_count": 0,
+                                "columns": [],
+                                "rows": [],
+                            },
+                            "hint": "Plan preview is not reliable for this plan. Use pipeline_preview_wait for Spark-backed execution.",
+                            "warnings": list(warnings or []),
+                        }
+
                     try:
                         preview = await executor.preview(definition=definition, db_name=db_name, node_id=node_id, limit=limit)
                     except Exception as exc:
@@ -2304,6 +2361,7 @@ class PipelineMCPServer:
                             "status": "preview_failed",
                             "error": str(exc),
                             "error_type": type(exc).__name__,
+                            "preview_policy": preview_policy,
                             "preview": {
                                 "row_count": 0,
                                 "columns": [],
@@ -2314,7 +2372,7 @@ class PipelineMCPServer:
                         }
 
                     preview_masked = mask_pii(preview)
-                    return {"status": "success", "preview": preview_masked, "warnings": warnings}
+                    return {"status": "success", "preview": preview_masked, "preview_policy": preview_policy, "warnings": warnings}
 
                 if name == "plan_refute_claims":
                     plan_obj = arguments.get("plan") or {}
@@ -3079,7 +3137,7 @@ class PipelineMCPServer:
                     plan = arguments.get("plan") or {}
                     node_id = str(arguments.get("node_id") or "").strip()
                     if not node_id:
-                        return {"status": "error", "error": "node_id is required"}
+                        return _tool_error("node_id is required")
 
                     definition = plan.get("definition_json") or {}
                     nodes = definition.get("nodes") or []
@@ -3089,11 +3147,14 @@ class PipelineMCPServer:
                     node = next((n for n in nodes if n.get("id") == node_id), None)
                     if not node:
                         available_nodes = [n.get("id") for n in nodes if n.get("id")]
-                        return {
-                            "status": "error",
-                            "error": f"Node '{node_id}' not found in plan",
-                            "available_nodes": available_nodes[:20],
-                        }
+                        payload = _tool_error(
+                            f"Node '{node_id}' not found in plan",
+                            status_code=404,
+                            code=ErrorCode.RESOURCE_NOT_FOUND,
+                            category=ErrorCategory.RESOURCE,
+                        )
+                        payload["available_nodes"] = available_nodes[:20]
+                        return payload
 
                     # Find input and output edges
                     input_edges = [e for e in edges if e.get("target") == node_id]
@@ -3217,7 +3278,12 @@ class PipelineMCPServer:
                     dataset_registry, _ = await self._ensure_registries()
                     dataset = await dataset_registry.get_dataset(dataset_id=dataset_id)
                     if not dataset:
-                        return {"status": "error", "error": f"Dataset not found: {dataset_id}"}
+                        return _tool_error(
+                            f"Dataset not found: {dataset_id}",
+                            status_code=404,
+                            code=ErrorCode.RESOURCE_NOT_FOUND,
+                            category=ErrorCategory.RESOURCE,
+                        )
 
                     # Get dataset schema columns
                     schema_json = dataset.schema_json or {}
@@ -3328,13 +3394,18 @@ class PipelineMCPServer:
                             normalized_mappings.append({"source_field": src, "target_field": tgt})
 
                     if not normalized_mappings:
-                        return {"status": "error", "error": "No valid mappings provided"}
+                        return _tool_error("No valid mappings provided")
 
                     # Get dataset info
                     dataset_registry, _ = await self._ensure_registries()
                     dataset = await dataset_registry.get_dataset(dataset_id=dataset_id)
                     if not dataset:
-                        return {"status": "error", "error": f"Dataset not found: {dataset_id}"}
+                        return _tool_error(
+                            f"Dataset not found: {dataset_id}",
+                            status_code=404,
+                            code=ErrorCode.RESOURCE_NOT_FOUND,
+                            category=ErrorCategory.RESOURCE,
+                        )
 
                     objectify_registry = await self._ensure_objectify_registry()
 
@@ -3360,12 +3431,16 @@ class PipelineMCPServer:
                                 schema_hash = compute_schema_hash(sample_columns) if sample_columns else None
 
                     if not schema_hash:
-                        return {
-                            "status": "error",
-                            "error": "Cannot determine schema_hash for dataset",
-                            "hint": "Dataset has no schema information. Try uploading a new version with schema.",
-                            "dataset_id": dataset_id,
-                        }
+                        payload = _tool_error(
+                            "Cannot determine schema_hash for dataset",
+                            status_code=422,
+                            code=ErrorCode.REQUEST_VALIDATION_FAILED,
+                            category=ErrorCategory.INPUT,
+                            context={"dataset_id": dataset_id},
+                        )
+                        payload["hint"] = "Dataset has no schema information. Try uploading a new version with schema."
+                        payload["dataset_id"] = dataset_id
+                        return payload
 
                     mapping_spec = await objectify_registry.create_mapping_spec(
                         dataset_id=dataset_id,
@@ -3434,7 +3509,12 @@ class PipelineMCPServer:
                     # Get dataset
                     dataset = await dataset_registry.get_dataset(dataset_id=dataset_id)
                     if not dataset:
-                        return {"status": "error", "error": f"Dataset not found: {dataset_id}"}
+                        return _tool_error(
+                            f"Dataset not found: {dataset_id}",
+                            status_code=404,
+                            code=ErrorCode.RESOURCE_NOT_FOUND,
+                            category=ErrorCategory.RESOURCE,
+                        )
 
                     # Get or find mapping spec
                     mapping_spec = None
@@ -3448,11 +3528,16 @@ class PipelineMCPServer:
                             mapping_spec = await objectify_registry.get_mapping_spec(mapping_spec_id=active_specs[0].mapping_spec_id)
 
                     if not mapping_spec:
-                        return {
-                            "status": "error",
-                            "error": "No active mapping spec found for dataset",
-                            "hint": "Use objectify_create_mapping_spec to create a mapping first",
-                        }
+                        payload = _tool_error(
+                            "No active mapping spec found for dataset",
+                            status_code=404,
+                            code=ErrorCode.RESOURCE_NOT_FOUND,
+                            category=ErrorCategory.RESOURCE,
+                            external_code="MAPPING_SPEC_NOT_FOUND",
+                            context={"dataset_id": dataset_id},
+                        )
+                        payload["hint"] = "Use objectify_create_mapping_spec to create a mapping first"
+                        return payload
 
                     # Get dataset version
                     if dataset_version_id:
@@ -3461,7 +3546,14 @@ class PipelineMCPServer:
                         version = await dataset_registry.get_latest_version(dataset_id=dataset_id)
 
                     if not version:
-                        return {"status": "error", "error": "No dataset version found"}
+                        return _tool_error(
+                            "No dataset version found",
+                            status_code=404,
+                            code=ErrorCode.RESOURCE_NOT_FOUND,
+                            category=ErrorCategory.RESOURCE,
+                            external_code="DATASET_VERSION_MISSING",
+                            context={"dataset_id": dataset_id},
+                        )
 
                     # Create objectify job
                     from uuid import uuid4
@@ -3534,7 +3626,14 @@ class PipelineMCPServer:
                     job = await objectify_registry.get_objectify_job(job_id=job_id)
 
                     if not job:
-                        return {"status": "error", "error": f"Objectify job not found: {job_id}"}
+                        return _tool_error(
+                            f"Objectify job not found: {job_id}",
+                            status_code=404,
+                            code=ErrorCode.RESOURCE_NOT_FOUND,
+                            category=ErrorCategory.RESOURCE,
+                            external_code="OBJECTIFY_JOB_NOT_FOUND",
+                            context={"job_id": job_id},
+                        )
 
                     # Extract statistics from report if available
                     report = job.report or {}
@@ -3571,7 +3670,14 @@ class PipelineMCPServer:
                         job = await objectify_registry.get_objectify_job(job_id=job_id)
 
                         if not job:
-                            return {"status": "error", "error": f"Objectify job not found: {job_id}"}
+                            return _tool_error(
+                                f"Objectify job not found: {job_id}",
+                                status_code=404,
+                                code=ErrorCode.RESOURCE_NOT_FOUND,
+                                category=ErrorCategory.RESOURCE,
+                                external_code="OBJECTIFY_JOB_NOT_FOUND",
+                                context={"job_id": job_id},
+                            )
 
                         job_status = (job.status or "").lower()
 
@@ -3629,9 +3735,9 @@ class PipelineMCPServer:
                     title_list = [str(k).strip() for k in title_key if str(k).strip()] if isinstance(title_key, list) else [str(title_key).strip()]
 
                     if not pk_list:
-                        return {"status": "error", "error": "primary_key must be a non-empty list of field names"}
+                        return _tool_error("primary_key must be a non-empty list of field names")
                     if not title_list:
-                        return {"status": "error", "error": "title_key must be a non-empty list of field names"}
+                        return _tool_error("title_key must be a non-empty list of field names")
 
                     try:
                         # First, get the current head commit for optimistic concurrency
@@ -3644,7 +3750,13 @@ class PipelineMCPServer:
                         head_data = head_resp.get("data") if isinstance(head_resp.get("data"), dict) else {}
                         head_commit = head_data.get("head_commit_id") or head_data.get("commit") or head_data.get("head_commit") or ""
                         if not head_commit:
-                            return {"status": "error", "error": f"No head commit found for branch '{branch}'. Please create an ontology class first."}
+                            payload = _tool_error(
+                                f"No head commit found for branch '{branch}'. Please create an ontology class first.",
+                                status_code=404,
+                                code=ErrorCode.RESOURCE_NOT_FOUND,
+                                category=ErrorCategory.RESOURCE,
+                            )
+                            return payload
 
                         # Build the object_type resource payload
                         object_type_payload: Dict[str, Any] = {
@@ -3685,12 +3797,16 @@ class PipelineMCPServer:
                             )
 
                         if resp.get("error"):
-                            return {
-                                "status": "error",
-                                "error": resp.get("error"),
-                                "db_name": db_name,
-                                "class_id": class_id,
-                            }
+                            payload = _tool_error(
+                                str(resp.get("error") or "OMS request failed"),
+                                status_code=502,
+                                code=ErrorCode.UPSTREAM_ERROR,
+                                category=ErrorCategory.UPSTREAM,
+                                context={"db_name": db_name, "class_id": class_id},
+                            )
+                            payload["db_name"] = db_name
+                            payload["class_id"] = class_id
+                            return payload
 
                         return {
                             "status": "success",
@@ -3705,12 +3821,16 @@ class PipelineMCPServer:
 
                     except Exception as exc:
                         logger.error("ontology_register_object_type failed: %s", exc)
-                        return {
-                            "status": "error",
-                            "error": str(exc),
-                            "db_name": db_name,
-                            "class_id": class_id,
-                        }
+                        payload = _tool_error(
+                            str(exc),
+                            status_code=500,
+                            code=ErrorCode.INTERNAL_ERROR,
+                            category=ErrorCategory.INTERNAL,
+                            context={"db_name": db_name, "class_id": class_id},
+                        )
+                        payload["db_name"] = db_name
+                        payload["class_id"] = class_id
+                        return payload
 
                 if name == "ontology_query_instances":
                     db_name = str(arguments.get("db_name") or "").strip()
@@ -3741,12 +3861,16 @@ class PipelineMCPServer:
                         )
 
                         if resp.get("error"):
-                            return {
-                                "status": "error",
-                                "error": resp.get("error"),
-                                "db_name": db_name,
-                                "class_id": class_id,
-                            }
+                            payload = _tool_error(
+                                str(resp.get("error") or "Query failed"),
+                                status_code=502,
+                                code=ErrorCode.UPSTREAM_ERROR,
+                                category=ErrorCategory.UPSTREAM,
+                                context={"db_name": db_name, "class_id": class_id},
+                            )
+                            payload["db_name"] = db_name
+                            payload["class_id"] = class_id
+                            return payload
 
                         data = resp.get("data") if isinstance(resp.get("data"), dict) else resp
                         instances = data.get("instances") or data.get("results") or data.get("rows") or []
@@ -3766,12 +3890,16 @@ class PipelineMCPServer:
                         }
                     except Exception as exc:
                         logger.warning("ontology_query_instances failed: %s", exc)
-                        return {
-                            "status": "error",
-                            "error": f"Query failed: {str(exc)[:200]}",
-                            "db_name": db_name,
-                            "class_id": class_id,
-                        }
+                        payload = _tool_error(
+                            f"Query failed: {str(exc)[:200]}",
+                            status_code=500,
+                            code=ErrorCode.INTERNAL_ERROR,
+                            category=ErrorCategory.INTERNAL,
+                            context={"db_name": db_name, "class_id": class_id},
+                        )
+                        payload["db_name"] = db_name
+                        payload["class_id"] = class_id
+                        return payload
 
                 # ── Enterprise Features: FK Detection, Incremental Objectify, Schema Drift ──
                 if name == "detect_foreign_keys":
@@ -3795,7 +3923,12 @@ class PipelineMCPServer:
                         dataset = await dataset_registry.get_dataset(dataset_id=dataset_id)
 
                         if not dataset:
-                            return {"status": "error", "error": f"Dataset not found: {dataset_id}"}
+                            return _tool_error(
+                                f"Dataset not found: {dataset_id}",
+                                status_code=404,
+                                code=ErrorCode.RESOURCE_NOT_FOUND,
+                                category=ErrorCategory.RESOURCE,
+                            )
 
                         schema = dataset.schema_json or {}
                         columns = schema.get("columns") or schema.get("fields") or []
@@ -3846,7 +3979,12 @@ class PipelineMCPServer:
                         }
                     except Exception as exc:
                         logger.warning("detect_foreign_keys failed: %s", exc)
-                        return {"status": "error", "error": str(exc)[:300]}
+                        return _tool_error(
+                            str(exc)[:300],
+                            status_code=500,
+                            code=ErrorCode.INTERNAL_ERROR,
+                            category=ErrorCategory.INTERNAL,
+                        )
 
                 if name == "create_link_type_from_fk":
                     db_name = str(arguments.get("db_name") or "").strip()
@@ -3893,7 +4031,15 @@ class PipelineMCPServer:
                         )
 
                         if resp.get("error"):
-                            return {"status": "error", "error": resp.get("error"), "db_name": db_name}
+                            payload = _tool_error(
+                                str(resp.get("error") or "BFF request failed"),
+                                status_code=502,
+                                code=ErrorCode.UPSTREAM_ERROR,
+                                category=ErrorCategory.UPSTREAM,
+                                context={"db_name": db_name},
+                            )
+                            payload["db_name"] = db_name
+                            return payload
 
                         return {
                             "status": "success",
@@ -3905,7 +4051,12 @@ class PipelineMCPServer:
                         }
                     except Exception as exc:
                         logger.warning("create_link_type_from_fk failed: %s", exc)
-                        return {"status": "error", "error": str(exc)[:300]}
+                        return _tool_error(
+                            str(exc)[:300],
+                            status_code=500,
+                            code=ErrorCode.INTERNAL_ERROR,
+                            category=ErrorCategory.INTERNAL,
+                        )
 
                 if name == "trigger_incremental_objectify":
                     db_name = str(arguments.get("db_name") or "").strip()
@@ -3953,8 +4104,15 @@ class PipelineMCPServer:
                             timeout_seconds=60.0,
                         )
 
-                        if resp.get("error"):
-                            return {"status": "error", "error": resp.get("error")}
+	                        if resp.get("error"):
+	                            return _tool_error(
+	                                "Objectify trigger failed",
+	                                detail=str(resp.get("error"))[:500],
+	                                code=ErrorCode.UPSTREAM_ERROR,
+	                                category=ErrorCategory.UPSTREAM,
+	                                status_code=502,
+	                                context={"mapping_spec_id": mapping_spec_id, "branch": branch},
+	                            )
 
                         return {
                             "status": "success",
@@ -3964,9 +4122,16 @@ class PipelineMCPServer:
                             "previous_watermark": trigger_body.get("previous_watermark"),
                             "job_id": resp.get("job_id") or resp.get("data", {}).get("job_id"),
                         }
-                    except Exception as exc:
-                        logger.warning("trigger_incremental_objectify failed: %s", exc)
-                        return {"status": "error", "error": str(exc)[:300]}
+	                    except Exception as exc:
+	                        logger.warning("trigger_incremental_objectify failed: %s", exc)
+	                        return _tool_error(
+	                            "trigger_incremental_objectify failed",
+	                            detail=str(exc)[:300],
+	                            code=ErrorCode.INTERNAL_ERROR,
+	                            category=ErrorCategory.INTERNAL,
+	                            status_code=500,
+	                            context={"mapping_spec_id": mapping_spec_id, "branch": branch},
+	                        )
 
                 if name == "get_objectify_watermark":
                     mapping_spec_id = str(arguments.get("mapping_spec_id") or "").strip()
@@ -3993,9 +4158,16 @@ class PipelineMCPServer:
                             "status": "success",
                             **watermark,
                         }
-                    except Exception as exc:
-                        logger.warning("get_objectify_watermark failed: %s", exc)
-                        return {"status": "error", "error": str(exc)[:300]}
+	                    except Exception as exc:
+	                        logger.warning("get_objectify_watermark failed: %s", exc)
+	                        return _tool_error(
+	                            "get_objectify_watermark failed",
+	                            detail=str(exc)[:300],
+	                            code=ErrorCode.INTERNAL_ERROR,
+	                            category=ErrorCategory.INTERNAL,
+	                            status_code=500,
+	                            context={"mapping_spec_id": mapping_spec_id, "dataset_branch": dataset_branch},
+	                        )
 
                 if name == "check_schema_drift":
                     db_name = str(arguments.get("db_name") or "").strip()
@@ -4011,21 +4183,39 @@ class PipelineMCPServer:
                         objectify_registry = await self._ensure_objectify_registry()
                         dataset_registry, _ = await self._ensure_registries()
 
-                        spec = await objectify_registry.get_mapping_spec(mapping_spec_id=mapping_spec_id)
-                        if not spec:
-                            return {"status": "error", "error": f"Mapping spec not found: {mapping_spec_id}"}
+	                        spec = await objectify_registry.get_mapping_spec(mapping_spec_id=mapping_spec_id)
+	                        if not spec:
+	                            return _tool_error(
+	                                f"Mapping spec not found: {mapping_spec_id}",
+	                                code=ErrorCode.RESOURCE_NOT_FOUND,
+	                                category=ErrorCategory.RESOURCE,
+	                                status_code=404,
+	                                context={"mapping_spec_id": mapping_spec_id},
+	                            )
 
-                        dataset = await dataset_registry.get_dataset(dataset_id=str(spec.dataset_id))
-                        if not dataset:
-                            return {"status": "error", "error": f"Dataset not found: {spec.dataset_id}"}
+	                        dataset = await dataset_registry.get_dataset(dataset_id=str(spec.dataset_id))
+	                        if not dataset:
+	                            return _tool_error(
+	                                f"Dataset not found: {spec.dataset_id}",
+	                                code=ErrorCode.RESOURCE_NOT_FOUND,
+	                                category=ErrorCategory.RESOURCE,
+	                                status_code=404,
+	                                context={"dataset_id": str(spec.dataset_id)},
+	                            )
 
                         if dataset_version_id:
                             version = await dataset_registry.get_version(version_id=dataset_version_id)
                         else:
                             version = await dataset_registry.get_latest_version(dataset_id=str(spec.dataset_id))
 
-                        if not version:
-                            return {"status": "error", "error": "No dataset version found"}
+	                        if not version:
+	                            return _tool_error(
+	                                "No dataset version found",
+	                                code=ErrorCode.RESOURCE_NOT_FOUND,
+	                                category=ErrorCategory.RESOURCE,
+	                                status_code=404,
+	                                context={"dataset_id": str(spec.dataset_id), "version_id": dataset_version_id},
+	                            )
 
                         current_schema = version.schema_json or {}
                         current_columns = current_schema.get("columns") or current_schema.get("fields") or []
@@ -4078,9 +4268,16 @@ class PipelineMCPServer:
                             "current_hash": drift.current_hash,
                             "previous_hash": drift.previous_hash,
                         }
-                    except Exception as exc:
-                        logger.warning("check_schema_drift failed: %s", exc)
-                        return {"status": "error", "error": str(exc)[:300]}
+	                    except Exception as exc:
+	                        logger.warning("check_schema_drift failed: %s", exc)
+	                        return _tool_error(
+	                            "check_schema_drift failed",
+	                            detail=str(exc)[:300],
+	                            code=ErrorCode.INTERNAL_ERROR,
+	                            category=ErrorCategory.INTERNAL,
+	                            status_code=500,
+	                            context={"db_name": db_name, "mapping_spec_id": mapping_spec_id},
+	                        )
 
                 if name == "list_schema_changes":
                     db_name = str(arguments.get("db_name") or "").strip()
@@ -4140,8 +4337,8 @@ class PipelineMCPServer:
                             "total_changes": len(changes),
                             "changes": changes,
                         }
-                    except Exception as exc:
-                        logger.warning("list_schema_changes failed: %s", exc)
+	                    except Exception as exc:
+	                        logger.warning("list_schema_changes failed: %s", exc)
                         # Table might not exist yet
                         if "does not exist" in str(exc):
                             return {
@@ -4150,10 +4347,17 @@ class PipelineMCPServer:
                                 "subject_type": subject_type,
                                 "subject_id": subject_id,
                                 "total_changes": 0,
-                                "changes": [],
-                                "message": "No schema change history available",
-                            }
-                        return {"status": "error", "error": str(exc)[:300]}
+	                                "changes": [],
+	                                "message": "No schema change history available",
+	                            }
+	                        return _tool_error(
+	                            "list_schema_changes failed",
+	                            detail=str(exc)[:300],
+	                            code=ErrorCode.INTERNAL_ERROR,
+	                            category=ErrorCategory.INTERNAL,
+	                            status_code=500,
+	                            context={"db_name": db_name, "subject_type": subject_type, "subject_id": subject_id},
+	                        )
 
                 # ── Dataset Lookup Tools ─────────────────────────────────────
                 if name == "dataset_get_by_name":
@@ -4232,12 +4436,14 @@ class PipelineMCPServer:
                     dataset_registry, _ = await self._ensure_registries()
                     dataset = await dataset_registry.get_dataset(dataset_id=dataset_id)
 
-                    if not dataset:
-                        return {
-                            "status": "error",
-                            "error": f"Dataset not found: {dataset_id}",
-                            "dataset_id": dataset_id,
-                        }
+	                    if not dataset:
+	                        return _tool_error(
+	                            f"Dataset not found: {dataset_id}",
+	                            code=ErrorCode.RESOURCE_NOT_FOUND,
+	                            category=ErrorCategory.RESOURCE,
+	                            status_code=404,
+	                            context={"dataset_id": dataset_id},
+	                        )
 
                     # Get schema from dataset
                     schema_json = dataset.schema_json or {}

@@ -566,13 +566,12 @@ class PipelineRegistry:
         if not branch:
             raise ValueError("branch is required")
 
-        lakefs_client = await self.get_lakefs_client(user_id=user_id)
-        try:
-            await lakefs_client.get_branch_head_commit_id(repository=repository, branch=branch)
+        # lakeFS repositories always have a `main` branch by convention. Avoid an extra network call
+        # (and keep idempotency semantics in tests) by skipping branch creation for main.
+        if branch == "main":
             return
-        except LakeFSNotFoundError:
-            pass
 
+        lakefs_client = await self.get_lakefs_client(user_id=user_id)
         try:
             await lakefs_client.create_branch(repository=repository, name=branch, source=source)
         except LakeFSConflictError:

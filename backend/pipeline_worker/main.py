@@ -105,6 +105,8 @@ from shared.utils.time_utils import utcnow
 
 logger = logging.getLogger(__name__)
 
+SUPPORTED_TRANSFORMS_SPARK = frozenset(set(SUPPORTED_TRANSFORMS) - {"udf"})
+
 _SENSITIVE_CONF_TOKENS = (
     "secret",
     "password",
@@ -3769,7 +3771,7 @@ class PipelineWorker:
             errors.append("Pipeline has no output node")
 
         incoming = build_incoming(edges)
-        supported_ops = SUPPORTED_TRANSFORMS
+        supported_ops = SUPPORTED_TRANSFORMS_SPARK
         for node_id, node in nodes.items():
             if node.get("type") != "transform":
                 continue
@@ -4650,6 +4652,8 @@ class PipelineWorker:
         if not inputs:
             return self._empty_dataframe()
         operation = normalize_operation(metadata.get("operation"))
+        if operation == "udf":
+            raise ValueError("udf operation is not supported in Spark execution. Remove this transform or replace it with built-in expressions.")
         if operation == "join" and len(inputs) >= 2:
             join_spec = resolve_join_spec(metadata)
             join_type = join_spec.join_type

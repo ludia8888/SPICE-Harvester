@@ -400,7 +400,7 @@ def _validate_pipeline_definition(*, definition_json: Dict[str, Any], require_ou
         errors.append("Pipeline has no output node")
 
     incoming = build_incoming(edges)
-    supported_ops = SUPPORTED_TRANSFORMS
+    supported_ops = SUPPORTED_TRANSFORMS - {"udf"}
     for node_id, node in nodes.items():
         if node.get("type") != "transform":
             continue
@@ -409,6 +409,9 @@ def _validate_pipeline_definition(*, definition_json: Dict[str, Any], require_ou
         if not operation:
             if len(incoming.get(node_id, [])) >= 2:
                 errors.append(f"transform node {node_id} has multiple inputs but no operation")
+            continue
+        if operation == "udf":
+            errors.append(f"Unsupported operation '{operation}' on node {node_id} (Spark execution does not support udf yet).")
             continue
         if operation not in supported_ops:
             errors.append(f"Unsupported operation '{operation}' on node {node_id}")

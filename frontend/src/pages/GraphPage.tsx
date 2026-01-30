@@ -1624,7 +1624,18 @@ export const GraphPage = () => {
   const [agentMessages, setAgentMessages] = useState<Array<{ id: string; role: 'user' | 'assistant'; text: string }>>([])
   const [agentInput, setAgentInput] = useState('')
   // Agent가 생성한 노드별 preview 데이터 저장
-  const [agentNodePreviews, setAgentNodePreviews] = useState<Map<string, { columns: Array<{ name: string; type?: string }>; rows: Array<Record<string, unknown>> }>>(new Map())
+  const [agentNodePreviews, setAgentNodePreviews] = useState<
+    Map<
+      string,
+      {
+        columns: Array<{ name: string; type?: string }>
+        rows: Array<Record<string, unknown>>
+        previewStatus?: string
+        previewPolicy?: Record<string, unknown> | null
+        hint?: string
+      }
+    >
+  >(new Map())
   const [isWizardOpen, setIsWizardOpen] = useState(false)
   const [isUdfDialogOpen, setIsUdfDialogOpen] = useState(false)
   const [isDatasetSelectOpen, setIsDatasetSelectOpen] = useState(false)
@@ -1923,6 +1934,136 @@ export const GraphPage = () => {
     return nodes.filter((node) => node.type === 'transform')
   }, [nodes])
 
+  const pipelinePreviewNotice = useMemo(() => {
+    if (previewSource !== 'pipeline') {
+      return null
+    }
+    if (agentRunDbName && agentRunDbName !== activeDbName && !pipelinePreviewOverride) {
+      return null
+    }
+    const override = pipelinePreviewOverride
+    const payload =
+      override && isRecord(override)
+        ? override
+        : isRecord(pipelineAgentRun) && isRecord(pipelineAgentRun.preview)
+          ? (pipelineAgentRun.preview as Record<string, unknown>)
+          : null
+    if (!isRecord(payload)) {
+      return null
+    }
+    const statusRaw =
+      (payload.__preview_status as string | undefined) ||
+      (payload.preview_status as string | undefined) ||
+      ''
+    const status = String(statusRaw || '').toLowerCase()
+    const hintRaw =
+      (payload.__hint as string | undefined) ||
+      (payload.hint as string | undefined) ||
+      ''
+    const hint = String(hintRaw || '').trim()
+    const policyRaw =
+      (payload.__preview_policy as Record<string, unknown> | undefined) ||
+      (payload.preview_policy as Record<string, unknown> | undefined)
+    const policy = policyRaw && isRecord(policyRaw) ? policyRaw : null
+    const policyLevel = policy ? String(policy.level ?? '').toLowerCase() : ''
+    const issues = policy && Array.isArray(policy.issues) ? (policy.issues as Array<Record<string, unknown>>) : []
+    const issueMessages = issues
+      .map((issue) => String(issue.message || '').trim())
+      .filter(Boolean)
+      .slice(0, 3)
+
+    if (status === 'requires_spark_preview' || policyLevel === 'require_spark') {
+      return {
+        level: 'require_spark',
+        title: 'Spark preview required',
+        message: hint || 'This pipeline preview requires Spark execution for accurate results. Use Build to verify.',
+        issues: issueMessages,
+      }
+    }
+    if (status === 'preview_denied' || policyLevel === 'deny') {
+      return {
+        level: 'deny',
+        title: 'Preview denied by policy',
+        message: hint || 'This pipeline contains operations not supported for production execution. Fix the plan first.',
+        issues: issueMessages,
+      }
+    }
+    if (status === 'preview_failed') {
+      return {
+        level: 'warn',
+        title: 'Preview failed',
+        message: hint || 'Pipeline preview failed. Consider using Spark Build for validation.',
+        issues: issueMessages,
+      }
+    }
+    if (policyLevel === 'warn' && (issueMessages.length > 0 || hint)) {
+      return {
+        level: 'warn',
+        title: 'Best-effort preview',
+        message: hint || 'Preview may diverge from full Spark execution; validate with Build when ready.',
+        issues: issueMessages,
+      }
+    }
+    return null
+  }, [previewSource, pipelinePreviewOverride, pipelineAgentRun, agentRunDbName, activeDbName])
+
+  const transformPreviewNotice = useMemo(() => {
+    if (previewSource !== 'transform' || !transformPreviewNodeId) {
+      return null
+    }
+    const agentPreview = agentNodePreviews.get(transformPreviewNodeId)
+    if (!agentPreview) {
+      return null
+    }
+    const status = (agentPreview.previewStatus || '').toLowerCase()
+    const policy = agentPreview.previewPolicy && isRecord(agentPreview.previewPolicy) ? agentPreview.previewPolicy : null
+    const policyLevel = policy ? String(policy.level ?? '').toLowerCase() : ''
+    const issues = policy && Array.isArray(policy.issues) ? (policy.issues as Array<Record<string, unknown>>) : []
+
+    const issueMessages = issues
+      .map((issue) => String(issue.message || '').trim())
+      .filter(Boolean)
+      .slice(0, 3)
+
+    if (status === 'requires_spark_preview' || policyLevel === 'require_spark') {
+      return {
+        level: 'require_spark',
+        title: 'Spark preview required',
+        message:
+          agentPreview.hint ||
+          'This transform uses Spark semantics that plan_preview cannot validate safely. Use Build to verify.',
+        issues: issueMessages,
+      }
+    }
+    if (status === 'preview_denied' || policyLevel === 'deny') {
+      return {
+        level: 'deny',
+        title: 'Preview denied by policy',
+        message:
+          agentPreview.hint ||
+          'This transform contains operations that are not supported for production execution. Fix the plan first.',
+        issues: issueMessages,
+      }
+    }
+    if (status === 'preview_failed') {
+      return {
+        level: 'warn',
+        title: 'Preview failed',
+        message: agentPreview.hint || 'Plan preview failed. Consider using Spark Build for validation.',
+        issues: issueMessages,
+      }
+    }
+    if (policyLevel === 'warn' && (issueMessages.length > 0 || agentPreview.hint)) {
+      return {
+        level: 'warn',
+        title: 'Best-effort preview',
+        message: agentPreview.hint || 'Preview may diverge from full Spark execution; validate with Build when ready.',
+        issues: issueMessages,
+      }
+    }
+    return null
+  }, [previewSource, transformPreviewNodeId, agentNodePreviews])
+
   const previewMenu = useMemo(() => {
     const hasDatasets = datasets.length > 0
     const hasTransforms = transformNodes.length > 0
@@ -2149,8 +2290,16 @@ export const GraphPage = () => {
           limit: 200,
         })
         const preview = isRecord(response.preview) ? (response.preview as Record<string, unknown>) : null
+        const previewStatus = typeof response.preview_status === 'string' ? response.preview_status : ''
+        const previewPolicy = isRecord(response.preview_policy) ? (response.preview_policy as Record<string, unknown>) : null
+        const hint = typeof response.hint === 'string' ? response.hint : ''
         if (preview) {
-          setPipelinePreviewOverride(preview)
+          setPipelinePreviewOverride({
+            ...preview,
+            __preview_status: previewStatus,
+            __preview_policy: previewPolicy ?? undefined,
+            __hint: hint,
+          })
           setPipelinePreviewLabel(outputName)
           setPreviewSource('pipeline')
           setBottomPanelOpen(true)
@@ -2536,9 +2685,18 @@ export const GraphPage = () => {
           if (nodeId && preview) {
             const columns = preview.columns || []
             const rows = preview.rows || []
+            const previewStatus = data.preview_status as string | undefined
+            const previewPolicy = data.preview_policy as Record<string, unknown> | undefined
+            const hint = data.hint as string | undefined
             setAgentNodePreviews((prev) => {
               const next = new Map(prev)
-              next.set(nodeId, { columns, rows })
+              next.set(nodeId, {
+                columns,
+                rows,
+                previewStatus,
+                previewPolicy: previewPolicy ?? null,
+                hint,
+              })
               return next
             })
           }
@@ -3677,6 +3835,31 @@ export const GraphPage = () => {
                   </div>
                   <div className="pipeline-preview-table">
                     <div className="pipeline-preview-table-scroll">
+                      {(transformPreviewNotice || pipelinePreviewNotice) ? (
+                        <div className={`pipeline-preview-notice is-${(transformPreviewNotice || pipelinePreviewNotice)?.level}`}>
+                          <div className="pipeline-preview-notice-header">
+                            <Icon
+                              icon={
+                                (transformPreviewNotice || pipelinePreviewNotice)?.level === 'deny'
+                                  ? 'error'
+                                  : (transformPreviewNotice || pipelinePreviewNotice)?.level === 'require_spark'
+                                    ? 'warning-sign'
+                                    : 'info-sign'
+                              }
+                              size={14}
+                            />
+                            <span className="pipeline-preview-notice-title">{(transformPreviewNotice || pipelinePreviewNotice)?.title}</span>
+                          </div>
+                          <div className="pipeline-preview-notice-message">{(transformPreviewNotice || pipelinePreviewNotice)?.message}</div>
+                          {(transformPreviewNotice || pipelinePreviewNotice)?.issues.length ? (
+                            <ul className="pipeline-preview-notice-issues">
+                              {(transformPreviewNotice || pipelinePreviewNotice)?.issues.map((issue, idx) => (
+                                <li key={`${idx}`}>{issue}</li>
+                              ))}
+                            </ul>
+                          ) : null}
+                        </div>
+                      ) : null}
                       <div
                         className="pipeline-preview-table-header"
                         style={{ gridTemplateColumns: tableGridTemplate, minWidth: tableMinWidth }}

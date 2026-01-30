@@ -2859,7 +2859,10 @@ async def run_pipeline_agent_streaming(
 
                 # plan_preview 도구 후 preview_update 이벤트
                 if tool_name == "plan_preview" and isinstance(observation, dict) and not observation.get("error"):
-                    preview_data = observation.get("preview") or observation.get("result") or observation
+                    preview_status = observation.get("status")
+                    preview_policy = observation.get("preview_policy") if isinstance(observation.get("preview_policy"), dict) else None
+                    preview_hint = observation.get("hint")
+                    preview_data = observation.get("preview") or observation.get("result") or {}
                     node_id = args.get("node_id")
                     if not node_id and isinstance(state.plan_obj, dict):
                         definition = state.plan_obj.get("definition_json", {})
@@ -2893,6 +2896,9 @@ async def run_pipeline_agent_streaming(
                             "run_id": run_id,
                             "step": step_idx + 1,
                             "node_id": node_id,
+                            "preview_status": preview_status,
+                            "preview_policy": preview_policy,
+                            "hint": preview_hint,
                             "preview": {
                                 "columns": preview_columns,
                                 "rows": preview_rows,

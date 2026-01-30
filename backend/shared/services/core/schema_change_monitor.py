@@ -17,6 +17,9 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional, Set
 from dataclasses import dataclass, field
 
+from shared.errors.error_envelope import build_error_envelope
+from shared.errors.error_types import ErrorCategory, ErrorCode
+
 from shared.services.core.schema_drift_detector import (
     SchemaDriftDetector,
     SchemaDrift,
@@ -323,15 +326,48 @@ class SchemaChangeMonitor:
         try:
             spec = await self.objectify_registry.get_mapping_spec(mapping_spec_id)
             if not spec:
-                return {"status": "error", "error": "Mapping spec not found"}
+                payload = build_error_envelope(
+                    service_name="schema_change_monitor",
+                    message="Mapping spec not found",
+                    code=ErrorCode.RESOURCE_NOT_FOUND,
+                    category=ErrorCategory.RESOURCE,
+                    status_code=404,
+                    context={"mapping_spec_id": mapping_spec_id},
+                    external_code="MAPPING_SPEC_NOT_FOUND",
+                    prefer_status_code=True,
+                )
+                payload["error"] = "Mapping spec not found"
+                return payload
 
             dataset = await self.dataset_registry.get_dataset(str(spec.dataset_id))
             if not dataset:
-                return {"status": "error", "error": "Dataset not found"}
+                payload = build_error_envelope(
+                    service_name="schema_change_monitor",
+                    message="Dataset not found",
+                    code=ErrorCode.RESOURCE_NOT_FOUND,
+                    category=ErrorCategory.RESOURCE,
+                    status_code=404,
+                    context={"dataset_id": str(spec.dataset_id)},
+                    external_code="DATASET_NOT_FOUND",
+                    prefer_status_code=True,
+                )
+                payload["error"] = "Dataset not found"
+                return payload
 
             latest_version = await self.dataset_registry.get_latest_version(str(spec.dataset_id))
             if not latest_version:
-                return {"status": "error", "error": "No dataset version found"}
+                payload = build_error_envelope(
+                    service_name="schema_change_monitor",
+                    message="No dataset version found",
+                    code=ErrorCode.RESOURCE_NOT_FOUND,
+                    category=ErrorCategory.RESOURCE,
+                    status_code=404,
+                    context={"dataset_id": str(spec.dataset_id)},
+                    external_code="DATASET_VERSION_MISSING",
+                    prefer_status_code=True,
+                )
+                payload["error"] = "No dataset version found"
+                return payload
 
             current_schema = latest_version.schema_json or []
             expected_hash = getattr(spec, "expected_schema_hash", None)
@@ -364,7 +400,18 @@ class SchemaChangeMonitor:
 
         except Exception as e:
             logger.error(f"Compatibility check failed: {e}")
-            return {"status": "error", "error": str(e)}
+            payload = build_error_envelope(
+                service_name="schema_change_monitor",
+                message="Compatibility check failed",
+                detail=str(e),
+                code=ErrorCode.INTERNAL_ERROR,
+                category=ErrorCategory.INTERNAL,
+                status_code=500,
+                context={"mapping_spec_id": mapping_spec_id},
+                prefer_status_code=True,
+            )
+            payload["error"] = str(e)
+            return payload
 
     def get_status(self) -> Dict[str, Any]:
         """Get monitor status"""
