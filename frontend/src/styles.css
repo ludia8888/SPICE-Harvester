@@ -3473,6 +3473,13 @@ body {
   color: #bfccd6;
 }
 
+.pipeline-preview-notice-actions {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .pipeline-preview-notice-issues {
   margin: 8px 0 0 18px;
   padding: 0;

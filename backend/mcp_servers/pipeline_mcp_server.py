@@ -2338,18 +2338,21 @@ class PipelineMCPServer:
                             "hint": "Fix the denied operations (see preview_policy) before preview/build/deploy.",
                             "warnings": list(warnings or []),
                         }
-                    if policy_level == "require_spark":
-                        return {
-                            "status": "requires_spark_preview",
-                            "preview_policy": preview_policy,
-                            "preview": {
-                                "row_count": 0,
-                                "columns": [],
-                                "rows": [],
-                            },
-                            "hint": "Plan preview is not reliable for this plan. Use pipeline_preview_wait for Spark-backed execution.",
-                            "warnings": list(warnings or []),
-                        }
+	                    if policy_level == "require_spark":
+	                        return {
+	                            "status": "requires_spark_preview",
+	                            "preview_policy": preview_policy,
+	                            "preview": {
+	                                "row_count": 0,
+	                                "columns": [],
+	                                "rows": [],
+	                            },
+	                            "hint": (
+	                                "Plan preview is not reliable for this plan. Save/materialize the pipeline first, "
+	                                "then use Spark-backed preview (pipeline_preview_wait) or Build."
+	                            ),
+	                            "warnings": list(warnings or []),
+	                        }
 
                     try:
                         preview = await executor.preview(definition=definition, db_name=db_name, node_id=node_id, limit=limit)
@@ -2357,19 +2360,22 @@ class PipelineMCPServer:
                         # Plan preview runs in a lightweight Python executor that cannot support all Spark SQL
                         # expressions. Return explicit error status instead of hiding as warning.
                         logger.warning("plan_preview failed: %s", exc, exc_info=True)
-                        return {
-                            "status": "preview_failed",
-                            "error": str(exc),
-                            "error_type": type(exc).__name__,
-                            "preview_policy": preview_policy,
-                            "preview": {
-                                "row_count": 0,
-                                "columns": [],
-                                "rows": [],
-                            },
-                            "hint": "Plan preview failed. Use pipeline_preview_wait for Spark-backed execution.",
-                            "warnings": list(warnings or []),
-                        }
+	                        return {
+	                            "status": "preview_failed",
+	                            "error": str(exc),
+	                            "error_type": type(exc).__name__,
+	                            "preview_policy": preview_policy,
+	                            "preview": {
+	                                "row_count": 0,
+	                                "columns": [],
+	                                "rows": [],
+	                            },
+	                            "hint": (
+	                                "Plan preview failed. Save/materialize the pipeline first, then use Spark-backed preview "
+	                                "(pipeline_preview_wait) or Build."
+	                            ),
+	                            "warnings": list(warnings or []),
+	                        }
 
                     preview_masked = mask_pii(preview)
                     return {"status": "success", "preview": preview_masked, "preview_policy": preview_policy, "warnings": warnings}

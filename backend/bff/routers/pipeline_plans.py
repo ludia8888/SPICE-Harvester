@@ -569,7 +569,7 @@ async def preview_plan(
                 "preflight": validation.preflight,
                 "preview_status": "requires_spark_preview",
                 "preview_policy": preview_policy,
-                "hint": "This plan uses Spark semantics that the lightweight preview engine cannot validate safely. Use Build to verify.",
+                "hint": "This plan uses Spark semantics that the lightweight preview engine cannot validate safely. Save the pipeline, then use Build (Spark) to verify.",
                 "preview": {"columns": [], "rows": [], "row_count": 0},
                 "definition_digest": _definition_digest(preview_definition),
             },

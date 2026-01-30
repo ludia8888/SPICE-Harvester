@@ -1836,8 +1836,15 @@ export const GraphPage = () => {
   const defaultOutputNodeId = outputNodeIds[0] ?? null
   const canSave = Boolean(primaryPipeline && pipelineDetail && definitionDirty) && !isSaving
   const canPropose = Boolean(primaryPipeline) && !isProposing
+  const canBuild =
+    Boolean(primaryPipeline) &&
+    Boolean(activeDbName) &&
+    !definitionDirty &&
+    (isStreamingPipeline || Boolean(defaultOutputNodeId)) &&
+    !isBuilding
   const canDeploy =
     Boolean(primaryPipeline && latestBuildArtifact) &&
+    Boolean(activeDbName) &&
     !definitionDirty &&
     (isStreamingPipeline || Boolean(defaultOutputNodeId)) &&
     !isDeploying
@@ -1973,10 +1980,15 @@ export const GraphPage = () => {
       .slice(0, 3)
 
     if (status === 'requires_spark_preview' || policyLevel === 'require_spark') {
+      const actionHint = primaryPipeline
+        ? definitionDirty
+          ? 'Save the pipeline first, then click Build (Spark) to verify.'
+          : 'Click Build (Spark) to verify.'
+        : 'Save the pipeline first, then click Build (Spark) to verify.'
       return {
         level: 'require_spark',
         title: 'Spark preview required',
-        message: hint || 'This pipeline preview requires Spark execution for accurate results. Use Build to verify.',
+        message: `${hint || 'This pipeline preview requires Spark execution for accurate results.'} ${actionHint}`.trim(),
         issues: issueMessages,
       }
     }
@@ -1989,23 +2001,33 @@ export const GraphPage = () => {
       }
     }
     if (status === 'preview_failed') {
+      const actionHint = primaryPipeline
+        ? definitionDirty
+          ? 'Save the pipeline first, then use Build (Spark) to validate.'
+          : 'Consider using Build (Spark) for validation.'
+        : 'Save the pipeline first, then use Build (Spark) for validation.'
       return {
         level: 'warn',
         title: 'Preview failed',
-        message: hint || 'Pipeline preview failed. Consider using Spark Build for validation.',
+        message: `${hint || 'Pipeline preview failed.'} ${actionHint}`.trim(),
         issues: issueMessages,
       }
     }
     if (policyLevel === 'warn' && (issueMessages.length > 0 || hint)) {
+      const actionHint = primaryPipeline
+        ? definitionDirty
+          ? 'Save the pipeline first, then validate with Build (Spark) when ready.'
+          : 'Validate with Build (Spark) when ready.'
+        : 'Save the pipeline first, then validate with Build (Spark) when ready.'
       return {
         level: 'warn',
         title: 'Best-effort preview',
-        message: hint || 'Preview may diverge from full Spark execution; validate with Build when ready.',
+        message: `${hint || 'Preview may diverge from full Spark execution.'} ${actionHint}`.trim(),
         issues: issueMessages,
       }
     }
     return null
-  }, [previewSource, pipelinePreviewOverride, pipelineAgentRun, agentRunDbName, activeDbName])
+  }, [previewSource, pipelinePreviewOverride, pipelineAgentRun, agentRunDbName, activeDbName, primaryPipeline, definitionDirty])
 
   const transformPreviewNotice = useMemo(() => {
     if (previewSource !== 'transform' || !transformPreviewNodeId) {
@@ -2026,12 +2048,16 @@ export const GraphPage = () => {
       .slice(0, 3)
 
     if (status === 'requires_spark_preview' || policyLevel === 'require_spark') {
+      const actionHint = primaryPipeline
+        ? definitionDirty
+          ? 'Save the pipeline first, then click Build (Spark) to verify.'
+          : 'Click Build (Spark) to verify.'
+        : 'Save the pipeline first, then click Build (Spark) to verify.'
       return {
         level: 'require_spark',
         title: 'Spark preview required',
         message:
-          agentPreview.hint ||
-          'This transform uses Spark semantics that plan_preview cannot validate safely. Use Build to verify.',
+          `${agentPreview.hint || 'This transform uses Spark semantics that plan_preview cannot validate safely.'} ${actionHint}`.trim(),
         issues: issueMessages,
       }
     }
@@ -2046,23 +2072,33 @@ export const GraphPage = () => {
       }
     }
     if (status === 'preview_failed') {
+      const actionHint = primaryPipeline
+        ? definitionDirty
+          ? 'Save the pipeline first, then use Build (Spark) for validation.'
+          : 'Consider using Build (Spark) for validation.'
+        : 'Save the pipeline first, then use Build (Spark) for validation.'
       return {
         level: 'warn',
         title: 'Preview failed',
-        message: agentPreview.hint || 'Plan preview failed. Consider using Spark Build for validation.',
+        message: `${agentPreview.hint || 'Plan preview failed.'} ${actionHint}`.trim(),
         issues: issueMessages,
       }
     }
     if (policyLevel === 'warn' && (issueMessages.length > 0 || agentPreview.hint)) {
+      const actionHint = primaryPipeline
+        ? definitionDirty
+          ? 'Save the pipeline first, then validate with Build (Spark) when ready.'
+          : 'Validate with Build (Spark) when ready.'
+        : 'Save the pipeline first, then validate with Build (Spark) when ready.'
       return {
         level: 'warn',
         title: 'Best-effort preview',
-        message: agentPreview.hint || 'Preview may diverge from full Spark execution; validate with Build when ready.',
+        message: `${agentPreview.hint || 'Preview may diverge from full Spark execution.'} ${actionHint}`.trim(),
         issues: issueMessages,
       }
     }
     return null
-  }, [previewSource, transformPreviewNodeId, agentNodePreviews])
+  }, [previewSource, transformPreviewNodeId, agentNodePreviews, primaryPipeline, definitionDirty])
 
   const previewMenu = useMemo(() => {
     const hasDatasets = datasets.length > 0
@@ -3121,14 +3157,20 @@ export const GraphPage = () => {
     if (!primaryPipeline) {
       return
     }
+    if (!activeDbName) {
+      window.alert('먼저 프로젝트를 선택해주세요.')
+      return
+    }
+    if (definitionDirty) {
+      window.alert('Build 전에 Save로 파이프라인 정의를 먼저 저장해주세요.')
+      return
+    }
+    if (!isStreamingPipeline && !defaultOutputNodeId) {
+      window.alert('Build 전에 Output 노드를 추가해주세요.')
+      return
+    }
     setIsBuilding(true)
     try {
-      if (definitionDirty) {
-        const saved = await savePipelineDefinition()
-        if (!saved) {
-          return
-        }
-      }
       await buildPipeline(primaryPipeline.pipeline_id, {
         nodeId: defaultOutputNodeId ?? undefined,
         dbName: activeDbName,
@@ -3142,14 +3184,22 @@ export const GraphPage = () => {
   }, [
     primaryPipeline,
     definitionDirty,
-    savePipelineDefinition,
     defaultOutputNodeId,
     activeDbName,
     queryClient,
+    isStreamingPipeline,
   ])
 
   const handleDeploy = useCallback(async () => {
     if (!primaryPipeline || !latestBuildArtifact) {
+      return
+    }
+    if (!activeDbName) {
+      window.alert('먼저 프로젝트를 선택해주세요.')
+      return
+    }
+    if (definitionDirty) {
+      window.alert('Deploy 전에 Save로 파이프라인 정의를 먼저 저장하고, Build를 다시 수행해주세요.')
       return
     }
     if (!isStreamingPipeline && !defaultOutputNodeId) {
@@ -3177,6 +3227,7 @@ export const GraphPage = () => {
     latestBuildArtifact,
     isStreamingPipeline,
     defaultOutputNodeId,
+    definitionDirty,
     activeDbName,
     queryClient,
   ])
@@ -3484,7 +3535,7 @@ export const GraphPage = () => {
           intent="warning"
           onClick={handleBuild}
           loading={isBuilding}
-          disabled={!primaryPipeline}
+          disabled={!canBuild}
           className="pipeline-build-button"
         />
 
@@ -3495,7 +3546,7 @@ export const GraphPage = () => {
           intent="primary"
           onClick={handleDeploy}
           loading={isDeploying}
-          disabled={!primaryPipeline}
+          disabled={!canDeploy}
           className="pipeline-deploy-button"
         />
 
@@ -3851,6 +3902,29 @@ export const GraphPage = () => {
                             <span className="pipeline-preview-notice-title">{(transformPreviewNotice || pipelinePreviewNotice)?.title}</span>
                           </div>
                           <div className="pipeline-preview-notice-message">{(transformPreviewNotice || pipelinePreviewNotice)?.message}</div>
+                          {(transformPreviewNotice || pipelinePreviewNotice)?.level === 'require_spark' ? (
+                            <div className="pipeline-preview-notice-actions">
+                              {primaryPipeline && !definitionDirty ? (
+                                <Button
+                                  small
+                                  icon="build"
+                                  text="Build (Spark Preview)"
+                                  intent="warning"
+                                  onClick={handleBuild}
+                                  disabled={!canBuild}
+                                />
+                              ) : (
+                                <Button
+                                  small
+                                  icon="cloud-upload"
+                                  text="Save"
+                                  intent="success"
+                                  onClick={handleSave}
+                                  disabled={!definitionDirty || !activeDbName || isSaving}
+                                />
+                              )}
+                            </div>
+                          ) : null}
                           {(transformPreviewNotice || pipelinePreviewNotice)?.issues.length ? (
                             <ul className="pipeline-preview-notice-issues">
                               {(transformPreviewNotice || pipelinePreviewNotice)?.issues.map((issue, idx) => (
