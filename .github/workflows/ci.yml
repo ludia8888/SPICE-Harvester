@@ -41,6 +41,23 @@ jobs:
       - name: Verify BACKEND_METHODS.md
         run: python scripts/generate_backend_methods.py --check
 
+  docs-check:
+    name: Docs Auto-Generated Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Verify auto-generated docs
+        run: python scripts/update_docs.py --check
+
   frontend-check:
     name: Frontend Lint + Build
     runs-on: ubuntu-latest
