@@ -18,9 +18,10 @@ import asyncio
 import logging
 import time
 from abc import ABC, abstractmethod
+from collections import deque
 from contextlib import suppress
 from dataclasses import dataclass
-from typing import Any, Dict, Generic, Optional, TypeVar
+from typing import Any, Deque, Dict, Generic, Optional, TypeVar
 
 from confluent_kafka import KafkaError, TopicPartition
 
@@ -37,6 +38,7 @@ logger = logging.getLogger(__name__)
 
 PayloadT = TypeVar("PayloadT")
 ResultT = TypeVar("ResultT")
+PartitionKey = tuple[str, int]
 
 
 @dataclass(frozen=True)
@@ -278,6 +280,180 @@ class ProcessedEventKafkaWorker(Generic[PayloadT, ResultT], ABC):
                 offset=int(msg.offset()),
             )
 
+    def _init_partition_state(self, *, reset: bool = True) -> None:
+        if reset or not hasattr(self, "_revoked_partitions"):
+            self._revoked_partitions: set[PartitionKey] = set()
+        if reset or not hasattr(self, "_inflight_by_partition"):
+            self._inflight_by_partition: Dict[PartitionKey, asyncio.Task] = {}
+        if reset or not hasattr(self, "_pending_by_partition"):
+            self._pending_by_partition: Dict[PartitionKey, Deque[Any]] = {}
+        if reset or not hasattr(self, "_commit_state_by_partition"):
+            self._commit_state_by_partition: Dict[PartitionKey, bool] = {}
+        if reset or not hasattr(self, "_rebalance_in_progress"):
+            self._rebalance_in_progress = False
+
+    def _buffer_messages(self) -> bool:
+        return False
+
+    def _pending_log_thresholds(self) -> set[int]:
+        return set()
+
+    def _uses_commit_state(self) -> bool:
+        return False
+
+    def _busy_partition_sleep_seconds(self) -> float:
+        return 0.1
+
+    def _partition_task_name(self, msg: Any) -> str:
+        label = self._loop_label()
+        return f"{label}:{msg.topic()}:{msg.partition()}:{msg.offset()}"
+
+    def _partition_key(self, msg: Any) -> PartitionKey:
+        return (str(msg.topic()), int(msg.partition()))
+
+    def _log_buffered_message(self, *, msg: Any, pending_count: int) -> None:
+        logger.info(
+            "Buffered %s message while partition busy (topic=%s partition=%s pending=%s offset=%s)",
+            self._loop_label(),
+            msg.topic(),
+            msg.partition(),
+            pending_count,
+            msg.offset(),
+        )
+
+    def _pause_partition(self, *, topic: str, partition: int) -> None:
+        if not getattr(self, "consumer", None):
+            return
+        try:
+            self.consumer.pause([TopicPartition(topic, partition)])
+        except Exception as exc:
+            logger.warning(
+                "Failed to pause %s partition (topic=%s partition=%s): %s",
+                self._loop_label(),
+                topic,
+                partition,
+                exc,
+            )
+
+    def _resume_partition(self, *, topic: str, partition: int) -> None:
+        if not getattr(self, "consumer", None):
+            return
+        try:
+            self.consumer.resume([TopicPartition(topic, partition)])
+        except Exception as exc:
+            logger.warning(
+                "Failed to resume %s partition (topic=%s partition=%s): %s",
+                self._loop_label(),
+                topic,
+                partition,
+                exc,
+            )
+
+    def _log_background_task_exception(self, task: asyncio.Task) -> None:
+        try:
+            exc = task.exception()
+        except asyncio.CancelledError:
+            return
+        except Exception as exc:
+            logger.warning("Background task introspection failed: %s", exc)
+            return
+        if exc:
+            logger.error("Background task crashed: %s", exc, exc_info=True)
+
+    def _handle_partitions_revoked(self, partitions: list, *, clear_pending: bool = True) -> None:
+        revoked = {(p.topic, int(p.partition)) for p in partitions}
+        self._revoked_partitions |= revoked
+        for key in revoked:
+            task = self._inflight_by_partition.get(key)
+            if task:
+                task.cancel()
+            if clear_pending:
+                self._pending_by_partition.pop(key, None)
+
+    def _handle_partitions_assigned(self, partitions: list, *, resume: bool = True) -> None:
+        for p in partitions:
+            self._revoked_partitions.discard((p.topic, int(p.partition)))
+        if resume and getattr(self, "consumer", None) and partitions:
+            try:
+                self.consumer.resume([TopicPartition(p.topic, p.partition) for p in partitions])
+            except Exception as exc:
+                logger.warning("Failed to resume %s partitions after assign: %s", self._loop_label(), exc)
+
+    async def _handle_busy_partition_message(self, msg: Any) -> None:
+        topic = str(msg.topic())
+        partition = int(msg.partition())
+        logger.warning(
+            "Received %s message while partition busy; rewinding (topic=%s partition=%s offset=%s)",
+            self._loop_label(),
+            topic,
+            partition,
+            msg.offset(),
+        )
+        try:
+            await self._seek(topic=topic, partition=partition, offset=int(msg.offset()))
+            self._pause_partition(topic=topic, partition=partition)
+        except Exception as exc:
+            logger.warning("Failed to rewind/pause busy partition: %s", exc)
+        await asyncio.sleep(self._busy_partition_sleep_seconds())
+
+    def _start_partition_task(self, msg: Any) -> None:
+        if not getattr(self, "consumer", None):
+            return
+        topic = str(msg.topic())
+        partition = int(msg.partition())
+        key = (topic, partition)
+
+        self._pause_partition(topic=topic, partition=partition)
+        task = asyncio.create_task(
+            self._handle_partition_message(msg),
+            name=self._partition_task_name(msg),
+        )
+        self._inflight_by_partition[key] = task
+        task.add_done_callback(self._log_background_task_exception)
+
+    async def _handle_partition_message(self, msg: Any) -> None:
+        if not getattr(self, "consumer", None):
+            return
+        key = self._partition_key(msg)
+        if self._uses_commit_state():
+            self._commit_state_by_partition[key] = False
+        try:
+            await self.handle_message(msg)
+        finally:
+            committed = True
+            if self._uses_commit_state():
+                committed = bool(self._commit_state_by_partition.pop(key, False))
+            current = self._inflight_by_partition.get(key)
+            if current is asyncio.current_task():
+                self._inflight_by_partition.pop(key, None)
+            if not getattr(self, "consumer", None):
+                return
+            if key in self._revoked_partitions:
+                self._pending_by_partition.pop(key, None)
+                return
+
+            if self._buffer_messages():
+                if not committed:
+                    self._pending_by_partition.pop(key, None)
+                    self._resume_partition(topic=key[0], partition=key[1])
+                    return
+                pending = self._pending_by_partition.get(key)
+                if pending and len(pending) > 0:
+                    next_msg = pending.popleft()
+                    if len(pending) == 0:
+                        self._pending_by_partition.pop(key, None)
+                    self._start_partition_task(next_msg)
+                    return
+
+            self._resume_partition(topic=key[0], partition=key[1])
+
+    async def _cancel_inflight_tasks(self) -> None:
+        inflight = list(self._inflight_by_partition.values())
+        for task in inflight:
+            task.cancel()
+        if inflight:
+            await asyncio.gather(*inflight, return_exceptions=True)
+
     async def run_loop(
         self,
         *,
@@ -331,6 +507,64 @@ class ProcessedEventKafkaWorker(Generic[PayloadT, ResultT], ABC):
                     await self._seek_on_unexpected_error(msg)
                     if post_seek_sleep:
                         await asyncio.sleep(post_seek_sleep)
+
+    async def run_partitioned_loop(
+        self,
+        *,
+        poll_timeout: float = 0.25,
+        idle_sleep: Optional[float] = 0.0,
+        missing_consumer_sleep: float = 0.2,
+        poll_exception_sleep: float = 1.0,
+    ) -> None:
+        self._init_partition_state(reset=False)
+
+        while self.running:
+            if not getattr(self, "consumer", None):
+                if missing_consumer_sleep:
+                    await asyncio.sleep(missing_consumer_sleep)
+                continue
+
+            try:
+                msg = await self._poll_message(timeout=poll_timeout)
+            except Exception as exc:
+                await self._on_poll_exception(exc)
+                if poll_exception_sleep:
+                    await asyncio.sleep(poll_exception_sleep)
+                continue
+
+            if msg is None:
+                if idle_sleep is not None:
+                    await asyncio.sleep(idle_sleep)
+                continue
+
+            if msg.error():
+                if self._is_partition_eof(msg):
+                    continue
+                await self._on_kafka_message_error(msg)
+                continue
+
+            key = self._partition_key(msg)
+            if key in self._inflight_by_partition:
+                if self._buffer_messages():
+                    pending = self._pending_by_partition.setdefault(key, deque())
+                    pending.append(msg)
+                    thresholds = self._pending_log_thresholds()
+                    if thresholds and len(pending) in thresholds:
+                        self._log_buffered_message(msg=msg, pending_count=len(pending))
+                else:
+                    await self._handle_busy_partition_message(msg)
+                continue
+
+            pending = self._pending_by_partition.get(key)
+            if self._buffer_messages() and pending and len(pending) > 0:
+                pending.append(msg)
+                msg_to_process = pending.popleft()
+                if len(pending) == 0:
+                    self._pending_by_partition.pop(key, None)
+            else:
+                msg_to_process = msg
+
+            self._start_partition_task(msg_to_process)
 
     async def handle_message(self, msg: Any) -> None:
         """

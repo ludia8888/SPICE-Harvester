@@ -15,16 +15,15 @@ import os
 import shutil
 import tempfile
 import time
-from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from functools import reduce
 import operator
-from typing import Any, Callable, Deque, Dict, List, Optional, TypeVar
+from typing import Any, Callable, Dict, List, Optional, TypeVar
 from uuid import UUID, uuid4
 
 import httpx
-from confluent_kafka import KafkaError, Producer, TopicPartition
+from confluent_kafka import Producer
 
 from shared.services.kafka.safe_consumer import SafeKafkaConsumer
 
@@ -204,11 +203,7 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
         # Consumer safety (enterprise):
         # - Keep Kafka polling responsive even when Spark actions take minutes.
         # - Track in-flight message handlers per partition and pause/resume partitions.
-        self._rebalance_in_progress = False
-        self._revoked_partitions: set[tuple[str, int]] = set()
-        self._inflight_by_partition: Dict[tuple[str, int], asyncio.Task] = {}
-        self._pending_by_partition: Dict[tuple[str, int], Deque[Any]] = {}
-        self._commit_state_by_partition: Dict[tuple[str, int], bool] = {}
+        self._init_partition_state()
         self._dlq_lock = asyncio.Lock()
         self.tracing = get_tracing_service("pipeline-worker")
         self.metrics = get_metrics_collector("pipeline-worker")
@@ -329,10 +324,7 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
             on_revoke=self._on_partitions_revoked,
             on_assign=self._on_partitions_assigned,
         )
-        self._rebalance_in_progress = False
-        self._revoked_partitions.clear()
-        self._inflight_by_partition.clear()
-        self._pending_by_partition.clear()
+        self._init_partition_state(reset=True)
         logger.info("PipelineWorker initialized (topic=%s)", self.topic)
 
         self.dlq_producer = Producer(
@@ -354,13 +346,7 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
             "Pipeline worker partitions revoked: %s",
             [(p.topic, p.partition) for p in partitions],
         )
-        revoked = {(p.topic, int(p.partition)) for p in partitions}
-        self._revoked_partitions |= revoked
-        for key in revoked:
-            task = self._inflight_by_partition.get(key)
-            if task:
-                task.cancel()
-            self._pending_by_partition.pop(key, None)
+        self._handle_partitions_revoked(partitions, clear_pending=True)
 
     def _on_partitions_assigned(self, partitions: list) -> None:
         """Handle partition assignment during rebalance."""
@@ -369,13 +355,7 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
             "Pipeline worker partitions assigned: %s",
             [(p.topic, p.partition) for p in partitions],
         )
-        for p in partitions:
-            self._revoked_partitions.discard((p.topic, int(p.partition)))
-        try:
-            if self.consumer and partitions:
-                self.consumer.resume([TopicPartition(p.topic, p.partition) for p in partitions])
-        except Exception as exc:
-            logger.warning("Failed to resume pipeline partitions after assign: %s", exc)
+        self._handle_partitions_assigned(partitions, resume=True)
 
     async def close(self) -> None:
         if self.consumer:
@@ -558,111 +538,32 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
             logger.error("Spark action failed (%s)", label, exc_info=True)
             raise
 
-    def _start_message_task(self, msg: Any) -> None:
-        if not self.consumer:
-            return
-
-        topic = str(msg.topic())
-        partition = int(msg.partition())
-        key = (topic, partition)
-
-        if key in self._inflight_by_partition:
-            pending = self._pending_by_partition.setdefault(key, deque())
-            pending.append(msg)
-            return
-
-        try:
-            self.consumer.pause([TopicPartition(topic, partition)])
-        except Exception as exc:
-            logger.warning(
-                "Failed to pause pipeline partition (topic=%s partition=%s): %s",
-                topic,
-                partition,
-                exc,
-            )
-
-        task = asyncio.create_task(
-            self._handle_kafka_message(msg),
-            name=f"pipeline:{topic}:{partition}:{msg.offset()}",
-        )
-        self._inflight_by_partition[key] = task
-        task.add_done_callback(self._log_background_task_exception)
-
     async def run(self) -> None:
         await self.initialize()
         self.running = True
         try:
-            while self.running:
-                if not self.consumer:
-                    await asyncio.sleep(0.2)
-                    continue
-
-                # Poll frequently to keep group membership even while Spark jobs run.
-                try:
-                    msg = self.consumer.poll(0.25)
-                except Exception as exc:
-                    logger.warning("Kafka poll failed (will retry): %s", exc, exc_info=True)
-                    await asyncio.sleep(1.0)
-                    continue
-
-                if msg is None:
-                    await asyncio.sleep(0)
-                    continue
-                if msg.error():
-                    if msg.error().code() == KafkaError._PARTITION_EOF:
-                        continue
-                    logger.error("Kafka error: %s", msg.error())
-                    continue
-
-                topic = str(msg.topic())
-                partition = int(msg.partition())
-                key = (topic, partition)
-
-                if key in self._inflight_by_partition:
-                    pending = self._pending_by_partition.setdefault(key, deque())
-                    pending.append(msg)
-                    if len(pending) in {1, 10, 50, 100}:
-                        logger.info(
-                            "Buffered pipeline message while partition busy (topic=%s partition=%s pending=%s offset=%s)",
-                            topic,
-                            partition,
-                            len(pending),
-                            msg.offset(),
-                        )
-                    continue
-
-                pending = self._pending_by_partition.get(key)
-                if pending and len(pending) > 0:
-                    pending.append(msg)
-                    msg_to_process = pending.popleft()
-                    if len(pending) == 0:
-                        self._pending_by_partition.pop(key, None)
-                else:
-                    msg_to_process = msg
-
-                self._start_message_task(msg_to_process)
+            await self.run_partitioned_loop(poll_timeout=0.25, idle_sleep=0.0)
         finally:
-            inflight = list(self._inflight_by_partition.values())
-            for task in inflight:
-                task.cancel()
-            if inflight:
-                await asyncio.gather(*inflight, return_exceptions=True)
+            await self._cancel_inflight_tasks()
             await self.close()
-
-    def _log_background_task_exception(self, task: asyncio.Task) -> None:
-        try:
-            exc = task.exception()
-        except asyncio.CancelledError:
-            return
-        except Exception as exc:
-            logger.warning("Background task introspection failed: %s", exc)
-            return
-        if exc:
-            logger.error("Pipeline background task crashed: %s", exc, exc_info=True)
 
     # --- ProcessedEventKafkaWorker Strategy hooks ---
     def _service_name(self) -> Optional[str]:  # type: ignore[override]
         return "pipeline-worker"
+
+    def _buffer_messages(self) -> bool:  # type: ignore[override]
+        return True
+
+    def _pending_log_thresholds(self) -> set[int]:  # type: ignore[override]
+        return {1, 10, 50, 100}
+
+    def _uses_commit_state(self) -> bool:  # type: ignore[override]
+        return True
+
+    async def _poll_message(self, *, timeout: float) -> Any:  # type: ignore[override]
+        if not self.consumer:
+            return None
+        return self.consumer.poll(timeout)
 
     def _parse_payload(self, payload: Any) -> PipelineJob:  # type: ignore[override]
         if not isinstance(payload, (bytes, bytearray)):
@@ -902,58 +803,6 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
             job=payload,
             attempt_count=int(attempt_count),
         )
-
-    async def _handle_kafka_message(self, msg: Any) -> None:
-        if not self.consumer:
-            return
-
-        topic = str(msg.topic())
-        partition = int(msg.partition())
-        key = (topic, partition)
-        self._commit_state_by_partition[key] = False
-        try:
-            await self.handle_message(msg)
-        finally:
-            committed = bool(self._commit_state_by_partition.pop(key, False))
-            self._inflight_by_partition.pop(key, None)
-            if not self.consumer:
-                return
-            if key in self._revoked_partitions:
-                self._pending_by_partition.pop(key, None)
-                return
-
-            if not committed:
-                # We are rewinding (seek) and will retry this message; do not process buffered
-                # newer offsets as it could commit past an unprocessed message.
-                self._pending_by_partition.pop(key, None)
-                try:
-                    self.consumer.resume([TopicPartition(topic, partition)])
-                except Exception as exc:
-                    logger.warning(
-                        "Failed to resume pipeline partition (topic=%s partition=%s): %s",
-                        topic,
-                        partition,
-                        exc,
-                    )
-                return
-
-            pending = self._pending_by_partition.get(key)
-            if pending and len(pending) > 0:
-                next_msg = pending.popleft()
-                if len(pending) == 0:
-                    self._pending_by_partition.pop(key, None)
-                self._start_message_task(next_msg)
-                return
-
-            try:
-                self.consumer.resume([TopicPartition(topic, partition)])
-            except Exception as exc:
-                logger.warning(
-                    "Failed to resume pipeline partition (topic=%s partition=%s): %s",
-                    topic,
-                    partition,
-                    exc,
-                )
 
     async def _publish_to_dlq(
         self,

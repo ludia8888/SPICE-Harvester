@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
 
 import httpx
-from confluent_kafka import KafkaError, Producer, TopicPartition
+from confluent_kafka import Producer
 
 from shared.services.kafka.processed_event_worker import (
     HeartbeatOptions,
@@ -124,9 +124,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
         self.ontology_pk_validation_mode = str(cfg.ontology_pk_validation_mode or "warn").strip().lower() or "warn"
         self.tracing = get_tracing_service(self.service_name)
         self.metrics = get_metrics_collector(self.service_name)
-        self._revoked_partitions: set[tuple[str, int]] = set()
-        self._inflight_by_partition: Dict[tuple[str, int], asyncio.Task] = {}
-        self._rebalance_in_progress = False
+        self._init_partition_state()
 
     def _build_error_report(
         self,
@@ -510,6 +508,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
             on_revoke=self._on_partitions_revoked,
             on_assign=self._on_partitions_assigned,
         )
+        self._init_partition_state(reset=True)
 
         self.dlq_producer = Producer(
             {
@@ -530,12 +529,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
             "Objectify worker partitions revoked: %s",
             [(p.topic, p.partition) for p in partitions],
         )
-        revoked = {(p.topic, p.partition) for p in partitions}
-        self._revoked_partitions |= revoked
-        for key in revoked:
-            task = self._inflight_by_partition.get(key)
-            if task:
-                task.cancel()
+        self._handle_partitions_revoked(partitions, clear_pending=True)
 
     def _on_partitions_assigned(self, partitions: list) -> None:
         """Handle partition assignment during rebalance."""
@@ -544,13 +538,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
             "Objectify worker partitions assigned: %s",
             [(p.topic, p.partition) for p in partitions],
         )
-        for p in partitions:
-            self._revoked_partitions.discard((p.topic, p.partition))
-        try:
-            if self.consumer and partitions:
-                self.consumer.resume([TopicPartition(p.topic, p.partition) for p in partitions])
-        except Exception as exc:
-            logger.warning("Failed to resume objectify partitions after assign: %s", exc)
+        self._handle_partitions_assigned(partitions, resume=True)
 
     async def close(self) -> None:
         if self.consumer:
@@ -586,80 +574,15 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
         self.running = True
         logger.info("ObjectifyWorker started (topic=%s)", self.topic)
         try:
-            while self.running:
-                if not self.consumer:
-                    await asyncio.sleep(0.2)
-                    continue
-
-                # Poll frequently to maintain consumer group membership even while
-                # long-running jobs are executing in background tasks.
-                try:
-                    msg = self.consumer.poll(0.25)
-                except Exception as exc:
-                    logger.warning("Kafka poll failed (will retry): %s", exc, exc_info=True)
-                    await asyncio.sleep(1.0)
-                    continue
-
-                if msg is None:
-                    await asyncio.sleep(0)
-                    continue
-                if msg.error():
-                    if msg.error().code() == KafkaError._PARTITION_EOF:
-                        continue
-                    logger.error("Kafka error: %s", msg.error())
-                    continue
-                key = (msg.topic(), int(msg.partition()))
-                if key in self._inflight_by_partition:
-                    # Should never happen because we pause partitions while processing, but
-                    # be defensive: rewind and keep the partition paused.
-                    logger.warning(
-                        "Received objectify message while partition busy; rewinding (topic=%s partition=%s offset=%s)",
-                        msg.topic(),
-                        msg.partition(),
-                        msg.offset(),
-                    )
-                    try:
-                        self.consumer.seek(TopicPartition(msg.topic(), msg.partition(), msg.offset()))
-                        self.consumer.pause([TopicPartition(msg.topic(), msg.partition())])
-                    except Exception as exc:
-                        logger.warning("Failed to rewind/pause busy partition: %s", exc)
-                    await asyncio.sleep(0.1)
-                    continue
-
-                try:
-                    self.consumer.pause([TopicPartition(msg.topic(), msg.partition())])
-                except Exception as exc:
-                    logger.warning(
-                        "Failed to pause objectify partition (topic=%s partition=%s): %s",
-                        msg.topic(),
-                        msg.partition(),
-                        exc,
-                    )
-
-                task = asyncio.create_task(
-                    self._handle_kafka_message(msg),
-                    name=f"objectify:{msg.topic()}:{msg.partition()}:{msg.offset()}",
-                )
-                self._inflight_by_partition[key] = task
-                task.add_done_callback(self._log_background_task_exception)
+            await self.run_partitioned_loop(poll_timeout=0.25, idle_sleep=0.0)
         finally:
-            inflight = list(self._inflight_by_partition.values())
-            for task in inflight:
-                task.cancel()
-            if inflight:
-                await asyncio.gather(*inflight, return_exceptions=True)
+            await self._cancel_inflight_tasks()
             await self.close()
 
-    def _log_background_task_exception(self, task: asyncio.Task) -> None:
-        try:
-            exc = task.exception()
-        except asyncio.CancelledError:
-            return
-        except Exception as exc:
-            logger.warning("Background task introspection failed: %s", exc)
-            return
-        if exc:
-            logger.error("Background task crashed: %s", exc, exc_info=True)
+    async def _poll_message(self, *, timeout: float) -> Any:  # type: ignore[override]
+        if not self.consumer:
+            return None
+        return self.consumer.poll(timeout)
 
     # --- ProcessedEventKafkaWorker Strategy hooks ---
     def _parse_payload(self, payload: Any) -> ObjectifyJob:  # type: ignore[override]
@@ -818,31 +741,6 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
             payload.job_id,
             attempt_count,
         )
-
-    async def _handle_kafka_message(self, msg: Any) -> None:
-        if not self.consumer:
-            return
-
-        topic = str(msg.topic())
-        partition = int(msg.partition())
-        key = (topic, partition)
-
-        try:
-            await self.handle_message(msg)
-        finally:
-            try:
-                if self.consumer and key not in self._revoked_partitions:
-                    self.consumer.resume([TopicPartition(topic, partition)])
-            except Exception as exc:
-                logger.warning(
-                    "Failed to resume objectify partition (topic=%s partition=%s): %s",
-                    topic,
-                    partition,
-                    exc,
-                )
-            current = self._inflight_by_partition.get(key)
-            if current is asyncio.current_task():
-                self._inflight_by_partition.pop(key, None)
 
     async def _process_job(self, job: ObjectifyJob) -> None:
         if not self.objectify_registry or not self.dataset_registry:
