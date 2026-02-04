@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
-from confluent_kafka import KafkaError, Producer, TopicPartition
+from confluent_kafka import Producer, TopicPartition
 
 from shared.services.kafka.safe_consumer import SafeKafkaConsumer
 
@@ -612,25 +612,7 @@ class ActionWorker(ProcessedEventKafkaWorker[_ActionCommandPayload, None]):
 
     async def run(self) -> None:
         self.running = True
-        while self.running:
-            msg = await self._poll(timeout=1.0)
-            if msg is None:
-                continue
-            if msg.error():
-                if msg.error().code() == KafkaError._PARTITION_EOF:
-                    continue
-                logger.error("Kafka error: %s", msg.error())
-                continue
-            try:
-                await self.handle_message(msg)
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:
-                logger.error("Unexpected action worker error: %s", exc, exc_info=True)
-                await asyncio.sleep(2)
-                with suppress(Exception):
-                    await self._seek(topic=str(msg.topic()), partition=int(msg.partition()), offset=int(msg.offset()))
-                await asyncio.sleep(1.0)
+        await self.run_loop(poll_timeout=1.0, idle_sleep=None)
 
     async def _enforce_permission(
         self,

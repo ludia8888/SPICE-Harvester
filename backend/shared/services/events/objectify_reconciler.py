@@ -10,19 +10,9 @@ from shared.models.objectify_job import ObjectifyJob
 from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.services.registries.objectify_registry import ObjectifyJobRecord, ObjectifyRegistry
 from shared.services.registries.pipeline_registry import PipelineRegistry
+from shared.utils.objectify_outputs import match_output_name
 
 logger = logging.getLogger(__name__)
-
-
-def _match_output_name(output: Dict[str, Any], name: str) -> bool:
-    target = (name or "").strip()
-    if not target:
-        return False
-    for key in ("output_name", "dataset_name", "node_id"):
-        candidate = str(output.get(key) or "").strip()
-        if candidate and candidate == target:
-            return True
-    return False
 
 
 async def _build_objectify_payload(
@@ -65,7 +55,9 @@ async def _build_objectify_payload(
             if not resolved_output_name:
                 raise RuntimeError("artifact_output_name_missing")
         matches = [
-            out for out in outputs if _match_output_name(out, job.artifact_output_name or resolved_output_name or "")
+            out
+            for out in outputs
+            if match_output_name(out, job.artifact_output_name or resolved_output_name or "")
         ]
         if not matches:
             raise RuntimeError("artifact_output_not_found")

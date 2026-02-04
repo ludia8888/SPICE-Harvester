@@ -6,7 +6,43 @@ Normalizes user/ontology-provided type strings into xsd types understood by the 
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Optional, Set
+
+SUPPORTED_IMPORT_TYPES: Set[str] = {
+    "string",
+    "text",
+    "integer",
+    "int",
+    "long",
+    "decimal",
+    "number",
+    "float",
+    "double",
+    "boolean",
+    "bool",
+    "date",
+    "datetime",
+    "timestamp",
+    "email",
+    "url",
+    "uri",
+    "uuid",
+    "ip",
+    "phone",
+    "json",
+    "array",
+    "struct",
+    "object",
+    "vector",
+    "geopoint",
+    "geoshape",
+    "marking",
+    "cipher",
+    "attachment",
+    "media",
+    "time_series",
+    "timeseries",
+}
 
 
 def normalize_import_target_type(type_value: Any) -> str:
@@ -57,3 +93,22 @@ def normalize_import_target_type(type_value: Any) -> str:
         return "xsd:string"
 
     return "xsd:string"
+
+
+def resolve_import_type(raw_type: Any) -> Optional[str]:
+    """
+    Resolve a raw type hint to an importable target type.
+
+    Returns None for unknown/unsupported types.
+    """
+    if not raw_type:
+        return None
+    raw = str(raw_type).strip()
+    if not raw:
+        return None
+    lowered = raw.lower()
+    if lowered.startswith("xsd:") or lowered.startswith("sys:"):
+        return raw
+    if lowered not in SUPPORTED_IMPORT_TYPES:
+        return None
+    return normalize_import_target_type(lowered)

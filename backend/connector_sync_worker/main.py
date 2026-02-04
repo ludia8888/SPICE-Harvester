@@ -23,7 +23,7 @@ from datetime import timedelta
 from typing import Any, Dict, Optional
 
 import httpx
-from confluent_kafka import KafkaError, Producer
+from confluent_kafka import Producer
 
 from data_connector.google_sheets.service import GoogleSheetsService
 from data_connector.google_sheets.utils import normalize_sheet_data
@@ -86,6 +86,11 @@ class ConnectorSyncWorker(EventEnvelopeKafkaWorker[Optional[str]]):
 
     async def _producer_call(self, func, *args, **kwargs):
         return await call_in_executor(self._producer_executor, func, *args, **kwargs)
+
+    async def _poll_message(self, *, timeout: float) -> Any:
+        if not self.consumer:
+            return None
+        return await self._consumer_call(self.consumer.poll, timeout=timeout)
 
     async def initialize(self) -> None:
         settings = get_settings()
@@ -571,17 +576,7 @@ class ConnectorSyncWorker(EventEnvelopeKafkaWorker[Optional[str]]):
         self.running = True
         logger.info("🚀 ConnectorSyncWorker started")
 
-        while self.running:
-            msg = await self._consumer_call(self.consumer.poll, timeout=1.0)
-            if msg is None:
-                continue
-
-            if msg.error():
-                if msg.error().code() == KafkaError._PARTITION_EOF:
-                    continue
-                logger.error(f"Kafka error: {msg.error()}")
-                continue
-            await self.handle_message(msg)
+        await self.run_loop(poll_timeout=1.0, idle_sleep=None, catch_exceptions=False)
 
 
 async def _main() -> None:

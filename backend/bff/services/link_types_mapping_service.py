@@ -27,6 +27,7 @@ from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.services.pipeline.pipeline_schema_utils import normalize_schema_type
 from shared.utils.import_type_normalization import normalize_import_target_type
 from shared.utils.key_spec import normalize_key_spec
+from shared.utils.payload_utils import unwrap_data_payload
 from shared.utils.schema_columns import extract_schema_columns as _extract_schema_columns_raw
 from shared.utils.schema_hash import compute_schema_hash as _compute_schema_hash_raw
 from shared.utils.schema_type_compatibility import is_type_compatible
@@ -70,11 +71,8 @@ def build_join_schema(
 
 
 def extract_ontology_properties(payload: Any) -> Dict[str, Dict[str, Any]]:
-    if isinstance(payload, dict) and isinstance(payload.get("data"), dict):
-        payload = payload["data"]
-    if not isinstance(payload, dict):
-        return {}
-    props = payload.get("properties")
+    data = unwrap_data_payload(payload)
+    props = data.get("properties") if isinstance(data, dict) else None
     output: Dict[str, Dict[str, Any]] = {}
     if isinstance(props, list):
         for prop in props:
@@ -87,11 +85,8 @@ def extract_ontology_properties(payload: Any) -> Dict[str, Dict[str, Any]]:
 
 
 def extract_ontology_relationships(payload: Any) -> Dict[str, Dict[str, Any]]:
-    if isinstance(payload, dict) and isinstance(payload.get("data"), dict):
-        payload = payload["data"]
-    if not isinstance(payload, dict):
-        return {}
-    rels = payload.get("relationships")
+    data = unwrap_data_payload(payload)
+    rels = data.get("relationships") if isinstance(data, dict) else None
     output: Dict[str, Dict[str, Any]] = {}
     if isinstance(rels, list):
         for rel in rels:
@@ -683,4 +678,3 @@ async def build_mapping_request(
         result.dataset_version_id,
         result.spec_type,
     )
-

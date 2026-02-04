@@ -13,7 +13,7 @@ import httpx
 from fastapi import HTTPException, Request, status
 
 from bff.routers.objectify_deps import _require_db_role
-from bff.routers.objectify_ops import (
+from bff.services.objectify_ops_service import (
     _ALLOWED_SOURCE_TYPES,
     _build_mapping_change_summary,
     _compute_schema_hash_from_sample,

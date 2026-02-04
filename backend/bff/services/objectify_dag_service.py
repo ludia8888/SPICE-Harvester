@@ -18,7 +18,7 @@ from uuid import uuid4
 import httpx
 from fastapi import HTTPException, Request, status
 
-from bff.routers.objectify_ops import _extract_ontology_fields, _unwrap_data_payload
+from bff.services.objectify_ops_service import _extract_ontology_fields, _unwrap_data_payload
 from bff.schemas.objectify_requests import RunObjectifyDAGRequest
 from bff.services.oms_client import OMSClient
 from bff.utils.httpx_exceptions import raise_httpx_as_http_exception
@@ -649,4 +649,3 @@ async def run_objectify_dag(
     except Exception as exc:
         logger.error("Failed to orchestrate objectify DAG: %s", exc)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
-

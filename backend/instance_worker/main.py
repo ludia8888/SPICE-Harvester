@@ -26,7 +26,7 @@ from datetime import datetime, timezone
 from typing import Dict, Any, Optional, Set, List, Union
 from uuid import uuid4
 
-from confluent_kafka import Producer, KafkaError, TopicPartition
+from confluent_kafka import Producer, TopicPartition
 import boto3
 import httpx
 from botocore.exceptions import ClientError
@@ -332,6 +332,11 @@ class StrictInstanceWorker(ProcessedEventKafkaWorker[_InstanceCommandPayload, No
 
     async def _consumer_call(self, func, *args, **kwargs):
         return await call_in_executor(self._consumer_executor, func, *args, **kwargs)
+
+    async def _poll_message(self, *, timeout: float) -> Any:
+        if not self.consumer:
+            return None
+        return await self._consumer_call(self.consumer.poll, timeout=timeout)
         
     def _extract_payload_from_message(self, message: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -3103,29 +3108,13 @@ class StrictInstanceWorker(ProcessedEventKafkaWorker[_InstanceCommandPayload, No
         """Main processing loop"""
         self.running = True
         logger.info("🚀 STRICT Instance Worker started (topic=%s)", AppConfig.INSTANCE_COMMANDS_TOPIC)
-
-        while self.running:
-            if not self.consumer:
-                await asyncio.sleep(0.2)
-                continue
-
-            msg = await self._consumer_call(self.consumer.poll, timeout=1.0)
-            if msg is None:
-                continue
-
-            if msg.error():
-                if msg.error().code() == KafkaError._PARTITION_EOF:
-                    continue
-                logger.error("Kafka error: %s", msg.error())
-                continue
-
-            try:
-                await self.handle_message(msg)
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:
-                logger.error("Unexpected instance worker error: %s", exc, exc_info=True)
-                await asyncio.sleep(1.0)
+        await self.run_loop(
+            poll_timeout=1.0,
+            idle_sleep=None,
+            unexpected_error_sleep=1.0,
+            seek_on_error=False,
+            post_seek_sleep=0.0,
+        )
                 
     async def shutdown(self):
         """Graceful shutdown"""

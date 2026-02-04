@@ -8,6 +8,7 @@ from shared.services.pipeline.pipeline_graph_utils import build_incoming, normal
 from shared.services.pipeline.pipeline_schema_utils import normalize_schema_contract, normalize_schema_type
 from shared.services.pipeline.pipeline_transform_spec import normalize_operation, normalize_union_mode, resolve_join_spec
 from shared.services.pipeline.pipeline_type_utils import infer_xsd_type_from_values
+from shared.utils.schema_columns import extract_schema_columns
 
 
 @dataclass(frozen=True)
@@ -35,86 +36,17 @@ def _normalize_column_list(raw: Any) -> List[str]:
 
 
 def _extract_schema_columns(schema: Any) -> Tuple[List[str], Dict[str, Optional[str]]]:
-    if not isinstance(schema, dict):
-        return [], {}
-    if isinstance(schema.get("columns"), list):
-        columns: List[str] = []
-        type_map: Dict[str, Optional[str]] = {}
-        seen: set[str] = set()
-        for col in schema["columns"]:
-            if isinstance(col, dict):
-                name = str(col.get("name") or col.get("column") or "").strip()
-                if not name:
-                    continue
-                name = name.lstrip("\ufeff") or name
-                if name in seen:
-                    base = name
-                    idx = 1
-                    while f"{base}__{idx}" in seen:
-                        idx += 1
-                    name = f"{base}__{idx}"
-                seen.add(name)
-                columns.append(name)
-                raw_type = col.get("type") or col.get("data_type") or col.get("dtype")
-                if raw_type:
-                    type_map[name] = normalize_schema_type(raw_type)
-            elif isinstance(col, str):
-                name = col.strip()
-                if name:
-                    name = name.lstrip("\ufeff") or name
-                    if name in seen:
-                        base = name
-                        idx = 1
-                        while f"{base}__{idx}" in seen:
-                            idx += 1
-                        name = f"{base}__{idx}"
-                    seen.add(name)
-                    columns.append(name)
-        return columns, type_map
-    if isinstance(schema.get("fields"), list):
-        columns = []
-        type_map: Dict[str, Optional[str]] = {}
-        seen: set[str] = set()
-        for col in schema["fields"]:
-            if not isinstance(col, dict):
-                continue
-            name = str(col.get("name") or "").strip()
-            if not name:
-                continue
-            name = name.lstrip("\ufeff") or name
-            if name in seen:
-                base = name
-                idx = 1
-                while f"{base}__{idx}" in seen:
-                    idx += 1
-                name = f"{base}__{idx}"
-            seen.add(name)
-            columns.append(name)
-            raw_type = col.get("type")
-            if raw_type:
-                type_map[name] = normalize_schema_type(raw_type)
-        return columns, type_map
-    if isinstance(schema.get("properties"), dict):
-        columns = []
-        type_map = {}
-        seen: set[str] = set()
-        for key, value in schema["properties"].items():
-            name = str(key).strip()
-            if not name:
-                continue
-            name = name.lstrip("\ufeff") or name
-            if name in seen:
-                base = name
-                idx = 1
-                while f"{base}__{idx}" in seen:
-                    idx += 1
-                name = f"{base}__{idx}"
-            seen.add(name)
-            columns.append(name)
-            if isinstance(value, dict) and value.get("type"):
-                type_map[name] = normalize_schema_type(value.get("type"))
-        return columns, type_map
-    return [], {}
+    columns: List[str] = []
+    type_map: Dict[str, Optional[str]] = {}
+    for col in extract_schema_columns(schema, strip_bom=True, dedupe=True):
+        name = str(col.get("name") or "").strip()
+        if not name:
+            continue
+        columns.append(name)
+        raw_type = col.get("type")
+        if raw_type:
+            type_map[name] = normalize_schema_type(raw_type)
+    return columns, type_map
 
 
 def _extract_sample_rows(sample: Any) -> List[Dict[str, Any]]:

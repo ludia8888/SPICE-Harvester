@@ -41,7 +41,7 @@ from shared.services.registries.lineage_store import LineageStore
 from shared.services.registries.processed_event_registry import ProcessedEventRegistry
 from shared.services.core.sheet_import_service import FieldMapping, SheetImportService
 from shared.utils.deterministic_ids import deterministic_uuid5_hex_prefix
-from shared.utils.import_type_normalization import normalize_import_target_type
+from shared.utils.import_type_normalization import normalize_import_target_type, resolve_import_type
 from shared.utils.key_spec import normalize_key_spec
 from shared.utils.ontology_type_normalization import normalize_ontology_base_type
 from shared.utils.s3_uri import parse_s3_uri
@@ -364,54 +364,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
 
     @staticmethod
     def _resolve_import_type(raw_type: Any) -> Optional[str]:
-        if not raw_type:
-            return None
-        raw = str(raw_type).strip()
-        if not raw:
-            return None
-        lowered = raw.lower()
-        if lowered.startswith("xsd:"):
-            return raw
-        if lowered.startswith("sys:"):
-            return raw
-        supported = {
-            "string",
-            "text",
-            "integer",
-            "int",
-            "long",
-            "decimal",
-            "number",
-            "float",
-            "double",
-            "boolean",
-            "bool",
-            "date",
-            "datetime",
-            "timestamp",
-            "email",
-            "url",
-            "uri",
-            "uuid",
-            "ip",
-            "phone",
-            "json",
-            "array",
-            "struct",
-            "object",
-            "vector",
-            "geopoint",
-            "geoshape",
-            "marking",
-            "cipher",
-            "attachment",
-            "media",
-            "time_series",
-            "timeseries",
-        }
-        if lowered not in supported:
-            return None
-        return normalize_import_target_type(lowered)
+        return resolve_import_type(raw_type)
 
     def _validate_value_constraints(
         self,

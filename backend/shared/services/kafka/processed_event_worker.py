@@ -18,10 +18,11 @@ import asyncio
 import logging
 import time
 from abc import ABC, abstractmethod
+from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any, Dict, Generic, Optional, TypeVar
 
-from confluent_kafka import TopicPartition
+from confluent_kafka import KafkaError, TopicPartition
 
 from shared.models.event_envelope import EventEnvelope
 from shared.observability.context_propagation import attach_context_from_kafka
@@ -233,6 +234,103 @@ class ProcessedEventKafkaWorker(Generic[PayloadT, ResultT], ABC):
             logger=logger,
             warning_message=options.warning_message,
         )
+
+    async def _poll_message(self, *, timeout: float) -> Any:
+        poller = getattr(self, "_poll", None)
+        if callable(poller):
+            return await poller(timeout)
+        if not getattr(self, "consumer", None):
+            return None
+        return await asyncio.to_thread(self.consumer.poll, timeout)
+
+    def _is_partition_eof(self, msg: Any) -> bool:
+        try:
+            error = msg.error()
+        except Exception:
+            return False
+        if not error:
+            return False
+        try:
+            return error.code() == KafkaError._PARTITION_EOF
+        except Exception:
+            return False
+
+    def _loop_label(self) -> str:
+        return (self._service_name() or self.__class__.__name__).strip() or self.__class__.__name__
+
+    async def _on_poll_exception(self, exc: Exception) -> None:
+        logger.warning("Kafka poll failed (will retry): %s", exc, exc_info=True)
+
+    async def _on_kafka_message_error(self, msg: Any) -> None:
+        try:
+            logger.error("Kafka error: %s", msg.error())
+        except Exception:
+            logger.error("Kafka error: %s", msg)
+
+    async def _on_unexpected_message_error(self, exc: Exception, msg: Any) -> None:
+        logger.error("Unexpected %s error: %s", self._loop_label(), exc, exc_info=True)
+
+    async def _seek_on_unexpected_error(self, msg: Any) -> None:
+        with suppress(Exception):
+            await self._seek(
+                topic=str(msg.topic()),
+                partition=int(msg.partition()),
+                offset=int(msg.offset()),
+            )
+
+    async def run_loop(
+        self,
+        *,
+        poll_timeout: float = 1.0,
+        idle_sleep: Optional[float] = None,
+        missing_consumer_sleep: float = 0.2,
+        poll_exception_sleep: float = 1.0,
+        unexpected_error_sleep: float = 2.0,
+        post_seek_sleep: float = 1.0,
+        seek_on_error: bool = True,
+        catch_exceptions: bool = True,
+    ) -> None:
+        while self.running:
+            if not getattr(self, "consumer", None):
+                if missing_consumer_sleep:
+                    await asyncio.sleep(missing_consumer_sleep)
+                continue
+
+            try:
+                msg = await self._poll_message(timeout=poll_timeout)
+            except Exception as exc:
+                await self._on_poll_exception(exc)
+                if poll_exception_sleep:
+                    await asyncio.sleep(poll_exception_sleep)
+                continue
+
+            if msg is None:
+                if idle_sleep is not None:
+                    await asyncio.sleep(idle_sleep)
+                continue
+
+            if msg.error():
+                if self._is_partition_eof(msg):
+                    continue
+                await self._on_kafka_message_error(msg)
+                continue
+
+            if not catch_exceptions:
+                await self.handle_message(msg)
+                continue
+
+            try:
+                await self.handle_message(msg)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                await self._on_unexpected_message_error(exc, msg)
+                if unexpected_error_sleep:
+                    await asyncio.sleep(unexpected_error_sleep)
+                if seek_on_error:
+                    await self._seek_on_unexpected_error(msg)
+                    if post_seek_sleep:
+                        await asyncio.sleep(post_seek_sleep)
 
     async def handle_message(self, msg: Any) -> None:
         """

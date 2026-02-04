@@ -9,7 +9,7 @@ import asyncio
 import logging
 from typing import Any, Optional
 
-from confluent_kafka import KafkaError, Producer
+from confluent_kafka import Producer
 
 from elasticsearch.exceptions import ApiError as ElasticsearchException, RequestError, ConnectionError as ESConnectionError
 
@@ -130,23 +130,19 @@ class SearchProjectionWorker(EventEnvelopeKafkaWorker[None]):
             await self.es.disconnect()
             self.es = None
 
+    async def _poll_message(self, *, timeout: float) -> Any:
+        if not self.consumer:
+            return None
+        return self.consumer.poll(timeout)
+
     async def run(self) -> None:
         await self.initialize()
         if not self.enabled:
             return
         logger.info("SearchProjectionWorker started (topic=%s index=%s)", self.topic, self.index_name)
         try:
-            while True:
-                msg = self.consumer.poll(1.0)
-                if msg is None:
-                    await asyncio.sleep(0)
-                    continue
-                if msg.error():
-                    if msg.error().code() == KafkaError._PARTITION_EOF:
-                        continue
-                    logger.error("Kafka error: %s", msg.error())
-                    continue
-                await self.handle_message(msg)
+            self.running = True
+            await self.run_loop(poll_timeout=1.0, idle_sleep=0.0, catch_exceptions=False)
         finally:
             await self.close()
 

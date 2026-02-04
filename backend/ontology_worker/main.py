@@ -13,7 +13,7 @@ from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any
-from confluent_kafka import Producer, KafkaError, TopicPartition
+from confluent_kafka import Producer, TopicPartition
 
 from shared.config.app_config import AppConfig
 from shared.config.settings import get_settings
@@ -182,6 +182,11 @@ class OntologyWorker(ProcessedEventKafkaWorker[_OntologyCommandPayload, None]):
 
     async def _consumer_call(self, func, *args, **kwargs):
         return await call_in_executor(self._consumer_executor, func, *args, **kwargs)
+
+    async def _poll_message(self, *, timeout: float) -> Any:
+        if not self.consumer:
+            return None
+        return await self._consumer_call(self.consumer.poll, timeout=timeout)
         
     async def initialize(self):
         """워커 초기화"""
@@ -1440,34 +1445,7 @@ class OntologyWorker(ProcessedEventKafkaWorker[_OntologyCommandPayload, None]):
         logger.info("Ontology Worker started")
         
         try:
-            while self.running:
-                if not self.consumer:
-                    await asyncio.sleep(0.2)
-                    continue
-
-                msg = await self._consumer_call(self.consumer.poll, timeout=1.0)
-                
-                if msg is None:
-                    continue
-                    
-                if msg.error():
-                    if msg.error().code() == KafkaError._PARTITION_EOF:
-                        logger.debug(f"Reached end of partition {msg.partition()}")
-                    else:
-                        logger.error(f"Consumer error: {msg.error()}")
-                    continue
-                    
-                try:
-                    await self.handle_message(msg)
-                except asyncio.CancelledError:
-                    raise
-                except Exception as exc:
-                    logger.error("Unexpected ontology worker error: %s", exc, exc_info=True)
-                    await asyncio.sleep(2)
-                    with suppress(Exception):
-                        await self._seek(topic=str(msg.topic()), partition=int(msg.partition()), offset=int(msg.offset()))
-                    await asyncio.sleep(1.0)
-                    
+            await self.run_loop(poll_timeout=1.0, idle_sleep=None)
         except KeyboardInterrupt:
             logger.info("Worker interrupted by user")
         finally:
