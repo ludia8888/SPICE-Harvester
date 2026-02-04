@@ -127,9 +127,7 @@ python scripts/generate_api_reference.py
 
 ### Agent
 - `POST /api/v1/agent/pipeline-runs`
-- `POST /api/v1/agent/runs`
-- `GET /api/v1/agent/runs/{run_id}`
-- `GET /api/v1/agent/runs/{run_id}/events`
+- `POST /api/v1/agent/pipeline-runs/stream`
 
 ### AI
 - `POST /api/v1/ai/intent`
@@ -168,6 +166,7 @@ python scripts/generate_api_reference.py
 - `GET /api/v1/config/config/validation`
 
 ### Context Tools
+- `POST /api/v1/context-tools/datasets/describe`
 - `POST /api/v1/context-tools/ontology/snapshot`
 
 ### context7
@@ -274,9 +273,13 @@ python scripts/generate_api_reference.py
 - `GET /api/v1/monitoring/status`
 
 ### Objectify
+- `POST /api/v1/objectify/databases/{db_name}/datasets/{dataset_id}/detect-relationships`
+- `POST /api/v1/objectify/databases/{db_name}/run-dag`
 - `POST /api/v1/objectify/datasets/{dataset_id}/run`
 - `GET /api/v1/objectify/mapping-specs`
 - `POST /api/v1/objectify/mapping-specs`
+- `POST /api/v1/objectify/mapping-specs/{mapping_spec_id}/trigger-incremental`
+- `GET /api/v1/objectify/mapping-specs/{mapping_spec_id}/watermark`
 
 ### Ontology Agent
 - `POST /api/v1/ontology-agent/runs`
@@ -381,6 +384,11 @@ python scripts/generate_api_reference.py
 - `POST /api/v1/pipelines/datasets/{dataset_id}/versions/{version_id}/funnel-analysis`
 - `GET /api/v1/pipelines/proposals`
 - `POST /api/v1/pipelines/simulate-definition`
+- `GET /api/v1/pipelines/udfs`
+- `POST /api/v1/pipelines/udfs`
+- `GET /api/v1/pipelines/udfs/{udf_id}`
+- `POST /api/v1/pipelines/udfs/{udf_id}/versions`
+- `GET /api/v1/pipelines/udfs/{udf_id}/versions/{version}`
 - `GET /api/v1/pipelines/{pipeline_id}`
 - `PUT /api/v1/pipelines/{pipeline_id}`
 - `GET /api/v1/pipelines/{pipeline_id}/artifacts`
@@ -406,6 +414,15 @@ python scripts/generate_api_reference.py
 - `POST /api/v1/databases/{db_name}/query`
 - `GET /api/v1/databases/{db_name}/query/builder`
 - `POST /api/v1/databases/{db_name}/query/raw`
+
+### Schema Changes
+- `PUT /api/v1/schema-changes/drifts/{drift_id}/acknowledge`
+- `GET /api/v1/schema-changes/history`
+- `GET /api/v1/schema-changes/mappings/{mapping_spec_id}/compatibility`
+- `GET /api/v1/schema-changes/stats`
+- `GET /api/v1/schema-changes/subscriptions`
+- `POST /api/v1/schema-changes/subscriptions`
+- `DELETE /api/v1/schema-changes/subscriptions/{subscription_id}`
 
 ### Summary
 - `GET /api/v1/summary`

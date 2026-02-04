@@ -29,6 +29,11 @@ python scripts/check_docs.py
 ./.venv-docs/bin/python scripts/check_docs.py
 ```
 
+Docs update (auto-managed generators only):
+```bash
+python scripts/update_docs.py
+```
+
 ### Core Documentation
 
 - **[System Architecture](ARCHITECTURE.md)** - Comprehensive system architecture with microservices design, implementation status, and performance metrics

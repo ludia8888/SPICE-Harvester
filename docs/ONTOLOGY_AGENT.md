@@ -19,7 +19,7 @@
 
 ### Tool provider (MCP)
 - Ontology MCP server: 스키마 빌더 + 검증 + 추론 도구 제공
-  - 코드: `backend/mcp/ontology_mcp_server.py`
+  - 코드: `backend/mcp_servers/ontology_mcp_server.py`
   - 도구 카테고리:
     - **초기화**: `ontology_new`, `ontology_load`, `ontology_reset`
     - **클래스 메타데이터**: `ontology_set_class_meta`, `ontology_set_abstract`
@@ -261,7 +261,7 @@ Ontology Agent는 한 요청 안에서 반복적으로 도구를 호출하는 **
   "mcpServers": {
     "ontology": {
       "command": "python",
-      "args": ["backend/mcp/ontology_mcp_server.py"],
+      "args": ["backend/mcp_servers/ontology_mcp_server.py"],
       "config": {
         "capabilities": [
           "ontology_management",

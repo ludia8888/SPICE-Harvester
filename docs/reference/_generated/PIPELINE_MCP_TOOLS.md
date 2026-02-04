@@ -1,25 +1,47 @@
 # Pipeline MCP Tool Catalog
 
 <!-- BEGIN AUTO-GENERATED: pipeline_tooling_reference -->
-> Updated: 2026-01-27T09:22:12+09:00
-> Revision: `d4b71b63bfd4c68fb9c677077d4200b7bb236bec`
-> Source of truth: `backend/mcp/pipeline_mcp_server.py` (parsed from the `tool_specs` literal).
+> Updated: 2026-02-04T21:36:30+09:00
+> Revision: `3f1c9128c08ac4aed8ccd395aafeb1dbb36d5963`
+> Source of truth: `backend/mcp_servers/pipeline_mcp_server.py` (parsed from the `tool_specs` literal).
 > Regenerate: `python scripts/generate_pipeline_tooling_reference.py`
 
 ## Other
 
 | Tool | Required args | Description |
 | --- | --- | --- |
+| `check_schema_drift` | `db_name, mapping_spec_id` | Check if dataset schema has drifted from mapping spec expectations. Detects column additions, removals, type changes. |
+| `create_link_type_from_fk` | `db_name, fk_pattern, source_class_id, target_class_id` | Create a link_type from a detected FK pattern. Generates the relationship spec and link_type definition. |
+| `dataset_get_by_name` | `db_name, dataset_name` | Look up a dataset by name and return its dataset_id. Use this when you have a dataset name but need the dataset_id for objectify or other tools. |
+| `dataset_get_latest_version` | `dataset_id` | Get the latest version of a dataset. Returns version_id, artifact_key, and schema info. |
+| `dataset_validate_columns` | `dataset_id, columns` | Validate that specified columns exist in a dataset's schema. Returns valid/invalid columns and available columns for suggestions. Use this before adding operations that reference specific columns. |
+| `debug_dry_run` | `plan` | Validate a pipeline plan without actually executing it. Checks for structural issues, missing references, and join key compatibility. |
+| `debug_explain_failure` | `` | Analyze accumulated errors and provide diagnostic suggestions with potential fixes. |
+| `debug_get_errors` | `` | Get accumulated errors and warnings from current pipeline run. Use this to see what went wrong. |
+| `debug_get_execution_log` | `` | Get step-by-step execution log of tool calls made during this run. Useful for understanding what happened. |
+| `debug_inspect_node` | `plan, node_id` | Inspect a specific node's configuration, inputs, and outputs in the pipeline plan. |
+| `detect_foreign_keys` | `db_name, dataset_id` | Detect potential FK relationships in a dataset based on naming conventions and value overlap analysis. Returns detected FK patterns with confidence scores. |
+| `get_objectify_watermark` | `mapping_spec_id` | Get the current watermark state for a mapping spec. Shows last processed watermark value and timestamp. |
+| `list_schema_changes` | `db_name, subject_type, subject_id` | List recent schema changes for a dataset or mapping spec. Shows drift history with severity and change details. |
+| `objectify_create_mapping_spec` | `dataset_id, target_class_id, mappings, db_name` | Create a mapping specification that defines how dataset columns map to ontology class properties. Required before running objectify. |
+| `objectify_get_status` | `job_id` | Get the status of an objectify job. |
+| `objectify_list_mapping_specs` | `dataset_id` | List existing mapping specifications for a dataset. |
+| `objectify_run` | `dataset_id, db_name` | Execute objectify transformation to convert dataset rows into ontology instances. Requires an active mapping spec. |
+| `objectify_suggest_mapping` | `dataset_id, target_class_id, db_name` | Suggest field mappings from dataset columns to ontology class properties. Uses schema matching and naming heuristics. Call this before creating a mapping spec. |
+| `objectify_wait` | `job_id` | Wait for an objectify job to complete. Polls the job status until completion, failure, or timeout. Returns final job status with results. |
+| `ontology_query_instances` | `db_name, class_id` | Query ontology instances by class type. Use this to verify objectify results by counting instances or retrieving sample data. Returns instance count and sample instances. |
+| `ontology_register_object_type` | `db_name, class_id, dataset_id, primary_key, title_key` | Register an ontology class as an object_type resource for objectify. REQUIRED before running objectify. Creates the object_type contract with pk_spec and backing_source configuration. |
 | `preview_inspect` | `preview` | Inspect a preview sample and propose cleansing suggestions (deterministic). |
+| `trigger_incremental_objectify` | `db_name, mapping_spec_id` | Trigger objectify in incremental mode (watermark or delta). Processes only changed rows since last run. |
 
 ## Pipeline Control Plane (Spark worker execution)
 
 | Tool | Required args | Description |
 | --- | --- | --- |
-| `pipeline_build_wait` | `pipeline_id` | Queue a Spark build for a Pipeline and optionally wait (poll) until completion. If job_id is provided, this tool will poll that existing job_id without enqueuing a new build (prevents runaway QUEUED runs). |
+| `pipeline_build_wait` | `pipeline_id` | Queue a Spark build for a Pipeline and optionally wait (poll) until completion. If job_id is provided, this tool will poll that existing job_id without enqueuing a new build (prevents runaway QUEUED runs). Note: limit is capped at 500 rows. |
 | `pipeline_create_from_plan` | `plan, name, location` | Create a Pipeline (control plane) from a PipelinePlan.definition_json. If the pipeline already exists (same db/name/branch), this tool will update it and return the existing pipeline_id (idempotent upsert). Requires admin token; respects principal headers for permissions. |
 | `pipeline_deploy_promote_build` | `pipeline_id, build_job_id, node_id, db_name, dataset_name` | Promote a successful build to a deployed dataset (requires approve permission). To avoid build↔deploy definition hash mismatches, you may pass definition_json, or pass pipeline_spec_commit_id and this tool will fetch the exact build snapshot from pipeline_versions. |
-| `pipeline_preview_wait` | `pipeline_id` | Queue a Spark preview for a Pipeline and optionally wait (poll) until completion. If job_id is provided, this tool will poll that existing job_id without enqueuing a new preview (prevents runaway QUEUED runs). |
+| `pipeline_preview_wait` | `pipeline_id` | Queue a Spark preview for a Pipeline and optionally wait (poll) until completion. If job_id is provided, this tool will poll that existing job_id without enqueuing a new preview (prevents runaway QUEUED runs). Note: limit is capped at 500 rows. |
 | `pipeline_update_from_plan` | `pipeline_id, plan` | Update an existing Pipeline definition from a PipelinePlan.definition_json. |
 
 ## Plan Builder / Validation
@@ -39,8 +61,8 @@
 | `plan_add_group_by` | `plan, input_node_id, aggregates` | Add a groupBy/aggregate transform node (group_by + aggregates). aggregates items: {column,op,alias?}. |
 | `plan_add_group_by_expr` | `plan, input_node_id, aggregate_expressions` | Add a groupBy/aggregate node using Spark SQL aggregate expressions (supports approx_percentile, etc). |
 | `plan_add_input` | `plan` | Add an input node for a dataset. |
-| `plan_add_join` | `plan, left_node_id, right_node_id, left_keys, right_keys` | Add a join transform node (LEFT then RIGHT edge order). Cross joins are rejected. |
-| `plan_add_normalize` | `plan, input_node_id, columns` | Add a normalize transform node. |
+| `plan_add_join` | `plan, left_node_id, right_node_id, left_keys, right_keys, join_type` | Add a join transform node (LEFT then RIGHT edge order). Cross joins are rejected. IMPORTANT: join_type is required - specify 'inner', 'left', 'right', 'full', or 'cross'. |
+| `plan_add_normalize` | `plan, input_node_id, columns` | Add a normalize transform node. WARNING: Default behavior modifies data (trim=true, empty_to_null=true, whitespace_to_null=true). Set these to false explicitly if you want to preserve original values. |
 | `plan_add_output` | `plan, input_node_id, output_name` | Add an output node + outputs[] entry. |
 | `plan_add_pivot` | `plan, input_node_id, index, columns, values` | Add a pivot transform node (groupBy(index...).pivot(columns).agg(values)). |
 | `plan_add_regex_replace` | `plan, input_node_id, rules` | Add a regexReplace transform node. rules=[{column,pattern,replacement,flags?}]. |
@@ -57,8 +79,8 @@
 | `plan_delete_node` | `plan, node_id` | Delete a node and any incident edges; for output nodes also removes outputs[] entry. |
 | `plan_evaluate_joins` | `plan` | Evaluate join nodes in a plan (coverage/explosion) using sample-safe execution. |
 | `plan_new` | `goal, db_name` | Create a new PipelinePlan JSON (empty nodes/edges). |
-| `plan_preview` | `plan` | Preview a plan via the deterministic PipelineExecutor (sample-safe). |
-| `plan_refute_claims` | `plan` | Refute plan-embedded claims with concrete counterexamples (witness-based hard gate). |
+| `plan_preview` | `plan` | Preview a plan via the deterministic PipelineExecutor (sample-safe). Note: limit is capped at 200 rows. For larger previews, use pipeline_preview_wait. |
+| `plan_refute_claims` | `plan` | Refute plan-embedded claims with concrete counterexamples (witness-based hard gate). Note: Stops after max_hard_failures (default: 5) or max_soft_warnings (default: 20). |
 | `plan_reset` | `plan` | Reset an existing plan to empty (preserves goal + data_scope). |
 | `plan_set_node_inputs` | `plan, node_id, input_node_ids` | Replace all incoming edges to node_id with input_node_ids (in order). |
 | `plan_update_node_metadata` | `plan, node_id` | Patch node.metadata (merge by default, replace if requested). Use `set` (aliases: `metadata`, `meta`). |

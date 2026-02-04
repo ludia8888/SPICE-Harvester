@@ -69,7 +69,7 @@ LLM이 조인 전략/키/타입을 “상상”하지 않도록 후보 공간을
 관련 코드:
 - `backend/bff/services/pipeline_context_pack.py`
 - `backend/shared/services/pipeline_type_inference.py`
-- `backend/mcp/pipeline_mcp_server.py`
+- `backend/mcp_servers/pipeline_mcp_server.py`
 
 ---
 
@@ -109,7 +109,7 @@ Claim 예시(노드 메타데이터):
 
 관련 코드:
 - Refuter: `backend/shared/services/pipeline_claim_refuter.py`
-- MCP tool: `backend/mcp/pipeline_mcp_server.py` (`plan_refute_claims`)
+- MCP tool: `backend/mcp_servers/pipeline_mcp_server.py` (`plan_refute_claims`)
 - Finish-time gate(자동): `backend/bff/services/pipeline_agent_autonomous_loop.py`
 
 ---
@@ -126,7 +126,7 @@ Claim 예시(노드 메타데이터):
 
 관련 코드:
 - `backend/shared/services/pipeline_plan_builder.py`
-- `backend/mcp/pipeline_mcp_server.py`
+- `backend/mcp_servers/pipeline_mcp_server.py`
 - `backend/bff/services/pipeline_plan_autonomous_compiler.py`
 - `backend/bff/services/pipeline_plan_models.py`
 - `backend/bff/services/pipeline_agent_autonomous_loop.py`
@@ -193,7 +193,7 @@ Pipeline Agent는 역할 분해 그래프 대신, 단일 루프가 필요한 도
 - Pipeline Plans API: `backend/bff/routers/pipeline_plans.py`
 - Plan validation/preflight: `backend/bff/services/pipeline_plan_validation.py`
 - Context pack + join/pk/fk 후보: `backend/bff/services/pipeline_context_pack.py`
-- Pipeline MCP server: `backend/mcp/pipeline_mcp_server.py`
+- Pipeline MCP server: `backend/mcp_servers/pipeline_mcp_server.py`
 - MCP tool catalog (auto-generated): `docs/reference/_generated/PIPELINE_MCP_TOOLS.md`
 - Agent tool allowlist (auto-generated): `docs/reference/_generated/PIPELINE_AGENT_ALLOWED_TOOLS.md`
 

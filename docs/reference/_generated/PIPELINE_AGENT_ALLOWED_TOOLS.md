@@ -1,13 +1,52 @@
 # Pipeline Agent Tool Allowlist
 
 <!-- BEGIN AUTO-GENERATED: pipeline_tooling_reference -->
-> Updated: 2026-01-27T09:22:12+09:00
-> Revision: `d4b71b63bfd4c68fb9c677077d4200b7bb236bec`
+> Updated: 2026-02-04T21:36:30+09:00
+> Revision: `3f1c9128c08ac4aed8ccd395aafeb1dbb36d5963`
 > Source of truth: `backend/bff/services/pipeline_agent_autonomous_loop.py` (`_PIPELINE_AGENT_ALLOWED_TOOLS`).
 > Regenerate: `python scripts/generate_pipeline_tooling_reference.py`
 
 ## Allowed tools (runtime-enforced)
 
+- `dataset_get_by_name`
+- `dataset_get_latest_version`
+- `dataset_validate_columns`
+- `debug_dry_run`
+- `debug_explain_failure`
+- `debug_get_errors`
+- `debug_get_execution_log`
+- `debug_inspect_node`
+- `objectify_create_mapping_spec`
+- `objectify_get_status`
+- `objectify_list_mapping_specs`
+- `objectify_run`
+- `objectify_suggest_mapping`
+- `objectify_wait`
+- `ontology_add_property`
+- `ontology_add_relationship`
+- `ontology_check_circular_refs`
+- `ontology_check_relationships`
+- `ontology_create`
+- `ontology_get_class`
+- `ontology_infer_schema_from_data`
+- `ontology_list_classes`
+- `ontology_load`
+- `ontology_new`
+- `ontology_preview`
+- `ontology_query_instances`
+- `ontology_register_object_type`
+- `ontology_remove_property`
+- `ontology_remove_relationship`
+- `ontology_reset`
+- `ontology_search_classes`
+- `ontology_set_abstract`
+- `ontology_set_class_meta`
+- `ontology_set_primary_key`
+- `ontology_suggest_mappings`
+- `ontology_update`
+- `ontology_update_property`
+- `ontology_update_relationship`
+- `ontology_validate`
 - `pipeline_build_wait`
 - `pipeline_create_from_plan`
 - `pipeline_deploy_promote_build`
@@ -57,7 +96,38 @@
 
 ## Consistency checks
 
-- `allowed_minus_mcp_specs`: empty (OK)
-- `mcp_specs_minus_allowed`: empty (OK)
+### Allowed by agent, but missing from MCP tool specs (should be empty)
+
+- `ontology_add_property`
+- `ontology_add_relationship`
+- `ontology_check_circular_refs`
+- `ontology_check_relationships`
+- `ontology_create`
+- `ontology_get_class`
+- `ontology_infer_schema_from_data`
+- `ontology_list_classes`
+- `ontology_load`
+- `ontology_new`
+- `ontology_preview`
+- `ontology_remove_property`
+- `ontology_remove_relationship`
+- `ontology_reset`
+- `ontology_search_classes`
+- `ontology_set_abstract`
+- `ontology_set_class_meta`
+- `ontology_set_primary_key`
+- `ontology_suggest_mappings`
+- `ontology_update`
+- `ontology_update_property`
+- `ontology_update_relationship`
+- `ontology_validate`
+
+- `mcp_specs_minus_allowed`:
+  - `check_schema_drift`
+  - `create_link_type_from_fk`
+  - `detect_foreign_keys`
+  - `get_objectify_watermark`
+  - `list_schema_changes`
+  - `trigger_incremental_objectify`
 
 <!-- END AUTO-GENERATED: pipeline_tooling_reference -->

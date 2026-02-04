@@ -26,12 +26,26 @@ from typing import Any, Dict, List, Sequence, Tuple
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
+def _resolve_mcp_server(primary: Path, legacy: Path) -> Path:
+    if primary.exists():
+        return primary
+    if legacy.exists():
+        return legacy
+    return primary
+
+
 # Pipeline Agent sources
-PIPELINE_MCP_SERVER = REPO_ROOT / "backend" / "mcp" / "pipeline_mcp_server.py"
+PIPELINE_MCP_SERVER = _resolve_mcp_server(
+    REPO_ROOT / "backend" / "mcp_servers" / "pipeline_mcp_server.py",
+    REPO_ROOT / "backend" / "mcp" / "pipeline_mcp_server.py",
+)
 PIPELINE_AGENT_LOOP = REPO_ROOT / "backend" / "bff" / "services" / "pipeline_agent_autonomous_loop.py"
 
 # Ontology Agent sources
-ONTOLOGY_MCP_SERVER = REPO_ROOT / "backend" / "mcp" / "ontology_mcp_server.py"
+ONTOLOGY_MCP_SERVER = _resolve_mcp_server(
+    REPO_ROOT / "backend" / "mcp_servers" / "ontology_mcp_server.py",
+    REPO_ROOT / "backend" / "mcp" / "ontology_mcp_server.py",
+)
 ONTOLOGY_AGENT_LOOP = REPO_ROOT / "backend" / "bff" / "services" / "ontology_agent_autonomous_loop.py"
 
 OUT_DIR = REPO_ROOT / "docs" / "reference" / "_generated"
@@ -213,7 +227,7 @@ def _render_mcp_tools_md(tool_specs: List[Dict[str, Any]], *, updated_at: str, r
     if rev:
         lines.append(f"> Revision: `{rev}`")
     lines.append(
-        "> Source of truth: `backend/mcp/pipeline_mcp_server.py` (parsed from the `tool_specs` literal)."
+        "> Source of truth: `backend/mcp_servers/pipeline_mcp_server.py` (parsed from the `tool_specs` literal)."
     )
     lines.append("> Regenerate: `python scripts/generate_pipeline_tooling_reference.py`")
     lines.append("")

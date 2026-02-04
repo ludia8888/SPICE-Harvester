@@ -1,6 +1,6 @@
 # Enterprise Error Taxonomy
 
-> Updated: 2026-01-27
+> Updated: 2026-01-30
 
 This file is auto-generated from `backend/shared/errors/enterprise_catalog.py`.
 Run: `python scripts/generate_error_taxonomy.py`.
@@ -68,6 +68,7 @@ Run: `python scripts/generate_error_taxonomy.py`.
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | BUILD_NOT_SUCCESS | SHV-{SUBSYS}-PIP-STA-1001 | pipeline | state | error | Build not successful | false | none | 1 | 0 | 0 | none | false | true | BUILD_NOT_SUCCESS | request_human | 409 |
 | CARDINALITY_RECOMMENDATION | SHV-{SUBSYS}-ONT-VAL-1107 | ontology | validation | info | Cardinality recommendation | false | none | 1 | 0 | 0 | none | false | true | CARDINALITY_RECOMMENDATION | request_human | 400 |
+| DATASET_VERSION_MISSING | SHV-{SUBSYS}-DAT-NOT-2101 | data | not_found | error | Dataset version missing | false | none | 1 | 0 | 0 | none | false | true | DATASET_VERSION_MISSING | request_human | 404 |
 | DEFINITION_MISMATCH | SHV-{SUBSYS}-PIP-CON-1008 | pipeline | conflict | error | Pipeline definition mismatch | false | none | 1 | 0 | 0 | none | false | true | DEFINITION_MISMATCH | request_human | 409 |
 | DUPLICATE_PREDICATE | SHV-{SUBSYS}-ONT-VAL-1118 | ontology | validation | error | Duplicate predicate | false | none | 1 | 0 | 0 | none | false | true | DUPLICATE_PREDICATE | request_human | 400 |
 | DUPLICATE_RELATIONSHIP | SHV-{SUBSYS}-ONT-VAL-1117 | ontology | validation | error | Duplicate relationship | false | none | 1 | 0 | 0 | none | false | true | DUPLICATE_RELATIONSHIP | request_human | 400 |
@@ -75,6 +76,7 @@ Run: `python scripts/generate_error_taxonomy.py`.
 | EMPTY_LABEL | SHV-{SUBSYS}-ONT-VAL-1112 | ontology | validation | warning | Relationship label empty | false | none | 1 | 0 | 0 | none | false | true | EMPTY_LABEL | request_human | 400 |
 | EXTERNAL_CLASS_REFERENCE | SHV-{SUBSYS}-ONT-VAL-1120 | ontology | validation | warning | External class reference | false | none | 1 | 0 | 0 | none | false | true | EXTERNAL_CLASS_REFERENCE | request_human | 400 |
 | FULL_SYNC_FAILED | SHV-{SUBSYS}-OBJ-INT-3001 | objectify | internal | error | Full sync failed | false | none | 1 | 0 | 0 | none | false | true | FULL_SYNC_FAILED | request_human | 500 |
+| FUNNEL_UNAVAILABLE | SHV-{SUBSYS}-UPS-UNA-2101 | upstream | unavailable | error | Funnel service unavailable | true | backoff | 3 | 500 | 10000 | deterministic_equal_jitter | false | false | FUNNEL_UNAVAILABLE | retry_backoff | 503 |
 | GLOBAL_PREDICATE_CONFLICT | SHV-{SUBSYS}-ONT-VAL-1121 | ontology | validation | warning | Global predicate conflict | false | none | 1 | 0 | 0 | none | false | true | GLOBAL_PREDICATE_CONFLICT | request_human | 400 |
 | IFACE_MISSING_PROPERTY | SHV-{SUBSYS}-ONT-VAL-1001 | ontology | validation | error | Interface missing property | false | none | 1 | 0 | 0 | none | false | true | IFACE_MISSING_PROPERTY | request_human | 400 |
 | IFACE_MISSING_RELATIONSHIP | SHV-{SUBSYS}-ONT-VAL-1003 | ontology | validation | error | Interface missing relationship | false | none | 1 | 0 | 0 | none | false | true | IFACE_MISSING_RELATIONSHIP | request_human | 400 |
@@ -130,9 +132,14 @@ Run: `python scripts/generate_error_taxonomy.py`.
 | MISSING_PREDICATE | SHV-{SUBSYS}-ONT-VAL-1101 | ontology | validation | error | Relationship predicate missing | false | none | 1 | 0 | 0 | none | false | true | MISSING_PREDICATE | request_human | 400 |
 | MISSING_TARGET | SHV-{SUBSYS}-ONT-VAL-1102 | ontology | validation | error | Relationship target missing | false | none | 1 | 0 | 0 | none | false | true | MISSING_TARGET | request_human | 400 |
 | NO_RELATIONSHIPS_INDEXED | SHV-{SUBSYS}-OBJ-STA-3001 | objectify | state | error | No relationships indexed | false | none | 1 | 0 | 0 | none | false | true | NO_RELATIONSHIPS_INDEXED | request_human | 409 |
+| OBJECTIFY_DAG_CYCLE_DETECTED | SHV-{SUBSYS}-OBJ-VAL-3101 | objectify | validation | error | Objectify DAG cycle detected | false | none | 1 | 0 | 0 | none | false | true | OBJECTIFY_DAG_CYCLE_DETECTED | request_human | 400 |
+| OBJECTIFY_DAG_DEPENDENCIES_MISSING | SHV-{SUBSYS}-OBJ-VAL-3102 | objectify | validation | error | Objectify DAG dependencies missing | false | none | 1 | 0 | 0 | none | false | true | OBJECTIFY_DAG_DEPENDENCIES_MISSING | request_human | 400 |
+| OBJECTIFY_PRIMARY_KEY_ORDER_OVERRIDE_IGNORED | SHV-{SUBSYS}-OBJ-VAL-3104 | objectify | validation | warning | Objectify primary key order override ignored | false | none | 1 | 0 | 0 | none | false | true | OBJECTIFY_PRIMARY_KEY_ORDER_OVERRIDE_IGNORED | request_human | 200 |
+| OBJECTIFY_PRIMARY_KEY_OVERRIDE_IGNORED | SHV-{SUBSYS}-OBJ-VAL-3103 | objectify | validation | warning | Objectify primary key override ignored | false | none | 1 | 0 | 0 | none | false | true | OBJECTIFY_PRIMARY_KEY_OVERRIDE_IGNORED | request_human | 200 |
 | OBJECT_TYPE_AUTO_MAPPING_EMPTY | SHV-{SUBSYS}-ONT-VAL-3014 | ontology | validation | error | Object type auto mapping empty | false | none | 1 | 0 | 0 | none | false | true | OBJECT_TYPE_AUTO_MAPPING_EMPTY | request_human | 400 |
 | OBJECT_TYPE_BACKING_ARTIFACT_REQUIRED | SHV-{SUBSYS}-ONT-VAL-3015 | ontology | validation | error | Object type backing artifact required | false | none | 1 | 0 | 0 | none | false | true | OBJECT_TYPE_BACKING_ARTIFACT_REQUIRED | request_human | 400 |
 | OBJECT_TYPE_BACKING_DATASET_MISMATCH | SHV-{SUBSYS}-ONT-CON-3005 | ontology | conflict | error | Object type backing dataset mismatch | false | none | 1 | 0 | 0 | none | false | true | OBJECT_TYPE_BACKING_DATASET_MISMATCH | request_human | 409 |
+| OBJECT_TYPE_BACKING_DATASET_MISSING | SHV-{SUBSYS}-ONT-NOT-3101 | ontology | not_found | error | Object type backing dataset missing | false | none | 1 | 0 | 0 | none | false | true | OBJECT_TYPE_BACKING_DATASET_MISSING | request_human | 404 |
 | OBJECT_TYPE_BACKING_MISMATCH | SHV-{SUBSYS}-ONT-CON-3004 | ontology | conflict | error | Object type backing source mismatch | false | none | 1 | 0 | 0 | none | false | true | OBJECT_TYPE_BACKING_MISMATCH | request_human | 409 |
 | OBJECT_TYPE_BACKING_VERSION_REQUIRED | SHV-{SUBSYS}-ONT-VAL-3016 | ontology | validation | error | Object type backing version required | false | none | 1 | 0 | 0 | none | false | true | OBJECT_TYPE_BACKING_VERSION_REQUIRED | request_human | 400 |
 | OBJECT_TYPE_CONTRACT_MISSING | SHV-{SUBSYS}-ONT-NOT-3004 | ontology | not_found | error | Object type contract missing | false | none | 1 | 0 | 0 | none | false | true | OBJECT_TYPE_CONTRACT_MISSING | request_human | 404 |
@@ -146,6 +153,7 @@ Run: `python scripts/generate_error_taxonomy.py`.
 | OBJECT_TYPE_SCHEMA_HASH_MISMATCH | SHV-{SUBSYS}-ONT-CON-3003 | ontology | conflict | error | Object type schema hash mismatch | false | none | 1 | 0 | 0 | none | false | true | OBJECT_TYPE_SCHEMA_HASH_MISMATCH | request_human | 409 |
 | OBJECT_TYPE_TITLE_KEY_MISSING | SHV-{SUBSYS}-ONT-VAL-3011 | ontology | validation | error | Object type title key missing | false | none | 1 | 0 | 0 | none | false | true | OBJECT_TYPE_TITLE_KEY_MISSING | request_human | 400 |
 | ONTOLOGY_GATE_UNAVAILABLE | SHV-{SUBSYS}-UPS-UNA-1001 | upstream | unavailable | error | Ontology gate unavailable | true | backoff | 3 | 500 | 10000 | deterministic_equal_jitter | false | false | ONTOLOGY_GATE_UNAVAILABLE | retry_backoff | 503 |
+| ONTOLOGY_OBJECT_TYPE_PRIMARY_KEY_MISMATCH | SHV-{SUBSYS}-ONT-CON-3101 | ontology | conflict | error | Ontology/object type primary key mismatch | false | none | 1 | 0 | 0 | none | false | true | ONTOLOGY_OBJECT_TYPE_PRIMARY_KEY_MISMATCH | request_human | 409 |
 | ONTOLOGY_SCHEMA_MISSING | SHV-{SUBSYS}-ONT-NOT-3001 | ontology | not_found | error | Ontology schema missing | false | none | 1 | 0 | 0 | none | false | true | ONTOLOGY_SCHEMA_MISSING | request_human | 404 |
 | ONTOLOGY_VERSION_MISMATCH | SHV-{SUBSYS}-ONT-CON-1002 | ontology | conflict | error | Ontology version mismatch | false | none | 1 | 0 | 0 | none | false | true | ONTOLOGY_VERSION_MISMATCH | request_human | 409 |
 | ONTOLOGY_VERSION_UNKNOWN | SHV-{SUBSYS}-ONT-NOT-1001 | ontology | not_found | error | Ontology version unknown | false | none | 1 | 0 | 0 | none | false | true | ONTOLOGY_VERSION_UNKNOWN | request_human | 404 |

@@ -1,6 +1,13 @@
 repos:
   - repo: local
     hooks:
+      - id: update-docs
+        name: Update auto-generated docs
+        entry: bash -c "python scripts/update_docs.py && git add docs/API_REFERENCE.md docs/ARCHITECTURE.md docs/BACKEND_METHODS.md docs/ERROR_TAXONOMY.md docs/reference/_generated"
+        language: system
+        pass_filenames: false
+        always_run: true
+        description: "Regenerate auto-managed docs on commit"
       - id: generate-architecture
         name: Generate Architecture Diagrams
         entry: bash -c "python /Users/isihyeon/Desktop/SPICE\ HARVESTER/generate_architecture.py && git add docs/architecture/"

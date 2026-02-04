@@ -31,6 +31,8 @@ help:
 	@echo "  backend-perf-cleanup   Cleanup perf_* DBs (requires Postgres + BFF)"
 	@echo "  backend-methods        Regenerate docs/BACKEND_METHODS.md"
 	@echo "  backend-methods-check  Verify docs/BACKEND_METHODS.md is up to date"
+	@echo "  docs-update            Regenerate auto-managed docs"
+	@echo "  docs-check             Verify auto-managed docs + Sphinx build"
 	@echo "  frontend-check         Install + lint + build frontend"
 	@echo "  frontend-coverage      Run frontend tests + coverage gate"
 	@echo "  ci                     Run backend-coverage + frontend-check + frontend-coverage"
@@ -81,6 +83,14 @@ backend-methods:
 .PHONY: backend-methods-check
 backend-methods-check:
 	$(PYTHON) scripts/generate_backend_methods.py --check
+
+.PHONY: docs-update
+docs-update:
+	$(PYTHON) scripts/update_docs.py
+
+.PHONY: docs-check
+docs-check:
+	$(PYTHON) scripts/check_docs.py
 
 .PHONY: frontend-check
 frontend-check:

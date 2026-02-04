@@ -36,10 +36,10 @@ Legacy plan-only control plane (`/api/v1/agent-plans/*`) has been removed from t
 
 | ID | Status | Evidence (code/docs/tests) | Notes |
 |---|---|---|---|
-| MCP-001 | DONE | `backend/mcp/pipeline_mcp_server.py` | Analysis tools: `context_pack_*` (null/PK-FK/types/join-plan) |
-| MCP-002 | DONE | `backend/mcp/pipeline_mcp_server.py`, `backend/shared/services/pipeline_plan_builder.py` | Plan builder tools: `plan_new`, `plan_add_*` (join/filter/groupBy/window/cast/...) |
-| MCP-003 | DONE | `backend/mcp/pipeline_mcp_server.py` | Edit/patch tools: node delete, metadata update, edge operations |
-| MCP-004 | DONE | `backend/mcp/pipeline_mcp_server.py` | Validation/preview tools: `plan_validate`, `plan_preview`, `plan_evaluate_joins`, `preview_inspect` |
+| MCP-001 | DONE | `backend/mcp_servers/pipeline_mcp_server.py` | Analysis tools: `context_pack_*` (null/PK-FK/types/join-plan) |
+| MCP-002 | DONE | `backend/mcp_servers/pipeline_mcp_server.py`, `backend/shared/services/pipeline_plan_builder.py` | Plan builder tools: `plan_new`, `plan_add_*` (join/filter/groupBy/window/cast/...) |
+| MCP-003 | DONE | `backend/mcp_servers/pipeline_mcp_server.py` | Edit/patch tools: node delete, metadata update, edge operations |
+| MCP-004 | DONE | `backend/mcp_servers/pipeline_mcp_server.py` | Validation/preview tools: `plan_validate`, `plan_preview`, `plan_evaluate_joins`, `preview_inspect` |
 | MCP-005 | PARTIAL | `docs/PIPELINE_AGENT.md` | Tool schema discoverability/documentation quality (examples + failure modes) can be expanded |
 
 ---

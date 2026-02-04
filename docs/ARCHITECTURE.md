@@ -450,7 +450,7 @@ Agent 런타임(단일 루프) 설계는 `docs/AGENT_PRD.md` Appendix A (AGENT-R
 - BFF는 Agent service를 `backend/bff/routers/agent_proxy.py`로 proxy하며, `X-Spice-Caller: agent`로 proxy loop를 차단한다.
 - Pipeline Agent(자연어 ETL)는 `POST /api/v1/agent/pipeline-runs`로 실행되며, **BFF 내부에서 단일 autonomous loop + MCP tools**로 수행된다.
   - 런타임 컨트롤러: `backend/bff/services/pipeline_agent_autonomous_loop.py`
-  - Tool provider: `backend/mcp/pipeline_mcp_server.py`
+- Tool provider: `backend/mcp_servers/pipeline_mcp_server.py`
 - Pipeline Agent는 “서브 에이전트/핸드오프/라우터/병렬 실행” 없이, 한 요청 안에서 `Inference → Tool → Observation`을 반복한다. (상세: `docs/PIPELINE_AGENT.md`)
 
 ### 12.1.9 LLM/Context7 (현재 구현)
@@ -478,7 +478,7 @@ Agent 런타임(단일 루프) 설계는 `docs/AGENT_PRD.md` Appendix A (AGENT-R
 - Agent runtime + proxy: `backend/agent/services/agent_runtime.py`, `backend/bff/routers/agent_proxy.py`
 - Pipeline Agent loop: `backend/bff/services/pipeline_agent_autonomous_loop.py`, `backend/bff/routers/agent_proxy.py`
 - Pipeline Plans API: `backend/bff/routers/pipeline_plans.py`, `backend/bff/services/pipeline_plan_autonomous_compiler.py`, `backend/bff/services/pipeline_plan_validation.py`
-- Pipeline MCP server/tools: `backend/mcp/pipeline_mcp_server.py`, `backend/shared/services/pipeline_plan_builder.py`
+- Pipeline MCP server/tools: `backend/mcp_servers/pipeline_mcp_server.py`, `backend/shared/services/pipeline_plan_builder.py`
 - AI/Context7: `backend/bff/routers/ai.py`, `backend/bff/routers/context7.py`
 
 ### 12.1.12 Agent 실행 상태 저장 계약 (현재 구현)
@@ -750,6 +750,7 @@ graph TD
 | `pipeline.router` | `/api/v1` | - |
 | `pipeline_plans.router` | `/api/v1` | - |
 | `query.router` | `/api/v1` | - |
+| `schema_changes.router` | `/api/v1` | - |
 | `summary.router` | `/api/v1` | - |
 | `tasks.router` | `/api/v1` | - |
 | `websocket.router` | `/api/v1` | - |
