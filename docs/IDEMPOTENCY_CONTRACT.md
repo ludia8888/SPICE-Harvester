@@ -60,10 +60,12 @@ Goal: keep read-models converging to the latest state under duplicates/out-of-or
 
 ## 5) Code locations
 
-- Postgres registry: `backend/shared/services/processed_event_registry.py`
+- Postgres registry: `backend/shared/services/registries/processed_event_registry.py`
+- Worker runtime (Template Method): `backend/shared/services/kafka/processed_event_worker.py`
 - Publisher (S3 tail → Kafka): `backend/message_relay/main.py`
-- Write-side consumers: `backend/instance_worker/main.py`, `backend/ontology_worker/main.py`
-- Projection consumer: `backend/projection_worker/main.py`
+- Write-side consumers: `backend/instance_worker/main.py`, `backend/ontology_worker/main.py`, `backend/action_worker/main.py`
+- Pipeline/Objectify consumers: `backend/pipeline_worker/main.py`, `backend/objectify_worker/main.py`
+- Projection consumers: `backend/projection_worker/main.py`, `backend/search_projection_worker/main.py`
 
 ## 6) Operational acceptance tests (must-pass)
 

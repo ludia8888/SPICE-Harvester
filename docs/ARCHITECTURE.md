@@ -154,6 +154,16 @@ graph TD
 
 ---
 
+## 1.3) Kafka Worker Runtime (Template Method + Partitioned Loop)
+
+- **공통 런타임**: `ProcessedEventKafkaWorker`가 claim/heartbeat/retry/DLQ/commit 흐름을 **Template Method**로 제공한다.
+- **전략 훅**: payload 파싱, registry key 추출, side-effect 실행, DLQ publish는 워커가 **Strategy**로 주입한다.
+- **Partitioned loop**: `pipeline-worker`/`objectify-worker`는 **파티션 단일 in-flight** + pause/resume를 사용한다.
+  - 대기열 버퍼링 및 commit-gate(실패 시 rewind)를 통해 **순서 보장 + 안전한 재시도**를 확보한다.
+- **표준 루프**: 나머지 워커는 `run_loop`로 **poll/에러 처리/seek**을 일관화한다.
+
+---
+
 ## 2) Event Sourcing Write Flow (실제 코드 기준)
 
 ```{mermaid}
