@@ -20,17 +20,12 @@ from uuid import UUID, uuid4
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
+from bff.routers.registry_deps import get_agent_session_registry
 from shared.models.requests import ApiResponse
 from shared.security.input_sanitizer import sanitize_input
 from shared.services.registries.agent_session_registry import AgentSessionRegistry
 
 router = APIRouter(prefix="/admin/ci", tags=["Admin"])
-
-
-async def get_agent_session_registry() -> AgentSessionRegistry:
-    from bff.main import get_agent_session_registry as _get_agent_session_registry
-
-    return await _get_agent_session_registry()
 
 
 class AgentSessionCIResultIngestRequest(BaseModel):

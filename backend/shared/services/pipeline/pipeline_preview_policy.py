@@ -390,6 +390,7 @@ def evaluate_preview_policy(definition_json: Dict[str, Any]) -> Dict[str, Any]:
                     node_id=node_id,
                     operation=operation,
                 )
+            )
             continue
 
         if op_lower in {"dedupe", "sort", "union"}:

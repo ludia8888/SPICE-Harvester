@@ -821,298 +821,25 @@ const buildDatasetInputNodes = (datasets: DatasetRecord[]): { nodes: FlowNode[];
   const nodes: FlowNode[] = []
   const edges: Edge[] = []
 
-  // 데이터셋 ID 매핑 (이름 기반으로 찾기)
-  const findDataset = (namePattern: string) =>
-    sortedDatasets.find(d => d.name.toLowerCase().includes(namePattern.toLowerCase()))
-
-  const accountsDs = findDataset('accounts')
-  const customersDs = findDataset('customers')
-  const productsDs = findDataset('products')
-  const ordersDs = findDataset('orders')
-  const transactionsDs = findDataset('transactions')
-
   // 레이아웃 상수
   const ROW_HEIGHT = 140
-  const COL_WIDTH = 220
 
-  // ===== 1. ACCOUNTS PIPELINE =====
-  // Raw → Normalize → Cast → Filter → Select → Canonical Accounts
-  if (accountsDs) {
-    const rawId = accountsDs.dataset_id
-    const row = 0
-    const schemaColumns = extractSchemaColumns(accountsDs.schema_json)
-
+  // 모든 raw 데이터셋에 대해 input 노드만 생성
+  sortedDatasets.forEach((dataset, index) => {
+    const schemaColumns = extractSchemaColumns(dataset.schema_json)
     nodes.push({
-      id: rawId,
+      id: dataset.dataset_id,
       type: 'datasetInput',
       data: {
-        label: accountsDs.name,
-        columnCount: schemaColumns.length || accountsDs.row_count,
-        sourceType: accountsDs.source_type,
+        label: dataset.name,
+        columnCount: schemaColumns.length || dataset.row_count,
+        sourceType: dataset.source_type,
         stage: 'raw',
-        metadata: { datasetId: rawId, datasetName: accountsDs.name },
+        metadata: { datasetId: dataset.dataset_id, datasetName: dataset.name },
       },
-      position: { x: 0, y: row * ROW_HEIGHT },
+      position: { x: 0, y: index * ROW_HEIGHT },
     })
-
-    const normalizeId = `${rawId}-normalize`
-    const castId = `${rawId}-cast`
-    const filterId = `${rawId}-filter`
-    const selectId = `${rawId}-select`
-    const outputId = `${rawId}-canonical`
-
-    nodes.push(
-      { id: normalizeId, type: 'transform', data: { label: 'Normalize', transformType: 'normalize', description: 'trim, emptyToNull' }, position: { x: COL_WIDTH, y: row * ROW_HEIGHT } },
-      { id: castId, type: 'transform', data: { label: 'Cast Types', transformType: 'cast', description: 'balance→decimal, opened_date→date' }, position: { x: COL_WIDTH * 2, y: row * ROW_HEIGHT } },
-      { id: filterId, type: 'transform', data: { label: 'Active Only', transformType: 'filter', description: "status = 'Active'" }, position: { x: COL_WIDTH * 3, y: row * ROW_HEIGHT } },
-      { id: selectId, type: 'transform', data: { label: 'Select', transformType: 'select', description: 'account_id, customer_id, type, balance, status' }, position: { x: COL_WIDTH * 4, y: row * ROW_HEIGHT } },
-      { id: outputId, type: 'transform', data: { label: 'Canonical Accounts', transformType: 'output' }, position: { x: COL_WIDTH * 5, y: row * ROW_HEIGHT } },
-    )
-
-    edges.push(
-      createEdge(`e-${rawId}-norm`, rawId, normalizeId),
-      createEdge(`e-${normalizeId}-cast`, normalizeId, castId),
-      createEdge(`e-${castId}-filter`, castId, filterId),
-      createEdge(`e-${filterId}-select`, filterId, selectId),
-      createEdge(`e-${selectId}-out`, selectId, outputId),
-    )
-  }
-
-  // ===== 2. CUSTOMERS PIPELINE =====
-  // Raw → Normalize → Dedupe → Cast → Select → Canonical Customers
-  if (customersDs) {
-    const rawId = customersDs.dataset_id
-    const row = 1
-    const schemaColumns = extractSchemaColumns(customersDs.schema_json)
-
-    nodes.push({
-      id: rawId,
-      type: 'datasetInput',
-      data: {
-        label: customersDs.name,
-        columnCount: schemaColumns.length || customersDs.row_count,
-        sourceType: customersDs.source_type,
-        stage: 'raw',
-        metadata: { datasetId: rawId, datasetName: customersDs.name },
-      },
-      position: { x: 0, y: row * ROW_HEIGHT },
-    })
-
-    const normalizeId = `${rawId}-normalize`
-    const dedupeId = `${rawId}-dedupe`
-    const castId = `${rawId}-cast`
-    const selectId = `${rawId}-select`
-    const outputId = `${rawId}-canonical`
-
-    nodes.push(
-      { id: normalizeId, type: 'transform', data: { label: 'Normalize', transformType: 'normalize', description: 'email→lowercase, phone→E.164' }, position: { x: COL_WIDTH, y: row * ROW_HEIGHT } },
-      { id: dedupeId, type: 'transform', data: { label: 'Dedupe', transformType: 'dedupe', description: 'by customer_id, keep latest' }, position: { x: COL_WIDTH * 2, y: row * ROW_HEIGHT } },
-      { id: castId, type: 'transform', data: { label: 'Cast Types', transformType: 'cast', description: 'tier→enum, created_at→timestamp' }, position: { x: COL_WIDTH * 3, y: row * ROW_HEIGHT } },
-      { id: selectId, type: 'transform', data: { label: 'Select', transformType: 'select', description: 'customer_id, name, email, phone, tier' }, position: { x: COL_WIDTH * 4, y: row * ROW_HEIGHT } },
-      { id: outputId, type: 'transform', data: { label: 'Canonical Customers', transformType: 'output' }, position: { x: COL_WIDTH * 5, y: row * ROW_HEIGHT } },
-    )
-
-    edges.push(
-      createEdge(`e-${rawId}-norm`, rawId, normalizeId),
-      createEdge(`e-${normalizeId}-dedupe`, normalizeId, dedupeId),
-      createEdge(`e-${dedupeId}-cast`, dedupeId, castId),
-      createEdge(`e-${castId}-select`, castId, selectId),
-      createEdge(`e-${selectId}-out`, selectId, outputId),
-    )
-  }
-
-  // ===== 3. PRODUCTS PIPELINE =====
-  // Raw → Normalize → Cast → Filter → Select → Canonical Products
-  if (productsDs) {
-    const rawId = productsDs.dataset_id
-    const row = 2
-    const schemaColumns = extractSchemaColumns(productsDs.schema_json)
-
-    nodes.push({
-      id: rawId,
-      type: 'datasetInput',
-      data: {
-        label: productsDs.name,
-        columnCount: schemaColumns.length || productsDs.row_count,
-        sourceType: productsDs.source_type,
-        stage: 'raw',
-        metadata: { datasetId: rawId, datasetName: productsDs.name },
-      },
-      position: { x: 0, y: row * ROW_HEIGHT },
-    })
-
-    const normalizeId = `${rawId}-normalize`
-    const castId = `${rawId}-cast`
-    const filterId = `${rawId}-filter`
-    const selectId = `${rawId}-select`
-    const outputId = `${rawId}-canonical`
-
-    nodes.push(
-      { id: normalizeId, type: 'transform', data: { label: 'Normalize', transformType: 'normalize', description: 'category→titleCase, sku→uppercase' }, position: { x: COL_WIDTH, y: row * ROW_HEIGHT } },
-      { id: castId, type: 'transform', data: { label: 'Cast Types', transformType: 'cast', description: 'price→decimal(10,2), stock→integer' }, position: { x: COL_WIDTH * 2, y: row * ROW_HEIGHT } },
-      { id: filterId, type: 'transform', data: { label: 'In Stock', transformType: 'filter', description: 'stock > 0' }, position: { x: COL_WIDTH * 3, y: row * ROW_HEIGHT } },
-      { id: selectId, type: 'transform', data: { label: 'Select', transformType: 'select', description: 'product_id, name, category, price, stock' }, position: { x: COL_WIDTH * 4, y: row * ROW_HEIGHT } },
-      { id: outputId, type: 'transform', data: { label: 'Canonical Products', transformType: 'output' }, position: { x: COL_WIDTH * 5, y: row * ROW_HEIGHT } },
-    )
-
-    edges.push(
-      createEdge(`e-${rawId}-norm`, rawId, normalizeId),
-      createEdge(`e-${normalizeId}-cast`, normalizeId, castId),
-      createEdge(`e-${castId}-filter`, castId, filterId),
-      createEdge(`e-${filterId}-select`, filterId, selectId),
-      createEdge(`e-${selectId}-out`, selectId, outputId),
-    )
-  }
-
-  // ===== 4. ORDERS PIPELINE =====
-  // Raw → Filter → Cast → Compute → Select → Canonical Orders
-  if (ordersDs) {
-    const rawId = ordersDs.dataset_id
-    const row = 3
-    const schemaColumns = extractSchemaColumns(ordersDs.schema_json)
-
-    nodes.push({
-      id: rawId,
-      type: 'datasetInput',
-      data: {
-        label: ordersDs.name,
-        columnCount: schemaColumns.length || ordersDs.row_count,
-        sourceType: ordersDs.source_type,
-        stage: 'raw',
-        metadata: { datasetId: rawId, datasetName: ordersDs.name },
-      },
-      position: { x: 0, y: row * ROW_HEIGHT },
-    })
-
-    const filterId = `${rawId}-filter`
-    const castId = `${rawId}-cast`
-    const computeId = `${rawId}-compute`
-    const selectId = `${rawId}-select`
-    const outputId = `${rawId}-canonical`
-
-    nodes.push(
-      { id: filterId, type: 'transform', data: { label: 'Valid Orders', transformType: 'filter', description: "status != 'Cancelled'" }, position: { x: COL_WIDTH, y: row * ROW_HEIGHT } },
-      { id: castId, type: 'transform', data: { label: 'Cast Types', transformType: 'cast', description: 'order_date→date, total→decimal' }, position: { x: COL_WIDTH * 2, y: row * ROW_HEIGHT } },
-      { id: computeId, type: 'transform', data: { label: 'Compute Total', transformType: 'compute', description: 'line_total = quantity × unit_price' }, position: { x: COL_WIDTH * 3, y: row * ROW_HEIGHT } },
-      { id: selectId, type: 'transform', data: { label: 'Select', transformType: 'select', description: 'order_id, customer_id, product_id, total, status' }, position: { x: COL_WIDTH * 4, y: row * ROW_HEIGHT } },
-      { id: outputId, type: 'transform', data: { label: 'Canonical Orders', transformType: 'output' }, position: { x: COL_WIDTH * 5, y: row * ROW_HEIGHT } },
-    )
-
-    edges.push(
-      createEdge(`e-${rawId}-filter`, rawId, filterId),
-      createEdge(`e-${filterId}-cast`, filterId, castId),
-      createEdge(`e-${castId}-compute`, castId, computeId),
-      createEdge(`e-${computeId}-select`, computeId, selectId),
-      createEdge(`e-${selectId}-out`, selectId, outputId),
-    )
-  }
-
-  // ===== 5. TRANSACTIONS PIPELINE =====
-  // Raw → Filter → Normalize → Cast → Select → Canonical Transactions
-  if (transactionsDs) {
-    const rawId = transactionsDs.dataset_id
-    const row = 4
-    const schemaColumns = extractSchemaColumns(transactionsDs.schema_json)
-
-    nodes.push({
-      id: rawId,
-      type: 'datasetInput',
-      data: {
-        label: transactionsDs.name,
-        columnCount: schemaColumns.length || transactionsDs.row_count,
-        sourceType: transactionsDs.source_type,
-        stage: 'raw',
-        metadata: { datasetId: rawId, datasetName: transactionsDs.name },
-      },
-      position: { x: 0, y: row * ROW_HEIGHT },
-    })
-
-    const filterId = `${rawId}-filter`
-    const normalizeId = `${rawId}-normalize`
-    const castId = `${rawId}-cast`
-    const selectId = `${rawId}-select`
-    const outputId = `${rawId}-canonical`
-
-    nodes.push(
-      { id: filterId, type: 'transform', data: { label: 'Completed Only', transformType: 'filter', description: "status = 'Completed'" }, position: { x: COL_WIDTH, y: row * ROW_HEIGHT } },
-      { id: normalizeId, type: 'transform', data: { label: 'Normalize', transformType: 'normalize', description: 'currency→ISO4217, ref→uppercase' }, position: { x: COL_WIDTH * 2, y: row * ROW_HEIGHT } },
-      { id: castId, type: 'transform', data: { label: 'Cast Types', transformType: 'cast', description: 'amount→decimal, timestamp→datetime' }, position: { x: COL_WIDTH * 3, y: row * ROW_HEIGHT } },
-      { id: selectId, type: 'transform', data: { label: 'Select', transformType: 'select', description: 'txn_id, account_id, amount, type, timestamp' }, position: { x: COL_WIDTH * 4, y: row * ROW_HEIGHT } },
-      { id: outputId, type: 'transform', data: { label: 'Canonical Transactions', transformType: 'output' }, position: { x: COL_WIDTH * 5, y: row * ROW_HEIGHT } },
-    )
-
-    edges.push(
-      createEdge(`e-${rawId}-filter`, rawId, filterId),
-      createEdge(`e-${filterId}-norm`, filterId, normalizeId),
-      createEdge(`e-${normalizeId}-cast`, normalizeId, castId),
-      createEdge(`e-${castId}-select`, castId, selectId),
-      createEdge(`e-${selectId}-out`, selectId, outputId),
-    )
-  }
-
-  // ===== 6. JOIN PIPELINE: CUSTOMER 360 =====
-  // Canonical Customers + Canonical Accounts → Join → Aggregate → Customer 360
-  if (customersDs && accountsDs) {
-    const row = 5.5
-    const joinId = 'join-customer-360'
-    const aggregateId = 'agg-customer-360'
-    const outputId = 'out-customer-360'
-
-    nodes.push(
-      { id: joinId, type: 'transform', data: { label: 'Join Customer+Account', transformType: 'join', description: 'LEFT JOIN on customer_id' }, position: { x: COL_WIDTH * 6, y: 0.5 * ROW_HEIGHT } },
-      { id: aggregateId, type: 'transform', data: { label: 'Aggregate', transformType: 'aggregate', description: 'total_balance, account_count per customer' }, position: { x: COL_WIDTH * 7, y: 0.5 * ROW_HEIGHT } },
-      { id: outputId, type: 'transform', data: { label: 'Customer 360', transformType: 'output' }, position: { x: COL_WIDTH * 8, y: 0.5 * ROW_HEIGHT } },
-    )
-
-    edges.push(
-      createEdge('e-cust-canonical-join', `${customersDs.dataset_id}-canonical`, joinId, 'input-1'),
-      createEdge('e-acct-canonical-join', `${accountsDs.dataset_id}-canonical`, joinId, 'input-2'),
-      createEdge('e-join-agg', joinId, aggregateId),
-      createEdge('e-agg-360', aggregateId, outputId),
-    )
-  }
-
-  // ===== 7. JOIN PIPELINE: ORDER DETAILS =====
-  // Canonical Orders + Canonical Products → Join → Compute → Order Details
-  if (ordersDs && productsDs) {
-    const joinId = 'join-order-details'
-    const computeId = 'compute-order-details'
-    const outputId = 'out-order-details'
-
-    nodes.push(
-      { id: joinId, type: 'transform', data: { label: 'Join Order+Product', transformType: 'join', description: 'INNER JOIN on product_id' }, position: { x: COL_WIDTH * 6, y: 2.5 * ROW_HEIGHT } },
-      { id: computeId, type: 'transform', data: { label: 'Enrich', transformType: 'compute', description: 'product_name, category, subtotal' }, position: { x: COL_WIDTH * 7, y: 2.5 * ROW_HEIGHT } },
-      { id: outputId, type: 'transform', data: { label: 'Order Details', transformType: 'output' }, position: { x: COL_WIDTH * 8, y: 2.5 * ROW_HEIGHT } },
-    )
-
-    edges.push(
-      createEdge('e-order-canonical-join', `${ordersDs.dataset_id}-canonical`, joinId, 'input-1'),
-      createEdge('e-prod-canonical-join', `${productsDs.dataset_id}-canonical`, joinId, 'input-2'),
-      createEdge('e-join-compute', joinId, computeId),
-      createEdge('e-compute-order', computeId, outputId),
-    )
-  }
-
-  // ===== 8. JOIN PIPELINE: TRANSACTION LEDGER =====
-  // Canonical Transactions + Canonical Accounts → Join → Aggregate → Transaction Ledger
-  if (transactionsDs && accountsDs) {
-    const joinId = 'join-txn-ledger'
-    const aggregateId = 'agg-txn-ledger'
-    const outputId = 'out-txn-ledger'
-
-    nodes.push(
-      { id: joinId, type: 'transform', data: { label: 'Join Txn+Account', transformType: 'join', description: 'INNER JOIN on account_id' }, position: { x: COL_WIDTH * 6, y: 4.5 * ROW_HEIGHT } },
-      { id: aggregateId, type: 'transform', data: { label: 'Aggregate', transformType: 'aggregate', description: 'daily_volume, txn_count by account' }, position: { x: COL_WIDTH * 7, y: 4.5 * ROW_HEIGHT } },
-      { id: outputId, type: 'transform', data: { label: 'Transaction Ledger', transformType: 'output' }, position: { x: COL_WIDTH * 8, y: 4.5 * ROW_HEIGHT } },
-    )
-
-    edges.push(
-      createEdge('e-txn-canonical-join', `${transactionsDs.dataset_id}-canonical`, joinId, 'input-1'),
-      createEdge('e-acct-canonical-join2', `${accountsDs.dataset_id}-canonical`, joinId, 'input-2'),
-      createEdge('e-join-agg-txn', joinId, aggregateId),
-      createEdge('e-agg-ledger', aggregateId, outputId),
-    )
-  }
+  })
 
   return { nodes, edges }
 }
@@ -1601,6 +1328,9 @@ export const GraphPage = () => {
   const pipelineContext = useAppStore((state) => state.pipelineContext)
   const setPipelineContext = useAppStore((state) => state.setPipelineContext)
   const pipelineAgentRun = useAppStore((state) => state.pipelineAgentRun)
+  const setPipelineAgentRun = useAppStore((state) => state.setPipelineAgentRun)
+  const setPipelineAgentRequest = useAppStore((state) => state.setPipelineAgentRequest)
+  const setPipelineAgentQuestions = useAppStore((state) => state.setPipelineAgentQuestions)
   const [activeTab, setActiveTab] = useState<'edit' | 'proposals' | 'history'>('edit')
   const [toolMode, setToolMode] = useState<ToolMode>('pointer')
   const [isRightPanelOpen, setRightPanelOpen] = useState(false)
@@ -2589,16 +2319,24 @@ export const GraphPage = () => {
 
     const datasetIds = datasets.map((d) => d.dataset_id).filter(Boolean)
 
+    const requestScope = {
+      db_name: activeDbName,
+      dataset_ids: datasetIds,
+      branch: 'main',
+    }
+
+    // Persist the latest agent request/run in the global store so the rest of the UI
+    // (outputs panel, output previews, etc.) can reference the completed plan safely.
+    setPipelineAgentRequest({ goal: text, data_scope: requestScope })
+    setPipelineAgentRun(null)
+    setPipelineAgentQuestions([])
+
     // SSE 스트리밍 시작
     const { abort } = runPipelineAgentStreaming(
       {
         goal: text,
-        data_scope: {
-          db_name: activeDbName,
-          dataset_ids: datasetIds,
-          branch: 'main',
-        },
-        max_transform: 5,
+        data_scope: requestScope,
+        max_transform: 3,
         max_cleansing: 3,
         max_repairs: 3,
       },
@@ -2607,21 +2345,73 @@ export const GraphPage = () => {
         onStart: (data) => {
           setAgentMessages((prev) => [
             ...prev,
-            { id: `msg-${Date.now()}`, role: 'assistant' as const, text: '🤖 파이프라인 생성을 시작합니다...' },
+            {
+              id: `msg-${Date.now()}`,
+              role: 'assistant' as const,
+              text: `🤖 **요청을 분석하고 있습니다...**\n   🔍 데이터셋 구조 확인 중`,
+            },
           ])
         },
 
-        // 도구 호출 시작 - 실시간 피드백
+        // LLM이 생각 중 - 진행 상황 표시
+        onThinking: (data) => {
+          const step = data.step || 1
+          const maxSteps = data.max_steps || 10
+          const message = data.message || '처리 중...'
+          setAgentMessages((prev) => {
+            const last = prev[prev.length - 1]
+            if (last?.role === 'assistant' && (last.text.startsWith('🤖') || last.text.startsWith('✅'))) {
+              return [
+                ...prev.slice(0, -1),
+                {
+                  ...last,
+                  text: `🤖 **[단계 ${step}/${maxSteps}]** ${message}\n   🧠 AI가 최적의 방법을 탐색 중...`,
+                },
+              ]
+            }
+            return prev
+          })
+        },
+
+        // 도구 호출 시작 - 실시간 피드백 (상세 정보 포함)
         onToolStart: (data) => {
           currentTool = data.tool || ''
           const toolLabel = getToolLabel(currentTool)
+          const step = data.step || 1
+          const maxSteps = data.max_steps || 10
+          const args = data.args || {}
+          const reasoning = data.reasoning || ''
+
+          // 인자에서 주요 정보 추출
+          let argsInfo = ''
+          if (args.input_ids && Array.isArray(args.input_ids)) {
+            const inputNames = args.input_ids.slice(0, 2).join(', ')
+            argsInfo = args.input_ids.length > 2 ? `${inputNames} 외 ${args.input_ids.length - 2}개` : inputNames
+          } else if (args.dataset_id) {
+            argsInfo = String(args.dataset_id)
+          } else if (args.node_id) {
+            argsInfo = String(args.node_id)
+          } else if (args.expression) {
+            argsInfo = String(args.expression).slice(0, 30) + (String(args.expression).length > 30 ? '...' : '')
+          }
+
+          // 상태 텍스트 구성
+          let statusText = `🤖 **[단계 ${step}/${maxSteps}]** ${toolLabel}`
+          if (argsInfo) {
+            statusText += `\n   📋 대상: \`${argsInfo}\``
+          }
+          if (reasoning) {
+            statusText += `\n   💭 ${reasoning}`
+          }
+          statusText += '\n   ⏳ 실행 중...'
+
           setAgentMessages((prev) => {
             const last = prev[prev.length - 1]
             if (last?.role === 'assistant' && last.text.startsWith('🤖')) {
               // 기존 메시지 업데이트
               return [
                 ...prev.slice(0, -1),
-                { ...last, text: `🤖 ${toolLabel} 실행 중...` },
+                { ...last, text: statusText },
               ]
             }
             return prev
@@ -2630,11 +2420,22 @@ export const GraphPage = () => {
 
         // 도구 호출 완료
         onToolEnd: (data) => {
-          if (!data.success && data.error) {
-            setAgentMessages((prev) => [
-              ...prev,
-              { id: `msg-${Date.now()}`, role: 'assistant' as const, text: `⚠️ ${data.tool}: ${data.error}` },
-            ])
+          // observation 안의 error도 확인
+          const obs = data.observation as Record<string, unknown> | undefined
+          const errorMsg = data.error || (obs?.error as string | undefined)
+          if (!data.success && errorMsg) {
+            // 에러 메시지가 반복되지 않도록 확인
+            setAgentMessages((prev) => {
+              const lastMsg = prev[prev.length - 1]
+              // 동일한 에러 메시지가 이미 있으면 추가하지 않음
+              if (lastMsg?.text?.includes(errorMsg)) {
+                return prev
+              }
+              return [
+                ...prev,
+                { id: `msg-${Date.now()}`, role: 'assistant' as const, text: `⚠️ ${data.tool}: ${errorMsg}` },
+              ]
+            })
           }
         },
 
@@ -2669,15 +2470,20 @@ export const GraphPage = () => {
             reactFlowInstance?.fitView({ padding: 0.2, minZoom: 0.5, duration: 300 })
           }, 0)
 
-          // 노드 추가 메시지
+          // 노드 추가 메시지 - 캔버스에 노드가 추가되었음을 명확히 표시
           if (addedCount > 0) {
             const toolLabel = getToolLabel(data.tool || '')
+            const step = data.step || ''
+            const stepInfo = step ? `[단계 ${step}] ` : ''
             setAgentMessages((prev) => {
               const last = prev[prev.length - 1]
               if (last?.role === 'assistant' && last.text.startsWith('🤖')) {
                 return [
                   ...prev.slice(0, -1),
-                  { ...last, text: `✅ ${toolLabel} 완료 (+${addedCount} 노드)` },
+                  {
+                    ...last,
+                    text: `✅ ${stepInfo}${toolLabel} 완료\n   📦 캔버스에 **${addedCount}개 노드** 추가됨 (총 ${nextNodes.length}개)`,
+                  },
                 ]
               }
               return [
@@ -2685,7 +2491,7 @@ export const GraphPage = () => {
                 {
                   id: `msg-${Date.now()}`,
                   role: 'assistant' as const,
-                  text: `✅ ${toolLabel} 완료 (+${addedCount} 노드)`,
+                  text: `✅ ${stepInfo}${toolLabel} 완료\n   📦 캔버스에 **${addedCount}개 노드** 추가됨 (총 ${nextNodes.length}개)`,
                 },
               ]
             })
@@ -2696,6 +2502,13 @@ export const GraphPage = () => {
         onClarification: (data) => {
           setIsNLProcessing(false)
           const questions = data.questions as Array<Record<string, unknown>> | undefined
+          setPipelineAgentQuestions(questions ?? [])
+          setPipelineAgentRun({
+            ...data,
+            status: data.status || 'clarification_required',
+            goal: text,
+            data_scope: requestScope,
+          })
           if (questions && questions.length > 0) {
             const questionTexts = questions.map((q) => String(q?.question || q?.text || '')).filter(Boolean)
             setAgentMessages((prev) => [
@@ -2708,10 +2521,18 @@ export const GraphPage = () => {
         // 에러 발생
         onError: (data) => {
           setIsNLProcessing(false)
-          setAgentMessages((prev) => [
-            ...prev,
-            { id: `msg-${Date.now()}`, role: 'assistant' as const, text: `❌ 오류: ${data.error || '알 수 없는 오류'}` },
-          ])
+          const errorMsg = data.error || '알 수 없는 오류'
+          setAgentMessages((prev) => {
+            // 동일한 에러 메시지가 이미 있으면 추가하지 않음 (반복 방지)
+            const recentErrors = prev.slice(-5)
+            if (recentErrors.some((msg) => msg.text?.includes(errorMsg))) {
+              return prev
+            }
+            return [
+              ...prev,
+              { id: `msg-${Date.now()}`, role: 'assistant' as const, text: `❌ 오류: ${errorMsg}` },
+            ]
+          })
         },
 
         // 프리뷰 데이터 업데이트 ✨
@@ -2741,6 +2562,8 @@ export const GraphPage = () => {
         // 완료
         onComplete: (data) => {
           setIsNLProcessing(false)
+          setPipelineAgentQuestions([])
+          setPipelineAgentRun({ ...data, goal: text, data_scope: requestScope })
 
           const status = data.status || 'unknown'
           const planId = data.plan_id || ''
@@ -2764,6 +2587,26 @@ export const GraphPage = () => {
             if (errors && errors.length > 0) {
               finalMessage += `\n\n경고:\n${errors.slice(0, 3).map((e) => `• ${e}`).join('\n')}`
             }
+          } else if (status === 'no_action') {
+            // 일반 대화나 파이프라인과 무관한 요청에 대한 안내
+            const messageText = typeof data.message === 'string' ? data.message : ''
+            finalMessage = messageText || '파이프라인 관련 요청을 해주세요.'
+          } else if (status === 'info') {
+            // 정보 조회 결과
+            const messageText = typeof data.message === 'string' ? data.message : ''
+            finalMessage = messageText || '요청하신 정보입니다.'
+            if (data.observation) {
+              const obs = data.observation
+              // 데이터셋 정보인 경우 보기 좋게 포맷팅
+              if (obs.datasets && Array.isArray(obs.datasets)) {
+                finalMessage += '\n\n📊 **데이터셋 목록:**\n'
+                finalMessage += obs.datasets.map((d: { name: string; row_count?: number }) =>
+                  `• ${d.name}${d.row_count ? ` (${d.row_count.toLocaleString()}행)` : ''}`
+                ).join('\n')
+              } else if (typeof obs === 'object') {
+                finalMessage += '\n\n```json\n' + JSON.stringify(obs, null, 2) + '\n```'
+              }
+            }
           } else {
             finalMessage = `❌ 파이프라인 생성에 실패했습니다.`
             if (data.error) {
@@ -2780,7 +2623,18 @@ export const GraphPage = () => {
     )
 
     agentAbortRef.current = abort
-  }, [agentInput, isNLProcessing, activeDbName, datasets, setNodes, setEdges, reactFlowInstance])
+  }, [
+    agentInput,
+    isNLProcessing,
+    activeDbName,
+    datasets,
+    setNodes,
+    setEdges,
+    reactFlowInstance,
+    setPipelineAgentRequest,
+    setPipelineAgentRun,
+    setPipelineAgentQuestions,
+  ])
 
   // 도구 이름을 한글 라벨로 변환
   const getToolLabel = (tool: string): string => {

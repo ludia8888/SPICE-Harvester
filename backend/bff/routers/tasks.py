@@ -12,88 +12,25 @@ Key features:
 5. ✅ Real-time updates via WebSocket
 """
 
-import logging
-from datetime import datetime, timezone
-from typing import List, Optional, Dict, Any
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel, Field
+from __future__ import annotations
 
-from bff.dependencies import get_oms_client
-from bff.services.oms_client import OMSClient
-from shared.models.background_task import (
-    BackgroundTask,
-    TaskStatus,
-    TaskMetrics,
-    TaskFilter
-)
-from shared.services.core.background_task_manager import (
-    BackgroundTaskManager,
-    create_background_task_manager,
-)
-from shared.services.storage.redis_service import RedisService, create_redis_service
-from shared.dependencies import get_container, ServiceContainer
+from typing import Any, Dict, Optional
 
-logger = logging.getLogger(__name__)
+from fastapi import APIRouter, HTTPException, Query, status
+
+from bff.schemas.tasks_requests import TaskListResponse, TaskMetricsResponse, TaskStatusResponse
+from bff.services import tasks_service
+from shared.models.background_task import TaskStatus
+from shared.dependencies.providers import BackgroundTaskManagerDep
 
 router = APIRouter(prefix="/tasks", tags=["Background Tasks"])
-
-
-# Request/Response Models
-class TaskStatusResponse(BaseModel):
-    """Task status response model."""
-    task_id: str = Field(..., description="Task identifier")
-    task_name: str = Field(..., description="Task name")
-    task_type: str = Field(..., description="Task type")
-    status: TaskStatus = Field(..., description="Current status")
-    created_at: datetime = Field(..., description="Creation time")
-    started_at: Optional[datetime] = Field(None, description="Start time")
-    completed_at: Optional[datetime] = Field(None, description="Completion time")
-    duration: Optional[float] = Field(None, description="Duration in seconds")
-    progress: Optional[Dict[str, Any]] = Field(None, description="Progress information")
-    result: Optional[Dict[str, Any]] = Field(None, description="Task result")
-
-
-class TaskListResponse(BaseModel):
-    """Task list response model."""
-    tasks: List[TaskStatusResponse] = Field(..., description="List of tasks")
-    total: int = Field(..., description="Total number of tasks")
-    
-    
-class TaskMetricsResponse(BaseModel):
-    """Task metrics response model."""
-    metrics: TaskMetrics = Field(..., description="Task execution metrics")
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="Metrics timestamp")
-
-
-# Dependency injection
-async def get_task_manager(
-    container: ServiceContainer = Depends(get_container)
-) -> BackgroundTaskManager:
-    """Get BackgroundTaskManager from container."""
-    try:
-        if container.has(BackgroundTaskManager) and container.is_created(BackgroundTaskManager):
-            return await container.get(BackgroundTaskManager)
-
-        if not container.has(RedisService):
-            container.register_singleton(RedisService, create_redis_service)
-        redis_service = await container.get(RedisService)
-
-        task_manager = create_background_task_manager(redis_service)
-        container.register_instance(BackgroundTaskManager, task_manager)
-        return task_manager
-    except Exception as e:
-        logger.error(f"Failed to get BackgroundTaskManager: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Background task service unavailable"
-        )
 
 
 # API Endpoints
 @router.get("/{task_id}", response_model=TaskStatusResponse)
 async def get_task_status(
     task_id: str,
-    task_manager: BackgroundTaskManager = Depends(get_task_manager)
+    task_manager: BackgroundTaskManagerDep,
 ) -> TaskStatusResponse:
     """
     Get current status of a background task.
@@ -101,26 +38,7 @@ async def get_task_status(
     This endpoint allows monitoring of any background task by its ID,
     providing real-time status updates and results.
     """
-    task = await task_manager.get_task_status(task_id)
-    
-    if not task:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Task {task_id} not found"
-        )
-
-    return TaskStatusResponse(
-        task_id=task.task_id,
-        task_name=task.task_name,
-        task_type=task.task_type,
-        status=task.status,
-        created_at=task.created_at,
-        started_at=task.started_at,
-        completed_at=task.completed_at,
-        duration=task.duration,
-        progress=task.progress.model_dump(mode="json") if task.progress else None,
-        result=task.result.model_dump(mode="json") if task.result else None,
-    )
+    return await tasks_service.get_task_status(task_id=task_id, task_manager=task_manager)
 
 
 @router.get("/", response_model=TaskListResponse)
@@ -128,7 +46,8 @@ async def list_tasks(
     status: Optional[TaskStatus] = Query(None, description="Filter by status"),
     task_type: Optional[str] = Query(None, description="Filter by task type"),
     limit: int = Query(100, ge=1, le=1000, description="Maximum tasks to return"),
-    task_manager: BackgroundTaskManager = Depends(get_task_manager)
+    *,
+    task_manager: BackgroundTaskManagerDep,
 ) -> TaskListResponse:
     """
     List background tasks with optional filtering.
@@ -136,38 +55,18 @@ async def list_tasks(
     Provides visibility into all background tasks running in the system,
     helping identify stuck or failed tasks.
     """
-    tasks = await task_manager.get_all_tasks(
-        status=status,
+    return await tasks_service.list_tasks(
+        status_filter=status,
         task_type=task_type,
-        limit=limit
-    )
-    
-    task_responses = [
-        TaskStatusResponse(
-            task_id=task.task_id,
-            task_name=task.task_name,
-            task_type=task.task_type,
-            status=task.status,
-            created_at=task.created_at,
-            started_at=task.started_at,
-            completed_at=task.completed_at,
-            duration=task.duration,
-            progress=task.progress.model_dump(mode="json") if task.progress else None,
-            result=task.result.model_dump(mode="json") if task.result else None,
-        )
-        for task in tasks
-    ]
-    
-    return TaskListResponse(
-        tasks=task_responses,
-        total=len(task_responses)
+        limit=limit,
+        task_manager=task_manager,
     )
 
 
 @router.delete("/{task_id}")
 async def cancel_task(
     task_id: str,
-    task_manager: BackgroundTaskManager = Depends(get_task_manager)
+    task_manager: BackgroundTaskManagerDep,
 ) -> Dict[str, Any]:
     """
     Cancel a running background task.
@@ -175,31 +74,12 @@ async def cancel_task(
     Allows graceful cancellation of long-running tasks,
     preventing resource waste and enabling retry.
     """
-    success = await task_manager.cancel_task(task_id)
-    
-    if not success:
-        # Check if task exists
-        task = await task_manager.get_task_status(task_id)
-        if not task:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Task {task_id} not found"
-            )
-        else:
-            return {
-                "message": f"Task {task_id} is already {task.status.value}",
-                "cancelled": False
-            }
-    
-    return {
-        "message": f"Task {task_id} cancelled successfully",
-        "cancelled": True
-    }
+    return await tasks_service.cancel_task(task_id=task_id, task_manager=task_manager)
 
 
 @router.get("/metrics/summary", response_model=TaskMetricsResponse)
 async def get_task_metrics(
-    task_manager: BackgroundTaskManager = Depends(get_task_manager)
+    task_manager: BackgroundTaskManagerDep,
 ) -> TaskMetricsResponse:
     """
     Get aggregated metrics for all background tasks.
@@ -207,18 +87,13 @@ async def get_task_metrics(
     Provides insights into task execution patterns,
     success rates, and performance metrics.
     """
-    metrics = await task_manager.get_task_metrics()
-    
-    return TaskMetricsResponse(
-        metrics=metrics,
-        timestamp=datetime.now(timezone.utc)
-    )
+    return await tasks_service.get_task_metrics(task_manager=task_manager)
 
 
 @router.post("/{task_id}/retry", include_in_schema=False)
 async def retry_task(
     task_id: str,
-    task_manager: BackgroundTaskManager = Depends(get_task_manager)
+    task_manager: BackgroundTaskManagerDep,
 ) -> Dict[str, Any]:
     """
     Retry a failed task.
@@ -255,7 +130,7 @@ async def retry_task(
 @router.get("/{task_id}/result")
 async def get_task_result(
     task_id: str,
-    task_manager: BackgroundTaskManager = Depends(get_task_manager)
+    task_manager: BackgroundTaskManagerDep,
 ) -> Dict[str, Any]:
     """
     Get the result of a completed task.
@@ -263,39 +138,7 @@ async def get_task_result(
     Returns the full result data for completed tasks,
     including any output data or error information.
     """
-    task = await task_manager.get_task_status(task_id)
-    
-    if not task:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Task {task_id} not found"
-        )
-    
-    if not task.is_complete:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Task {task_id} is not complete. Current status: {task.status.value}"
-        )
-    
-    if not task.result:
-        return {
-            "task_id": task_id,
-            "status": task.status.value,
-            "completed_at": task.completed_at.isoformat() if task.completed_at else None,
-            "result": None,
-            "message": "Task completed but no result data available"
-        }
-    
-    return {
-        "task_id": task_id,
-        "status": task.status.value,
-        "completed_at": task.completed_at.isoformat() if task.completed_at else None,
-        "success": task.result.success,
-        "data": task.result.data,
-        "error": task.result.error,
-        "message": task.result.message,
-        "warnings": task.result.warnings
-    }
+    return await tasks_service.get_task_result(task_id=task_id, task_manager=task_manager)
 
 
 # WebSocket endpoint for real-time updates would be in websocket.py router

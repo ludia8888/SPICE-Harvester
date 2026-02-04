@@ -7,7 +7,6 @@ import hashlib
 import json
 import os
 import asyncio
-from urllib.parse import urlparse
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional, AsyncIterator, Tuple, BinaryIO, Union
 
@@ -15,7 +14,6 @@ try:
     import boto3
     from botocore.client import BaseClient
     from botocore.exceptions import ClientError
-    from botocore.config import Config
     HAS_BOTO3 = True
 except ImportError:
     # boto3 not available - S3 storage will be disabled
@@ -25,6 +23,7 @@ except ImportError:
     HAS_BOTO3 = False
 
 from shared.models.commands import CommandType
+from shared.services.storage.s3_client_config import build_s3_client_config
 
 
 class StorageService:
@@ -74,18 +73,7 @@ class StorageService:
             raise ImportError("boto3 is required for S3 storage functionality. Install with: pip install boto3")
         
         self.endpoint_url = endpoint_url
-        host = urlparse(endpoint_url).hostname or ""
-        host = host.lower()
-        use_path_style = host in {
-            "localhost",
-            "127.0.0.1",
-            "0.0.0.0",
-            "minio",
-            "spice-minio",
-            "spice_minio",
-            "lakefs",
-        } or host.endswith(".localhost")
-        client_config = Config(s3={"addressing_style": "path"}) if use_path_style else None
+        client_config = build_s3_client_config(endpoint_url, extra_path_style_hosts={"lakefs"})
         client_kwargs: Dict[str, Any] = {
             "endpoint_url": endpoint_url,
             "aws_access_key_id": access_key,

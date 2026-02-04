@@ -1,17 +1,14 @@
 from __future__ import annotations
 
-import os
-
 import pytest
-import redis.asyncio as aioredis
 
 from shared.services.core.watermark_monitor import GlobalWatermark, PartitionWatermark, WatermarkMonitor
+from tests.unit.services.fake_async_redis import FakeAsyncRedis
 
 
 @pytest.mark.asyncio
 async def test_watermark_monitor_metrics_and_alerts() -> None:
-    redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379")
-    redis_client = aioredis.from_url(redis_url)
+    redis_client = FakeAsyncRedis()
 
     monitor = WatermarkMonitor(
         kafka_config={"bootstrap.servers": "localhost:9092"},

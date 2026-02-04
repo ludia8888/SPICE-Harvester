@@ -294,7 +294,7 @@ def test_ai_query_dataset_list_executes_and_answers(client, monkeypatch):
                 }
             ]
 
-    monkeypatch.setattr(ai_router, "get_dataset_registry", AsyncMock(return_value=_StubDatasetRegistry()))
+    app.dependency_overrides[ai_router.get_dataset_registry] = lambda: _StubDatasetRegistry()
     try:
         res = client.post(
             "/api/v1/ai/query/testdb",

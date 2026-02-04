@@ -7,7 +7,7 @@ from uuid import uuid4
 import pytest
 from fastapi import HTTPException, status
 
-from bff.routers.pipeline import approve_pipeline_proposal, submit_pipeline_proposal
+from bff.routers.pipeline_proposals import approve_pipeline_proposal, submit_pipeline_proposal
 
 
 @dataclass
@@ -205,7 +205,7 @@ async def test_pipeline_proposal_submit_and_approve_flow() -> None:
         pipeline_registry=registry,
         dataset_registry=dataset_registry,
         objectify_registry=objectify_registry,
-        request=_Request(headers={"X-Principal-Id": "editor"}),
+        request=_Request(headers={"X-Principal-Id": "editor", "Idempotency-Key": "idem-proposal-1"}),
     )
     assert response["status"] == "success"
 
@@ -219,7 +219,7 @@ async def test_pipeline_proposal_submit_and_approve_flow() -> None:
         payload={"merge_into": "main", "review_comment": "ok"},
         audit_store=audit_store,
         pipeline_registry=registry,
-        request=_Request(headers={"X-Principal-Id": "approver"}),
+        request=_Request(headers={"X-Principal-Id": "approver", "Idempotency-Key": "idem-proposal-2"}),
     )
     assert response["status"] == "success"
 
@@ -259,7 +259,7 @@ async def test_pipeline_proposal_requires_approve_role() -> None:
             payload={"merge_into": "main"},
             audit_store=audit_store,
             pipeline_registry=registry,
-            request=_Request(headers={"X-Principal-Id": "editor"}),
+            request=_Request(headers={"X-Principal-Id": "editor", "Idempotency-Key": "idem-proposal-3"}),
         )
 
     assert exc_info.value.status_code == status.HTTP_403_FORBIDDEN
@@ -295,7 +295,7 @@ async def test_pipeline_proposal_requires_pending_status() -> None:
             payload={"merge_into": "main"},
             audit_store=audit_store,
             pipeline_registry=registry,
-            request=_Request(headers={"X-Principal-Id": "approver"}),
+            request=_Request(headers={"X-Principal-Id": "approver", "Idempotency-Key": "idem-proposal-4"}),
         )
 
     assert exc_info.value.status_code == status.HTTP_409_CONFLICT

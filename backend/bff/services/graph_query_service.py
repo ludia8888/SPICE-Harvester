@@ -1,0 +1,733 @@
+"""
+Graph query domain logic (BFF).
+
+Extracted from `bff.routers.graph` to keep routers thin and to deduplicate
+branch/overlay virtualization + access policy application across endpoints.
+"""
+
+import logging
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional, Tuple
+
+from fastapi import HTTPException, Request, status
+
+from shared.config.app_config import AppConfig
+from shared.config.settings import get_settings
+from shared.models.graph_query import (
+    GraphEdge,
+    GraphNode,
+    GraphQueryRequest,
+    GraphQueryResponse,
+    SimpleGraphQueryRequest,
+)
+from shared.security.input_sanitizer import validate_branch_name, validate_db_name
+from shared.services.core.graph_federation_service_woql import GraphFederationServiceWOQL
+from shared.services.registries.dataset_registry import DatasetRegistry
+from shared.services.registries.lineage_store import LineageStore
+from shared.utils.access_policy import apply_access_policy
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class GraphBranchContext:
+    terminus_branch: str
+    es_base_branch: str
+    es_overlay_branch: Optional[str]
+    overlay_active: bool
+    overlay_required: bool
+    overlay_status: str
+    writeback_enabled: bool
+    branch_virtualization_active: bool
+
+
+def _resolve_graph_branches(
+    *,
+    db_name: str,
+    base_branch: str,
+    overlay_branch: Optional[str],
+    branch: Optional[str],
+    include_documents: bool,
+    classes_in_query: List[str],
+) -> GraphBranchContext:
+    resolved_terminus_branch = validate_branch_name(branch or base_branch or "main")
+
+    writeback_enabled = bool(
+        AppConfig.WRITEBACK_READ_OVERLAY
+        and any(AppConfig.is_writeback_enabled_object_type(c) for c in classes_in_query if c)
+    )
+    requested_overlay = str(overlay_branch).strip() if overlay_branch else None
+    resolved_overlay_branch = None
+    if requested_overlay:
+        resolved_overlay_branch = validate_branch_name(requested_overlay)
+    elif writeback_enabled:
+        resolved_overlay_branch = AppConfig.get_ontology_writeback_branch(db_name)
+
+    virtualization_base_branch = "main"
+    try:
+        virtualization_base_branch = validate_branch_name(get_settings().branch_virtualization.base_branch)
+    except Exception:
+        virtualization_base_branch = "main"
+
+    es_base_branch = resolved_terminus_branch
+    es_overlay_branch = resolved_overlay_branch
+    branch_virtualization_active = False
+    if resolved_terminus_branch != virtualization_base_branch and not requested_overlay:
+        branch_virtualization_active = True
+        es_base_branch = virtualization_base_branch
+        es_overlay_branch = resolved_terminus_branch
+
+    overlay_active = bool(es_overlay_branch and es_overlay_branch != es_base_branch)
+    overlay_required = bool(overlay_active and include_documents)
+    overlay_status = "ACTIVE" if overlay_active else "DISABLED"
+    return GraphBranchContext(
+        terminus_branch=resolved_terminus_branch,
+        es_base_branch=es_base_branch,
+        es_overlay_branch=es_overlay_branch,
+        overlay_active=overlay_active,
+        overlay_required=overlay_required,
+        overlay_status=overlay_status,
+        writeback_enabled=writeback_enabled,
+        branch_virtualization_active=branch_virtualization_active,
+    )
+
+
+def _raise_overlay_degraded(*, ctx: GraphBranchContext) -> None:
+    raise HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail={
+            "error": "overlay_degraded",
+            "message": "Overlay index unavailable; cannot serve authoritative view.",
+            "base_branch": ctx.terminus_branch,
+            "overlay_branch": ctx.es_overlay_branch,
+            "overlay_status": "DEGRADED",
+            "writeback_enabled": ctx.writeback_enabled,
+            "writeback_edits_present": None,
+            "branch_virtualization_active": ctx.branch_virtualization_active,
+            "es_base_branch": ctx.es_base_branch,
+        },
+    )
+
+
+async def _load_access_policies(
+    dataset_registry: DatasetRegistry,
+    *,
+    db_name: str,
+    class_ids: List[str],
+) -> Dict[str, Dict[str, Any]]:
+    policies: Dict[str, Dict[str, Any]] = {}
+    for class_id in sorted({c for c in class_ids if c}):
+        record = await dataset_registry.get_access_policy(
+            db_name=db_name,
+            scope="data_access",
+            subject_type="object_type",
+            subject_id=class_id,
+        )
+        if record:
+            policies[class_id] = record.policy
+    return policies
+
+
+def _apply_access_policies_to_nodes(
+    nodes: List[Dict[str, Any]],
+    *,
+    policies: Dict[str, Dict[str, Any]],
+) -> Tuple[List[Dict[str, Any]], set[str]]:
+    filtered_nodes: List[Dict[str, Any]] = []
+    allowed_ids: set[str] = set()
+    for node in nodes:
+        class_id = str(node.get("type") or "")
+        policy = policies.get(class_id)
+        if not policy:
+            filtered_nodes.append(node)
+            allowed_ids.add(str(node.get("id")))
+            continue
+        data = node.get("data")
+        if data is None:
+            filters = policy.get("row_filters") or policy.get("filters") or []
+            if filters:
+                continue
+            filtered_nodes.append(node)
+            allowed_ids.add(str(node.get("id")))
+            continue
+        filtered_rows, _ = apply_access_policy([data], policy=policy)
+        if not filtered_rows:
+            continue
+        node["data"] = filtered_rows[0]
+        filtered_nodes.append(node)
+        allowed_ids.add(str(node.get("id")))
+    return filtered_nodes, allowed_ids
+
+
+def _apply_access_policies_to_documents(
+    documents: List[Dict[str, Any]],
+    *,
+    policy: Optional[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    if not policy:
+        return documents
+    output: List[Dict[str, Any]] = []
+    for doc in documents:
+        if not isinstance(doc, dict):
+            continue
+        data = doc.get("data")
+        if data is None:
+            output.append(doc)
+            continue
+        filtered_rows, _ = apply_access_policy([data], policy=policy)
+        if not filtered_rows:
+            continue
+        next_doc = dict(doc)
+        next_doc["data"] = filtered_rows[0]
+        output.append(next_doc)
+    return output
+
+
+def _collect_class_ids_from_hops(hops: Any) -> List[str]:
+    class_ids: List[str] = []
+    if not isinstance(hops, list):
+        return class_ids
+    for hop in hops:
+        if isinstance(hop, (tuple, list)) and len(hop) >= 2:
+            class_ids.append(str(hop[1] or "").strip())
+            continue
+        if isinstance(hop, dict):
+            class_ids.append(str(hop.get("target_class") or hop.get("targetClass") or "").strip())
+    return [c for c in class_ids if c]
+
+
+async def execute_graph_query(
+    *,
+    db_name: str,
+    query: GraphQueryRequest,
+    request: Request,
+    lineage_store: LineageStore,
+    graph_service: GraphFederationServiceWOQL,
+    dataset_registry: DatasetRegistry,
+    base_branch: str = "main",
+    overlay_branch: Optional[str] = None,
+    branch: Optional[str] = None,
+) -> GraphQueryResponse:
+    """
+    Execute multi-hop graph query with ES federation (TerminusDB + Elasticsearch).
+    """
+    try:
+        db_name = validate_db_name(db_name)
+
+        hops_tuples = [
+            (hop.predicate, hop.target_class, bool(getattr(hop, "reverse", False))) for hop in (query.hops or [])
+        ]
+        classes_in_query = [str(query.start_class or "").strip()] + [
+            str(hop.target_class or "").strip() for hop in (query.hops or [])
+        ]
+        ctx = _resolve_graph_branches(
+            db_name=db_name,
+            base_branch=base_branch,
+            overlay_branch=overlay_branch,
+            branch=branch,
+            include_documents=bool(query.include_documents),
+            classes_in_query=classes_in_query,
+        )
+
+        logger.info("📊 Graph query on %s: %s -> %s", db_name, query.start_class, hops_tuples)
+
+        try:
+            result = await graph_service.multi_hop_query(
+                db_name=db_name,
+                base_branch=ctx.es_base_branch,
+                overlay_branch=ctx.es_overlay_branch,
+                terminus_branch=ctx.terminus_branch,
+                strict_overlay=bool(ctx.overlay_required),
+                start_class=query.start_class,
+                hops=hops_tuples,
+                filters=query.filters,
+                limit=query.limit,
+                offset=query.offset,
+                max_nodes=query.max_nodes,
+                max_edges=query.max_edges,
+                include_paths=query.include_paths,
+                max_paths=query.max_paths,
+                no_cycles=query.no_cycles,
+                include_documents=query.include_documents,
+                include_audit=query.include_audit,
+            )
+        except Exception as exc:
+            if ctx.overlay_required:
+                _raise_overlay_degraded(ctx=ctx)
+            raise exc
+
+        raw_nodes = list(result.get("nodes", []) or [])
+        policies = await _load_access_policies(
+            dataset_registry,
+            db_name=db_name,
+            class_ids=[str(node.get("type") or "") for node in raw_nodes],
+        )
+        filtered_nodes, allowed_ids = _apply_access_policies_to_nodes(raw_nodes, policies=policies)
+        raw_edges = list(result.get("edges", []) or [])
+        if allowed_ids:
+            raw_edges = [
+                edge
+                for edge in raw_edges
+                if str(edge.get("from") or "") in allowed_ids and str(edge.get("to") or "") in allowed_ids
+            ]
+        else:
+            raw_edges = []
+
+        terminus_latest: Dict[str, Dict[str, Any]] = {}
+        es_latest: Dict[str, Dict[str, Any]] = {}
+        terminus_artifact_by_node_id: Dict[str, str] = {}
+        es_artifact_by_node_id: Dict[str, str] = {}
+
+        if query.include_provenance and raw_nodes:
+            try:
+                terminus_artifacts: List[str] = []
+                es_artifacts: List[str] = []
+                for node in raw_nodes:
+                    terminus_id = str(node.get("terminus_id") or node.get("id") or "")
+                    if terminus_id:
+                        art = LineageStore.node_artifact("terminus", db_name, ctx.terminus_branch, terminus_id)
+                        terminus_artifact_by_node_id[terminus_id] = art
+                        terminus_artifacts.append(art)
+
+                    es_ref = node.get("es_ref") or {}
+                    index_name = str(es_ref.get("index") or "")
+                    doc_id = str(es_ref.get("id") or "")
+                    if index_name and doc_id:
+                        art = LineageStore.node_artifact("es", index_name, doc_id)
+                        es_artifact_by_node_id[f"{index_name}/{doc_id}"] = art
+                        es_artifacts.append(art)
+
+                terminus_latest = await lineage_store.get_latest_edges_to(
+                    to_node_ids=list({*terminus_artifacts}),
+                    edge_type="event_wrote_terminus_document",
+                    db_name=db_name,
+                )
+                es_latest = await lineage_store.get_latest_edges_to(
+                    to_node_ids=list({*es_artifacts}),
+                    edge_type="event_materialized_es_document",
+                    db_name=db_name,
+                )
+            except Exception as exc:
+                logger.debug("Provenance lookup failed (non-fatal): %s", exc)
+
+        nodes: List[GraphNode] = []
+        for node in filtered_nodes:
+            terminus_id = str(node.get("terminus_id") or node.get("id") or "")
+            es_doc_id = node.get("es_doc_id") or terminus_id or node.get("id")
+            es_ref = node.get("es_ref") or {
+                "index": f"{db_name}_instances",
+                "id": str(es_doc_id),
+            }
+            node_index_status = dict(node.get("index_status") or {})
+
+            provenance: Optional[Dict[str, Any]] = None
+            if query.include_provenance and terminus_id:
+                terminus_art = terminus_artifact_by_node_id.get(terminus_id) or LineageStore.node_artifact(
+                    "terminus",
+                    db_name,
+                    ctx.terminus_branch,
+                    terminus_id,
+                )
+                es_key = f"{es_ref.get('index')}/{es_ref.get('id')}"
+                es_art = es_artifact_by_node_id.get(es_key) or (
+                    LineageStore.node_artifact("es", str(es_ref.get("index")), str(es_ref.get("id")))
+                    if es_ref.get("index") and es_ref.get("id")
+                    else None
+                )
+
+                terminus_prov = terminus_latest.get(terminus_art)
+                es_prov = es_latest.get(es_art) if es_art else None
+                provenance = {"terminus": terminus_prov, "es": es_prov}
+
+                try:
+                    t_at = (
+                        datetime.fromisoformat(str(terminus_prov.get("occurred_at")))
+                        if terminus_prov and terminus_prov.get("occurred_at")
+                        else None
+                    )
+                    e_at = (
+                        datetime.fromisoformat(str(es_prov.get("occurred_at"))) if es_prov and es_prov.get("occurred_at") else None
+                    )
+                    if t_at and t_at.tzinfo is None:
+                        t_at = t_at.replace(tzinfo=timezone.utc)
+                    if e_at and e_at.tzinfo is None:
+                        e_at = e_at.replace(tzinfo=timezone.utc)
+                    if t_at and e_at:
+                        node_index_status["graph_last_updated_at"] = t_at.isoformat()
+                        node_index_status["projection_last_indexed_at"] = e_at.isoformat()
+                        node_index_status["projection_lag_seconds"] = max(0.0, (t_at - e_at).total_seconds())
+                except Exception:
+                    pass
+
+            nodes.append(
+                GraphNode(
+                    id=node["id"],
+                    type=node["type"],
+                    es_doc_id=str(es_doc_id),
+                    db_name=str(node.get("db_name") or db_name),
+                    es_ref=es_ref,
+                    data_status=str(node.get("data_status") or ("FULL" if node.get("data") else "PARTIAL")),
+                    display=node.get("display"),
+                    data=node.get("data") if query.include_documents else None,
+                    index_status=node_index_status or None,
+                    provenance=provenance,
+                )
+            )
+
+        edges: List[GraphEdge] = []
+        for edge in raw_edges:
+            edge_prov: Optional[Dict[str, Any]] = None
+            if query.include_provenance:
+                from_node = str(edge.get("from") or "")
+                if from_node:
+                    terminus_art = LineageStore.node_artifact("terminus", db_name, ctx.terminus_branch, from_node)
+                    edge_prov = {"terminus": terminus_latest.get(terminus_art)}
+            edges.append(
+                GraphEdge(
+                    from_node=edge["from"],
+                    to_node=edge["to"],
+                    predicate=edge["predicate"],
+                    provenance=edge_prov,
+                )
+            )
+
+        full_docs = sum(1 for n in nodes if n.data_status == "FULL")
+        index_ages = [
+            float(n.index_status.get("index_age_seconds"))
+            for n in nodes
+            if isinstance(n.index_status, dict) and n.index_status.get("index_age_seconds") is not None
+        ]
+        index_summary = {
+            "documents_found": full_docs,
+            "documents_missing": max(0, len(nodes) - full_docs),
+            "max_index_age_seconds": max(index_ages) if index_ages else None,
+            "avg_index_age_seconds": (sum(index_ages) / len(index_ages)) if index_ages else None,
+        }
+
+        response = GraphQueryResponse(
+            base_branch=ctx.terminus_branch,
+            overlay_branch=ctx.es_overlay_branch,
+            overlay_status=ctx.overlay_status,
+            writeback_enabled=ctx.writeback_enabled,
+            nodes=nodes,
+            edges=edges,
+            paths=result.get("paths") if query.include_paths else None,
+            index_summary=index_summary,
+            query={
+                "start_class": query.start_class,
+                "hops": [{"predicate": h[0], "target_class": h[1], "reverse": bool(h[2])} for h in hops_tuples],
+                "filters": query.filters,
+                "base_branch": ctx.terminus_branch,
+                "overlay_branch": ctx.es_overlay_branch,
+                "terminus_branch": ctx.terminus_branch,
+                "es_base_branch": ctx.es_base_branch,
+                "es_overlay_branch": ctx.es_overlay_branch,
+                "branch_virtualization_active": ctx.branch_virtualization_active,
+                "limit": query.limit,
+                "offset": query.offset,
+                "max_nodes": query.max_nodes,
+                "max_edges": query.max_edges,
+                "include_paths": query.include_paths,
+                "max_paths": query.max_paths,
+                "no_cycles": query.no_cycles,
+                "include_provenance": query.include_provenance,
+                "include_documents": query.include_documents,
+                "include_audit": query.include_audit,
+            },
+            count=len(nodes),
+            warnings=list(result.get("warnings") or []),
+            page=result.get("page"),
+        )
+
+        logger.info("✅ Graph query complete: %s nodes, %s edges", len(nodes), len(edges))
+        return response
+
+    except ValueError as exc:
+        logger.error("Invalid query parameters: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid query: {str(exc)}",
+        ) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("Graph query failed: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Graph query failed: {str(exc)}",
+        ) from exc
+
+
+async def execute_simple_graph_query(
+    *,
+    db_name: str,
+    query: SimpleGraphQueryRequest,
+    request: Request,
+    graph_service: GraphFederationServiceWOQL,
+    dataset_registry: DatasetRegistry,
+    base_branch: str = "main",
+    overlay_branch: Optional[str] = None,
+    branch: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Execute simple single-class graph query.
+    """
+    try:
+        db_name = validate_db_name(db_name)
+
+        ctx = _resolve_graph_branches(
+            db_name=db_name,
+            base_branch=base_branch,
+            overlay_branch=overlay_branch,
+            branch=branch,
+            include_documents=True,
+            classes_in_query=[str(query.class_name or "").strip()],
+        )
+
+        logger.info("📊 Simple graph query on %s: %s", db_name, query.class_name)
+
+        try:
+            result = await graph_service.simple_graph_query(
+                db_name=db_name,
+                base_branch=ctx.es_base_branch,
+                overlay_branch=ctx.es_overlay_branch,
+                terminus_branch=ctx.terminus_branch,
+                strict_overlay=bool(ctx.overlay_required),
+                class_name=query.class_name,
+                filters=query.filters,
+            )
+        except Exception as exc:
+            if ctx.overlay_required:
+                _raise_overlay_degraded(ctx=ctx)
+            raise exc
+
+        policy = await dataset_registry.get_access_policy(
+            db_name=db_name,
+            scope="data_access",
+            subject_type="object_type",
+            subject_id=str(query.class_name),
+        )
+        documents = result.get("documents") or []
+        if isinstance(documents, list):
+            result["documents"] = _apply_access_policies_to_documents(
+                documents,
+                policy=policy.policy if policy else None,
+            )
+            result["count"] = len(result["documents"])
+
+        result["base_branch"] = ctx.terminus_branch
+        result["overlay_branch"] = ctx.es_overlay_branch
+        result["overlay_status"] = ctx.overlay_status
+        result["writeback_enabled"] = ctx.writeback_enabled
+        result["writeback_edits_present"] = None
+        result["terminus_branch"] = ctx.terminus_branch
+        result["es_base_branch"] = ctx.es_base_branch
+        result["es_overlay_branch"] = ctx.es_overlay_branch
+        result["branch_virtualization_active"] = ctx.branch_virtualization_active
+
+        return result
+
+    except ValueError as exc:
+        logger.error("Invalid query parameters: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid query: {str(exc)}",
+        ) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("Simple graph query failed: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Query failed: {str(exc)}",
+        ) from exc
+
+
+async def execute_multi_hop_query(
+    *,
+    db_name: str,
+    query: Dict[str, Any],
+    request: Request,
+    graph_service: GraphFederationServiceWOQL,
+    dataset_registry: DatasetRegistry,
+    base_branch: str = "main",
+    overlay_branch: Optional[str] = None,
+    branch: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Execute multi-hop graph query (legacy dict payload).
+    """
+    try:
+        db_name = validate_db_name(db_name)
+
+        resolved_terminus_branch = validate_branch_name(branch or base_branch or "main")
+
+        start_class = query.get("start_class")
+        hops = query.get("hops", [])
+        filters = query.get("filters", {})
+        include_documents = bool(query.get("include_documents", True))
+        include_audit = bool(query.get("include_audit", False))
+        limit = query.get("limit", 100)
+
+        if not start_class:
+            raise ValueError("start_class is required")
+
+        classes_in_query = [str(start_class or "").strip()] + _collect_class_ids_from_hops(hops)
+        ctx = _resolve_graph_branches(
+            db_name=db_name,
+            base_branch=resolved_terminus_branch,
+            overlay_branch=overlay_branch,
+            branch=None,
+            include_documents=include_documents,
+            classes_in_query=classes_in_query,
+        )
+
+        logger.info("🚀 Multi-hop query: %s -> %s", start_class, hops)
+
+        try:
+            result = await graph_service.multi_hop_query(
+                db_name=db_name,
+                base_branch=ctx.es_base_branch,
+                overlay_branch=ctx.es_overlay_branch,
+                terminus_branch=ctx.terminus_branch,
+                strict_overlay=bool(ctx.overlay_required),
+                start_class=start_class,
+                hops=hops or [],
+                filters=filters,
+                limit=limit,
+                include_documents=include_documents,
+                include_audit=include_audit,
+            )
+        except Exception as exc:
+            if ctx.overlay_required and include_documents:
+                _raise_overlay_degraded(ctx=ctx)
+            raise exc
+
+        raw_nodes = list(result.get("nodes", []) or [])
+        policies = await _load_access_policies(
+            dataset_registry,
+            db_name=db_name,
+            class_ids=[str(node.get("type") or "") for node in raw_nodes],
+        )
+        filtered_nodes, allowed_ids = _apply_access_policies_to_nodes(raw_nodes, policies=policies)
+        raw_edges = list(result.get("edges", []) or [])
+        if allowed_ids:
+            raw_edges = [
+                edge
+                for edge in raw_edges
+                if str(edge.get("from") or "") in allowed_ids and str(edge.get("to") or "") in allowed_ids
+            ]
+        else:
+            raw_edges = []
+
+        result["nodes"] = filtered_nodes
+        result["edges"] = raw_edges
+        result["count"] = len(filtered_nodes)
+        result["base_branch"] = ctx.terminus_branch
+        result["overlay_branch"] = ctx.es_overlay_branch
+        result["overlay_status"] = ctx.overlay_status
+        result["writeback_enabled"] = ctx.writeback_enabled
+        result["writeback_edits_present"] = None
+        result["terminus_branch"] = ctx.terminus_branch
+        result["es_base_branch"] = ctx.es_base_branch
+        result["es_overlay_branch"] = ctx.es_overlay_branch
+        result["branch_virtualization_active"] = ctx.branch_virtualization_active
+
+        return {"status": "success", "data": result}
+
+    except ValueError as exc:
+        logger.error("Invalid multi-hop query: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid query: {str(exc)}",
+        ) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("Multi-hop query failed: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Query failed: {str(exc)}",
+        ) from exc
+
+
+async def find_relationship_paths(
+    *,
+    db_name: str,
+    source_class: str,
+    target_class: str,
+    max_depth: int,
+    graph_service: GraphFederationServiceWOQL,
+    branch: str,
+) -> Dict[str, Any]:
+    try:
+        db_name = validate_db_name(db_name)
+        branch = validate_branch_name(branch)
+
+        logger.info("🔍 Finding paths from %s to %s in %s", source_class, target_class, db_name)
+
+        paths = await graph_service.find_relationship_paths(
+            db_name=db_name,
+            branch=branch,
+            source_class=source_class,
+            target_class=target_class,
+            max_depth=max_depth,
+        )
+
+        logger.info("✅ Found %s paths via REAL WOQL schema discovery", len(paths))
+        return {
+            "source_class": source_class,
+            "target_class": target_class,
+            "paths": paths,
+            "count": len(paths),
+            "max_depth": max_depth,
+        }
+
+    except Exception as exc:
+        logger.error("Path finding failed: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Path finding failed: {str(exc)}",
+        ) from exc
+
+
+async def graph_service_health(*, graph_service: GraphFederationServiceWOQL) -> Dict[str, Any]:
+    """
+    Check health of graph federation service.
+
+    Returns a best-effort diagnostic payload (does not raise on failure).
+    """
+    try:
+        terminus_healthy = await graph_service.terminus.ping()
+
+        import aiohttp
+
+        es_healthy = False
+        async with aiohttp.ClientSession() as session:
+            try:
+                async with session.get(
+                    f"{graph_service.es_url}/_cluster/health",
+                    auth=graph_service.es_auth,
+                ) as resp:
+                    if resp.status == 200:
+                        es_health = await resp.json()
+                        es_healthy = es_health.get("status") in ["green", "yellow"]
+            except Exception as exc:
+                logger.error("ES health check failed: %s", exc)
+
+        return {
+            "status": "healthy" if (terminus_healthy and es_healthy) else "degraded",
+            "services": {
+                "terminusdb": "healthy" if terminus_healthy else "unhealthy",
+                "elasticsearch": "healthy" if es_healthy else "unhealthy",
+            },
+            "message": "Graph federation service operational"
+            if (terminus_healthy and es_healthy)
+            else "Some services are degraded",
+        }
+
+    except Exception as exc:
+        logger.error("Health check failed: %s", exc)
+        return {"status": "unhealthy", "error": str(exc)}
+

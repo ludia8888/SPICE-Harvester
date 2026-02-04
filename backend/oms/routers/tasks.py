@@ -8,53 +8,19 @@ This router is simpler than BFF's version as it focuses on
 internal task management without user-facing features.
 """
 
-import logging
-from typing import Dict, Any, List, Optional
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from typing import Any, Dict
 
-from oms.dependencies import get_redis_service
-from shared.services.storage.redis_service import RedisService
-from shared.models.background_task import TaskStatus, BackgroundTask
-from shared.services.core.background_task_manager import (
-    BackgroundTaskManager,
-    create_background_task_manager,
-)
-from shared.services.storage.redis_service import create_redis_service
-from shared.dependencies import get_container, ServiceContainer
+from fastapi import APIRouter, HTTPException, Query, status
 
-logger = logging.getLogger(__name__)
+from shared.dependencies.providers import BackgroundTaskManagerDep, RedisServiceDep
+from shared.models.background_task import TaskStatus
 
 router = APIRouter(prefix="/tasks", tags=["Task Management"])
-
-
-# Dependency injection
-async def get_task_manager(
-    container: ServiceContainer = Depends(get_container)
-) -> BackgroundTaskManager:
-    """Get BackgroundTaskManager from container."""
-    try:
-        if container.has(BackgroundTaskManager) and container.is_created(BackgroundTaskManager):
-            return await container.get(BackgroundTaskManager)
-
-        if not container.has(RedisService):
-            container.register_singleton(RedisService, create_redis_service)
-        redis_service = await container.get(RedisService)
-
-        task_manager = create_background_task_manager(redis_service)
-        container.register_instance(BackgroundTaskManager, task_manager)
-        return task_manager
-    except Exception as e:
-        logger.error(f"Failed to get BackgroundTaskManager: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Background task service unavailable"
-        )
-
 
 @router.get("/internal/status/{task_id}")
 async def get_internal_task_status(
     task_id: str,
-    task_manager: BackgroundTaskManager = Depends(get_task_manager)
+    task_manager: BackgroundTaskManagerDep,
 ) -> Dict[str, Any]:
     """
     Get internal task status for monitoring.
@@ -82,7 +48,7 @@ async def get_internal_task_status(
 
 @router.get("/internal/active")
 async def get_active_tasks(
-    task_manager: BackgroundTaskManager = Depends(get_task_manager)
+    task_manager: BackgroundTaskManagerDep,
 ) -> Dict[str, Any]:
     """
     Get all active (running) tasks.
@@ -123,8 +89,9 @@ async def get_active_tasks(
 @router.post("/internal/cleanup")
 async def cleanup_old_tasks(
     older_than_days: int = Query(7, ge=1, le=30, description="Delete tasks older than N days"),
-    task_manager: BackgroundTaskManager = Depends(get_task_manager),
-    redis_service: RedisService = Depends(get_redis_service)
+    *,
+    task_manager: BackgroundTaskManagerDep,
+    redis_service: RedisServiceDep,
 ) -> Dict[str, Any]:
     """
     Clean up old completed tasks.
@@ -155,7 +122,7 @@ async def cleanup_old_tasks(
 
 @router.get("/internal/health")
 async def task_service_health(
-    task_manager: BackgroundTaskManager = Depends(get_task_manager)
+    task_manager: BackgroundTaskManagerDep,
 ) -> Dict[str, Any]:
     """
     Get task service health status.

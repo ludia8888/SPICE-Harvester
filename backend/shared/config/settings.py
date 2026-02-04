@@ -1099,6 +1099,10 @@ class PipelineSettings(BaseSettings):
         default=True,
         description="Enable Spark ANSI mode (PIPELINE_SPARK_ANSI_ENABLED)",
     )
+    spark_executor_threads: int = Field(
+        default=1,
+        description="Spark executor thread pool size (PIPELINE_SPARK_EXECUTOR_THREADS)",
+    )
     cast_mode: str = Field(
         default="SAFE_NULL",
         description="Casting policy: SAFE_NULL or STRICT (PIPELINE_CAST_MODE)",
@@ -1202,6 +1206,11 @@ class PipelineSettings(BaseSettings):
     @classmethod
     def clamp_jobs_backoff_max_seconds(cls, v):  # noqa: ANN001
         return _clamp_int(v, default=60, min_value=1, max_value=3600)
+
+    @field_validator("spark_executor_threads", mode="before")
+    @classmethod
+    def clamp_spark_executor_threads(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=1, min_value=1, max_value=128)
 
     @field_validator("lock_ttl_seconds", mode="before")
     @classmethod
@@ -2661,6 +2670,14 @@ class InstanceWorkerSettings(BaseSettings):
         default=True,
         description="Strict relationship schema enforcement (INSTANCE_RELATIONSHIP_STRICT)",
     )
+    untyped_ref_max_retry_attempts: int = Field(
+        default=30,
+        description="Max retry attempts for untyped ref witness errors (INSTANCE_WORKER_UNTYPED_REF_MAX_RETRY_ATTEMPTS)",
+    )
+    untyped_ref_backoff_max_seconds: float = Field(
+        default=15.0,
+        description="Max backoff seconds for untyped ref witness errors (INSTANCE_WORKER_UNTYPED_REF_BACKOFF_MAX_SECONDS)",
+    )
 
     @field_validator("allow_pk_generation", mode="before")
     @classmethod
@@ -2678,6 +2695,20 @@ class InstanceWorkerSettings(BaseSettings):
     @classmethod
     def clamp_max_retry_attempts(cls, v):  # noqa: ANN001
         return _clamp_int(v, default=5, min_value=1, max_value=100)
+
+    @field_validator("untyped_ref_max_retry_attempts", mode="before")
+    @classmethod
+    def clamp_untyped_ref_max_retry_attempts(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=30, min_value=1, max_value=500)
+
+    @field_validator("untyped_ref_backoff_max_seconds", mode="before")
+    @classmethod
+    def clamp_untyped_ref_backoff_max_seconds(cls, v):  # noqa: ANN001
+        try:
+            value = float(v)
+        except Exception:
+            return 15.0
+        return max(0.1, min(value, 300.0))
 
 
 class OntologyWorkerSettings(BaseSettings):

@@ -6,7 +6,7 @@ from typing import Any, Dict, Optional
 
 import pytest
 
-from bff.routers.pipeline import create_dataset_version
+from bff.routers.pipeline_datasets import create_dataset_version
 
 
 @dataclass
@@ -97,15 +97,16 @@ async def test_create_dataset_version_materializes_manual_sample_to_artifact(mon
         async def append_event(self, event: Any) -> None:
             return None
 
-    import bff.routers.pipeline as pipeline_router
+    import bff.routers.pipeline_datasets_ops as pipeline_datasets_ops
 
-    monkeypatch.setattr(pipeline_router, "event_store", _EventStore())
-    monkeypatch.setattr(pipeline_router, "_utcnow", lambda: datetime(2025, 1, 2, 3, 4, 5, tzinfo=timezone.utc))
+    monkeypatch.setattr(pipeline_datasets_ops, "event_store", _EventStore())
 
     class _LakeFSClient:
         async def commit(self, **kwargs: Any) -> str:
             return "c-manual"
 
+    monkeypatch.setenv("PIPELINE_LOCKS_ENABLED", "false")
+    monkeypatch.setenv("PIPELINE_LOCKS_REQUIRED", "false")
     monkeypatch.setenv("LAKEFS_RAW_REPOSITORY", "dataset-artifacts-test")
 
     dataset = _Dataset(dataset_id="ds-1", db_name="testdb", name="My Dataset", source_type="manual")

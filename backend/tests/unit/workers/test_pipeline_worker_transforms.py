@@ -74,6 +74,21 @@ def test_apply_transform_basic_ops(worker: PipelineWorker) -> None:
     renamed = worker._apply_transform({"operation": "rename", "rename": {"a": "a1"}}, [df], {})
     assert "a1" in renamed.columns
 
+    norm_df = worker.spark.createDataFrame([(1, " A "), (2, ""), (3, "   ")], ["id", "name"])
+    normalized = worker._apply_transform(
+        {
+            "operation": "normalize",
+            "columns": ["name"],
+            "trim": True,
+            "whitespaceToNull": True,
+            "emptyToNull": True,
+            "lowercase": True,
+        },
+        [norm_df],
+        {},
+    )
+    assert [row["name"] for row in normalized.orderBy("id").collect()] == ["a", None, None]
+
     casted = worker._apply_transform({"operation": "cast", "casts": [{"column": "a", "type": "string"}]}, [df], {})
     assert dict(casted.dtypes)["a"] == "string"
 

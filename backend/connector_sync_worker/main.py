@@ -18,15 +18,12 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 from typing import Any, Dict, Optional
 
 import httpx
 from confluent_kafka import KafkaError, Producer
-
-from shared.services.kafka.safe_consumer import SafeKafkaConsumer, ConsumerState
 
 from data_connector.google_sheets.service import GoogleSheetsService
 from data_connector.google_sheets.utils import normalize_sheet_data
@@ -37,28 +34,29 @@ from shared.observability.context_propagation import (
     attach_context_from_kafka,
     kafka_headers_from_envelope_metadata,
 )
-from shared.observability.logging import install_trace_context_filter
 from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
+from shared.services.kafka.processed_event_worker import EventEnvelopeKafkaWorker, HeartbeatOptions
+from shared.services.kafka.safe_consumer import SafeKafkaConsumer
 from shared.services.registries.connector_registry import ConnectorRegistry
 from shared.services.registries.lineage_store import LineageStore
-from shared.services.registries.processed_event_registry import ClaimDecision, ProcessedEventRegistry
+from shared.services.registries.processed_event_registry import ProcessedEventRegistry
 from shared.services.core.sheet_import_service import FieldMapping, SheetImportService
-from shared.security.auth_utils import get_expected_token
+from shared.security.auth_utils import BFF_TOKEN_ENV_KEYS, get_expected_token
+from shared.utils.app_logger import configure_logging
 from shared.utils.import_type_normalization import normalize_import_target_type
+from shared.utils.executor_utils import call_in_executor
 from shared.utils.time_utils import utcnow
 
 logger = logging.getLogger(__name__)
 
 
-_BFF_TOKEN_ENV_KEYS = ("BFF_ADMIN_TOKEN", "BFF_WRITE_TOKEN", "ADMIN_API_KEY", "ADMIN_TOKEN")
-
-
-class ConnectorSyncWorker:
+class ConnectorSyncWorker(EventEnvelopeKafkaWorker[Optional[str]]):
     def __init__(self) -> None:
         settings = get_settings()
         cfg = settings.workers.connector_sync
 
+        self.service_name = "connector-sync-worker"
         self.running = False
 
         self.topic = AppConfig.CONNECTOR_UPDATES_TOPIC
@@ -69,8 +67,8 @@ class ConnectorSyncWorker:
         self.max_retries = int(cfg.max_retries)
         self.backoff_base = int(cfg.backoff_base_seconds)
         self.backoff_max = int(cfg.backoff_max_seconds)
-        self.tracing = get_tracing_service("connector-sync-worker")
-        self.metrics = get_metrics_collector("connector-sync-worker")
+        self.tracing = get_tracing_service(self.service_name)
+        self.metrics = get_metrics_collector(self.service_name)
 
         self._consumer_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="kafka-consumer")
         self._producer_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="kafka-producer")
@@ -84,12 +82,10 @@ class ConnectorSyncWorker:
         self.http: Optional[httpx.AsyncClient] = None
 
     async def _consumer_call(self, func, *args, **kwargs):
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(self._consumer_executor, lambda: func(*args, **kwargs))
+        return await call_in_executor(self._consumer_executor, func, *args, **kwargs)
 
     async def _producer_call(self, func, *args, **kwargs):
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(self._producer_executor, lambda: func(*args, **kwargs))
+        return await call_in_executor(self._producer_executor, func, *args, **kwargs)
 
     async def initialize(self) -> None:
         settings = get_settings()
@@ -112,7 +108,7 @@ class ConnectorSyncWorker:
         self.sheets = GoogleSheetsService(api_key=api_key)
 
         # HTTP client to call BFF (auth is fail-closed in prod).
-        token = get_expected_token(_BFF_TOKEN_ENV_KEYS)
+        token = get_expected_token(BFF_TOKEN_ENV_KEYS)
         headers: Dict[str, str] = {}
         if token:
             headers["X-Admin-Token"] = token
@@ -195,21 +191,25 @@ class ConnectorSyncWorker:
         self._consumer_executor.shutdown(wait=False, cancel_futures=True)
         self._producer_executor.shutdown(wait=False, cancel_futures=True)
 
-    async def _heartbeat_loop(self, *, handler: str, event_id: str) -> None:
-        if not self.processed:
-            return
-        interval = int(get_settings().event_sourcing.processed_event_heartbeat_interval_seconds)
-        while True:
-            await asyncio.sleep(interval)
-            ok = await self.processed.heartbeat(handler=handler, event_id=event_id)
-            if not ok:
-                return
+    def _heartbeat_options(self) -> HeartbeatOptions:  # type: ignore[override]
+        return HeartbeatOptions(
+            stop_when_false=True,
+            continue_on_exception=False,
+        )
 
-    async def _send_to_dlq(self, envelope: EventEnvelope, *, error: str, attempt_count: int) -> None:
+    async def _send_to_dlq(  # type: ignore[override]
+        self,
+        *,
+        msg: Any,
+        payload: EventEnvelope,
+        raw_payload: Optional[str],
+        error: str,
+        attempt_count: int,
+    ) -> None:
         if not self.dlq_producer:
             return
 
-        dlq_env = envelope.model_copy(deep=True)
+        dlq_env = payload.model_copy(deep=True)
         if not isinstance(dlq_env.metadata, dict):
             dlq_env.metadata = {}
         dlq_env.metadata.update(
@@ -247,6 +247,97 @@ class ConnectorSyncWorker:
                     headers=headers or None,
                 )
                 await self._producer_call(self.dlq_producer.flush, 10)
+
+    # --- EventEnvelopeKafkaWorker hooks ---
+    async def _process_payload(self, payload: EventEnvelope) -> Optional[str]:  # type: ignore[override]
+        return await self._handle_envelope(payload)
+
+    def _span_name(self, *, payload: EventEnvelope) -> str:  # type: ignore[override]
+        return "connector_sync.process_event"
+
+    def _is_retryable_error(self, exc: Exception, *, payload: EventEnvelope) -> bool:  # type: ignore[override]
+        return True
+
+    def _in_progress_sleep_seconds(self, *, claim, payload: EventEnvelope) -> float:  # type: ignore[override]
+        return 1.0
+
+    def _should_seek_on_in_progress(self, *, claim, payload: EventEnvelope) -> bool:  # type: ignore[override]
+        return False
+
+    def _should_seek_on_retry(self, *, attempt_count: int, payload: EventEnvelope) -> bool:  # type: ignore[override]
+        return False
+
+    def _should_mark_done_after_dlq(self, *, payload: EventEnvelope, error: str) -> bool:  # type: ignore[override]
+        return True
+
+    async def _commit(self, msg: Any) -> None:  # type: ignore[override]
+        if not self.consumer:
+            return
+        await self._consumer_call(self.consumer.commit, msg, asynchronous=False)
+
+    async def _seek(self, *, topic: str, partition: int, offset: int) -> None:  # type: ignore[override]
+        if not self.consumer:
+            return
+        from confluent_kafka import TopicPartition
+
+        await self._consumer_call(self.consumer.seek, TopicPartition(topic, partition, offset))
+
+    async def _on_success(self, *, payload: EventEnvelope, result: Optional[str], duration_s: float) -> None:  # type: ignore[override]
+        if self.registry:
+            try:
+                await self.registry.record_sync_outcome(
+                    source_type=str((payload.data or {}).get("source_type") or ""),
+                    source_id=str((payload.data or {}).get("source_id") or ""),
+                    success=True,
+                    command_id=result,
+                )
+            except Exception as exc:
+                logger.warning("Best-effort record_sync_outcome failed: %s", exc, exc_info=True)
+        await super()._on_success(payload=payload, result=result, duration_s=duration_s)
+
+    async def _on_retry_scheduled(
+        self,
+        *,
+        payload: EventEnvelope,
+        error: str,
+        attempt_count: int,
+        backoff_s: int,
+        retryable: bool,
+    ) -> None:
+        if not self.registry:
+            return
+        try:
+            await self.registry.record_sync_outcome(
+                source_type=str((payload.data or {}).get("source_type") or ""),
+                source_id=str((payload.data or {}).get("source_id") or ""),
+                success=False,
+                error=error,
+                next_retry_at=utcnow() + timedelta(seconds=int(backoff_s)),
+            )
+        except Exception as exc:
+            logger.warning("Best-effort record_sync_outcome failed: %s", exc, exc_info=True)
+
+    async def _on_terminal_failure(
+        self,
+        *,
+        payload: EventEnvelope,
+        error: str,
+        attempt_count: int,
+        retryable: bool,
+    ) -> None:
+        if not self.registry:
+            return
+        try:
+            backoff_s = self._backoff_seconds(attempt_count=attempt_count, payload=payload)
+            await self.registry.record_sync_outcome(
+                source_type=str((payload.data or {}).get("source_type") or ""),
+                source_id=str((payload.data or {}).get("source_id") or ""),
+                success=False,
+                error=error,
+                next_retry_at=utcnow() + timedelta(seconds=int(backoff_s)),
+            )
+        except Exception as exc:
+            logger.warning("Best-effort record_sync_outcome failed: %s", exc, exc_info=True)
 
     def _bff_scope_headers(self, *, db_name: str) -> Dict[str, str]:
         scope = (db_name or "").strip()
@@ -490,148 +581,11 @@ class ConnectorSyncWorker:
                     continue
                 logger.error(f"Kafka error: {msg.error()}")
                 continue
-
-            envelope: Optional[EventEnvelope] = None
-            claim = None
-            heartbeat_task = None
-            try:
-                raw = msg.value().decode("utf-8")
-                payload = json.loads(raw)
-                envelope = EventEnvelope.model_validate(payload)
-                kafka_headers = msg.headers()
-                start = time.monotonic()
-
-                with attach_context_from_kafka(
-                    kafka_headers=kafka_headers,
-                    fallback_metadata=envelope.metadata if isinstance(envelope.metadata, dict) else None,
-                    service_name="connector-sync-worker",
-                ):
-                    with self.tracing.span(
-                        "connector_sync.process_event",
-                        attributes={
-                            "messaging.system": "kafka",
-                            "messaging.destination": msg.topic(),
-                            "messaging.destination_kind": "topic",
-                            "messaging.kafka.partition": msg.partition(),
-                            "messaging.kafka.offset": msg.offset(),
-                            "event.id": str(envelope.event_id),
-                            "event.type": str(envelope.event_type),
-                            "event.aggregate_id": str(envelope.aggregate_id),
-                        },
-                    ):
-                        claim = await self.processed.claim(
-                            handler=self.handler,
-                            event_id=str(envelope.event_id),
-                            aggregate_id=str(envelope.aggregate_id),
-                            sequence_number=envelope.sequence_number,
-                        )
-
-                        if claim.decision in {ClaimDecision.DUPLICATE_DONE, ClaimDecision.STALE}:
-                            await self._consumer_call(self.consumer.commit, msg, asynchronous=False)
-                            continue
-
-                        if claim.decision == ClaimDecision.IN_PROGRESS:
-                            # Another worker holds the lease; do not commit to avoid losing the event.
-                            await asyncio.sleep(1)
-                            continue
-
-                        heartbeat_task = asyncio.create_task(
-                            self._heartbeat_loop(handler=self.handler, event_id=str(envelope.event_id))
-                        )
-
-                        command_id = await self._handle_envelope(envelope)
-
-                        # Best-effort sync outcome tracking for ops/UI.
-                        try:
-                            await self.registry.record_sync_outcome(
-                                source_type=str((envelope.data or {}).get("source_type") or ""),
-                                source_id=str((envelope.data or {}).get("source_id") or ""),
-                                success=True,
-                                command_id=command_id,
-                            )
-                        except Exception as exc:
-                            logger.warning("Best-effort record_sync_outcome failed: %s", exc, exc_info=True)
-
-                        await self.processed.mark_done(
-                            handler=self.handler,
-                            event_id=str(envelope.event_id),
-                            aggregate_id=str(envelope.aggregate_id),
-                            sequence_number=envelope.sequence_number,
-                        )
-                        await self._consumer_call(self.consumer.commit, msg, asynchronous=False)
-                        try:
-                            self.metrics.record_event(
-                                str(envelope.event_type),
-                                action="processed",
-                                duration=time.monotonic() - start,
-                            )
-                        except Exception:
-                            pass
-
-            except json.JSONDecodeError as e:
-                logger.error(f"Invalid JSON in connector-updates (dropping): {e}")
-                await self._consumer_call(self.consumer.commit, msg, asynchronous=False)
-            except Exception as e:
-                err = str(e)
-                attempt_count = int(getattr(claim, "attempt_count", 1) or 1)
-
-                if envelope:
-                    try:
-                        await self.processed.mark_failed(handler=self.handler, event_id=str(envelope.event_id), error=err)
-                    except Exception as mark_err:
-                        logger.error(f"Failed to mark processed event failed: {mark_err}")
-
-                    # Best-effort sync outcome tracking for ops/UI.
-                    try:
-                        backoff_s = min(self.backoff_max, int(self.backoff_base * (2 ** max(0, attempt_count - 1))))
-                        await self.registry.record_sync_outcome(
-                            source_type=str((envelope.data or {}).get("source_type") or ""),
-                            source_id=str((envelope.data or {}).get("source_id") or ""),
-                            success=False,
-                            error=err,
-                            next_retry_at=utcnow() + timedelta(seconds=backoff_s),
-                        )
-                    except Exception as exc:
-                        logger.warning("Best-effort record_sync_outcome failed: %s", exc, exc_info=True)
-
-                    if attempt_count >= self.max_retries:
-                        logger.error(f"Max retries exceeded; sending to DLQ (event_id={envelope.event_id})")
-                        try:
-                            await self._send_to_dlq(envelope, error=err, attempt_count=attempt_count)
-                        except Exception as dlq_err:
-                            logger.error(f"Failed to send to DLQ: {dlq_err}")
-
-                        try:
-                            await self.processed.mark_done(
-                                handler=self.handler,
-                                event_id=str(envelope.event_id),
-                                aggregate_id=str(envelope.aggregate_id),
-                                sequence_number=envelope.sequence_number,
-                            )
-                        except Exception as mark_done_err:
-                            logger.error(
-                                "Failed to mark processed event done after DLQ; event may be stuck (event_id=%s): %s",
-                                envelope.event_id,
-                                mark_done_err,
-                                exc_info=True,
-                            )
-                        await self._consumer_call(self.consumer.commit, msg, asynchronous=False)
-                        continue
-
-                backoff_s = min(self.backoff_max, int(self.backoff_base * (2 ** max(0, attempt_count - 1))))
-                await asyncio.sleep(backoff_s)
-            finally:
-                if heartbeat_task:
-                    heartbeat_task.cancel()
+            await self.handle_message(msg)
 
 
 async def _main() -> None:
-    log_level = get_settings().observability.log_level
-    logging.basicConfig(
-        level=log_level,
-        format="%(asctime)s - %(name)s - %(levelname)s - trace_id=%(trace_id)s span_id=%(span_id)s req_id=%(request_id)s corr_id=%(correlation_id)s db=%(db_name)s - %(message)s",
-    )
-    install_trace_context_filter()
+    configure_logging(get_settings().observability.log_level)
     worker = ConnectorSyncWorker()
     await worker.initialize()
     try:

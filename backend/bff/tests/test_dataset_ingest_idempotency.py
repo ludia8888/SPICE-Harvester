@@ -9,8 +9,8 @@ import pytest
 from fastapi import HTTPException
 from starlette.datastructures import Headers, UploadFile
 
-from bff.routers import pipeline as pipeline_router
-from bff.routers.pipeline import upload_csv_dataset
+from bff.routers import pipeline_datasets as pipeline_router, pipeline_datasets_ops
+from bff.routers.pipeline_datasets import upload_csv_dataset
 
 
 class _FakeLakeFSStorage:
@@ -276,7 +276,9 @@ def _build_upload(content: bytes) -> UploadFile:
 @pytest.mark.asyncio
 async def test_csv_upload_idempotency_key_reuses_version(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("BFF_ADMIN_TOKEN", "testtoken")
-    monkeypatch.setattr(pipeline_router, "flush_dataset_ingest_outbox", _noop_flush_outbox)
+    monkeypatch.setenv("PIPELINE_LOCKS_ENABLED", "false")
+    monkeypatch.setenv("PIPELINE_LOCKS_REQUIRED", "false")
+    monkeypatch.setattr(pipeline_datasets_ops, "flush_dataset_ingest_outbox", _noop_flush_outbox)
 
     dataset_registry = _FakeDatasetRegistry()
     pipeline_registry = _FakePipelineRegistry()

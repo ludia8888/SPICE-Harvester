@@ -3,6 +3,28 @@ from __future__ import annotations
 from typing import Any, Dict, List
 
 
+def unique_node_id(base: str, existing: set[str], *, start_index: int = 1) -> str:
+    """Return a node id that is unique within `existing`.
+
+    Uses `base` when available, otherwise appends `_{n}` starting at `start_index`.
+    """
+    base = str(base or "").strip() or "node"
+    candidate = base
+    if candidate not in existing:
+        return candidate
+    try:
+        index = int(start_index)
+    except Exception:
+        index = 1
+    if index < 1:
+        index = 1
+    candidate = f"{base}_{index}"
+    while candidate in existing:
+        index += 1
+        candidate = f"{base}_{index}"
+    return candidate
+
+
 def normalize_nodes(nodes_raw: Any) -> Dict[str, Dict[str, Any]]:
     output: Dict[str, Dict[str, Any]] = {}
     if not isinstance(nodes_raw, list):

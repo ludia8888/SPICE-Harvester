@@ -9,6 +9,7 @@ from typing import Any, Dict
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from bff.dependencies import LabelMapper, TerminusService, get_label_mapper, get_terminus_service
+from bff.routers.registry_deps import get_dataset_registry
 from shared.models.ontology import QueryInput, QueryResponse
 from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.utils.access_policy import apply_access_policy
@@ -22,12 +23,6 @@ from shared.utils.language import get_accept_language
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/databases/{db_name}", tags=["Query"])
-
-
-async def get_dataset_registry() -> DatasetRegistry:
-    from bff.main import get_dataset_registry as _get_dataset_registry
-
-    return await _get_dataset_registry()
 
 
 @router.post("/query", response_model=QueryResponse)

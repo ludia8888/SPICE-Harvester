@@ -5,8 +5,8 @@ from typing import Any, Optional
 
 import pytest
 
-from bff.routers import pipeline as pipeline_router
-from bff.routers.pipeline import update_pipeline
+from bff.routers import pipeline_detail as pipeline_detail_router
+from bff.routers.pipeline_detail import update_pipeline
 
 PIPELINE_ID = "00000000-0000-0000-0000-000000000001"
 
@@ -75,7 +75,7 @@ class _AuditStore:
 
 @pytest.mark.asyncio
 async def test_pipeline_update_writes_audit_log(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(pipeline_router, "event_store", _EventStore())
+    monkeypatch.setattr(pipeline_detail_router, "event_store", _EventStore())
 
     audit_store = _AuditStore()
     registry = _PipelineRegistry(_Pipeline(pipeline_id=PIPELINE_ID, db_name="testdb"))

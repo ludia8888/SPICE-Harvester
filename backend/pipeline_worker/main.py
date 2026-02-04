@@ -53,10 +53,10 @@ from shared.errors.error_envelope import build_error_envelope
 from shared.errors.error_types import ErrorCategory, ErrorCode
 from shared.models.event_envelope import EventEnvelope
 from shared.models.pipeline_job import PipelineJob
-from shared.observability.context_propagation import attach_context_from_kafka, kafka_headers_from_current_context
-from shared.observability.logging import install_trace_context_filter
+from shared.observability.context_propagation import kafka_headers_from_current_context
 from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
+from shared.services.kafka.processed_event_worker import HeartbeatOptions, ProcessedEventKafkaWorker, RegistryKey
 from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.services.storage.lakefs_client import LakeFSClient, LakeFSConflictError, LakeFSError
 from shared.services.storage.lakefs_storage_service import LakeFSStorageService
@@ -69,7 +69,6 @@ from shared.services.pipeline.pipeline_parameter_utils import apply_parameters, 
 from shared.services.pipeline.pipeline_definition_utils import (
     build_expectations_with_pk,
     resolve_delete_column,
-    resolve_execution_semantics,
     resolve_incremental_config,
     resolve_pk_columns,
     resolve_pk_semantics,
@@ -94,207 +93,63 @@ from shared.services.pipeline.pipeline_transform_spec import (
 from shared.services.registries.objectify_registry import ObjectifyRegistry
 from shared.services.events.objectify_job_queue import ObjectifyJobQueue
 from shared.models.objectify_job import ObjectifyJob
-from shared.services.registries.processed_event_registry import ProcessedEventRegistry, ClaimDecision
+from shared.services.registries.processed_event_registry import ProcessedEventRegistry
 from shared.services.pipeline.pipeline_lock import PipelineLock, PipelineLockError
 from shared.services.storage.redis_service import RedisService, create_redis_service_legacy
 from shared.services.storage.storage_service import StorageService
 from shared.utils.path_utils import safe_lakefs_ref
 from shared.utils.s3_uri import build_s3_uri, parse_s3_uri
 from shared.utils.schema_hash import compute_schema_hash
+from shared.utils.app_logger import configure_logging
 from shared.utils.time_utils import utcnow
+
+from pipeline_worker.worker_helpers import (
+    _collect_input_commit_map,
+    _collect_watermark_keys_from_snapshots,
+    _inputs_diff_empty,
+    _is_sensitive_conf_key,
+    _max_watermark_from_snapshots,
+    _resolve_code_version,
+    _resolve_execution_semantics,
+    _resolve_lakefs_repository,
+    _resolve_output_format,
+    _resolve_partition_columns,
+    _resolve_watermark_column,
+    _watermark_values_match,
+)
+from pipeline_worker.spark_transform_engine import apply_spark_transform
+from pipeline_worker.spark_schema_helpers import (
+    _hash_schema_columns,
+    _is_data_object,
+    _list_part_files,
+    _schema_diff,
+    _schema_from_dataframe,
+)
 
 logger = logging.getLogger(__name__)
 
 SUPPORTED_TRANSFORMS_SPARK = frozenset(set(SUPPORTED_TRANSFORMS) - {"udf"})
 
-_SENSITIVE_CONF_TOKENS = (
-    "secret",
-    "password",
-    "token",
-    "access.key",
-    "secret.key",
-    "session.token",
-    "aws_access",
-    "aws_secret",
-    "credentials",
-)
-
 T = TypeVar("T")
 
 
-def _resolve_code_version() -> Optional[str]:
-    return get_settings().observability.code_sha
+class _PipelinePayloadParseError(ValueError):
+    def __init__(
+        self,
+        *,
+        stage: str,
+        payload_text: Optional[str],
+        payload_obj: Optional[Dict[str, Any]],
+        cause: Exception,
+    ) -> None:
+        super().__init__(str(cause))
+        self.stage = str(stage)
+        self.payload_text = payload_text
+        self.payload_obj = payload_obj
+        self.cause = cause
 
 
-def _is_sensitive_conf_key(key: str) -> bool:
-    lowered = str(key or "").lower()
-    return any(token in lowered for token in _SENSITIVE_CONF_TOKENS)
-
-
-def _resolve_lakefs_repository() -> str:
-    repo = str(get_settings().storage.lakefs_artifacts_repository or "").strip()
-    return repo or "pipeline-artifacts"
-
-
-
-def _resolve_watermark_column(*, incremental: Dict[str, Any], metadata: Dict[str, Any]) -> Optional[str]:
-    for key in ("watermark_column", "watermarkColumn", "watermark"):
-        value = metadata.get(key) if isinstance(metadata, dict) else None
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-        value = incremental.get(key) if isinstance(incremental, dict) else None
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-    return None
-
-
-def _max_watermark_from_snapshots(
-    input_snapshots: list[dict[str, Any]], *, watermark_column: str
-) -> Optional[Any]:
-    resolved_column = str(watermark_column or "").strip()
-    if not resolved_column:
-        return None
-    max_value: Optional[Any] = None
-    for snapshot in input_snapshots or []:
-        if not isinstance(snapshot, dict):
-            continue
-        if str(snapshot.get("watermark_column") or "").strip() != resolved_column:
-            continue
-        candidate = snapshot.get("watermark_max")
-        if candidate is None:
-            continue
-        if max_value is None:
-            max_value = candidate
-            continue
-        try:
-            if candidate > max_value:
-                max_value = candidate
-        except TypeError:
-            try:
-                if float(candidate) > float(max_value):
-                    max_value = candidate
-            except Exception:
-                if str(candidate) > str(max_value):
-                    max_value = candidate
-    return max_value
-
-
-def _watermark_values_match(left: Any, right: Any) -> bool:
-    if left == right:
-        return True
-    try:
-        return float(left) == float(right)
-    except Exception:
-        return str(left) == str(right)
-
-
-def _collect_watermark_keys_from_snapshots(
-    input_snapshots: list[dict[str, Any]], *, watermark_column: str, watermark_value: Any
-) -> list[str]:
-    resolved_column = str(watermark_column or "").strip()
-    if not resolved_column or watermark_value is None:
-        return []
-    keys: list[str] = []
-    for snapshot in input_snapshots or []:
-        if not isinstance(snapshot, dict):
-            continue
-        if str(snapshot.get("watermark_column") or "").strip() != resolved_column:
-            continue
-        candidate_value = snapshot.get("watermark_max")
-        if candidate_value is None or not _watermark_values_match(candidate_value, watermark_value):
-            continue
-        raw_keys = snapshot.get("watermark_keys") or snapshot.get("watermarkKeys")
-        if not isinstance(raw_keys, list):
-            continue
-        for item in raw_keys:
-            item_str = str(item or "").strip()
-            if item_str:
-                keys.append(item_str)
-    deduped: list[str] = []
-    seen: set[str] = set()
-    for item in keys:
-        if item in seen:
-            continue
-        seen.add(item)
-        deduped.append(item)
-    return deduped
-
-
-def _collect_input_commit_map(input_snapshots: list[dict[str, Any]]) -> Dict[str, str]:
-    commits: Dict[str, str] = {}
-    for snapshot in input_snapshots or []:
-        if not isinstance(snapshot, dict):
-            continue
-        node_id = str(snapshot.get("node_id") or "").strip()
-        commit_id = str(snapshot.get("lakefs_commit_id") or "").strip()
-        if node_id and commit_id:
-            commits[node_id] = commit_id
-    return commits
-
-
-def _inputs_diff_empty(input_snapshots: list[dict[str, Any]]) -> bool:
-    diff_snapshots = [
-        snapshot
-        for snapshot in input_snapshots or []
-        if isinstance(snapshot, dict) and snapshot.get("diff_requested")
-    ]
-    if not diff_snapshots:
-        return False
-    return all(bool(snapshot.get("diff_ok")) and bool(snapshot.get("diff_empty")) for snapshot in diff_snapshots)
-
-
-def _resolve_execution_semantics(*, job: PipelineJob, definition: Dict[str, Any]) -> str:
-    return resolve_execution_semantics(definition, pipeline_type=str(job.pipeline_type or ""))
-
-
-def _resolve_output_format(*, definition: Dict[str, Any], output_metadata: Dict[str, Any]) -> str:
-    settings = definition.get("settings") if isinstance(definition.get("settings"), dict) else {}
-    for key in ("outputFormat", "output_format", "format"):
-        raw = output_metadata.get(key)
-        if isinstance(raw, str) and raw.strip():
-            return raw.strip().lower()
-        raw = settings.get(key)
-        if isinstance(raw, str) and raw.strip():
-            return raw.strip().lower()
-        raw = definition.get(key)
-        if isinstance(raw, str) and raw.strip():
-            return raw.strip().lower()
-    return "parquet"
-
-
-def _resolve_partition_columns(
-    *,
-    definition: Dict[str, Any],
-    output_metadata: Dict[str, Any],
-) -> List[str]:
-    settings = definition.get("settings") if isinstance(definition.get("settings"), dict) else {}
-    raw = (
-        output_metadata.get("partitionBy")
-        or output_metadata.get("partition_by")
-        or settings.get("partitionBy")
-        or settings.get("partition_by")
-        or definition.get("partitionBy")
-        or definition.get("partition_by")
-    )
-    if raw is None:
-        return []
-    if isinstance(raw, str):
-        values = [item.strip() for item in raw.split(",") if item.strip()]
-    elif isinstance(raw, list):
-        values = [str(item).strip() for item in raw if str(item).strip()]
-    else:
-        return []
-    seen: set[str] = set()
-    deduped: List[str] = []
-    for value in values:
-        if value in seen:
-            continue
-        seen.add(value)
-        deduped.append(value)
-    return deduped
-
-
-class PipelineWorker:
+class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
     def __init__(self) -> None:
         settings = get_settings()
         self.settings = settings
@@ -353,6 +208,7 @@ class PipelineWorker:
         self._revoked_partitions: set[tuple[str, int]] = set()
         self._inflight_by_partition: Dict[tuple[str, int], asyncio.Task] = {}
         self._pending_by_partition: Dict[tuple[str, int], Deque[Any]] = {}
+        self._commit_state_by_partition: Dict[tuple[str, int], bool] = {}
         self._dlq_lock = asyncio.Lock()
         self.tracing = get_tracing_service("pipeline-worker")
         self.metrics = get_metrics_collector("pipeline-worker")
@@ -456,8 +312,7 @@ class PipelineWorker:
 
         self.spark = self._create_spark_session()
         if not self._spark_executor:
-            max_workers = int(os.getenv("PIPELINE_SPARK_EXECUTOR_THREADS", "1") or "1")
-            max_workers = max(1, max_workers)
+            max_workers = max(1, int(settings.pipeline.spark_executor_threads))
             self._spark_executor = ThreadPoolExecutor(
                 max_workers=max_workers,
                 thread_name_prefix="pipeline-spark",
@@ -805,233 +660,261 @@ class PipelineWorker:
         if exc:
             logger.error("Pipeline background task crashed: %s", exc, exc_info=True)
 
-    async def _handle_kafka_message(self, msg: Any) -> None:
-        if not self.consumer:
-            return
+    # --- ProcessedEventKafkaWorker Strategy hooks ---
+    def _service_name(self) -> Optional[str]:  # type: ignore[override]
+        return "pipeline-worker"
 
-        topic = str(msg.topic())
-        partition = int(msg.partition())
-        offset = int(msg.offset())
-        key = (topic, partition)
-
-        kafka_headers = msg.headers()
-        raw_value: Optional[bytes] = None
-        raw_text: Optional[str] = None
-        payload: Optional[Dict[str, Any]] = None
-        job: Optional[PipelineJob] = None
-        claim = None
-        heartbeat_task: Optional[asyncio.Task] = None
-        start = time.monotonic()
-        committed = False
+    def _parse_payload(self, payload: Any) -> PipelineJob:  # type: ignore[override]
+        if not isinstance(payload, (bytes, bytearray)):
+            raise _PipelinePayloadParseError(
+                stage="decode",
+                payload_text=None,
+                payload_obj=None,
+                cause=TypeError("Pipeline job payload must be bytes"),
+            )
+        try:
+            raw_text = payload.decode("utf-8")
+        except Exception as exc:
+            raise _PipelinePayloadParseError(
+                stage="decode",
+                payload_text=None,
+                payload_obj=None,
+                cause=exc,
+            ) from exc
 
         try:
-            try:
-                raw_value = msg.value()
-                raw_text = raw_value.decode("utf-8")
-            except Exception as exc:
-                await self._send_to_dlq(
-                    msg=msg,
-                    stage="decode",
-                    error=str(exc),
-                    payload_text=None,
-                    payload_obj=None,
-                    job=None,
-                    attempt_count=None,
-                )
-                committed = True
-                self.consumer.commit_sync(msg)
-                return
+            payload_obj = json.loads(raw_text)
+        except Exception as exc:
+            raise _PipelinePayloadParseError(
+                stage="json",
+                payload_text=raw_text,
+                payload_obj=None,
+                cause=exc,
+            ) from exc
 
-            try:
-                payload = json.loads(raw_text)
-            except Exception as exc:
-                await self._send_to_dlq(
-                    msg=msg,
-                    stage="json",
-                    error=str(exc),
-                    payload_text=raw_text,
-                    payload_obj=None,
-                    job=None,
-                    attempt_count=None,
-                )
-                committed = True
-                self.consumer.commit_sync(msg)
-                return
+        try:
+            job = PipelineJob.model_validate(payload_obj)
+        except Exception as exc:
+            raise _PipelinePayloadParseError(
+                stage="validate",
+                payload_text=raw_text,
+                payload_obj=payload_obj if isinstance(payload_obj, dict) else None,
+                cause=exc,
+            ) from exc
+        return job
 
-            try:
-                job = PipelineJob.model_validate(payload)
-            except Exception as exc:
-                await self._send_to_dlq(
-                    msg=msg,
-                    stage="validate",
-                    error=str(exc),
-                    payload_text=raw_text,
-                    payload_obj=payload,
-                    job=None,
-                    attempt_count=None,
-                )
+    def _registry_key(self, payload: PipelineJob) -> RegistryKey:  # type: ignore[override]
+        return RegistryKey(
+            event_id=str(payload.job_id),
+            aggregate_id=str(payload.pipeline_id),
+            # Pipeline jobs are not "append-only state" per pipeline; avoid stale-skips.
+            sequence_number=None,
+        )
+
+    async def _process_payload(self, payload: PipelineJob) -> None:  # type: ignore[override]
+        logger.info(
+            "Executing pipeline job (job_id=%s pipeline_id=%s mode=%s)",
+            payload.job_id,
+            payload.pipeline_id,
+            getattr(payload, "mode", None),
+        )
+        try:
+            await self._execute_job(payload)
+        except Exception as exc:
+            if self._is_spark_gateway_error(exc):
                 try:
-                    await self._best_effort_record_invalid_job(payload, error=str(exc))
+                    self._restart_spark_session()
+                except Exception as restart_exc:
+                    err = f"{exc} (spark_restart_failed: {restart_exc})"
+                    if self.processed:
+                        try:
+                            await self.processed.mark_failed(
+                                handler=self.handler,
+                                event_id=str(payload.job_id),
+                                error=err,
+                            )
+                        except Exception as mark_err:
+                            logger.warning(
+                                "Failed to mark pipeline job failed before restart: %s",
+                                mark_err,
+                                exc_info=True,
+                            )
+                    logger.warning(
+                        "Failed to restart Spark session after connection refusal: %s",
+                        restart_exc,
+                    )
+                    raise SystemExit(1) from restart_exc
+            raise
+        logger.info(
+            "Pipeline job complete (job_id=%s pipeline_id=%s)",
+            payload.job_id,
+            payload.pipeline_id,
+        )
+
+    def _fallback_metadata(self, payload: PipelineJob) -> Optional[Dict[str, Any]]:  # type: ignore[override]
+        return {
+            "job_id": payload.job_id,
+            "pipeline_id": str(payload.pipeline_id),
+            "db_name": payload.db_name,
+            "branch": payload.branch,
+            "mode": getattr(payload, "mode", None),
+        }
+
+    def _span_name(self, *, payload: PipelineJob) -> str:  # type: ignore[override]
+        return "pipeline_worker.process_job"
+
+    def _span_attributes(  # type: ignore[override]
+        self,
+        *,
+        msg: Any,
+        payload: PipelineJob,
+        registry_key: RegistryKey,
+    ) -> Dict[str, Any]:
+        attrs = super()._span_attributes(msg=msg, payload=payload, registry_key=registry_key)
+        attrs.update(
+            {
+                "pipeline.job_id": payload.job_id,
+                "pipeline.pipeline_id": str(payload.pipeline_id),
+                "pipeline.db_name": payload.db_name,
+                "pipeline.branch": payload.branch,
+                "pipeline.mode": getattr(payload, "mode", None),
+            }
+        )
+        return attrs
+
+    def _metric_event_name(self, *, payload: PipelineJob) -> Optional[str]:  # type: ignore[override]
+        return "PIPELINE_JOB"
+
+    def _heartbeat_options(self) -> HeartbeatOptions:  # type: ignore[override]
+        return HeartbeatOptions(
+            interval_seconds=int(self.processed_event_heartbeat_interval_seconds),
+        )
+
+    def _is_retryable_error(self, exc: Exception, *, payload: PipelineJob) -> bool:  # type: ignore[override]
+        return True
+
+    async def _mark_retryable_failure(  # type: ignore[override]
+        self,
+        *,
+        payload: PipelineJob,
+        registry_key: RegistryKey,
+        handler: str,
+        error: str,
+    ) -> None:
+        await self.processed.mark_retrying(
+            handler=handler,
+            event_id=str(registry_key.event_id),
+            error=error,
+        )
+
+    async def _commit(self, msg: Any) -> None:  # type: ignore[override]
+        key = (str(msg.topic()), int(msg.partition()))
+        self._commit_state_by_partition[key] = True
+        await super()._commit(msg)
+
+    async def _seek(self, *, topic: str, partition: int, offset: int) -> None:  # type: ignore[override]
+        key = (str(topic), int(partition))
+        self._commit_state_by_partition[key] = False
+        await super()._seek(topic=topic, partition=partition, offset=offset)
+
+    async def _on_parse_error(self, *, msg: Any, raw_payload: Optional[str], error: Exception) -> None:  # type: ignore[override]
+        stage = "parse"
+        payload_text = raw_payload
+        payload_obj = None
+        err_text = str(error)
+
+        if isinstance(error, _PipelinePayloadParseError):
+            stage = str(error.stage)
+            payload_text = error.payload_text if error.payload_text is not None else raw_payload
+            payload_obj = error.payload_obj
+            err_text = str(error.cause)
+
+        try:
+            await self._publish_to_dlq(
+                msg=msg,
+                stage=stage,
+                error=err_text,
+                payload_text=payload_text,
+                payload_obj=payload_obj,
+                job=None,
+                attempt_count=None,
+            )
+            if stage == "validate" and isinstance(payload_obj, dict):
+                try:
+                    await self._best_effort_record_invalid_job(payload_obj, error=err_text)
                 except Exception as record_exc:
                     logger.warning(
                         "Failed to record invalid pipeline job (best-effort): %s",
                         record_exc,
                         exc_info=True,
                     )
-                committed = True
-                self.consumer.commit_sync(msg)
-                return
+        except Exception:
+            logger.exception("Failed to publish invalid pipeline job payload to DLQ")
 
-            with attach_context_from_kafka(kafka_headers=kafka_headers, service_name="pipeline-worker"):
-                with self.tracing.span(
-                    "pipeline_worker.process_job",
-                    attributes={
-                        "messaging.system": "kafka",
-                        "messaging.destination": topic,
-                        "messaging.destination_kind": "topic",
-                        "messaging.kafka.partition": partition,
-                        "messaging.kafka.offset": offset,
-                        "pipeline.job_id": job.job_id,
-                        "pipeline.pipeline_id": job.pipeline_id,
-                        "pipeline.db_name": job.db_name,
-                        "pipeline.branch": job.branch,
-                        "pipeline.mode": getattr(job, "mode", None),
-                    },
-                ):
-                    if not self.processed:
-                        raise RuntimeError("ProcessedEventRegistry not available")
+        logger.exception("Invalid pipeline job payload; skipping: %s", err_text)
 
-                    claim = await self.processed.claim(
-                        handler=self.handler,
-                        event_id=job.job_id,
-                        aggregate_id=job.pipeline_id,
-                        sequence_number=getattr(job, "sequence_number", None),
-                    )
+    async def _on_retry_scheduled(  # type: ignore[override]
+        self,
+        *,
+        payload: PipelineJob,
+        error: str,
+        attempt_count: int,
+        backoff_s: int,
+        retryable: bool,
+    ) -> None:
+        logger.warning(
+            "Pipeline job failed; will retry (job_id=%s attempt=%s backoff=%ss): %s",
+            payload.job_id,
+            attempt_count,
+            int(backoff_s),
+            error,
+        )
 
-                    if claim.decision in {ClaimDecision.DUPLICATE_DONE, ClaimDecision.STALE}:
-                        committed = True
-                        self.consumer.commit_sync(msg)
-                        return
+    async def _on_terminal_failure(  # type: ignore[override]
+        self,
+        *,
+        payload: PipelineJob,
+        error: str,
+        attempt_count: int,
+        retryable: bool,
+    ) -> None:
+        logger.error(
+            "Pipeline job max retries exceeded; sending to DLQ (job_id=%s attempt=%s)",
+            payload.job_id,
+            attempt_count,
+        )
 
-                    if claim.decision == ClaimDecision.IN_PROGRESS:
-                        await asyncio.sleep(2)
-                        self.consumer.seek(TopicPartition(topic, partition, offset))
-                        return
+    async def _send_to_dlq(  # type: ignore[override]
+        self,
+        *,
+        msg: Any,
+        payload: PipelineJob,
+        raw_payload: Optional[str],
+        error: str,
+        attempt_count: int,
+    ) -> None:
+        await self._publish_to_dlq(
+            msg=msg,
+            stage="execute",
+            error=error,
+            payload_text=raw_payload,
+            payload_obj=None,
+            job=payload,
+            attempt_count=int(attempt_count),
+        )
 
-                    heartbeat_task = asyncio.create_task(
-                        self._heartbeat_loop(handler=self.handler, event_id=job.job_id)
-                    )
+    async def _handle_kafka_message(self, msg: Any) -> None:
+        if not self.consumer:
+            return
 
-                    try:
-                        logger.info(
-                            "Executing pipeline job (job_id=%s pipeline_id=%s mode=%s)",
-                            job.job_id,
-                            job.pipeline_id,
-                            getattr(job, "mode", None),
-                        )
-                        await self._execute_job(job)
-                        logger.info(
-                            "Pipeline job complete (job_id=%s pipeline_id=%s)",
-                            job.job_id,
-                            job.pipeline_id,
-                        )
-                        await self.processed.mark_done(handler=self.handler, event_id=job.job_id)
-                        committed = True
-                        self.consumer.commit_sync(msg)
-                        try:
-                            self.metrics.record_event(
-                                "PIPELINE_JOB",
-                                action="processed",
-                                duration=time.monotonic() - start,
-                            )
-                        except Exception:
-                            pass
-                        return
-                    except Exception as exc:
-                        err = str(exc)
-                        if self._is_spark_gateway_error(exc):
-                            try:
-                                self._restart_spark_session()
-                            except Exception as restart_exc:
-                                err = f"{err} (spark_restart_failed: {restart_exc})"
-                                if self.processed and job:
-                                    try:
-                                        await self.processed.mark_failed(
-                                            handler=self.handler,
-                                            event_id=job.job_id,
-                                            error=err,
-                                        )
-                                    except Exception as mark_err:
-                                        logger.warning(
-                                            "Failed to mark pipeline job failed before restart: %s",
-                                            mark_err,
-                                        )
-                                logger.warning(
-                                    "Failed to restart Spark session after connection refusal: %s",
-                                    restart_exc,
-                                )
-                                raise SystemExit(1) from restart_exc
-
-                        attempt_count = int(getattr(claim, "attempt_count", 1) or 1)
-                        if attempt_count >= self.max_retries:
-                            if self.processed and job:
-                                try:
-                                    await self.processed.mark_failed(
-                                        handler=self.handler,
-                                        event_id=job.job_id,
-                                        error=err,
-                                    )
-                                except Exception as mark_err:
-                                    logger.warning("Failed to mark pipeline job failed: %s", mark_err)
-                            logger.error(
-                                "Pipeline job max retries exceeded; sending to DLQ (job_id=%s attempt=%s)",
-                                getattr(job, "job_id", None),
-                                attempt_count,
-                            )
-                            await self._send_to_dlq(
-                                msg=msg,
-                                stage="execute",
-                                error=err,
-                                payload_text=raw_text,
-                                payload_obj=payload,
-                                job=job,
-                                attempt_count=attempt_count,
-                            )
-                            committed = True
-                            self.consumer.commit_sync(msg)
-                            return
-
-                        if self.processed and job:
-                            try:
-                                await self.processed.mark_retrying(
-                                    handler=self.handler,
-                                    event_id=job.job_id,
-                                    error=err,
-                                )
-                            except Exception as mark_err:
-                                logger.warning("Failed to mark pipeline job retrying: %s", mark_err)
-
-                        backoff_s = min(self.backoff_max, int(self.backoff_base * (2 ** max(0, attempt_count - 1))))
-                        logger.warning(
-                            "Pipeline job failed; will retry (job_id=%s attempt=%s backoff=%ss): %s",
-                            getattr(job, "job_id", None),
-                            attempt_count,
-                            backoff_s,
-                            err,
-                        )
-                        await asyncio.sleep(backoff_s)
-                        self.consumer.seek(TopicPartition(topic, partition, offset))
-                        return
-                    finally:
-                        if heartbeat_task:
-                            heartbeat_task.cancel()
-                            try:
-                                await heartbeat_task
-                            except asyncio.CancelledError:
-                                pass
-                            except Exception:
-                                pass
+        topic = str(msg.topic())
+        partition = int(msg.partition())
+        key = (topic, partition)
+        self._commit_state_by_partition[key] = False
+        try:
+            await self.handle_message(msg)
         finally:
+            committed = bool(self._commit_state_by_partition.pop(key, False))
             self._inflight_by_partition.pop(key, None)
             if not self.consumer:
                 return
@@ -1072,20 +955,7 @@ class PipelineWorker:
                     exc,
                 )
 
-    async def _heartbeat_loop(self, *, handler: str, event_id: str) -> None:
-        if not self.processed:
-            return
-        interval = self.processed_event_heartbeat_interval_seconds
-        while True:
-            try:
-                await asyncio.sleep(interval)
-                await self.processed.heartbeat(handler=handler, event_id=event_id)
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:
-                logger.warning("Heartbeat failed (handler=%s event_id=%s): %s", handler, event_id, exc)
-
-    async def _send_to_dlq(
+    async def _publish_to_dlq(
         self,
         *,
         msg: Any,
@@ -4651,582 +4521,16 @@ class PipelineWorker:
     ) -> DataFrame:
         if not inputs:
             return self._empty_dataframe()
-        operation = normalize_operation(metadata.get("operation"))
-        if operation == "udf":
-            raise ValueError("udf operation is not supported in Spark execution. Remove this transform or replace it with built-in expressions.")
-        if operation == "join" and len(inputs) >= 2:
-            join_spec = resolve_join_spec(metadata)
-            join_type = join_spec.join_type
-            allow_cross_join = join_spec.allow_cross_join
-            left_key = join_spec.left_key
-            right_key = join_spec.right_key
-            left_keys = list(join_spec.left_keys or [])
-            right_keys = list(join_spec.right_keys or [])
-            if left_key and not left_keys:
-                left_keys = [left_key]
-            if right_key and not right_keys:
-                right_keys = [right_key]
-            left = inputs[0]
-            right = inputs[1]
-            # Optional join hints (Spark will ignore unknown hints).
-            hints = (
-                metadata.get("joinHints")
-                or metadata.get("join_hints")
-                or metadata.get("hints")
-                or {}
-            )
-            if isinstance(hints, dict):
-                left_hint = hints.get("left") or hints.get("leftHint") or hints.get("left_hint")
-                right_hint = hints.get("right") or hints.get("rightHint") or hints.get("right_hint")
-                if left_hint:
-                    left = left.hint(str(left_hint))
-                if right_hint:
-                    right = right.hint(str(right_hint))
-            if metadata.get("broadcastLeft") or metadata.get("broadcast_left"):
-                left = left.hint("broadcast")
-            if metadata.get("broadcastRight") or metadata.get("broadcast_right"):
-                right = right.hint("broadcast")
-            if left_keys and right_keys:
-                if len(left_keys) != len(right_keys):
-                    raise ValueError("Join requires leftKeys/rightKeys of the same length.")
-
-                def _resolve_join_col(df, col_name: str) -> str:
-                    """
-                    Resolve join column names defensively.
-
-                    Spark's CSV reader may strip a UTF-8 BOM from the first header column, while
-                    upstream sampling/metadata may preserve it. If the plan references a BOM-prefixed
-                    column (e.g. "\\ufeffproduct_category_name") but the DataFrame has the non-BOM
-                    column, transparently fall back to the stripped name.
-                    """
-                    if col_name in df.columns:
-                        return col_name
-                    stripped = col_name.lstrip("\ufeff")
-                    if stripped != col_name and stripped in df.columns:
-                        return stripped
-                    # Also handle the opposite mismatch: plan references the stripped name but the DataFrame
-                    # still includes the BOM prefix (rare, but possible depending on reader/encoding).
-                    bom = f"\ufeff{col_name}"
-                    if bom in df.columns:
-                        return bom
-                    return col_name
-
-                resolved_left_keys = [_resolve_join_col(left, lkey) for lkey in left_keys]
-                resolved_right_keys = [_resolve_join_col(right, rkey) for rkey in right_keys]
-                same_key_names = all(lk == rk for lk, rk in zip(resolved_left_keys, resolved_right_keys))
-
-                # Deterministically avoid duplicate column names in join output by renaming
-                # colliding right-side columns. This matches preflight's `right_` prefixing
-                # logic, so plans can rely on stable column names without Spark ambiguity.
-                left_set = set(left.columns)
-                right_df = right
-                right_col_map: Dict[str, str] = {}
-                right_cols: set[str] = set(right.columns)
-                join_key_keep = set(resolved_right_keys) if same_key_names else set()
-                for col in list(right.columns):
-                    if col in left_set and col not in join_key_keep:
-                        new = f"right_{col}"
-                        if new in right_cols or new in left_set:
-                            base = new
-                            idx = 1
-                            while f"{base}__{idx}" in right_cols or f"{base}__{idx}" in left_set:
-                                idx += 1
-                            new = f"{base}__{idx}"
-                        right_df = right_df.withColumnRenamed(col, new)
-                        right_col_map[col] = new
-                        right_cols.discard(col)
-                        right_cols.add(new)
-
-                mapped_right_keys = [right_col_map.get(rk, rk) for rk in resolved_right_keys]
-
-                if same_key_names:
-                    # When key names match, join using `on=[...]` so Spark de-dupes the key columns.
-                    return left.join(right_df, on=resolved_left_keys, how=join_type)
-
-                conditions = [left[lk] == right_df[rk] for lk, rk in zip(resolved_left_keys, mapped_right_keys)]
-                join_expr = conditions[0]
-                for cond in conditions[1:]:
-                    join_expr = join_expr & cond
-                return left.join(right_df, join_expr, how=join_type)
-            if allow_cross_join:
-                if join_type != "cross":
-                    logger.warning("allowCrossJoin enabled but joinType=%s; forcing cross join", join_type)
-                try:
-                    return left.crossJoin(right)
-                except Exception:
-                    return left.join(right, how="cross")
-            raise ValueError("Join requires leftKey/rightKey or leftKeys/rightKeys (or joinKey). Cross join requires allowCrossJoin=true.")
-        if operation == "filter":
-            expr = apply_parameters(str(metadata.get("expression") or ""), parameters).replace("\ufeff", "")
-            if expr:
-                return inputs[0].filter(expr)
-        if operation == "compute":
-            df = inputs[0]
-            # Preferred structured form: {"assignments":[{"column":"c","expression":"..."}]}
-            assignments = (
-                metadata.get("assignments")
-                or metadata.get("computedColumns")
-                or metadata.get("computed_columns")
-            )
-            if isinstance(assignments, list) and assignments:
-                out = df
-                for item in assignments:
-                    if not isinstance(item, dict):
-                        continue
-                    target = str(item.get("column") or item.get("target") or item.get("name") or "").strip().lstrip("\ufeff")
-                    formula = str(item.get("expression") or item.get("expr") or item.get("formula") or "").strip()
-                    if not target or not formula:
-                        continue
-                    formula = apply_parameters(formula, parameters).replace("\ufeff", "")
-                    out = out.withColumn(target, F.expr(formula))
-                return out
-
-            # Structured single-column form: {"targetColumn":"c","formula":"..."}
-            target = (
-                metadata.get("targetColumn")
-                or metadata.get("target_column")
-                or metadata.get("target")
-                or metadata.get("column")
-            )
-            formula = metadata.get("formula") or metadata.get("expr")
-            if target and formula:
-                target_text = str(target).strip().lstrip("\ufeff")
-                formula_text = apply_parameters(str(formula).strip(), parameters).replace("\ufeff", "")
-                if target_text and formula_text:
-                    return df.withColumn(target_text, F.expr(formula_text))
-
-            # Back-compat fallback: "col = expr" OR "expr" (avoid mis-parsing `a = b` comparisons).
-            expr = apply_parameters(str(metadata.get("expression") or ""), parameters).replace("\ufeff", "").strip()
-            if not expr:
-                return df
-            if "=" in expr:
-                target_candidate, formula_candidate = [part.strip() for part in expr.split("=", 1)]
-                target_clean = target_candidate.strip().lstrip("\ufeff")
-                if target_clean.startswith("`") and target_clean.endswith("`") and len(target_clean) > 1:
-                    target_clean = target_clean[1:-1].replace("``", "`")
-                if target_clean and target_clean not in df.columns:
-                    return df.withColumn(target_clean, F.expr(formula_candidate.replace("\ufeff", "")))
-            return df.withColumn("computed", F.expr(expr))
-        if operation == "explode":
-            columns = metadata.get("columns") or []
-            if columns:
-                column = str(columns[0]).strip().lstrip("\ufeff")
-                if column:
-                    return inputs[0].withColumn(column, F.explode(F.col(column)))
-        if operation == "select":
-            expressions = metadata.get("expressions") or metadata.get("selectExpr") or metadata.get("select_expr")
-            if isinstance(expressions, list) and expressions:
-                resolved = [
-                    apply_parameters(str(item), parameters).replace("\ufeff", "")
-                    for item in expressions
-                    if str(item or "").strip()
-                ]
-                if resolved:
-                    return inputs[0].selectExpr(*resolved)
-            columns = metadata.get("columns") or []
-            if columns:
-                cleaned = [str(col).strip().lstrip("\ufeff") for col in columns if str(col or "").strip()]
-                return inputs[0].select(*[F.col(col) for col in cleaned])
-        if operation == "drop":
-            columns = metadata.get("columns") or []
-            if columns:
-                cleaned = [str(col).strip().lstrip("\ufeff") for col in columns if str(col or "").strip()]
-                return inputs[0].drop(*cleaned)
-        if operation == "rename":
-            rename_map = metadata.get("rename") or {}
-            if rename_map:
-                df = inputs[0]
-                existing = list(df.columns)
-                existing_set = set(existing)
-                for raw_src, raw_dst in rename_map.items():
-                    src = str(raw_src)
-                    dst = str(raw_dst).lstrip("\ufeff")
-
-                    # Handle UTF-8 BOM artifacts deterministically.
-                    # - If the plan references a BOM-prefixed column that Spark stripped, fall back.
-                    # - If the plan wants to rename BOM->stripped but stripped already exists, drop the
-                    #   redundant BOM column instead of creating a duplicate destination column.
-                    if src not in existing_set:
-                        stripped = src.lstrip("\ufeff")
-                        if stripped != src and stripped in existing_set:
-                            src = stripped
-                    if src not in existing_set:
-                        continue
-                    if src == dst:
-                        continue
-
-                    if dst in existing_set:
-                        # Special-case: strip BOM (src starts with BOM, dst == stripped version).
-                        if str(raw_src).startswith("\ufeff") and dst == str(raw_src).lstrip("\ufeff"):
-                            df = df.drop(src)
-                            existing_set.remove(src)
-                            continue
-
-                        # General-case collision: make the destination unique to avoid invalid schemas.
-                        base = dst
-                        suffix = 1
-                        while dst in existing_set:
-                            dst = f"{base}__{suffix}"
-                            suffix += 1
-
-                    df = df.withColumnRenamed(src, dst)
-                    existing_set.remove(src)
-                    existing_set.add(dst)
-
-                return df
-        if operation == "cast":
-            casts = metadata.get("casts") or []
-            if casts:
-                return self._apply_casts(inputs[0], casts)
-        if operation == "regexReplace":
-            rules = metadata.get("rules") or []
-            df = inputs[0]
-            if rules:
-                for rule in rules:
-                    if not isinstance(rule, dict):
-                        continue
-                    column = str(rule.get("column") or "").strip().lstrip("\ufeff")
-                    pattern = str(rule.get("pattern") or "").strip()
-                    if not column or not pattern:
-                        continue
-                    flags = str(rule.get("flags") or "")
-                    inline = ""
-                    if "i" in flags:
-                        inline += "i"
-                    if "m" in flags:
-                        inline += "m"
-                    if "s" in flags:
-                        inline += "s"
-                    if inline:
-                        pattern = f"(?{inline}){pattern}"
-                    replacement = str(rule.get("replacement") or "")
-                    df = df.withColumn(column, F.regexp_replace(F.col(column), pattern, replacement))
-                return df
-            pattern = str(metadata.get("pattern") or "").strip()
-            columns = metadata.get("columns") or []
-            if pattern and columns:
-                flags = str(metadata.get("flags") or "")
-                inline = ""
-                if "i" in flags:
-                    inline += "i"
-                if "m" in flags:
-                    inline += "m"
-                if "s" in flags:
-                    inline += "s"
-                if inline:
-                    pattern = f"(?{inline}){pattern}"
-                replacement = str(metadata.get("replacement") or "")
-                for col in columns:
-                    col_name = str(col).strip().lstrip("\ufeff")
-                    if not col_name:
-                        continue
-                    df = df.withColumn(col_name, F.regexp_replace(F.col(col_name), pattern, replacement))
-                return df
-        if operation == "dedupe":
-            subset = metadata.get("columns") or []
-            if subset:
-                cleaned = [str(col).strip().lstrip("\ufeff") for col in subset if str(col or "").strip()]
-                return inputs[0].dropDuplicates(cleaned)
-            return inputs[0].dropDuplicates()
-        if operation == "sort":
-            columns = metadata.get("columns") or []
-            if columns:
-                specs: list[Any] = []
-                for item in columns:
-                    if isinstance(item, str):
-                        col = item.strip()
-                        if not col:
-                            continue
-                        direction = "asc"
-                        if col.startswith("-"):
-                            direction = "desc"
-                            col = col[1:].strip()
-                        col = col.lstrip("\ufeff")
-                        if not col:
-                            continue
-                        specs.append(F.col(col).desc() if direction == "desc" else F.col(col))
-                        continue
-                    if isinstance(item, dict):
-                        col = str(item.get("column") or item.get("name") or "").strip().lstrip("\ufeff")
-                        if not col:
-                            continue
-                        direction = str(item.get("direction") or item.get("dir") or "asc").strip().lower()
-                        if direction not in {"asc", "desc"}:
-                            direction = "asc"
-                        specs.append(F.col(col).desc() if direction == "desc" else F.col(col))
-                        continue
-                if specs:
-                    return inputs[0].sort(*specs)
-        if operation == "union" and len(inputs) >= 2:
-            union_mode = normalize_union_mode(metadata)
-            left = inputs[0]
-            right = inputs[1]
-            left_cols = list(left.columns)
-            right_cols = list(right.columns)
-            left_set = set(left_cols)
-            right_set = set(right_cols)
-            if union_mode == "strict":
-                if left_set != right_set:
-                    missing_left = sorted(right_set - left_set)
-                    missing_right = sorted(left_set - right_set)
-                    raise ValueError(
-                        "union schema mismatch (strict): "
-                        f"missing_in_left={missing_left} missing_in_right={missing_right}"
-                    )
-                return left.unionByName(right)
-            if union_mode == "common_only":
-                common = [col for col in left_cols if col in right_set]
-                if not common:
-                    raise ValueError("union has no common columns")
-                return left.select(*common).unionByName(right.select(*common))
-            if union_mode in {"pad_missing_nulls", "pad"}:
-                all_cols = left_cols + [col for col in right_cols if col not in left_set]
-
-                def align(df: DataFrame, present: set[str]) -> DataFrame:
-                    return df.select(
-                        *[
-                            (F.col(col) if col in present else F.lit(None).alias(col))
-                            for col in all_cols
-                        ]
-                    )
-
-                return align(left, left_set).unionByName(align(right, right_set))
-            raise ValueError(f"Invalid unionMode: {union_mode}")
-        if operation in {"groupBy", "aggregate"}:
-            group_by_raw = metadata.get("groupBy") or []
-            group_by = [
-                str(col).strip().lstrip("\ufeff")
-                for col in (group_by_raw if isinstance(group_by_raw, list) else [])
-                if str(col or "").strip()
-            ]
-            group_cols = [F.col(col) for col in group_by] if group_by else []
-
-            agg_exprs: list[Any] = []
-            expr_items = (
-                metadata.get("aggregateExpressions")
-                or metadata.get("aggExpressions")
-                or metadata.get("aggregate_expressions")
-            )
-            if isinstance(expr_items, list) and expr_items:
-                for item in expr_items:
-                    if isinstance(item, str):
-                        expr_text = apply_parameters(item, parameters).replace("\ufeff", "").strip()
-                        if not expr_text:
-                            continue
-                        alias = None
-                        lower = expr_text.lower()
-                        if " as " in lower:
-                            parts = lower.rsplit(" as ", 1)
-                            if len(parts) == 2 and parts[1].strip():
-                                alias = expr_text[len(parts[0]) + 4 :].strip()
-                                expr_text = expr_text[: len(parts[0])].strip()
-                        col_expr = F.expr(expr_text)
-                        if alias:
-                            col_expr = col_expr.alias(alias)
-                        agg_exprs.append(col_expr)
-                        continue
-                    if not isinstance(item, dict):
-                        continue
-                    expr_text = str(item.get("expr") or item.get("expression") or "").strip()
-                    if not expr_text:
-                        continue
-                    expr_text = apply_parameters(expr_text, parameters).replace("\ufeff", "")
-                    alias = str(item.get("alias") or item.get("as") or "").strip() or None
-                    col_expr = F.expr(expr_text)
-                    if alias:
-                        col_expr = col_expr.alias(alias)
-                    agg_exprs.append(col_expr)
-
-            if not agg_exprs:
-                aggregates = metadata.get("aggregates") or []
-                for agg in aggregates:
-                    if not isinstance(agg, dict):
-                        continue
-                    col_name = str(agg.get("column") or "").strip().lstrip("\ufeff")
-                    op = str(agg.get("op") or "").lower()
-                    alias = agg.get("alias") or f"{op}_{col_name}"
-                    if not col_name or not op:
-                        continue
-                    base_col = F.col(col_name)
-                    if op == "count":
-                        agg_exprs.append(F.count(base_col).alias(alias))
-                    elif op == "sum":
-                        agg_exprs.append(F.sum(base_col).alias(alias))
-                    elif op == "avg":
-                        agg_exprs.append(F.avg(base_col).alias(alias))
-                    elif op == "min":
-                        agg_exprs.append(F.min(base_col).alias(alias))
-                    elif op == "max":
-                        agg_exprs.append(F.max(base_col).alias(alias))
-
-            if group_cols and agg_exprs:
-                return inputs[0].groupBy(*group_cols).agg(*agg_exprs)
-            if agg_exprs:
-                return inputs[0].agg(*agg_exprs)
-        if operation == "pivot":
-            pivot_meta = metadata.get("pivot") or {}
-            index_cols_raw = pivot_meta.get("index") or []
-            index_cols = [
-                str(c).strip().lstrip("\ufeff")
-                for c in (index_cols_raw if isinstance(index_cols_raw, list) else [])
-                if str(c or "").strip()
-            ]
-            columns_col = str(pivot_meta.get("columns") or "").strip().lstrip("\ufeff") or None
-            values_col = str(pivot_meta.get("values") or "").strip().lstrip("\ufeff") or None
-            agg = str(pivot_meta.get("agg") or "sum").lower()
-            if index_cols and columns_col and values_col:
-                base = inputs[0].groupBy(*[F.col(c) for c in index_cols]).pivot(columns_col)
-                if agg == "count":
-                    return base.count()
-                if agg == "avg":
-                    return base.avg(values_col)
-                if agg == "min":
-                    return base.min(values_col)
-                if agg == "max":
-                    return base.max(values_col)
-                return base.sum(values_col)
-        if operation == "window":
-            window_meta = metadata.get("window") or {}
-            expressions = (
-                window_meta.get("expressions")
-                if isinstance(window_meta.get("expressions"), list)
-                else metadata.get("expressions")
-            )
-            if isinstance(expressions, list) and expressions:
-                df = inputs[0]
-                for item in expressions:
-                    if not isinstance(item, dict):
-                        continue
-                    name = str(item.get("column") or item.get("name") or "").strip().lstrip("\ufeff")
-                    expr_text = str(item.get("expr") or item.get("expression") or "").strip()
-                    if not name or not expr_text:
-                        continue
-                    expr_text = apply_parameters(expr_text, parameters).replace("\ufeff", "")
-                    df = df.withColumn(name, F.expr(expr_text))
-                return df
-
-            partition_by_raw = window_meta.get("partitionBy") or []
-            partition_by = [
-                str(c).strip().lstrip("\ufeff")
-                for c in (partition_by_raw if isinstance(partition_by_raw, list) else [])
-                if str(c or "").strip()
-            ]
-            order_by = window_meta.get("orderBy") or []
-            output_column = str(window_meta.get("outputColumn") or "row_number").strip().lstrip("\ufeff") or "row_number"
-            if order_by:
-                specs: list[Any] = []
-                for item in order_by:
-                    if isinstance(item, str):
-                        col = item.strip()
-                        if not col:
-                            continue
-                        direction = "asc"
-                        if col.startswith("-"):
-                            direction = "desc"
-                            col = col[1:].strip()
-                        col = col.lstrip("\ufeff")
-                        if not col:
-                            continue
-                        specs.append(F.col(col).desc() if direction == "desc" else F.col(col))
-                        continue
-                    if isinstance(item, dict):
-                        col = str(item.get("column") or item.get("name") or "").strip().lstrip("\ufeff")
-                        if not col:
-                            continue
-                        direction = str(item.get("direction") or item.get("dir") or "asc").strip().lower()
-                        if direction not in {"asc", "desc"}:
-                            direction = "asc"
-                        specs.append(F.col(col).desc() if direction == "desc" else F.col(col))
-                        continue
-                if not specs:
-                    return inputs[0]
-                if partition_by:
-                    window_spec = Window.partitionBy(*partition_by).orderBy(*specs)
-                else:
-                    window_spec = Window.orderBy(*specs)
-                return inputs[0].withColumn(output_column, F.row_number().over(window_spec))
-        return inputs[0]
-
-def _is_data_object(key: str) -> bool:
-    if not key:
-        return False
-    base = os.path.basename(key)
-    if base.startswith("_"):
-        return False
-    if base.startswith("."):
-        return False
-    return bool(os.path.splitext(base)[1])
-
-
-def _schema_from_dataframe(frame: DataFrame) -> List[Dict[str, str]]:
-    columns: List[Dict[str, str]] = []
-    schema = frame.schema
-    for field in schema.fields:
-        columns.append({"name": field.name, "type": spark_type_to_xsd(field.dataType)})
-    return columns
-
-
-def _hash_schema_columns(columns: List[Dict[str, Any]]) -> str:
-    return compute_schema_hash(columns)
-
-
-def _schema_columns_map(columns: List[Dict[str, Any]]) -> Dict[str, str]:
-    output: Dict[str, str] = {}
-    for col in columns or []:
-        if not isinstance(col, dict):
-            continue
-        name = str(col.get("name") or col.get("column") or "").strip()
-        raw_type = col.get("type") or col.get("data_type") or col.get("datatype")
-        if not name:
-            continue
-        output[name] = str(raw_type).strip().lower() if raw_type is not None else ""
-    return output
-
-
-def _schema_diff(
-    *,
-    current_columns: List[Dict[str, Any]],
-    expected_columns: List[Dict[str, Any]],
-) -> Dict[str, Any]:
-    current_map = _schema_columns_map(current_columns)
-    expected_map = _schema_columns_map(expected_columns)
-    current_keys = set(current_map.keys())
-    expected_keys = set(expected_map.keys())
-    removed = sorted(expected_keys - current_keys)
-    added = sorted(current_keys - expected_keys)
-    type_changed = []
-    for key in sorted(current_keys & expected_keys):
-        cur = current_map.get(key)
-        exp = expected_map.get(key)
-        if exp and cur and exp != cur:
-            type_changed.append({"column": key, "expected": exp, "observed": cur})
-    return {
-        "removed_columns": removed,
-        "added_columns": added,
-        "type_changes": type_changed,
-    }
-
-def _list_part_files(path: str, *, extensions: Optional[set[str]] = None) -> List[str]:
-    if extensions is None:
-        extensions = {".json", ".parquet"}
-    normalized = {ext.lower() for ext in extensions}
-    part_files: List[str] = []
-    for root, _, files in os.walk(path):
-        for name in files:
-            if not name.startswith("part-"):
-                continue
-            ext = os.path.splitext(name)[1].lower()
-            if ext in normalized:
-                part_files.append(os.path.join(root, name))
-    return part_files
+        return apply_spark_transform(
+            metadata=metadata,
+            inputs=inputs,
+            parameters=parameters,
+            apply_casts=self._apply_casts,
+        )
 
 
 async def main() -> None:
-    logging.basicConfig(
-        level=get_settings().observability.log_level,
-        format="%(asctime)s - %(name)s - %(levelname)s - trace_id=%(trace_id)s span_id=%(span_id)s req_id=%(request_id)s corr_id=%(correlation_id)s db=%(db_name)s - %(message)s",
-    )
-    install_trace_context_filter()
+    configure_logging(get_settings().observability.log_level)
     worker = PipelineWorker()
     await worker.run()
 

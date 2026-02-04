@@ -10,7 +10,7 @@ NO MOCKS, REAL EVENT SOURCING
 import asyncio
 import json
 from datetime import datetime, timezone
-from typing import Dict, Any, List, Optional
+from typing import Any, Dict, List, Optional
 import boto3
 from botocore.client import Config
 import hashlib
@@ -27,15 +27,17 @@ class EventReplayService:
         s3_endpoint: str = "http://localhost:9000",
         s3_access_key: str = "minioadmin",
         s3_secret_key: str = "minioadmin123",
-        bucket_name: str = "instance-events"
+        bucket_name: str = "instance-events",
+        *,
+        s3_client: Any | None = None,
     ):
-        self.s3_client = boto3.client(
-            's3',
+        self.s3_client = s3_client or boto3.client(
+            "s3",
             endpoint_url=s3_endpoint,
             aws_access_key_id=s3_access_key,
             aws_secret_access_key=s3_secret_key,
-            config=Config(signature_version='s3v4'),
-            region_name='us-east-1'
+            config=Config(signature_version="s3v4"),
+            region_name="us-east-1",
         )
         self.bucket_name = bucket_name
         

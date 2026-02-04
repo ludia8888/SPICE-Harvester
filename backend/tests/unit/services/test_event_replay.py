@@ -1,27 +1,61 @@
 from __future__ import annotations
 
+import io
 import json
-import os
-import time
 import uuid
 from datetime import datetime, timezone
 
-import boto3
 import pytest
-from botocore.client import Config
 
 from shared.services.events.event_replay import EventReplayService
 
 
+class _InMemoryS3Client:
+    def __init__(self) -> None:
+        self._buckets: dict[str, dict[str, dict]] = {}
+
+    def head_bucket(self, *, Bucket: str) -> None:  # noqa: N803
+        if Bucket not in self._buckets:
+            raise RuntimeError("Bucket not found")
+
+    def create_bucket(self, *, Bucket: str) -> None:  # noqa: N803
+        self._buckets.setdefault(Bucket, {})
+
+    def put_object(self, *, Bucket: str, Key: str, Body: bytes) -> None:  # noqa: N803
+        self.create_bucket(Bucket=Bucket)
+        self._buckets[Bucket][Key] = {
+            "Body": bytes(Body),
+            "LastModified": datetime.now(timezone.utc),
+        }
+
+    def get_object(self, *, Bucket: str, Key: str):  # noqa: N803, ANN001
+        body = self._buckets[Bucket][Key]["Body"]
+        return {"Body": io.BytesIO(body)}
+
+    def list_objects_v2(self, *, Bucket: str, Prefix: str, MaxKeys: int = 1000):  # noqa: N803, ANN001
+        objects = self._buckets.get(Bucket, {})
+        keys = [k for k in objects.keys() if k.startswith(Prefix)]
+        keys = sorted(keys)[: int(MaxKeys)]
+        if not keys:
+            return {}
+        return {
+            "Contents": [
+                {
+                    "Key": key,
+                    "LastModified": objects[key]["LastModified"],
+                    "Size": len(objects[key]["Body"]),
+                }
+                for key in keys
+            ]
+        }
+
+    def delete_object(self, *, Bucket: str, Key: str) -> None:  # noqa: N803
+        bucket = self._buckets.get(Bucket, {})
+        bucket.pop(Key, None)
+
+
 def _s3_client():
-    return boto3.client(
-        "s3",
-        endpoint_url=os.environ.get("MINIO_ENDPOINT_URL", "http://localhost:9000"),
-        aws_access_key_id=os.environ.get("MINIO_ACCESS_KEY", "minioadmin"),
-        aws_secret_access_key=os.environ.get("MINIO_SECRET_KEY", "minioadmin123"),
-        config=Config(signature_version="s3v4"),
-        region_name="us-east-1",
-    )
+    return _InMemoryS3Client()
 
 
 def _ensure_bucket(client, bucket: str) -> None:
@@ -55,12 +89,7 @@ async def test_event_replay_aggregate_and_history() -> None:
     aggregate_id = "cust-1"
     prefix = f"{db_name}/{class_id}/{aggregate_id}/"
 
-    service = EventReplayService(
-        s3_endpoint=os.environ.get("MINIO_ENDPOINT_URL", "http://localhost:9000"),
-        s3_access_key=os.environ.get("MINIO_ACCESS_KEY", "minioadmin"),
-        s3_secret_key=os.environ.get("MINIO_SECRET_KEY", "minioadmin123"),
-        bucket_name=bucket,
-    )
+    service = EventReplayService(bucket_name=bucket, s3_client=client)
 
     try:
         create_event = {
@@ -103,12 +132,7 @@ async def test_event_replay_all_and_determinism() -> None:
     class_id = "Order"
     prefix = f"{db_name}/{class_id}/"
 
-    service = EventReplayService(
-        s3_endpoint=os.environ.get("MINIO_ENDPOINT_URL", "http://localhost:9000"),
-        s3_access_key=os.environ.get("MINIO_ACCESS_KEY", "minioadmin"),
-        s3_secret_key=os.environ.get("MINIO_SECRET_KEY", "minioadmin123"),
-        bucket_name=bucket,
-    )
+    service = EventReplayService(bucket_name=bucket, s3_client=client)
 
     try:
         for agg_id in ("order-1", "order-2"):

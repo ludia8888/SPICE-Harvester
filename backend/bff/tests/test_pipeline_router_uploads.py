@@ -7,7 +7,7 @@ import pytest
 from starlette.datastructures import UploadFile
 from starlette.requests import Request
 
-from bff.routers import pipeline as pipeline_router
+from bff.routers import pipeline_datasets, pipeline_datasets_ops, pipeline_ops, pipeline_proposals
 from shared.services.registries.dataset_registry import (
     DatasetIngestRequestRecord,
     DatasetIngestTransactionRecord,
@@ -370,20 +370,20 @@ def test_pipeline_helpers_normalize_inputs(monkeypatch):
     monkeypatch.setenv("PIPELINE_PROTECTED_BRANCHES", "main, release")
     monkeypatch.setenv("PIPELINE_REQUIRE_PROPOSALS", "true")
 
-    assert pipeline_router._resolve_pipeline_protected_branches() == {"main", "release"}
-    assert pipeline_router._pipeline_requires_proposal("main") is True
-    assert pipeline_router._pipeline_requires_proposal("feature") is False
+    assert pipeline_ops._resolve_pipeline_protected_branches() == {"main", "release"}
+    assert pipeline_ops._pipeline_requires_proposal("main") is True
+    assert pipeline_ops._pipeline_requires_proposal("feature") is False
 
-    assert pipeline_router._normalize_mapping_spec_ids(None) == []
-    assert pipeline_router._normalize_mapping_spec_ids("a,b") == ["a", "b"]
-    assert pipeline_router._normalize_mapping_spec_ids(["a", "a", "b"]) == ["a", "b"]
+    assert pipeline_proposals._normalize_mapping_spec_ids(None) == []
+    assert pipeline_proposals._normalize_mapping_spec_ids("a,b") == ["a", "b"]
+    assert pipeline_proposals._normalize_mapping_spec_ids(["a", "a", "b"]) == ["a", "b"]
 
-    metadata = pipeline_router._sanitize_s3_metadata({"hello": "world", "label": "안녕"})
+    metadata = pipeline_datasets._sanitize_s3_metadata({"hello": "world", "label": "안녕"})
     assert metadata["hello"] == "world"
     assert metadata["label"] != "안녕"
 
-    assert pipeline_router._detect_csv_delimiter("a,b,c") == ","
-    columns, preview_rows, total_rows = pipeline_router._parse_csv_content(
+    assert pipeline_datasets._detect_csv_delimiter("a,b,c") == ","
+    columns, preview_rows, total_rows = pipeline_datasets._parse_csv_content(
         "id,name\n1,Ada\n2,Ben\n",
         delimiter=",",
         has_header=True,
@@ -403,7 +403,7 @@ async def test_upload_csv_dataset_creates_version(monkeypatch):
 
     monkeypatch.setenv("PIPELINE_LOCKS_ENABLED", "false")
     monkeypatch.setenv("PIPELINE_LOCKS_REQUIRED", "false")
-    monkeypatch.setattr(pipeline_router, "flush_dataset_ingest_outbox", _noop_flush)
+    monkeypatch.setattr(pipeline_datasets_ops, "flush_dataset_ingest_outbox", _noop_flush)
     monkeypatch.setattr(funnel_client, "FunnelClient", _FakeFunnelClient)
 
     pipeline_registry = _FakePipelineRegistry()
@@ -419,7 +419,7 @@ async def test_upload_csv_dataset_creates_version(monkeypatch):
         }
     )
 
-    response = await pipeline_router.upload_csv_dataset(
+    response = await pipeline_datasets.upload_csv_dataset(
         db_name="core-db",
         branch="main",
         file=upload,
@@ -449,7 +449,7 @@ async def test_upload_csv_dataset_funnel_failure_uses_fallback(monkeypatch):
 
     monkeypatch.setenv("PIPELINE_LOCKS_ENABLED", "false")
     monkeypatch.setenv("PIPELINE_LOCKS_REQUIRED", "false")
-    monkeypatch.setattr(pipeline_router, "flush_dataset_ingest_outbox", _noop_flush)
+    monkeypatch.setattr(pipeline_datasets_ops, "flush_dataset_ingest_outbox", _noop_flush)
     monkeypatch.setattr(funnel_client, "FunnelClient", _FailingFunnelClient)
 
     pipeline_registry = _FakePipelineRegistry()
@@ -465,7 +465,7 @@ async def test_upload_csv_dataset_funnel_failure_uses_fallback(monkeypatch):
         }
     )
 
-    response = await pipeline_router.upload_csv_dataset(
+    response = await pipeline_datasets.upload_csv_dataset(
         db_name="core-db",
         branch="main",
         file=upload,
@@ -501,7 +501,7 @@ async def test_upload_excel_dataset_commits_preview(monkeypatch):
 
     monkeypatch.setenv("PIPELINE_LOCKS_ENABLED", "false")
     monkeypatch.setenv("PIPELINE_LOCKS_REQUIRED", "false")
-    monkeypatch.setattr(pipeline_router, "flush_dataset_ingest_outbox", _noop_flush)
+    monkeypatch.setattr(pipeline_datasets_ops, "flush_dataset_ingest_outbox", _noop_flush)
     monkeypatch.setattr(funnel_client, "FunnelClient", _FakeFunnelClient)
 
     pipeline_registry = _FakePipelineRegistry()
@@ -516,7 +516,7 @@ async def test_upload_excel_dataset_commits_preview(monkeypatch):
         }
     )
 
-    response = await pipeline_router.upload_excel_dataset(
+    response = await pipeline_datasets.upload_excel_dataset(
         db_name="core-db",
         branch="main",
         file=upload,
@@ -565,7 +565,7 @@ async def test_approve_dataset_schema_updates_dataset():
     )
     request = _build_request({"X-DB-Name": "core-db", "X-User-ID": "user-approve"})
 
-    response = await pipeline_router.approve_dataset_schema(
+    response = await pipeline_datasets.approve_dataset_schema(
         ingest_request_id=ingest_request.ingest_request_id,
         payload={},
         request=request,
@@ -607,7 +607,7 @@ async def test_get_ingest_request_includes_funnel_analysis(monkeypatch):
     )
     request = _build_request({"X-DB-Name": "core-db"})
 
-    response = await pipeline_router.get_dataset_ingest_request(
+    response = await pipeline_datasets.get_dataset_ingest_request(
         ingest_request_id=ingest_request.ingest_request_id,
         request=request,
         dataset_registry=dataset_registry,
@@ -647,7 +647,7 @@ async def test_get_ingest_request_funnel_failure_uses_fallback(monkeypatch):
     )
     request = _build_request({"X-DB-Name": "core-db"})
 
-    response = await pipeline_router.get_dataset_ingest_request(
+    response = await pipeline_datasets.get_dataset_ingest_request(
         ingest_request_id=ingest_request.ingest_request_id,
         request=request,
         dataset_registry=dataset_registry,
@@ -690,7 +690,7 @@ async def test_reanalyze_dataset_version_returns_funnel_analysis(monkeypatch):
     )
     request = _build_request({"X-DB-Name": "core-db"})
 
-    response = await pipeline_router.reanalyze_dataset_version(
+    response = await pipeline_datasets.reanalyze_dataset_version(
         dataset_id=dataset.dataset_id,
         version_id=version.version_id,
         request=request,
@@ -709,7 +709,7 @@ async def test_upload_media_dataset_stores_files(monkeypatch):
 
     monkeypatch.setenv("PIPELINE_LOCKS_ENABLED", "false")
     monkeypatch.setenv("PIPELINE_LOCKS_REQUIRED", "false")
-    monkeypatch.setattr(pipeline_router, "flush_dataset_ingest_outbox", _noop_flush)
+    monkeypatch.setattr(pipeline_datasets_ops, "flush_dataset_ingest_outbox", _noop_flush)
 
     pipeline_registry = _FakePipelineRegistry()
     dataset_registry = _FakeDatasetRegistry()
@@ -724,7 +724,7 @@ async def test_upload_media_dataset_stores_files(monkeypatch):
         }
     )
 
-    response = await pipeline_router.upload_media_dataset(
+    response = await pipeline_datasets.upload_media_dataset(
         db_name="core-db",
         branch="main",
         files=[upload_one, upload_two],
@@ -792,7 +792,7 @@ async def test_maybe_enqueue_objectify_job():
     queue = FakeObjectifyJobQueue()
     dataset_registry = FakeDatasetRegistry()
 
-    job_id = await pipeline_router._maybe_enqueue_objectify_job(
+    job_id = await pipeline_datasets._maybe_enqueue_objectify_job(
         dataset=dataset,
         version=version,
         objectify_registry=registry,

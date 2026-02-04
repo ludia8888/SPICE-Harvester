@@ -10,21 +10,17 @@ import asyncio
 import logging
 
 from shared.config.settings import get_settings
-from shared.observability.logging import install_trace_context_filter
 from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
 from shared.services.pipeline.pipeline_job_queue import PipelineJobQueue
 from shared.services.registries.pipeline_registry import PipelineRegistry
 from shared.services.pipeline.pipeline_scheduler import PipelineScheduler
+from shared.utils.app_logger import configure_logging
 
 
 async def main() -> None:
     settings = get_settings()
-    logging.basicConfig(
-        level=settings.observability.log_level,
-        format="%(asctime)s - %(name)s - %(levelname)s - trace_id=%(trace_id)s span_id=%(span_id)s req_id=%(request_id)s corr_id=%(correlation_id)s db=%(db_name)s - %(message)s",
-    )
-    install_trace_context_filter()
+    configure_logging(settings.observability.log_level)
     tracing = get_tracing_service("pipeline-scheduler")
     metrics = get_metrics_collector("pipeline-scheduler")
     registry = PipelineRegistry()

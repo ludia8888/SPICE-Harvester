@@ -35,6 +35,7 @@ describe('bff api helpers', () => {
     const { listDatabases } = await loadModule({
       VITE_API_BASE_URL: 'http://example.com/api/v1',
       VITE_BFF_TOKEN: 'token',
+      VITE_USER_JWT: 'user.jwt.token',
       VITE_USER_ID: 'user-1',
       VITE_USER_NAME: 'User One',
     })
@@ -52,7 +53,8 @@ describe('bff api helpers', () => {
     )
 
     const headers = fetchMock.mock.calls[0][1]?.headers as Headers
-    expect(headers.get('Authorization')).toBe('Bearer token')
+    expect(headers.get('X-Admin-Token')).toBe('token')
+    expect(headers.get('X-Delegated-Authorization')).toBe('Bearer user.jwt.token')
     expect(headers.get('X-User-ID')).toBe('user-1')
     expect(headers.get('X-User-Name')).toBe('User One')
   })

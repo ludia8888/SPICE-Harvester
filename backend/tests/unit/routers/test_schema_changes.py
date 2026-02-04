@@ -281,6 +281,7 @@ class TestMappingCompatibility:
         """Create mock registries"""
         dataset_registry = MagicMock()
         objectify_registry = MagicMock()
+        dataset_registry.get_latest_version = AsyncMock(return_value=None)
         return dataset_registry, objectify_registry
 
     @pytest.mark.asyncio
@@ -292,12 +293,12 @@ class TestMappingCompatibility:
         mapping_spec = MagicMock()
         mapping_spec.dataset_id = "ds-123"
         mapping_spec.schema_hash = "same-hash"
-        objectify_registry.get_mapping_spec_by_id = AsyncMock(return_value=mapping_spec)
+        objectify_registry.get_mapping_spec = AsyncMock(return_value=mapping_spec)
 
         # Mock dataset with same schema hash
-        dataset_registry.get_dataset = AsyncMock(return_value={
-            "schema": [{"name": "id", "type": "xsd:integer"}]
-        })
+        dataset = MagicMock()
+        dataset.schema_json = {"columns": [{"name": "id", "type": "xsd:integer"}]}
+        dataset_registry.get_dataset = AsyncMock(return_value=dataset)
 
         with patch("bff.routers.schema_changes.get_dataset_registry", AsyncMock(return_value=dataset_registry)), \
              patch("bff.routers.schema_changes.get_objectify_registry", AsyncMock(return_value=objectify_registry)), \
@@ -328,11 +329,11 @@ class TestMappingCompatibility:
         mapping_spec = MagicMock()
         mapping_spec.dataset_id = "ds-123"
         mapping_spec.schema_hash = "old-hash"
-        objectify_registry.get_mapping_spec_by_id = AsyncMock(return_value=mapping_spec)
+        objectify_registry.get_mapping_spec = AsyncMock(return_value=mapping_spec)
 
-        dataset_registry.get_dataset = AsyncMock(return_value={
-            "schema": [{"name": "new_id", "type": "xsd:string"}]
-        })
+        dataset = MagicMock()
+        dataset.schema_json = {"columns": [{"name": "new_id", "type": "xsd:string"}]}
+        dataset_registry.get_dataset = AsyncMock(return_value=dataset)
 
         with patch("bff.routers.schema_changes.get_dataset_registry", AsyncMock(return_value=dataset_registry)), \
              patch("bff.routers.schema_changes.get_objectify_registry", AsyncMock(return_value=objectify_registry)), \
@@ -380,7 +381,7 @@ class TestMappingCompatibility:
     async def test_check_compatibility_mapping_not_found(self, mock_registries) -> None:
         """check_mapping_compatibility should return 404 for unknown mapping"""
         dataset_registry, objectify_registry = mock_registries
-        objectify_registry.get_mapping_spec_by_id = AsyncMock(return_value=None)
+        objectify_registry.get_mapping_spec = AsyncMock(return_value=None)
 
         with patch("bff.routers.schema_changes.get_dataset_registry", AsyncMock(return_value=dataset_registry)), \
              patch("bff.routers.schema_changes.get_objectify_registry", AsyncMock(return_value=objectify_registry)):

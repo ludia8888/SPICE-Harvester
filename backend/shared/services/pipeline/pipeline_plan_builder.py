@@ -11,6 +11,7 @@ import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
+from shared.services.pipeline.pipeline_graph_utils import unique_node_id
 from shared.services.pipeline.pipeline_transform_spec import SUPPORTED_TRANSFORMS
 
 
@@ -221,16 +222,6 @@ def _incoming_sources_in_order(definition: Dict[str, Any], node_id: str) -> List
     return sources
 
 
-def _unique_node_id(base: str, existing: set[str]) -> str:
-    base = str(base or "").strip() or "node"
-    candidate = base
-    idx = 2
-    while candidate in existing:
-        candidate = f"{base}_{idx}"
-        idx += 1
-    return candidate
-
-
 def new_plan(
     *,
     goal: str,
@@ -306,7 +297,7 @@ def add_input(
         base = "input"
         if ds_name:
             base = f"input_{ds_name}".replace(" ", "_")
-        resolved_id = _unique_node_id(base, existing)
+        resolved_id = unique_node_id(base, existing, start_index=2)
 
     metadata: Dict[str, Any] = {}
     if ds_id:
@@ -356,7 +347,7 @@ def add_external_input(
 
     resolved_id = str(node_id or "").strip() or None
     if not resolved_id:
-        resolved_id = _unique_node_id(f"input_{fmt}", existing)
+        resolved_id = unique_node_id(f"input_{fmt}", existing, start_index=2)
 
     metadata: Dict[str, Any] = {"read": dict(read_cfg)}
     if source_name:
@@ -433,7 +424,7 @@ def add_transform(
 
     resolved_id = str(node_id or "").strip() or None
     if not resolved_id:
-        resolved_id = _unique_node_id(op, existing)
+        resolved_id = unique_node_id(op, existing, start_index=2)
 
     meta = dict(metadata or {})
     meta["operation"] = op
@@ -1022,7 +1013,7 @@ def add_output(
 
     resolved_id = str(node_id or "").strip() or None
     if not resolved_id:
-        resolved_id = _unique_node_id(f"output_{name}".replace(" ", "_"), existing)
+        resolved_id = unique_node_id(f"output_{name}".replace(" ", "_"), existing, start_index=2)
 
     metadata = dict(output_metadata or {})
     metadata["outputName"] = name

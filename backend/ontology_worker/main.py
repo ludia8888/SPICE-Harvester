@@ -10,10 +10,9 @@ import os
 from concurrent.futures import ThreadPoolExecutor
 import signal
 from contextlib import suppress
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any
-from uuid import uuid5, NAMESPACE_URL
-
 from confluent_kafka import Producer, KafkaError, TopicPartition
 
 from shared.config.app_config import AppConfig
@@ -31,9 +30,9 @@ from shared.models.config import ConnectionConfig
 from oms.services.async_terminus import AsyncTerminusService
 from oms.services.event_store import EventStore
 from shared.services.storage.redis_service import RedisService, create_redis_service
-from shared.services.core.command_status_service import CommandStatusService
+from shared.services.core.command_status_service import CommandStatus, CommandStatusService
+from shared.services.kafka.processed_event_worker import HeartbeatOptions, ProcessedEventKafkaWorker, RegistryKey
 from shared.services.registries.processed_event_registry import (
-    ClaimDecision,
     ProcessedEventRegistry,
     validate_registry_enabled,
     validate_lease_settings,
@@ -43,6 +42,8 @@ from shared.services.registries.lineage_store import LineageStore
 from shared.services.core.audit_log_store import AuditLogStore
 from shared.services.registries.ontology_key_spec_registry import OntologyKeySpecRegistry
 from shared.security.input_sanitizer import validate_branch_name
+from shared.utils.executor_utils import call_in_executor
+from shared.utils.spice_event_ids import spice_event_id
 from shared.utils.ontology_version import resolve_ontology_version
 from oms.exceptions import DuplicateOntologyError, DatabaseError
 
@@ -53,19 +54,39 @@ from shared.observability.context_propagation import (
     attach_context_from_kafka,
     kafka_headers_from_current_context,
 )
-from shared.observability.logging import install_trace_context_filter
+from shared.utils.app_logger import configure_logging
 
 # 로깅 설정
 _LOG_LEVEL = get_settings().observability.log_level
-logging.basicConfig(
-    level=_LOG_LEVEL,
-    format="%(asctime)s - %(name)s - %(levelname)s - trace_id=%(trace_id)s span_id=%(span_id)s req_id=%(request_id)s corr_id=%(correlation_id)s db=%(db_name)s - %(message)s",
-)
-install_trace_context_filter()
+configure_logging(_LOG_LEVEL)
 logger = logging.getLogger(__name__)
 
 
-class OntologyWorker:
+@dataclass(frozen=True)
+class _OntologyCommandPayload:
+    command: Dict[str, Any]
+    envelope_metadata: Optional[Dict[str, Any]] = None
+
+
+class _OntologyCommandParseError(ValueError):
+    def __init__(
+        self,
+        *,
+        stage: str,
+        payload_text: Optional[str],
+        payload_obj: Optional[Dict[str, Any]],
+        fallback_metadata: Optional[Dict[str, Any]],
+        cause: Exception,
+    ) -> None:
+        super().__init__(str(cause))
+        self.stage = str(stage)
+        self.payload_text = payload_text
+        self.payload_obj = payload_obj
+        self.fallback_metadata = fallback_metadata
+        self.cause = cause
+
+
+class OntologyWorker(ProcessedEventKafkaWorker[_OntologyCommandPayload, None]):
     """온톨로지 Command를 처리하는 워커"""
     
     def __init__(self):
@@ -73,6 +94,8 @@ class OntologyWorker:
         worker_cfg = settings.workers.ontology
 
         self.running = False
+        self.service_name = "ontology-worker"
+        self.handler = "ontology_worker"
         self.kafka_servers = settings.database.kafka_servers
         self.enable_event_sourcing = bool(settings.event_sourcing.enable_event_sourcing)
         self.enable_processed_event_registry = bool(settings.event_sourcing.enable_processed_event_registry)
@@ -84,17 +107,23 @@ class OntologyWorker:
         self.dlq_topic = AppConfig.ONTOLOGY_COMMANDS_DLQ_TOPIC
         self.dlq_flush_timeout_seconds = float(worker_cfg.dlq_flush_timeout_seconds)
         self.max_retry_attempts = int(worker_cfg.max_retry_attempts)
+        self.max_retries = int(self.max_retry_attempts)
+        self.backoff_base = 1
+        self.backoff_max = 60
         self.db_ready_poll_seconds = float(worker_cfg.db_ready_poll_seconds)
         self.terminus_service: Optional[AsyncTerminusService] = None
         self.redis_service: Optional[RedisService] = None
         self.command_status_service: Optional[CommandStatusService] = None
         self.event_store: Optional[EventStore] = None
         self.processed_event_registry: Optional[ProcessedEventRegistry] = None
+        self.processed: Optional[ProcessedEventRegistry] = None
         self.lineage_store: Optional[LineageStore] = None
         self.audit_store: Optional[AuditLogStore] = None
         self.key_spec_registry: Optional[OntologyKeySpecRegistry] = OntologyKeySpecRegistry()
         self.tracing_service = None
         self.metrics_collector = None
+        self.tracing = None
+        self.metrics = None
         self._consumer_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="ontology-worker-kafka")
 
     @staticmethod
@@ -151,19 +180,8 @@ class OntologyWorker:
             f"Database '{db_name}' existence check timed out (expected={expected}, last_exists={last})"
         )
 
-    async def _heartbeat_loop(self, *, handler: str, event_id: str) -> None:
-        if not self.processed_event_registry:
-            return
-        interval = int(get_settings().event_sourcing.processed_event_heartbeat_interval_seconds)
-        while True:
-            await asyncio.sleep(interval)
-            ok = await self.processed_event_registry.heartbeat(handler=handler, event_id=event_id)
-            if not ok:
-                return
-
     async def _consumer_call(self, func, *args, **kwargs):
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(self._consumer_executor, lambda: func(*args, **kwargs))
+        return await call_in_executor(self._consumer_executor, func, *args, **kwargs)
         
     async def initialize(self):
         """워커 초기화"""
@@ -229,6 +247,7 @@ class OntologyWorker:
         # Durable processed-events registry (idempotency + ordering guard)
         self.processed_event_registry = ProcessedEventRegistry()
         await self.processed_event_registry.connect()
+        self.processed = self.processed_event_registry
         logger.info("✅ ProcessedEventRegistry connected (Postgres)")
 
         # First-class lineage/audit (best-effort; do not fail the worker)
@@ -253,10 +272,12 @@ class OntologyWorker:
         # Initialize OpenTelemetry
         self.tracing_service = get_tracing_service("ontology-worker")
         self.metrics_collector = get_metrics_collector("ontology-worker")
+        self.tracing = self.tracing_service
+        self.metrics = self.metrics_collector
         
         logger.info("Ontology Worker initialized successfully")
 
-    async def _send_to_dlq(
+    async def _publish_to_dlq(
         self,
         *,
         msg: Any,
@@ -318,6 +339,44 @@ class OntologyWorker:
             self.metrics_collector.record_event("ONTOLOGY_COMMAND_DLQ", action="published")
         except Exception:
             pass
+
+    async def _send_to_dlq(  # type: ignore[override]
+        self,
+        *,
+        msg: Any,
+        error: str,
+        attempt_count: int,
+        payload: Optional[_OntologyCommandPayload] = None,
+        raw_payload: Optional[str] = None,
+        stage: str = "process_command",
+        payload_text: Optional[str] = None,
+        payload_obj: Optional[Dict[str, Any]] = None,
+        kafka_headers: Optional[Any] = None,
+        fallback_metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        if kafka_headers is None:
+            with suppress(Exception):
+                kafka_headers = msg.headers()
+
+        if payload_text is None:
+            payload_text = raw_payload
+
+        if payload_obj is None and payload is not None:
+            payload_obj = payload.command if isinstance(payload.command, dict) else None
+
+        if fallback_metadata is None and payload is not None:
+            fallback_metadata = payload.envelope_metadata
+
+        await self._publish_to_dlq(
+            msg=msg,
+            stage=str(stage),
+            error=error,
+            attempt_count=int(attempt_count),
+            payload_text=payload_text,
+            payload_obj=payload_obj,
+            kafka_headers=kafka_headers,
+            fallback_metadata=fallback_metadata,
+        )
         
     async def process_command(self, command_data: Dict[str, Any]) -> None:
         """Command 처리"""
@@ -364,19 +423,6 @@ class OntologyWorker:
         else:
             raise ValueError(f"Unknown command type: {command_type}")
 
-    @staticmethod
-    def _is_retryable_error(exc: Exception) -> bool:
-        msg = str(exc).lower()
-        non_retryable_markers = [
-            "schema check failure",
-            "not_a_class_or_base_type",
-            "security violation",
-            "invalid",
-            "bad request",
-            "api error: 400",
-        ]
-        return not any(marker in msg for marker in non_retryable_markers)
-            
     async def handle_create_ontology(self, command_data: Dict[str, Any]) -> None:
         """온톨로지 생성 처리"""
         import sys
@@ -1089,7 +1135,11 @@ class OntologyWorker:
         if getattr(event, "command_id", None):
             command_id_str = str(event.command_id)
             metadata.setdefault("command_id", command_id_str)
-            event_id = str(uuid5(NAMESPACE_URL, f"spice:{command_id_str}:{event_type}:{event.aggregate_id}"))
+            event_id = spice_event_id(
+                command_id=command_id_str,
+                event_type=event_type,
+                aggregate_id=str(event.aggregate_id),
+            )
 
         return EventEnvelope(
             event_id=event_id,
@@ -1136,6 +1186,252 @@ class OntologyWorker:
         )
         
         await self.publish_event(event)
+
+    # --- ProcessedEventKafkaWorker hooks ---
+    def _heartbeat_options(self) -> HeartbeatOptions:  # type: ignore[override]
+        return HeartbeatOptions(
+            stop_when_false=True,
+            continue_on_exception=False,
+        )
+
+    def _parse_payload(self, payload: Any) -> _OntologyCommandPayload:  # type: ignore[override]
+        if not isinstance(payload, (bytes, bytearray)):
+            raise _OntologyCommandParseError(
+                stage="decode",
+                payload_text=None,
+                payload_obj=None,
+                fallback_metadata=None,
+                cause=TypeError("Kafka payload must be bytes"),
+            )
+
+        try:
+            raw_text = payload.decode("utf-8")
+        except Exception as exc:
+            raise _OntologyCommandParseError(
+                stage="decode",
+                payload_text=None,
+                payload_obj=None,
+                fallback_metadata=None,
+                cause=exc,
+            ) from exc
+
+        raw_message: Any
+        try:
+            raw_message = json.loads(raw_text)
+        except Exception as exc:
+            raise _OntologyCommandParseError(
+                stage="parse_json",
+                payload_text=raw_text,
+                payload_obj=None,
+                fallback_metadata=None,
+                cause=exc,
+            ) from exc
+
+        fallback_metadata = raw_message.get("metadata") if isinstance(raw_message, dict) else None
+        fallback_metadata = fallback_metadata if isinstance(fallback_metadata, dict) else None
+
+        try:
+            envelope = EventEnvelope.model_validate(raw_message if isinstance(raw_message, dict) else {})
+        except Exception as exc:
+            payload_obj = raw_message if isinstance(raw_message, dict) else None
+            raise _OntologyCommandParseError(
+                stage="parse_envelope",
+                payload_text=raw_text,
+                payload_obj=payload_obj,
+                fallback_metadata=fallback_metadata,
+                cause=exc,
+            ) from exc
+
+        kind = envelope.metadata.get("kind") if isinstance(envelope.metadata, dict) else None
+        if kind != "command":
+            payload_obj = envelope.model_dump(mode="json")
+            raise _OntologyCommandParseError(
+                stage="validate_envelope",
+                payload_text=raw_text,
+                payload_obj=payload_obj if isinstance(payload_obj, dict) else None,
+                fallback_metadata=envelope.metadata if isinstance(envelope.metadata, dict) else fallback_metadata,
+                cause=ValueError(f"unexpected_envelope_kind:{kind}"),
+            )
+
+        command_data = dict(envelope.data or {})
+        if command_data.get("aggregate_id") and command_data.get("aggregate_id") != envelope.aggregate_id:
+            raise _OntologyCommandParseError(
+                stage="validate_envelope",
+                payload_text=raw_text,
+                payload_obj=envelope.model_dump(mode="json"),
+                fallback_metadata=envelope.metadata if isinstance(envelope.metadata, dict) else fallback_metadata,
+                cause=ValueError(
+                    f"aggregate_id mismatch: command.aggregate_id={command_data.get('aggregate_id')} "
+                    f"envelope.aggregate_id={envelope.aggregate_id}"
+                ),
+            )
+        command_data["aggregate_id"] = envelope.aggregate_id
+        command_data.setdefault("event_id", envelope.event_id)
+        command_data.setdefault("sequence_number", envelope.sequence_number)
+        return _OntologyCommandPayload(command=command_data, envelope_metadata=envelope.metadata)
+
+    def _fallback_metadata(self, payload: _OntologyCommandPayload) -> Optional[Dict[str, Any]]:  # type: ignore[override]
+        return payload.envelope_metadata
+
+    def _registry_key(self, payload: _OntologyCommandPayload) -> RegistryKey:  # type: ignore[override]
+        command = payload.command if isinstance(payload.command, dict) else {}
+
+        registry_event_id = command.get("event_id") or command.get("command_id")
+        registry_event_id = str(registry_event_id or "").strip()
+        if not registry_event_id:
+            raise ValueError("event_id is required")
+
+        aggregate_id = command.get("aggregate_id")
+        aggregate_id = str(aggregate_id).strip() if aggregate_id is not None else None
+        if not aggregate_id:
+            aggregate_id = None
+
+        sequence_number = command.get("sequence_number")
+        try:
+            seq_int = int(sequence_number) if sequence_number is not None else None
+        except Exception:
+            seq_int = None
+
+        return RegistryKey(event_id=registry_event_id, aggregate_id=aggregate_id, sequence_number=seq_int)
+
+    async def _process_payload(self, payload: _OntologyCommandPayload) -> None:  # type: ignore[override]
+        command = payload.command if isinstance(payload.command, dict) else {}
+        await self.process_command(command)
+
+    def _span_name(self, *, payload: _OntologyCommandPayload) -> str:  # type: ignore[override]
+        return "ontology_worker.process_command"
+
+    def _span_attributes(  # type: ignore[override]
+        self,
+        *,
+        msg: Any,
+        payload: _OntologyCommandPayload,
+        registry_key: RegistryKey,
+    ) -> Dict[str, Any]:
+        attrs = super()._span_attributes(msg=msg, payload=payload, registry_key=registry_key)
+        command = payload.command if isinstance(payload.command, dict) else {}
+        db_name = command.get("db_name")
+        payload_obj = command.get("payload")
+        if not db_name and isinstance(payload_obj, dict):
+            db_name = payload_obj.get("db_name")
+        attrs.update(
+            {
+                "command.type": command.get("command_type"),
+                "command.id": str(command.get("command_id")) if command.get("command_id") is not None else None,
+                "db.name": db_name,
+            }
+        )
+        return attrs
+
+    @staticmethod
+    def _is_retryable_error(exc: Exception, *, payload: Optional[_OntologyCommandPayload] = None) -> bool:
+        msg = str(exc).lower()
+        non_retryable_markers = [
+            "schema check failure",
+            "not_a_class_or_base_type",
+            "security violation",
+            "invalid",
+            "bad request",
+            "api error: 400",
+        ]
+        return not any(marker in msg for marker in non_retryable_markers)
+
+    async def _commit(self, msg: Any) -> None:  # type: ignore[override]
+        if not self.consumer:
+            return
+        await self._consumer_call(self.consumer.commit_sync, msg)
+
+    async def _seek(self, *, topic: str, partition: int, offset: int) -> None:  # type: ignore[override]
+        if not self.consumer:
+            return
+        await self._consumer_call(self.consumer.seek, TopicPartition(topic, partition, offset))
+
+    async def _on_parse_error(self, *, msg: Any, raw_payload: Optional[str], error: Exception) -> None:  # type: ignore[override]
+        stage = "parse"
+        payload_text = raw_payload
+        payload_obj = None
+        fallback_metadata = None
+        cause = error
+
+        if isinstance(error, _OntologyCommandParseError):
+            stage = error.stage
+            payload_text = error.payload_text if error.payload_text is not None else raw_payload
+            payload_obj = error.payload_obj
+            fallback_metadata = error.fallback_metadata
+            cause = error.cause
+
+        kafka_headers = None
+        with suppress(Exception):
+            kafka_headers = msg.headers()
+        try:
+            await self._publish_to_dlq(
+                msg=msg,
+                stage=stage,
+                error=str(cause),
+                attempt_count=1,
+                payload_text=payload_text,
+                payload_obj=payload_obj,
+                kafka_headers=kafka_headers,
+                fallback_metadata=fallback_metadata,
+            )
+        except Exception as dlq_err:
+            logger.error("Failed to publish invalid ontology payload to DLQ; retrying: %s", dlq_err, exc_info=True)
+            raise
+        logger.exception("Invalid ontology payload; skipping: %s", cause)
+
+    async def _on_retry_scheduled(  # type: ignore[override]
+        self,
+        *,
+        payload: _OntologyCommandPayload,
+        error: str,
+        attempt_count: int,
+        backoff_s: int,
+        retryable: bool,
+    ) -> None:
+        command = payload.command if isinstance(payload.command, dict) else {}
+        command_id = str(command.get("command_id") or "").strip()
+        if command_id and self.command_status_service:
+            with suppress(Exception):
+                await self.command_status_service.update_status(
+                    command_id,
+                    CommandStatus.RETRYING,
+                    message="Retrying command after transient failure",
+                    error=error,
+                )
+
+        with suppress(Exception):
+            await self.publish_failure_event(command, error)
+
+        logger.warning(
+            "Retrying ontology command in %ss (attempt %s): %s",
+            int(backoff_s),
+            attempt_count,
+            error,
+        )
+
+    async def _on_terminal_failure(  # type: ignore[override]
+        self,
+        *,
+        payload: _OntologyCommandPayload,
+        error: str,
+        attempt_count: int,
+        retryable: bool,
+    ) -> None:
+        command = payload.command if isinstance(payload.command, dict) else {}
+        command_id = str(command.get("command_id") or "").strip()
+        if command_id and self.command_status_service:
+            with suppress(Exception):
+                await self.command_status_service.fail_command(command_id, error, retry_count=int(attempt_count))
+
+        with suppress(Exception):
+            await self.publish_failure_event(command, error)
+
+        logger.error(
+            "Ontology command failed after %s attempts (retryable=%s): %s",
+            attempt_count,
+            retryable,
+            error,
+        )
         
     async def run(self):
         """메인 실행 루프"""
@@ -1145,6 +1441,10 @@ class OntologyWorker:
         
         try:
             while self.running:
+                if not self.consumer:
+                    await asyncio.sleep(0.2)
+                    continue
+
                 msg = await self._consumer_call(self.consumer.poll, timeout=1.0)
                 
                 if msg is None:
@@ -1158,250 +1458,15 @@ class OntologyWorker:
                     continue
                     
                 try:
-                    # 메시지 파싱
-                    registry_event_id = None
-                    registry_aggregate_id = None
-                    registry_sequence = None
-                    registry_claimed = False
-                    registry_attempt_count = 1
-                    command_data: Dict[str, Any] = {}
-                    envelope: Optional[EventEnvelope] = None
-                    kafka_headers = None
-
-                    try:
-                        envelope = EventEnvelope.model_validate_json(msg.value())
-                    except Exception as e:
-                        logger.error(f"Failed to parse EventEnvelope JSON: {e}")
-                        with suppress(Exception):
-                            kafka_headers = msg.headers()
-                        try:
-                            await self._send_to_dlq(
-                                msg=msg,
-                                stage="parse_envelope",
-                                error=str(e),
-                                attempt_count=1,
-                                payload_text=None,
-                                payload_obj=None,
-                                kafka_headers=kafka_headers,
-                                fallback_metadata=None,
-                            )
-                            await self._consumer_call(self.consumer.commit, message=msg, asynchronous=False)
-                        except Exception as dlq_err:
-                            logger.error("Failed to publish invalid envelope to DLQ; retrying: %s", dlq_err, exc_info=True)
-                            await asyncio.sleep(2)
-                            await self._consumer_call(
-                                self.consumer.seek, TopicPartition(msg.topic(), msg.partition(), msg.offset())
-                            )
-                        continue
-
-                    kind = envelope.metadata.get("kind") if isinstance(envelope.metadata, dict) else None
-                    if kind != "command":
-                        logger.error(f"Unexpected envelope kind for command topic: {kind}")
-                        with suppress(Exception):
-                            kafka_headers = msg.headers()
-                        try:
-                            await self._send_to_dlq(
-                                msg=msg,
-                                stage="validate_envelope",
-                                error=f"unexpected_envelope_kind:{kind}",
-                                attempt_count=1,
-                                payload_text=envelope.model_dump_json(),
-                                payload_obj=envelope.model_dump(mode="json"),
-                                kafka_headers=kafka_headers,
-                                fallback_metadata=envelope.metadata if isinstance(envelope.metadata, dict) else None,
-                            )
-                            await self._consumer_call(self.consumer.commit, message=msg, asynchronous=False)
-                        except Exception as dlq_err:
-                            logger.error("Failed to publish invalid kind to DLQ; retrying: %s", dlq_err, exc_info=True)
-                            await asyncio.sleep(2)
-                            await self._consumer_call(
-                                self.consumer.seek, TopicPartition(msg.topic(), msg.partition(), msg.offset())
-                            )
-                        continue
-
-                    command_data = dict(envelope.data or {})
-                    if command_data.get("aggregate_id") and command_data.get("aggregate_id") != envelope.aggregate_id:
-                        raise ValueError(
-                            f"aggregate_id mismatch: command.aggregate_id={command_data.get('aggregate_id')} "
-                            f"envelope.aggregate_id={envelope.aggregate_id}"
-                        )
-                    command_data["aggregate_id"] = envelope.aggregate_id
-                    command_data.setdefault("event_id", envelope.event_id)
-                    command_data.setdefault("sequence_number", envelope.sequence_number)
-                    logger.info(f"Unwrapped command event: {envelope.event_type}")
-
-                    kafka_headers = msg.headers()
-                    with attach_context_from_kafka(
-                        kafka_headers=kafka_headers,
-                        fallback_metadata=envelope.metadata if isinstance(envelope.metadata, dict) else None,
-                        service_name="ontology-worker",
-                    ):
-                        with self.tracing_service.span(
-                            "ontology_worker.process_command",
-                            attributes={
-                                "messaging.system": "kafka",
-                                "messaging.destination": msg.topic(),
-                                "messaging.destination_kind": "topic",
-                                "messaging.kafka.partition": msg.partition(),
-                                "messaging.kafka.offset": msg.offset(),
-                                "command.type": command_data.get("command_type"),
-                                "event.id": command_data.get("event_id") or command_data.get("command_id"),
-                                "event.aggregate_id": command_data.get("aggregate_id"),
-                            },
-                        ):
-                            # Durable idempotency + ordering guard (Postgres)
-                            registry_event_id = command_data.get("event_id") or command_data.get("command_id")
-                            registry_aggregate_id = command_data.get("aggregate_id")
-                            registry_sequence = command_data.get("sequence_number")
-                            if self.processed_event_registry and registry_event_id:
-                                claim = await self.processed_event_registry.claim(
-                                    handler="ontology_worker",
-                                    event_id=str(registry_event_id),
-                                    aggregate_id=str(registry_aggregate_id) if registry_aggregate_id else None,
-                                    sequence_number=int(registry_sequence) if registry_sequence is not None else None,
-                                )
-                                if claim.decision in {ClaimDecision.DUPLICATE_DONE, ClaimDecision.STALE}:
-                                    logger.info(
-                                        f"Skipping {claim.decision.value} command event_id={registry_event_id} "
-                                        f"(aggregate_id={registry_aggregate_id}, seq={registry_sequence})"
-                                    )
-                                    await self._consumer_call(self.consumer.commit, message=msg, asynchronous=False)
-                                    continue
-                                if claim.decision == ClaimDecision.IN_PROGRESS:
-                                    logger.info(
-                                        f"Command {registry_event_id} is in progress elsewhere; retrying later"
-                                    )
-                                    await asyncio.sleep(2)
-                                    await self._consumer_call(
-                                        self.consumer.seek, TopicPartition(msg.topic(), msg.partition(), msg.offset())
-                                    )
-                                    continue
-                                registry_claimed = True
-                                registry_attempt_count = int(claim.attempt_count or 1)
-
-                            heartbeat_task = None
-                            if registry_claimed and self.processed_event_registry and registry_event_id:
-                                heartbeat_task = asyncio.create_task(
-                                    self._heartbeat_loop(handler="ontology_worker", event_id=str(registry_event_id))
-                                )
-
-                            try:
-                                logger.info(
-                                    f"Processing command: {command_data.get('command_type')} "
-                                    f"for {command_data.get('aggregate_id')}"
-                                )
-
-                                # Command 처리
-                                await self.process_command(command_data)
-
-                                if registry_claimed and self.processed_event_registry and registry_event_id:
-                                    await self.processed_event_registry.mark_done(
-                                        handler="ontology_worker",
-                                        event_id=str(registry_event_id),
-                                        aggregate_id=str(registry_aggregate_id) if registry_aggregate_id else None,
-                                        sequence_number=int(registry_sequence) if registry_sequence is not None else None,
-                                    )
-
-                                # 처리 성공 시 오프셋 커밋
-                                await self._consumer_call(self.consumer.commit, message=msg, asynchronous=False)
-                            finally:
-                                if heartbeat_task:
-                                    heartbeat_task.cancel()
-                                    with suppress(asyncio.CancelledError):
-                                        await heartbeat_task
-                    
-                except json.JSONDecodeError as e:
-                    logger.error(f"Failed to parse message: {e}")
+                    await self.handle_message(msg)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    logger.error("Unexpected ontology worker error: %s", exc, exc_info=True)
+                    await asyncio.sleep(2)
                     with suppress(Exception):
-                        kafka_headers = msg.headers()
-                    try:
-                        await self._send_to_dlq(
-                            msg=msg,
-                            stage="parse_json",
-                            error=str(e),
-                            attempt_count=1,
-                            payload_text=None,
-                            payload_obj=None,
-                            kafka_headers=kafka_headers,
-                            fallback_metadata=envelope.metadata if envelope and isinstance(envelope.metadata, dict) else None,
-                        )
-                        await self._consumer_call(self.consumer.commit, message=msg, asynchronous=False)
-                    except Exception as dlq_err:
-                        logger.error("Failed to publish JSON decode error to DLQ; retrying: %s", dlq_err, exc_info=True)
-                        await asyncio.sleep(2)
-                        await self._consumer_call(
-                            self.consumer.seek, TopicPartition(msg.topic(), msg.partition(), msg.offset())
-                        )
-                except Exception as e:
-                    logger.error(f"Error processing command: {e}")
-                    if registry_claimed and self.processed_event_registry and registry_event_id:
-                        try:
-                            await self.processed_event_registry.mark_failed(
-                                handler="ontology_worker",
-                                event_id=str(registry_event_id),
-                                error=str(e),
-                            )
-                        except Exception as reg_err:
-                            logger.warning(f"Failed to mark event failed in registry: {reg_err}")
-                    # Surface failure to user-facing command status (if available)
-                    command_id = command_data.get("command_id") if isinstance(command_data, dict) else None
-                    if command_id and self.command_status_service:
-                        try:
-                            await self.command_status_service.fail_command(str(command_id), str(e))
-                        except Exception as cs_err:
-                            logger.warning(f"Failed to update command status for {command_id}: {cs_err}")
-                    # Emit a failure event for observability (best-effort; never crash on failure publishing).
-                    try:
-                        await self.publish_failure_event(command_data, str(e))
-                    except Exception as pub_err:
-                        logger.warning(f"Failed to publish failure event: {pub_err}")
-
-                    # Decide retry vs. skip (avoid poison-pill crash loops).
-                    attempt_count = int(registry_attempt_count or 1)
-
-                    max_attempts = self.max_retry_attempts
-                    retryable = self._is_retryable_error(e)
-
-                    if retryable and attempt_count < max_attempts:
-                        backoff_s = min(2 ** max(attempt_count - 1, 0), 60)
-                        logger.warning(
-                            f"Retrying command event_id={registry_event_id} in {backoff_s}s "
-                            f"(attempt {attempt_count}/{max_attempts})"
-                        )
-                        await asyncio.sleep(backoff_s)
-                        await self._consumer_call(
-                            self.consumer.seek, TopicPartition(msg.topic(), msg.partition(), msg.offset())
-                        )
-                        continue
-
-                    logger.error(
-                        "Ontology command failed (event_id=%s attempt=%s/%s retryable=%s); sending to DLQ and committing offset",
-                        registry_event_id,
-                        attempt_count,
-                        max_attempts,
-                        retryable,
-                    )
-                    with suppress(Exception):
-                        kafka_headers = msg.headers()
-                    try:
-                        await self._send_to_dlq(
-                            msg=msg,
-                            stage="process_command",
-                            error=str(e),
-                            attempt_count=attempt_count,
-                            payload_text=envelope.model_dump_json() if envelope else None,
-                            payload_obj=envelope.model_dump(mode="json") if envelope else command_data,
-                            kafka_headers=kafka_headers,
-                            fallback_metadata=envelope.metadata if envelope and isinstance(envelope.metadata, dict) else None,
-                        )
-                        await self._consumer_call(self.consumer.commit, message=msg, asynchronous=False)
-                    except Exception as dlq_err:
-                        logger.error("Failed to publish to ontology DLQ; retrying: %s", dlq_err, exc_info=True)
-                        await asyncio.sleep(2)
-                        await self._consumer_call(
-                            self.consumer.seek, TopicPartition(msg.topic(), msg.partition(), msg.offset())
-                        )
-                    continue
+                        await self._seek(topic=str(msg.topic()), partition=int(msg.partition()), offset=int(msg.offset()))
+                    await asyncio.sleep(1.0)
                     
         except KeyboardInterrupt:
             logger.info("Worker interrupted by user")

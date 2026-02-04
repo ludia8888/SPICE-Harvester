@@ -5,6 +5,7 @@ from typing import Any, Dict
 
 from fastapi import APIRouter, Depends
 
+from bff.routers.registry_deps import get_dataset_registry, get_objectify_registry
 from shared.models.requests import ApiResponse
 from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.services.registries.objectify_registry import ObjectifyRegistry
@@ -12,18 +13,6 @@ from shared.services.registries.objectify_registry import ObjectifyRegistry
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/ops", tags=["Ops"])
-
-
-async def get_dataset_registry() -> DatasetRegistry:
-    from bff.main import get_dataset_registry as _get_dataset_registry
-
-    return await _get_dataset_registry()
-
-
-async def get_objectify_registry() -> ObjectifyRegistry:
-    from bff.main import get_objectify_registry as _get_objectify_registry
-
-    return await _get_objectify_registry()
 
 
 @router.get("/status", response_model=Dict[str, Any])

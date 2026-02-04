@@ -1,18 +1,16 @@
 from __future__ import annotations
 
-import os
 import uuid
 
 import pytest
-import redis.asyncio as aioredis
 
 from shared.services.events.idempotency_service import IdempotencyService
+from tests.unit.services.fake_async_redis import FakeAsyncRedis
 
 
 @pytest.mark.asyncio
 async def test_idempotency_service_detects_duplicates() -> None:
-    redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379")
-    redis_client = aioredis.from_url(redis_url)
+    redis_client = FakeAsyncRedis()
 
     event_id = uuid.uuid4().hex
     aggregate_id = "agg-123"
@@ -45,8 +43,7 @@ async def test_idempotency_service_detects_duplicates() -> None:
 
 @pytest.mark.asyncio
 async def test_idempotency_service_marks_processed_and_failed() -> None:
-    redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379")
-    redis_client = aioredis.from_url(redis_url)
+    redis_client = FakeAsyncRedis()
 
     event_id = uuid.uuid4().hex
     aggregate_id = "agg-456"

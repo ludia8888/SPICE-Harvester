@@ -21,9 +21,10 @@ import os
 import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import suppress
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional, Set, List, Union
-from uuid import uuid4, uuid5, NAMESPACE_URL
+from uuid import uuid4
 
 from confluent_kafka import Producer, KafkaError, TopicPartition
 import boto3
@@ -42,13 +43,12 @@ from shared.observability.context_propagation import (
     attach_context_from_kafka,
     kafka_headers_from_current_context,
 )
-from shared.observability.logging import install_trace_context_filter
 from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
-from shared.security.auth_utils import get_expected_token
+from shared.security.auth_utils import BFF_TOKEN_ENV_KEYS, get_expected_token
 from shared.security.input_sanitizer import validate_branch_name, validate_class_id, validate_instance_id
+from shared.services.kafka.processed_event_worker import HeartbeatOptions, ProcessedEventKafkaWorker, RegistryKey
 from shared.services.registries.processed_event_registry import (
-    ClaimDecision,
     ProcessedEventRegistry,
     validate_registry_enabled,
     validate_lease_settings,
@@ -58,7 +58,11 @@ from shared.services.registries.lineage_store import LineageStore
 from shared.services.core.audit_log_store import AuditLogStore
 from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.utils.chaos import maybe_crash
+from shared.utils.executor_utils import call_in_executor
 from shared.utils.ontology_version import normalize_ontology_version, resolve_ontology_version
+from shared.utils.app_logger import configure_logging
+from shared.utils.deterministic_ids import deterministic_uuid5_hex_prefix, deterministic_uuid5_str
+from shared.utils.spice_event_ids import spice_event_id
 
 # ULTRA CRITICAL: Import TerminusDB service
 from oms.services.async_terminus import AsyncTerminusService
@@ -66,17 +70,35 @@ from oms.services.event_store import EventStore
 from shared.models.config import ConnectionConfig
 
 _LOG_LEVEL = get_settings().observability.log_level
-logging.basicConfig(
-    level=_LOG_LEVEL,
-    format="%(asctime)s - %(name)s - %(levelname)s - trace_id=%(trace_id)s span_id=%(span_id)s req_id=%(request_id)s corr_id=%(correlation_id)s db=%(db_name)s - %(message)s",
-)
-install_trace_context_filter()
+configure_logging(_LOG_LEVEL)
 logger = logging.getLogger(__name__)
 
-_BFF_TOKEN_ENV_KEYS = ("BFF_ADMIN_TOKEN", "BFF_WRITE_TOKEN", "ADMIN_API_KEY", "ADMIN_TOKEN")
+
+@dataclass(frozen=True)
+class _InstanceCommandPayload:
+    command: Dict[str, Any]
+    envelope_metadata: Optional[Dict[str, Any]] = None
 
 
-class StrictInstanceWorker:
+class _InstanceCommandParseError(ValueError):
+    def __init__(
+        self,
+        *,
+        stage: str,
+        payload_text: Optional[str],
+        payload_obj: Optional[Dict[str, Any]],
+        fallback_metadata: Optional[Dict[str, Any]],
+        cause: Exception,
+    ) -> None:
+        super().__init__(str(cause))
+        self.stage = str(stage)
+        self.payload_text = payload_text
+        self.payload_obj = payload_obj
+        self.fallback_metadata = fallback_metadata
+        self.cause = cause
+
+
+class StrictInstanceWorker(ProcessedEventKafkaWorker[_InstanceCommandPayload, None]):
     """
     STRICT Lightweight Instance Worker
     Graph는 관계와 참조만, 데이터는 ES/S3에만
@@ -97,6 +119,13 @@ class StrictInstanceWorker:
         self.dlq_topic = AppConfig.INSTANCE_COMMANDS_DLQ_TOPIC
         self.dlq_flush_timeout_seconds = float(worker_cfg.dlq_flush_timeout_seconds)
         self.max_retry_attempts = int(worker_cfg.max_retry_attempts)
+        self.service_name = "instance-worker"
+        self.handler = "instance_worker"
+        self.max_retries = int(self.max_retry_attempts)
+        self.backoff_base = 1
+        self.backoff_max = 60
+        self.untyped_ref_max_retry_attempts = int(worker_cfg.untyped_ref_max_retry_attempts)
+        self.untyped_ref_backoff_max_seconds = float(worker_cfg.untyped_ref_backoff_max_seconds)
         self.redis_client = None
         self.command_status_service: Optional[CommandStatusTracker] = None
         self.s3_client = None
@@ -106,6 +135,7 @@ class StrictInstanceWorker:
         # Durable idempotency (Postgres)
         self.enable_processed_event_registry = bool(settings.event_sourcing.enable_processed_event_registry)
         self.processed_event_registry: Optional[ProcessedEventRegistry] = None
+        self.processed: Optional[ProcessedEventRegistry] = None
         self.event_store: Optional[EventStore] = None
 
         # First-class provenance/audit (fail-open by default)
@@ -118,8 +148,8 @@ class StrictInstanceWorker:
         self.dataset_registry: Optional[DatasetRegistry] = None
         self.bff_http: Optional[httpx.AsyncClient] = None
         self._consumer_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="instance-worker-kafka")
-        self.tracing = get_tracing_service("instance-worker")
-        self.metrics = get_metrics_collector("instance-worker")
+        self.tracing = get_tracing_service(self.service_name)
+        self.metrics = get_metrics_collector(self.service_name)
         self.run_id = settings.observability.run_id
         self.code_sha = settings.observability.code_sha
         
@@ -237,6 +267,7 @@ class StrictInstanceWorker:
         # Durable processed-events registry (idempotency + ordering guard)
         self.processed_event_registry = ProcessedEventRegistry()
         await self.processed_event_registry.connect()
+        self.processed = self.processed_event_registry
         logger.info("✅ ProcessedEventRegistry connected (Postgres)")
 
         # Dataset registry for edit tracking (best-effort)
@@ -248,7 +279,7 @@ class StrictInstanceWorker:
             logger.warning(f"⚠️ DatasetRegistry unavailable (edits tracking disabled): {e}")
             self.dataset_registry = None
 
-        token = get_expected_token(_BFF_TOKEN_ENV_KEYS)
+        token = get_expected_token(BFF_TOKEN_ENV_KEYS)
         headers: Dict[str, str] = {}
         if token:
             headers["X-Admin-Token"] = token
@@ -300,10 +331,9 @@ class StrictInstanceWorker:
         return await asyncio.to_thread(body.read)
 
     async def _consumer_call(self, func, *args, **kwargs):
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(self._consumer_executor, lambda: func(*args, **kwargs))
+        return await call_in_executor(self._consumer_executor, func, *args, **kwargs)
         
-    async def extract_payload_from_message(self, message: Dict[str, Any]) -> Dict[str, Any]:
+    def _extract_payload_from_message(self, message: Dict[str, Any]) -> Dict[str, Any]:
         """
         Unwrap a command from the canonical EventEnvelope message.
 
@@ -331,6 +361,9 @@ class StrictInstanceWorker:
         command.setdefault("event_id", envelope.event_id)
         command.setdefault("sequence_number", envelope.sequence_number)
         return command
+
+    async def extract_payload_from_message(self, message: Dict[str, Any]) -> Dict[str, Any]:
+        return self._extract_payload_from_message(message)
     
     def get_primary_key_value(
         self,
@@ -902,7 +935,7 @@ class StrictInstanceWorker:
         aggregate_id = f"{db_name}:{branch}:{class_id}:{instance_id}"
 
         domain_event_id = (
-            str(uuid5(NAMESPACE_URL, f"spice:{command_id}:INSTANCE_CREATED:{aggregate_id}"))
+            spice_event_id(command_id=str(command_id), event_type="INSTANCE_CREATED", aggregate_id=aggregate_id)
             if command_id
             else str(uuid4())
         )
@@ -1238,7 +1271,7 @@ class StrictInstanceWorker:
             aggregate_id = f"{db_name}:{branch}:{class_id}:{instance_id}"
 
             domain_event_id = (
-                str(uuid5(NAMESPACE_URL, f"spice:{command_id}:INSTANCE_CREATED:{aggregate_id}"))
+                spice_event_id(command_id=str(command_id), event_type="INSTANCE_CREATED", aggregate_id=aggregate_id)
                 if command_id
                 else str(uuid4())
             )
@@ -1435,7 +1468,10 @@ class StrictInstanceWorker:
                         try:
                             validate_instance_id(proposed)
                         except Exception:
-                            suffix = uuid5(NAMESPACE_URL, f"objectify:{class_id}:{'|'.join(values)}").hex[:12]
+                            suffix = deterministic_uuid5_hex_prefix(
+                                f"objectify:{class_id}:{'|'.join(values)}",
+                                length=12,
+                            )
                             proposed = f"{class_id.lower()}_{suffix}"
                         instance_id = proposed
                         instance_id_source_key = None
@@ -1443,7 +1479,7 @@ class StrictInstanceWorker:
                     if not instance_id:
                         if is_objectify:
                             raise ValueError(f"Primary key is required for objectify bulk create ({class_id})")
-                        suffix = uuid5(NAMESPACE_URL, f"bulk:{command_id}:{idx}").hex[:12]
+                        suffix = deterministic_uuid5_hex_prefix(f"bulk:{command_id}:{idx}", length=12)
                         instance_id = f"{class_id.lower()}_{suffix}"
                         inst_payload[expected_key] = instance_id
 
@@ -1568,7 +1604,7 @@ class StrictInstanceWorker:
                 if not isinstance(data, dict):
                     raise ValueError(f"instances[{idx}].data must be an object")
 
-                child_command_id = str(uuid5(NAMESPACE_URL, f"bulk-update:{command_id}:{instance_id}:{idx}"))
+                child_command_id = deterministic_uuid5_str(f"bulk-update:{command_id}:{instance_id}:{idx}")
                 update_command = {
                     "command_id": child_command_id,
                     "command_type": "UPDATE_INSTANCE",
@@ -2039,7 +2075,7 @@ class StrictInstanceWorker:
 
         # Publish domain event (SSoT: Event Store)
         domain_event_id = (
-            str(uuid5(NAMESPACE_URL, f"spice:{command_id}:INSTANCE_UPDATED:{aggregate_id}"))
+            spice_event_id(command_id=str(command_id), event_type="INSTANCE_UPDATED", aggregate_id=aggregate_id)
             if command_id
             else str(uuid4())
         )
@@ -2333,7 +2369,7 @@ class StrictInstanceWorker:
 
         aggregate_id = expected_aggregate_id
         domain_event_id = (
-            str(uuid5(NAMESPACE_URL, f"spice:{command_id}:INSTANCE_DELETED:{aggregate_id}"))
+            spice_event_id(command_id=str(command_id), event_type="INSTANCE_DELETED", aggregate_id=aggregate_id)
             if command_id
             else str(uuid4())
         )
@@ -2650,18 +2686,14 @@ class StrictInstanceWorker:
         except Exception as e:
             logger.warning(f"Failed to update command status for {command_id}: {e}")
 
-    async def _heartbeat_loop(self, *, handler: str, event_id: str) -> None:
-        if not self.processed_event_registry:
-            return
-        interval = int(get_settings().event_sourcing.processed_event_heartbeat_interval_seconds)
-        while True:
-            await asyncio.sleep(interval)
-            ok = await self.processed_event_registry.heartbeat(handler=handler, event_id=event_id)
-            if not ok:
-                return
+    def _heartbeat_options(self) -> HeartbeatOptions:  # type: ignore[override]
+        return HeartbeatOptions(
+            stop_when_false=True,
+            continue_on_exception=False,
+        )
 
     @staticmethod
-    def _is_retryable_error(exc: Exception) -> bool:
+    def _is_retryable_error_impl(exc: Exception) -> bool:
         msg = str(exc).lower()
         # TerminusDB schema failures can be transient under at-least-once + cross-aggregate reordering.
         # Example: Product references Customer that hasn't been created yet.
@@ -2685,7 +2717,7 @@ class StrictInstanceWorker:
             return False
         return not any(marker in msg for marker in non_retryable_markers)
 
-    async def _send_to_dlq(
+    async def _publish_to_dlq(
         self,
         *,
         msg: Any,
@@ -2747,334 +2779,353 @@ class StrictInstanceWorker:
             self.metrics.record_event("INSTANCE_COMMAND_DLQ", action="published")
         except Exception:
             pass
-        
+
+    # --- ProcessedEventKafkaWorker hooks ---
+    def _parse_payload(self, payload: Any) -> _InstanceCommandPayload:  # type: ignore[override]
+        if not isinstance(payload, (bytes, bytearray)):
+            raise _InstanceCommandParseError(
+                stage="decode",
+                payload_text=None,
+                payload_obj=None,
+                fallback_metadata=None,
+                cause=TypeError("Kafka payload must be bytes"),
+            )
+        try:
+            raw_text = payload.decode("utf-8")
+        except Exception as exc:
+            raise _InstanceCommandParseError(
+                stage="decode",
+                payload_text=None,
+                payload_obj=None,
+                fallback_metadata=None,
+                cause=exc,
+            ) from exc
+
+        raw_message: Any
+        try:
+            raw_message = json.loads(raw_text)
+        except Exception as exc:
+            raise _InstanceCommandParseError(
+                stage="parse_json",
+                payload_text=None,
+                payload_obj=None,
+                fallback_metadata=None,
+                cause=exc,
+            ) from exc
+
+        fallback_metadata = raw_message.get("metadata") if isinstance(raw_message, dict) else None
+        fallback_metadata = fallback_metadata if isinstance(fallback_metadata, dict) else None
+
+        try:
+            command = self._extract_payload_from_message(raw_message if isinstance(raw_message, dict) else {})
+        except Exception as exc:
+            payload_obj = raw_message if isinstance(raw_message, dict) else None
+            raise _InstanceCommandParseError(
+                stage="validate_envelope",
+                payload_text=raw_text,
+                payload_obj=payload_obj,
+                fallback_metadata=fallback_metadata,
+                cause=exc,
+            ) from exc
+
+        return _InstanceCommandPayload(command=command, envelope_metadata=fallback_metadata)
+
+    def _fallback_metadata(self, payload: _InstanceCommandPayload) -> Optional[Dict[str, Any]]:  # type: ignore[override]
+        return payload.envelope_metadata
+
+    def _registry_key(self, payload: _InstanceCommandPayload) -> RegistryKey:  # type: ignore[override]
+        command = payload.command if isinstance(payload.command, dict) else {}
+
+        registry_event_id = command.get("event_id") or command.get("command_id")
+        registry_event_id = str(registry_event_id or "").strip()
+        if not registry_event_id:
+            raise ValueError("event_id is required")
+
+        aggregate_id = command.get("aggregate_id")
+        aggregate_id = str(aggregate_id).strip() if aggregate_id is not None else None
+        if not aggregate_id:
+            aggregate_id = None
+
+        sequence_number = command.get("sequence_number")
+        try:
+            seq_int = int(sequence_number) if sequence_number is not None else None
+        except Exception:
+            seq_int = None
+
+        command_type = command.get("command_type")
+        command_type = str(getattr(command_type, "value", command_type) or "").strip()
+        if command_type.startswith("BULK_"):
+            seq_int = None
+        if self._writeback_guard_blocks(command):
+            seq_int = None
+
+        return RegistryKey(event_id=registry_event_id, aggregate_id=aggregate_id, sequence_number=seq_int)
+
+    async def _process_payload(self, payload: _InstanceCommandPayload) -> None:  # type: ignore[override]
+        command = payload.command if isinstance(payload.command, dict) else {}
+        command_type_raw = command.get("command_type")
+        command_type = str(getattr(command_type_raw, "value", command_type_raw) or "").strip()
+        command_id_raw = command.get("command_id")
+        command_id = str(command_id_raw or "").strip() or None
+
+        maybe_crash("instance_worker:after_claim", logger=logger)
+
+        if self.redis_client and command_id:
+            try:
+                status_key = AppConfig.get_command_status_key(str(command_id))
+                status_raw = await self.redis_client.get(status_key)
+                if status_raw:
+                    status_data = json.loads(status_raw)
+                    if str(status_data.get("status", "")).upper() == "COMPLETED":
+                        logger.info("Skipping already completed command %s", command_id)
+                        return
+            except Exception as exc:
+                logger.warning("Failed to read command status for %s: %s", command_id, exc)
+
+        if self._writeback_guard_blocks(command):
+            await self.set_command_status(
+                str(command_id or ""),
+                "failed",
+                {
+                    "error": "writeback_enforced",
+                    "message": (
+                        "Direct CRUD instance writes are ingestion-only for writeback-enabled object types. "
+                        "Use Actions for operational edits."
+                    ),
+                    "class_id": command.get("class_id"),
+                },
+            )
+            return
+
+        if command_type == "CREATE_INSTANCE":
+            await self.process_create_instance(command)
+        elif command_type == "BULK_CREATE_INSTANCES":
+            await self.process_bulk_create_instances(command)
+        elif command_type == "BULK_UPDATE_INSTANCES":
+            await self.process_bulk_update_instances(command)
+        elif command_type == "UPDATE_INSTANCE":
+            await self.process_update_instance(command)
+        elif command_type == "DELETE_INSTANCE":
+            await self.process_delete_instance(command)
+        else:
+            raise ValueError(f"Unknown command type: {command_type}")
+
+        maybe_crash("instance_worker:before_mark_done", logger=logger)
+
+    def _span_name(self, *, payload: _InstanceCommandPayload) -> str:  # type: ignore[override]
+        return "instance_worker.process_command"
+
+    def _span_attributes(  # type: ignore[override]
+        self,
+        *,
+        msg: Any,
+        payload: _InstanceCommandPayload,
+        registry_key: RegistryKey,
+    ) -> Dict[str, Any]:
+        attrs = super()._span_attributes(msg=msg, payload=payload, registry_key=registry_key)
+        command = payload.command if isinstance(payload.command, dict) else {}
+        command_type_raw = command.get("command_type")
+        command_type = str(getattr(command_type_raw, "value", command_type_raw) or "").strip()
+        command_id = command.get("command_id")
+        attrs.update(
+            {
+                "command.type": command_type or None,
+                "command.id": str(command_id) if command_id is not None else None,
+                "db.name": command.get("db_name"),
+                "instance.class_id": command.get("class_id"),
+                "instance.instance_id": command.get("instance_id"),
+            }
+        )
+        return attrs
+
+    def _metric_event_name(self, *, payload: _InstanceCommandPayload) -> Optional[str]:  # type: ignore[override]
+        command = payload.command if isinstance(payload.command, dict) else {}
+        command_type_raw = command.get("command_type")
+        command_type = str(getattr(command_type_raw, "value", command_type_raw) or "").strip()
+        return command_type or None
+
+    @staticmethod
+    def _is_retryable_error(  # type: ignore[override]
+        exc: Exception, *, payload: Optional[_InstanceCommandPayload] = None
+    ) -> bool:
+        return StrictInstanceWorker._is_retryable_error_impl(exc)
+
+    def _max_retries_for_error(  # type: ignore[override]
+        self, exc: Exception, *, payload: _InstanceCommandPayload, error: str, retryable: bool
+    ) -> int:
+        msg = str(error or exc).lower()
+        if "references_untyped_object" in msg or "no_unique_type_for_document" in msg:
+            return max(int(self.max_retries), int(self.untyped_ref_max_retry_attempts))
+        return int(self.max_retries)
+
+    def _backoff_seconds_for_error(  # type: ignore[override]
+        self,
+        exc: Exception,
+        *,
+        payload: _InstanceCommandPayload,
+        error: str,
+        attempt_count: int,
+        retryable: bool,
+    ) -> int:
+        msg = str(error or exc).lower()
+        cap = int(self.backoff_max)
+        if "references_untyped_object" in msg or "no_unique_type_for_document" in msg:
+            cap = max(1, int(self.untyped_ref_backoff_max_seconds))
+        return min(cap, int(2 ** max(attempt_count - 1, 0)))
+
+    async def _commit(self, msg: Any) -> None:  # type: ignore[override]
+        if not self.consumer:
+            return
+        await self._consumer_call(self.consumer.commit, msg, asynchronous=False)
+
+    async def _seek(self, *, topic: str, partition: int, offset: int) -> None:  # type: ignore[override]
+        if not self.consumer:
+            return
+        await self._consumer_call(self.consumer.seek, TopicPartition(topic, partition, offset))
+
+    async def _on_parse_error(self, *, msg: Any, raw_payload: Optional[str], error: Exception) -> None:  # type: ignore[override]
+        stage = "parse"
+        payload_text = raw_payload
+        payload_obj = None
+        fallback_metadata = None
+        cause = error
+
+        if isinstance(error, _InstanceCommandParseError):
+            stage = error.stage
+            payload_text = error.payload_text if error.payload_text is not None else raw_payload
+            payload_obj = error.payload_obj
+            fallback_metadata = error.fallback_metadata
+            cause = error.cause
+
+        kafka_headers = None
+        with suppress(Exception):
+            kafka_headers = msg.headers()
+        try:
+            await self._publish_to_dlq(
+                msg=msg,
+                stage=stage,
+                error=str(cause),
+                attempt_count=1,
+                payload_text=payload_text,
+                payload_obj=payload_obj,
+                kafka_headers=kafka_headers,
+                fallback_metadata=fallback_metadata,
+            )
+        except Exception:
+            logger.exception("Failed to publish invalid instance payload to DLQ")
+        logger.exception("Invalid instance payload; skipping: %s", cause)
+
+    async def _on_retry_scheduled(  # type: ignore[override]
+        self,
+        *,
+        payload: _InstanceCommandPayload,
+        error: str,
+        attempt_count: int,
+        backoff_s: int,
+        retryable: bool,
+    ) -> None:
+        command = payload.command if isinstance(payload.command, dict) else {}
+        command_id = str(command.get("command_id") or "").strip()
+        if command_id:
+            max_attempts = self._max_retries_for_error(Exception(error), payload=payload, error=error, retryable=retryable)
+            with suppress(Exception):
+                await self.set_command_status(
+                    command_id,
+                    "retrying",
+                    {"error": error, "attempt": attempt_count, "max_attempts": int(max_attempts)},
+                )
+        logger.warning(
+            "Retrying instance command in %ss (attempt %s): %s",
+            int(backoff_s),
+            attempt_count,
+            error,
+        )
+
+    async def _on_terminal_failure(  # type: ignore[override]
+        self,
+        *,
+        payload: _InstanceCommandPayload,
+        error: str,
+        attempt_count: int,
+        retryable: bool,
+    ) -> None:
+        command = payload.command if isinstance(payload.command, dict) else {}
+        command_id = str(command.get("command_id") or "").strip()
+        if command_id:
+            with suppress(Exception):
+                await self.set_command_status(command_id, "failed", {"error": error})
+        logger.error(
+            "Instance command failed after %s attempts (retryable=%s): %s",
+            attempt_count,
+            retryable,
+            error,
+        )
+
+    async def _send_to_dlq(  # type: ignore[override]
+        self,
+        *,
+        msg: Any,
+        error: str,
+        attempt_count: int,
+        payload: Optional[_InstanceCommandPayload] = None,
+        raw_payload: Optional[str] = None,
+        stage: str = "process_command",
+        payload_text: Optional[str] = None,
+        payload_obj: Optional[Dict[str, Any]] = None,
+        kafka_headers: Optional[Any] = None,
+        fallback_metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        if kafka_headers is None:
+            with suppress(Exception):
+                kafka_headers = msg.headers()
+
+        if payload_text is None:
+            payload_text = raw_payload
+
+        if payload_obj is None and payload is not None and isinstance(payload.command, dict):
+            payload_obj = payload.command
+
+        if fallback_metadata is None and payload is not None:
+            fallback_metadata = payload.envelope_metadata
+
+        await self._publish_to_dlq(
+            msg=msg,
+            stage=str(stage),
+            error=error,
+            attempt_count=int(attempt_count),
+            payload_text=payload_text,
+            payload_obj=payload_obj,
+            kafka_headers=kafka_headers,
+            fallback_metadata=fallback_metadata,
+        )
+
     async def run(self):
         """Main processing loop"""
         self.running = True
-        logger.info("🚀 STRICT Instance Worker started")
-        logger.info(f"  Subscribed to topic: {AppConfig.INSTANCE_COMMANDS_TOPIC}")
-        
-        poll_count = 0
+        logger.info("🚀 STRICT Instance Worker started (topic=%s)", AppConfig.INSTANCE_COMMANDS_TOPIC)
+
         while self.running:
+            if not self.consumer:
+                await asyncio.sleep(0.2)
+                continue
+
             msg = await self._consumer_call(self.consumer.poll, timeout=1.0)
-            poll_count += 1
-            
-            if poll_count % 10 == 0:
-                logger.info(f"  Polled {poll_count} times, no messages yet...")
-            
             if msg is None:
                 continue
-                
+
             if msg.error():
                 if msg.error().code() == KafkaError._PARTITION_EOF:
                     continue
-                else:
-                    logger.error(f"Kafka error: {msg.error()}")
-                    continue
-                    
-            registry_event_id = None
-            registry_aggregate_id = None
-            registry_sequence = None
-            registry_claimed = False
-            registry_attempt_count = 1
-            command: Dict[str, Any] = {}
-            command_id = None
-            heartbeat_task = None
-
-            try:
-                logger.info("📨 Received message from Kafka!")
-                raw_message: Any = {}
-                try:
-                    raw_message = json.loads(msg.value().decode("utf-8"))
-                except json.JSONDecodeError as e:
-                    logger.error(f"Failed to parse Kafka message JSON: {e}")
-                    kafka_headers = None
-                    with suppress(Exception):
-                        kafka_headers = msg.headers()
-                    try:
-                        await self._send_to_dlq(
-                            msg=msg,
-                            stage="parse_json",
-                            error=str(e),
-                            attempt_count=1,
-                            payload_text=None,
-                            payload_obj=None,
-                            kafka_headers=kafka_headers,
-                            fallback_metadata=None,
-                        )
-                        await self._consumer_call(self.consumer.commit, msg, asynchronous=False)
-                    except Exception as dlq_err:
-                        logger.error("Failed to publish invalid JSON to DLQ; retrying: %s", dlq_err, exc_info=True)
-                        await asyncio.sleep(2)
-                        await self._consumer_call(
-                            self.consumer.seek, TopicPartition(msg.topic(), msg.partition(), msg.offset())
-                        )
-                    continue
-
-                # Extract the actual command payload (canonical EventEnvelope only)
-                try:
-                    command = await self.extract_payload_from_message(raw_message)
-                except Exception as e:
-                    logger.error(f"Invalid command envelope on instance command topic: {e}")
-                    kafka_headers = None
-                    with suppress(Exception):
-                        kafka_headers = msg.headers()
-                    fallback_metadata = raw_message.get("metadata") if isinstance(raw_message, dict) else None
-                    try:
-                        await self._send_to_dlq(
-                            msg=msg,
-                            stage="validate_envelope",
-                            error=str(e),
-                            attempt_count=1,
-                            payload_text=json.dumps(raw_message, ensure_ascii=False, default=str),
-                            payload_obj=raw_message if isinstance(raw_message, dict) else None,
-                            kafka_headers=kafka_headers,
-                            fallback_metadata=fallback_metadata if isinstance(fallback_metadata, dict) else None,
-                        )
-                        await self._consumer_call(self.consumer.commit, msg, asynchronous=False)
-                    except Exception as dlq_err:
-                        logger.error("Failed to publish invalid envelope to DLQ; retrying: %s", dlq_err, exc_info=True)
-                        await asyncio.sleep(2)
-                        await self._consumer_call(
-                            self.consumer.seek, TopicPartition(msg.topic(), msg.partition(), msg.offset())
-                        )
-                    continue
-
-                kafka_headers = msg.headers()
-                fallback_metadata = raw_message.get("metadata") if isinstance(raw_message, dict) else None
-                start = time.monotonic()
-                with attach_context_from_kafka(
-                    kafka_headers=kafka_headers,
-                    fallback_metadata=fallback_metadata if isinstance(fallback_metadata, dict) else None,
-                    service_name="instance-worker",
-                ):
-                    with self.tracing.span(
-                        "instance_worker.process_command",
-                        attributes={
-                            "messaging.system": "kafka",
-                            "messaging.destination": msg.topic(),
-                            "messaging.destination_kind": "topic",
-                            "messaging.kafka.partition": msg.partition(),
-                            "messaging.kafka.offset": msg.offset(),
-                        },
-                    ):
-                        command_type = command.get("command_type")
-                        self.tracing.set_span_attribute("command.type", command_type)
-
-                        # Idempotency guard: if this command is already completed, skip processing.
-                        command_id = command.get("command_id")
-                        self.tracing.set_span_attribute("command.id", command_id)
-                        if self.redis_client and command_id:
-                            try:
-                                status_key = AppConfig.get_command_status_key(str(command_id))
-                                status_raw = await self.redis_client.get(status_key)
-                                if status_raw:
-                                    status_data = json.loads(status_raw)
-                                    if str(status_data.get("status", "")).upper() == "COMPLETED":
-                                        logger.info(f"Skipping already completed command {command_id}")
-                                        await self._consumer_call(self.consumer.commit, msg, asynchronous=False)
-                                        continue
-                            except Exception as e:
-                                logger.warning(f"Failed to read command status for {command_id}: {e}")
-
-                        # Durable idempotency + ordering guard (Postgres)
-                        registry_event_id = command.get("event_id") or command.get("command_id")
-                        registry_aggregate_id = command.get("aggregate_id")
-                        registry_sequence = command.get("sequence_number")
-                        self.tracing.set_span_attribute("event.id", registry_event_id)
-                        self.tracing.set_span_attribute("event.aggregate_id", registry_aggregate_id)
-
-                        # Bulk commands are not state-overwriting operations on a single aggregate.
-                        # Disabling the sequence guard prevents "out-of-order => skipped_stale" data loss.
-                        if command_type and str(command_type).startswith("BULK_"):
-                            registry_sequence = None
-                        if self.processed_event_registry and registry_event_id:
-                            claim = await self.processed_event_registry.claim(
-                                handler="instance_worker",
-                                event_id=str(registry_event_id),
-                                aggregate_id=str(registry_aggregate_id) if registry_aggregate_id else None,
-                                sequence_number=int(registry_sequence) if registry_sequence is not None else None,
-                            )
-                            registry_attempt_count = int(claim.attempt_count or 1)
-                            if claim.decision in {ClaimDecision.DUPLICATE_DONE, ClaimDecision.STALE}:
-                                logger.info(
-                                    f"Skipping {claim.decision.value} command event_id={registry_event_id} "
-                                    f"(aggregate_id={registry_aggregate_id}, seq={registry_sequence})"
-                                )
-                                await self._consumer_call(self.consumer.commit, msg, asynchronous=False)
-                                continue
-                            if claim.decision == ClaimDecision.IN_PROGRESS:
-                                logger.info(f"Command {registry_event_id} is in progress elsewhere; retrying later")
-                                await asyncio.sleep(2)
-                                await self._consumer_call(
-                                    self.consumer.seek, TopicPartition(msg.topic(), msg.partition(), msg.offset())
-                                )
-                                continue
-                            registry_claimed = True
-                            maybe_crash("instance_worker:after_claim", logger=logger)
-
-                        if registry_claimed and self.processed_event_registry and registry_event_id:
-                            heartbeat_task = asyncio.create_task(
-                                self._heartbeat_loop(handler="instance_worker", event_id=str(registry_event_id))
-                            )
-
-                        logger.info(f"Processing command: {command_type}")
-                        logger.info(f"  Database: {command.get('db_name')}")
-                        logger.info(f"  Class: {command.get('class_id')}")
-
-                        if self._writeback_guard_blocks(command):
-                            await self.set_command_status(
-                                command_id,
-                                "failed",
-                                {
-                                    "error": "writeback_enforced",
-                                    "message": (
-                                        "Direct CRUD instance writes are ingestion-only for writeback-enabled object types. "
-                                        "Use Actions for operational edits."
-                                    ),
-                                    "class_id": command.get("class_id"),
-                                },
-                            )
-                            if registry_claimed and self.processed_event_registry and registry_event_id:
-                                await self.processed_event_registry.mark_done(
-                                    handler="instance_worker",
-                                    event_id=str(registry_event_id),
-                                    aggregate_id=str(registry_aggregate_id) if registry_aggregate_id else None,
-                                    # Blocked commands must not advance aggregate ordering watermarks.
-                                    sequence_number=None,
-                                )
-                            await self._consumer_call(self.consumer.commit, msg, asynchronous=False)
-                            continue
-
-                        if command_type == "CREATE_INSTANCE":
-                            await self.process_create_instance(command)
-                        elif command_type == "BULK_CREATE_INSTANCES":
-                            await self.process_bulk_create_instances(command)
-                        elif command_type == "BULK_UPDATE_INSTANCES":
-                            await self.process_bulk_update_instances(command)
-                        elif command_type == "UPDATE_INSTANCE":
-                            await self.process_update_instance(command)
-                        elif command_type == "DELETE_INSTANCE":
-                            await self.process_delete_instance(command)
-                        else:
-                            raise ValueError(f"Unknown command type: {command_type}")
-
-                        if registry_claimed and self.processed_event_registry and registry_event_id:
-                            maybe_crash("instance_worker:before_mark_done", logger=logger)
-                            await self.processed_event_registry.mark_done(
-                                handler="instance_worker",
-                                event_id=str(registry_event_id),
-                                aggregate_id=str(registry_aggregate_id) if registry_aggregate_id else None,
-                                sequence_number=int(registry_sequence) if registry_sequence is not None else None,
-                            )
-
-                        await self._consumer_call(self.consumer.commit, msg, asynchronous=False)
-                        try:
-                            duration_s = time.monotonic() - start
-                            if command_type:
-                                self.metrics.record_event(str(command_type), action="processed", duration=duration_s)
-                        except Exception:
-                            pass
-
-            except Exception as e:
-                logger.error(f"Error processing command: {e}")
-                if registry_claimed and self.processed_event_registry and registry_event_id:
-                    try:
-                        await self.processed_event_registry.mark_failed(
-                            handler="instance_worker",
-                            event_id=str(registry_event_id),
-                            error=str(e),
-                        )
-                    except Exception as reg_err:
-                        logger.warning(f"Failed to mark event failed in registry: {reg_err}")
-
-                retryable = self._is_retryable_error(e)
-                attempt_count = int(registry_attempt_count or 1)
-                max_attempts = self.max_retry_attempts
-                backoff_cap_seconds: float = 60.0
-
-                # Narrow + long retry budget for out-of-order relationship materialization.
-                # We only extend retries for Terminus SchemaCheckFailure witness "references_untyped_object".
-                # Everything else should fail fast to surface real schema/contract bugs.
-                err_msg = str(e)
-                err_msg_norm = err_msg.lower()
-                if "references_untyped_object" in err_msg_norm or "no_unique_type_for_document" in err_msg_norm:
-                    with suppress(Exception):
-                        max_attempts = max(
-                            max_attempts,
-                            int(os.getenv("INSTANCE_WORKER_UNTYPED_REF_MAX_RETRY_ATTEMPTS", "30") or 30),
-                        )
-                    with suppress(Exception):
-                        backoff_cap_seconds = float(
-                            os.getenv("INSTANCE_WORKER_UNTYPED_REF_BACKOFF_MAX_SECONDS", "15") or 15
-                        )
-
-                if retryable and attempt_count < max_attempts:
-                    try:
-                        await self.set_command_status(
-                            command_id,
-                            "retrying",
-                            {"error": str(e), "attempt": attempt_count, "max_attempts": max_attempts},
-                        )
-                    except Exception as status_err:
-                        logger.warning(
-                            f"Failed to set command status to retrying for {command_id}: {status_err}",
-                            exc_info=True,
-                        )
-                    backoff_s = min(float(2 ** max(attempt_count - 1, 0)), backoff_cap_seconds)
-                    logger.warning(
-                        f"Retrying command event_id={registry_event_id} in {backoff_s}s "
-                        f"(attempt {attempt_count}/{max_attempts})"
-                    )
-                    await asyncio.sleep(backoff_s)
-                    await self._consumer_call(
-                        self.consumer.seek, TopicPartition(msg.topic(), msg.partition(), msg.offset())
-                    )
-                    continue
-
-                try:
-                    await self.set_command_status(command_id, "failed", {"error": str(e)})
-                except Exception as status_err:
-                    logger.warning(
-                        f"Failed to set command status to failed for {command_id}: {status_err}",
-                        exc_info=True,
-                    )
-
-                logger.error(
-                    f"Skipping failed command event_id={registry_event_id} after {attempt_count} attempts "
-                    f"(retryable={retryable}); committing offset to avoid poison pill"
-                )
-                kafka_headers = None
-                with suppress(Exception):
-                    kafka_headers = msg.headers()
-                fallback_metadata = None
-                with suppress(Exception):
-                    fallback_metadata = raw_message.get("metadata") if isinstance(raw_message, dict) else None
-                try:
-                    await self._send_to_dlq(
-                        msg=msg,
-                        stage="process_command",
-                        error=str(e),
-                        attempt_count=attempt_count,
-                        payload_text=None,
-                        payload_obj=command if isinstance(command, dict) and command else raw_message,
-                        kafka_headers=kafka_headers,
-                        fallback_metadata=fallback_metadata if isinstance(fallback_metadata, dict) else None,
-                    )
-                    await self._consumer_call(self.consumer.commit, message=msg, asynchronous=False)
-                except Exception as dlq_err:
-                    logger.error("Failed to publish to instance DLQ; retrying: %s", dlq_err, exc_info=True)
-                    await asyncio.sleep(2)
-                    await self._consumer_call(
-                        self.consumer.seek, TopicPartition(msg.topic(), msg.partition(), msg.offset())
-                    )
+                logger.error("Kafka error: %s", msg.error())
                 continue
 
-            finally:
-                if heartbeat_task:
-                    heartbeat_task.cancel()
-                    with suppress(asyncio.CancelledError):
-                        await heartbeat_task
+            try:
+                await self.handle_message(msg)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.error("Unexpected instance worker error: %s", exc, exc_info=True)
+                await asyncio.sleep(1.0)
                 
     async def shutdown(self):
         """Graceful shutdown"""

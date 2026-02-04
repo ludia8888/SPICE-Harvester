@@ -2,16 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple
 
-from shared.services.pipeline.pipeline_graph_utils import normalize_edges, normalize_nodes, topological_sort
-
-
-def _unique_node_id(base: str, existing: set[str]) -> str:
-    candidate = base
-    counter = 1
-    while candidate in existing:
-        counter += 1
-        candidate = f"{base}_{counter}"
-    return candidate
+from shared.services.pipeline.pipeline_graph_utils import normalize_edges, normalize_nodes, topological_sort, unique_node_id
 
 
 def _transform_columns(transform: Dict[str, Any]) -> List[str]:
@@ -129,7 +120,7 @@ def _insert_chain(
     prev_id = source_id
     for transform in transforms:
         base_id = f"cleanse_{transform.get('operation')}_{source_id}"
-        node_id = _unique_node_id(base_id, existing_ids)
+        node_id = unique_node_id(base_id, existing_ids, start_index=2)
         existing_ids.add(node_id)
         nodes.append(
             {

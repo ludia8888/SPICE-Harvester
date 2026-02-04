@@ -10,6 +10,7 @@ from shared.security.input_sanitizer import (
     validate_class_id,
     validate_instance_id,
 )
+from shared.utils.time_utils import utcnow
 
 
 class ActionImplementationError(ValueError):
@@ -18,10 +19,6 @@ class ActionImplementationError(ValueError):
 
 _ALLOWED_IMPLEMENTATION_TYPES = {"template_v1", "function_v1"}
 _ALLOWED_REF_ROOTS = {"input", "user", "target"}
-
-
-def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
 
 
 def _is_non_empty_str(value: Any) -> bool:
@@ -418,7 +415,7 @@ def compile_template_v1(
     - per-target merges (including delete tombstones)
     """
     impl = _validate_template_v1(implementation)
-    now = now or _utcnow()
+    now = now or utcnow()
     if now.tzinfo is None:
         now = now.replace(tzinfo=timezone.utc)
 

@@ -73,11 +73,12 @@ from oms.routers import (
 # Monitoring and observability routers
 from shared.routers import monitoring, config_monitoring
 from shared.observability.logging import install_trace_context_filter
+from shared.utils.app_logger import DEFAULT_LOG_FORMAT
 
 # Logging setup
 logging.basicConfig(
     level=logging.INFO, 
-    format="%(asctime)s - %(name)s - %(levelname)s - trace_id=%(trace_id)s span_id=%(span_id)s req_id=%(request_id)s corr_id=%(correlation_id)s db=%(db_name)s - %(message)s",
+    format=DEFAULT_LOG_FORMAT,
     force=True
 )
 install_trace_context_filter()

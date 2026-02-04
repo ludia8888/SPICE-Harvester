@@ -13,13 +13,11 @@ import logging
 import signal
 import time
 from contextlib import suppress
-from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Set, Tuple
 from uuid import uuid4
 
 from shared.config.app_config import AppConfig
 from shared.config.settings import get_settings
-from shared.observability.logging import install_trace_context_filter
 from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
 from shared.services.storage.lakefs_client import LakeFSClient, LakeFSConflictError
@@ -27,6 +25,8 @@ from shared.services.storage.lakefs_storage_service import LakeFSStorageService,
 from shared.services.storage.storage_service import StorageService, create_storage_service
 from shared.services.core.writeback_merge_service import WritebackMergeService
 from shared.utils.canonical_json import CANONICAL_JSON_VERSION, sha256_canonical_json_prefixed
+from shared.utils.app_logger import configure_logging
+from shared.utils.time_utils import utcnow
 from shared.utils.writeback_paths import (
     queue_compaction_marker_key,
     ref_key,
@@ -36,17 +36,8 @@ from shared.utils.writeback_paths import (
 )
 
 _LOG_LEVEL = get_settings().observability.log_level
-logging.basicConfig(
-    level=_LOG_LEVEL,
-    format="%(asctime)s - %(name)s - %(levelname)s - trace_id=%(trace_id)s span_id=%(span_id)s req_id=%(request_id)s corr_id=%(correlation_id)s db=%(db_name)s - %(message)s",
-)
-install_trace_context_filter()
+configure_logging(_LOG_LEVEL)
 logger = logging.getLogger(__name__)
-
-
-def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
-
 
 def _parse_queue_seq(filename: str) -> Optional[int]:
     name = str(filename or "").rsplit("/", 1)[-1]
@@ -169,7 +160,7 @@ class WritebackMaterializerWorker:
             logger.info("No queue entries found (db=%s); skipping snapshot", db_name)
             return
 
-        snapshot_id = f"{_utcnow().strftime('%Y%m%dT%H%M%SZ')}-{uuid4().hex[:8]}"
+        snapshot_id = f"{utcnow().strftime('%Y%m%dT%H%M%SZ')}-{uuid4().hex[:8]}"
         staging_branch = AppConfig.sanitize_lakefs_branch_id(f"{branch}__snapshots__{snapshot_id}")
 
         try:
@@ -249,7 +240,7 @@ class WritebackMaterializerWorker:
             "snapshot_id": snapshot_id,
             "snapshot_revision": int(max_seq) if max_seq >= 0 else 0,
             "queue_high_watermark": int(max_seq) if max_seq >= 0 else 0,
-            "created_at": _utcnow().isoformat(),
+            "created_at": utcnow().isoformat(),
             "db_name": db_name,
             "base_branch": base_branch,
             "base_dataset_version_id": manifest_base_dataset_version_id,

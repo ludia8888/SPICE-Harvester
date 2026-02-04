@@ -22,7 +22,6 @@ import hashlib
 from urllib.parse import urlparse
 
 import aioboto3
-from botocore.config import Config
 from botocore.exceptions import ClientError
 
 from shared.config.settings import get_settings
@@ -30,6 +29,7 @@ from shared.models.event_envelope import EventEnvelope
 from shared.observability.context_propagation import enrich_metadata_with_current_trace
 from shared.services.events.aggregate_sequence_allocator import AggregateSequenceAllocator
 from shared.utils.ontology_version import extract_ontology_version
+from shared.services.storage.s3_client_config import build_s3_client_config
 import logging
 
 logger = logging.getLogger(__name__)
@@ -94,22 +94,11 @@ class EventStore:
             )
         verify_ssl = bool(get_settings().event_sourcing.event_store_ssl_verify)
 
-        addressing_style = (
-            str(get_settings().event_sourcing.event_store_s3_addressing_style or "").strip().lower()
+        addressing_style = str(get_settings().event_sourcing.event_store_s3_addressing_style or "").strip().lower()
+        client_config = build_s3_client_config(
+            self.endpoint_url,
+            addressing_style=addressing_style or None,
         )
-        if addressing_style in {"path", "virtual"}:
-            client_config = Config(s3={"addressing_style": addressing_style})
-        else:
-            host = (parsed.hostname or "").lower()
-            use_path_style = host in {
-                "localhost",
-                "127.0.0.1",
-                "0.0.0.0",
-                "minio",
-                "spice-minio",
-                "spice_minio",
-            } or host.endswith(".localhost")
-            client_config = Config(s3={"addressing_style": "path"}) if use_path_style else None
 
         return {
             "service_name": "s3",

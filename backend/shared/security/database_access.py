@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Iterable, Mapping, Optional, Tuple
+from collections import defaultdict
+from typing import Any, DefaultDict, Dict, Iterable, List, Mapping, Optional, Tuple
 
 import asyncpg
 
@@ -54,6 +55,104 @@ def normalize_database_role(value: Optional[str]) -> Optional[str]:
         return None
     normalized = _ROLE_ALIASES.get(raw.lower())
     return normalized or raw
+
+
+async def fetch_database_access_entries(*, db_names: Iterable[str]) -> Dict[str, List[Dict[str, Any]]]:
+    names = [str(name).strip() for name in db_names or [] if str(name or "").strip()]
+    if not names:
+        return {}
+
+    conn = await asyncpg.connect(get_settings().database.postgres_url)
+    try:
+        try:
+            rows = await conn.fetch(
+                """
+                SELECT db_name, principal_type, principal_id, principal_name, role
+                FROM database_access
+                WHERE db_name = ANY($1)
+                """,
+                names,
+            )
+        except asyncpg.UndefinedTableError:
+            # Treat missing table as "unconfigured" (migrations not applied yet).
+            return {}
+    finally:
+        await conn.close()
+
+    grouped: DefaultDict[str, List[Dict[str, Any]]] = defaultdict(list)
+    for row in rows or []:
+        raw_role = row["role"]
+        normalized_role = normalize_database_role(raw_role) or str(raw_role)
+        grouped[str(row["db_name"])].append(
+            {
+                "principal_type": str(row["principal_type"]),
+                "principal_id": str(row["principal_id"]),
+                "principal_name": str(row["principal_name"]) if row["principal_name"] else None,
+                "role": normalized_role,
+            }
+        )
+    return dict(grouped)
+
+
+async def upsert_database_access_entry(
+    *,
+    db_name: str,
+    principal_type: str,
+    principal_id: str,
+    principal_name: str,
+    role: str,
+) -> None:
+    if not principal_id:
+        return
+    normalized_role = normalize_database_role(role) or role
+
+    conn = await asyncpg.connect(get_settings().database.postgres_url)
+    try:
+        try:
+            await conn.execute(
+                """
+                INSERT INTO database_access (
+                    db_name, principal_type, principal_id, principal_name, role, created_at, updated_at
+                ) VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
+                ON CONFLICT (db_name, principal_type, principal_id)
+                DO UPDATE SET
+                    principal_name = EXCLUDED.principal_name,
+                    role = EXCLUDED.role,
+                    updated_at = NOW()
+                """,
+                db_name,
+                principal_type,
+                principal_id,
+                principal_name,
+                normalized_role,
+            )
+        except asyncpg.UndefinedTableError:
+            # Treat missing table as "unconfigured" (migrations not applied yet).
+            return
+    finally:
+        await conn.close()
+
+
+async def upsert_database_owner(
+    *,
+    db_name: str,
+    principal_type: str,
+    principal_id: str,
+    principal_name: str,
+) -> None:
+    await upsert_database_access_entry(
+        db_name=db_name,
+        principal_type=principal_type,
+        principal_id=principal_id,
+        principal_name=principal_name,
+        role="Owner",
+    )
+
+
+def resolve_database_actor_with_name(headers: Mapping[str, str]) -> Tuple[str, str, str]:
+    principal_type, principal_id = resolve_database_actor(headers)
+    principal_name = (headers.get("X-User-Name") or "").strip() or principal_id
+    return principal_type, principal_id, principal_name
 
 
 async def ensure_database_access_table(conn: asyncpg.Connection) -> None:

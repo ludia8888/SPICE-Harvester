@@ -32,11 +32,11 @@ from shared.services.storage.elasticsearch_service import ElasticsearchService, 
 from shared.services.storage.lakefs_storage_service import LakeFSStorageService, create_lakefs_storage_service
 from shared.services.core.projection_manager import ProjectionManager
 from shared.services.registries.processed_event_registry import (
-    ClaimDecision,
     ProcessedEventRegistry,
     validate_registry_enabled,
     validate_lease_settings,
 )
+from shared.services.kafka.processed_event_worker import HeartbeatOptions, ProcessedEventKafkaWorker, RegistryKey
 from shared.services.kafka.safe_consumer import SafeKafkaConsumer
 from shared.services.registries.lineage_store import LineageStore
 from shared.services.core.audit_log_store import AuditLogStore
@@ -46,28 +46,21 @@ from shared.utils.language import coerce_localized_text, select_localized_text, 
 from shared.utils.resource_rid import strip_rid_revision
 from shared.utils.writeback_paths import ref_key, writeback_patchset_key
 from shared.utils.writeback_lifecycle import overlay_doc_id
+from shared.utils.executor_utils import call_in_executor
 
 # Observability imports
 from shared.observability.tracing import get_tracing_service
 from shared.observability.metrics import get_metrics_collector
 from shared.observability.context_propagation import attach_context_from_kafka, kafka_headers_from_current_context
-from shared.observability.logging import install_trace_context_filter
+from shared.utils.app_logger import configure_logging
 
 # 로깅 설정
 _LOG_LEVEL = get_settings().observability.log_level
-logging.basicConfig(
-    level=_LOG_LEVEL,
-    format="%(asctime)s - %(name)s - %(levelname)s - trace_id=%(trace_id)s span_id=%(span_id)s req_id=%(request_id)s corr_id=%(correlation_id)s db=%(db_name)s - %(message)s",
-)
-install_trace_context_filter()
+configure_logging(_LOG_LEVEL)
 logger = logging.getLogger(__name__)
 
 
-class _InProgressLeaseError(RuntimeError):
-    """Raised when another worker holds the processed_events lease for this event."""
-
-
-class ProjectionWorker:
+class ProjectionWorker(ProcessedEventKafkaWorker[EventEnvelope, None]):
     """Instance와 Ontology 이벤트를 Elasticsearch에 프로젝션하는 워커
 
     Kafka message contract:
@@ -78,6 +71,7 @@ class ProjectionWorker:
         settings = get_settings()
         worker_cfg = settings.workers.projection
 
+        self.service_name = "projection-worker"
         self.running = False
         self.kafka_servers = settings.database.kafka_servers
         self.consumer: Optional[SafeKafkaConsumer] = None
@@ -107,8 +101,15 @@ class ProjectionWorker:
         self.dlq_topic = AppConfig.PROJECTION_DLQ_TOPIC
 
         # 재시도 설정
-        self.max_retries = int(worker_cfg.max_retries)
-        self.retry_count = {}
+        max_retries = int(worker_cfg.max_retries)
+        self.max_retries_config = max_retries
+        # Legacy semantics: max_retries counted retries (not attempts). Our runtime uses registry attempt_count starting at 1.
+        self.max_retries = max(1, max_retries + 1)
+        self.backoff_base = 2
+        self.backoff_max = 30
+
+        # ProcessedEventRegistry handler base (actual handler is per-topic).
+        self.handler = "projection_worker"
 
         # Cache Stampede 방지 모니터링 메트릭
         self.cache_metrics = {
@@ -348,19 +349,8 @@ class ProjectionWorker:
             except Exception as e:
                 logger.debug(f"Lineage record failed (non-fatal): {e}")
 
-    async def _heartbeat_loop(self, *, handler: str, event_id: str) -> None:
-        if not self.processed_event_registry:
-            return
-        interval = int(get_settings().event_sourcing.processed_event_heartbeat_interval_seconds)
-        while True:
-            await asyncio.sleep(interval)
-            ok = await self.processed_event_registry.heartbeat(handler=handler, event_id=event_id)
-            if not ok:
-                return
-
     async def _consumer_call(self, func, *args, **kwargs):
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(self._consumer_executor, lambda: func(*args, **kwargs))
+        return await call_in_executor(self._consumer_executor, func, *args, **kwargs)
         
     async def initialize(self):
         """워커 초기화"""
@@ -414,6 +404,7 @@ class ProjectionWorker:
         # Durable processed-events registry (idempotency + ordering guard)
         self.processed_event_registry = ProcessedEventRegistry()
         await self.processed_event_registry.connect()
+        self.processed = self.processed_event_registry
         logger.info("✅ ProcessedEventRegistry connected (Postgres)")
 
         # First-class lineage/audit (best-effort; do not fail the worker)
@@ -443,6 +434,8 @@ class ProjectionWorker:
         # Initialize OpenTelemetry
         self.tracing_service = get_tracing_service("projection-worker")
         self.metrics_collector = get_metrics_collector("projection-worker")
+        self.tracing = self.tracing_service
+        self.metrics = self.metrics_collector
         
         # 🎯 Initialize ProjectionManager for materialized views
         try:
@@ -577,166 +570,314 @@ class ProjectionWorker:
             logger.error(f"Failed to load mapping {filename}: {e}")
             raise
             
-    async def run(self):
+    async def run(self) -> None:
         """메인 실행 루프"""
         self.running = True
         logger.info("Projection Worker started")
-        
+
         try:
             while self.running:
                 msg = await self._consumer_call(self.consumer.poll, timeout=1.0)
                 if msg is None:
                     continue
-                    
+
                 if msg.error():
                     if msg.error().code() == KafkaError._PARTITION_EOF:
                         continue
-                    else:
-                        logger.error(f"Kafka error: {msg.error()}")
-                        continue
-                        
+                    logger.error("Kafka error: %s", msg.error())
+                    continue
+
                 try:
-                    # 이벤트 처리
-                    await self._process_event(msg)
-                    # 성공 시 오프셋 커밋
-                    maybe_crash("projection_worker:before_commit", logger=logger)
-                    await self._consumer_call(self.consumer.commit, msg)
-                    # Clear retry state for this offset
-                    key = f"{msg.topic()}:{msg.partition()}:{msg.offset()}"
-                    self.retry_count.pop(key, None)
-                    
-                except Exception as e:
-                    logger.error(f"Failed to process event: {e}")
-                    # 재시도 로직
-                    await self._handle_retry(msg, e)
-                    
+                    await self.handle_message(msg)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    logger.error("Unexpected projection worker error: %s", exc, exc_info=True)
+                    await asyncio.sleep(2)
+                    with suppress(Exception):
+                        await self._seek(topic=str(msg.topic()), partition=int(msg.partition()), offset=int(msg.offset()))
+                    await asyncio.sleep(1.0)
         except KeyboardInterrupt:
             logger.info("Received keyboard interrupt")
-        except Exception as e:
-            logger.error(f"Unexpected error in main loop: {e}")
         finally:
             await self._shutdown()
-            
-    async def _process_event(self, msg):
-        """이벤트 처리"""
+
+    def _parse_payload(self, payload: Any) -> EventEnvelope:  # type: ignore[override]
         try:
-            registry_event_id = None
-            registry_aggregate_id = None
-            registry_sequence = None
-            registry_claimed = False
+            envelope = EventEnvelope.model_validate_json(payload)
+        except Exception as exc:
+            raise ValueError(f"Invalid EventEnvelope JSON: {exc}") from exc
 
-            try:
-                envelope = EventEnvelope.model_validate_json(msg.value())
-            except Exception as e:
-                raise ValueError(f"Invalid EventEnvelope JSON: {e}") from e
+        kind = envelope.metadata.get("kind") if isinstance(envelope.metadata, dict) else None
+        if kind != "domain":
+            raise ValueError(f"Unexpected envelope kind for projection topics: {kind}")
 
-            kind = envelope.metadata.get("kind") if isinstance(envelope.metadata, dict) else None
-            if kind != "domain":
-                raise ValueError(f"Unexpected envelope kind for projection topic {msg.topic()}: {kind}")
+        return envelope
 
+    def _fallback_metadata(self, payload: EventEnvelope) -> Optional[Dict[str, Any]]:  # type: ignore[override]
+        return payload.metadata if isinstance(payload.metadata, dict) else None
+
+    def _span_name(self, *, payload: EventEnvelope) -> str:  # type: ignore[override]
+        return "projection_worker.process_event"
+
+    def _span_attributes(  # type: ignore[override]
+        self,
+        *,
+        msg: Any,
+        payload: EventEnvelope,
+        registry_key: RegistryKey,
+    ) -> Dict[str, Any]:
+        attrs = super()._span_attributes(msg=msg, payload=payload, registry_key=registry_key)
+        attrs.update(
+            {
+                "event.type": str(payload.event_type),
+                "event.sequence_number": payload.sequence_number,
+            }
+        )
+        return attrs
+
+    def _registry_handler(self, *, msg: Any, payload: EventEnvelope) -> str:  # type: ignore[override]
+        return f"{self.handler}:{msg.topic()}"
+
+    def _registry_key(self, payload: EventEnvelope) -> RegistryKey:  # type: ignore[override]
+        return RegistryKey(
+            event_id=str(payload.event_id),
+            aggregate_id=str(payload.aggregate_id) if payload.aggregate_id else None,
+            sequence_number=int(payload.sequence_number) if payload.sequence_number is not None else None,
+        )
+
+    def _heartbeat_options(self) -> HeartbeatOptions:  # type: ignore[override]
+        return HeartbeatOptions(
+            stop_when_false=True,
+            continue_on_exception=False,
+        )
+
+    def _is_retryable_error(self, exc: Exception, *, payload: EventEnvelope) -> bool:  # type: ignore[override]
+        if self._is_transient_infra_error(exc):
+            return True
+        return ProcessedEventKafkaWorker._is_retryable_error(self, exc, payload=payload)
+
+    def _max_retries_for_error(  # type: ignore[override]
+        self,
+        exc: Exception,
+        *,
+        payload: EventEnvelope,
+        error: str,
+        retryable: bool,
+    ) -> int:
+        if retryable and self._is_transient_infra_error(exc):
+            return 1_000_000_000
+        return int(self.max_retries)
+
+    def _backoff_seconds_for_error(  # type: ignore[override]
+        self,
+        exc: Exception,
+        *,
+        payload: EventEnvelope,
+        error: str,
+        attempt_count: int,
+        retryable: bool,
+    ) -> int:
+        backoff = min(max(1, int(attempt_count) * 2), 30)
+        return backoff
+
+    def _in_progress_sleep_seconds(self, *, claim: Any, payload: EventEnvelope) -> float:  # type: ignore[override]
+        try:
+            logger.info(
+                "Lease in progress elsewhere; retrying later (event_id=%s attempt=%s)",
+                payload.event_id,
+                int(getattr(claim, "attempt_count", 0) or 0),
+            )
+        except Exception:
+            pass
+        return 2.0
+
+    async def _on_retry_scheduled(  # type: ignore[override]
+        self,
+        *,
+        payload: EventEnvelope,
+        error: str,
+        attempt_count: int,
+        backoff_s: int,
+        retryable: bool,
+    ) -> None:
+        if self._is_transient_infra_error(RuntimeError(error)):
+            logger.warning(
+                "Transient infra error; retrying without DLQ (event_id=%s attempt=%s backoff=%ss): %s",
+                payload.event_id,
+                attempt_count,
+                int(backoff_s),
+                error,
+            )
+            return
+
+        max_failures = int(getattr(self, "max_retries_config", 0) or 0)
+        denom = max_failures if max_failures > 0 else int(self.max_retries)
+        logger.warning(
+            "Projection event failed; will retry (event_id=%s attempt=%s/%s backoff=%ss): %s",
+            payload.event_id,
+            attempt_count,
+            denom,
+            int(backoff_s),
+            error,
+        )
+
+    async def _on_terminal_failure(  # type: ignore[override]
+        self,
+        *,
+        payload: EventEnvelope,
+        error: str,
+        attempt_count: int,
+        retryable: bool,
+    ) -> None:
+        logger.error(
+            "Projection event max retries exceeded; sending to DLQ (event_id=%s attempt=%s)",
+            payload.event_id,
+            attempt_count,
+        )
+
+    async def _on_parse_error(self, *, msg: Any, raw_payload: Optional[str], error: Exception) -> None:  # type: ignore[override]
+        kafka_headers = None
+        with suppress(Exception):
             kafka_headers = msg.headers()
-            with attach_context_from_kafka(
+
+        fallback_metadata = None
+        if raw_payload:
+            try:
+                decoded = json.loads(raw_payload)
+                if isinstance(decoded, dict) and isinstance(decoded.get("metadata"), dict):
+                    fallback_metadata = decoded["metadata"]
+            except Exception:
+                fallback_metadata = None
+
+        try:
+            await self._publish_to_dlq(
+                msg=msg,
+                error=str(error),
+                attempt_count=1,
+                payload_text=raw_payload,
                 kafka_headers=kafka_headers,
-                fallback_metadata=envelope.metadata if isinstance(envelope.metadata, dict) else None,
-                service_name="projection-worker",
-            ):
-                with self.tracing_service.span(
-                    "projection_worker.process_event",
-                    attributes={
-                        "messaging.system": "kafka",
-                        "messaging.destination": msg.topic(),
-                        "messaging.destination_kind": "topic",
-                        "messaging.kafka.partition": msg.partition(),
-                        "messaging.kafka.offset": msg.offset(),
-                        "event.id": str(envelope.event_id),
-                        "event.type": str(envelope.event_type),
-                        "event.aggregate_id": str(envelope.aggregate_id),
-                    },
-                ):
-                    event_data = envelope.model_dump(mode="json")
-                    event_type = envelope.event_type
-                    topic = msg.topic()
-
-                    logger.info(f"Processing event: {event_type} from topic: {topic}")
-
-                    # Durable idempotency + ordering guard (Postgres)
-                    registry_event_id = envelope.event_id
-                    registry_aggregate_id = envelope.aggregate_id
-                    registry_sequence = envelope.sequence_number
-                    handler = f"projection_worker:{topic}"
-
-                    if self.processed_event_registry and registry_event_id:
-                        claim = await self.processed_event_registry.claim(
-                            handler=handler,
-                            event_id=str(registry_event_id),
-                            aggregate_id=str(registry_aggregate_id) if registry_aggregate_id else None,
-                            sequence_number=int(registry_sequence) if registry_sequence is not None else None,
-                        )
-                        if claim.decision in {ClaimDecision.DUPLICATE_DONE, ClaimDecision.STALE}:
-                            logger.info(
-                                f"Skipping {claim.decision.value} event_id={registry_event_id} "
-                                f"(aggregate_id={registry_aggregate_id}, seq={registry_sequence})"
-                            )
-                            return
-                        if claim.decision == ClaimDecision.IN_PROGRESS:
-                            raise _InProgressLeaseError(
-                                f"Event {registry_event_id} is already in progress elsewhere (lease not expired)"
-                            )
-                        registry_claimed = True
-                        maybe_crash("projection_worker:after_claim", logger=logger)
-
-                    heartbeat_task = None
-                    if registry_claimed and self.processed_event_registry and registry_event_id:
-                        heartbeat_task = asyncio.create_task(
-                            self._heartbeat_loop(handler=handler, event_id=str(registry_event_id))
-                        )
-
-                    try:
-                        maybe_crash("projection_worker:before_side_effect", logger=logger)
-                        if topic == AppConfig.INSTANCE_EVENTS_TOPIC:
-                            await self._handle_instance_event(event_data)
-                        elif topic == AppConfig.ONTOLOGY_EVENTS_TOPIC:
-                            await self._handle_ontology_event(event_data)
-                        elif topic == AppConfig.ACTION_EVENTS_TOPIC:
-                            await self._handle_action_event(event_data)
-                        else:
-                            logger.warning(f"Unknown topic: {topic}")
-                        maybe_crash("projection_worker:after_side_effect", logger=logger)
-
-                        if registry_claimed and self.processed_event_registry and registry_event_id:
-                            maybe_crash("projection_worker:before_mark_done", logger=logger)
-                            await self.processed_event_registry.mark_done(
-                                handler=handler,
-                                event_id=str(registry_event_id),
-                                aggregate_id=str(registry_aggregate_id) if registry_aggregate_id else None,
-                                sequence_number=int(registry_sequence) if registry_sequence is not None else None,
-                            )
-                    finally:
-                        if heartbeat_task:
-                            heartbeat_task.cancel()
-                            with suppress(asyncio.CancelledError):
-                                await heartbeat_task
-                
-        except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse event JSON: {e}")
+                fallback_metadata=fallback_metadata,
+            )
+        except Exception as dlq_err:
+            logger.error("Failed to publish invalid projection payload to DLQ; retrying: %s", dlq_err, exc_info=True)
             raise
-        except Exception as e:
-            logger.error(f"Error processing event: {e}")
-            if (
-                registry_claimed
-                and self.processed_event_registry
-                and registry_event_id
-                and "handler" in locals()
+
+        logger.exception("Invalid projection payload; skipping: %s", error)
+
+    async def _commit(self, msg: Any) -> None:  # type: ignore[override]
+        if not self.consumer:
+            return
+        maybe_crash("projection_worker:before_commit", logger=logger)
+        await self._consumer_call(self.consumer.commit_sync, msg)
+
+    async def _seek(self, *, topic: str, partition: int, offset: int) -> None:  # type: ignore[override]
+        if not self.consumer:
+            return
+        await self._consumer_call(self.consumer.seek, TopicPartition(topic, partition, offset))
+
+    async def _publish_to_dlq(
+        self,
+        *,
+        msg: Any,
+        error: str,
+        attempt_count: int,
+        payload_text: Optional[str],
+        kafka_headers: Optional[Any] = None,
+        fallback_metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        if not self.producer:
+            logger.error("DLQ producer not configured; dropping DLQ message: %s", error)
+            return
+
+        dlq_message = {
+            "original_topic": msg.topic(),
+            "original_partition": msg.partition(),
+            "original_offset": msg.offset(),
+            "original_value": payload_text,
+            "error": str(error),
+            "attempt_count": int(attempt_count),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "worker": "projection-worker",
+        }
+
+        with attach_context_from_kafka(
+            kafka_headers=kafka_headers,
+            fallback_metadata=fallback_metadata,
+            service_name="projection-worker",
+        ):
+            headers = kafka_headers_from_current_context()
+            with self.tracing_service.span(
+                "projection_worker.dlq_produce",
+                attributes={
+                    "messaging.system": "kafka",
+                    "messaging.destination": self.dlq_topic,
+                    "messaging.destination_kind": "topic",
+                    "messaging.kafka.partition": msg.partition(),
+                    "messaging.kafka.offset": msg.offset(),
+                },
             ):
-                try:
-                    await self.processed_event_registry.mark_failed(
-                        handler=handler,
-                        event_id=str(registry_event_id),
-                        error=str(e),
-                    )
-                except Exception as reg_err:
-                    logger.warning(f"Failed to mark event failed in registry: {reg_err}")
-            raise
+                self.producer.produce(
+                    self.dlq_topic,
+                    key=f"{msg.topic()}:{msg.partition()}:{msg.offset()}",
+                    value=json.dumps(dlq_message, ensure_ascii=False, default=str).encode("utf-8"),
+                    headers=headers or None,
+                )
+                self.producer.flush()
+
+        logger.info(
+            "Message sent to DLQ (topic=%s partition=%s offset=%s)",
+            msg.topic(),
+            msg.partition(),
+            msg.offset(),
+        )
+
+    async def _send_to_dlq(  # type: ignore[override]
+        self,
+        *,
+        msg: Any,
+        payload: EventEnvelope,
+        raw_payload: Optional[str],
+        error: str,
+        attempt_count: int,
+    ) -> None:
+        kafka_headers = None
+        with suppress(Exception):
+            kafka_headers = msg.headers()
+
+        await self._publish_to_dlq(
+            msg=msg,
+            error=error,
+            attempt_count=attempt_count,
+            payload_text=raw_payload,
+            kafka_headers=kafka_headers,
+            fallback_metadata=payload.metadata if isinstance(payload.metadata, dict) else None,
+        )
+
+    async def _process_payload(self, payload: EventEnvelope) -> None:  # type: ignore[override]
+        maybe_crash("projection_worker:after_claim", logger=logger)
+
+        event_data = payload.model_dump(mode="json")
+        event_type = str(payload.event_type)
+        logger.info("Processing event: %s", event_type)
+
+        maybe_crash("projection_worker:before_side_effect", logger=logger)
+        if event_type in {
+            EventType.INSTANCE_CREATED.value,
+            EventType.INSTANCE_UPDATED.value,
+            EventType.INSTANCE_DELETED.value,
+            EventType.INSTANCES_BULK_CREATED.value,
+            EventType.INSTANCES_BULK_UPDATED.value,
+            EventType.INSTANCES_BULK_DELETED.value,
+        }:
+            await self._handle_instance_event(event_data)
+        elif event_type == EventType.ACTION_APPLIED.value:
+            await self._handle_action_event(event_data)
+        else:
+            await self._handle_ontology_event(event_data)
+        maybe_crash("projection_worker:after_side_effect", logger=logger)
+
+        maybe_crash("projection_worker:before_mark_done", logger=logger)
             
     async def _handle_instance_event(self, event_data: Dict[str, Any]):
         """인스턴스 이벤트 처리"""
@@ -2617,120 +2758,7 @@ class ProjectionWorker:
             "timeout",
         ]
         return any(marker in msg for marker in transient_markers)
-        
-    async def _handle_retry(self, msg, error):
-        """재시도 처리"""
-        try:
-            key = f"{msg.topic()}:{msg.partition()}:{msg.offset()}"
 
-            # Lease contention is not a "failure": another worker is already processing this event_id.
-            # Never send this to DLQ; just retry later without consuming retry budget.
-            if isinstance(error, _InProgressLeaseError):
-                self.retry_count.pop(key, None)
-                logger.info(f"Lease in progress elsewhere; retrying later: {key}")
-                await asyncio.sleep(2)
-                if self.consumer:
-                    await self._consumer_call(
-                        self.consumer.seek, TopicPartition(msg.topic(), msg.partition(), msg.offset())
-                    )
-                return
-
-            # Transient infra failures (e.g. Elasticsearch down): retry indefinitely with capped backoff.
-            if self._is_transient_infra_error(error):
-                retry_count = self.retry_count.get(key, 0) + 1
-                self.retry_count[key] = retry_count
-                backoff_s = min(max(1, retry_count * 2), 30)
-                logger.warning(
-                    f"Transient infra error; retrying without DLQ (attempt {retry_count}, backoff={backoff_s}s): {key}"
-                )
-                await asyncio.sleep(backoff_s)
-                if self.consumer:
-                    await self._consumer_call(
-                        self.consumer.seek, TopicPartition(msg.topic(), msg.partition(), msg.offset())
-                    )
-                return
-
-            retry_count = self.retry_count.get(key, 0) + 1
-            
-            if retry_count <= self.max_retries:
-                self.retry_count[key] = retry_count
-                logger.warning(f"Retrying message (attempt {retry_count}/{self.max_retries}): {key}")
-                await asyncio.sleep(min(retry_count * 2, 30))  # capped backoff (avoid max.poll.interval issues)
-                # Rewind to the failed offset so we don't accidentally commit past it.
-                if self.consumer:
-                    await self._consumer_call(
-                        self.consumer.seek, TopicPartition(msg.topic(), msg.partition(), msg.offset())
-                    )
-                return
-                
-            # 최대 재시도 횟수 초과 시 DLQ로 전송
-            logger.error(f"Max retries exceeded for message: {key}, sending to DLQ")
-            await self._send_to_dlq(msg, error)
-            
-            # 재시도 카운트 제거
-            if key in self.retry_count:
-                del self.retry_count[key]
-                
-            # 오프셋 커밋 (DLQ 전송 후)
-            await self._consumer_call(self.consumer.commit, msg)
-            
-        except Exception as e:
-            logger.error(f"Error in retry handling: {e}")
-            
-    async def _send_to_dlq(self, msg, error):
-        """실패한 메시지를 DLQ로 전송"""
-        try:
-            if not self.producer:
-                logger.error("DLQ producer not configured; dropping DLQ message: %s", error)
-                return
-
-            fallback_metadata = None
-            try:
-                env = EventEnvelope.model_validate_json(msg.value())
-                if isinstance(env.metadata, dict):
-                    fallback_metadata = env.metadata
-            except Exception:
-                fallback_metadata = None
-
-            dlq_message = {
-                'original_topic': msg.topic(),
-                'original_partition': msg.partition(),
-                'original_offset': msg.offset(),
-                'original_value': msg.value().decode('utf-8', errors='replace') if msg.value() else None,
-                'error': str(error),
-                'timestamp': datetime.now(timezone.utc).isoformat(),
-                'worker': 'projection-worker'
-            }
-
-            kafka_headers = msg.headers()
-            with attach_context_from_kafka(
-                kafka_headers=kafka_headers,
-                fallback_metadata=fallback_metadata,
-                service_name="projection-worker",
-            ):
-                headers = kafka_headers_from_current_context()
-                with self.tracing_service.span(
-                    "projection_worker.dlq_produce",
-                    attributes={
-                        "messaging.system": "kafka",
-                        "messaging.destination": self.dlq_topic,
-                        "messaging.destination_kind": "topic",
-                        "messaging.kafka.partition": msg.partition(),
-                        "messaging.kafka.offset": msg.offset(),
-                    },
-                ):
-                    self.producer.produce(
-                        self.dlq_topic,
-                        key=f"{msg.topic()}:{msg.partition()}:{msg.offset()}",
-                        value=json.dumps(dlq_message, ensure_ascii=False, default=str).encode("utf-8"),
-                        headers=headers or None,
-                    )
-                    self.producer.flush()
-
-            logger.info("Message sent to DLQ (topic=%s partition=%s offset=%s)", msg.topic(), msg.partition(), msg.offset())
-            
-        except Exception as e:
-            logger.error(f"Failed to send message to DLQ: {e}")
             
     async def _shutdown(self):
         """워커 종료"""

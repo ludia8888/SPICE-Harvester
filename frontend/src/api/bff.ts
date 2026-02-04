@@ -275,12 +275,24 @@ type GoogleSheetsRegisteredListPayload = {
 }
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? ''
-const API_TOKEN =
+const API_TOKEN_RAW =
   (import.meta.env.VITE_BFF_TOKEN as string | undefined) ??
   (import.meta.env.VITE_ADMIN_TOKEN as string | undefined) ??
   ''
+const API_USER_JWT_RAW = (import.meta.env.VITE_USER_JWT as string | undefined) ?? ''
 const API_USER_ID = (import.meta.env.VITE_USER_ID as string | undefined) ?? ''
 const API_USER_NAME = (import.meta.env.VITE_USER_NAME as string | undefined) ?? ''
+
+const stripBearerPrefix = (value: string) => {
+  const raw = String(value || '').trim()
+  if (!raw) {
+    return ''
+  }
+  return raw.replace(/^bearer\s+/i, '').trim()
+}
+
+const API_TOKEN = stripBearerPrefix(API_TOKEN_RAW)
+const API_USER_JWT = stripBearerPrefix(API_USER_JWT_RAW)
 
 const buildUrl = (path: string) => {
   if (!API_BASE) {
@@ -315,7 +327,10 @@ const requestApi = async <T>(
   const headers = new Headers()
   headers.set('Accept', 'application/json')
   if (API_TOKEN) {
-    headers.set('Authorization', `Bearer ${API_TOKEN}`)
+    headers.set('X-Admin-Token', API_TOKEN)
+  }
+  if (API_USER_JWT) {
+    headers.set('X-Delegated-Authorization', `Bearer ${API_USER_JWT}`)
   }
   if (API_USER_ID) {
     headers.set('X-User-ID', API_USER_ID)
@@ -999,6 +1014,7 @@ export const runPipelineAgent = async (payload: {
 // === Pipeline Agent SSE Streaming Types ===
 export type AgentStreamEventType =
   | 'start'
+  | 'thinking'
   | 'tool_start'
   | 'tool_end'
   | 'plan_update'
@@ -1052,6 +1068,7 @@ export type AgentStreamEvent = {
 
 export type AgentStreamCallbacks = {
   onStart?: (data: AgentStreamEvent['data']) => void
+  onThinking?: (data: AgentStreamEvent['data']) => void
   onToolStart?: (data: AgentStreamEvent['data']) => void
   onToolEnd?: (data: AgentStreamEvent['data']) => void
   onPlanUpdate?: (data: AgentStreamEvent['data']) => void
@@ -1150,7 +1167,10 @@ export const runPipelineAgentStreaming = (
       'Accept': 'text/event-stream',
     }
     if (API_TOKEN) {
-      headers['Authorization'] = `Bearer ${API_TOKEN}`
+      headers['X-Admin-Token'] = API_TOKEN
+    }
+    if (API_USER_JWT) {
+      headers['X-Delegated-Authorization'] = `Bearer ${API_USER_JWT}`
     }
     if (API_USER_ID) {
       headers['X-User-ID'] = API_USER_ID
@@ -1178,7 +1198,22 @@ export const runPipelineAgentStreaming = (
 
       if (!response.ok) {
         const errorText = await response.text()
-        callbacks.onError?.({ error: errorText || response.statusText })
+        let message = errorText || response.statusText
+        try {
+          const parsed = JSON.parse(errorText)
+          const msg = typeof parsed?.message === 'string' ? parsed.message : ''
+          const detail = typeof parsed?.detail === 'string' ? parsed.detail : ''
+          if (msg && detail) {
+            message = `${msg} (${detail})`
+          } else if (msg) {
+            message = msg
+          } else if (detail) {
+            message = detail
+          }
+        } catch {
+          // ignore - keep raw errorText
+        }
+        callbacks.onError?.({ error: message })
         return
       }
 
@@ -1208,6 +1243,9 @@ export const runPipelineAgentStreaming = (
           switch (parsed.type) {
             case 'start':
               callbacks.onStart?.(data)
+              break
+            case 'thinking':
+              callbacks.onThinking?.(data)
               break
             case 'tool_start':
               callbacks.onToolStart?.(data)

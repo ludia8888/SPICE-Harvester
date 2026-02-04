@@ -50,6 +50,9 @@ services:
       service: bff
     environment:
       - INPUT_SANITIZER_MAX_LIST_ITEMS=10000
+      # Dev convenience: allow admin-token traffic to hit agent endpoints without a user JWT.
+      # In production, keep this false and provide real end-user JWTs via the auth layer.
+      - DEV_MASTER_AUTH_ENABLED=true
       # Allow Prometheus to scrape /metrics without requiring admin tokens (local dev stack).
       - BFF_AUTH_EXEMPT_PATHS=/api/v1/health,/api/v1/,/api/v1/data-connectors/google-sheets/oauth/callback,/metrics
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317

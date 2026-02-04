@@ -258,6 +258,9 @@ npm ci
 npm run dev
 ```
 
+참고: 백엔드에서 `USER_JWT_ENABLED=true` + `DEV_MASTER_AUTH_ENABLED=false` 인 경우, `/api/v1/agent/*`는 위임 사용자 JWT가 필요합니다.
+프론트 `frontend/.env`에 `VITE_USER_JWT=<jwt>`를 설정하거나(권장), 로컬 개발에서는 `DEV_MASTER_AUTH_ENABLED=true`로 우회할 수 있습니다.
+
 프론트 정책/스펙: `docs/frontend.md`, `docs/FRONTEND_POLICIES.md`
 
 ---

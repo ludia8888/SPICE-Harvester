@@ -16,9 +16,9 @@ import logging
 import signal
 from collections import Counter
 from contextlib import suppress
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
-from uuid import NAMESPACE_URL, UUID, uuid5
 
 from confluent_kafka import KafkaError, Producer, TopicPartition
 
@@ -32,11 +32,7 @@ from shared.errors.enterprise_catalog import is_external_code, resolve_enterpris
 from shared.errors.error_types import ErrorCode
 from shared.models.event_envelope import EventEnvelope
 from shared.models.events import ActionAppliedEvent
-from shared.observability.context_propagation import (
-    attach_context_from_kafka,
-    kafka_headers_from_current_context,
-)
-from shared.observability.logging import install_trace_context_filter
+from shared.observability.context_propagation import attach_context_from_kafka, kafka_headers_from_current_context
 from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
 from shared.security.database_access import DOMAIN_MODEL_ROLES, get_database_access_role
@@ -45,8 +41,8 @@ from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.services.storage.event_store import event_store
 from shared.services.storage.lakefs_client import LakeFSClient, LakeFSConflictError, LakeFSError
 from shared.services.storage.lakefs_storage_service import create_lakefs_storage_service, LakeFSStorageService
+from shared.services.kafka.processed_event_worker import HeartbeatOptions, ProcessedEventKafkaWorker, RegistryKey
 from shared.services.registries.processed_event_registry import (
-    ClaimDecision,
     ProcessedEventRegistry,
     validate_registry_enabled,
     validate_lease_settings,
@@ -85,77 +81,53 @@ from shared.utils.writeback_paths import (
     writeback_patchset_metadata_key,
 )
 from shared.utils.writeback_lifecycle import derive_lifecycle_id
+from shared.utils.action_writeback import action_applied_event_id, is_noop_changes, safe_str
+from shared.utils.app_logger import configure_logging
+from shared.utils.time_utils import utcnow
 
 _LOG_LEVEL = get_settings().observability.log_level
-logging.basicConfig(
-    level=_LOG_LEVEL,
-    format="%(asctime)s - %(name)s - %(levelname)s - trace_id=%(trace_id)s span_id=%(span_id)s req_id=%(request_id)s corr_id=%(correlation_id)s db=%(db_name)s - %(message)s",
-)
-install_trace_context_filter()
+configure_logging(_LOG_LEVEL)
 logger = logging.getLogger(__name__)
 
 
-def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+@dataclass
+class _ActionCommandPayload:
+    envelope: EventEnvelope
+    raw_text: Optional[str]
+    envelope_metadata: Optional[Dict[str, Any]] = None
+    stage: str = "execute_action"
 
 
-def _safe_str(value: Any) -> str:
-    if value is None:
-        return ""
-    return str(value).strip()
-
-
-def _action_applied_event_id(action_log_id: str) -> UUID:
-    key = f"action-applied:{action_log_id}"
-    return uuid5(NAMESPACE_URL, key)
-
-
-def _is_noop_changes(changes: Dict[str, Any]) -> bool:
-    if not isinstance(changes, dict):
-        return True
-    if bool(changes.get("delete")):
-        return False
-    return not (
-        (changes.get("set") or {})
-        or (changes.get("unset") or [])
-        or (changes.get("link_add") or [])
-        or (changes.get("link_remove") or [])
-    )
+class _ActionCommandParseError(ValueError):
+    def __init__(
+        self,
+        *,
+        stage: str,
+        payload_text: Optional[str],
+        payload_obj: Optional[Dict[str, Any]],
+        fallback_metadata: Optional[Dict[str, Any]],
+        cause: Exception,
+    ) -> None:
+        super().__init__(str(cause))
+        self.stage = str(stage)
+        self.payload_text = payload_text
+        self.payload_obj = payload_obj
+        self.fallback_metadata = fallback_metadata
+        self.cause = cause
 
 
 class _ActionRejected(Exception):
     """Used to short-circuit retries when the ActionLog is already finalized with a rejection result."""
 
 
-class _ActionCommandInProgress(Exception):
-    """Raised when a command is leased by another worker (retry later)."""
-
-
-class _ActionProcessingError(Exception):
-    def __init__(
-        self,
-        message: str,
-        *,
-        attempt_count: int,
-        envelope: Optional[EventEnvelope],
-        raw_payload: Optional[str],
-        stage: str,
-        cause: Optional[BaseException] = None,
-    ) -> None:
-        super().__init__(message)
-        self.attempt_count = int(attempt_count or 1)
-        self.envelope = envelope
-        self.raw_payload = raw_payload
-        self.stage = stage
-        self.cause = cause
-
-
-class ActionWorker:
+class ActionWorker(ProcessedEventKafkaWorker[_ActionCommandPayload, None]):
     def __init__(self) -> None:
         settings = get_settings()
         cfg = settings.workers.action
 
         self.running = False
+        self.service_name = "action-worker"
+        self.handler = "action_worker"
         self.tracing = get_tracing_service("action-worker")
         self.metrics = get_metrics_collector("action-worker")
         self.kafka_servers = settings.database.kafka_servers
@@ -164,9 +136,13 @@ class ActionWorker:
         self.dlq_topic = AppConfig.ACTION_COMMANDS_DLQ_TOPIC
         self.dlq_flush_timeout_seconds = float(cfg.dlq_flush_timeout_seconds)
         self.max_retry_attempts = int(cfg.max_retry_attempts)
+        self.max_retries = int(self.max_retry_attempts)
+        self.backoff_base = 1
+        self.backoff_max = 60
 
         self.enable_processed_event_registry = settings.event_sourcing.enable_processed_event_registry
         self.processed_event_registry: Optional[ProcessedEventRegistry] = None
+        self.processed: Optional[ProcessedEventRegistry] = None
 
         self.action_logs = ActionLogRegistry()
         self.dataset_registry: Optional[DatasetRegistry] = None
@@ -211,9 +187,9 @@ class ActionWorker:
             }
         )
 
-        if self.enable_processed_event_registry:
-            self.processed_event_registry = ProcessedEventRegistry()
-            await self.processed_event_registry.connect()
+        self.processed_event_registry = ProcessedEventRegistry()
+        await self.processed_event_registry.connect()
+        self.processed = self.processed_event_registry
 
         await event_store.connect()
         await self.action_logs.connect()
@@ -285,16 +261,214 @@ class ActionWorker:
             return
         await asyncio.to_thread(self.consumer.commit_sync, msg)
 
-    async def _seek_retry(self, msg: Any) -> None:
+    def _heartbeat_options(self) -> HeartbeatOptions:  # type: ignore[override]
+        return HeartbeatOptions(
+            stop_when_false=True,
+            continue_on_exception=False,
+        )
+
+    def _parse_payload(self, payload: Any) -> _ActionCommandPayload:  # type: ignore[override]
+        if not isinstance(payload, (bytes, bytearray)):
+            raise _ActionCommandParseError(
+                stage="decode",
+                payload_text=None,
+                payload_obj=None,
+                fallback_metadata=None,
+                cause=TypeError("Kafka payload must be bytes"),
+            )
+        try:
+            raw_text = payload.decode("utf-8")
+        except Exception as exc:
+            raise _ActionCommandParseError(
+                stage="decode",
+                payload_text=None,
+                payload_obj=None,
+                fallback_metadata=None,
+                cause=exc,
+            ) from exc
+
+        raw_message: Any
+        try:
+            raw_message = json.loads(raw_text)
+        except Exception as exc:
+            raise _ActionCommandParseError(
+                stage="parse_json",
+                payload_text=raw_text,
+                payload_obj=None,
+                fallback_metadata=None,
+                cause=exc,
+            ) from exc
+
+        fallback_metadata = raw_message.get("metadata") if isinstance(raw_message, dict) else None
+        fallback_metadata = fallback_metadata if isinstance(fallback_metadata, dict) else None
+
+        try:
+            envelope = EventEnvelope.model_validate(raw_message if isinstance(raw_message, dict) else {})
+        except Exception as exc:
+            payload_obj = raw_message if isinstance(raw_message, dict) else None
+            raise _ActionCommandParseError(
+                stage="parse_envelope",
+                payload_text=raw_text,
+                payload_obj=payload_obj,
+                fallback_metadata=fallback_metadata,
+                cause=exc,
+            ) from exc
+
+        return _ActionCommandPayload(
+            envelope=envelope,
+            raw_text=raw_text,
+            envelope_metadata=envelope.metadata if isinstance(envelope.metadata, dict) else fallback_metadata,
+        )
+
+    def _fallback_metadata(self, payload: _ActionCommandPayload) -> Optional[Dict[str, Any]]:  # type: ignore[override]
+        return payload.envelope_metadata
+
+    def _registry_key(self, payload: _ActionCommandPayload) -> RegistryKey:  # type: ignore[override]
+        envelope = payload.envelope
+        event_id = str(envelope.event_id or "").strip()
+        if not event_id:
+            raise ValueError("event_id is required")
+        aggregate_id = str(envelope.aggregate_id).strip() if envelope.aggregate_id is not None else None
+        if not aggregate_id:
+            aggregate_id = None
+        sequence_number = int(envelope.sequence_number) if envelope.sequence_number is not None else None
+        return RegistryKey(event_id=event_id, aggregate_id=aggregate_id, sequence_number=sequence_number)
+
+    async def _process_payload(self, payload: _ActionCommandPayload) -> None:  # type: ignore[override]
+        envelope = payload.envelope
+        meta = envelope.metadata if isinstance(envelope.metadata, dict) else {}
+        if meta.get("kind") != "command":
+            logger.info(
+                "Skipping non-command envelope event_id=%s type=%s",
+                envelope.event_id,
+                envelope.event_type,
+            )
+            return
+
+        command_data = envelope.data if isinstance(envelope.data, dict) else {}
+        command_type = command_data.get("command_type")
+        command_type = getattr(command_type, "value", command_type)
+        if str(command_type) != "EXECUTE_ACTION":
+            logger.info("Skipping non-action command_type=%s event_id=%s", command_type, envelope.event_id)
+            return
+
+        payload.stage = "validate_command"
+        action_log_id = safe_str(command_data.get("action_log_id"))
+        db_name = safe_str(command_data.get("db_name"))
+        if not action_log_id or not db_name:
+            raise ValueError("action_log_id and db_name are required on ActionCommand")
+
+        payload.stage = "execute_action"
+        try:
+            await self._execute_action(
+                db_name=db_name,
+                action_log_id=action_log_id,
+                command=command_data,
+                envelope=envelope,
+            )
+        except _ActionRejected:
+            return
+
+    def _span_name(self, *, payload: _ActionCommandPayload) -> str:  # type: ignore[override]
+        return "action_worker.process_message"
+
+    def _span_attributes(  # type: ignore[override]
+        self,
+        *,
+        msg: Any,
+        payload: _ActionCommandPayload,
+        registry_key: RegistryKey,
+    ) -> Dict[str, Any]:
+        attrs = super()._span_attributes(msg=msg, payload=payload, registry_key=registry_key)
+        envelope = payload.envelope
+        command_data = envelope.data if isinstance(envelope.data, dict) else {}
+        attrs.update(
+            {
+                "messaging.operation": "process",
+                "event.type": str(envelope.event_type or ""),
+                "event.aggregate_type": str(envelope.aggregate_type or ""),
+                "action_log_id": safe_str(command_data.get("action_log_id")) or None,
+                "db.name": safe_str(command_data.get("db_name")) or None,
+            }
+        )
+        return attrs
+
+    def _metric_event_name(self, *, payload: _ActionCommandPayload) -> Optional[str]:  # type: ignore[override]
+        return str(payload.envelope.event_type or "").strip() or None
+
+    async def _seek(self, *, topic: str, partition: int, offset: int) -> None:  # type: ignore[override]
         if not self.consumer:
             return
-        await asyncio.to_thread(
-            self.consumer.seek,
-            TopicPartition(msg.topic(), msg.partition(), msg.offset()),
+        await asyncio.to_thread(self.consumer.seek, TopicPartition(topic, partition, offset))
+
+    async def _on_parse_error(self, *, msg: Any, raw_payload: Optional[str], error: Exception) -> None:  # type: ignore[override]
+        stage = "parse"
+        payload_text = raw_payload
+        payload_obj = None
+        fallback_metadata = None
+        cause = error
+
+        if isinstance(error, _ActionCommandParseError):
+            stage = error.stage
+            payload_text = error.payload_text if error.payload_text is not None else raw_payload
+            payload_obj = error.payload_obj
+            fallback_metadata = error.fallback_metadata
+            cause = error.cause
+
+        kafka_headers = None
+        with suppress(Exception):
+            kafka_headers = msg.headers()
+
+        try:
+            await self._send_to_dlq(
+                msg=msg,
+                stage=stage,
+                error=str(cause),
+                attempt_count=1,
+                payload_text=payload_text,
+                payload_obj=payload_obj,
+                kafka_headers=kafka_headers,
+                fallback_metadata=fallback_metadata,
+            )
+        except Exception as dlq_err:
+            logger.error("Failed to publish invalid action payload to DLQ; retrying: %s", dlq_err, exc_info=True)
+            raise
+
+        logger.exception("Invalid action payload; skipping: %s", cause)
+
+    async def _on_retry_scheduled(  # type: ignore[override]
+        self,
+        *,
+        payload: _ActionCommandPayload,
+        error: str,
+        attempt_count: int,
+        backoff_s: int,
+        retryable: bool,
+    ) -> None:
+        logger.warning(
+            "Retrying action command in %ss (attempt %s): %s",
+            int(backoff_s),
+            attempt_count,
+            error,
+        )
+
+    async def _on_terminal_failure(  # type: ignore[override]
+        self,
+        *,
+        payload: _ActionCommandPayload,
+        error: str,
+        attempt_count: int,
+        retryable: bool,
+    ) -> None:
+        logger.error(
+            "Action command failed after %s attempts (retryable=%s): %s",
+            attempt_count,
+            retryable,
+            error,
         )
 
     @staticmethod
-    def _is_retryable_error(exc: BaseException) -> bool:
+    def _is_retryable_error(exc: BaseException, *, payload: Optional[_ActionCommandPayload] = None) -> bool:
         if isinstance(exc, _ActionRejected):
             return False
         if isinstance(exc, PermissionError):
@@ -332,7 +506,7 @@ class ActionWorker:
         # Default to retryable: unknown failures are more likely to be infra/transient.
         return True
 
-    async def _send_to_dlq(
+    async def _publish_to_dlq(
         self,
         *,
         msg: Any,
@@ -341,6 +515,8 @@ class ActionWorker:
         attempt_count: int,
         payload_text: Optional[str],
         payload_obj: Optional[dict[str, Any]],
+        kafka_headers: Optional[Any] = None,
+        fallback_metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
         if not self.dlq_producer:
             raise RuntimeError("DLQ producer not configured")
@@ -361,30 +537,78 @@ class ActionWorker:
             "error": (error or "").strip()[:4000],
             "attempt_count": int(attempt_count),
             "worker": "action-worker",
-            "timestamp": _utcnow().isoformat(),
+            "timestamp": utcnow().isoformat(),
         }
         if payload_obj is not None:
             dlq_message["parsed_payload"] = payload_obj
 
         key = f"{msg.topic()}:{msg.partition()}:{msg.offset()}".encode("utf-8")
         value = json.dumps(dlq_message, ensure_ascii=False, default=str).encode("utf-8")
-        headers = kafka_headers_from_current_context()
-        with self.tracing.span(
-            "action_worker.dlq_produce",
-            attributes={
-                "messaging.system": "kafka",
-                "messaging.destination": self.dlq_topic,
-                "messaging.destination_kind": "topic",
-                "messaging.kafka.partition": msg.partition(),
-                "messaging.kafka.offset": msg.offset(),
-            },
+
+        with attach_context_from_kafka(
+            kafka_headers=kafka_headers,
+            fallback_metadata=fallback_metadata if isinstance(fallback_metadata, dict) else None,
+            service_name=self.service_name,
         ):
-            self.dlq_producer.produce(self.dlq_topic, key=key, value=value, headers=headers or None)
-            await asyncio.to_thread(self.dlq_producer.flush, self.dlq_flush_timeout_seconds)
+            headers = kafka_headers_from_current_context()
+            with self.tracing.span(
+                "action_worker.dlq_produce",
+                attributes={
+                    "messaging.system": "kafka",
+                    "messaging.destination": self.dlq_topic,
+                    "messaging.destination_kind": "topic",
+                    "messaging.kafka.partition": msg.partition(),
+                    "messaging.kafka.offset": msg.offset(),
+                },
+            ):
+                self.dlq_producer.produce(self.dlq_topic, key=key, value=value, headers=headers or None)
+                await asyncio.to_thread(self.dlq_producer.flush, self.dlq_flush_timeout_seconds)
         try:
             self.metrics.record_event("ACTION_COMMAND_DLQ", action="published")
         except Exception:
             pass
+
+    async def _send_to_dlq(  # type: ignore[override]
+        self,
+        *,
+        msg: Any,
+        error: str,
+        attempt_count: int,
+        payload: Optional[_ActionCommandPayload] = None,
+        raw_payload: Optional[str] = None,
+        stage: str = "execute_action",
+        payload_text: Optional[str] = None,
+        payload_obj: Optional[dict[str, Any]] = None,
+        kafka_headers: Optional[Any] = None,
+        fallback_metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        if kafka_headers is None:
+            with suppress(Exception):
+                kafka_headers = msg.headers()
+
+        stage_final = str(stage or "").strip() or "execute_action"
+        if payload is not None and stage_final == "execute_action":
+            stage_final = str(payload.stage or stage_final).strip() or stage_final
+
+        if payload_text is None:
+            payload_text = raw_payload
+
+        if payload_obj is None and payload is not None:
+            payload_obj = payload.envelope.model_dump(mode="json")
+
+        if fallback_metadata is None and payload is not None:
+            fallback_metadata = payload.envelope_metadata
+
+        await self._publish_to_dlq(
+            msg=msg,
+            stage=stage_final,
+            error=error,
+            attempt_count=int(attempt_count),
+            payload_text=payload_text,
+            payload_obj=payload_obj,
+            kafka_headers=kafka_headers,
+            fallback_metadata=fallback_metadata,
+        )
 
     async def run(self) -> None:
         self.running = True
@@ -397,212 +621,16 @@ class ActionWorker:
                     continue
                 logger.error("Kafka error: %s", msg.error())
                 continue
-
             try:
-                raw_message = json.loads(msg.value().decode("utf-8"))
-            except Exception as e:
-                logger.error("Invalid JSON message on action command topic: %s", e)
-                try:
-                    await self._send_to_dlq(
-                        msg=msg,
-                        stage="parse_json",
-                        error=str(e),
-                        attempt_count=1,
-                        payload_text=None,
-                        payload_obj=None,
-                    )
-                    await self._commit(msg)
-                except Exception as dlq_err:
-                    logger.error("Failed to DLQ invalid JSON payload; retrying: %s", dlq_err, exc_info=True)
-                    await asyncio.sleep(2)
-                    await self._seek_retry(msg)
-                continue
-
-            try:
-                kafka_headers = None
+                await self.handle_message(msg)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.error("Unexpected action worker error: %s", exc, exc_info=True)
+                await asyncio.sleep(2)
                 with suppress(Exception):
-                    kafka_headers = msg.headers()
-                await self._process_message(raw_message, kafka_headers=kafka_headers)
-                await self._commit(msg)
-            except _ActionCommandInProgress:
-                await asyncio.sleep(2)
-                await self._seek_retry(msg)
-            except _ActionProcessingError as e:
-                cause = e.cause or e
-                attempt_count = int(getattr(e, "attempt_count", 1) or 1)
-                max_attempts = self.max_retry_attempts
-                retryable = self._is_retryable_error(cause)
-
-                if retryable and attempt_count < max_attempts:
-                    backoff_s = min(2 ** max(attempt_count - 1, 0), 60)
-                    logger.warning(
-                        "Retrying action command (attempt %s/%s, backoff=%ss): %s",
-                        attempt_count,
-                        max_attempts,
-                        backoff_s,
-                        cause,
-                    )
-                    await asyncio.sleep(backoff_s)
-                    await self._seek_retry(msg)
-                    continue
-
-                logger.error(
-                    "Action command failed (attempt %s/%s, retryable=%s); sending to DLQ and committing offset: %s",
-                    attempt_count,
-                    max_attempts,
-                    retryable,
-                    cause,
-                )
-                try:
-                    await self._send_to_dlq(
-                        msg=msg,
-                        stage=e.stage,
-                        error=str(cause),
-                        attempt_count=attempt_count,
-                        payload_text=e.raw_payload,
-                        payload_obj=e.envelope.model_dump(mode="json") if e.envelope else raw_message,
-                    )
-                    await self._commit(msg)
-                except Exception as dlq_err:
-                    logger.error("Failed to publish to DLQ; retrying: %s", dlq_err, exc_info=True)
-                    await asyncio.sleep(2)
-                    await self._seek_retry(msg)
-            except Exception as e:
-                logger.error("Unexpected error processing action command: %s", e, exc_info=True)
-                await asyncio.sleep(2)
-                await self._seek_retry(msg)
-
-    async def _process_message(
-        self,
-        envelope_json: Dict[str, Any],
-        *,
-        kafka_headers: Optional[Any] = None,
-    ) -> None:
-        envelope = None
-        try:
-            envelope = EventEnvelope.model_validate(envelope_json)
-        except Exception as exc:
-            raise _ActionProcessingError(
-                "Invalid EventEnvelope on action command topic",
-                attempt_count=1,
-                envelope=None,
-                raw_payload=json.dumps(envelope_json, ensure_ascii=False, default=str),
-                stage="parse_envelope",
-                cause=exc,
-            ) from exc
-        metadata = envelope.metadata if isinstance(envelope.metadata, dict) else {}
-
-        start_time = datetime.now(timezone.utc)
-        with attach_context_from_kafka(
-            kafka_headers=kafka_headers,
-            fallback_metadata=metadata,
-            service_name="action-worker",
-        ):
-            with self.tracing.span(
-                    "action_worker.process_message",
-                    attributes={
-                        "messaging.system": "kafka",
-                        "messaging.operation": "process",
-                    "event.id": str(envelope.event_id or ""),
-                    "event.type": str(envelope.event_type or ""),
-                    "event.aggregate_type": str(envelope.aggregate_type or ""),
-                    "event.aggregate_id": str(envelope.aggregate_id or ""),
-                },
-            ):
-                if metadata.get("kind") != "command":
-                    logger.info(
-                        "Skipping non-command envelope event_id=%s type=%s",
-                        envelope.event_id,
-                        envelope.event_type,
-                    )
-                    return
-
-                command_data = envelope.data if isinstance(envelope.data, dict) else {}
-                command_type = command_data.get("command_type")
-                if hasattr(command_type, "value"):
-                    command_type = command_type.value
-                if str(command_type) != "EXECUTE_ACTION":
-                    logger.info("Skipping non-action command_type=%s event_id=%s", command_type, envelope.event_id)
-                    return
-
-                action_log_id = _safe_str(command_data.get("action_log_id"))
-                db_name = _safe_str(command_data.get("db_name"))
-                if not action_log_id or not db_name:
-                    raise _ActionProcessingError(
-                        "action_log_id and db_name are required on ActionCommand",
-                        attempt_count=1,
-                        envelope=envelope,
-                        raw_payload=envelope.model_dump_json(),
-                        stage="validate_command",
-                        cause=ValueError("action_log_id and db_name are required on ActionCommand"),
-                    )
-
-                claimed = False
-                attempt_count = 1
-                if self.processed_event_registry:
-                    claim = await self.processed_event_registry.claim(
-                        handler="action_worker",
-                        event_id=str(envelope.event_id),
-                        aggregate_id=str(envelope.aggregate_id) if envelope.aggregate_id else None,
-                        sequence_number=int(envelope.sequence_number) if envelope.sequence_number is not None else None,
-                    )
-                    attempt_count = int(claim.attempt_count or 1)
-                    if claim.decision in {ClaimDecision.DUPLICATE_DONE, ClaimDecision.STALE}:
-                        logger.info(
-                            "Skipping %s action command event_id=%s (aggregate_id=%s)",
-                            claim.decision.value,
-                            envelope.event_id,
-                            envelope.aggregate_id,
-                        )
-                        return
-                    if claim.decision == ClaimDecision.IN_PROGRESS:
-                        logger.info(
-                            "Action command is in progress elsewhere; retry later (event_id=%s)",
-                            envelope.event_id,
-                        )
-                        raise _ActionCommandInProgress("action_command_in_progress_elsewhere")
-                    claimed = True
-
-                try:
-                    await self._execute_action(
-                        db_name=db_name,
-                        action_log_id=action_log_id,
-                        command=command_data,
-                        envelope=envelope,
-                    )
-                except _ActionRejected:
-                    # The action log is already finalized with a durable rejection result; ack the command.
-                    pass
-                except Exception as e:
-                    if claimed and self.processed_event_registry:
-                        with suppress(Exception):
-                            await self.processed_event_registry.mark_failed(
-                                handler="action_worker",
-                                event_id=str(envelope.event_id),
-                                error=str(e),
-                            )
-                    raise _ActionProcessingError(
-                        "Action command processing failed",
-                        attempt_count=attempt_count,
-                        envelope=envelope,
-                        raw_payload=envelope.model_dump_json(),
-                        stage="execute_action",
-                        cause=e,
-                    ) from e
-
-                if claimed and self.processed_event_registry:
-                    await self.processed_event_registry.mark_done(
-                        handler="action_worker",
-                        event_id=str(envelope.event_id),
-                        aggregate_id=str(envelope.aggregate_id) if envelope.aggregate_id else None,
-                        sequence_number=int(envelope.sequence_number) if envelope.sequence_number is not None else None,
-                    )
-
-                try:
-                    duration_s = (datetime.now(timezone.utc) - start_time).total_seconds()
-                    self.metrics.record_event(str(envelope.event_type or ""), action="processed", duration=duration_s)
-                except Exception:
-                    pass
+                    await self._seek(topic=str(msg.topic()), partition=int(msg.partition()), offset=int(msg.offset()))
+                await asyncio.sleep(1.0)
 
     async def _enforce_permission(
         self,
@@ -851,7 +879,7 @@ class ActionWorker:
         if log_rec.status in {ActionLogStatus.SUCCEEDED.value, ActionLogStatus.FAILED.value}:
             return
 
-        submitted_by = _safe_str(log_rec.submitted_by)
+        submitted_by = safe_str(log_rec.submitted_by)
         if not submitted_by:
             await self.action_logs.mark_failed(
                 action_log_id=action_log_id,
@@ -861,7 +889,7 @@ class ActionWorker:
 
         # Load action definition at the deployed commit.
         action_type_id = log_rec.action_type_id
-        ontology_commit_id = log_rec.ontology_commit_id or _safe_str(command.get("ontology_commit_id"))
+        ontology_commit_id = log_rec.ontology_commit_id or safe_str(command.get("ontology_commit_id"))
         if not ontology_commit_id:
             raise RuntimeError("ontology_commit_id is required for action execution")
         resources = OntologyResourceService(self.terminus)
@@ -987,7 +1015,7 @@ class ActionWorker:
                         ),
                     )
                     raise _ActionRejected("action_no_targets")
-                base_branch = _safe_str(command.get("base_branch") or "main") or "main"
+                base_branch = safe_str(command.get("base_branch") or "main") or "main"
 
                 governance_error = await self._check_writeback_dataset_acl_alignment(
                     db_name=db_name,
@@ -1008,9 +1036,9 @@ class ActionWorker:
                     for item in submission_snapshot.get("targets") or []:
                         if not isinstance(item, dict):
                             continue
-                        sid_class = _safe_str(item.get("class_id"))
-                        sid_instance = _safe_str(item.get("instance_id"))
-                        sid_lifecycle = _safe_str(item.get("lifecycle_id") or "lc-0") or "lc-0"
+                        sid_class = safe_str(item.get("class_id"))
+                        sid_instance = safe_str(item.get("instance_id"))
+                        sid_lifecycle = safe_str(item.get("lifecycle_id") or "lc-0") or "lc-0"
                         if not sid_class or not sid_instance:
                             continue
                         submission_targets[(sid_class, sid_instance, sid_lifecycle)] = item
@@ -1049,8 +1077,8 @@ class ActionWorker:
                 loaded_targets: List[Dict[str, Any]] = []
                 target_docs: Dict[Tuple[str, str], Dict[str, Any]] = {}
                 for item in compiled_shape:
-                    class_id = _safe_str(item.class_id)
-                    instance_id = _safe_str(item.instance_id)
+                    class_id = safe_str(item.class_id)
+                    instance_id = safe_str(item.instance_id)
                     if not class_id or not instance_id:
                         raise ValueError("each compiled target requires class_id and instance_id")
 
@@ -1075,7 +1103,7 @@ class ActionWorker:
                         input_payload=input_payload,
                         user=user_ctx,
                         target_docs=target_docs,
-                        now=_utcnow(),
+                        now=utcnow(),
                     )
                 except ActionImplementationError as exc:
                     await self.action_logs.mark_failed(
@@ -1094,8 +1122,8 @@ class ActionWorker:
                 }
 
                 for item in compiled_shape:
-                    class_id = _safe_str(item.class_id)
-                    instance_id = _safe_str(item.instance_id)
+                    class_id = safe_str(item.class_id)
+                    instance_id = safe_str(item.instance_id)
                     base_state = target_docs.get((class_id, instance_id))
                     if not isinstance(base_state, dict) or not base_state:
                         raise RuntimeError("base_state missing for compiled target")
@@ -1153,8 +1181,8 @@ class ActionWorker:
                 if AppConfig.WRITEBACK_ENFORCE_GOVERNANCE and self.dataset_registry:
                     denied: List[Dict[str, Any]] = []
                     for loaded in loaded_targets:
-                        class_id = _safe_str(loaded.get("class_id"))
-                        instance_id = _safe_str(loaded.get("instance_id"))
+                        class_id = safe_str(loaded.get("class_id"))
+                        instance_id = safe_str(loaded.get("instance_id"))
                         base_state = loaded.get("base_state") if isinstance(loaded.get("base_state"), dict) else None
                         if not class_id or not instance_id or not base_state:
                             continue
@@ -1232,8 +1260,8 @@ class ActionWorker:
                         if not _is_public_identifier(key) or key in criteria_vars:
                             continue
                         if isinstance(value, dict):
-                            ref_class = _safe_str(value.get("class_id"))
-                            ref_instance = _safe_str(value.get("instance_id"))
+                            ref_class = safe_str(value.get("class_id"))
+                            ref_instance = safe_str(value.get("instance_id"))
                             if ref_class and ref_instance:
                                 match = next(
                                     (
@@ -1463,10 +1491,10 @@ class ActionWorker:
                 conflicts: List[Dict[str, Any]] = []
                 policies_used: set[str] = set()
                 for loaded in loaded_targets:
-                    class_id = _safe_str(loaded.get("class_id"))
-                    instance_id = _safe_str(loaded.get("instance_id"))
-                    lifecycle_id = _safe_str(loaded.get("lifecycle_id") or "lc-0") or "lc-0"
-                    resource_rid = _safe_str(loaded.get("resource_rid")) or f"object_type:{class_id}@1"
+                    class_id = safe_str(loaded.get("class_id"))
+                    instance_id = safe_str(loaded.get("instance_id"))
+                    lifecycle_id = safe_str(loaded.get("lifecycle_id") or "lc-0") or "lc-0"
+                    resource_rid = safe_str(loaded.get("resource_rid")) or f"object_type:{class_id}@1"
                     base_state = loaded.get("base_state") if isinstance(loaded.get("base_state"), dict) else None
                     changes = loaded.get("changes") if isinstance(loaded.get("changes"), dict) else None
                     observed_base = loaded.get("observed_base") if isinstance(loaded.get("observed_base"), dict) else None
@@ -1550,7 +1578,7 @@ class ActionWorker:
                     "targets": targets,
                     "metadata": {
                         "submitted_by": log_rec.submitted_by,
-                        "submitted_at": (log_rec.submitted_at or _utcnow()).isoformat(),
+                        "submitted_at": (log_rec.submitted_at or utcnow()).isoformat(),
                         "correlation_id": log_rec.correlation_id,
                         "conflict_policy": action_conflict_policy,
                         "conflict_policies_used": sorted(policies_used),
@@ -1561,7 +1589,7 @@ class ActionWorker:
                     "db_name": db_name,
                     "action_type_id": action_type_id,
                     "ontology_commit_id": ontology_commit_id,
-                    "created_at": _utcnow().isoformat(),
+                    "created_at": utcnow().isoformat(),
                     "patchset_sha256": sha256_canonical_json_prefixed(patchset),
                 }
 
@@ -1580,7 +1608,7 @@ class ActionWorker:
                             "attempted_changes": patchset.get("targets", []),
                             "applied_changes": [
                                 t for t in patchset.get("targets", [])
-                                if isinstance(t, dict) and not _is_noop_changes(t.get("applied_changes", t.get("changes")))
+                                if isinstance(t, dict) and not is_noop_changes(t.get("applied_changes", t.get("changes")))
                             ],
                             "conflict_policy": action_conflict_policy,
                             "conflict_policies_used": sorted(policies_used),
@@ -1613,9 +1641,9 @@ class ActionWorker:
             action_applied_seq = log_rec.action_applied_seq
             action_applied_event_id = log_rec.action_applied_event_id
         else:
-            overlay_branch = _safe_str(command.get("overlay_branch") or branch) or branch
+            overlay_branch = safe_str(command.get("overlay_branch") or branch) or branch
             evt = ActionAppliedEvent(
-                event_id=_action_applied_event_id(action_log_id),
+                event_id=action_applied_event_id(action_log_id),
                 db_name=db_name,
                 action_log_id=action_log_id,
                 patchset_commit_id=patchset_commit_id,
@@ -1630,9 +1658,9 @@ class ActionWorker:
                 },
                 metadata={
                     "correlation_id": log_rec.correlation_id,
-                    "ontology": {"ref": f"branch:{_safe_str(command.get('base_branch') or 'main')}", "commit": ontology_commit_id},
+                    "ontology": {"ref": f"branch:{safe_str(command.get('base_branch') or 'main')}", "commit": ontology_commit_id},
                 },
-                occurred_at=_utcnow(),
+                occurred_at=utcnow(),
                 occurred_by=log_rec.submitted_by,
             )
             action_env = EventEnvelope.from_base_event(
@@ -1757,11 +1785,11 @@ class ActionWorker:
             if not isinstance(t, dict):
                 continue
             applied_changes = t.get("applied_changes")
-            if isinstance(applied_changes, dict) and _is_noop_changes(applied_changes):
+            if isinstance(applied_changes, dict) and is_noop_changes(applied_changes):
                 continue
-            resource_rid = _safe_str(t.get("resource_rid"))
-            instance_id = _safe_str(t.get("instance_id"))
-            lifecycle_id = _safe_str(t.get("lifecycle_id") or "lc-0") or "lc-0"
+            resource_rid = safe_str(t.get("resource_rid"))
+            instance_id = safe_str(t.get("instance_id"))
+            lifecycle_id = safe_str(t.get("lifecycle_id") or "lc-0") or "lc-0"
             base_token = t.get("base_token") if isinstance(t.get("base_token"), dict) else {}
             object_type = strip_rid_revision(resource_rid) or "object"
 

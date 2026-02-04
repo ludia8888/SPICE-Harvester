@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 from bff.dependencies import get_oms_client
 from bff.main import app
 from bff.routers import objectify as objectify_router
+from bff.routers import objectify_deps
 
 
 class _FakeDatasetRegistry:
@@ -200,12 +201,12 @@ def _post_mapping_spec(
     object_type_resource = object_type_resource or _build_object_type_resource(ontology_payload)
     oms_client = _FakeOMSClient(ontology_payload, object_type_resource)
 
-    original_enforce = objectify_router.enforce_database_role
+    original_enforce = objectify_deps.enforce_database_role
 
     async def _noop_enforce_database_role(**kwargs):
         return None
 
-    objectify_router.enforce_database_role = _noop_enforce_database_role
+    objectify_deps.enforce_database_role = _noop_enforce_database_role
     app.dependency_overrides[objectify_router.get_dataset_registry] = lambda: dataset_registry
     app.dependency_overrides[objectify_router.get_objectify_registry] = lambda: objectify_registry
     app.dependency_overrides[get_oms_client] = lambda: oms_client
@@ -217,7 +218,7 @@ def _post_mapping_spec(
             headers={"X-DB-Name": dataset.db_name},
         )
     finally:
-        objectify_router.enforce_database_role = original_enforce
+        objectify_deps.enforce_database_role = original_enforce
         app.dependency_overrides.clear()
 
 
@@ -377,10 +378,9 @@ def test_mapping_spec_target_type_mismatch_is_rejected():
     payload = _base_payload(
         [{"source_field": "name", "target_field": "name"}],
         target_field_types={"name": "xsd:integer"},
-        options={"primary_key_targets": ["name"]},
     )
     ontology_payload = {
-        "properties": [{"name": "name", "type": "xsd:string"}],
+        "properties": [{"name": "name", "type": "xsd:string", "primary_key": True}],
         "relationships": [],
     }
 

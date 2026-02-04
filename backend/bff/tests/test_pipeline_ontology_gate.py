@@ -6,7 +6,7 @@ from typing import Any, Optional
 import pytest
 from fastapi import HTTPException, status
 
-from bff.routers.pipeline import deploy_pipeline
+from bff.routers.pipeline_execution import deploy_pipeline
 
 PIPELINE_ID = "00000000-0000-0000-0000-000000000002"
 
@@ -129,7 +129,7 @@ async def test_promote_build_rejects_missing_ontology_commit() -> None:
                 "node_id": "node-1",
                 "definition_json": {"nodes": [], "edges": []},
             },
-            request=_Request(headers={}),
+            request=_Request(headers={"Idempotency-Key": "idem-ontology-1"}),
             pipeline_registry=registry,
             dataset_registry=_DatasetRegistry(),
             objectify_registry=_ObjectifyRegistry(),
@@ -162,7 +162,7 @@ async def test_promote_build_rejects_ontology_commit_mismatch() -> None:
                 "node_id": "node-1",
                 "definition_json": {"nodes": [], "edges": []},
             },
-            request=_Request(headers={}),
+            request=_Request(headers={"Idempotency-Key": "idem-ontology-2"}),
             pipeline_registry=registry,
             dataset_registry=_DatasetRegistry(),
             objectify_registry=_ObjectifyRegistry(),
@@ -198,7 +198,7 @@ async def test_promote_build_returns_503_when_ontology_gate_unavailable() -> Non
                 "node_id": "node-1",
                 "definition_json": {"nodes": [], "edges": []},
             },
-            request=_Request(headers={}),
+            request=_Request(headers={"Idempotency-Key": "idem-ontology-3"}),
             pipeline_registry=registry,
             dataset_registry=_DatasetRegistry(),
             objectify_registry=_ObjectifyRegistry(),

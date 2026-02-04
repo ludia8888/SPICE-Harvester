@@ -16,18 +16,21 @@ import threading
 import time
 from datetime import datetime, timezone
 from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
-from uuid import NAMESPACE_URL, uuid5
 
 import httpx
 from confluent_kafka import KafkaError, Producer, TopicPartition
 
-from shared.services.kafka.safe_consumer import SafeKafkaConsumer, ConsumerState
+from shared.services.kafka.processed_event_worker import (
+    HeartbeatOptions,
+    ProcessedEventKafkaWorker,
+    RegistryKey,
+)
+from shared.services.kafka.safe_consumer import SafeKafkaConsumer
 
 from shared.config.app_config import AppConfig
 from shared.config.settings import get_settings
 from shared.models.objectify_job import ObjectifyJob
-from shared.observability.context_propagation import attach_context_from_kafka, kafka_headers_from_current_context
-from shared.observability.logging import install_trace_context_filter
+from shared.observability.context_propagation import kafka_headers_from_current_context
 from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
 from shared.services.registries.dataset_registry import DatasetRegistry
@@ -35,8 +38,9 @@ from shared.services.registries.objectify_registry import ObjectifyRegistry
 from shared.services.registries.pipeline_registry import PipelineRegistry
 from shared.services.storage.lakefs_storage_service import create_lakefs_storage_service
 from shared.services.registries.lineage_store import LineageStore
-from shared.services.registries.processed_event_registry import ClaimDecision, ProcessedEventRegistry
+from shared.services.registries.processed_event_registry import ProcessedEventRegistry
 from shared.services.core.sheet_import_service import FieldMapping, SheetImportService
+from shared.utils.deterministic_ids import deterministic_uuid5_hex_prefix
 from shared.utils.import_type_normalization import normalize_import_target_type
 from shared.utils.key_spec import normalize_key_spec
 from shared.utils.ontology_type_normalization import normalize_ontology_base_type
@@ -50,6 +54,7 @@ from shared.services.pipeline.objectify_delta_utils import (
     DeltaResult,
     create_delta_computer_for_mapping_spec,
 )
+from shared.utils.app_logger import configure_logging
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +63,7 @@ class ObjectifyNonRetryableError(RuntimeError):
     """Raised for objectify failures that should not be retried."""
 
 
-class ObjectifyWorker:
+class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
     P0_ERROR_CODES = {
         "SOURCE_FIELD_MISSING",
         "SOURCE_FIELD_UNKNOWN",
@@ -92,6 +97,7 @@ class ObjectifyWorker:
         cfg = settings.workers.objectify
 
         self.running = False
+        self.service_name = "objectify-worker"
         self.topic = (AppConfig.OBJECTIFY_JOBS_TOPIC or "objectify-jobs").strip() or "objectify-jobs"
         self.dlq_topic = (AppConfig.OBJECTIFY_JOBS_DLQ_TOPIC or "objectify-jobs-dlq").strip() or "objectify-jobs-dlq"
         self.group_id = (AppConfig.OBJECTIFY_JOBS_GROUP or "objectify-worker-group").strip()
@@ -116,8 +122,8 @@ class ObjectifyWorker:
         self.backoff_base = int(cfg.backoff_base_seconds)
         self.backoff_max = int(cfg.backoff_max_seconds)
         self.ontology_pk_validation_mode = str(cfg.ontology_pk_validation_mode or "warn").strip().lower() or "warn"
-        self.tracing = get_tracing_service("objectify-worker")
-        self.metrics = get_metrics_collector("objectify-worker")
+        self.tracing = get_tracing_service(self.service_name)
+        self.metrics = get_metrics_collector(self.service_name)
         self._revoked_partitions: set[tuple[str, int]] = set()
         self._inflight_by_partition: Dict[tuple[str, int], asyncio.Task] = {}
         self._rebalance_in_progress = False
@@ -702,183 +708,175 @@ class ObjectifyWorker:
         if exc:
             logger.error("Background task crashed: %s", exc, exc_info=True)
 
+    # --- ProcessedEventKafkaWorker Strategy hooks ---
+    def _parse_payload(self, payload: Any) -> ObjectifyJob:  # type: ignore[override]
+        return ObjectifyJob.model_validate_json(payload)
+
+    def _registry_key(self, payload: ObjectifyJob) -> RegistryKey:  # type: ignore[override]
+        return RegistryKey(
+            event_id=str(payload.job_id),
+            aggregate_id=str(payload.dataset_id) if payload.dataset_id else None,
+            sequence_number=None,
+        )
+
+    async def _process_payload(self, payload: ObjectifyJob) -> None:  # type: ignore[override]
+        await self._process_job(payload)
+
+    def _fallback_metadata(self, payload: ObjectifyJob) -> Optional[Dict[str, Any]]:  # type: ignore[override]
+        return {
+            "job_id": payload.job_id,
+            "db_name": payload.db_name,
+            "dataset_id": payload.dataset_id,
+            "dataset_version_id": payload.dataset_version_id,
+            "mapping_spec_id": payload.mapping_spec_id,
+            "mapping_spec_version": payload.mapping_spec_version,
+            "target_class_id": payload.target_class_id,
+            "artifact_id": payload.artifact_id,
+            "artifact_key": payload.artifact_key,
+            "artifact_output_name": payload.artifact_output_name,
+        }
+
+    def _span_name(self, *, payload: ObjectifyJob) -> str:  # type: ignore[override]
+        return "objectify_worker.process_message"
+
+    def _span_attributes(  # type: ignore[override]
+        self,
+        *,
+        msg: Any,
+        payload: ObjectifyJob,
+        registry_key: RegistryKey,
+    ) -> Dict[str, Any]:
+        attrs = super()._span_attributes(msg=msg, payload=payload, registry_key=registry_key)
+        attrs.update(
+            {
+                "objectify.job_id": payload.job_id,
+                "objectify.db_name": payload.db_name,
+                "objectify.dataset_id": payload.dataset_id,
+                "objectify.dataset_version_id": payload.dataset_version_id,
+                "objectify.mapping_spec_id": payload.mapping_spec_id,
+                "objectify.mapping_spec_version": payload.mapping_spec_version,
+                "objectify.target_class_id": payload.target_class_id,
+            }
+        )
+        return attrs
+
+    def _metric_event_name(self, *, payload: ObjectifyJob) -> Optional[str]:  # type: ignore[override]
+        return "OBJECTIFY_JOB"
+
+    def _heartbeat_options(self) -> HeartbeatOptions:  # type: ignore[override]
+        return HeartbeatOptions(
+            warning_message="Objectify heartbeat failed (handler=%s event_id=%s): %s",
+        )
+
+    async def _on_parse_error(self, *, msg: Any, raw_payload: Optional[str], error: Exception) -> None:  # type: ignore[override]
+        try:
+            record = getattr(self.tracing, "record_exception", None)
+            if callable(record):
+                record(error)
+        except Exception:
+            pass
+        await super()._on_parse_error(msg=msg, raw_payload=raw_payload, error=error)
+
+    def _is_retryable_error(self, exc: Exception, *, payload: ObjectifyJob) -> bool:  # type: ignore[override]
+        try:
+            record = getattr(self.tracing, "record_exception", None)
+            if callable(record):
+                record(exc)
+        except Exception:
+            pass
+        return self._is_retryable_error_impl(exc)
+
+    async def _persist_objectify_failure_status(
+        self,
+        *,
+        job: ObjectifyJob,
+        status: str,
+        error: str,
+        attempt_count: int,
+        retryable: bool,
+        completed_at: Optional[datetime],
+    ) -> None:
+        if not self.objectify_registry:
+            return
+        try:
+            report_payload = self._build_error_report(
+                error=error,
+                job=job,
+                context={"attempt_count": int(attempt_count), "retryable": bool(retryable)},
+            )
+            await self.objectify_registry.update_objectify_job_status(
+                job_id=job.job_id,
+                status=status,
+                error=(error or "")[:4000],
+                report=report_payload,
+                completed_at=completed_at,
+            )
+        except Exception as status_err:
+            logger.warning(
+                "Failed to persist objectify failure status (job_id=%s): %s",
+                job.job_id,
+                status_err,
+                exc_info=True,
+            )
+
+    async def _on_retry_scheduled(  # type: ignore[override]
+        self,
+        *,
+        payload: ObjectifyJob,
+        error: str,
+        attempt_count: int,
+        backoff_s: int,
+        retryable: bool,
+    ) -> None:
+        await self._persist_objectify_failure_status(
+            job=payload,
+            status="RETRYING",
+            error=error,
+            attempt_count=attempt_count,
+            retryable=retryable,
+            completed_at=None,
+        )
+        logger.warning(
+            "Objectify job failed; will retry (job_id=%s attempt=%s backoff=%ss): %s",
+            payload.job_id,
+            attempt_count,
+            int(backoff_s),
+            error,
+        )
+
+    async def _on_terminal_failure(  # type: ignore[override]
+        self,
+        *,
+        payload: ObjectifyJob,
+        error: str,
+        attempt_count: int,
+        retryable: bool,
+    ) -> None:
+        await self._persist_objectify_failure_status(
+            job=payload,
+            status="FAILED",
+            error=error,
+            attempt_count=attempt_count,
+            retryable=retryable,
+            completed_at=datetime.now(timezone.utc),
+        )
+        logger.error(
+            "Objectify job max retries exceeded; sending to DLQ (job_id=%s attempt=%s)",
+            payload.job_id,
+            attempt_count,
+        )
+
     async def _handle_kafka_message(self, msg: Any) -> None:
         if not self.consumer:
             return
 
         topic = str(msg.topic())
         partition = int(msg.partition())
-        offset = int(msg.offset())
         key = (topic, partition)
 
-        kafka_headers = msg.headers()
-        payload = msg.value()
-        raw_text: Optional[str] = None
-        job: Optional[ObjectifyJob] = None
-        heartbeat_task: Optional[asyncio.Task] = None
-        claim = None
-        start = time.monotonic()
-
         try:
-            if not payload:
-                self.consumer.commit_sync(msg)
-                return
-
-            with attach_context_from_kafka(kafka_headers=kafka_headers, service_name="objectify-worker"):
-                with self.tracing.span(
-                    "objectify_worker.process_message",
-                    attributes={
-                        "messaging.system": "kafka",
-                        "messaging.destination": topic,
-                        "messaging.destination_kind": "topic",
-                        "messaging.kafka.partition": partition,
-                        "messaging.kafka.offset": offset,
-                    },
-                ):
-                    try:
-                        raw_text = (
-                            payload.decode("utf-8", errors="replace")
-                            if isinstance(payload, (bytes, bytearray))
-                            else None
-                        )
-                        job = ObjectifyJob.model_validate_json(payload)
-                        self.tracing.set_span_attribute("objectify.job_id", job.job_id)
-                        self.tracing.set_span_attribute("objectify.dataset_id", job.dataset_id)
-                        self.tracing.set_span_attribute("objectify.dataset_version_id", job.dataset_version_id)
-                        self.tracing.set_span_attribute("objectify.mapping_spec_id", job.mapping_spec_id)
-                        self.tracing.set_span_attribute("objectify.mapping_spec_version", job.mapping_spec_version)
-                    except Exception as exc:
-                        self.tracing.record_exception(exc)
-                        logger.exception("Invalid objectify payload; skipping: %s", exc)
-                        self.consumer.commit_sync(msg)
-                        return
-
-                    try:
-                        if not self.processed:
-                            raise RuntimeError("ProcessedEventRegistry not initialized")
-
-                        claim = await self.processed.claim(
-                            handler=self.handler,
-                            event_id=job.job_id,
-                            aggregate_id=job.dataset_id,
-                            sequence_number=job.mapping_spec_version,
-                        )
-                        if claim.decision in {ClaimDecision.DUPLICATE_DONE, ClaimDecision.STALE}:
-                            self.consumer.commit_sync(msg)
-                            return
-                        if claim.decision == ClaimDecision.IN_PROGRESS:
-                            await asyncio.sleep(2)
-                            self.consumer.seek(TopicPartition(topic, partition, offset))
-                            return
-
-                        heartbeat_task = asyncio.create_task(
-                            self._heartbeat_loop(handler=self.handler, event_id=job.job_id)
-                        )
-
-                        await self._process_job(job)
-                        if self.processed:
-                            await self.processed.mark_done(handler=self.handler, event_id=job.job_id)
-                        self.consumer.commit_sync(msg)
-                        try:
-                            self.metrics.record_event(
-                                "OBJECTIFY_JOB",
-                                action="processed",
-                                duration=time.monotonic() - start,
-                            )
-                        except Exception:
-                            pass
-                    except asyncio.CancelledError:
-                        if self.processed and job:
-                            try:
-                                await self.processed.mark_failed(
-                                    handler=self.handler,
-                                    event_id=job.job_id,
-                                    error="cancelled",
-                                )
-                            except Exception as mark_err:
-                                logger.warning("Failed to mark cancelled objectify job failed: %s", mark_err)
-                        raise
-                    except Exception as exc:
-                        self.tracing.record_exception(exc)
-                        err = str(exc)
-                        retryable = self._is_retryable_error(exc)
-                        attempt_count = int(getattr(claim, "attempt_count", 1) or 1)
-
-                        if self.objectify_registry and job:
-                            try:
-                                report_payload = self._build_error_report(
-                                    error=err,
-                                    job=job,
-                                    context={"attempt_count": attempt_count, "retryable": retryable},
-                                )
-                                # IMPORTANT: Do not mark the job as FAILED (terminal) for retryable errors.
-                                # The worker will re-seek and retry the same Kafka message; callers (including the
-                                # DAG orchestrator) must be able to distinguish "will retry" vs "final failure".
-                                job_status = "FAILED"
-                                completed_at: Optional[datetime] = datetime.now(timezone.utc)
-                                if retryable and attempt_count < self.max_retries:
-                                    job_status = "RETRYING"
-                                    completed_at = None
-                                await self.objectify_registry.update_objectify_job_status(
-                                    job_id=job.job_id,
-                                    status=job_status,
-                                    error=err[:4000],
-                                    report=report_payload,
-                                    completed_at=completed_at,
-                                )
-                            except Exception as status_err:
-                                logger.warning(
-                                    "Failed to persist objectify failure status (job_id=%s): %s",
-                                    job.job_id,
-                                    status_err,
-                                    exc_info=True,
-                                )
-
-                        if self.processed and job:
-                            try:
-                                await self.processed.mark_failed(handler=self.handler, event_id=job.job_id, error=err)
-                            except Exception as mark_err:
-                                logger.warning("Failed to mark objectify job failed: %s", mark_err)
-
-                        if not retryable:
-                            attempt_count = self.max_retries
-
-                        if attempt_count >= self.max_retries:
-                            logger.error(
-                                "Objectify job max retries exceeded; sending to DLQ (job_id=%s attempt=%s)",
-                                job.job_id if job else None,
-                                attempt_count,
-                            )
-                            await self._send_to_dlq(
-                                job=job,
-                                raw_payload=raw_text,
-                                error=err,
-                                attempt_count=attempt_count,
-                            )
-                            self.consumer.commit_sync(msg)
-                            return
-
-                        backoff_s = min(
-                            self.backoff_max,
-                            int(self.backoff_base * (2 ** max(0, attempt_count - 1))),
-                        )
-                        logger.warning(
-                            "Objectify job failed; will retry (job_id=%s attempt=%s backoff=%ss): %s",
-                            job.job_id if job else None,
-                            attempt_count,
-                            backoff_s,
-                            err,
-                        )
-                        await asyncio.sleep(backoff_s)
-                        self.consumer.seek(TopicPartition(topic, partition, offset))
-                        return
+            await self.handle_message(msg)
         finally:
-            if heartbeat_task:
-                heartbeat_task.cancel()
-                try:
-                    await heartbeat_task
-                except asyncio.CancelledError:
-                    pass
             try:
                 if self.consumer and key not in self._revoked_partitions:
                     self.consumer.resume([TopicPartition(topic, partition)])
@@ -3527,7 +3525,7 @@ class ObjectifyWorker:
                     raise ValueError("row_key is required to derive instance id")
                 row_key = row_keys[idx]
                 seed = f"{stable_seed}:{mapping_spec_version}:{row_key}"
-                suffix = uuid5(NAMESPACE_URL, f"objectify:{seed}").hex[:12]
+                suffix = deterministic_uuid5_hex_prefix(f"objectify:{seed}", length=12)
                 candidate = f"{class_id.lower()}_{suffix}"
                 inst[expected_key] = candidate
             instance_ids.append(str(candidate))
@@ -3695,23 +3693,11 @@ class ObjectifyWorker:
                 logger.warning("Failed to record lineage for instance %s: %s", instance_id, exc)
         return limit_remaining
 
-    async def _heartbeat_loop(self, *, handler: str, event_id: str) -> None:
-        if not self.processed:
-            return
-        interval = int(get_settings().event_sourcing.processed_event_heartbeat_interval_seconds)
-        while True:
-            try:
-                await asyncio.sleep(interval)
-                await self.processed.heartbeat(handler=handler, event_id=event_id)
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:
-                logger.warning("Objectify heartbeat failed (handler=%s event_id=%s): %s", handler, event_id, exc)
-
-    async def _send_to_dlq(
+    async def _send_to_dlq(  # type: ignore[override]
         self,
         *,
-        job: Optional[ObjectifyJob],
+        msg: Any,
+        payload: ObjectifyJob,
         raw_payload: Optional[str],
         error: str,
         attempt_count: int,
@@ -3719,22 +3705,25 @@ class ObjectifyWorker:
         if not self.dlq_producer:
             logger.error("DLQ producer not configured; dropping objectify DLQ payload: %s", error)
             return
-        payload = {
+        dlq_payload = {
             "kind": "objectify_job_dlq",
-            "job": job.model_dump(mode="json") if job else None,
+            "job": payload.model_dump(mode="json"),
             "error": error,
             "attempt_count": int(attempt_count),
             "failed_at": datetime.now(timezone.utc).isoformat(),
             "raw_payload": raw_payload,
         }
-        key = (job.job_id if job else "objectify-job").encode("utf-8")
-        value = json.dumps(payload, ensure_ascii=True, default=str).encode("utf-8")
+        key = str(payload.job_id or "objectify-job").encode("utf-8")
+        value = json.dumps(dlq_payload, ensure_ascii=True, default=str).encode("utf-8")
         headers = kafka_headers_from_current_context()
-        self.dlq_producer.produce(self.dlq_topic, key=key, value=value, headers=headers or None)
-        self.dlq_producer.flush(10)
+        try:
+            self.dlq_producer.produce(self.dlq_topic, key=key, value=value, headers=headers or None)
+            self.dlq_producer.flush(10)
+        except Exception as exc:
+            logger.warning("Failed to publish objectify DLQ payload (job_id=%s): %s", payload.job_id, exc, exc_info=True)
 
     @staticmethod
-    def _is_retryable_error(exc: Exception) -> bool:
+    def _is_retryable_error_impl(exc: Exception) -> bool:
         if isinstance(exc, ObjectifyNonRetryableError):
             return False
         if isinstance(exc, httpx.HTTPStatusError):
@@ -3771,12 +3760,7 @@ class ObjectifyWorker:
 
 
 async def main() -> None:
-    log_level = get_settings().observability.log_level
-    logging.basicConfig(
-        level=log_level,
-        format="%(asctime)s - %(name)s - %(levelname)s - trace_id=%(trace_id)s span_id=%(span_id)s req_id=%(request_id)s corr_id=%(correlation_id)s db=%(db_name)s - %(message)s",
-    )
-    install_trace_context_filter()
+    configure_logging(get_settings().observability.log_level)
     worker = ObjectifyWorker()
     await worker.run()
 

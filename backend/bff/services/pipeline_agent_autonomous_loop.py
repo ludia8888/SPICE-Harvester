@@ -755,6 +755,9 @@ def _build_system_prompt(*, allowed_tools: List[str]) -> str:
         "\n"
         "Core rules:\n"
         "- Return ONLY JSON matching the schema. No markdown, no extra text.\n"
+        "- IMPORTANT: For greetings or casual chat (e.g., '안녕', 'hello', '하이', '뭐해?', '넌 누구야'), IMMEDIATELY respond with action='finish' and a friendly note in Korean. Do NOT use clarify or call any tools.\n"
+        "  Example: {\"action\": \"finish\", \"notes\": [\"안녕하세요! 저는 파이프라인 생성을 도와드리는 AI 에이전트입니다. 데이터 변환, 조인, 집계 등의 파이프라인을 만들어 드릴 수 있어요. 어떤 작업이 필요하신가요?\"]}\n"
+        "- For dataset queries (e.g., '데이터셋이 뭐가 있어?', '어떤 데이터가 있어?'), use dataset_list ONCE (not dataset_get_latest_version for each), then finish with a summary in notes. Do NOT call dataset_get_latest_version repeatedly.\n"
         "- Do NOT invent data; prefer tool observations over guessing.\n"
         "- Tool args MUST NOT include raw `plan` objects; the server stores them.\n"
         "- Respect scope: if the user asked ONLY for analysis (e.g., null check), do NOT build a plan.\n"
@@ -2644,6 +2647,25 @@ async def run_pipeline_agent_streaming(
 
     # 메인 루프
     for step_idx in range(max_steps):
+        # 생각 중 이벤트 - 사용자에게 진행 상황 표시
+        thinking_messages = [
+            "요청을 분석하고 있습니다...",
+            "데이터 구조를 파악하고 있습니다...",
+            "최적의 변환 방법을 찾고 있습니다...",
+            "파이프라인 구조를 설계하고 있습니다...",
+            "노드 연결 관계를 검토하고 있습니다...",
+        ]
+        thinking_msg = thinking_messages[step_idx % len(thinking_messages)]
+        yield StreamEvent(
+            event_type="thinking",
+            data={
+                "run_id": run_id,
+                "step": step_idx + 1,
+                "max_steps": max_steps,
+                "message": thinking_msg,
+            }
+        )
+
         # 프롬프트 구성
         user_prompt = _build_user_prompt(
             state=state,
@@ -2740,11 +2762,64 @@ async def run_pipeline_agent_streaming(
                     )
                     return
             else:
+                # 도구 실행 결과 또는 LLM notes가 있으면 정보 조회 응답으로 처리
+                if state.last_observation or decision.notes:
+                    # LLM이 notes에 요약 정보를 담은 경우 이를 메시지로 사용
+                    notes_text = "\n".join(decision.notes) if decision.notes else None
+
+                    # 에러 메시지 패턴 감지 - LLM이 에러 메시지를 notes에 넣은 경우 친절한 안내로 대체
+                    error_patterns = ["cannot finish", "no plan", "error", "failed", "unable to"]
+                    is_error_note = notes_text and any(
+                        pattern in notes_text.lower() for pattern in error_patterns
+                    )
+
+                    if is_error_note:
+                        # 에러 메시지 대신 친절한 안내 메시지 사용
+                        friendly_message = (
+                            "안녕하세요! 저는 파이프라인 생성을 도와드리는 에이전트입니다. 🤖\n\n"
+                            "다음과 같은 요청을 해주시면 도움을 드릴 수 있습니다:\n"
+                            "• \"고객별 주문 총액을 계산하는 파이프라인 만들어줘\"\n"
+                            "• \"주문 데이터와 고객 데이터를 조인해서 분석해줘\"\n"
+                            "• \"매출 분석 파이프라인 만들어줘\"\n"
+                            "• \"현재 데이터셋이 뭐가 있어?\""
+                        )
+                        yield StreamEvent(
+                            event_type="complete",
+                            data={
+                                "run_id": run_id,
+                                "status": "info",
+                                "message": friendly_message,
+                            }
+                        )
+                        return
+
+                    yield StreamEvent(
+                        event_type="complete",
+                        data={
+                            "run_id": run_id,
+                            "status": "info",
+                            "message": notes_text or "요청하신 정보입니다.",
+                            "observation": state.last_observation,
+                        }
+                    )
+                    return
+                # 일반 대화나 파이프라인과 무관한 요청에 대해 친절하게 안내
                 yield StreamEvent(
-                    event_type="error",
-                    data={"error": "Cannot finish: no plan created", "run_id": run_id}
+                    event_type="complete",
+                    data={
+                        "run_id": run_id,
+                        "status": "no_action",
+                        "message": (
+                            "안녕하세요! 저는 파이프라인 생성을 도와드리는 에이전트입니다. 🤖\n\n"
+                            "다음과 같은 요청을 해주시면 도움을 드릴 수 있습니다:\n"
+                            "• \"고객별 주문 총액을 계산하는 파이프라인 만들어줘\"\n"
+                            "• \"주문 데이터와 고객 데이터를 조인해서 분석해줘\"\n"
+                            "• \"매출 분석 파이프라인 만들어줘\"\n"
+                            "• \"현재 데이터셋이 뭐가 있어?\""
+                        ),
+                    }
                 )
-                continue
+                return
 
         # call_tool 액션
         tool_calls = list(decision.tool_calls or [])
@@ -2758,14 +2833,16 @@ async def run_pipeline_agent_streaming(
 
             args = dict(call.args or {})
 
-            # 도구 시작 이벤트
+            # 도구 시작 이벤트 - LLM reasoning 포함
             yield StreamEvent(
                 event_type="tool_start",
                 data={
                     "run_id": run_id,
                     "step": step_idx + 1,
+                    "max_steps": max_steps,
                     "tool": tool_name,
                     "args": {k: v for k, v in args.items() if k != "plan"},  # plan 제외
+                    "reasoning": decision.notes[0] if decision.notes else None,  # LLM의 reasoning
                 }
             )
 
@@ -2822,13 +2899,15 @@ async def run_pipeline_agent_streaming(
                 state.last_observation = observation
 
                 # 도구 완료 이벤트
+                tool_error = observation.get("error") if isinstance(observation, dict) else None
                 yield StreamEvent(
                     event_type="tool_end",
                     data={
                         "run_id": run_id,
                         "step": step_idx + 1,
                         "tool": tool_name,
-                        "success": not observation.get("error"),
+                        "success": not tool_error,
+                        "error": tool_error,  # 최상위 레벨에 error 추가
                         "observation": _mask_tool_observation(observation),
                     }
                 )
@@ -2953,11 +3032,19 @@ async def run_pipeline_agent_streaming(
                 data={"error": f"Final plan validation failed: {exc}", "run_id": run_id}
             )
     else:
+        # plan이 없는 경우 친절한 안내 메시지로 응답
         yield StreamEvent(
             event_type="complete",
             data={
                 "run_id": run_id,
-                "status": "failed",
-                "error": "No plan created",
+                "status": "no_action",
+                "message": (
+                    "요청을 처리하는 데 어려움이 있었습니다. 🤔\n\n"
+                    "다음과 같은 파이프라인 관련 요청을 해주시면 도움을 드릴 수 있습니다:\n"
+                    "• \"고객별 주문 총액을 계산하는 파이프라인 만들어줘\"\n"
+                    "• \"주문 데이터와 고객 데이터를 조인해서 분석해줘\"\n"
+                    "• \"매출 분석 파이프라인 만들어줘\"\n"
+                    "• \"현재 데이터셋이 뭐가 있어?\""
+                ),
             }
         )

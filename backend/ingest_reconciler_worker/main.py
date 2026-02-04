@@ -20,10 +20,10 @@ from shared.errors.error_envelope import build_error_envelope
 from shared.errors.error_types import ErrorCategory, ErrorCode
 from shared.observability.request_context import get_correlation_id, get_request_id
 from shared.observability.metrics import get_metrics_collector
-from shared.observability.logging import install_trace_context_filter
 from shared.observability.tracing import get_tracing_service
 from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.services.core.service_factory import ServiceInfo, create_fastapi_service
+from shared.utils.app_logger import configure_logging
 from shared.utils.time_utils import utcnow
 
 logger = logging.getLogger(__name__)
@@ -236,11 +236,7 @@ def main() -> None:
 
     settings = get_settings()
     log_level = settings.observability.log_level
-    logging.basicConfig(
-        level=log_level,
-        format="%(asctime)s - %(name)s - %(levelname)s - trace_id=%(trace_id)s span_id=%(span_id)s req_id=%(request_id)s corr_id=%(correlation_id)s db=%(db_name)s - %(message)s",
-    )
-    install_trace_context_filter()
+    configure_logging(log_level)
     uvicorn.run(
         "ingest_reconciler_worker.main:app",
         host="0.0.0.0",

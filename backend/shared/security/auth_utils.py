@@ -10,6 +10,8 @@ _DB_SCOPE_HEADER_KEYS = (
     "X-Project-Id",
 )
 
+BFF_TOKEN_ENV_KEYS = ("BFF_ADMIN_TOKEN", "BFF_WRITE_TOKEN", "ADMIN_API_KEY", "ADMIN_TOKEN")
+
 
 def get_expected_token(env_keys: Iterable[str]) -> Optional[str]:
     settings = get_settings()

@@ -6,8 +6,8 @@ from typing import Any, Dict, Optional
 import pytest
 from fastapi import HTTPException, status
 
-import bff.routers.pipeline as pipeline_router
-from bff.routers.pipeline import build_pipeline, deploy_pipeline, preview_pipeline
+import bff.routers.pipeline_execution as pipeline_router
+from bff.routers.pipeline_execution import build_pipeline, deploy_pipeline, preview_pipeline
 
 PIPELINE_ID = "00000000-0000-0000-0000-000000000004"
 
@@ -292,6 +292,7 @@ async def test_build_enqueues_job_and_records_run() -> None:
             "definition_json": {"nodes": [], "edges": []},
             "limit": 123,
         },
+        request=_Request(headers={"Idempotency-Key": "idem-build-1"}),
         pipeline_registry=registry,
         pipeline_job_queue=queue,
         dataset_registry=_DatasetRegistry(),
@@ -330,7 +331,7 @@ async def test_preview_enqueues_job_with_node_id_and_records_preview_and_run(mon
         async def append_event(self, event: Any) -> None:
             return None
 
-    import bff.routers.pipeline as pipeline_router
+    import bff.routers.pipeline_execution as pipeline_router
 
     monkeypatch.setattr(pipeline_router, "event_store", _EventStore())
 
@@ -346,6 +347,7 @@ async def test_preview_enqueues_job_with_node_id_and_records_preview_and_run(mon
             "node_id": "node-x",
             "limit": 42,
         },
+        request=_Request(headers={"Idempotency-Key": "idem-preview-1"}),
         pipeline_registry=registry,
         pipeline_job_queue=queue,
         dataset_registry=_DatasetRegistry(),
@@ -421,7 +423,7 @@ async def test_promote_build_merges_build_branch_to_main_and_registers_version(
             "node_id": node_id,
             "definition_json": {},
         },
-        request=_Request(headers={}),
+        request=_Request(headers={"Idempotency-Key": "idem-deploy-1"}),
         pipeline_registry=registry,
         dataset_registry=dataset_registry,
         objectify_registry=_ObjectifyRegistry(),
@@ -487,7 +489,7 @@ async def test_promote_build_rejects_non_staged_artifact_key() -> None:
                 "node_id": node_id,
                 "definition_json": {},
             },
-            request=_Request(headers={}),
+            request=_Request(headers={"Idempotency-Key": "idem-deploy-2"}),
             pipeline_registry=registry,
             dataset_registry=_DatasetRegistry(),
             objectify_registry=_ObjectifyRegistry(),
@@ -523,7 +525,7 @@ async def test_promote_build_surfaces_build_errors_when_build_failed() -> None:
                 "node_id": "node-1",
                 "definition_json": {},
             },
-            request=_Request(headers={}),
+            request=_Request(headers={"Idempotency-Key": "idem-deploy-3"}),
             pipeline_registry=registry,
             dataset_registry=_DatasetRegistry(),
             objectify_registry=_ObjectifyRegistry(),
@@ -561,7 +563,7 @@ async def test_promote_build_blocks_deploy_when_expectations_failed() -> None:
                 "node_id": "node-1",
                 "definition_json": {},
             },
-            request=_Request(headers={}),
+            request=_Request(headers={"Idempotency-Key": "idem-deploy-4"}),
             pipeline_registry=registry,
             dataset_registry=_DatasetRegistry(),
             objectify_registry=_ObjectifyRegistry(),
@@ -624,7 +626,7 @@ async def test_promote_build_requires_replay_for_breaking_schema_changes(
                 "node_id": node_id,
                 "definition_json": {},
             },
-            request=_Request(headers={}),
+            request=_Request(headers={"Idempotency-Key": "idem-deploy-5"}),
             pipeline_registry=registry,
             dataset_registry=dataset_registry,
             objectify_registry=_ObjectifyRegistry(),
@@ -690,7 +692,7 @@ async def test_promote_build_allows_breaking_schema_changes_with_replay_flag(
             "definition_json": {},
             "replay": True,
         },
-        request=_Request(headers={}),
+        request=_Request(headers={"Idempotency-Key": "idem-deploy-6"}),
         pipeline_registry=registry,
         dataset_registry=dataset_registry,
         objectify_registry=_ObjectifyRegistry(),

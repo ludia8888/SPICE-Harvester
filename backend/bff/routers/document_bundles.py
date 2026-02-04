@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
 from bff.routers.context7 import get_context7_client
+from bff.routers.registry_deps import get_agent_policy_registry
 from shared.models.responses import ApiResponse
 from shared.security.input_sanitizer import sanitize_input
 from shared.services.registries.agent_policy_registry import AgentPolicyRegistry
@@ -14,12 +15,6 @@ from shared.services.registries.agent_policy_registry import AgentPolicyRegistry
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/document-bundles", tags=["Document Bundles"])
-
-
-async def get_agent_policy_registry() -> AgentPolicyRegistry:
-    from bff.main import get_agent_policy_registry as _get_agent_policy_registry
-
-    return await _get_agent_policy_registry()
 
 
 def _resolve_verified_principal(request: Request) -> tuple[str, str]:

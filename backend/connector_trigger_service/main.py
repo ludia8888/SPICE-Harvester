@@ -31,10 +31,11 @@ from shared.observability.context_propagation import (
     kafka_headers_from_current_context,
     kafka_headers_from_envelope_metadata,
 )
-from shared.observability.logging import install_trace_context_filter
 from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
 from shared.services.registries.connector_registry import ConnectorRegistry, ConnectorSource
+from shared.utils.app_logger import configure_logging
+from shared.utils.executor_utils import call_in_executor
 from shared.utils.time_utils import utcnow
 
 logger = logging.getLogger(__name__)
@@ -97,7 +98,7 @@ class ConnectorTriggerService:
             self.sheets = None
         if self.producer:
             try:
-                await asyncio.get_running_loop().run_in_executor(self._producer_executor, lambda: self.producer.flush(5))
+                await call_in_executor(self._producer_executor, self.producer.flush, 5)
             except Exception:
                 logger.warning("Failed to flush Kafka producer", exc_info=True)
             self.producer = None
@@ -110,8 +111,7 @@ class ConnectorTriggerService:
         self._producer_executor.shutdown(wait=False, cancel_futures=True)
 
     async def _producer_call(self, func, *args, **kwargs):
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(self._producer_executor, lambda: func(*args, **kwargs))
+        return await call_in_executor(self._producer_executor, func, *args, **kwargs)
 
     async def _is_due(self, source: ConnectorSource) -> bool:
         if not self.registry:
@@ -333,12 +333,7 @@ class ConnectorTriggerService:
 
 
 async def _main() -> None:
-    log_level = get_settings().observability.log_level
-    logging.basicConfig(
-        level=log_level,
-        format="%(asctime)s - %(name)s - %(levelname)s - trace_id=%(trace_id)s span_id=%(span_id)s req_id=%(request_id)s corr_id=%(correlation_id)s db=%(db_name)s - %(message)s",
-    )
-    install_trace_context_filter()
+    configure_logging(get_settings().observability.log_level)
     svc = ConnectorTriggerService()
     await svc.initialize()
     try:

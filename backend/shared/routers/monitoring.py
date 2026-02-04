@@ -23,6 +23,7 @@ from starlette.responses import RedirectResponse
 
 from shared.config.settings import ApplicationSettings
 from shared.dependencies import get_container, ServiceContainer
+from shared.dependencies.providers import InitializedBackgroundTaskManagerDep
 from shared.config.settings import get_settings as get_settings_ssot
 from shared.errors.error_envelope import build_error_envelope
 from shared.errors.error_types import ErrorCategory, ErrorCode
@@ -381,7 +382,7 @@ async def get_service_dependencies(
            description="Get metrics for background task execution")
 async def get_background_task_metrics(
     request: Request,
-    container: ServiceContainer = Depends(get_container),
+    task_manager: InitializedBackgroundTaskManagerDep,
 ):
     """
     Get background task execution metrics
@@ -393,17 +394,13 @@ async def get_background_task_metrics(
     into all background tasks running in the system.
     """
     try:
-        # Get BackgroundTaskManager from container
-        from shared.services.core.background_task_manager import BackgroundTaskManager
-        
-        if not container.has(BackgroundTaskManager):
+        if task_manager is None:
             return {
                 "status": "not_available",
                 "message": "Background task manager not initialized",
                 "timestamp": datetime.now(timezone.utc).isoformat()
             }
         
-        task_manager = await container.get(BackgroundTaskManager)
         metrics = await task_manager.get_task_metrics()
         
         return {
@@ -450,7 +447,8 @@ async def get_background_task_metrics(
 async def get_active_background_tasks(
     request: Request,
     limit: int = Query(100, ge=1, le=1000, description="Maximum tasks to return"),
-    container: ServiceContainer = Depends(get_container)
+    *,
+    task_manager: InitializedBackgroundTaskManagerDep,
 ):
     """
     Get list of all active background tasks
@@ -459,18 +457,15 @@ async def get_active_background_tasks(
     helping identify potential issues with stuck or long-running tasks.
     """
     try:
-        from shared.services.core.background_task_manager import BackgroundTaskManager
         from shared.models.background_task import TaskStatus
         
-        if not container.has(BackgroundTaskManager):
+        if task_manager is None:
             return {
                 "status": "not_available",
                 "message": "Background task manager not initialized",
                 "tasks": [],
                 "timestamp": datetime.now(timezone.utc).isoformat()
             }
-        
-        task_manager = await container.get(BackgroundTaskManager)
         
         # Get all active tasks (pending, processing, retrying)
         active_statuses = [TaskStatus.PENDING, TaskStatus.PROCESSING, TaskStatus.RETRYING]
@@ -528,7 +523,7 @@ async def get_active_background_tasks(
            description="Check health of background task processing system")
 async def get_background_task_health(
     request: Request,
-    container: ServiceContainer = Depends(get_container),
+    task_manager: InitializedBackgroundTaskManagerDep,
 ):
     """
     Get health status of background task processing system
@@ -541,9 +536,7 @@ async def get_background_task_health(
     - Resource exhaustion
     """
     try:
-        from shared.services.core.background_task_manager import BackgroundTaskManager
-        
-        if not container.has(BackgroundTaskManager):
+        if task_manager is None:
             return JSONResponse(
                 content={
                     "status": "unavailable",
@@ -553,8 +546,6 @@ async def get_background_task_health(
                 },
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE
             )
-        
-        task_manager = await container.get(BackgroundTaskManager)
         metrics = await task_manager.get_task_metrics()
         
         # Health checks

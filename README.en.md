@@ -266,6 +266,9 @@ npm ci
 npm run dev
 ```
 
+Note: if the backend runs with `USER_JWT_ENABLED=true` and `DEV_MASTER_AUTH_ENABLED=false`, `/api/v1/agent/*` requires a delegated end-user JWT.
+Set `VITE_USER_JWT=<jwt>` in `frontend/.env` (recommended), or enable `DEV_MASTER_AUTH_ENABLED=true` for local dev.
+
 Dev/preview proxy:
 - requests under `/api/*` proxy to `VITE_API_PROXY_TARGET` (or `BFF_BASE_URL`, default `http://localhost:8002`)
 - client calls default to `VITE_API_BASE_URL=/api/v1`

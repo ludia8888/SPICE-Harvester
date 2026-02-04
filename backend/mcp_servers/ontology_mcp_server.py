@@ -457,70 +457,11 @@ class OntologyMCPServer:
                 return _build_error_response(name, str(exc))
 
     async def _handle_tool_call(self, name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
-        """Route tool calls to implementations."""
-        # ==================== Initialization ====================
-        if name == "ontology_new":
-            return await self._tool_ontology_new(arguments)
-        if name == "ontology_load":
-            return await self._tool_ontology_load(arguments)
-        if name == "ontology_reset":
-            return await self._tool_ontology_reset(arguments)
-
-        # ==================== Class Metadata ====================
-        if name == "ontology_set_class_meta":
-            return await self._tool_ontology_set_class_meta(arguments)
-        if name == "ontology_set_abstract":
-            return await self._tool_ontology_set_abstract(arguments)
-
-        # ==================== Property Management ====================
-        if name == "ontology_add_property":
-            return await self._tool_ontology_add_property(arguments)
-        if name == "ontology_update_property":
-            return await self._tool_ontology_update_property(arguments)
-        if name == "ontology_remove_property":
-            return await self._tool_ontology_remove_property(arguments)
-        if name == "ontology_set_primary_key":
-            return await self._tool_ontology_set_primary_key(arguments)
-
-        # ==================== Relationship Management ====================
-        if name == "ontology_add_relationship":
-            return await self._tool_ontology_add_relationship(arguments)
-        if name == "ontology_update_relationship":
-            return await self._tool_ontology_update_relationship(arguments)
-        if name == "ontology_remove_relationship":
-            return await self._tool_ontology_remove_relationship(arguments)
-
-        # ==================== Schema Inference ====================
-        if name == "ontology_infer_schema_from_data":
-            return await self._tool_ontology_infer_schema_from_data(arguments)
-        if name == "ontology_suggest_mappings":
-            return await self._tool_ontology_suggest_mappings(arguments)
-
-        # ==================== Validation ====================
-        if name == "ontology_validate":
-            return await self._tool_ontology_validate(arguments)
-        if name == "ontology_check_relationships":
-            return await self._tool_ontology_check_relationships(arguments)
-        if name == "ontology_check_circular_refs":
-            return await self._tool_ontology_check_circular_refs(arguments)
-
-        # ==================== Query ====================
-        if name == "ontology_list_classes":
-            return await self._tool_ontology_list_classes(arguments)
-        if name == "ontology_get_class":
-            return await self._tool_ontology_get_class(arguments)
-        if name == "ontology_search_classes":
-            return await self._tool_ontology_search_classes(arguments)
-
-        # ==================== Save ====================
-        if name == "ontology_create":
-            return await self._tool_ontology_create(arguments)
-        if name == "ontology_update":
-            return await self._tool_ontology_update(arguments)
-        if name == "ontology_preview":
-            return await self._tool_ontology_preview(arguments)
-
-        return _build_error_response(name, f"Unknown tool: {name}")
+        """Route tool calls to implementations (Command pattern via naming convention)."""
+        handler = getattr(self, f"_tool_{name}", None)
+        if handler is None or not callable(handler):
+            return _build_error_response(name, f"Unknown tool: {name}")
+        return await handler(arguments)
 
     # ==================== Tool Implementations ====================
 

@@ -43,16 +43,8 @@ from shared.utils.writeback_conflicts import (
 from shared.utils.writeback_governance import extract_backing_dataset_id, policies_aligned
 from shared.utils.writeback_lifecycle import DEFAULT_LIFECYCLE_ID, derive_lifecycle_id, overlay_doc_id
 from shared.utils.writeback_paths import queue_entry_prefix, queue_entry_key, ref_key, writeback_patchset_key
-
-
-def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
-
-
-def _safe_str(value: Any) -> str:
-    if value is None:
-        return ""
-    return str(value).strip()
+from shared.utils.action_writeback import is_noop_changes, safe_str
+from shared.utils.time_utils import utcnow
 
 
 class ActionSimulationRejected(Exception):
@@ -94,19 +86,6 @@ def _attach_enterprise(payload: Dict[str, Any]) -> Dict[str, Any]:
     if enterprise is not None:
         out["enterprise"] = enterprise
     return out
-
-
-def _is_noop_changes(changes: Dict[str, Any]) -> bool:
-    if not isinstance(changes, dict):
-        return True
-    if bool(changes.get("delete")):
-        return False
-    return not (
-        (changes.get("set") or {})
-        or (changes.get("unset") or [])
-        or (changes.get("link_add") or [])
-        or (changes.get("link_remove") or [])
-    )
 
 
 def _apply_changes_to_payload(payload: Dict[str, Any], changes: Dict[str, Any]) -> bool:
@@ -769,8 +748,8 @@ async def preflight_action_writeback(
                     _attach_enterprise({"error": "simulation_assumption_invalid", "message": "assumptions.targets entries must be objects", "index": idx}),
                     status_code=400,
                 )
-            class_id = _safe_str(item.get("class_id"))
-            instance_id = _safe_str(item.get("instance_id"))
+            class_id = safe_str(item.get("class_id"))
+            instance_id = safe_str(item.get("instance_id"))
             if not class_id or not instance_id:
                 raise ActionSimulationRejected(
                     _attach_enterprise({"error": "simulation_assumption_invalid", "message": "assumptions.targets requires class_id and instance_id", "index": idx}),
@@ -784,7 +763,7 @@ async def preflight_action_writeback(
                 )
             assumptions_by_key[key] = item
 
-    target_keys = {( _safe_str(t.class_id), _safe_str(t.instance_id) ) for t in compiled_shape}
+    target_keys = {(safe_str(t.class_id), safe_str(t.instance_id)) for t in compiled_shape}
     unknown_targets = [{"class_id": c, "instance_id": i} for (c, i) in assumptions_by_key.keys() if (c, i) not in target_keys]
     unknown_targets.sort(key=lambda item: (str(item.get("class_id") or ""), str(item.get("instance_id") or "")))
     if unknown_targets:
@@ -868,8 +847,8 @@ async def preflight_action_writeback(
     access_docs: Dict[Tuple[str, str], Dict[str, Any]] = {}
     assumption_reports: Dict[Tuple[str, str], Dict[str, Any]] = {}
     for item in compiled_shape:
-        class_id = _safe_str(item.class_id)
-        instance_id = _safe_str(item.instance_id)
+        class_id = safe_str(item.class_id)
+        instance_id = safe_str(item.instance_id)
         if not class_id or not instance_id:
             raise ActionSimulationRejected(
                 _attach_enterprise({"error": "action_implementation_invalid", "message": "each compiled target requires class_id and instance_id"}),
@@ -921,7 +900,7 @@ async def preflight_action_writeback(
             input_payload=validated_input,
             user=user_ctx,
             target_docs=target_docs,
-            now=_utcnow(),
+            now=utcnow(),
         )
     except ActionImplementationError as exc:
         raise ActionSimulationRejected(
@@ -933,8 +912,8 @@ async def preflight_action_writeback(
 
     loaded: List[TargetPreflight] = []
     for item in compiled_shape:
-        class_id = _safe_str(item.class_id)
-        instance_id = _safe_str(item.instance_id)
+        class_id = safe_str(item.class_id)
+        instance_id = safe_str(item.instance_id)
         base_state = target_docs.get((class_id, instance_id))
         if not isinstance(base_state, dict) or not base_state:
             raise ActionSimulationRejected(
@@ -1255,7 +1234,7 @@ def build_patchset_for_scenario(
         "targets": targets,
         "metadata": {
             "submitted_by": preflight.submitted_by,
-            "submitted_at": _utcnow().isoformat(),
+            "submitted_at": utcnow().isoformat(),
             "correlation_id": None,
             "conflict_policy": conflict_policy_override or preflight.action_conflict_policy,
             "conflict_policies_used": sorted(policies_used),
@@ -1285,10 +1264,10 @@ async def simulate_effects_for_patchset(
     queue_objects: List[Dict[str, Any]] = []
 
     for t in targets:
-        resource_rid = _safe_str(t.get("resource_rid"))
+        resource_rid = safe_str(t.get("resource_rid"))
         class_id = strip_rid_revision(resource_rid) or ""
-        instance_id = _safe_str(t.get("instance_id"))
-        lifecycle_id = _safe_str(t.get("lifecycle_id") or DEFAULT_LIFECYCLE_ID) or DEFAULT_LIFECYCLE_ID
+        instance_id = safe_str(t.get("instance_id"))
+        lifecycle_id = safe_str(t.get("lifecycle_id") or DEFAULT_LIFECYCLE_ID) or DEFAULT_LIFECYCLE_ID
         applied_changes = t.get("applied_changes") if isinstance(t.get("applied_changes"), dict) else {}
         base_token = t.get("base_token") if isinstance(t.get("base_token"), dict) else {}
 
@@ -1374,13 +1353,13 @@ async def simulate_effects_for_patchset(
                 "lifecycle_id": lifecycle_id,
                 "overlay_doc_id": overlay_doc_id(instance_id=instance_id, lifecycle_id=lifecycle_id),
                 "overlay_document": effective,
-                "overlay_would_write": not _is_noop_changes(applied_changes),
-                "queue_would_write": not _is_noop_changes(applied_changes),
+                "overlay_would_write": not is_noop_changes(applied_changes),
+                "queue_would_write": not is_noop_changes(applied_changes),
                 "assumptions_applied": {"base_overrides_applied": base_overrides_report} if base_overrides_report != {"fields": [], "links": []} else None,
             }
         )
 
-        if not _is_noop_changes(applied_changes):
+        if not is_noop_changes(applied_changes):
             queue_objects.append(
                 {
                     "object_type": class_id,

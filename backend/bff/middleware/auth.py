@@ -7,7 +7,8 @@ import json
 import logging
 import re
 import time
-from typing import Any, Optional
+from dataclasses import dataclass
+from typing import Any, Awaitable, Callable, Optional
 from uuid import UUID, uuid4
 from datetime import datetime, timezone
 
@@ -1037,6 +1038,259 @@ def ensure_bff_auth_configured() -> None:
         )
 
 
+_CallNext = Callable[[Request], Awaitable[Response]]
+
+
+@dataclass(frozen=True)
+class _BffAuthContext:
+    settings: Any
+    auth: Any
+    dev_master: bool
+    presented: Optional[str]
+    agent_tokens: tuple[str, ...]
+    expected_tokens: tuple[str, ...]
+
+
+async def _bff_auth_handle_missing_token(request: Request, call_next: _CallNext, ctx: _BffAuthContext) -> Optional[Response]:
+    if ctx.presented:
+        return None
+    if ctx.dev_master:
+        _attach_dev_master_principal(request)
+        return await call_next(request)
+    return _error_response(
+        request=request,
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        message="Authentication required",
+        code=ErrorCode.AUTH_REQUIRED,
+        category=ErrorCategory.AUTH,
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+
+async def _bff_auth_handle_agent_token(request: Request, call_next: _CallNext, ctx: _BffAuthContext) -> Optional[Response]:
+    presented = (ctx.presented or "").strip()
+    if not presented:
+        return None
+    if not (ctx.agent_tokens and any(hmac.compare_digest(presented, token) for token in ctx.agent_tokens)):
+        return None
+
+    request.state.is_internal_agent = True
+    delegated_raw = extract_bearer_token(request.headers.get(_DELEGATED_AUTH_HEADER)) or extract_bearer_token(
+        request.headers.get("Authorization")
+    )
+    if not delegated_raw and ctx.dev_master:
+        _attach_dev_master_principal(request)
+        delegated_raw = None
+
+    if not delegated_raw and not ctx.dev_master:
+        return _error_response(
+            request=request,
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            message=f"{_DELEGATED_AUTH_HEADER} required for agent calls",
+            code=ErrorCode.AUTH_REQUIRED,
+            category=ErrorCategory.AUTH,
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    if ctx.auth.user_jwt_enabled:
+        if delegated_raw:
+            try:
+                principal = await verify_user_token(
+                    delegated_raw,
+                    jwt_enabled=bool(ctx.auth.user_jwt_enabled),
+                    jwt_issuer=ctx.auth.user_jwt_issuer,
+                    jwt_audience=ctx.auth.user_jwt_audience,
+                    jwt_jwks_url=ctx.auth.user_jwt_jwks_url,
+                    jwt_public_key=ctx.auth.user_jwt_public_key,
+                    jwt_hs256_secret=ctx.auth.user_jwt_hs256_secret,
+                    jwt_algorithms=ctx.auth.user_jwt_algorithms,
+                )
+                _attach_verified_principal(request, principal)
+            except UserTokenError as exc:
+                if ctx.dev_master:
+                    _attach_dev_master_principal(request)
+                else:
+                    return _error_response(
+                        request=request,
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        message="Delegated user token invalid",
+                        detail=str(exc),
+                        code=ErrorCode.AUTH_INVALID,
+                        category=ErrorCategory.AUTH,
+                    )
+        elif ctx.dev_master:
+            _attach_dev_master_principal(request)
+        else:
+            return _error_response(
+                request=request,
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                message=f"{_DELEGATED_AUTH_HEADER} required for agent calls",
+                code=ErrorCode.AUTH_REQUIRED,
+                category=ErrorCategory.AUTH,
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+    else:
+        if ctx.dev_master:
+            _attach_dev_master_principal(request)
+        else:
+            return _error_response(
+                request=request,
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                message="USER_JWT_ENABLED required for agent calls",
+                code=ErrorCode.INTERNAL_ERROR,
+                category=ErrorCategory.INTERNAL,
+                context={"error": "user-jwt-required-for-agent"},
+            )
+
+    await _maybe_start_session_tool_call(request)
+    denied = await _enforce_internal_agent_tool_policy(request)
+    if denied is not None:
+        denied_obj: Any = {}
+        with contextlib.suppress(Exception):
+            raw = denied.body if hasattr(denied, "body") else b""
+            if isinstance(raw, (bytes, bytearray)) and raw:
+                denied_obj = json.loads(bytes(raw).decode("utf-8", errors="replace"))
+        if denied_obj in (None, ""):
+            denied_obj = {}
+        request.state.agent_tool_response_body = denied_obj
+        await _finalize_session_tool_call(request, denied, terminal_status="DENIED")
+        return denied
+    replay = await _maybe_replay_or_start_tool_idempotency(request)
+    if replay is not None:
+        return replay
+    try:
+        response = await call_next(request)
+    except Exception as exc:
+        await _finalize_tool_idempotency_error(request, exc)
+        # Best-effort tool call telemetry for crashes.
+        with contextlib.suppress(Exception):
+            response = _error_response(
+                request=request,
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                message="Internal error",
+                code=ErrorCode.INTERNAL_ERROR,
+                category=ErrorCategory.INTERNAL,
+            )
+            request.state.agent_tool_response_body = _internal_error_payload(request, message="Internal error")
+            await _finalize_session_tool_call(request, response, terminal_status="FAILED")
+        raise
+    response = await _finalize_tool_idempotency(request, response)
+    await _finalize_session_tool_call(
+        request,
+        response,
+        terminal_status="COMPLETED" if int(getattr(response, "status_code", 200)) < 400 else "FAILED",
+    )
+    return response
+
+
+async def _bff_auth_handle_expected_token(request: Request, call_next: _CallNext, ctx: _BffAuthContext) -> Optional[Response]:
+    presented = (ctx.presented or "").strip()
+    if not presented:
+        return None
+    if not (ctx.expected_tokens and any(hmac.compare_digest(presented, token) for token in ctx.expected_tokens)):
+        return None
+
+    if ctx.auth.user_jwt_enabled and request.url.path.startswith(_USER_CONTEXT_REQUIRED_PREFIXES):
+        delegated_raw = extract_bearer_token(request.headers.get(_DELEGATED_AUTH_HEADER)) or extract_bearer_token(
+            request.headers.get("Authorization")
+        )
+        if not delegated_raw:
+            if ctx.dev_master:
+                _attach_dev_master_principal(request)
+                return await call_next(request)
+            return _error_response(
+                request=request,
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                message="User JWT required for agent endpoints",
+                code=ErrorCode.AUTH_REQUIRED,
+                category=ErrorCategory.AUTH,
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        try:
+            principal = await verify_user_token(
+                delegated_raw,
+                jwt_enabled=bool(ctx.auth.user_jwt_enabled),
+                jwt_issuer=ctx.auth.user_jwt_issuer,
+                jwt_audience=ctx.auth.user_jwt_audience,
+                jwt_jwks_url=ctx.auth.user_jwt_jwks_url,
+                jwt_public_key=ctx.auth.user_jwt_public_key,
+                jwt_hs256_secret=ctx.auth.user_jwt_hs256_secret,
+                jwt_algorithms=ctx.auth.user_jwt_algorithms,
+            )
+            _attach_verified_principal(request, principal)
+        except UserTokenError as exc:
+            if ctx.dev_master:
+                _attach_dev_master_principal(request)
+                return await call_next(request)
+            return _error_response(
+                request=request,
+                status_code=status.HTTP_403_FORBIDDEN,
+                message="User JWT invalid",
+                detail=str(exc),
+                code=ErrorCode.AUTH_INVALID,
+                category=ErrorCategory.AUTH,
+            )
+    elif ctx.dev_master and getattr(request.state, "user", None) is None:
+        _attach_dev_master_principal(request)
+    return await call_next(request)
+
+
+async def _bff_auth_handle_user_jwt(request: Request, call_next: _CallNext, ctx: _BffAuthContext) -> Optional[Response]:
+    if not ctx.auth.user_jwt_enabled:
+        return None
+    presented = (ctx.presented or "").strip()
+    if not presented:
+        return None
+    try:
+        principal = await verify_user_token(
+            presented,
+            jwt_enabled=bool(ctx.auth.user_jwt_enabled),
+            jwt_issuer=ctx.auth.user_jwt_issuer,
+            jwt_audience=ctx.auth.user_jwt_audience,
+            jwt_jwks_url=ctx.auth.user_jwt_jwks_url,
+            jwt_public_key=ctx.auth.user_jwt_public_key,
+            jwt_hs256_secret=ctx.auth.user_jwt_hs256_secret,
+            jwt_algorithms=ctx.auth.user_jwt_algorithms,
+        )
+        _attach_verified_principal(request, principal)
+        return await call_next(request)
+    except UserTokenError:
+        return None
+
+
+async def _bff_auth_handle_no_token_configured(
+    request: Request, call_next: _CallNext, ctx: _BffAuthContext
+) -> Optional[Response]:
+    if ctx.expected_tokens or ctx.auth.user_jwt_enabled:
+        return None
+    return _error_response(
+        request=request,
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        message="BFF auth required but no token configured",
+        code=ErrorCode.INTERNAL_ERROR,
+        category=ErrorCategory.INTERNAL,
+    )
+
+
+async def _bff_auth_handle_dev_master_fallback(request: Request, call_next: _CallNext, ctx: _BffAuthContext) -> Optional[Response]:
+    if not ctx.dev_master:
+        return None
+    _attach_dev_master_principal(request)
+    return await call_next(request)
+
+
+async def _bff_auth_handle_invalid_credentials(
+    request: Request, call_next: _CallNext, ctx: _BffAuthContext
+) -> Optional[Response]:
+    return _error_response(
+        request=request,
+        status_code=status.HTTP_403_FORBIDDEN,
+        message="Invalid authentication credentials",
+        code=ErrorCode.AUTH_INVALID,
+        category=ErrorCategory.AUTH,
+    )
+
+
 def install_bff_auth_middleware(app: FastAPI) -> None:
     @app.middleware("http")
     async def _bff_auth_middleware(request: Request, call_next):
@@ -1049,216 +1303,30 @@ def install_bff_auth_middleware(app: FastAPI) -> None:
         if is_exempt_path(request.url.path, exempt_paths=exempt_paths):
             return await call_next(request)
 
-        dev_master = _dev_master_auth_enabled()
-        presented = extract_presented_token(request.headers)
-        if not presented:
-            if dev_master:
-                _attach_dev_master_principal(request)
-                return await call_next(request)
-            return _error_response(
-                request=request,
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                message="Authentication required",
-                code=ErrorCode.AUTH_REQUIRED,
-                category=ErrorCategory.AUTH,
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-
-        agent_tokens = auth.bff_agent_tokens
-        if agent_tokens and any(hmac.compare_digest(presented, token) for token in agent_tokens):
-            request.state.is_internal_agent = True
-            delegated_raw = (
-                extract_bearer_token(request.headers.get(_DELEGATED_AUTH_HEADER))
-                or extract_bearer_token(request.headers.get("Authorization"))
-            )
-            dev_master = _dev_master_auth_enabled()
-            if not delegated_raw and dev_master:
-                _attach_dev_master_principal(request)
-                delegated_raw = None
-
-            if not delegated_raw and not dev_master:
-                return _error_response(
-                    request=request,
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    message=f"{_DELEGATED_AUTH_HEADER} required for agent calls",
-                    code=ErrorCode.AUTH_REQUIRED,
-                    category=ErrorCategory.AUTH,
-                    headers={"WWW-Authenticate": "Bearer"},
-                )
-
-            if auth.user_jwt_enabled:
-                if delegated_raw:
-                    try:
-                        principal = await verify_user_token(
-                            delegated_raw,
-                            jwt_enabled=bool(auth.user_jwt_enabled),
-                            jwt_issuer=auth.user_jwt_issuer,
-                            jwt_audience=auth.user_jwt_audience,
-                            jwt_jwks_url=auth.user_jwt_jwks_url,
-                            jwt_public_key=auth.user_jwt_public_key,
-                            jwt_hs256_secret=auth.user_jwt_hs256_secret,
-                            jwt_algorithms=auth.user_jwt_algorithms,
-                        )
-                        _attach_verified_principal(request, principal)
-                    except UserTokenError as exc:
-                        if dev_master:
-                            _attach_dev_master_principal(request)
-                        else:
-                            return _error_response(
-                                request=request,
-                                status_code=status.HTTP_403_FORBIDDEN,
-                                message="Delegated user token invalid",
-                                detail=str(exc),
-                                code=ErrorCode.AUTH_INVALID,
-                                category=ErrorCategory.AUTH,
-                            )
-                elif dev_master:
-                    _attach_dev_master_principal(request)
-                else:
-                    return _error_response(
-                        request=request,
-                        status_code=status.HTTP_401_UNAUTHORIZED,
-                        message=f"{_DELEGATED_AUTH_HEADER} required for agent calls",
-                        code=ErrorCode.AUTH_REQUIRED,
-                        category=ErrorCategory.AUTH,
-                        headers={"WWW-Authenticate": "Bearer"},
-                    )
-            else:
-                if dev_master:
-                    _attach_dev_master_principal(request)
-                else:
-                    return _error_response(
-                        request=request,
-                        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                        message="USER_JWT_ENABLED required for agent calls",
-                        code=ErrorCode.INTERNAL_ERROR,
-                        category=ErrorCategory.INTERNAL,
-                        context={"error": "user-jwt-required-for-agent"},
-                    )
-
-            await _maybe_start_session_tool_call(request)
-            denied = await _enforce_internal_agent_tool_policy(request)
-            if denied is not None:
-                denied_obj: Any = {}
-                with contextlib.suppress(Exception):
-                    raw = denied.body if hasattr(denied, "body") else b""
-                    if isinstance(raw, (bytes, bytearray)) and raw:
-                        denied_obj = json.loads(bytes(raw).decode("utf-8", errors="replace"))
-                if denied_obj in (None, ""):
-                    denied_obj = {}
-                request.state.agent_tool_response_body = denied_obj
-                await _finalize_session_tool_call(request, denied, terminal_status="DENIED")
-                return denied
-            replay = await _maybe_replay_or_start_tool_idempotency(request)
-            if replay is not None:
-                return replay
-            try:
-                response = await call_next(request)
-            except Exception as exc:
-                await _finalize_tool_idempotency_error(request, exc)
-                # Best-effort tool call telemetry for crashes.
-                with contextlib.suppress(Exception):
-                    response = _error_response(
-                        request=request,
-                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                        message="Internal error",
-                        code=ErrorCode.INTERNAL_ERROR,
-                        category=ErrorCategory.INTERNAL,
-                    )
-                    request.state.agent_tool_response_body = _internal_error_payload(request, message="Internal error")
-                    await _finalize_session_tool_call(request, response, terminal_status="FAILED")
-                raise
-            response = await _finalize_tool_idempotency(request, response)
-            await _finalize_session_tool_call(
-                request,
-                response,
-                terminal_status="COMPLETED" if int(getattr(response, "status_code", 200)) < 400 else "FAILED",
-            )
-            return response
-
-        expected_tokens = auth.bff_expected_tokens
-        if expected_tokens and any(hmac.compare_digest(presented, token) for token in expected_tokens):
-            if auth.user_jwt_enabled and request.url.path.startswith(_USER_CONTEXT_REQUIRED_PREFIXES):
-                delegated_raw = extract_bearer_token(request.headers.get(_DELEGATED_AUTH_HEADER)) or extract_bearer_token(
-                    request.headers.get("Authorization")
-                )
-                if not delegated_raw:
-                    if dev_master:
-                        _attach_dev_master_principal(request)
-                        return await call_next(request)
-                    return _error_response(
-                        request=request,
-                        status_code=status.HTTP_401_UNAUTHORIZED,
-                        message="User JWT required for agent endpoints",
-                        code=ErrorCode.AUTH_REQUIRED,
-                        category=ErrorCategory.AUTH,
-                        headers={"WWW-Authenticate": "Bearer"},
-                    )
-                try:
-                    principal = await verify_user_token(
-                        delegated_raw,
-                        jwt_enabled=bool(auth.user_jwt_enabled),
-                        jwt_issuer=auth.user_jwt_issuer,
-                        jwt_audience=auth.user_jwt_audience,
-                        jwt_jwks_url=auth.user_jwt_jwks_url,
-                        jwt_public_key=auth.user_jwt_public_key,
-                        jwt_hs256_secret=auth.user_jwt_hs256_secret,
-                        jwt_algorithms=auth.user_jwt_algorithms,
-                    )
-                    _attach_verified_principal(request, principal)
-                except UserTokenError as exc:
-                    if dev_master:
-                        _attach_dev_master_principal(request)
-                        return await call_next(request)
-                    return _error_response(
-                        request=request,
-                        status_code=status.HTTP_403_FORBIDDEN,
-                        message="User JWT invalid",
-                        detail=str(exc),
-                        code=ErrorCode.AUTH_INVALID,
-                        category=ErrorCategory.AUTH,
-                    )
-            elif dev_master and getattr(request.state, "user", None) is None:
-                _attach_dev_master_principal(request)
-            return await call_next(request)
-
-        if auth.user_jwt_enabled:
-            try:
-                principal = await verify_user_token(
-                    presented,
-                    jwt_enabled=bool(auth.user_jwt_enabled),
-                    jwt_issuer=auth.user_jwt_issuer,
-                    jwt_audience=auth.user_jwt_audience,
-                    jwt_jwks_url=auth.user_jwt_jwks_url,
-                    jwt_public_key=auth.user_jwt_public_key,
-                    jwt_hs256_secret=auth.user_jwt_hs256_secret,
-                    jwt_algorithms=auth.user_jwt_algorithms,
-                )
-                _attach_verified_principal(request, principal)
-                return await call_next(request)
-            except UserTokenError:
-                pass
-
-        if not expected_tokens and not auth.user_jwt_enabled:
-            return _error_response(
-                request=request,
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                message="BFF auth required but no token configured",
-                code=ErrorCode.INTERNAL_ERROR,
-                category=ErrorCategory.INTERNAL,
-            )
-
-        if dev_master:
-            _attach_dev_master_principal(request)
-            return await call_next(request)
-
-        return _error_response(
-            request=request,
-            status_code=status.HTTP_403_FORBIDDEN,
-            message="Invalid authentication credentials",
-            code=ErrorCode.AUTH_INVALID,
-            category=ErrorCategory.AUTH,
+        ctx = _BffAuthContext(
+            settings=settings,
+            auth=auth,
+            dev_master=_dev_master_auth_enabled(),
+            presented=extract_presented_token(request.headers),
+            agent_tokens=auth.bff_agent_tokens,
+            expected_tokens=auth.bff_expected_tokens,
         )
+
+        handlers: tuple[Callable[[Request, _CallNext, _BffAuthContext], Awaitable[Optional[Response]]], ...] = (
+            _bff_auth_handle_missing_token,
+            _bff_auth_handle_agent_token,
+            _bff_auth_handle_expected_token,
+            _bff_auth_handle_user_jwt,
+            _bff_auth_handle_no_token_configured,
+            _bff_auth_handle_dev_master_fallback,
+            _bff_auth_handle_invalid_credentials,
+        )
+        for handler in handlers:
+            response = await handler(request, call_next, ctx)
+            if response is not None:
+                return response
+
+        return await call_next(request)
 
 
 async def enforce_bff_websocket_auth(websocket: WebSocket, token: Optional[str]) -> bool:

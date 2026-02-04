@@ -18,16 +18,13 @@ import logging
 import signal
 import time
 from contextlib import suppress
-from datetime import datetime, timezone
 from typing import Any, Dict, Optional
-from uuid import NAMESPACE_URL, UUID, uuid5
 
 from shared.config.app_config import AppConfig
 from shared.config.settings import get_settings
 from shared.models.event_envelope import EventEnvelope
 from shared.models.events import ActionAppliedEvent
 from shared.observability.context_propagation import attach_context_from_carrier, carrier_from_envelope_metadata
-from shared.observability.logging import install_trace_context_filter
 from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
 from shared.services.registries.action_log_registry import ActionLogRecord, ActionLogRegistry, ActionLogStatus
@@ -40,30 +37,14 @@ from shared.services.registries.processed_event_registry import (
     validate_registry_enabled,
     validate_lease_settings,
 )
+from shared.utils.action_writeback import action_applied_event_id, is_noop_changes, safe_str
 from shared.utils.resource_rid import strip_rid_revision
 from shared.utils.writeback_paths import queue_entry_key, ref_key, writeback_patchset_key
+from shared.utils.app_logger import configure_logging
 
 _LOG_LEVEL = get_settings().observability.log_level
-logging.basicConfig(
-    level=_LOG_LEVEL,
-    format="%(asctime)s - %(name)s - %(levelname)s - trace_id=%(trace_id)s span_id=%(span_id)s req_id=%(request_id)s corr_id=%(correlation_id)s db=%(db_name)s - %(message)s",
-)
-install_trace_context_filter()
+configure_logging(_LOG_LEVEL)
 logger = logging.getLogger(__name__)
-
-
-def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
-
-
-def _safe_str(value: Any) -> str:
-    return str(value).strip()
-
-
-def _action_applied_event_id(action_log_id: str) -> UUID:
-    key = f"action-applied:{action_log_id}"
-    return uuid5(NAMESPACE_URL, key)
-
 
 def _resolve_overlay_branch(log: ActionLogRecord) -> str:
     # Prefer explicit submission metadata; fall back to writeback branch.
@@ -77,19 +58,6 @@ def _resolve_overlay_branch(log: ActionLogRecord) -> str:
     if branch:
         return branch
     return AppConfig.get_ontology_writeback_branch(log.db_name)
-
-
-def _is_noop_changes(changes: Dict[str, Any]) -> bool:
-    if not isinstance(changes, dict):
-        return True
-    if bool(changes.get("delete")):
-        return False
-    return not (
-        (changes.get("set") or {})
-        or (changes.get("unset") or [])
-        or (changes.get("link_add") or [])
-        or (changes.get("link_remove") or [])
-    )
 
 
 class ActionOutboxWorker:
@@ -151,7 +119,7 @@ class ActionOutboxWorker:
         ontology_commit_id = str(log.ontology_commit_id or "").strip()
 
         evt = ActionAppliedEvent(
-            event_id=_action_applied_event_id(action_log_id),
+            event_id=action_applied_event_id(action_log_id),
             db_name=db_name,
             action_log_id=action_log_id,
             patchset_commit_id=patchset_commit_id,
@@ -246,12 +214,20 @@ class ActionOutboxWorker:
                 continue
             applied = t.get("applied_changes") if isinstance(t.get("applied_changes"), dict) else None
             changes = applied if isinstance(applied, dict) else (t.get("changes") if isinstance(t.get("changes"), dict) else {})
-            if isinstance(applied, dict) and _is_noop_changes(changes):
+            if isinstance(applied, dict) and is_noop_changes(changes):
                 continue
 
-            resource_rid = _safe_str(t.get("resource_rid"))
-            instance_id = _safe_str(t.get("instance_id"))
-            lifecycle_id = _safe_str(t.get("lifecycle_id") or "lc-0") or "lc-0"
+            resource_rid = safe_str(t.get("resource_rid"))
+            instance_id = safe_str(t.get("instance_id"))
+            lifecycle_id = safe_str(t.get("lifecycle_id") or "lc-0") or "lc-0"
+            if not resource_rid or not instance_id:
+                logger.warning(
+                    "Skipping writeback target with missing identifiers (action_log_id=%s resource_rid=%s instance_id=%s)",
+                    action_log_id,
+                    resource_rid or None,
+                    instance_id or None,
+                )
+                continue
             base_token = t.get("base_token") if isinstance(t.get("base_token"), dict) else {}
             object_type = strip_rid_revision(resource_rid) or "object"
 
@@ -328,7 +304,7 @@ class ActionOutboxWorker:
 
         if log.status == ActionLogStatus.EVENT_EMITTED.value:
             if log.action_applied_seq is None:
-                event_id = str(log.action_applied_event_id or _action_applied_event_id(action_log_id))
+                event_id = str(log.action_applied_event_id or action_applied_event_id(action_log_id))
                 seq = await self._get_event_seq(event_id=event_id)
                 if seq is None:
                     raise RuntimeError("EVENT_EMITTED log missing action_applied_seq and event not found")

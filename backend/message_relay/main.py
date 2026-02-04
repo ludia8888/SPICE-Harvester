@@ -22,8 +22,7 @@ from collections import OrderedDict
 
 import aioboto3
 from botocore.exceptions import ClientError
-from botocore.config import Config
-from urllib.parse import urlparse
+from shared.services.storage.s3_client_config import build_s3_client_config
 
 from confluent_kafka import Producer, KafkaException
 from confluent_kafka.admin import AdminClient, NewTopic
@@ -36,17 +35,13 @@ from shared.observability.context_propagation import (
     carrier_from_envelope_metadata,
     kafka_headers_from_envelope_metadata,
 )
-from shared.observability.logging import install_trace_context_filter
 from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
+from shared.utils.app_logger import configure_logging
 
 # 로깅 설정
 _LOG_LEVEL = get_settings().observability.log_level
-logging.basicConfig(
-    level=_LOG_LEVEL,
-    format="%(asctime)s - %(name)s - %(levelname)s - trace_id=%(trace_id)s span_id=%(span_id)s req_id=%(request_id)s corr_id=%(correlation_id)s db=%(db_name)s - %(message)s",
-)
-install_trace_context_filter()
+configure_logging(_LOG_LEVEL)
 logger = logging.getLogger(__name__)
 
 
@@ -138,6 +133,16 @@ class EventPublisher:
             "kafka_produce_buffer_full": 0,
         }
         self._last_metrics_log_at = time.monotonic()
+
+    def _s3_client_kwargs(self) -> Dict[str, Any]:
+        client_config = build_s3_client_config(self.endpoint_url)
+        return {
+            "endpoint_url": self.endpoint_url,
+            "aws_access_key_id": self.access_key,
+            "aws_secret_access_key": self.secret_key,
+            "use_ssl": False,
+            "config": client_config,
+        }
         
     async def initialize(self):
         """서비스 초기화"""
@@ -165,24 +170,9 @@ class EventPublisher:
             logger.warning(f"Failed to reset publisher checkpoint: {e}")
 
         # Ensure bucket exists
-        parsed = urlparse(self.endpoint_url)
-        host = (parsed.hostname or "").lower()
-        use_path_style = host in {
-            "localhost",
-            "127.0.0.1",
-            "0.0.0.0",
-            "minio",
-            "spice-minio",
-            "spice_minio",
-        } or host.endswith(".localhost")
-        client_config = Config(s3={"addressing_style": "path"}) if use_path_style else None
         async with self.session.client(
             "s3",
-            endpoint_url=self.endpoint_url,
-            aws_access_key_id=self.access_key,
-            aws_secret_access_key=self.secret_key,
-            use_ssl=False,
-            config=client_config,
+            **self._s3_client_kwargs(),
         ) as s3:
             try:
                 await s3.head_bucket(Bucket=self.bucket_name)
@@ -255,24 +245,9 @@ class EventPublisher:
                 await asyncio.sleep(sleep_seconds)
 
     async def _load_checkpoint(self) -> Dict[str, Any]:
-        parsed = urlparse(self.endpoint_url)
-        host = (parsed.hostname or "").lower()
-        use_path_style = host in {
-            "localhost",
-            "127.0.0.1",
-            "0.0.0.0",
-            "minio",
-            "spice-minio",
-            "spice_minio",
-        } or host.endswith(".localhost")
-        client_config = Config(s3={"addressing_style": "path"}) if use_path_style else None
         async with self.session.client(
             "s3",
-            endpoint_url=self.endpoint_url,
-            aws_access_key_id=self.access_key,
-            aws_secret_access_key=self.secret_key,
-            use_ssl=False,
-            config=client_config,
+            **self._s3_client_kwargs(),
         ) as s3:
             try:
                 obj = await s3.get_object(Bucket=self.bucket_name, Key=self.checkpoint_key)
@@ -284,24 +259,9 @@ class EventPublisher:
     async def _save_checkpoint(self, checkpoint: Dict[str, Any]) -> None:
         checkpoint["updated_at"] = datetime.now(timezone.utc).isoformat()
         checkpoint["recent_event_ids"] = self._recent_published_event_ids.snapshot(self.dedup_checkpoint_max_events)
-        parsed = urlparse(self.endpoint_url)
-        host = (parsed.hostname or "").lower()
-        use_path_style = host in {
-            "localhost",
-            "127.0.0.1",
-            "0.0.0.0",
-            "minio",
-            "spice-minio",
-            "spice_minio",
-        } or host.endswith(".localhost")
-        client_config = Config(s3={"addressing_style": "path"}) if use_path_style else None
         async with self.session.client(
             "s3",
-            endpoint_url=self.endpoint_url,
-            aws_access_key_id=self.access_key,
-            aws_secret_access_key=self.secret_key,
-            use_ssl=False,
-            config=client_config,
+            **self._s3_client_kwargs(),
         ) as s3:
             await s3.put_object(
                 Bucket=self.bucket_name,
@@ -399,24 +359,9 @@ class EventPublisher:
         if 0 < lookback_limit < self.batch_size:
             lookback_limit = self.batch_size
 
-        parsed = urlparse(self.endpoint_url)
-        host = (parsed.hostname or "").lower()
-        use_path_style = host in {
-            "localhost",
-            "127.0.0.1",
-            "0.0.0.0",
-            "minio",
-            "spice-minio",
-            "spice_minio",
-        } or host.endswith(".localhost")
-        client_config = Config(s3={"addressing_style": "path"}) if use_path_style else None
         async with self.session.client(
             "s3",
-            endpoint_url=self.endpoint_url,
-            aws_access_key_id=self.access_key,
-            aws_secret_access_key=self.secret_key,
-            use_ssl=False,
-            config=client_config,
+            **self._s3_client_kwargs(),
         ) as s3:
             paginator = s3.get_paginator("list_objects_v2")
 
@@ -565,24 +510,9 @@ class EventPublisher:
                 details = first_failure or f"kafka_flush_remaining={remaining}"
                 raise RuntimeError(f"Kafka batch delivery failed ({reason}): {details}")
 
-        parsed = urlparse(self.endpoint_url)
-        host = (parsed.hostname or "").lower()
-        use_path_style = host in {
-            "localhost",
-            "127.0.0.1",
-            "0.0.0.0",
-            "minio",
-            "spice-minio",
-            "spice_minio",
-        } or host.endswith(".localhost")
-        client_config = Config(s3={"addressing_style": "path"}) if use_path_style else None
         async with self.session.client(
             "s3",
-            endpoint_url=self.endpoint_url,
-            aws_access_key_id=self.access_key,
-            aws_secret_access_key=self.secret_key,
-            use_ssl=False,
-            config=client_config,
+            **self._s3_client_kwargs(),
         ) as s3:
             try:
                 for idx_key in index_keys:

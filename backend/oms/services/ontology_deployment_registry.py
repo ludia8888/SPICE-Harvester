@@ -8,10 +8,11 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
-from uuid import uuid4, uuid5, NAMESPACE_URL
+from uuid import uuid4
 
 from oms.database.postgres import db as postgres_db
 from shared.config.app_config import AppConfig
+from shared.utils.deterministic_ids import deterministic_uuid5_str
 
 logger = logging.getLogger(__name__)
 
@@ -107,7 +108,7 @@ class OntologyDeploymentRegistry:
         definition_hash: Optional[str],
         occurred_at: Optional[datetime] = None,
     ) -> Dict[str, Any]:
-        event_id = str(uuid5(NAMESPACE_URL, f"ontology-deploy:{deployment_id}"))
+        event_id = deterministic_uuid5_str(f"ontology-deploy:{deployment_id}")
         occurred_at = occurred_at or datetime.now(timezone.utc)
         metadata = {
             "kind": "domain",

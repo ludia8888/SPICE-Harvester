@@ -6,7 +6,7 @@ from typing import Any, Optional
 import pytest
 from fastapi import HTTPException, status
 
-from bff.routers.pipeline import get_pipeline
+from bff.routers.pipeline_detail import get_pipeline
 
 PIPELINE_ID = "00000000-0000-0000-0000-000000000003"
 

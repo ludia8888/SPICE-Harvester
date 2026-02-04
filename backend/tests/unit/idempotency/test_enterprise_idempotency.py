@@ -445,7 +445,7 @@ class TestPipelineAPIIdempotencyKeys:
 
     def test_get_idempotency_key_from_primary_header(self) -> None:
         """_get_idempotency_key should extract from Idempotency-Key header"""
-        from bff.routers.pipeline import _get_idempotency_key
+        from bff.routers.pipeline_shared import _get_idempotency_key
 
         mock_request = MagicMock()
         mock_request.headers.get = lambda key: "idem-key-123" if key == "Idempotency-Key" else None
@@ -455,7 +455,7 @@ class TestPipelineAPIIdempotencyKeys:
 
     def test_get_idempotency_key_from_fallback_header(self) -> None:
         """_get_idempotency_key should fallback to X-Idempotency-Key"""
-        from bff.routers.pipeline import _get_idempotency_key
+        from bff.routers.pipeline_shared import _get_idempotency_key
 
         mock_request = MagicMock()
 
@@ -471,7 +471,7 @@ class TestPipelineAPIIdempotencyKeys:
 
     def test_get_idempotency_key_returns_none_when_missing(self) -> None:
         """_get_idempotency_key should return None when no header present"""
-        from bff.routers.pipeline import _get_idempotency_key
+        from bff.routers.pipeline_shared import _get_idempotency_key
 
         mock_request = MagicMock()
         mock_request.headers.get = lambda key: None
@@ -481,7 +481,7 @@ class TestPipelineAPIIdempotencyKeys:
 
     def test_get_idempotency_key_strips_whitespace(self) -> None:
         """_get_idempotency_key should strip whitespace from header value"""
-        from bff.routers.pipeline import _get_idempotency_key
+        from bff.routers.pipeline_shared import _get_idempotency_key
 
         mock_request = MagicMock()
         mock_request.headers.get = lambda key: "  idem-key-789  " if key == "Idempotency-Key" else None
@@ -491,7 +491,7 @@ class TestPipelineAPIIdempotencyKeys:
 
     def test_get_idempotency_key_returns_none_for_empty_string(self) -> None:
         """_get_idempotency_key should return None for empty/whitespace-only"""
-        from bff.routers.pipeline import _get_idempotency_key
+        from bff.routers.pipeline_shared import _get_idempotency_key
 
         mock_request = MagicMock()
         mock_request.headers.get = lambda key: "   " if key == "Idempotency-Key" else None
@@ -501,7 +501,7 @@ class TestPipelineAPIIdempotencyKeys:
 
     def test_require_pipeline_idempotency_key_success(self) -> None:
         """_require_pipeline_idempotency_key should return key when present"""
-        from bff.routers.pipeline import _require_pipeline_idempotency_key
+        from bff.routers.pipeline_shared import _require_pipeline_idempotency_key
 
         mock_request = MagicMock()
         mock_request.headers.get = lambda key: "valid-key" if key == "Idempotency-Key" else None
@@ -511,7 +511,7 @@ class TestPipelineAPIIdempotencyKeys:
 
     def test_require_pipeline_idempotency_key_raises_when_missing(self) -> None:
         """_require_pipeline_idempotency_key should raise HTTPException when missing"""
-        from bff.routers.pipeline import _require_pipeline_idempotency_key
+        from bff.routers.pipeline_shared import _require_pipeline_idempotency_key
         from fastapi import HTTPException
 
         mock_request = MagicMock()
@@ -525,7 +525,7 @@ class TestPipelineAPIIdempotencyKeys:
 
     def test_require_pipeline_idempotency_key_includes_operation_in_error(self) -> None:
         """Error message should include the operation name"""
-        from bff.routers.pipeline import _require_pipeline_idempotency_key
+        from bff.routers.pipeline_shared import _require_pipeline_idempotency_key
         from fastapi import HTTPException
 
         mock_request = MagicMock()

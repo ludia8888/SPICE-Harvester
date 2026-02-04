@@ -5,9 +5,23 @@ Centralized logging configuration for all services
 
 import logging
 import sys
-from typing import Optional
+from typing import Optional, Union
 
 from shared.observability.logging import TraceContextFilter, install_trace_context_filter
+
+DEFAULT_LOG_FORMAT = (
+    "%(asctime)s - %(name)s - %(levelname)s - trace_id=%(trace_id)s span_id=%(span_id)s "
+    "req_id=%(request_id)s corr_id=%(correlation_id)s db=%(db_name)s - %(message)s"
+)
+
+
+def _normalize_log_level(level: Union[str, int, None]) -> int:
+    if level is None:
+        return logging.INFO
+    if isinstance(level, int):
+        return level
+    return getattr(logging, str(level).strip().upper(), logging.INFO)
+
 
 def get_logger(name: str, level: Optional[str] = None) -> logging.Logger:
     """
@@ -22,16 +36,22 @@ def get_logger(name: str, level: Optional[str] = None) -> logging.Logger:
     """
     logger = logging.getLogger(name)
 
+    # Ensure trace fields exist for any formatter contract (global record factory).
+    install_trace_context_filter()
+
+    # Set log level
+    log_level = _normalize_log_level(level)
+
+    logger.setLevel(log_level)
+
+    # Don't attach per-logger handlers if the root logger is already configured and
+    # this logger propagates to it.
+    if logging.root.handlers and logger.propagate:
+        return logger
+
     # Don't add handlers if already configured
     if logger.handlers:
         return logger
-
-    # Set log level
-    log_level = level or logging.INFO
-    if isinstance(log_level, str):
-        log_level = getattr(logging, log_level.upper(), logging.INFO)
-
-    logger.setLevel(log_level)
 
     # Create console handler
     handler = logging.StreamHandler(sys.stdout)
@@ -43,7 +63,7 @@ def get_logger(name: str, level: Optional[str] = None) -> logging.Logger:
     logger.addFilter(trace_filter)
     handler.addFilter(trace_filter)
     formatter = logging.Formatter(
-        "%(asctime)s - %(name)s - %(levelname)s - trace_id=%(trace_id)s span_id=%(span_id)s req_id=%(request_id)s corr_id=%(correlation_id)s db=%(db_name)s - %(message)s"
+        DEFAULT_LOG_FORMAT
     )
     handler.setFormatter(formatter)
 
@@ -56,14 +76,17 @@ def get_logger(name: str, level: Optional[str] = None) -> logging.Logger:
     return logger
 
 
-def configure_logging(level: str = "INFO") -> None:
+def configure_logging(level: Union[str, int] = "INFO") -> None:
     """
     Configure global logging settings.
 
     Args:
         level: Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
     """
-    log_level = getattr(logging, level.upper(), logging.INFO)
+    log_level = _normalize_log_level(level)
+
+    # Always install trace context support, even if handlers are already present.
+    install_trace_context_filter()
 
     # Set root logger level (works even when handlers exist)
     logging.root.setLevel(log_level)
@@ -72,10 +95,9 @@ def configure_logging(level: str = "INFO") -> None:
     if not logging.root.handlers:
         handler = logging.StreamHandler(sys.stdout)
         handler.setLevel(log_level)
-        install_trace_context_filter()
         handler.addFilter(TraceContextFilter())
         formatter = logging.Formatter(
-            "%(asctime)s - %(name)s - %(levelname)s - trace_id=%(trace_id)s span_id=%(span_id)s req_id=%(request_id)s corr_id=%(correlation_id)s db=%(db_name)s - %(message)s"
+            DEFAULT_LOG_FORMAT
         )
         handler.setFormatter(formatter)
         logging.root.addHandler(handler)

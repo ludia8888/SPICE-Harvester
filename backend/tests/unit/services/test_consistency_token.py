@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import os
 import uuid
 
 import pytest
 
 from shared.services.core.consistency_token import ConsistencyToken, ConsistencyTokenService
+from tests.unit.services.fake_async_redis import FakeAsyncRedis
 
 
 @pytest.mark.asyncio
@@ -31,9 +31,9 @@ async def test_token_roundtrip() -> None:
 
 @pytest.mark.asyncio
 async def test_consistency_token_service_creates_metadata() -> None:
-    redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379")
-    service = ConsistencyTokenService(redis_url=redis_url)
+    service = ConsistencyTokenService(redis_url="redis://localhost:6379")
     await service.connect()
+    service.redis_client = FakeAsyncRedis()
 
     command_id = uuid.uuid4().hex
     abbreviated = command_id[:8]

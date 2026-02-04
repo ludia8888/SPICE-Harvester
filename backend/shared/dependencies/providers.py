@@ -12,8 +12,9 @@ Features:
 - Test-friendly mocking support
 """
 
-from typing import Annotated
-from fastapi import Depends
+from typing import Annotated, Optional
+
+from fastapi import Depends, HTTPException, status
 
 # Import service classes and factories - all dependencies are now explicit in pyproject.toml
 from shared.services.storage.storage_service import StorageService, create_storage_service
@@ -22,6 +23,10 @@ from shared.services.storage.redis_service import RedisService, create_redis_ser
 from shared.services.storage.elasticsearch_service import ElasticsearchService, create_elasticsearch_service
 from shared.services.registries.lineage_store import LineageStore, create_lineage_store
 from shared.services.core.audit_log_store import AuditLogStore, create_audit_log_store
+from shared.services.core.background_task_manager import (
+    BackgroundTaskManager,
+    create_background_task_manager,
+)
 from shared.services.agent.llm_gateway import LLMGateway, create_llm_gateway
 
 # Import container and settings
@@ -138,6 +143,36 @@ async def get_llm_gateway(
         container.register_singleton(LLMGateway, create_llm_gateway)
     return await container.get(LLMGateway)
 
+async def get_background_task_manager(
+    container: ServiceContainer = Depends(get_container),
+) -> BackgroundTaskManager:
+    """FastAPI dependency to get BackgroundTaskManager instance."""
+    try:
+        if container.has(BackgroundTaskManager) and container.is_created(BackgroundTaskManager):
+            return await container.get(BackgroundTaskManager)
+
+        if not container.has(RedisService):
+            container.register_singleton(RedisService, create_redis_service)
+        redis_service = await container.get(RedisService)
+
+        task_manager = create_background_task_manager(redis_service)
+        container.register_instance(BackgroundTaskManager, task_manager)
+        return task_manager
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Background task service unavailable",
+        ) from e
+
+
+async def get_initialized_background_task_manager(
+    container: ServiceContainer = Depends(get_container),
+) -> Optional[BackgroundTaskManager]:
+    """FastAPI dependency to get an already-initialized BackgroundTaskManager, if present."""
+    if not (container.has(BackgroundTaskManager) and container.is_created(BackgroundTaskManager)):
+        return None
+    return await container.get(BackgroundTaskManager)
+
 
 # Type annotations for cleaner dependency injection - storage is now always available
 StorageServiceDep = Annotated[StorageService, Depends(get_storage_service)]
@@ -149,6 +184,11 @@ LineageStoreDep = Annotated[LineageStore, Depends(get_lineage_store)]
 AuditLogStoreDep = Annotated[AuditLogStore, Depends(get_audit_log_store)]
 LLMGatewayDep = Annotated[LLMGateway, Depends(get_llm_gateway)]
 SettingsDep = Annotated[ApplicationSettings, Depends(get_settings_dependency)]
+BackgroundTaskManagerDep = Annotated[BackgroundTaskManager, Depends(get_background_task_manager)]
+InitializedBackgroundTaskManagerDep = Annotated[
+    Optional[BackgroundTaskManager],
+    Depends(get_initialized_background_task_manager),
+]
 
 
 def register_core_services(container: ServiceContainer) -> None:
