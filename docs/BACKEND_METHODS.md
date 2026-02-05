@@ -1,6 +1,6 @@
 # Backend Method Index
 
-> Generated: 2026-02-06T03:40:13+09:00
+> Generated: 2026-02-06T04:21:46+09:00
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 
 ## action_outbox_worker
@@ -6877,10 +6877,9 @@
     - `calculate_next_retry_time(self, policy)` (line 83): Calculate when this message should be retried
   - `DLQHandlerFixed` (line 103): FIXED: Handles Dead Letter Queue processing with intelligent retry
     - `__init__(self, dlq_topic, kafka_config, redis_client, retry_policy, poison_topic, consumer_group)` (line 115): Initialize DLQ handler
-    - `register_processor(self, topic, processor)` (line 158): Register a message processor for a specific topic
-    - `async start_processing(self)` (line 163): Start processing DLQ messages
-    - `async stop_processing(self)` (line 201): Stop processing DLQ messages
-    - `_poll_message(self, timeout)` (line 220): Poll for message in thread (blocking operation)
+    - `register_processor(self, topic, processor)` (line 156): Register a message processor for a specific topic
+    - `async start_processing(self)` (line 161): Start processing DLQ messages
+    - `async stop_processing(self)` (line 203): Stop processing DLQ messages
     - `async _process_loop(self)` (line 224): Main DLQ processing loop - FIXED to not block event loop
     - `async _process_dlq_message(self, msg)` (line 254): Process a message from the DLQ
     - `async _retry_scheduler(self)` (line 302): Background task to retry messages when their time comes

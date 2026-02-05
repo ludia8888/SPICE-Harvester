@@ -9,7 +9,7 @@ processors:
 
 exporters:
   logging:
-    loglevel: info
+    verbosity: normal
   otlp/jaeger:
     endpoint: jaeger:4317
     tls:
