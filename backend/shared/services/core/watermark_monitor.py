@@ -13,9 +13,11 @@ from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass, field
 import logging
 import json
-from confluent_kafka import Consumer, TopicPartition
+from confluent_kafka import TopicPartition
 from confluent_kafka.admin import AdminClient
 import redis.asyncio as aioredis
+
+from shared.services.kafka.safe_consumer import SafeKafkaConsumer, create_safe_consumer
 
 logger = logging.getLogger(__name__)
 
@@ -111,7 +113,7 @@ class WatermarkMonitor:
         self.admin_client = AdminClient({'bootstrap.servers': kafka_config['bootstrap.servers']})
         
         # Consumers for each group (for reading committed offsets)
-        self.group_consumers: Dict[str, Consumer] = {}
+        self.group_consumers: Dict[str, SafeKafkaConsumer] = {}
         
         # Cached watermarks
         self.partition_watermarks: Dict[str, Dict[int, PartitionWatermark]] = {}
@@ -191,10 +193,15 @@ class WatermarkMonitor:
         """
         # Get or create consumer for this group
         if consumer_group not in self.group_consumers:
-            config = self.kafka_config.copy()
-            config['group.id'] = consumer_group
-            config['enable.auto.commit'] = False
-            self.group_consumers[consumer_group] = Consumer(config)
+            extra_config = dict(self.kafka_config)
+            extra_config.pop("group.id", None)
+            self.group_consumers[consumer_group] = create_safe_consumer(
+                group_id=consumer_group,
+                topics=[],
+                service_name="watermark-monitor",
+                extra_config=extra_config,
+                subscribe=False,
+            )
         
         consumer = self.group_consumers[consumer_group]
         
