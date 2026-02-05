@@ -52,6 +52,7 @@ from shared.services.registries.processed_event_registry import (
     ProcessedEventRegistry,
 )
 from shared.services.kafka.safe_consumer import SafeKafkaConsumer, create_safe_consumer
+from shared.services.kafka.producer_factory import create_kafka_dlq_producer
 from shared.services.registries.processed_event_registry_factory import create_processed_event_registry
 from shared.services.registries.lineage_store import LineageStore
 from shared.services.core.audit_log_store import AuditLogStore
@@ -201,11 +202,11 @@ class StrictInstanceWorker(ProcessedEventKafkaWorker[_InstanceCommandPayload, No
         )
         logger.info(f"Using consumer group: {group_id}")
         
-        # Kafka Producer for events
-        self.producer = Producer({
-            'bootstrap.servers': self.kafka_servers,
-            'client.id': 'strict-instance-worker-producer',
-        })
+        # Kafka Producer for DLQ (best-effort)
+        self.producer = create_kafka_dlq_producer(
+            bootstrap_servers=self.kafka_servers,
+            client_id="strict-instance-worker-producer",
+        )
         self.dlq_producer = self.producer
         
         # Redis (optional - don't fail if not available)

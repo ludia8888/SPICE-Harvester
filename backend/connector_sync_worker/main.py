@@ -75,7 +75,7 @@ class ConnectorSyncWorker(EventEnvelopeKafkaWorker[Optional[str]]):
         self._consumer_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="kafka-consumer")
         self._producer_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="kafka-producer")
 
-        self.consumer: Optional[Consumer] = None
+        self.consumer: Optional[SafeKafkaConsumer] = None
         self.dlq_producer: Optional[Producer] = None
         self.registry: Optional[ConnectorRegistry] = None
         self.processed: Optional[ProcessedEventRegistry] = None

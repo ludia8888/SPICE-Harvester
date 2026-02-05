@@ -51,7 +51,7 @@ class SearchProjectionWorker(EventEnvelopeKafkaWorker[None]):
         self.max_retries = int(cfg.max_retries)
         self.backoff_base = int(cfg.backoff_base_seconds)
         self.backoff_max = int(cfg.backoff_max_seconds)
-        self.consumer: Optional[Consumer] = None
+        self.consumer: Optional[SafeKafkaConsumer] = None
         self.dlq_producer: Optional[Producer] = None
         self.processed: Optional[ProcessedEventRegistry] = None
         self.es = None
