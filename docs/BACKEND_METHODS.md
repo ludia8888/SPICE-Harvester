@@ -1,6 +1,6 @@
 # Backend Method Index
 
-> Generated: 2026-02-06T00:48:25+09:00
+> Generated: 2026-02-06T00:52:28+09:00
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 
 ## action_outbox_worker
@@ -3174,58 +3174,58 @@
 
 ### `backend/instance_worker/main.py`
 - **Functions**
-  - `async main()` (line 3137): Main entry point
+  - `async main()` (line 3138): Main entry point
 - **Classes**
-  - `_InstanceCommandPayload` (line 77): no docstring
-  - `_InstanceCommandParseError` (line 82): no docstring
-    - `__init__(self, stage, payload_text, payload_obj, fallback_metadata, cause)` (line 83): no docstring
-  - `StrictInstanceWorker` (line 100): STRICT Lightweight Instance Worker
-    - `__init__(self)` (line 108): no docstring
-    - `_is_ingest_metadata(metadata)` (line 159): no docstring
-    - `_writeback_guard_blocks(cls, command)` (line 165): no docstring
-    - `async initialize(self)` (line 186): Initialize all connections
-    - `async _s3_call(self, func, *args, **kwargs)` (line 323): no docstring
-    - `async _s3_read_body(self, body)` (line 326): no docstring
-    - `async _consumer_call(self, func, *args, **kwargs)` (line 329): no docstring
-    - `async _poll_message(self, timeout)` (line 332): no docstring
-    - `_extract_payload_from_message(self, message)` (line 337): Unwrap a command from the canonical EventEnvelope message.
-    - `async extract_payload_from_message(self, message)` (line 366): no docstring
-    - `get_primary_key_value(self, class_id, payload, allow_generate)` (line 369): Extract primary key value dynamically based on class naming convention
-    - `_is_objectify_command(command)` (line 400): no docstring
-    - `async extract_relationships(self, db_name, class_id, payload, branch, allow_pattern_fallback, strict_schema)` (line 409): Extract ONLY relationship fields from payload
-    - `async extract_required_properties(self, db_name, class_id, branch)` (line 623): Extract required property names from the class schema.
-    - `async _apply_create_instance_side_effects(self, command_id, db_name, class_id, branch, payload, instance_id, command_log, ontology_version, created_by, allow_pattern_fallback)` (line 675): Apply the create-instance side-effects without touching command status.
-    - `async process_create_instance(self, command)` (line 975): Process CREATE_INSTANCE command - strict lightweight mode.
-    - `async process_bulk_create_instances(self, command)` (line 1345): Process BULK_CREATE_INSTANCES command (idempotent per event_id; no sequence-guard).
-    - `async process_bulk_update_instances(self, command)` (line 1541): Process BULK_UPDATE_INSTANCES command (updates multiple instances).
-    - `async process_update_instance(self, command, skip_status)` (line 1646): Process UPDATE_INSTANCE command (idempotent + ordered via registry claim).
-    - `async process_delete_instance(self, command)` (line 2147): Process DELETE_INSTANCE command (idempotent delete).
-    - `async _record_instance_edit(self, db_name, class_id, instance_id, edit_type, fields, metadata)` (line 2437): no docstring
-    - `async _resolve_instance_payload(self, db_name, branch, class_id, instance_id)` (line 2461): no docstring
-    - `async _enqueue_link_reindex(self, db_name, link_type_id)` (line 2531): no docstring
-    - `async _apply_relationship_object_link_edits(self, db_name, branch, class_id, instance_id, current_payload, previous_payload)` (line 2542): no docstring
-    - `async set_command_status(self, command_id, status, result)` (line 2622): Set command status using CommandStatusService (preserves history + pubsub).
-    - `_heartbeat_options(self)` (line 2690): no docstring
-    - `_is_retryable_error_impl(exc)` (line 2697): no docstring
-    - `async _publish_to_dlq(self, msg, stage, error, attempt_count, payload_text, payload_obj, kafka_headers, fallback_metadata)` (line 2721): no docstring
-    - `_parse_payload(self, payload)` (line 2785): no docstring
-    - `_fallback_metadata(self, payload)` (line 2834): no docstring
-    - `_registry_key(self, payload)` (line 2837): no docstring
-    - `async _process_payload(self, payload)` (line 2865): no docstring
-    - `_span_name(self, payload)` (line 2916): no docstring
-    - `_span_attributes(self, msg, payload, registry_key)` (line 2919): no docstring
-    - `_metric_event_name(self, payload)` (line 2942): no docstring
-    - `_is_retryable_error(exc, payload)` (line 2949): no docstring
-    - `_max_retries_for_error(self, exc, payload, error, retryable)` (line 2954): no docstring
-    - `_backoff_seconds_for_error(self, exc, payload, error, attempt_count, retryable)` (line 2962): no docstring
-    - `async _commit(self, msg)` (line 2977): no docstring
-    - `async _seek(self, topic, partition, offset)` (line 2982): no docstring
-    - `async _on_parse_error(self, msg, raw_payload, error)` (line 2987): no docstring
-    - `async _on_retry_scheduled(self, payload, error, attempt_count, backoff_s, retryable)` (line 3019): no docstring
-    - `async _on_terminal_failure(self, payload, error, attempt_count, retryable)` (line 3045): no docstring
-    - `async _send_to_dlq(self, msg, error, attempt_count, payload, raw_payload, stage, payload_text, payload_obj, kafka_headers, fallback_metadata)` (line 3065): no docstring
-    - `async run(self)` (line 3103): Main processing loop
-    - `async shutdown(self)` (line 3115): Graceful shutdown
+  - `_InstanceCommandPayload` (line 78): no docstring
+  - `_InstanceCommandParseError` (line 83): no docstring
+    - `__init__(self, stage, payload_text, payload_obj, fallback_metadata, cause)` (line 84): no docstring
+  - `StrictInstanceWorker` (line 101): STRICT Lightweight Instance Worker
+    - `__init__(self)` (line 109): no docstring
+    - `_is_ingest_metadata(metadata)` (line 160): no docstring
+    - `_writeback_guard_blocks(cls, command)` (line 166): no docstring
+    - `async initialize(self)` (line 187): Initialize all connections
+    - `async _s3_call(self, func, *args, **kwargs)` (line 324): no docstring
+    - `async _s3_read_body(self, body)` (line 327): no docstring
+    - `async _consumer_call(self, func, *args, **kwargs)` (line 330): no docstring
+    - `async _poll_message(self, timeout)` (line 333): no docstring
+    - `_extract_payload_from_message(self, message)` (line 338): Unwrap a command from the canonical EventEnvelope message.
+    - `async extract_payload_from_message(self, message)` (line 367): no docstring
+    - `get_primary_key_value(self, class_id, payload, allow_generate)` (line 370): Extract primary key value dynamically based on class naming convention
+    - `_is_objectify_command(command)` (line 401): no docstring
+    - `async extract_relationships(self, db_name, class_id, payload, branch, allow_pattern_fallback, strict_schema)` (line 410): Extract ONLY relationship fields from payload
+    - `async extract_required_properties(self, db_name, class_id, branch)` (line 624): Extract required property names from the class schema.
+    - `async _apply_create_instance_side_effects(self, command_id, db_name, class_id, branch, payload, instance_id, command_log, ontology_version, created_by, allow_pattern_fallback)` (line 676): Apply the create-instance side-effects without touching command status.
+    - `async process_create_instance(self, command)` (line 976): Process CREATE_INSTANCE command - strict lightweight mode.
+    - `async process_bulk_create_instances(self, command)` (line 1346): Process BULK_CREATE_INSTANCES command (idempotent per event_id; no sequence-guard).
+    - `async process_bulk_update_instances(self, command)` (line 1542): Process BULK_UPDATE_INSTANCES command (updates multiple instances).
+    - `async process_update_instance(self, command, skip_status)` (line 1647): Process UPDATE_INSTANCE command (idempotent + ordered via registry claim).
+    - `async process_delete_instance(self, command)` (line 2148): Process DELETE_INSTANCE command (idempotent delete).
+    - `async _record_instance_edit(self, db_name, class_id, instance_id, edit_type, fields, metadata)` (line 2438): no docstring
+    - `async _resolve_instance_payload(self, db_name, branch, class_id, instance_id)` (line 2462): no docstring
+    - `async _enqueue_link_reindex(self, db_name, link_type_id)` (line 2532): no docstring
+    - `async _apply_relationship_object_link_edits(self, db_name, branch, class_id, instance_id, current_payload, previous_payload)` (line 2543): no docstring
+    - `async set_command_status(self, command_id, status, result)` (line 2623): Set command status using CommandStatusService (preserves history + pubsub).
+    - `_heartbeat_options(self)` (line 2691): no docstring
+    - `_is_retryable_error_impl(exc)` (line 2698): no docstring
+    - `async _publish_to_dlq(self, msg, stage, error, attempt_count, payload_text, payload_obj, kafka_headers, fallback_metadata)` (line 2722): no docstring
+    - `_parse_payload(self, payload)` (line 2786): no docstring
+    - `_fallback_metadata(self, payload)` (line 2835): no docstring
+    - `_registry_key(self, payload)` (line 2838): no docstring
+    - `async _process_payload(self, payload)` (line 2866): no docstring
+    - `_span_name(self, payload)` (line 2917): no docstring
+    - `_span_attributes(self, msg, payload, registry_key)` (line 2920): no docstring
+    - `_metric_event_name(self, payload)` (line 2943): no docstring
+    - `_is_retryable_error(exc, payload)` (line 2950): no docstring
+    - `_max_retries_for_error(self, exc, payload, error, retryable)` (line 2955): no docstring
+    - `_backoff_seconds_for_error(self, exc, payload, error, attempt_count, retryable)` (line 2963): no docstring
+    - `async _commit(self, msg)` (line 2978): no docstring
+    - `async _seek(self, topic, partition, offset)` (line 2983): no docstring
+    - `async _on_parse_error(self, msg, raw_payload, error)` (line 2988): no docstring
+    - `async _on_retry_scheduled(self, payload, error, attempt_count, backoff_s, retryable)` (line 3020): no docstring
+    - `async _on_terminal_failure(self, payload, error, attempt_count, retryable)` (line 3046): no docstring
+    - `async _send_to_dlq(self, msg, error, attempt_count, payload, raw_payload, stage, payload_text, payload_obj, kafka_headers, fallback_metadata)` (line 3066): no docstring
+    - `async run(self)` (line 3104): Main processing loop
+    - `async shutdown(self)` (line 3116): Graceful shutdown
 
 ## mcp_servers
 
@@ -3474,29 +3474,29 @@
 
 ### `backend/message_relay/main.py`
 - **Functions**
-  - `async main()` (line 756): 메인 진입점
+  - `async main()` (line 754): 메인 진입점
 - **Classes**
-  - `_RecentPublishedEventIds` (line 48): Best-effort in-memory dedup window (publisher is still at-least-once).
-    - `__init__(self, max_events)` (line 51): no docstring
-    - `mark_published(self, event_id)` (line 55): no docstring
-    - `was_published(self, event_id)` (line 65): no docstring
-    - `load(self, event_ids)` (line 73): no docstring
-    - `snapshot(self, max_events)` (line 84): no docstring
-  - `EventPublisher` (line 92): S3/MinIO Event Store -> Kafka publisher.
-    - `__init__(self)` (line 95): no docstring
-    - `_s3_client_kwargs(self)` (line 137): no docstring
-    - `async initialize(self)` (line 147): 서비스 초기화
-    - `async ensure_kafka_topics(self)` (line 190): 필요한 Kafka 토픽이 존재하는지 확인하고 없으면 생성
-    - `async _load_checkpoint(self)` (line 247): no docstring
-    - `async _save_checkpoint(self, checkpoint)` (line 259): no docstring
-    - `_log_metrics_if_due(self)` (line 273): no docstring
-    - `_flush_producer(self, timeout_s)` (line 296): no docstring
-    - `_initial_checkpoint(self)` (line 306): no docstring
-    - `_advance_checkpoint(checkpoint, ts_ms, idx_key)` (line 320): Advance the durable checkpoint monotonically (never move backwards).
-    - `async _list_next_index_keys(self, checkpoint)` (line 344): no docstring
-    - `async process_events(self)` (line 419): Tail S3 by-date index and publish to Kafka.
-    - `async run(self)` (line 722): 메인 실행 루프
-    - `async shutdown(self)` (line 742): 서비스 종료
+  - `_RecentPublishedEventIds` (line 49): Best-effort in-memory dedup window (publisher is still at-least-once).
+    - `__init__(self, max_events)` (line 52): no docstring
+    - `mark_published(self, event_id)` (line 56): no docstring
+    - `was_published(self, event_id)` (line 66): no docstring
+    - `load(self, event_ids)` (line 74): no docstring
+    - `snapshot(self, max_events)` (line 85): no docstring
+  - `EventPublisher` (line 93): S3/MinIO Event Store -> Kafka publisher.
+    - `__init__(self)` (line 96): no docstring
+    - `_s3_client_kwargs(self)` (line 138): no docstring
+    - `async initialize(self)` (line 148): 서비스 초기화
+    - `async ensure_kafka_topics(self)` (line 188): 필요한 Kafka 토픽이 존재하는지 확인하고 없으면 생성
+    - `async _load_checkpoint(self)` (line 245): no docstring
+    - `async _save_checkpoint(self, checkpoint)` (line 257): no docstring
+    - `_log_metrics_if_due(self)` (line 271): no docstring
+    - `_flush_producer(self, timeout_s)` (line 294): no docstring
+    - `_initial_checkpoint(self)` (line 304): no docstring
+    - `_advance_checkpoint(checkpoint, ts_ms, idx_key)` (line 318): Advance the durable checkpoint monotonically (never move backwards).
+    - `async _list_next_index_keys(self, checkpoint)` (line 342): no docstring
+    - `async process_events(self)` (line 417): Tail S3 by-date index and publish to Kafka.
+    - `async run(self)` (line 720): 메인 실행 루프
+    - `async shutdown(self)` (line 740): 서비스 종료
 
 ## monitoring
 
