@@ -1054,6 +1054,9 @@ class _BffAuthContext:
 async def _bff_auth_handle_missing_token(request: Request, call_next: _CallNext, ctx: _BffAuthContext) -> Optional[Response]:
     if ctx.presented:
         return None
+    if ctx.dev_master:
+        _attach_dev_master_principal(request)
+        return await call_next(request)
     return _error_response(
         request=request,
         status_code=status.HTTP_401_UNAUTHORIZED,

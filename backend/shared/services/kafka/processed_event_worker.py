@@ -835,6 +835,22 @@ class ProcessedEventKafkaWorker(Generic[PayloadT, ResultT], ABC):
                     pass
 
 
+class StrictHeartbeatKafkaWorker(ProcessedEventKafkaWorker[PayloadT, ResultT], ABC):
+    """
+    Common specialization that fails fast when ProcessedEventRegistry heartbeats fail.
+
+    Many workers want the runtime to stop extending leases if the registry becomes
+    unavailable (fail-closed) rather than silently continuing work without durable
+    idempotency guarantees.
+    """
+
+    def _heartbeat_options(self) -> HeartbeatOptions:  # type: ignore[override]
+        return HeartbeatOptions(
+            stop_when_false=True,
+            continue_on_exception=False,
+        )
+
+
 class EventEnvelopeKafkaWorker(ProcessedEventKafkaWorker[EventEnvelope, ResultT], ABC):
     """
     Specialization of ProcessedEventKafkaWorker for EventEnvelope payloads.
@@ -884,3 +900,13 @@ class EventEnvelopeKafkaWorker(ProcessedEventKafkaWorker[EventEnvelope, ResultT]
     def _metric_event_name(self, *, payload: EventEnvelope) -> Optional[str]:  # type: ignore[override]
         event_type = str(payload.event_type or "").strip()
         return event_type or None
+
+
+class StrictHeartbeatEventEnvelopeKafkaWorker(EventEnvelopeKafkaWorker[ResultT], ABC):
+    """EventEnvelopeKafkaWorker with the common strict heartbeat policy."""
+
+    def _heartbeat_options(self) -> HeartbeatOptions:  # type: ignore[override]
+        return HeartbeatOptions(
+            stop_when_false=True,
+            continue_on_exception=False,
+        )

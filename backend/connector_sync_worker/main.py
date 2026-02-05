@@ -36,7 +36,7 @@ from shared.observability.context_propagation import (
 )
 from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
-from shared.services.kafka.processed_event_worker import EventEnvelopeKafkaWorker, HeartbeatOptions
+from shared.services.kafka.processed_event_worker import StrictHeartbeatEventEnvelopeKafkaWorker
 from shared.services.kafka.producer_factory import create_kafka_dlq_producer
 from shared.services.kafka.safe_consumer import SafeKafkaConsumer, create_safe_consumer
 from shared.services.registries.connector_registry import ConnectorRegistry
@@ -53,7 +53,7 @@ from shared.utils.time_utils import utcnow
 logger = logging.getLogger(__name__)
 
 
-class ConnectorSyncWorker(EventEnvelopeKafkaWorker[Optional[str]]):
+class ConnectorSyncWorker(StrictHeartbeatEventEnvelopeKafkaWorker[Optional[str]]):
     def __init__(self) -> None:
         settings = get_settings()
         cfg = settings.workers.connector_sync
@@ -189,12 +189,6 @@ class ConnectorSyncWorker(EventEnvelopeKafkaWorker[Optional[str]]):
 
         self._consumer_executor.shutdown(wait=False, cancel_futures=True)
         self._producer_executor.shutdown(wait=False, cancel_futures=True)
-
-    def _heartbeat_options(self) -> HeartbeatOptions:  # type: ignore[override]
-        return HeartbeatOptions(
-            stop_when_false=True,
-            continue_on_exception=False,
-        )
 
     async def _send_to_dlq(  # type: ignore[override]
         self,

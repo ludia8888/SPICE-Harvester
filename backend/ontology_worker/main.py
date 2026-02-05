@@ -31,7 +31,7 @@ from oms.services.async_terminus import AsyncTerminusService
 from oms.services.event_store import EventStore
 from shared.services.storage.redis_service import RedisService, create_redis_service
 from shared.services.core.command_status_service import CommandStatus, CommandStatusService
-from shared.services.kafka.processed_event_worker import HeartbeatOptions, ProcessedEventKafkaWorker, RegistryKey
+from shared.services.kafka.processed_event_worker import RegistryKey, StrictHeartbeatKafkaWorker
 from shared.services.kafka.producer_factory import create_kafka_producer
 from shared.services.registries.processed_event_registry import (
     ProcessedEventRegistry,
@@ -86,7 +86,7 @@ class _OntologyCommandParseError(ValueError):
         self.cause = cause
 
 
-class OntologyWorker(ProcessedEventKafkaWorker[_OntologyCommandPayload, None]):
+class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
     """온톨로지 Command를 처리하는 워커"""
     
     def __init__(self):
@@ -1187,12 +1187,6 @@ class OntologyWorker(ProcessedEventKafkaWorker[_OntologyCommandPayload, None]):
         await self.publish_event(event)
 
     # --- ProcessedEventKafkaWorker hooks ---
-    def _heartbeat_options(self) -> HeartbeatOptions:  # type: ignore[override]
-        return HeartbeatOptions(
-            stop_when_false=True,
-            continue_on_exception=False,
-        )
-
     def _parse_payload(self, payload: Any) -> _OntologyCommandPayload:  # type: ignore[override]
         if not isinstance(payload, (bytes, bytearray)):
             raise _OntologyCommandParseError(

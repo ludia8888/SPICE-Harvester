@@ -1083,7 +1083,7 @@ class PipelineSettings(BaseSettings):
         description="Worker lock acquire timeout seconds (PIPELINE_LOCK_ACQUIRE_TIMEOUT_SECONDS)",
     )
     publish_lock_acquire_timeout_seconds: int = Field(
-        default=120,
+        default=30,
         description=(
             "BFF publish lock acquire timeout seconds "
             "(PIPELINE_PUBLISH_LOCK_ACQUIRE_TIMEOUT_SECONDS; fallback PIPELINE_LOCK_ACQUIRE_TIMEOUT_SECONDS)"
@@ -1252,7 +1252,7 @@ class PipelineSettings(BaseSettings):
     @field_validator("publish_lock_acquire_timeout_seconds", mode="before")
     @classmethod
     def clamp_publish_lock_acquire_timeout_seconds(cls, v):  # noqa: ANN001
-        return _clamp_int(v, default=120, min_value=5, max_value=3_600)
+        return _clamp_int(v, default=30, min_value=5, max_value=3_600)
 
     @field_validator("scheduler_poll_seconds", mode="before")
     @classmethod

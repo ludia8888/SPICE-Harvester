@@ -8,7 +8,7 @@ from shared.utils.repo_dotenv import load_repo_dotenv
 
 def _ensure_test_env() -> None:
     if not Path("/.dockerenv").exists():
-        docker_env = str(os.getenv("DOCKER_CONTAINER") or "").strip().lower()
+        docker_env = str(os.environ.get("DOCKER_CONTAINER") or "").strip().lower()
         if docker_env in {"1", "true", "yes", "on"}:
             os.environ["DOCKER_CONTAINER"] = "false"
         else:

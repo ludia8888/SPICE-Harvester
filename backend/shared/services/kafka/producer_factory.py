@@ -7,12 +7,15 @@ especially DLQ publishers, to reduce duplication and keep defaults consistent.
 
 from __future__ import annotations
 
-from typing import Any, Mapping, Optional
+from collections.abc import Callable
+from typing import Any, Mapping, Optional, TypeVar
 
 from confluent_kafka import Producer
 
 DEFAULT_ACKS = "all"
 DEFAULT_COMPRESSION_TYPE = "snappy"
+
+ProducerT = TypeVar("ProducerT")
 
 
 def create_kafka_producer(
@@ -27,7 +30,8 @@ def create_kafka_producer(
     enable_idempotence: Optional[bool] = None,
     max_in_flight_requests_per_connection: Optional[int] = None,
     extra_config: Optional[Mapping[str, Any]] = None,
-) -> Producer:
+    producer_ctor: Callable[[dict[str, Any]], ProducerT] = Producer,
+) -> ProducerT:
     config: dict[str, Any] = {
         "bootstrap.servers": str(bootstrap_servers),
         "client.id": str(client_id),
@@ -47,7 +51,7 @@ def create_kafka_producer(
     if extra_config:
         config.update(dict(extra_config))
 
-    return Producer(config)
+    return producer_ctor(config)
 
 
 def create_kafka_dlq_producer(
@@ -62,7 +66,8 @@ def create_kafka_dlq_producer(
     enable_idempotence: Optional[bool] = None,
     max_in_flight_requests_per_connection: Optional[int] = None,
     extra_config: Optional[Mapping[str, Any]] = None,
-) -> Producer:
+    producer_ctor: Callable[[dict[str, Any]], ProducerT] = Producer,
+) -> ProducerT:
     return create_kafka_producer(
         bootstrap_servers=bootstrap_servers,
         client_id=client_id,
@@ -74,5 +79,5 @@ def create_kafka_dlq_producer(
         enable_idempotence=enable_idempotence,
         max_in_flight_requests_per_connection=max_in_flight_requests_per_connection,
         extra_config=extra_config,
+        producer_ctor=producer_ctor,
     )
-

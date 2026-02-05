@@ -79,6 +79,7 @@ class ConnectorTriggerService:
             linger_ms=20,
             enable_idempotence=True,
             max_in_flight_requests_per_connection=5,
+            producer_ctor=Producer,
         )
 
         logger.info(

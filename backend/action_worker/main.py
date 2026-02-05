@@ -42,7 +42,7 @@ from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.services.storage.event_store import event_store
 from shared.services.storage.lakefs_client import LakeFSClient, LakeFSConflictError, LakeFSError
 from shared.services.storage.lakefs_storage_service import create_lakefs_storage_service, LakeFSStorageService
-from shared.services.kafka.processed_event_worker import HeartbeatOptions, ProcessedEventKafkaWorker, RegistryKey
+from shared.services.kafka.processed_event_worker import RegistryKey, StrictHeartbeatKafkaWorker
 from shared.services.registries.processed_event_registry import (
     ProcessedEventRegistry,
 )
@@ -120,7 +120,7 @@ class _ActionRejected(Exception):
     """Used to short-circuit retries when the ActionLog is already finalized with a rejection result."""
 
 
-class ActionWorker(ProcessedEventKafkaWorker[_ActionCommandPayload, None]):
+class ActionWorker(StrictHeartbeatKafkaWorker[_ActionCommandPayload, None]):
     def __init__(self) -> None:
         settings = get_settings()
         cfg = settings.workers.action
@@ -243,21 +243,10 @@ class ActionWorker(ProcessedEventKafkaWorker[_ActionCommandPayload, None]):
         if self.terminus:
             await self.terminus.close()
 
-    async def _poll(self, timeout: float) -> Any:
-        if not self.consumer:
-            return None
-        return await asyncio.to_thread(self.consumer.poll, timeout)
-
     async def _commit(self, msg: Any) -> None:
         if not self.consumer:
             return
         await asyncio.to_thread(self.consumer.commit_sync, msg)
-
-    def _heartbeat_options(self) -> HeartbeatOptions:  # type: ignore[override]
-        return HeartbeatOptions(
-            stop_when_false=True,
-            continue_on_exception=False,
-        )
 
     def _parse_payload(self, payload: Any) -> _ActionCommandPayload:  # type: ignore[override]
         if not isinstance(payload, (bytes, bytearray)):

@@ -34,7 +34,7 @@ from shared.services.core.projection_manager import ProjectionManager
 from shared.services.registries.processed_event_registry import (
     ProcessedEventRegistry,
 )
-from shared.services.kafka.processed_event_worker import EventEnvelopeKafkaWorker, HeartbeatOptions, RegistryKey
+from shared.services.kafka.processed_event_worker import RegistryKey, StrictHeartbeatEventEnvelopeKafkaWorker
 from shared.services.kafka.producer_factory import create_kafka_producer
 from shared.services.kafka.safe_consumer import SafeKafkaConsumer, create_safe_consumer
 from shared.services.registries.lineage_store import LineageStore
@@ -60,7 +60,7 @@ configure_logging(_LOG_LEVEL)
 logger = logging.getLogger(__name__)
 
 
-class ProjectionWorker(EventEnvelopeKafkaWorker[None]):
+class ProjectionWorker(StrictHeartbeatEventEnvelopeKafkaWorker[None]):
     """Instance와 Ontology 이벤트를 Elasticsearch에 프로젝션하는 워커
 
     Kafka message contract:
@@ -594,12 +594,6 @@ class ProjectionWorker(EventEnvelopeKafkaWorker[None]):
             event_id=str(payload.event_id),
             aggregate_id=str(payload.aggregate_id) if payload.aggregate_id else None,
             sequence_number=int(payload.sequence_number) if payload.sequence_number is not None else None,
-        )
-
-    def _heartbeat_options(self) -> HeartbeatOptions:  # type: ignore[override]
-        return HeartbeatOptions(
-            stop_when_false=True,
-            continue_on_exception=False,
         )
 
     def _is_retryable_error(self, exc: Exception, *, payload: EventEnvelope) -> bool:  # type: ignore[override]

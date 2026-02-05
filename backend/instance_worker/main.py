@@ -47,7 +47,7 @@ from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
 from shared.security.auth_utils import BFF_TOKEN_ENV_KEYS, get_expected_token
 from shared.security.input_sanitizer import validate_branch_name, validate_class_id, validate_instance_id
-from shared.services.kafka.processed_event_worker import HeartbeatOptions, ProcessedEventKafkaWorker, RegistryKey
+from shared.services.kafka.processed_event_worker import RegistryKey, StrictHeartbeatKafkaWorker
 from shared.services.registries.processed_event_registry import (
     ProcessedEventRegistry,
 )
@@ -98,7 +98,7 @@ class _InstanceCommandParseError(ValueError):
         self.cause = cause
 
 
-class StrictInstanceWorker(ProcessedEventKafkaWorker[_InstanceCommandPayload, None]):
+class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, None]):
     """
     STRICT Lightweight Instance Worker
     Graph는 관계와 참조만, 데이터는 ES/S3에만
@@ -2687,12 +2687,6 @@ class StrictInstanceWorker(ProcessedEventKafkaWorker[_InstanceCommandPayload, No
             )
         except Exception as e:
             logger.warning(f"Failed to update command status for {command_id}: {e}")
-
-    def _heartbeat_options(self) -> HeartbeatOptions:  # type: ignore[override]
-        return HeartbeatOptions(
-            stop_when_false=True,
-            continue_on_exception=False,
-        )
 
     @staticmethod
     def _is_retryable_error_impl(exc: Exception) -> bool:
