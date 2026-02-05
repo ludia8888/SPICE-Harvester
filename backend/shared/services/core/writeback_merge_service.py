@@ -7,6 +7,7 @@ from shared.config.app_config import AppConfig
 from shared.services.storage.lakefs_storage_service import LakeFSStorageService
 from shared.services.storage.storage_service import StorageService
 from shared.utils.writeback_lifecycle import DEFAULT_LIFECYCLE_ID, derive_lifecycle_id
+from shared.utils.writeback_patch_apply import apply_changes_to_payload
 from shared.utils.writeback_paths import (
     queue_entry_prefix,
     ref_key,
@@ -36,61 +37,6 @@ def _coerce_object_type(resource_rid: str, *, fallback: str) -> str:
     if "@" in rid:
         rid = rid.split("@", 1)[0]
     return rid.strip() or fallback
-
-
-def _apply_changes_to_payload(payload: Dict[str, Any], changes: Dict[str, Any]) -> bool:
-    if bool(changes.get("delete")):
-        return True
-
-    set_ops = changes.get("set") if isinstance(changes.get("set"), dict) else {}
-    unset_ops = changes.get("unset") if isinstance(changes.get("unset"), list) else []
-
-    for key, value in (set_ops or {}).items():
-        if isinstance(key, str) and key:
-            payload[key] = value
-    for key in unset_ops or []:
-        if isinstance(key, str) and key:
-            payload.pop(key, None)
-
-    # Link ops are supported in the patchset shape but currently best-effort.
-    # Accept either {"field": "...", "value": "..."} or "field:value".
-    for op_key, add in (("link_add", True), ("link_remove", False)):
-        ops = changes.get(op_key)
-        if not isinstance(ops, list):
-            continue
-        for item in ops:
-            field = None
-            target = None
-            if isinstance(item, dict):
-                field = item.get("field") or item.get("predicate") or item.get("name")
-                target = item.get("value") or item.get("to") or item.get("target")
-                if (field is None or target is None) and len(item) == 1:
-                    k, v = next(iter(item.items()))
-                    field = k
-                    target = v
-            elif isinstance(item, str):
-                raw = item.strip()
-                if ":" in raw:
-                    field, target = raw.split(":", 1)
-            field_str = str(field or "").strip()
-            target_str = str(target or "").strip()
-            if not field_str or not target_str:
-                continue
-            existing = payload.get(field_str)
-            if isinstance(existing, list):
-                values = [str(v) for v in existing if v is not None]
-            elif existing is None:
-                values = []
-            else:
-                values = [str(existing)]
-            if add:
-                if target_str not in values:
-                    values.append(target_str)
-            else:
-                values = [v for v in values if v != target_str]
-            payload[field_str] = values
-
-    return False
 
 
 @dataclass(frozen=True)
@@ -279,7 +225,11 @@ class WritebackMergeService:
                 else:
                     changes = {}
 
-                tombstone = _apply_changes_to_payload(effective["data"], changes)
+                data_payload = effective.get("data")
+                if not isinstance(data_payload, dict):
+                    data_payload = {}
+                    effective["data"] = data_payload
+                tombstone = apply_changes_to_payload(data_payload, changes)
                 last_seq = int(seq)
                 last_patchset_commit_id = patchset_commit_id
                 last_ontology_commit_id = str(patchset.get("ontology_commit_id") or "").strip() or last_ontology_commit_id

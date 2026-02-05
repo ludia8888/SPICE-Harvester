@@ -46,6 +46,7 @@ from shared.utils.language import coerce_localized_text, select_localized_text, 
 from shared.utils.resource_rid import strip_rid_revision
 from shared.utils.writeback_paths import ref_key, writeback_patchset_key
 from shared.utils.writeback_lifecycle import overlay_doc_id
+from shared.utils.writeback_patch_apply import apply_changes_to_payload
 
 # Observability imports
 from shared.observability.tracing import get_tracing_service
@@ -967,7 +968,8 @@ class ProjectionWorker(StrictHeartbeatEventEnvelopeKafkaWorker[None]):
                 data_payload = {}
             effective["data"] = data_payload
 
-            if bool(changes.get("delete")):
+            tombstone = apply_changes_to_payload(data_payload, changes)
+            if tombstone:
                 effective = {
                     "instance_id": instance_id,
                     "class_id": class_id,
@@ -985,52 +987,6 @@ class ProjectionWorker(StrictHeartbeatEventEnvelopeKafkaWorker[None]):
                     "updated_at": datetime.now(timezone.utc).isoformat(),
                 }
             else:
-                set_ops = changes.get("set") if isinstance(changes.get("set"), dict) else {}
-                unset_ops = changes.get("unset") if isinstance(changes.get("unset"), list) else []
-
-                for k, v in (set_ops or {}).items():
-                    if isinstance(k, str) and k:
-                        data_payload[k] = v
-                for k in unset_ops or []:
-                    if isinstance(k, str) and k:
-                        data_payload.pop(k, None)
-
-                for op_key, add in (("link_add", True), ("link_remove", False)):
-                    ops = changes.get(op_key)
-                    if not isinstance(ops, list):
-                        continue
-                    for item in ops:
-                        field = None
-                        target = None
-                        if isinstance(item, dict):
-                            field = item.get("field") or item.get("predicate") or item.get("name")
-                            target = item.get("value") or item.get("to") or item.get("target")
-                            if (field is None or target is None) and len(item) == 1:
-                                k, v = next(iter(item.items()))
-                                field = k
-                                target = v
-                        elif isinstance(item, str):
-                            raw = item.strip()
-                            if ":" in raw:
-                                field, target = raw.split(":", 1)
-                        field_str = str(field or "").strip()
-                        target_str = str(target or "").strip()
-                        if not field_str or not target_str:
-                            continue
-                        existing = data_payload.get(field_str)
-                        if isinstance(existing, list):
-                            values = [str(v) for v in existing if v is not None]
-                        elif existing is None:
-                            values = []
-                        else:
-                            values = [str(existing)]
-                        if add:
-                            if target_str not in values:
-                                values.append(target_str)
-                        else:
-                            values = [v for v in values if v != target_str]
-                        data_payload[field_str] = values
-
                 effective.update(
                     {
                         "instance_id": instance_id,

@@ -1,6 +1,6 @@
 # Backend Method Index
 
-> Generated: 2026-02-06T04:21:46+09:00
+> Generated: 2026-02-06T05:16:00+09:00
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 
 ## action_outbox_worker
@@ -78,9 +78,6 @@
   - `AgentRunSummary` (line 42): no docstring
 
 ### `backend/agent/models_pipeline.py`
-- **Classes**
-  - `PipelineOutputBinding` (line 10): no docstring
-  - `PipelineAgentRunRequest` (line 26): no docstring
 
 ### `backend/agent/routers/__init__.py`
 
@@ -3932,26 +3929,25 @@
 
 ### `backend/oms/services/action_simulation_service.py`
 - **Functions**
-  - `_enterprise_payload_for_error(error_key)` (line 57): no docstring
-  - `_attach_enterprise(payload)` (line 81): no docstring
-  - `_apply_changes_to_payload(payload, changes)` (line 91): no docstring
-  - `_assumption_is_forbidden_field(field)` (line 159): no docstring
-  - `_extract_link_fields(ops)` (line 168): no docstring
-  - `_extract_patch_field_lists(patch)` (line 188): no docstring
-  - `_apply_assumption_patch(scope, base_state, patch)` (line 211): no docstring
-  - `_apply_observed_base_overrides(observed_base, overrides)` (line 264): no docstring
-  - `_coerce_overlay_branch(db_name, writeback_target, overlay_branch)` (line 386): no docstring
-  - `async enforce_action_permission(db_name, submitted_by, submitted_by_type, action_spec)` (line 395): no docstring
-  - `async _check_writeback_dataset_acl_alignment(db_name, submitted_by, submitted_by_type, actor_role, ontology_commit_id, resources, dataset_registry, class_ids)` (line 433): no docstring
-  - `async preflight_action_writeback(terminus, base_storage, dataset_registry, db_name, action_type_id, ontology_commit_id, action_spec, action_type_rid, input_payload, assumptions, submitted_by, submitted_by_type, actor_role, base_branch, overlay_branch)` (line 683): no docstring
-  - `build_patchset_for_scenario(preflight, action_log_id, conflict_policy_override)` (line 1159): no docstring
-  - `async simulate_effects_for_patchset(base_storage, lakefs_storage, db_name, base_branch, overlay_branch, writeback_repo, writeback_branch, action_log_id, patchset_id, targets, base_overrides_by_target)` (line 1247): no docstring
+  - `_enterprise_payload_for_error(error_key)` (line 58): no docstring
+  - `_attach_enterprise(payload)` (line 82): no docstring
+  - `_assumption_is_forbidden_field(field)` (line 106): no docstring
+  - `_extract_link_fields(ops)` (line 115): no docstring
+  - `_extract_patch_field_lists(patch)` (line 135): no docstring
+  - `_apply_assumption_patch(scope, base_state, patch)` (line 158): no docstring
+  - `_apply_observed_base_overrides(observed_base, overrides)` (line 211): no docstring
+  - `_coerce_overlay_branch(db_name, writeback_target, overlay_branch)` (line 333): no docstring
+  - `async enforce_action_permission(db_name, submitted_by, submitted_by_type, action_spec)` (line 342): no docstring
+  - `async _check_writeback_dataset_acl_alignment(db_name, submitted_by, submitted_by_type, actor_role, ontology_commit_id, resources, dataset_registry, class_ids)` (line 380): no docstring
+  - `async preflight_action_writeback(terminus, base_storage, dataset_registry, db_name, action_type_id, ontology_commit_id, action_spec, action_type_rid, input_payload, assumptions, submitted_by, submitted_by_type, actor_role, base_branch, overlay_branch)` (line 630): no docstring
+  - `build_patchset_for_scenario(preflight, action_log_id, conflict_policy_override)` (line 1106): no docstring
+  - `async simulate_effects_for_patchset(base_storage, lakefs_storage, db_name, base_branch, overlay_branch, writeback_repo, writeback_branch, action_log_id, patchset_id, targets, base_overrides_by_target)` (line 1194): no docstring
 - **Classes**
-  - `ActionSimulationRejected` (line 50): no docstring
-    - `__init__(self, payload, status_code)` (line 51): no docstring
-  - `ActionSimulationScenario` (line 347): no docstring
-  - `TargetPreflight` (line 353): no docstring
-  - `ActionPreflight` (line 370): no docstring
+  - `ActionSimulationRejected` (line 51): no docstring
+    - `__init__(self, payload, status_code)` (line 52): no docstring
+  - `ActionSimulationScenario` (line 294): no docstring
+  - `TargetPreflight` (line 300): no docstring
+  - `ActionPreflight` (line 317): no docstring
 
 ### `backend/oms/services/async_terminus.py`
 - **Classes**
@@ -4023,32 +4019,40 @@
     - `async flush_once(self)` (line 49): no docstring
     - `async maybe_purge(self)` (line 82): no docstring
 
+### `backend/oms/services/ontology_deploy_outbox_store.py`
+- **Classes**
+  - `OntologyDeployOutboxItem` (line 11): no docstring
+  - `OntologyDeployOutboxTableSpec` (line 26): no docstring
+  - `OntologyDeployOutboxStore` (line 32): Outbox operations (Strategy via table/column spec).
+    - `__init__(self, table)` (line 41): no docstring
+    - `async claim_batch(self, limit, claimed_by, claim_timeout_seconds)` (line 44): no docstring
+    - `async mark_published(self, outbox_id)` (line 120): no docstring
+    - `async mark_failed(self, outbox_id, error, next_attempt_at)` (line 137): no docstring
+
 ### `backend/oms/services/ontology_deployment_registry.py`
 - **Classes**
-  - `OntologyDeployOutboxItem` (line 21): no docstring
-  - `OntologyDeploymentRegistry` (line 35): Record ontology deployments in Postgres.
-    - `async ensure_schema(self)` (line 38): no docstring
-    - `build_deploy_event_payload(deployment_id, db_name, proposal_id, source_branch, target_branch, approved_ontology_commit_id, merge_commit_id, deployed_by, definition_hash, occurred_at)` (line 98): no docstring
-    - `async record_deployment(self, db_name, proposal_id, source_branch, target_branch, approved_ontology_commit_id, merge_commit_id, deployed_by, definition_hash, status, metadata)` (line 142): no docstring
-    - `async claim_outbox_batch(self, limit, claimed_by, claim_timeout_seconds)` (line 215): no docstring
-    - `async mark_outbox_published(self, outbox_id)` (line 285): no docstring
-    - `async mark_outbox_failed(self, outbox_id, error, next_attempt_at)` (line 300): no docstring
-    - `async purge_outbox(self, retention_days, limit)` (line 321): no docstring
+  - `OntologyDeploymentRegistry` (line 32): Record ontology deployments in Postgres.
+    - `async ensure_schema(self)` (line 35): no docstring
+    - `build_deploy_event_payload(deployment_id, db_name, proposal_id, source_branch, target_branch, approved_ontology_commit_id, merge_commit_id, deployed_by, definition_hash, occurred_at)` (line 95): no docstring
+    - `async record_deployment(self, db_name, proposal_id, source_branch, target_branch, approved_ontology_commit_id, merge_commit_id, deployed_by, definition_hash, status, metadata)` (line 139): no docstring
+    - `async claim_outbox_batch(self, limit, claimed_by, claim_timeout_seconds)` (line 212): no docstring
+    - `async mark_outbox_published(self, outbox_id)` (line 225): no docstring
+    - `async mark_outbox_failed(self, outbox_id, error, next_attempt_at)` (line 228): no docstring
+    - `async purge_outbox(self, retention_days, limit)` (line 237): no docstring
 
 ### `backend/oms/services/ontology_deployment_registry_v2.py`
 - **Classes**
-  - `OntologyDeployOutboxItem` (line 22): no docstring
-  - `OntologyDeploymentRegistryV2` (line 36): Record ontology deployments in Postgres (v2 schema).
-    - `_json_default(value)` (line 40): no docstring
-    - `_maybe_decode_json(value)` (line 46): no docstring
-    - `async ensure_schema(self)` (line 54): no docstring
-    - `build_deploy_event_payload(deployment_id, db_name, proposal_id, target_branch, ontology_commit_id, snapshot_rid, deployed_by, gate_policy, health_summary, occurred_at)` (line 115): no docstring
-    - `async record_deployment(self, db_name, target_branch, ontology_commit_id, snapshot_rid, proposal_id, status, gate_policy, health_summary, deployed_by, error, metadata)` (line 159): no docstring
-    - `async get_latest_deployed_commit(self, db_name, target_branch)` (line 246): Return the latest succeeded deployment record for a db/branch.
-    - `async claim_outbox_batch(self, limit, claimed_by, claim_timeout_seconds)` (line 289): no docstring
-    - `async mark_outbox_published(self, outbox_id)` (line 361): no docstring
-    - `async mark_outbox_failed(self, outbox_id, error, next_attempt_at)` (line 376): no docstring
-    - `async purge_outbox(self, retention_days, limit)` (line 397): no docstring
+  - `OntologyDeploymentRegistryV2` (line 33): Record ontology deployments in Postgres (v2 schema).
+    - `_json_default(value)` (line 37): no docstring
+    - `_maybe_decode_json(value)` (line 43): no docstring
+    - `async ensure_schema(self)` (line 51): no docstring
+    - `build_deploy_event_payload(deployment_id, db_name, proposal_id, target_branch, ontology_commit_id, snapshot_rid, deployed_by, gate_policy, health_summary, occurred_at)` (line 112): no docstring
+    - `async record_deployment(self, db_name, target_branch, ontology_commit_id, snapshot_rid, proposal_id, status, gate_policy, health_summary, deployed_by, error, metadata)` (line 156): no docstring
+    - `async get_latest_deployed_commit(self, db_name, target_branch)` (line 243): Return the latest succeeded deployment record for a db/branch.
+    - `async claim_outbox_batch(self, limit, claimed_by, claim_timeout_seconds)` (line 286): no docstring
+    - `async mark_outbox_published(self, outbox_id)` (line 303): no docstring
+    - `async mark_outbox_failed(self, outbox_id, error, next_attempt_at)` (line 306): no docstring
+    - `async purge_outbox(self, retention_days, limit)` (line 315): no docstring
 
 ### `backend/oms/services/ontology_health_issue_registry.py`
 - **Functions**
@@ -4657,56 +4661,56 @@
 
 ### `backend/projection_worker/main.py`
 - **Functions**
-  - `async main()` (line 2725): 메인 함수
+  - `async main()` (line 2681): 메인 함수
 - **Classes**
-  - `ProjectionWorker` (line 62): Instance와 Ontology 이벤트를 Elasticsearch에 프로젝션하는 워커
-    - `__init__(self)` (line 71): no docstring
-    - `_is_es_version_conflict(error)` (line 128): no docstring
-    - `_parse_sequence(value)` (line 136): no docstring
-    - `_normalize_localized_field(value, default_lang)` (line 145): no docstring
-    - `_normalize_ontology_properties(self, properties, default_lang)` (line 155): no docstring
-    - `_normalize_ontology_relationships(self, relationships, default_lang)` (line 192): no docstring
-    - `_extract_envelope_metadata(event_data)` (line 241): no docstring
-    - `async _record_es_side_effect(self, event_id, event_data, db_name, index_name, doc_id, operation, status, record_lineage, skip_reason, error, extra_metadata)` (line 259): Record projection side-effects for provenance (lineage) + audit.
-    - `async initialize(self)` (line 353): 워커 초기화
-    - `async _setup_indices(self)` (line 450): 매핑 파일 로드 (인덱스는 DB별로 동적 생성)
-    - `async _ensure_index_exists(self, db_name, index_type, branch)` (line 462): 특정 데이터베이스의 인덱스가 존재하는지 확인하고 없으면 생성
-    - `async _load_mapping(self, filename)` (line 554): 매핑 파일 로드
-    - `async run(self)` (line 568): 메인 실행 루프
-    - `_span_name(self, payload)` (line 580): no docstring
-    - `_registry_handler(self, msg, payload)` (line 583): no docstring
-    - `_registry_key(self, payload)` (line 586): no docstring
-    - `_is_retryable_error(self, exc, payload)` (line 593): no docstring
-    - `_max_retries_for_error(self, exc, payload, error, retryable)` (line 598): no docstring
-    - `_backoff_seconds_for_error(self, exc, payload, error, attempt_count, retryable)` (line 610): no docstring
-    - `_in_progress_sleep_seconds(self, claim, payload)` (line 622): no docstring
-    - `async _on_retry_scheduled(self, payload, error, attempt_count, backoff_s, retryable)` (line 633): no docstring
-    - `async _on_terminal_failure(self, payload, error, attempt_count, retryable)` (line 663): no docstring
-    - `async _on_parse_error(self, msg, raw_payload, error)` (line 677): no docstring
-    - `async _commit(self, msg)` (line 706): no docstring
-    - `async _publish_to_dlq(self, msg, error, attempt_count, payload_text, kafka_headers, fallback_metadata)` (line 712): no docstring
-    - `async _send_to_dlq(self, msg, payload, raw_payload, error, attempt_count)` (line 768): no docstring
-    - `async _process_payload(self, payload)` (line 790): no docstring
-    - `async _handle_instance_event(self, event_data)` (line 815): 인스턴스 이벤트 처리
-    - `async _handle_ontology_event(self, event_data)` (line 835): 온톨로지 이벤트 처리
-    - `async _handle_action_event(self, event_data)` (line 859): Action writeback events -> overlay projection.
-    - `async _handle_action_applied(self, action_data, event_id, event_data)` (line 874): no docstring
-    - `async _handle_instance_created(self, instance_data, event_id, event_data)` (line 1074): 인스턴스 생성 이벤트 처리
-    - `async _handle_instance_updated(self, instance_data, event_id, event_data)` (line 1233): 인스턴스 업데이트 이벤트 처리
-    - `async _handle_instance_deleted(self, instance_data, event_id, event_data)` (line 1416): 인스턴스 삭제 이벤트 처리
-    - `async _handle_ontology_class_created(self, ontology_data, event_id, event_data)` (line 1664): 온톨로지 클래스 생성 이벤트 처리
-    - `async _handle_ontology_class_updated(self, ontology_data, event_id, event_data)` (line 1847): 온톨로지 클래스 업데이트 이벤트 처리
-    - `async _handle_ontology_class_deleted(self, ontology_data, event_id, event_data)` (line 2046): 온톨로지 클래스 삭제 이벤트 처리
-    - `async _handle_database_created(self, db_data, event_id, event_data)` (line 2301): 데이터베이스 생성 이벤트 처리
-    - `async _handle_database_deleted(self, db_data, event_id, event_data)` (line 2357): 데이터베이스 삭제 이벤트 처리
-    - `async _get_class_label(self, class_id, db_name, branch)` (line 2431): Redis에서 클래스 라벨 조회 (Cache Stampede 방지)
-    - `async _get_class_label_fallback(self, class_id, db_name, branch)` (line 2537): 락 획득 실패 시 fallback 조회 (성능보다 안정성 우선)
-    - `get_cache_efficiency_metrics(self)` (line 2573): 캐시 효율성 및 락 경합 메트릭 반환
-    - `log_cache_metrics(self)` (line 2626): 캐시 메트릭을 로그로 출력
-    - `async _cache_class_label(self, class_id, label, db_name, branch)` (line 2645): 클래스 라벨을 Redis에 캐싱
-    - `_normalize_properties(self, properties)` (line 2660): 속성을 검색 최적화된 형태로 정규화
-    - `_is_transient_infra_error(error)` (line 2672): Return True for errors that are expected to recover via retry (e.g. ES outage).
-    - `async _shutdown(self)` (line 2696): 워커 종료
+  - `ProjectionWorker` (line 63): Instance와 Ontology 이벤트를 Elasticsearch에 프로젝션하는 워커
+    - `__init__(self)` (line 72): no docstring
+    - `_is_es_version_conflict(error)` (line 129): no docstring
+    - `_parse_sequence(value)` (line 137): no docstring
+    - `_normalize_localized_field(value, default_lang)` (line 146): no docstring
+    - `_normalize_ontology_properties(self, properties, default_lang)` (line 156): no docstring
+    - `_normalize_ontology_relationships(self, relationships, default_lang)` (line 193): no docstring
+    - `_extract_envelope_metadata(event_data)` (line 242): no docstring
+    - `async _record_es_side_effect(self, event_id, event_data, db_name, index_name, doc_id, operation, status, record_lineage, skip_reason, error, extra_metadata)` (line 260): Record projection side-effects for provenance (lineage) + audit.
+    - `async initialize(self)` (line 354): 워커 초기화
+    - `async _setup_indices(self)` (line 451): 매핑 파일 로드 (인덱스는 DB별로 동적 생성)
+    - `async _ensure_index_exists(self, db_name, index_type, branch)` (line 463): 특정 데이터베이스의 인덱스가 존재하는지 확인하고 없으면 생성
+    - `async _load_mapping(self, filename)` (line 555): 매핑 파일 로드
+    - `async run(self)` (line 569): 메인 실행 루프
+    - `_span_name(self, payload)` (line 581): no docstring
+    - `_registry_handler(self, msg, payload)` (line 584): no docstring
+    - `_registry_key(self, payload)` (line 587): no docstring
+    - `_is_retryable_error(self, exc, payload)` (line 594): no docstring
+    - `_max_retries_for_error(self, exc, payload, error, retryable)` (line 599): no docstring
+    - `_backoff_seconds_for_error(self, exc, payload, error, attempt_count, retryable)` (line 611): no docstring
+    - `_in_progress_sleep_seconds(self, claim, payload)` (line 623): no docstring
+    - `async _on_retry_scheduled(self, payload, error, attempt_count, backoff_s, retryable)` (line 634): no docstring
+    - `async _on_terminal_failure(self, payload, error, attempt_count, retryable)` (line 664): no docstring
+    - `async _on_parse_error(self, msg, raw_payload, error)` (line 678): no docstring
+    - `async _commit(self, msg)` (line 707): no docstring
+    - `async _publish_to_dlq(self, msg, error, attempt_count, payload_text, kafka_headers, fallback_metadata)` (line 713): no docstring
+    - `async _send_to_dlq(self, msg, payload, raw_payload, error, attempt_count)` (line 769): no docstring
+    - `async _process_payload(self, payload)` (line 791): no docstring
+    - `async _handle_instance_event(self, event_data)` (line 816): 인스턴스 이벤트 처리
+    - `async _handle_ontology_event(self, event_data)` (line 836): 온톨로지 이벤트 처리
+    - `async _handle_action_event(self, event_data)` (line 860): Action writeback events -> overlay projection.
+    - `async _handle_action_applied(self, action_data, event_id, event_data)` (line 875): no docstring
+    - `async _handle_instance_created(self, instance_data, event_id, event_data)` (line 1030): 인스턴스 생성 이벤트 처리
+    - `async _handle_instance_updated(self, instance_data, event_id, event_data)` (line 1189): 인스턴스 업데이트 이벤트 처리
+    - `async _handle_instance_deleted(self, instance_data, event_id, event_data)` (line 1372): 인스턴스 삭제 이벤트 처리
+    - `async _handle_ontology_class_created(self, ontology_data, event_id, event_data)` (line 1620): 온톨로지 클래스 생성 이벤트 처리
+    - `async _handle_ontology_class_updated(self, ontology_data, event_id, event_data)` (line 1803): 온톨로지 클래스 업데이트 이벤트 처리
+    - `async _handle_ontology_class_deleted(self, ontology_data, event_id, event_data)` (line 2002): 온톨로지 클래스 삭제 이벤트 처리
+    - `async _handle_database_created(self, db_data, event_id, event_data)` (line 2257): 데이터베이스 생성 이벤트 처리
+    - `async _handle_database_deleted(self, db_data, event_id, event_data)` (line 2313): 데이터베이스 삭제 이벤트 처리
+    - `async _get_class_label(self, class_id, db_name, branch)` (line 2387): Redis에서 클래스 라벨 조회 (Cache Stampede 방지)
+    - `async _get_class_label_fallback(self, class_id, db_name, branch)` (line 2493): 락 획득 실패 시 fallback 조회 (성능보다 안정성 우선)
+    - `get_cache_efficiency_metrics(self)` (line 2529): 캐시 효율성 및 락 경합 메트릭 반환
+    - `log_cache_metrics(self)` (line 2582): 캐시 메트릭을 로그로 출력
+    - `async _cache_class_label(self, class_id, label, db_name, branch)` (line 2601): 클래스 라벨을 Redis에 캐싱
+    - `_normalize_properties(self, properties)` (line 2616): 속성을 검색 최적화된 형태로 정규화
+    - `_is_transient_infra_error(error)` (line 2628): Return True for errors that are expected to recover via retry (e.g. ES outage).
+    - `async _shutdown(self)` (line 2652): 워커 종료
 
 ## scripts
 
@@ -6821,14 +6825,13 @@
 
 ### `backend/shared/services/core/writeback_merge_service.py`
 - **Functions**
-  - `_parse_queue_entry_seq(key)` (line 20): no docstring
-  - `_coerce_object_type(resource_rid, fallback)` (line 32): no docstring
-  - `_apply_changes_to_payload(payload, changes)` (line 41): no docstring
+  - `_parse_queue_entry_seq(key)` (line 21): no docstring
+  - `_coerce_object_type(resource_rid, fallback)` (line 33): no docstring
 - **Classes**
-  - `WritebackMergedInstance` (line 97): no docstring
-  - `WritebackMergeService` (line 107): Authoritative server-side merge path for Action writeback.
-    - `__init__(self, base_storage, lakefs_storage)` (line 114): no docstring
-    - `async merge_instance(self, db_name, base_branch, overlay_branch, class_id, instance_id, writeback_repo, writeback_branch)` (line 123): no docstring
+  - `WritebackMergedInstance` (line 43): no docstring
+  - `WritebackMergeService` (line 53): Authoritative server-side merge path for Action writeback.
+    - `__init__(self, base_storage, lakefs_storage)` (line 60): no docstring
+    - `async merge_instance(self, db_name, base_branch, overlay_branch, class_id, instance_id, writeback_repo, writeback_branch)` (line 69): no docstring
 
 ### `backend/shared/services/events/__init__.py`
 
@@ -8773,6 +8776,10 @@
 - **Functions**
   - `derive_lifecycle_id(instance_state)` (line 8): Derive a stable lifecycle/epoch identifier for an instance.
   - `overlay_doc_id(instance_id, lifecycle_id)` (line 58): Build the ES `_id` for overlay documents as (instance_id, lifecycle_id).
+
+### `backend/shared/utils/writeback_patch_apply.py`
+- **Functions**
+  - `apply_changes_to_payload(payload, changes)` (line 6): Apply a writeback patchset `changes` object to a payload dict.
 
 ### `backend/shared/utils/writeback_paths.py`
 - **Functions**
@@ -10732,6 +10739,14 @@
   - `test_derive_lifecycle_id_defaults_when_missing()` (line 27): no docstring
   - `test_overlay_doc_id_composes_instance_and_lifecycle()` (line 31): no docstring
   - `test_overlay_doc_id_rejects_delimiter_collision()` (line 35): no docstring
+
+### `backend/tests/unit/utils/test_writeback_patch_apply.py`
+- **Functions**
+  - `test_apply_changes_set_unset()` (line 6): no docstring
+  - `test_apply_changes_link_add_and_remove()` (line 12): no docstring
+  - `test_apply_changes_link_scalar_coerces_to_list()` (line 24): no docstring
+  - `test_apply_changes_delete_short_circuits()` (line 30): no docstring
+  - `test_apply_changes_type_validation()` (line 36): no docstring
 
 ### `backend/tests/unit/utils/test_writeback_paths.py`
 - **Functions**

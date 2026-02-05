@@ -44,6 +44,7 @@ from shared.utils.writeback_governance import extract_backing_dataset_id, polici
 from shared.utils.writeback_lifecycle import DEFAULT_LIFECYCLE_ID, derive_lifecycle_id, overlay_doc_id
 from shared.utils.writeback_paths import queue_entry_prefix, queue_entry_key, ref_key, writeback_patchset_key
 from shared.utils.action_writeback import is_noop_changes, safe_str
+from shared.utils.writeback_patch_apply import apply_changes_to_payload
 from shared.utils.time_utils import utcnow
 
 
@@ -86,60 +87,6 @@ def _attach_enterprise(payload: Dict[str, Any]) -> Dict[str, Any]:
     if enterprise is not None:
         out["enterprise"] = enterprise
     return out
-
-
-def _apply_changes_to_payload(payload: Dict[str, Any], changes: Dict[str, Any]) -> bool:
-    if bool(changes.get("delete")):
-        return True
-
-    set_ops = changes.get("set") if isinstance(changes.get("set"), dict) else {}
-    unset_ops = changes.get("unset") if isinstance(changes.get("unset"), list) else []
-
-    for key, value in (set_ops or {}).items():
-        if isinstance(key, str) and key:
-            payload[key] = value
-    for key in unset_ops or []:
-        if isinstance(key, str) and key:
-            payload.pop(key, None)
-
-    # Link ops are best-effort (same semantics as projection_worker / writeback_merge_service).
-    for op_key, add in (("link_add", True), ("link_remove", False)):
-        ops = changes.get(op_key)
-        if not isinstance(ops, list):
-            continue
-        for item in ops:
-            field = None
-            target = None
-            if isinstance(item, dict):
-                field = item.get("field") or item.get("predicate") or item.get("name")
-                target = item.get("value") or item.get("to") or item.get("target")
-                if (field is None or target is None) and len(item) == 1:
-                    k, v = next(iter(item.items()))
-                    field = k
-                    target = v
-            elif isinstance(item, str):
-                raw = item.strip()
-                if ":" in raw:
-                    field, target = raw.split(":", 1)
-            field_str = str(field or "").strip()
-            target_str = str(target or "").strip()
-            if not field_str or not target_str:
-                continue
-            existing = payload.get(field_str)
-            if isinstance(existing, list):
-                values = [str(v) for v in existing if v is not None]
-            elif existing is None:
-                values = []
-            else:
-                values = [str(existing)]
-            if add:
-                if target_str not in values:
-                    values.append(target_str)
-            else:
-                values = [v for v in values if v != target_str]
-            payload[field_str] = values
-
-    return False
 
 
 _ASSUMPTION_FORBIDDEN_FIELDS = {
@@ -246,7 +193,7 @@ def _apply_assumption_patch(
         )
 
     assumed = dict(base_state)
-    tombstone = _apply_changes_to_payload(assumed, patch)
+    tombstone = apply_changes_to_payload(assumed, patch)
     if tombstone:
         raise ActionSimulationRejected(
             _attach_enterprise(
@@ -1310,7 +1257,7 @@ async def simulate_effects_for_patchset(
                 patch=assumption_patch,
             )
 
-        tombstone = _apply_changes_to_payload(data_payload, applied_changes)
+        tombstone = apply_changes_to_payload(data_payload, applied_changes)
         if tombstone:
             effective.update(
                 {
