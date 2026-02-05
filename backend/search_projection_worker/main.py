@@ -114,13 +114,7 @@ class SearchProjectionWorker(EventEnvelopeKafkaWorker[None]):
         )
 
     async def close(self) -> None:
-        if self.consumer_ops:
-            await self.consumer_ops.close()
-            self.consumer_ops = None
-            self.consumer = None
-        elif self.consumer:
-            self.consumer.close()
-            self.consumer = None
+        await self._close_consumer_runtime()
         if self.dlq_producer:
             try:
                 self.dlq_producer.flush(5)

@@ -171,16 +171,7 @@ class ConnectorSyncWorker(StrictHeartbeatEventEnvelopeKafkaWorker[Optional[str]]
         if self.registry:
             await self.registry.close()
             self.registry = None
-        if self.consumer_ops:
-            try:
-                await self.consumer_ops.close()
-            except Exception as exc:
-                logger.warning("Kafka consumer close failed during shutdown: %s", exc, exc_info=True)
-            self.consumer_ops = None
-            self.consumer = None
-        elif self.consumer:
-            self.consumer.close()
-            self.consumer = None
+        await self._close_consumer_runtime()
         if self.dlq_producer:
             try:
                 await self._producer_call(self.dlq_producer.flush, 5)

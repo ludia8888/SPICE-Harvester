@@ -240,6 +240,8 @@ class ProcessedEventKafkaWorker(Generic[PayloadT, ResultT], ABC):
                 int(msg.offset()),
             )
             return
+        if self._uses_commit_state():
+            self._commit_state_by_partition[key] = True
         await self._get_consumer_ops().commit_sync(msg)
 
     async def _seek(self, *, topic: str, partition: int, offset: int) -> None:
@@ -257,6 +259,8 @@ class ProcessedEventKafkaWorker(Generic[PayloadT, ResultT], ABC):
                 int(offset),
             )
             return
+        if self._uses_commit_state():
+            self._commit_state_by_partition[key] = False
         await self._get_consumer_ops().seek(TopicPartition(topic, partition, offset))
 
     def _heartbeat_options(self) -> HeartbeatOptions:
@@ -293,6 +297,38 @@ class ProcessedEventKafkaWorker(Generic[PayloadT, ResultT], ABC):
         ops = InlineKafkaConsumerOps(consumer)
         setattr(self, "consumer_ops", ops)
         return ops
+
+    async def _close_consumer_runtime(self) -> None:
+        ops = getattr(self, "consumer_ops", None)
+        consumer = getattr(self, "consumer", None)
+
+        if ops is not None:
+            try:
+                await ops.close()
+            except Exception as exc:
+                logger.warning(
+                    "Kafka consumer close failed during %s shutdown: %s",
+                    self._loop_label(),
+                    exc,
+                    exc_info=True,
+                )
+            finally:
+                setattr(self, "consumer_ops", None)
+                setattr(self, "consumer", None)
+            return
+
+        if consumer is not None:
+            try:
+                consumer.close()
+            except Exception as exc:
+                logger.warning(
+                    "Kafka consumer close failed during %s shutdown: %s",
+                    self._loop_label(),
+                    exc,
+                    exc_info=True,
+                )
+            finally:
+                setattr(self, "consumer", None)
 
     def _is_partition_eof(self, msg: Any) -> bool:
         try:

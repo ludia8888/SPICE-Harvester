@@ -741,16 +741,6 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
             error=error,
         )
 
-    async def _commit(self, msg: Any) -> None:  # type: ignore[override]
-        key = (str(msg.topic()), int(msg.partition()))
-        self._commit_state_by_partition[key] = True
-        await super()._commit(msg)
-
-    async def _seek(self, *, topic: str, partition: int, offset: int) -> None:  # type: ignore[override]
-        key = (str(topic), int(partition))
-        self._commit_state_by_partition[key] = False
-        await super()._seek(topic=topic, partition=partition, offset=offset)
-
     async def _on_parse_error(self, *, msg: Any, raw_payload: Optional[str], error: Exception) -> None:  # type: ignore[override]
         stage = "parse"
         payload_text = raw_payload

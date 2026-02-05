@@ -1428,13 +1428,7 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
         logger.info("Shutting down Ontology Worker...")
         self.running = False
         
-        if self.consumer_ops:
-            await self.consumer_ops.close()
-            self.consumer_ops = None
-            self.consumer = None
-        elif self.consumer:
-            self.consumer.close()
-            self.consumer = None
+        await self._close_consumer_runtime()
             
         if self.terminus_service:
             await self.terminus_service.disconnect()

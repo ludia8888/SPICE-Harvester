@@ -234,13 +234,7 @@ class ActionWorker(StrictHeartbeatKafkaWorker[_ActionCommandPayload, None]):
 
     async def shutdown(self) -> None:
         self.running = False
-        if self.consumer_ops:
-            await self.consumer_ops.close()
-            self.consumer_ops = None
-            self.consumer = None
-        elif self.consumer:
-            self.consumer.close()
-            self.consumer = None
+        await self._close_consumer_runtime()
         if self.dlq_producer:
             try:
                 await asyncio.to_thread(self.dlq_producer.flush, self.dlq_flush_timeout_seconds)
