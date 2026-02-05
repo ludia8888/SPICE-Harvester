@@ -26,7 +26,7 @@ from shared.services.kafka.processed_event_worker import (
     RegistryKey,
 )
 from shared.services.kafka.producer_factory import create_kafka_dlq_producer
-from shared.services.kafka.safe_consumer import SafeKafkaConsumer
+from shared.services.kafka.safe_consumer import SafeKafkaConsumer, create_safe_consumer
 
 from shared.config.app_config import AppConfig
 from shared.config.settings import get_settings
@@ -40,6 +40,7 @@ from shared.services.registries.pipeline_registry import PipelineRegistry
 from shared.services.storage.lakefs_storage_service import create_lakefs_storage_service
 from shared.services.registries.lineage_store import LineageStore
 from shared.services.registries.processed_event_registry import ProcessedEventRegistry
+from shared.services.registries.processed_event_registry_factory import create_processed_event_registry
 from shared.services.core.sheet_import_service import FieldMapping, SheetImportService
 from shared.utils.deterministic_ids import deterministic_uuid5_hex_prefix
 from shared.utils.import_type_normalization import normalize_import_target_type, resolve_import_type
@@ -476,8 +477,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
         self.pipeline_registry = PipelineRegistry()
         await self.pipeline_registry.initialize()
 
-        self.processed = ProcessedEventRegistry()
-        await self.processed.initialize()
+        self.processed = await create_processed_event_registry()
 
         try:
             self.lineage_store = LineageStore()
@@ -500,7 +500,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
 
         # Use SafeKafkaConsumer for strong consistency guarantees
         # Critical: Enforces isolation.level=read_committed and proper rebalance handling
-        self.consumer = SafeKafkaConsumer(
+        self.consumer = create_safe_consumer(
             group_id=self.group_id,
             topics=[self.topic],
             service_name="objectify-worker",

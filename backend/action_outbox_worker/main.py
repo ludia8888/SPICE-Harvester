@@ -34,9 +34,8 @@ from shared.services.storage.lakefs_storage_service import create_lakefs_storage
 from shared.services.registries.processed_event_registry import (
     ClaimDecision,
     ProcessedEventRegistry,
-    validate_registry_enabled,
-    validate_lease_settings,
 )
+from shared.services.registries.processed_event_registry_factory import create_processed_event_registry
 from shared.utils.action_writeback import action_applied_event_id, is_noop_changes, safe_str
 from shared.utils.resource_rid import strip_rid_revision
 from shared.utils.writeback_paths import queue_entry_key, ref_key, writeback_patchset_key
@@ -71,18 +70,12 @@ class ActionOutboxWorker:
         self.lakefs_storage: Optional[LakeFSStorageService] = None
 
     async def initialize(self) -> None:
-        validate_registry_enabled()
-        validate_lease_settings()
-
         await event_store.connect()
         await self.action_logs.connect()
-
-        settings = get_settings()
-        if settings.event_sourcing.enable_processed_event_registry:
-            self.processed_event_registry = ProcessedEventRegistry()
-            await self.processed_event_registry.connect()
+        self.processed_event_registry = await create_processed_event_registry()
 
         self.lakefs_client = LakeFSClient()
+        settings = get_settings()
         self.lakefs_storage = create_lakefs_storage_service(settings)
         if not self.lakefs_storage:
             raise RuntimeError("LakeFSStorageService unavailable (boto3 missing?)")

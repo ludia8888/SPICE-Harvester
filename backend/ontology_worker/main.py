@@ -35,13 +35,12 @@ from shared.services.kafka.processed_event_worker import HeartbeatOptions, Proce
 from shared.services.kafka.producer_factory import create_kafka_producer
 from shared.services.registries.processed_event_registry import (
     ProcessedEventRegistry,
-    validate_registry_enabled,
-    validate_lease_settings,
 )
-from shared.services.kafka.safe_consumer import SafeKafkaConsumer
+from shared.services.kafka.safe_consumer import SafeKafkaConsumer, create_safe_consumer
 from shared.services.registries.lineage_store import LineageStore
 from shared.services.core.audit_log_store import AuditLogStore
 from shared.services.registries.ontology_key_spec_registry import OntologyKeySpecRegistry
+from shared.services.registries.processed_event_registry_factory import create_processed_event_registry
 from shared.security.input_sanitizer import validate_branch_name
 from shared.utils.executor_utils import call_in_executor
 from shared.utils.spice_event_ids import spice_event_id
@@ -191,15 +190,13 @@ class OntologyWorker(ProcessedEventKafkaWorker[_OntologyCommandPayload, None]):
         
     async def initialize(self):
         """워커 초기화"""
-        validate_registry_enabled()
-        validate_lease_settings()
         settings = get_settings()
 
         group_id = (AppConfig.ONTOLOGY_WORKER_GROUP or "ontology-worker-group").strip()
 
         # Kafka Consumer (strong consistency: read_committed + rebalance-safe offsets)
         self.consumer = await self._consumer_call(
-            SafeKafkaConsumer,
+            create_safe_consumer,
             group_id,
             [AppConfig.ONTOLOGY_COMMANDS_TOPIC, AppConfig.DATABASE_COMMANDS_TOPIC],
             "ontology-worker",
@@ -248,8 +245,7 @@ class OntologyWorker(ProcessedEventKafkaWorker[_OntologyCommandPayload, None]):
         logger.info("✅ Event Store connected (domain events will be appended to S3/MinIO)")
 
         # Durable processed-events registry (idempotency + ordering guard)
-        self.processed_event_registry = ProcessedEventRegistry()
-        await self.processed_event_registry.connect()
+        self.processed_event_registry = await create_processed_event_registry()
         self.processed = self.processed_event_registry
         logger.info("✅ ProcessedEventRegistry connected (Postgres)")
 

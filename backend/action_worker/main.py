@@ -22,7 +22,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from confluent_kafka import Producer, TopicPartition
 
-from shared.services.kafka.safe_consumer import SafeKafkaConsumer
+from shared.services.kafka.safe_consumer import SafeKafkaConsumer, create_safe_consumer
 from shared.services.kafka.producer_factory import create_kafka_dlq_producer
 
 from oms.services.async_terminus import AsyncTerminusService
@@ -45,9 +45,8 @@ from shared.services.storage.lakefs_storage_service import create_lakefs_storage
 from shared.services.kafka.processed_event_worker import HeartbeatOptions, ProcessedEventKafkaWorker, RegistryKey
 from shared.services.registries.processed_event_registry import (
     ProcessedEventRegistry,
-    validate_registry_enabled,
-    validate_lease_settings,
 )
+from shared.services.registries.processed_event_registry_factory import create_processed_event_registry
 from shared.services.storage.storage_service import StorageService, create_storage_service
 from shared.utils.canonical_json import sha256_canonical_json_prefixed
 from shared.utils.action_input_schema import (
@@ -153,13 +152,13 @@ class ActionWorker(ProcessedEventKafkaWorker[_ActionCommandPayload, None]):
         self.terminus: Optional[AsyncTerminusService] = None
 
     async def initialize(self) -> None:
-        validate_registry_enabled()
-        validate_lease_settings()
+        self.processed_event_registry = await create_processed_event_registry()
+        self.processed = self.processed_event_registry
 
         group_id = (AppConfig.ACTION_WORKER_GROUP or "action-worker-group").strip()
         topic = AppConfig.ACTION_COMMANDS_TOPIC
         # Use SafeKafkaConsumer for strong consistency guarantees
-        self.consumer = SafeKafkaConsumer(
+        self.consumer = create_safe_consumer(
             group_id=group_id,
             topics=[topic],
             service_name="action-worker",
@@ -183,10 +182,6 @@ class ActionWorker(ProcessedEventKafkaWorker[_ActionCommandPayload, None]):
             enable_idempotence=True,
             max_in_flight_requests_per_connection=5,
         )
-
-        self.processed_event_registry = ProcessedEventRegistry()
-        await self.processed_event_registry.connect()
-        self.processed = self.processed_event_registry
 
         await event_store.connect()
         await self.action_logs.connect()

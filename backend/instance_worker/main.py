@@ -50,10 +50,9 @@ from shared.security.input_sanitizer import validate_branch_name, validate_class
 from shared.services.kafka.processed_event_worker import HeartbeatOptions, ProcessedEventKafkaWorker, RegistryKey
 from shared.services.registries.processed_event_registry import (
     ProcessedEventRegistry,
-    validate_registry_enabled,
-    validate_lease_settings,
 )
-from shared.services.kafka.safe_consumer import SafeKafkaConsumer
+from shared.services.kafka.safe_consumer import SafeKafkaConsumer, create_safe_consumer
+from shared.services.registries.processed_event_registry_factory import create_processed_event_registry
 from shared.services.registries.lineage_store import LineageStore
 from shared.services.core.audit_log_store import AuditLogStore
 from shared.services.registries.dataset_registry import DatasetRegistry
@@ -188,14 +187,12 @@ class StrictInstanceWorker(ProcessedEventKafkaWorker[_InstanceCommandPayload, No
         """Initialize all connections"""
         logger.info("Initializing STRICT Instance Worker...")
 
-        validate_registry_enabled()
-        validate_lease_settings()
         settings = get_settings()
         
         # Kafka Consumer (strong consistency: read_committed + rebalance-safe offsets)
         group_id = (AppConfig.INSTANCE_WORKER_GROUP or "instance-worker-group").strip()
         self.consumer = await self._consumer_call(
-            SafeKafkaConsumer,
+            create_safe_consumer,
             group_id,
             [AppConfig.INSTANCE_COMMANDS_TOPIC],
             "instance-worker",
@@ -265,8 +262,7 @@ class StrictInstanceWorker(ProcessedEventKafkaWorker[_InstanceCommandPayload, No
         await self.terminus_service.connect()
 
         # Durable processed-events registry (idempotency + ordering guard)
-        self.processed_event_registry = ProcessedEventRegistry()
-        await self.processed_event_registry.connect()
+        self.processed_event_registry = await create_processed_event_registry()
         self.processed = self.processed_event_registry
         logger.info("✅ ProcessedEventRegistry connected (Postgres)")
 

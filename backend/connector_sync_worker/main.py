@@ -38,10 +38,11 @@ from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
 from shared.services.kafka.processed_event_worker import EventEnvelopeKafkaWorker, HeartbeatOptions
 from shared.services.kafka.producer_factory import create_kafka_dlq_producer
-from shared.services.kafka.safe_consumer import SafeKafkaConsumer
+from shared.services.kafka.safe_consumer import SafeKafkaConsumer, create_safe_consumer
 from shared.services.registries.connector_registry import ConnectorRegistry
 from shared.services.registries.lineage_store import LineageStore
 from shared.services.registries.processed_event_registry import ProcessedEventRegistry
+from shared.services.registries.processed_event_registry_factory import create_processed_event_registry
 from shared.services.core.sheet_import_service import FieldMapping, SheetImportService
 from shared.security.auth_utils import BFF_TOKEN_ENV_KEYS, get_expected_token
 from shared.utils.app_logger import configure_logging
@@ -98,8 +99,7 @@ class ConnectorSyncWorker(EventEnvelopeKafkaWorker[Optional[str]]):
         self.registry = ConnectorRegistry()
         await self.registry.initialize()
 
-        self.processed = ProcessedEventRegistry()
-        await self.processed.initialize()
+        self.processed = await create_processed_event_registry()
 
         # Lineage is best-effort; do not fail worker startup if it's unavailable.
         self.lineage = LineageStore()
@@ -123,7 +123,7 @@ class ConnectorSyncWorker(EventEnvelopeKafkaWorker[Optional[str]]):
         self.http = httpx.AsyncClient(timeout=60.0, headers=headers)
 
         # Use SafeKafkaConsumer for strong consistency guarantees
-        self.consumer = SafeKafkaConsumer(
+        self.consumer = create_safe_consumer(
             group_id=self.group_id,
             topics=[self.topic],
             service_name="connector-sync-worker",

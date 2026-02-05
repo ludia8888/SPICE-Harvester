@@ -24,9 +24,10 @@ from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
 from shared.services.kafka.processed_event_worker import EventEnvelopeKafkaWorker, HeartbeatOptions
 from shared.services.kafka.producer_factory import create_kafka_dlq_producer
-from shared.services.kafka.safe_consumer import SafeKafkaConsumer
+from shared.services.kafka.safe_consumer import SafeKafkaConsumer, create_safe_consumer
 from shared.services.storage.elasticsearch_service import create_elasticsearch_service_legacy
 from shared.services.registries.processed_event_registry import ProcessedEventRegistry
+from shared.services.registries.processed_event_registry_factory import create_processed_event_registry
 from shared.utils.app_logger import configure_logging
 
 logger = logging.getLogger(__name__)
@@ -64,8 +65,7 @@ class SearchProjectionWorker(EventEnvelopeKafkaWorker[None]):
         settings = get_settings()
         self.es = create_elasticsearch_service_legacy()
         await self.es.connect()
-        self.processed = ProcessedEventRegistry()
-        await self.processed.initialize()
+        self.processed = await create_processed_event_registry()
         try:
             exists = await self.es.index_exists(self.index_name)
             if not exists:
@@ -74,7 +74,7 @@ class SearchProjectionWorker(EventEnvelopeKafkaWorker[None]):
             logger.warning("Failed to ensure search index exists: %s", exc)
 
         # Use SafeKafkaConsumer for strong consistency guarantees
-        self.consumer = SafeKafkaConsumer(
+        self.consumer = create_safe_consumer(
             group_id=self.group_id,
             topics=[self.topic],
             service_name="search-projection-worker",

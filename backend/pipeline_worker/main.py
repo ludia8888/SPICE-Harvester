@@ -57,6 +57,7 @@ from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
 from shared.services.kafka.processed_event_worker import HeartbeatOptions, ProcessedEventKafkaWorker, RegistryKey
 from shared.services.kafka.producer_factory import create_kafka_dlq_producer
+from shared.services.kafka.safe_consumer import create_safe_consumer
 from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.services.storage.lakefs_client import LakeFSClient, LakeFSConflictError, LakeFSError
 from shared.services.storage.lakefs_storage_service import LakeFSStorageService
@@ -94,6 +95,7 @@ from shared.services.registries.objectify_registry import ObjectifyRegistry
 from shared.services.events.objectify_job_queue import ObjectifyJobQueue
 from shared.models.objectify_job import ObjectifyJob
 from shared.services.registries.processed_event_registry import ProcessedEventRegistry
+from shared.services.registries.processed_event_registry_factory import create_processed_event_registry
 from shared.services.pipeline.pipeline_lock import PipelineLock, PipelineLockError
 from shared.services.storage.redis_service import RedisService, create_redis_service_legacy
 from shared.services.storage.storage_service import StorageService
@@ -275,8 +277,9 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
         if self.objectify_registry:
             self.objectify_job_queue = ObjectifyJobQueue(objectify_registry=self.objectify_registry)
 
-        self.processed = ProcessedEventRegistry(lease_timeout_seconds=int(self.processed_event_lease_timeout_seconds))
-        await self.processed.initialize()
+        self.processed = await create_processed_event_registry(
+            lease_timeout_seconds=int(self.processed_event_lease_timeout_seconds),
+        )
 
         self.lineage = LineageStore()
         try:
@@ -319,7 +322,7 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
 
         # Use SafeKafkaConsumer for strong consistency guarantees
         # Critical: Enforces isolation.level=read_committed and proper rebalance handling
-        self.consumer = SafeKafkaConsumer(
+        self.consumer = create_safe_consumer(
             group_id=self.group_id,
             topics=[self.topic],
             service_name="pipeline-worker",
