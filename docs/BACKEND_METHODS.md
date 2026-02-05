@@ -1,6 +1,6 @@
 # Backend Method Index
 
-> Generated: 2026-02-06T01:08:52+09:00
+> Generated: 2026-02-06T01:17:19+09:00
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 
 ## action_outbox_worker
@@ -9186,73 +9186,74 @@
   - `_kafka_admin()` (line 65): no docstring
   - `_auth_headers()` (line 69): Get auth headers for BFF requests.
   - `_extract_constant_dict(node)` (line 74): Extract a best-effort {str: constant} mapping from an ast.Dict node.
+  - `_extract_constant_kwargs(node)` (line 87): Extract a best-effort {str: constant} mapping from an ast.Call keyword list.
 - **Classes**
-  - `TestSafeKafkaConsumerConfiguration` (line 92): Verify SafeKafkaConsumer enforces critical settings.
-    - `test_enforced_isolation_level(self)` (line 95): SafeKafkaConsumer should always use read_committed.
-    - `test_enforced_auto_commit_disabled(self)` (line 102): SafeKafkaConsumer should disable auto-commit.
-    - `test_workers_use_safe_consumer(self)` (line 109): Verify all Kafka-consuming workers use SafeKafkaConsumer (no raw Consumer).
-    - `test_no_raw_consumer_in_worker_tree(self)` (line 161): Hard-fail if any *_worker module imports raw Consumer (regression guard).
-  - `TestKafkaProducerConfiguration` (line 226): Verify critical producer-side idempotence settings are present where required.
-    - `test_pipeline_job_queue_producer_is_idempotent(self)` (line 229): no docstring
-    - `test_connector_trigger_producer_is_idempotent(self)` (line 253): no docstring
-  - `TestKafkaConnectivity` (line 283): Verify Kafka connectivity and topic access.
-    - `test_kafka_topics_exist(self)` (line 287): Verify all declared Kafka topics exist (SSoT: AppConfig.get_all_topics).
-    - `test_kafka_consumer_groups_listable(self)` (line 300): Verify consumer groups can be listed (connectivity + broker feature check).
-    - `test_expected_consumer_groups_present(self)` (line 310): Verify critical worker consumer groups exist (proxy for "workers are actually running").
-    - `test_read_committed_filters_aborted_transactions(self)` (line 366): End-to-end verification: read_committed consumers must NOT see aborted transactional messages.
-  - `TestBFFHealth` (line 459): Verify BFF is running and healthy.
-    - `async test_bff_health_endpoint(self)` (line 464): BFF health endpoint should return success.
-    - `async test_bff_databases_connected(self)` (line 475): BFF should have database connections.
-  - `TestMSAServiceHealth` (line 489): Verify all first-class services are reachable (full stack).
-    - `async test_oms_health_endpoint(self)` (line 494): no docstring
-    - `async test_funnel_health_endpoint(self)` (line 501): no docstring
-    - `async test_agent_health_endpoint(self)` (line 508): no docstring
-    - `async test_ingest_reconciler_health_endpoint(self)` (line 515): no docstring
-  - `TestDatabaseConnectivity` (line 526): Verify database connectivity.
-    - `async test_postgres_connection(self)` (line 531): PostgreSQL should be connectable.
-    - `async test_redis_connection(self)` (line 548): Redis should be connectable and require authentication (prod safety).
-  - `TestInfraConnectivity` (line 603): Verify non-DB infra dependencies (S3/MinIO, lakeFS, Elasticsearch, TerminusDB).
-    - `async test_minio_health(self)` (line 608): no docstring
-    - `async test_lakefs_health(self)` (line 615): no docstring
-    - `async test_elasticsearch_health(self)` (line 624): no docstring
-    - `test_terminusdb_port_open(self)` (line 634): no docstring
-  - `TestSystemWiring` (line 645): Verify producer/consumer wiring between key MSAs (no mocks).
-    - `async test_message_relay_publishes_event_store_appends(self)` (line 655): Message relay must publish newly appended Event Store events to Kafka.
-    - `async test_connector_trigger_publishes_outbox(self)` (line 729): Connector trigger service must publish pending outbox items to Kafka.
-    - `async test_pipeline_scheduler_enqueues_scheduled_pipeline(self)` (line 783): Pipeline scheduler must enqueue due scheduled pipelines to Kafka.
-    - `async test_action_outbox_emits_action_applied_event(self)` (line 864): Action outbox worker must emit ActionApplied into the event store, and the relay must publish it to Kafka.
-  - `TestOutboxPatternVerification` (line 987): Verify outbox pattern implementation.
-    - `test_objectify_outbox_uses_aggregate_key(self)` (line 990): Objectify outbox should scope ordering by run_id when present.
-    - `test_objectify_outbox_tracks_delivery(self)` (line 1005): Objectify outbox should track individual delivery status.
-    - `test_message_relay_prefers_ordering_key(self)` (line 1018): Message relay should prefer ordering_key for Kafka partitioning when present.
-  - `TestProcessedEventRegistryIdempotency` (line 1033): Verify ProcessedEventRegistry provides idempotency.
-    - `async test_claim_idempotency(self)` (line 1038): ProcessedEventRegistry.claim should be idempotent.
-    - `async test_sequence_ordering(self)` (line 1072): ProcessedEventRegistry should enforce sequence ordering.
-  - `TestPipelineJobQueue` (line 1126): Verify PipelineJobQueue implementation.
-    - `test_pipeline_job_has_dedupe_key(self)` (line 1129): PipelineJob should auto-generate dedupe_key.
-    - `test_pipeline_job_queue_uses_pipeline_id_key(self)` (line 1143): PipelineJobQueue should use pipeline_id as partition key.
-  - `TestEndToEndFlowSimulation` (line 1157): Simulate E2E flows without actually processing jobs.
-    - `async test_objectify_job_creation_flow(self)` (line 1161): Test creating an objectify job payload.
-    - `async test_pipeline_job_creation_flow(self)` (line 1189): Test creating a pipeline job payload.
-  - `TestWorkerModuleImports` (line 1224): Verify workers can be imported without errors.
-    - `test_objectify_worker_import(self)` (line 1227): Objectify worker should be importable.
-    - `test_pipeline_worker_import(self)` (line 1232): Pipeline worker should be importable.
-    - `test_action_worker_import(self)` (line 1237): Action worker should be importable.
-    - `test_search_projection_worker_import(self)` (line 1242): Search projection worker should be importable.
-    - `test_connector_sync_worker_import(self)` (line 1247): Connector sync worker should be importable.
-    - `test_ontology_worker_import(self)` (line 1252): Ontology worker should be importable.
-    - `test_instance_worker_import(self)` (line 1257): Instance worker should be importable.
-    - `test_projection_worker_import(self)` (line 1262): Projection worker should be importable.
-    - `test_action_outbox_worker_import(self)` (line 1267): Action outbox worker should be importable.
-    - `test_ingest_reconciler_worker_import(self)` (line 1272): Ingest reconciler worker should be importable.
-    - `test_writeback_materializer_worker_import(self)` (line 1277): Writeback materializer worker should be importable.
-    - `test_connector_trigger_service_import(self)` (line 1282): Connector trigger service should be importable.
-    - `test_pipeline_scheduler_import(self)` (line 1287): Pipeline scheduler should be importable.
-    - `test_message_relay_import(self)` (line 1292): Message relay should be importable.
-  - `TestConsistencySummary` (line 1303): Summary tests for all consistency features.
-    - `test_all_critical_settings_enforced(self)` (line 1306): All critical Kafka settings should be enforced.
-    - `test_idempotency_patterns_present(self)` (line 1318): Idempotency patterns should be present.
-    - `test_occ_support_present(self)` (line 1336): OCC support should be present in PipelineRegistry.
+  - `TestSafeKafkaConsumerConfiguration` (line 105): Verify SafeKafkaConsumer enforces critical settings.
+    - `test_enforced_isolation_level(self)` (line 108): SafeKafkaConsumer should always use read_committed.
+    - `test_enforced_auto_commit_disabled(self)` (line 115): SafeKafkaConsumer should disable auto-commit.
+    - `test_workers_use_safe_consumer(self)` (line 122): Verify all Kafka-consuming workers use SafeKafkaConsumer (no raw Consumer).
+    - `test_no_raw_consumer_in_worker_tree(self)` (line 174): Hard-fail if any *_worker module imports raw Consumer (regression guard).
+  - `TestKafkaProducerConfiguration` (line 239): Verify critical producer-side idempotence settings are present where required.
+    - `test_pipeline_job_queue_producer_is_idempotent(self)` (line 242): no docstring
+    - `test_connector_trigger_producer_is_idempotent(self)` (line 288): no docstring
+  - `TestKafkaConnectivity` (line 340): Verify Kafka connectivity and topic access.
+    - `test_kafka_topics_exist(self)` (line 344): Verify all declared Kafka topics exist (SSoT: AppConfig.get_all_topics).
+    - `test_kafka_consumer_groups_listable(self)` (line 357): Verify consumer groups can be listed (connectivity + broker feature check).
+    - `test_expected_consumer_groups_present(self)` (line 367): Verify critical worker consumer groups exist (proxy for "workers are actually running").
+    - `test_read_committed_filters_aborted_transactions(self)` (line 423): End-to-end verification: read_committed consumers must NOT see aborted transactional messages.
+  - `TestBFFHealth` (line 516): Verify BFF is running and healthy.
+    - `async test_bff_health_endpoint(self)` (line 521): BFF health endpoint should return success.
+    - `async test_bff_databases_connected(self)` (line 532): BFF should have database connections.
+  - `TestMSAServiceHealth` (line 546): Verify all first-class services are reachable (full stack).
+    - `async test_oms_health_endpoint(self)` (line 551): no docstring
+    - `async test_funnel_health_endpoint(self)` (line 558): no docstring
+    - `async test_agent_health_endpoint(self)` (line 565): no docstring
+    - `async test_ingest_reconciler_health_endpoint(self)` (line 572): no docstring
+  - `TestDatabaseConnectivity` (line 583): Verify database connectivity.
+    - `async test_postgres_connection(self)` (line 588): PostgreSQL should be connectable.
+    - `async test_redis_connection(self)` (line 605): Redis should be connectable and require authentication (prod safety).
+  - `TestInfraConnectivity` (line 660): Verify non-DB infra dependencies (S3/MinIO, lakeFS, Elasticsearch, TerminusDB).
+    - `async test_minio_health(self)` (line 665): no docstring
+    - `async test_lakefs_health(self)` (line 672): no docstring
+    - `async test_elasticsearch_health(self)` (line 681): no docstring
+    - `test_terminusdb_port_open(self)` (line 691): no docstring
+  - `TestSystemWiring` (line 702): Verify producer/consumer wiring between key MSAs (no mocks).
+    - `async test_message_relay_publishes_event_store_appends(self)` (line 712): Message relay must publish newly appended Event Store events to Kafka.
+    - `async test_connector_trigger_publishes_outbox(self)` (line 786): Connector trigger service must publish pending outbox items to Kafka.
+    - `async test_pipeline_scheduler_enqueues_scheduled_pipeline(self)` (line 840): Pipeline scheduler must enqueue due scheduled pipelines to Kafka.
+    - `async test_action_outbox_emits_action_applied_event(self)` (line 921): Action outbox worker must emit ActionApplied into the event store, and the relay must publish it to Kafka.
+  - `TestOutboxPatternVerification` (line 1044): Verify outbox pattern implementation.
+    - `test_objectify_outbox_uses_aggregate_key(self)` (line 1047): Objectify outbox should scope ordering by run_id when present.
+    - `test_objectify_outbox_tracks_delivery(self)` (line 1062): Objectify outbox should track individual delivery status.
+    - `test_message_relay_prefers_ordering_key(self)` (line 1075): Message relay should prefer ordering_key for Kafka partitioning when present.
+  - `TestProcessedEventRegistryIdempotency` (line 1090): Verify ProcessedEventRegistry provides idempotency.
+    - `async test_claim_idempotency(self)` (line 1095): ProcessedEventRegistry.claim should be idempotent.
+    - `async test_sequence_ordering(self)` (line 1129): ProcessedEventRegistry should enforce sequence ordering.
+  - `TestPipelineJobQueue` (line 1183): Verify PipelineJobQueue implementation.
+    - `test_pipeline_job_has_dedupe_key(self)` (line 1186): PipelineJob should auto-generate dedupe_key.
+    - `test_pipeline_job_queue_uses_pipeline_id_key(self)` (line 1200): PipelineJobQueue should use pipeline_id as partition key.
+  - `TestEndToEndFlowSimulation` (line 1214): Simulate E2E flows without actually processing jobs.
+    - `async test_objectify_job_creation_flow(self)` (line 1218): Test creating an objectify job payload.
+    - `async test_pipeline_job_creation_flow(self)` (line 1246): Test creating a pipeline job payload.
+  - `TestWorkerModuleImports` (line 1281): Verify workers can be imported without errors.
+    - `test_objectify_worker_import(self)` (line 1284): Objectify worker should be importable.
+    - `test_pipeline_worker_import(self)` (line 1289): Pipeline worker should be importable.
+    - `test_action_worker_import(self)` (line 1294): Action worker should be importable.
+    - `test_search_projection_worker_import(self)` (line 1299): Search projection worker should be importable.
+    - `test_connector_sync_worker_import(self)` (line 1304): Connector sync worker should be importable.
+    - `test_ontology_worker_import(self)` (line 1309): Ontology worker should be importable.
+    - `test_instance_worker_import(self)` (line 1314): Instance worker should be importable.
+    - `test_projection_worker_import(self)` (line 1319): Projection worker should be importable.
+    - `test_action_outbox_worker_import(self)` (line 1324): Action outbox worker should be importable.
+    - `test_ingest_reconciler_worker_import(self)` (line 1329): Ingest reconciler worker should be importable.
+    - `test_writeback_materializer_worker_import(self)` (line 1334): Writeback materializer worker should be importable.
+    - `test_connector_trigger_service_import(self)` (line 1339): Connector trigger service should be importable.
+    - `test_pipeline_scheduler_import(self)` (line 1344): Pipeline scheduler should be importable.
+    - `test_message_relay_import(self)` (line 1349): Message relay should be importable.
+  - `TestConsistencySummary` (line 1360): Summary tests for all consistency features.
+    - `test_all_critical_settings_enforced(self)` (line 1363): All critical Kafka settings should be enforced.
+    - `test_idempotency_patterns_present(self)` (line 1375): Idempotency patterns should be present.
+    - `test_occ_support_present(self)` (line 1393): OCC support should be present in PipelineRegistry.
 
 ### `backend/tests/test_core_functionality.py`
 - **Functions**
