@@ -3,11 +3,16 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from shared.config.settings import get_settings
+from shared.config.settings import get_settings, reload_settings
+from shared.utils.repo_dotenv import load_repo_dotenv
 
 def _ensure_test_env() -> None:
     if not Path("/.dockerenv").exists():
-        os.environ.setdefault("DOCKER_CONTAINER", "false")
+        docker_env = str(os.getenv("DOCKER_CONTAINER") or "").strip().lower()
+        if docker_env in {"1", "true", "yes", "on"}:
+            os.environ["DOCKER_CONTAINER"] = "false"
+        else:
+            os.environ.setdefault("DOCKER_CONTAINER", "false")
     candidate_keys = (
         "ADMIN_TOKEN",
         "BFF_ADMIN_TOKEN",
@@ -15,6 +20,7 @@ def _ensure_test_env() -> None:
         "SMOKE_ADMIN_TOKEN",
         "ADMIN_API_KEY",
     )
+    dotenv = load_repo_dotenv(keys=candidate_keys)
     token = None
     for key in candidate_keys:
         value = str(os.environ.get(key, "")).strip()
@@ -22,14 +28,26 @@ def _ensure_test_env() -> None:
             token = value
             break
     if not token:
+        for key in candidate_keys:
+            value = str(dotenv.get(key, "")).strip()
+            if value:
+                token = value
+                break
+    if not token:
         token = "test-token"
 
     for key in ("ADMIN_TOKEN", "BFF_ADMIN_TOKEN", "OMS_ADMIN_TOKEN", "SMOKE_ADMIN_TOKEN"):
-        os.environ.setdefault(key, token)
+        if str(os.environ.get(key, "")).strip():
+            continue
+        value = str(dotenv.get(key, "")).strip()
+        os.environ[key] = value or token
 
     os.environ.setdefault("RUN_LIVE_OMS_SMOKE", "true")
     os.environ.setdefault("RUN_LIVE_BRANCH_VIRTUALIZATION", "true")
 
+    # `shared.config.settings` instantiates a module-level settings object at import
+    # time, so we must reload it after normalizing DOCKER_CONTAINER on host runs.
+    reload_settings()
     settings = get_settings()
 
     os.environ.setdefault("KAFKA_BOOTSTRAP_SERVERS", settings.database.kafka_servers)

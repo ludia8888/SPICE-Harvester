@@ -13,6 +13,7 @@ import sys
 from contextlib import suppress
 
 from shared.services.registries.processed_event_registry import ClaimDecision, ProcessedEventRegistry
+from shared.services.registries.processed_event_registry_factory import create_processed_event_registry
 
 
 async def _main() -> int:
@@ -23,9 +24,7 @@ async def _main() -> int:
 
     async def make_registry(owner: str) -> ProcessedEventRegistry:
         os.environ["PROCESSED_EVENT_OWNER"] = owner
-        reg = ProcessedEventRegistry()
-        await reg.connect()
-        return reg
+        return await create_processed_event_registry(validate=False)
 
     reg1 = await make_registry("smoke-1")
     reg2 = await make_registry("smoke-2")

@@ -146,6 +146,18 @@ class ProcessedEventKafkaWorker(Generic[PayloadT, ResultT], ABC):
     def _should_mark_done_after_dlq(self, *, payload: PayloadT, error: str) -> bool:
         return False
 
+    def _cancel_inflight_on_revoke(self) -> bool:
+        """
+        Whether to cancel in-flight partition tasks on Kafka rebalance revoke.
+
+        Default: True (conservative) to avoid duplicate work across consumers.
+        Workers with strong idempotency guarantees and long-running jobs may
+        override this to False so in-flight work can finish while the new owner
+        observes the ProcessedEventRegistry lease.
+        """
+
+        return True
+
     def _backoff_seconds(self, *, attempt_count: int, payload: PayloadT) -> int:
         return min(self.backoff_max, int(self.backoff_base * (2 ** max(0, attempt_count - 1))))
 
@@ -214,10 +226,30 @@ class ProcessedEventKafkaWorker(Generic[PayloadT, ResultT], ABC):
     async def _commit(self, msg: Any) -> None:
         if not getattr(self, "consumer", None):
             return
+        key = self._partition_key(msg)
+        if key in self._revoked_partitions:
+            logger.info(
+                "Skipping %s commit; partition revoked (topic=%s partition=%s offset=%s)",
+                self._loop_label(),
+                str(msg.topic()),
+                int(msg.partition()),
+                int(msg.offset()),
+            )
+            return
         self.consumer.commit_sync(msg)
 
     async def _seek(self, *, topic: str, partition: int, offset: int) -> None:
         if not getattr(self, "consumer", None):
+            return
+        key: PartitionKey = (str(topic), int(partition))
+        if key in self._revoked_partitions:
+            logger.info(
+                "Skipping %s seek; partition revoked (topic=%s partition=%s offset=%s)",
+                self._loop_label(),
+                str(topic),
+                int(partition),
+                int(offset),
+            )
             return
         self.consumer.seek(TopicPartition(topic, partition, offset))
 
@@ -365,7 +397,7 @@ class ProcessedEventKafkaWorker(Generic[PayloadT, ResultT], ABC):
         self._revoked_partitions |= revoked
         for key in revoked:
             task = self._inflight_by_partition.get(key)
-            if task:
+            if task and self._cancel_inflight_on_revoke():
                 task.cancel()
             if clear_pending:
                 self._pending_by_partition.pop(key, None)

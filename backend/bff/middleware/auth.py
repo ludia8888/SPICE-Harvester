@@ -1054,9 +1054,6 @@ class _BffAuthContext:
 async def _bff_auth_handle_missing_token(request: Request, call_next: _CallNext, ctx: _BffAuthContext) -> Optional[Response]:
     if ctx.presented:
         return None
-    if ctx.dev_master:
-        _attach_dev_master_principal(request)
-        return await call_next(request)
     return _error_response(
         request=request,
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -1230,8 +1227,6 @@ async def _bff_auth_handle_expected_token(request: Request, call_next: _CallNext
                 code=ErrorCode.AUTH_INVALID,
                 category=ErrorCategory.AUTH,
             )
-    elif ctx.dev_master and getattr(request.state, "user", None) is None:
-        _attach_dev_master_principal(request)
     return await call_next(request)
 
 
@@ -1270,13 +1265,6 @@ async def _bff_auth_handle_no_token_configured(
         code=ErrorCode.INTERNAL_ERROR,
         category=ErrorCategory.INTERNAL,
     )
-
-
-async def _bff_auth_handle_dev_master_fallback(request: Request, call_next: _CallNext, ctx: _BffAuthContext) -> Optional[Response]:
-    if not ctx.dev_master:
-        return None
-    _attach_dev_master_principal(request)
-    return await call_next(request)
 
 
 async def _bff_auth_handle_invalid_credentials(
@@ -1318,7 +1306,6 @@ def install_bff_auth_middleware(app: FastAPI) -> None:
             _bff_auth_handle_expected_token,
             _bff_auth_handle_user_jwt,
             _bff_auth_handle_no_token_configured,
-            _bff_auth_handle_dev_master_fallback,
             _bff_auth_handle_invalid_credentials,
         )
         for handler in handlers:
@@ -1333,9 +1320,6 @@ async def enforce_bff_websocket_auth(websocket: WebSocket, token: Optional[str])
     settings = get_settings()
     auth = settings.auth
     if not auth.is_bff_auth_required(allow_pytest=True, default_required=True):
-        return True
-
-    if _dev_master_auth_enabled():
         return True
 
     query_token = None

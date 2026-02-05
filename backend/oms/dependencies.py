@@ -36,6 +36,7 @@ from shared.services.storage.elasticsearch_service import ElasticsearchService
 from shared.services.storage.redis_service import RedisService
 from shared.services.core.command_status_service import CommandStatusService
 from shared.services.registries.processed_event_registry import ProcessedEventRegistry
+from shared.services.registries.processed_event_registry_factory import create_processed_event_registry
 
 # OMS specific imports
 from oms.services.async_terminus import AsyncTerminusService
@@ -216,9 +217,8 @@ class OMSDependencyProvider:
             if container.has(ProcessedEventRegistry) and container.is_created(ProcessedEventRegistry):
                 return await container.get(ProcessedEventRegistry)
 
-            registry = ProcessedEventRegistry()
             try:
-                await registry.connect()
+                registry = await create_processed_event_registry(validate=False)
             except Exception as e:
                 logger.warning(f"ProcessedEventRegistry connection failed: {e}")
                 return None

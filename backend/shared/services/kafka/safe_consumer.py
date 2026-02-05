@@ -191,6 +191,7 @@ class SafeKafkaConsumer:
         extra_config: Optional[Dict[str, Any]] = None,
         on_revoke: Optional[Callable[[List[TopicPartition]], None]] = None,
         on_assign: Optional[Callable[[List[TopicPartition]], None]] = None,
+        subscribe: bool = True,
         session_timeout_ms: int = 45000,
         max_poll_interval_ms: int = 300000,
         heartbeat_interval_ms: int = 3000,
@@ -261,11 +262,12 @@ class SafeKafkaConsumer:
         )
 
         self._consumer = Consumer(config)
-        self._consumer.subscribe(
-            topics,
-            on_revoke=self._rebalance_handler.on_revoke,
-            on_assign=self._rebalance_handler.on_assign,
-        )
+        if subscribe:
+            self._consumer.subscribe(
+                topics,
+                on_revoke=self._rebalance_handler.on_revoke,
+                on_assign=self._rebalance_handler.on_assign,
+            )
 
         self._state = ConsumerState.RUNNING
 
@@ -475,6 +477,14 @@ class SafeKafkaConsumer:
     def list_topics(self, topic: Optional[str] = None, timeout: float = -1) -> Any:
         """List available topics."""
         return self._consumer.list_topics(topic, timeout)
+
+    def get_watermark_offsets(self, partition: TopicPartition, timeout: float = -1) -> tuple[int, int]:
+        """Return (low, high) offsets for a partition."""
+        return self._consumer.get_watermark_offsets(partition, timeout)
+
+    def committed(self, partitions: List[TopicPartition], timeout: float = -1) -> List[TopicPartition]:
+        """Return committed offsets for partitions in this consumer group."""
+        return self._consumer.committed(partitions, timeout)
 
     def assignment(self) -> List[TopicPartition]:
         """Get current partition assignment."""

@@ -25,7 +25,8 @@ from shared.services.kafka.processed_event_worker import (
     ProcessedEventKafkaWorker,
     RegistryKey,
 )
-from shared.services.kafka.safe_consumer import SafeKafkaConsumer
+from shared.services.kafka.producer_factory import create_kafka_dlq_producer
+from shared.services.kafka.safe_consumer import SafeKafkaConsumer, create_safe_consumer
 
 from shared.config.app_config import AppConfig
 from shared.config.settings import get_settings
@@ -39,6 +40,7 @@ from shared.services.registries.pipeline_registry import PipelineRegistry
 from shared.services.storage.lakefs_storage_service import create_lakefs_storage_service
 from shared.services.registries.lineage_store import LineageStore
 from shared.services.registries.processed_event_registry import ProcessedEventRegistry
+from shared.services.registries.processed_event_registry_factory import create_processed_event_registry
 from shared.services.core.sheet_import_service import FieldMapping, SheetImportService
 from shared.utils.deterministic_ids import deterministic_uuid5_hex_prefix
 from shared.utils.import_type_normalization import normalize_import_target_type, resolve_import_type
@@ -475,8 +477,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
         self.pipeline_registry = PipelineRegistry()
         await self.pipeline_registry.initialize()
 
-        self.processed = ProcessedEventRegistry()
-        await self.processed.initialize()
+        self.processed = await create_processed_event_registry()
 
         try:
             self.lineage_store = LineageStore()
@@ -499,7 +500,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
 
         # Use SafeKafkaConsumer for strong consistency guarantees
         # Critical: Enforces isolation.level=read_committed and proper rebalance handling
-        self.consumer = SafeKafkaConsumer(
+        self.consumer = create_safe_consumer(
             group_id=self.group_id,
             topics=[self.topic],
             service_name="objectify-worker",
@@ -510,16 +511,9 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
         )
         self._init_partition_state(reset=True)
 
-        self.dlq_producer = Producer(
-            {
-                "bootstrap.servers": settings.database.kafka_servers,
-                "client.id": settings.observability.service_name or "objectify-worker",
-                "acks": "all",
-                "retries": 3,
-                "retry.backoff.ms": 100,
-                "linger.ms": 20,
-                "compression.type": "snappy",
-            }
+        self.dlq_producer = create_kafka_dlq_producer(
+            bootstrap_servers=settings.database.kafka_servers,
+            client_id=settings.observability.service_name or "objectify-worker",
         )
 
     def _on_partitions_revoked(self, partitions: list) -> None:
@@ -596,7 +590,19 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
         )
 
     async def _process_payload(self, payload: ObjectifyJob) -> None:  # type: ignore[override]
-        await self._process_job(payload)
+        try:
+            await self._process_job(payload)
+        except Exception:
+            logger.error(
+                "Objectify job failed (job_id=%s db_name=%s mapping_spec_id=%s mapping_spec_version=%s): %s",
+                payload.job_id,
+                payload.db_name,
+                payload.mapping_spec_id,
+                payload.mapping_spec_version,
+                payload,
+                exc_info=True,
+            )
+            raise
 
     def _fallback_metadata(self, payload: ObjectifyJob) -> Optional[Dict[str, Any]]:  # type: ignore[override]
         return {
@@ -3064,6 +3070,12 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                 stats["full_sync_total_instances"] = total_instances
                 stats["full_sync_cleared"] = cleared_instances
             except Exception as exc:
+                # Full-sync enumeration is an OMS transport operation and can fail transiently
+                # (RemoteProtocolError "Server disconnected...", timeouts, etc). Treat those
+                # as retryable so the Kafka worker can backoff/retry instead of marking a
+                # permanent FAIL + DLQ on the relationship spec.
+                if isinstance(exc, (httpx.RequestError, httpx.TimeoutException)):
+                    raise
                 await _fail_link(
                     [
                         {

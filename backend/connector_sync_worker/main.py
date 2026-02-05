@@ -37,10 +37,12 @@ from shared.observability.context_propagation import (
 from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
 from shared.services.kafka.processed_event_worker import EventEnvelopeKafkaWorker, HeartbeatOptions
-from shared.services.kafka.safe_consumer import SafeKafkaConsumer
+from shared.services.kafka.producer_factory import create_kafka_dlq_producer
+from shared.services.kafka.safe_consumer import SafeKafkaConsumer, create_safe_consumer
 from shared.services.registries.connector_registry import ConnectorRegistry
 from shared.services.registries.lineage_store import LineageStore
 from shared.services.registries.processed_event_registry import ProcessedEventRegistry
+from shared.services.registries.processed_event_registry_factory import create_processed_event_registry
 from shared.services.core.sheet_import_service import FieldMapping, SheetImportService
 from shared.security.auth_utils import BFF_TOKEN_ENV_KEYS, get_expected_token
 from shared.utils.app_logger import configure_logging
@@ -73,7 +75,7 @@ class ConnectorSyncWorker(EventEnvelopeKafkaWorker[Optional[str]]):
         self._consumer_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="kafka-consumer")
         self._producer_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="kafka-producer")
 
-        self.consumer: Optional[Consumer] = None
+        self.consumer: Optional[SafeKafkaConsumer] = None
         self.dlq_producer: Optional[Producer] = None
         self.registry: Optional[ConnectorRegistry] = None
         self.processed: Optional[ProcessedEventRegistry] = None
@@ -97,8 +99,7 @@ class ConnectorSyncWorker(EventEnvelopeKafkaWorker[Optional[str]]):
         self.registry = ConnectorRegistry()
         await self.registry.initialize()
 
-        self.processed = ProcessedEventRegistry()
-        await self.processed.initialize()
+        self.processed = await create_processed_event_registry()
 
         # Lineage is best-effort; do not fail worker startup if it's unavailable.
         self.lineage = LineageStore()
@@ -122,7 +123,7 @@ class ConnectorSyncWorker(EventEnvelopeKafkaWorker[Optional[str]]):
         self.http = httpx.AsyncClient(timeout=60.0, headers=headers)
 
         # Use SafeKafkaConsumer for strong consistency guarantees
-        self.consumer = SafeKafkaConsumer(
+        self.consumer = create_safe_consumer(
             group_id=self.group_id,
             topics=[self.topic],
             service_name="connector-sync-worker",
@@ -134,16 +135,9 @@ class ConnectorSyncWorker(EventEnvelopeKafkaWorker[Optional[str]]):
         self._rebalance_in_progress = False
 
         # DLQ producer (best-effort)
-        self.dlq_producer = Producer(
-            {
-                "bootstrap.servers": settings.database.kafka_servers,
-                "client.id": settings.observability.service_name or "connector-sync-worker",
-                "acks": "all",
-                "retries": 3,
-                "retry.backoff.ms": 100,
-                "linger.ms": 20,
-                "compression.type": "snappy",
-            }
+        self.dlq_producer = create_kafka_dlq_producer(
+            bootstrap_servers=settings.database.kafka_servers,
+            client_id=settings.observability.service_name or "connector-sync-worker",
         )
 
         logger.info(f"✅ ConnectorSyncWorker initialized (topic={self.topic}, group={self.group_id})")

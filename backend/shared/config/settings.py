@@ -1083,7 +1083,7 @@ class PipelineSettings(BaseSettings):
         description="Worker lock acquire timeout seconds (PIPELINE_LOCK_ACQUIRE_TIMEOUT_SECONDS)",
     )
     publish_lock_acquire_timeout_seconds: int = Field(
-        default=30,
+        default=120,
         description=(
             "BFF publish lock acquire timeout seconds "
             "(PIPELINE_PUBLISH_LOCK_ACQUIRE_TIMEOUT_SECONDS; fallback PIPELINE_LOCK_ACQUIRE_TIMEOUT_SECONDS)"
@@ -1098,6 +1098,18 @@ class PipelineSettings(BaseSettings):
     spark_ansi_enabled: bool = Field(
         default=True,
         description="Enable Spark ANSI mode (PIPELINE_SPARK_ANSI_ENABLED)",
+    )
+    spark_adaptive_enabled: bool = Field(
+        default=True,
+        description="Enable Spark Adaptive Query Execution (PIPELINE_SPARK_ADAPTIVE_ENABLED)",
+    )
+    spark_shuffle_partitions: int = Field(
+        default=16,
+        description="Default Spark shuffle partitions (PIPELINE_SPARK_SHUFFLE_PARTITIONS)",
+    )
+    spark_console_progress: bool = Field(
+        default=False,
+        description="Show Spark console progress bars (PIPELINE_SPARK_CONSOLE_PROGRESS)",
     )
     spark_executor_threads: int = Field(
         default=1,
@@ -1212,6 +1224,11 @@ class PipelineSettings(BaseSettings):
     def clamp_spark_executor_threads(cls, v):  # noqa: ANN001
         return _clamp_int(v, default=1, min_value=1, max_value=128)
 
+    @field_validator("spark_shuffle_partitions", mode="before")
+    @classmethod
+    def clamp_spark_shuffle_partitions(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=16, min_value=1, max_value=5000)
+
     @field_validator("lock_ttl_seconds", mode="before")
     @classmethod
     def clamp_lock_ttl_seconds(cls, v):  # noqa: ANN001
@@ -1235,7 +1252,7 @@ class PipelineSettings(BaseSettings):
     @field_validator("publish_lock_acquire_timeout_seconds", mode="before")
     @classmethod
     def clamp_publish_lock_acquire_timeout_seconds(cls, v):  # noqa: ANN001
-        return _clamp_int(v, default=30, min_value=5, max_value=3_600)
+        return _clamp_int(v, default=120, min_value=5, max_value=3_600)
 
     @field_validator("scheduler_poll_seconds", mode="before")
     @classmethod

@@ -22,11 +22,12 @@ services:
     networks:
       - spice_network
     healthcheck:
-      test: ["CMD-SHELL", "cub zk-ready localhost:2181 10"]
+      # Prefer IPv4 to avoid slow/unstable ::1 resolution on some hosts.
+      test: ["CMD-SHELL", "cub zk-ready 127.0.0.1:2181 10"]
       interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
 
   # Kafka
   kafka:
@@ -58,11 +59,12 @@ services:
     networks:
       - spice_network
     healthcheck:
-      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      # Prefer IPv4 to avoid slow/unstable ::1 resolution on some hosts.
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "127.0.0.1:9092"]
       interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
 
   # Kafka UI (optional, for monitoring)
   kafka-ui:

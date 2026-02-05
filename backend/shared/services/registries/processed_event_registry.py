@@ -581,10 +581,22 @@ class ProcessedEventRegistry:
             )
 
 
-def validate_lease_settings() -> None:
+def validate_lease_settings(
+    *,
+    lease_timeout_seconds: Optional[int] = None,
+    heartbeat_interval_seconds: Optional[int] = None,
+) -> None:
     settings = get_settings()
-    heartbeat = int(settings.event_sourcing.processed_event_heartbeat_interval_seconds)
-    lease = int(settings.event_sourcing.processed_event_lease_timeout_seconds)
+    heartbeat = int(
+        heartbeat_interval_seconds
+        if heartbeat_interval_seconds is not None
+        else settings.event_sourcing.processed_event_heartbeat_interval_seconds
+    )
+    lease = int(
+        lease_timeout_seconds
+        if lease_timeout_seconds is not None
+        else settings.event_sourcing.processed_event_lease_timeout_seconds
+    )
 
     if heartbeat <= 0 or lease <= 0:
         raise RuntimeError(

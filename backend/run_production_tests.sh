@@ -25,10 +25,10 @@ trim_trailing_slash() {
   echo "${value%/}"
 }
 
-OMS_URL="$(trim_trailing_slash "${OMS_BASE_URL:-http://localhost:8000}")"
-BFF_URL="$(trim_trailing_slash "${BFF_BASE_URL:-http://localhost:8002}")"
-FUNNEL_URL="$(trim_trailing_slash "${FUNNEL_BASE_URL:-http://localhost:8003}")"
-AGENT_URL="$(trim_trailing_slash "${AGENT_BASE_URL:-http://localhost:8004}")"
+OMS_URL="$(trim_trailing_slash "${OMS_BASE_URL:-http://127.0.0.1:8000}")"
+BFF_URL="$(trim_trailing_slash "${BFF_BASE_URL:-http://127.0.0.1:8002}")"
+FUNNEL_URL="$(trim_trailing_slash "${FUNNEL_BASE_URL:-http://127.0.0.1:8003}")"
+AGENT_URL="$(trim_trailing_slash "${AGENT_BASE_URL:-http://127.0.0.1:8004}")"
 
 load_dotenv_defaults() {
   local dotenv_path="$1"
@@ -73,16 +73,16 @@ LAKEFS_PORT_HOST="${LAKEFS_PORT_HOST:-48080}"
 AGENT_PORT_HOST="${AGENT_PORT_HOST:-8004}"
 INGEST_RECONCILER_PORT_HOST="${INGEST_RECONCILER_PORT_HOST:-8012}"
 
-export POSTGRES_URL="${POSTGRES_URL:-postgresql://spiceadmin:spicepass123@localhost:${POSTGRES_PORT_HOST}/spicedb}"
 REDIS_PASSWORD="${REDIS_PASSWORD:-spicepass123}"
-export REDIS_URL="${REDIS_URL:-redis://:${REDIS_PASSWORD}@localhost:${REDIS_PORT_HOST}/0}"
-export MINIO_ENDPOINT_URL="${MINIO_ENDPOINT_URL:-http://localhost:${MINIO_PORT_HOST}}"
-export ELASTICSEARCH_URL="${ELASTICSEARCH_URL:-http://localhost:${ELASTICSEARCH_PORT_HOST}}"
+export POSTGRES_URL="${POSTGRES_URL:-postgresql://spiceadmin:spicepass123@127.0.0.1:${POSTGRES_PORT_HOST}/spicedb}"
+export REDIS_URL="${REDIS_URL:-redis://:${REDIS_PASSWORD}@127.0.0.1:${REDIS_PORT_HOST}/0}"
+export MINIO_ENDPOINT_URL="${MINIO_ENDPOINT_URL:-http://127.0.0.1:${MINIO_PORT_HOST}}"
+export ELASTICSEARCH_URL="${ELASTICSEARCH_URL:-http://127.0.0.1:${ELASTICSEARCH_PORT_HOST}}"
 export KAFKA_BOOTSTRAP_SERVERS="${KAFKA_BOOTSTRAP_SERVERS:-localhost:${KAFKA_PORT_HOST}}"
 
 MINIO_URL="$(trim_trailing_slash "${MINIO_ENDPOINT_URL}")"
-LAKEFS_URL="$(trim_trailing_slash "${LAKEFS_URL:-http://localhost:${LAKEFS_PORT_HOST}}")"
-INGEST_RECONCILER_URL="$(trim_trailing_slash "${INGEST_RECONCILER_BASE_URL:-http://localhost:${INGEST_RECONCILER_PORT_HOST}}")"
+LAKEFS_URL="$(trim_trailing_slash "${LAKEFS_URL:-http://127.0.0.1:${LAKEFS_PORT_HOST}}")"
+INGEST_RECONCILER_URL="$(trim_trailing_slash "${INGEST_RECONCILER_BASE_URL:-http://127.0.0.1:${INGEST_RECONCILER_PORT_HOST}}")"
 
 usage() {
   cat <<'USAGE'

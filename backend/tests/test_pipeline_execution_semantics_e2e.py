@@ -36,6 +36,11 @@ def _parse_s3_uri(uri: str) -> Tuple[str, str]:
     return bucket, key
 
 
+def _idem_key(prefix: str) -> str:
+    raw = str(prefix or "").strip() or "idem"
+    return f"{raw}-{uuid.uuid4().hex}"
+
+
 def _lakefs_s3_client():
     import boto3
     from botocore.config import Config
@@ -466,6 +471,7 @@ async def test_snapshot_overwrites_outputs_across_runs() -> None:
 
         create_pipeline = await client.post(
             f"{BFF_URL}/api/v1/pipelines",
+            headers={"Idempotency-Key": _idem_key(f"pipeline-create-{db_name}")},
             json={
                 "db_name": db_name,
                 "name": "snap pipeline",
@@ -591,6 +597,7 @@ async def test_incremental_appends_outputs_and_preserves_previous_parts() -> Non
 
         create_pipeline = await client.post(
             f"{BFF_URL}/api/v1/pipelines",
+            headers={"Idempotency-Key": _idem_key(f"pipeline-create-{db_name}")},
             json={
                 "db_name": db_name,
                 "name": "inc pipeline",
@@ -729,6 +736,7 @@ async def test_incremental_watermark_boundary_includes_equal_timestamp_rows() ->
 
         create_pipeline = await client.post(
             f"{BFF_URL}/api/v1/pipelines",
+            headers={"Idempotency-Key": _idem_key(f"pipeline-create-{db_name}")},
             json={
                 "db_name": db_name,
                 "name": "boundary pipeline",
@@ -855,6 +863,7 @@ async def test_incremental_empty_diff_noop() -> None:
 
         create_pipeline = await client.post(
             f"{BFF_URL}/api/v1/pipelines",
+            headers={"Idempotency-Key": _idem_key(f"pipeline-create-{db_name}")},
             json={
                 "db_name": db_name,
                 "name": "noop pipeline",
@@ -1001,6 +1010,7 @@ async def test_incremental_removed_files_noop() -> None:
 
         create_pipeline = await client.post(
             f"{BFF_URL}/api/v1/pipelines",
+            headers={"Idempotency-Key": _idem_key(f"pipeline-create-{db_name}")},
             json={
                 "db_name": db_name,
                 "name": "removed pipeline",
@@ -1201,6 +1211,7 @@ async def test_run_branch_conflict_fallback_and_cleanup() -> None:
 
         create_pipeline = await client.post(
             f"{BFF_URL}/api/v1/pipelines",
+            headers={"Idempotency-Key": _idem_key(f"pipeline-create-{db_name}")},
             json={
                 "db_name": db_name,
                 "name": "branch pipeline",
@@ -1329,6 +1340,7 @@ async def test_partition_column_special_chars_roundtrip() -> None:
 
         create_pipeline = await client.post(
             f"{BFF_URL}/api/v1/pipelines",
+            headers={"Idempotency-Key": _idem_key(f"pipeline-create-{db_name}")},
             json={
                 "db_name": db_name,
                 "name": "partition pipeline",
@@ -1429,6 +1441,7 @@ async def test_pk_semantics_append_log_allows_duplicate_ids() -> None:
 
         create_pipeline = await client.post(
             f"{BFF_URL}/api/v1/pipelines",
+            headers={"Idempotency-Key": _idem_key(f"pipeline-create-{db_name}")},
             json={
                 "db_name": db_name,
                 "name": "pk log pipeline",
@@ -1556,6 +1569,7 @@ async def test_pk_semantics_append_state_blocks_duplicate_ids() -> None:
 
         create_pipeline = await client.post(
             f"{BFF_URL}/api/v1/pipelines",
+            headers={"Idempotency-Key": _idem_key(f"pipeline-create-{db_name}")},
             json={
                 "db_name": db_name,
                 "name": "pk state pipeline",
@@ -1684,6 +1698,7 @@ async def test_pk_semantics_remove_requires_delete_column() -> None:
 
         create_pipeline = await client.post(
             f"{BFF_URL}/api/v1/pipelines",
+            headers={"Idempotency-Key": _idem_key(f"pipeline-create-{db_name}")},
             json={
                 "db_name": db_name,
                 "name": "pk remove pipeline",
@@ -1772,6 +1787,7 @@ async def test_schema_contract_breach_blocks_deploy() -> None:
 
         create_pipeline = await client.post(
             f"{BFF_URL}/api/v1/pipelines",
+            headers={"Idempotency-Key": _idem_key(f"pipeline-create-{db_name}")},
             json={
                 "db_name": db_name,
                 "name": "schema contract pipeline",
@@ -1919,6 +1935,7 @@ async def test_executor_vs_worker_validation_consistency() -> None:
 
         create_pipeline = await client.post(
             f"{BFF_URL}/api/v1/pipelines",
+            headers={"Idempotency-Key": _idem_key(f"pipeline-create-{db_name}")},
             json={
                 "db_name": db_name,
                 "name": "consistency pipeline",
@@ -2010,6 +2027,7 @@ async def test_incremental_small_files_compaction_metrics() -> None:
 
         create_pipeline = await client.post(
             f"{BFF_URL}/api/v1/pipelines",
+            headers={"Idempotency-Key": _idem_key(f"pipeline-create-{db_name}")},
             json={
                 "db_name": db_name,
                 "name": "perf pipeline",
@@ -2201,6 +2219,7 @@ async def test_composite_pk_unique_perf() -> None:
 
         create_pipeline = await client.post(
             f"{BFF_URL}/api/v1/pipelines",
+            headers={"Idempotency-Key": _idem_key(f"pipeline-create-{db_name}")},
             json={
                 "db_name": db_name,
                 "name": "pk perf pipeline",

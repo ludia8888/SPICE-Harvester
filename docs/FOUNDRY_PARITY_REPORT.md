@@ -1,0 +1,106 @@
+# Foundry Parity Report (Code-Backed, End-to-End)
+
+> ⚠️ Disclaimer (important)
+>
+> Palantir Foundry is proprietary/closed-source. This repo cannot verify Foundry’s internal
+> implementation details or guarantee “byte-for-byte identical behavior”.
+>
+> This report defines **a practical parity target**: Foundry’s publicly-known “core product
+> capabilities” (data onboarding → versioned transforms → ontology/semantic layer → governance
+> → lineage/audit → operational runtime) and verifies them **end-to-end** using:
+> - this repo’s architecture/contracts
+> - automated integration/E2E tests
+> - live-stack smoke checks (HTTP + Kafka + storage)
+
+## 1) Parity Scope (what we mean by “core Foundry”)
+
+The checklist below models Foundry core as these capability groups:
+
+1. **Data onboarding**: ingest datasets + connectors; deterministic parsing; idempotent retries.
+2. **Versioning & branching**: “what changed?” and safe promotion/rollback semantics.
+3. **Pipelines / transforms**: graph-based transforms with preview/build/deploy semantics.
+4. **Ontology / semantic layer**: object types + mappings; objectification (rows → entities/relationships).
+5. **Governance & access policy**: permission gates, safe-by-default behavior, explicit failures.
+6. **Lineage & audit**: provenance edges + audit logs stored durably and queryable.
+7. **Operational runtime**: workers, retries, DLQ, leases/heartbeats, at-least-once transport.
+8. **Search / read models**: projection into ES/OpenSearch-like store (idempotent).
+9. **Writeback** (Foundry-like operationalization): governed patchset writeback + materialization.
+10. **Agent tooling** (optional extension): deterministic tool layer + single-loop agent runtime.
+
+## 2) SPICE-Harvester mapping (implementation → tests)
+
+| Capability | SPICE implementation (code) | Primary E2E verification |
+|---|---|---|
+| Data onboarding | BFF ingest + registries + object store/lakeFS | `backend/tests/test_core_functionality.py` |
+| Versioning & branching | TerminusDB + lakeFS branching + promotion rules | `backend/tests/test_terminus_version_control.py`, `backend/tests/test_branch_virtualization_e2e.py` |
+| Pipelines/transforms | Spark pipeline-worker + scheduler + pipeline plans | `backend/tests/test_pipeline_transform_cleansing_e2e.py`, `backend/tests/test_pipeline_execution_semantics_e2e.py` |
+| Ontology/semantic layer | OMS + Terminus schema + mapping spec + objectify-worker | `backend/tests/test_pipeline_objectify_es_e2e.py` |
+| Governance & access policy | Access policies + proposal/approval + explicit error envelopes | `backend/tests/test_auth_hardening_e2e.py`, access-policy E2E tests |
+| Lineage & audit | Postgres lineage/audit stores + BFF APIs | `docs/DATA_LINEAGE.md`, lineage/audit tests (if present) |
+| Operational runtime | SafeKafkaConsumer + ProcessedEventRegistry + DLQ + heartbeat | `backend/tests/test_consistency_e2e_smoke.py`, `backend/tests/test_worker_lease_safety_e2e.py`, `backend/tests/test_idempotency_chaos.py` |
+| Search/read models | projection-worker + search-projection-worker | `backend/tests/test_core_functionality.py` + projection-specific tests |
+| Writeback | action-worker/outbox + lakeFS patchset + materializer + ES overlay | `backend/tests/test_action_writeback_e2e_smoke.py` |
+| Agent tooling | agent service + MCP servers + allowlist | `scripts/e2e_agent_pipeline_demo.sh`, tooling generated docs under `docs/reference/_generated/` |
+
+## 3) How to run the verification suite (recommended)
+
+### 3.1 Full “production” gate (expects local docker stack)
+
+```bash
+PYTHON_BIN="$PWD/.venv-ci/bin/python" ./backend/run_production_tests.sh --full
+```
+
+### 3.2 Extra E2E coverage (recommended add-ons)
+
+```bash
+PYTHONPATH=backend "$PWD/.venv-ci/bin/python" -m pytest -q \
+  backend/tests/test_action_writeback_e2e_smoke.py \
+  backend/tests/test_access_policy_link_indexing_e2e.py \
+  backend/tests/test_pipeline_execution_semantics_e2e.py \
+  backend/tests/test_pipeline_streaming_semantics_e2e.py \
+  backend/tests/test_pipeline_type_mismatch_guard_e2e.py
+```
+
+### 3.3 Agent smoke (optional)
+
+```bash
+./scripts/e2e_agent_pipeline_demo.sh
+./scripts/smoke_agent_progress.sh
+```
+
+## 4) Results
+
+Latest verified run (local dev stack):
+
+- Date: Thu Feb 5 22:26 KST 2026
+- Git: `42800ec` (working tree had local changes)
+- Host: macOS (Apple Silicon), Python 3.12
+- Notes:
+  - Elasticsearch runs as `linux/amd64` locally for stability on Apple Silicon (aarch64 images can SIGILL).
+  - Kafka must be running for command processing; the writeback E2Es include a preflight to start it if needed.
+
+### 4.1 Production suite
+
+- ✅ `./backend/run_production_tests.sh --full`
+
+### 4.2 Workshop/writeback parity (operational actions)
+
+- ✅ `RUN_LIVE_ACTION_WRITEBACK_SMOKE=true PYTHONPATH=backend pytest -q -c backend/pytest.ini backend/tests/test_action_writeback_e2e_smoke.py`
+
+### 4.3 Recommended extended coverage (optional)
+
+These are high-signal but can be slow. Run on a warmed stack.
+
+- `backend/tests/test_pipeline_execution_semantics_e2e.py` (Spark + retries/idempotency)
+- `backend/tests/test_pipeline_streaming_semantics_e2e.py`
+- `backend/tests/test_pipeline_type_mismatch_guard_e2e.py`
+- `backend/tests/test_access_policy_link_indexing_e2e.py`
+
+## 5) Known limitations vs “real Foundry”
+
+Even with all tests passing, these items are typically Foundry-specific and may not be
+implemented 1:1 in an open repo:
+
+- Full UI parity (Contour/Quiver/workbooks), advanced governance workflows, enterprise identity
+  integrations, and proprietary optimizations.
+- Feature-by-feature behavior equivalence for every edge case without an official Foundry spec.

@@ -64,13 +64,14 @@ async def _post_with_retry(
     url: str,
     *,
     json_payload: dict,
+    headers: Optional[dict[str, str]] = None,
     retries: int = 3,
     retry_sleep: float = 2.0,
 ) -> httpx.Response:
     last_response: Optional[httpx.Response] = None
     for attempt in range(retries):
         try:
-            response = await client.post(url, json=json_payload)
+            response = await client.post(url, json=json_payload, headers=headers)
         except httpx.HTTPError:
             if attempt + 1 >= retries:
                 raise
@@ -83,6 +84,11 @@ async def _post_with_retry(
     if last_response is not None:
         return last_response
     raise RuntimeError("request failed without response")
+
+
+def _idem_key(prefix: str) -> str:
+    raw = str(prefix or "").strip() or "idem"
+    return f"{raw}-{uuid.uuid4().hex}"
 
 
 async def _create_db_with_retry(
@@ -221,6 +227,7 @@ async def test_streaming_build_deploy_promotes_all_outputs() -> None:
 
         create_pipeline = await client.post(
             f"{BFF_URL}/api/v1/pipelines",
+            headers={"Idempotency-Key": _idem_key(f"pipeline-create-{db_name}")},
             json={
                 "db_name": db_name,
                 "name": "stream pipeline",
@@ -240,6 +247,7 @@ async def test_streaming_build_deploy_promotes_all_outputs() -> None:
             client,
             f"{BFF_URL}/api/v1/pipelines/{pipeline_id}/build",
             json_payload={"db_name": db_name, "node_id": "out1", "limit": 5},
+            headers={"Idempotency-Key": _idem_key(f"pipeline-build-{pipeline_id}")},
         )
         build_resp.raise_for_status()
         build_job_id = str(((build_resp.json().get("data") or {}) or {}).get("job_id") or "")
@@ -251,6 +259,7 @@ async def test_streaming_build_deploy_promotes_all_outputs() -> None:
             client,
             f"{BFF_URL}/api/v1/pipelines/{pipeline_id}/deploy",
             json_payload={"promote_build": True, "build_job_id": build_job_id},
+            headers={"Idempotency-Key": _idem_key(f"pipeline-deploy-{pipeline_id}")},
         )
         deploy_resp.raise_for_status()
         deploy_payload = deploy_resp.json()
@@ -354,6 +363,7 @@ async def test_streaming_build_fails_as_job_group_on_contract_mismatch() -> None
                 "pipeline_type": "streaming",
                 "definition_json": definition_json,
             },
+            headers={"Idempotency-Key": _idem_key(f"pipeline-create-{db_name}")},
         )
         create_pipeline.raise_for_status()
         pipeline = (create_pipeline.json().get("data") or {}).get("pipeline") or {}
@@ -364,6 +374,7 @@ async def test_streaming_build_fails_as_job_group_on_contract_mismatch() -> None
             client,
             f"{BFF_URL}/api/v1/pipelines/{pipeline_id}/build",
             json_payload={"db_name": db_name, "node_id": "out_ok", "limit": 5},
+            headers={"Idempotency-Key": _idem_key(f"pipeline-build-{pipeline_id}")},
         )
         if build_resp.status_code == 409:
             payload = build_resp.json()
@@ -380,6 +391,7 @@ async def test_streaming_build_fails_as_job_group_on_contract_mismatch() -> None
                 client,
                 f"{BFF_URL}/api/v1/pipelines/{pipeline_id}/deploy",
                 json_payload={"promote_build": True, "build_job_id": build_job_id},
+                headers={"Idempotency-Key": _idem_key(f"pipeline-deploy-{pipeline_id}")},
             )
             assert deploy_resp.status_code == 409
             payload = deploy_resp.json()

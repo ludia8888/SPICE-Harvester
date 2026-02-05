@@ -33,6 +33,7 @@ from shared.observability.context_propagation import (
 )
 from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
+from shared.services.kafka.producer_factory import create_kafka_producer
 from shared.services.registries.connector_registry import ConnectorRegistry, ConnectorSource
 from shared.utils.app_logger import configure_logging
 from shared.utils.executor_utils import call_in_executor
@@ -71,18 +72,14 @@ class ConnectorTriggerService:
         self.sheets = GoogleSheetsService(api_key=api_key)
 
         # Kafka producer (blocking)
-        kafka_config = {
-            "bootstrap.servers": settings.database.kafka_servers,
-            "client.id": settings.observability.service_name or "connector-trigger-service",
-            "acks": "all",
-            "retries": 3,
-            "retry.backoff.ms": 100,
-            "linger.ms": 20,
-            "compression.type": "snappy",
-            "enable.idempotence": True,
-            "max.in.flight.requests.per.connection": 5,
-        }
-        self.producer = Producer(kafka_config)
+        self.producer = create_kafka_producer(
+            bootstrap_servers=settings.database.kafka_servers,
+            client_id=settings.observability.service_name or "connector-trigger-service",
+            retry_backoff_ms=100,
+            linger_ms=20,
+            enable_idempotence=True,
+            max_in_flight_requests_per_connection=5,
+        )
 
         logger.info(
             "✅ ConnectorTriggerService initialized "

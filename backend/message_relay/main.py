@@ -37,6 +37,7 @@ from shared.observability.context_propagation import (
 )
 from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
+from shared.services.kafka.producer_factory import create_kafka_producer
 from shared.utils.app_logger import configure_logging
 
 # 로깅 설정
@@ -147,16 +148,13 @@ class EventPublisher:
     async def initialize(self):
         """서비스 초기화"""
         # Kafka Producer 설정
-        self.producer = Producer({
-            'bootstrap.servers': self.kafka_servers,
-            'client.id': 'event-publisher',
-            # Producer-level idempotence (handles retry-induced duplicates within a session)
-            'enable.idempotence': True,
-            'acks': 'all',  # 모든 replica가 메시지를 받을 때까지 대기
-            'retries': 1000000,  # allow long retry window; dedup is handled downstream too
-            # Idempotent producer preserves ordering with max.in.flight <= 5.
-            'max.in.flight.requests.per.connection': 5,
-        })
+        self.producer = create_kafka_producer(
+            bootstrap_servers=self.kafka_servers,
+            client_id="event-publisher",
+            retries=1_000_000,
+            enable_idempotence=True,
+            max_in_flight_requests_per_connection=5,
+        )
         
         # Kafka 토픽 생성 확인
         await self.ensure_kafka_topics()

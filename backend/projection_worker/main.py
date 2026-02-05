@@ -33,13 +33,13 @@ from shared.services.storage.lakefs_storage_service import LakeFSStorageService,
 from shared.services.core.projection_manager import ProjectionManager
 from shared.services.registries.processed_event_registry import (
     ProcessedEventRegistry,
-    validate_registry_enabled,
-    validate_lease_settings,
 )
-from shared.services.kafka.processed_event_worker import HeartbeatOptions, ProcessedEventKafkaWorker, RegistryKey
-from shared.services.kafka.safe_consumer import SafeKafkaConsumer
+from shared.services.kafka.processed_event_worker import EventEnvelopeKafkaWorker, HeartbeatOptions, RegistryKey
+from shared.services.kafka.producer_factory import create_kafka_producer
+from shared.services.kafka.safe_consumer import SafeKafkaConsumer, create_safe_consumer
 from shared.services.registries.lineage_store import LineageStore
 from shared.services.core.audit_log_store import AuditLogStore
+from shared.services.registries.processed_event_registry_factory import create_processed_event_registry
 from shared.utils.chaos import maybe_crash
 from shared.utils.ontology_version import split_ref_commit
 from shared.utils.language import coerce_localized_text, select_localized_text, get_default_language
@@ -60,12 +60,14 @@ configure_logging(_LOG_LEVEL)
 logger = logging.getLogger(__name__)
 
 
-class ProjectionWorker(ProcessedEventKafkaWorker[EventEnvelope, None]):
+class ProjectionWorker(EventEnvelopeKafkaWorker[None]):
     """Instance와 Ontology 이벤트를 Elasticsearch에 프로젝션하는 워커
 
     Kafka message contract:
     - Projection topics carry EventEnvelope JSON (metadata.kind == "domain")
     """
+
+    expected_envelope_kind = "domain"
 
     def __init__(self):
         settings = get_settings()
@@ -359,8 +361,6 @@ class ProjectionWorker(ProcessedEventKafkaWorker[EventEnvelope, None]):
         
     async def initialize(self):
         """워커 초기화"""
-        validate_registry_enabled()
-        validate_lease_settings()
         settings = get_settings()
 
         group_id = (AppConfig.PROJECTION_WORKER_GROUP or "projection-worker-group").strip()
@@ -368,7 +368,7 @@ class ProjectionWorker(ProcessedEventKafkaWorker[EventEnvelope, None]):
         # Kafka Consumer (strong consistency: read_committed + rebalance-safe offsets)
         topics = [AppConfig.INSTANCE_EVENTS_TOPIC, AppConfig.ONTOLOGY_EVENTS_TOPIC, AppConfig.ACTION_EVENTS_TOPIC]
         self.consumer = await self._consumer_call(
-            SafeKafkaConsumer,
+            create_safe_consumer,
             group_id,
             topics,
             "projection-worker",
@@ -377,13 +377,10 @@ class ProjectionWorker(ProcessedEventKafkaWorker[EventEnvelope, None]):
         )
         
         # Kafka Producer 설정 (실패 이벤트 발행용)
-        self.producer = Producer({
-            'bootstrap.servers': self.kafka_servers,
-            'client.id': 'projection-worker',
-            'acks': 'all',
-            'retries': 3,
-            'compression.type': 'snappy',
-        })
+        self.producer = create_kafka_producer(
+            bootstrap_servers=self.kafka_servers,
+            client_id="projection-worker",
+        )
         
         # Redis 연결 설정 (온톨로지 캐싱용)
         self.redis_service = create_redis_service(settings)
@@ -407,8 +404,7 @@ class ProjectionWorker(ProcessedEventKafkaWorker[EventEnvelope, None]):
             self.lakefs_storage = None
 
         # Durable processed-events registry (idempotency + ordering guard)
-        self.processed_event_registry = ProcessedEventRegistry()
-        await self.processed_event_registry.connect()
+        self.processed_event_registry = await create_processed_event_registry()
         self.processed = self.processed_event_registry
         logger.info("✅ ProcessedEventRegistry connected (Postgres)")
 
@@ -587,39 +583,8 @@ class ProjectionWorker(ProcessedEventKafkaWorker[EventEnvelope, None]):
         finally:
             await self._shutdown()
 
-    def _parse_payload(self, payload: Any) -> EventEnvelope:  # type: ignore[override]
-        try:
-            envelope = EventEnvelope.model_validate_json(payload)
-        except Exception as exc:
-            raise ValueError(f"Invalid EventEnvelope JSON: {exc}") from exc
-
-        kind = envelope.metadata.get("kind") if isinstance(envelope.metadata, dict) else None
-        if kind != "domain":
-            raise ValueError(f"Unexpected envelope kind for projection topics: {kind}")
-
-        return envelope
-
-    def _fallback_metadata(self, payload: EventEnvelope) -> Optional[Dict[str, Any]]:  # type: ignore[override]
-        return payload.metadata if isinstance(payload.metadata, dict) else None
-
     def _span_name(self, *, payload: EventEnvelope) -> str:  # type: ignore[override]
         return "projection_worker.process_event"
-
-    def _span_attributes(  # type: ignore[override]
-        self,
-        *,
-        msg: Any,
-        payload: EventEnvelope,
-        registry_key: RegistryKey,
-    ) -> Dict[str, Any]:
-        attrs = super()._span_attributes(msg=msg, payload=payload, registry_key=registry_key)
-        attrs.update(
-            {
-                "event.type": str(payload.event_type),
-                "event.sequence_number": payload.sequence_number,
-            }
-        )
-        return attrs
 
     def _registry_handler(self, *, msg: Any, payload: EventEnvelope) -> str:  # type: ignore[override]
         return f"{self.handler}:{msg.topic()}"
@@ -640,7 +605,7 @@ class ProjectionWorker(ProcessedEventKafkaWorker[EventEnvelope, None]):
     def _is_retryable_error(self, exc: Exception, *, payload: EventEnvelope) -> bool:  # type: ignore[override]
         if self._is_transient_infra_error(exc):
             return True
-        return ProcessedEventKafkaWorker._is_retryable_error(self, exc, payload=payload)
+        return super()._is_retryable_error(exc, payload=payload)
 
     def _max_retries_for_error(  # type: ignore[override]
         self,
@@ -1184,7 +1149,7 @@ class ProjectionWorker(ProcessedEventKafkaWorker[EventEnvelope, None]):
                 event_meta = {}
             ontology_ref, ontology_commit = split_ref_commit(event_meta.get("ontology"))
 
-            lifecycle_id = str(event_data.get("command_id") or "").strip()
+            lifecycle_id = str(event_meta.get("command_id") or event_data.get("command_id") or "").strip()
             if not lifecycle_id:
                 lifecycle_id = str(event_id).strip()
 

@@ -19,6 +19,7 @@ from shared.observability.context_propagation import (
 )
 from shared.observability.tracing import get_tracing_service
 from shared.services.registries.objectify_registry import ObjectifyOutboxItem, ObjectifyRegistry
+from shared.services.kafka.producer_factory import create_kafka_producer
 
 logger = logging.getLogger(__name__)
 
@@ -60,20 +61,18 @@ class ObjectifyOutboxPublisher:
         retries = int(cfg.producer_retries)
         client_id = (settings.observability.service_name or "objectify-outbox").strip() or "objectify-outbox"
 
-        self.producer = Producer(
-            {
-                "bootstrap.servers": settings.database.kafka_servers,
-                "client.id": client_id,
-                "acks": "all",
-                "retries": retries,
-                "retry.backoff.ms": 250,
-                "linger.ms": 10,
-                "compression.type": "snappy",
-                "enable.idempotence": True,
-                "max.in.flight.requests.per.connection": max_in_flight,
+        self.producer = create_kafka_producer(
+            bootstrap_servers=settings.database.kafka_servers,
+            client_id=client_id,
+            retries=retries,
+            retry_backoff_ms=250,
+            linger_ms=10,
+            enable_idempotence=True,
+            max_in_flight_requests_per_connection=max_in_flight,
+            extra_config={
                 "delivery.timeout.ms": delivery_timeout_ms,
                 "request.timeout.ms": request_timeout_ms,
-            }
+            },
         )
         self.tracing = get_tracing_service("objectify-outbox")
 

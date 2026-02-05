@@ -11,6 +11,7 @@ from fastapi import HTTPException, Request, status
 
 import bff.routers.pipeline_datasets_ops as ops
 from bff.services.dataset_ingest_outbox_builder import DatasetIngestOutboxBuilder
+from bff.services.dataset_ingest_outbox_flusher import maybe_flush_dataset_ingest_outbox_inline
 from bff.services.dataset_ingest_failures import mark_ingest_failed
 from shared.models.requests import ApiResponse
 from shared.security.auth_utils import enforce_db_scope
@@ -174,9 +175,10 @@ async def create_dataset_version(
                 ingest_request_id=ingest_request.ingest_request_id
             )
             if existing_version:
-                await flush_dataset_ingest_outbox(
+                await maybe_flush_dataset_ingest_outbox_inline(
                     dataset_registry=dataset_registry,
                     lineage_store=None,
+                    flush_dataset_ingest_outbox=flush_dataset_ingest_outbox,
                 )
                 return ApiResponse.success(
                     message="Dataset version created",
@@ -299,9 +301,10 @@ async def create_dataset_version(
             actor_user_id=actor_user_id,
         )
 
-        await flush_dataset_ingest_outbox(
+        await maybe_flush_dataset_ingest_outbox_inline(
             dataset_registry=dataset_registry,
             lineage_store=None,
+            flush_dataset_ingest_outbox=flush_dataset_ingest_outbox,
         )
 
         return ApiResponse.success(

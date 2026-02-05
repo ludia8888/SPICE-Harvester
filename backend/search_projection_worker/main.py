@@ -23,9 +23,11 @@ from shared.observability.context_propagation import (
 from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
 from shared.services.kafka.processed_event_worker import EventEnvelopeKafkaWorker, HeartbeatOptions
-from shared.services.kafka.safe_consumer import SafeKafkaConsumer
+from shared.services.kafka.producer_factory import create_kafka_dlq_producer
+from shared.services.kafka.safe_consumer import SafeKafkaConsumer, create_safe_consumer
 from shared.services.storage.elasticsearch_service import create_elasticsearch_service_legacy
 from shared.services.registries.processed_event_registry import ProcessedEventRegistry
+from shared.services.registries.processed_event_registry_factory import create_processed_event_registry
 from shared.utils.app_logger import configure_logging
 
 logger = logging.getLogger(__name__)
@@ -49,7 +51,7 @@ class SearchProjectionWorker(EventEnvelopeKafkaWorker[None]):
         self.max_retries = int(cfg.max_retries)
         self.backoff_base = int(cfg.backoff_base_seconds)
         self.backoff_max = int(cfg.backoff_max_seconds)
-        self.consumer: Optional[Consumer] = None
+        self.consumer: Optional[SafeKafkaConsumer] = None
         self.dlq_producer: Optional[Producer] = None
         self.processed: Optional[ProcessedEventRegistry] = None
         self.es = None
@@ -63,8 +65,7 @@ class SearchProjectionWorker(EventEnvelopeKafkaWorker[None]):
         settings = get_settings()
         self.es = create_elasticsearch_service_legacy()
         await self.es.connect()
-        self.processed = ProcessedEventRegistry()
-        await self.processed.initialize()
+        self.processed = await create_processed_event_registry()
         try:
             exists = await self.es.index_exists(self.index_name)
             if not exists:
@@ -73,7 +74,7 @@ class SearchProjectionWorker(EventEnvelopeKafkaWorker[None]):
             logger.warning("Failed to ensure search index exists: %s", exc)
 
         # Use SafeKafkaConsumer for strong consistency guarantees
-        self.consumer = SafeKafkaConsumer(
+        self.consumer = create_safe_consumer(
             group_id=self.group_id,
             topics=[self.topic],
             service_name="search-projection-worker",
@@ -85,16 +86,9 @@ class SearchProjectionWorker(EventEnvelopeKafkaWorker[None]):
         self._rebalance_in_progress = False
 
         service_name = settings.observability.service_name or self.service_name
-        self.dlq_producer = Producer(
-            {
-                "bootstrap.servers": settings.database.kafka_servers,
-                "client.id": service_name,
-                "acks": "all",
-                "retries": 3,
-                "retry.backoff.ms": 100,
-                "linger.ms": 20,
-                "compression.type": "snappy",
-            }
+        self.dlq_producer = create_kafka_dlq_producer(
+            bootstrap_servers=settings.database.kafka_servers,
+            client_id=service_name,
         )
 
     def _on_partitions_revoked(self, partitions: list) -> None:

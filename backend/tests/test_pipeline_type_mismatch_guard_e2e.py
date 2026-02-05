@@ -17,6 +17,10 @@ HTTPX_TIMEOUT = float(os.getenv("PIPELINE_HTTP_TIMEOUT", "120") or 120)
 RUN_TIMEOUT_SECONDS = int(os.getenv("PIPELINE_RUN_TIMEOUT_SECONDS", "300") or 300)
 COMMAND_TIMEOUT_SECONDS = int(os.getenv("PIPELINE_COMMAND_TIMEOUT_SECONDS", "120") or 120)
 
+def _idem_key(prefix: str) -> str:
+    raw = str(prefix or "").strip() or "idem"
+    return f"{raw}-{uuid.uuid4().hex}"
+
 
 async def _wait_for_command(
     client: httpx.AsyncClient,
@@ -88,13 +92,14 @@ async def _post_with_retry(
     url: str,
     *,
     json_payload: dict,
+    headers: Optional[dict[str, str]] = None,
     retries: int = 3,
     retry_sleep: float = 2.0,
 ) -> httpx.Response:
     last_response: Optional[httpx.Response] = None
     for attempt in range(retries):
         try:
-            response = await client.post(url, json=json_payload)
+            response = await client.post(url, json=json_payload, headers=headers)
         except httpx.HTTPError:
             if attempt + 1 >= retries:
                 raise
@@ -217,6 +222,7 @@ async def test_preview_rejects_type_mismatch_in_compute_expression() -> None:
                 "pipeline_type": "batch",
                 "definition_json": definition_json,
             },
+            headers={"Idempotency-Key": _idem_key(f"pipeline-create-{db_name}")},
         )
         create_pipeline.raise_for_status()
         pipeline = (create_pipeline.json().get("data") or {}).get("pipeline") or {}
@@ -233,6 +239,7 @@ async def test_preview_rejects_type_mismatch_in_compute_expression() -> None:
                 "branch": "main",
                 "limit": 50,
             },
+            headers={"Idempotency-Key": _idem_key(f"pipeline-preview-{db_name}")},
         )
         preview.raise_for_status()
         job_id = str((preview.json().get("data") or {}).get("job_id") or "")

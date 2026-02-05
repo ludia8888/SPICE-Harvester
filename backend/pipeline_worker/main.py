@@ -56,6 +56,8 @@ from shared.observability.context_propagation import kafka_headers_from_current_
 from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
 from shared.services.kafka.processed_event_worker import HeartbeatOptions, ProcessedEventKafkaWorker, RegistryKey
+from shared.services.kafka.producer_factory import create_kafka_dlq_producer
+from shared.services.kafka.safe_consumer import create_safe_consumer
 from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.services.storage.lakefs_client import LakeFSClient, LakeFSConflictError, LakeFSError
 from shared.services.storage.lakefs_storage_service import LakeFSStorageService
@@ -93,6 +95,7 @@ from shared.services.registries.objectify_registry import ObjectifyRegistry
 from shared.services.events.objectify_job_queue import ObjectifyJobQueue
 from shared.models.objectify_job import ObjectifyJob
 from shared.services.registries.processed_event_registry import ProcessedEventRegistry
+from shared.services.registries.processed_event_registry_factory import create_processed_event_registry
 from shared.services.pipeline.pipeline_lock import PipelineLock, PipelineLockError
 from shared.services.storage.redis_service import RedisService, create_redis_service_legacy
 from shared.services.storage.storage_service import StorageService
@@ -194,6 +197,9 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
         self.lock_acquire_timeout_seconds = pipeline_settings.lock_acquire_timeout_seconds
 
         self.spark_ansi_enabled = pipeline_settings.spark_ansi_enabled
+        self.spark_adaptive_enabled = pipeline_settings.spark_adaptive_enabled
+        self.spark_shuffle_partitions = int(pipeline_settings.spark_shuffle_partitions)
+        self.spark_console_progress = pipeline_settings.spark_console_progress
         self.cast_mode = normalize_cast_mode(pipeline_settings.cast_mode)
         self.use_lakefs_diff = pipeline_settings.lakefs_diff_enabled
         self.processed_event_heartbeat_interval_seconds = settings.event_sourcing.processed_event_heartbeat_interval_seconds
@@ -271,8 +277,9 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
         if self.objectify_registry:
             self.objectify_job_queue = ObjectifyJobQueue(objectify_registry=self.objectify_registry)
 
-        self.processed = ProcessedEventRegistry(lease_timeout_seconds=int(self.processed_event_lease_timeout_seconds))
-        await self.processed.initialize()
+        self.processed = await create_processed_event_registry(
+            lease_timeout_seconds=int(self.processed_event_lease_timeout_seconds),
+        )
 
         self.lineage = LineageStore()
         try:
@@ -315,7 +322,7 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
 
         # Use SafeKafkaConsumer for strong consistency guarantees
         # Critical: Enforces isolation.level=read_committed and proper rebalance handling
-        self.consumer = SafeKafkaConsumer(
+        self.consumer = create_safe_consumer(
             group_id=self.group_id,
             topics=[self.topic],
             service_name="pipeline-worker",
@@ -327,16 +334,9 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
         self._init_partition_state(reset=True)
         logger.info("PipelineWorker initialized (topic=%s)", self.topic)
 
-        self.dlq_producer = Producer(
-            {
-                "bootstrap.servers": settings.database.kafka_servers,
-                "client.id": self.service_name or "pipeline-worker-dlq",
-                "acks": "all",
-                "retries": 3,
-                "retry.backoff.ms": 100,
-                "linger.ms": 20,
-                "compression.type": "snappy",
-            }
+        self.dlq_producer = create_kafka_dlq_producer(
+            bootstrap_servers=settings.database.kafka_servers,
+            client_id=self.service_name or "pipeline-worker-dlq",
         )
 
     def _on_partitions_revoked(self, partitions: list) -> None:
@@ -403,15 +403,32 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
             self._spark_executor = None
 
     def _create_spark_session(self) -> SparkSession:
-        return (
+        builder = (
             SparkSession.builder.appName("spice-pipeline-worker")
             .config("spark.sql.session.timeZone", "UTC")
-            .config(
-                "spark.sql.ansi.enabled",
-                "true" if self.spark_ansi_enabled else "false",
-            )
-            .getOrCreate()
+            .config("spark.sql.ansi.enabled", "true" if self.spark_ansi_enabled else "false")
         )
+
+        shuffle_partitions = max(1, int(getattr(self, "spark_shuffle_partitions", 0) or 0))
+        if shuffle_partitions:
+            builder = (
+                builder.config("spark.sql.shuffle.partitions", str(shuffle_partitions))
+                .config("spark.default.parallelism", str(shuffle_partitions))
+            )
+
+        if bool(getattr(self, "spark_adaptive_enabled", True)):
+            builder = (
+                builder.config("spark.sql.adaptive.enabled", "true")
+                .config("spark.sql.adaptive.coalescePartitions.enabled", "true")
+                .config("spark.sql.adaptive.skewJoin.enabled", "true")
+            )
+        else:
+            builder = builder.config("spark.sql.adaptive.enabled", "false")
+
+        if not bool(getattr(self, "spark_console_progress", False)):
+            builder = builder.config("spark.ui.showConsoleProgress", "false")
+
+        return builder.getOrCreate()
 
     def _extract_job_settings(self, definition: Dict[str, Any]) -> Dict[str, Any]:
         settings = definition.get("settings")
@@ -551,6 +568,12 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
     def _service_name(self) -> Optional[str]:  # type: ignore[override]
         return "pipeline-worker"
 
+    def _cancel_inflight_on_revoke(self) -> bool:  # type: ignore[override]
+        # Pipeline jobs can be long-running (Spark actions, lakeFS/S3 IO). Rely on the
+        # ProcessedEventRegistry lease + heartbeats for idempotency across rebalances
+        # instead of canceling in-flight tasks and restarting expensive work.
+        return False
+
     def _buffer_messages(self) -> bool:  # type: ignore[override]
         return True
 
@@ -622,30 +645,40 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
         try:
             await self._execute_job(payload)
         except Exception as exc:
-            if self._is_spark_gateway_error(exc):
-                try:
-                    self._restart_spark_session()
-                except Exception as restart_exc:
-                    err = f"{exc} (spark_restart_failed: {restart_exc})"
-                    if self.processed:
-                        try:
-                            await self.processed.mark_failed(
-                                handler=self.handler,
-                                event_id=str(payload.job_id),
-                                error=err,
-                            )
-                        except Exception as mark_err:
-                            logger.warning(
-                                "Failed to mark pipeline job failed before restart: %s",
-                                mark_err,
-                                exc_info=True,
-                            )
-                    logger.warning(
-                        "Failed to restart Spark session after connection refusal: %s",
-                        restart_exc,
-                    )
-                    raise SystemExit(1) from restart_exc
-            raise
+            if not self._is_spark_gateway_error(exc):
+                raise
+
+            logger.warning(
+                "Spark gateway error; restarting Spark session and retrying once (job_id=%s): %s",
+                payload.job_id,
+                exc,
+            )
+            try:
+                self._restart_spark_session()
+            except Exception as restart_exc:
+                err = f"{exc} (spark_restart_failed: {restart_exc})"
+                if self.processed:
+                    try:
+                        await self.processed.mark_failed(
+                            handler=self.handler,
+                            event_id=str(payload.job_id),
+                            error=err,
+                        )
+                    except Exception as mark_err:
+                        logger.warning(
+                            "Failed to mark pipeline job failed before restart: %s",
+                            mark_err,
+                            exc_info=True,
+                        )
+                logger.warning(
+                    "Failed to restart Spark session after gateway error: %s",
+                    restart_exc,
+                )
+                raise SystemExit(1) from restart_exc
+
+            # Single in-process retry (keeps latency low vs Kafka backoff/seek) while still
+            # allowing the outer retry/DLQ logic to handle persistent failures.
+            await self._execute_job(payload)
         logger.info(
             "Pipeline job complete (job_id=%s pipeline_id=%s)",
             payload.job_id,
