@@ -18,8 +18,11 @@ import logging
 import hashlib
 from concurrent.futures import ThreadPoolExecutor
 
-from confluent_kafka import Consumer, Producer, KafkaError
+from confluent_kafka import Producer, KafkaError
 import redis.asyncio as aioredis
+
+from shared.services.kafka.producer_factory import create_kafka_producer
+from shared.services.kafka.safe_consumer import SafeKafkaConsumer, create_safe_consumer
 
 logger = logging.getLogger(__name__)
 
@@ -127,7 +130,7 @@ class DLQHandlerFixed:
         self.consumer_group = consumer_group or 'dlq-handler-group'
         
         # Kafka clients
-        self.consumer: Optional[Consumer] = None
+        self.consumer: Optional[SafeKafkaConsumer] = None
         self.producer: Optional[Producer] = None
         
         # Processing state
@@ -164,17 +167,26 @@ class DLQHandlerFixed:
             return
         
         # Initialize Kafka clients
-        consumer_config = self.kafka_config.copy()
-        consumer_config['group.id'] = self.consumer_group
-        consumer_config['enable.auto.commit'] = False
-        consumer_config['auto.offset.reset'] = 'earliest'
-        
-        self.consumer = Consumer(consumer_config)
-        self.consumer.subscribe([self.dlq_topic])
-        
-        producer_config = self.kafka_config.copy()
-        producer_config['client.id'] = 'dlq-handler-producer'
-        self.producer = Producer(producer_config)
+        consumer_extra = dict(self.kafka_config or {})
+        consumer_extra.pop("group.id", None)
+        self.consumer = create_safe_consumer(
+            group_id=self.consumer_group,
+            topics=[self.dlq_topic],
+            service_name="dlq-handler",
+            extra_config=consumer_extra,
+        )
+
+        bootstrap_servers = str((self.kafka_config or {}).get("bootstrap.servers") or "").strip()
+        if not bootstrap_servers:
+            raise ValueError("Missing kafka_config['bootstrap.servers'] for DLQHandlerFixed producer")
+        producer_extra = dict(self.kafka_config or {})
+        producer_extra.pop("bootstrap.servers", None)
+        producer_extra.pop("client.id", None)
+        self.producer = create_kafka_producer(
+            bootstrap_servers=bootstrap_servers,
+            client_id="dlq-handler-producer",
+            extra_config=producer_extra,
+        )
         
         self.processing = True
         
@@ -232,7 +244,8 @@ class DLQHandlerFixed:
                 await self._process_dlq_message(msg)
                 
                 # Commit offset
-                self.consumer.commit(asynchronous=False)
+                if self.consumer:
+                    self.consumer.commit_sync(msg)
                 
             except Exception as e:
                 logger.error(f"Error in DLQ processing loop: {e}")
