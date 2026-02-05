@@ -36,7 +36,7 @@ from shared.services.registries.processed_event_registry import (
     validate_registry_enabled,
     validate_lease_settings,
 )
-from shared.services.kafka.processed_event_worker import HeartbeatOptions, ProcessedEventKafkaWorker, RegistryKey
+from shared.services.kafka.processed_event_worker import EventEnvelopeKafkaWorker, HeartbeatOptions, RegistryKey
 from shared.services.kafka.safe_consumer import SafeKafkaConsumer
 from shared.services.registries.lineage_store import LineageStore
 from shared.services.core.audit_log_store import AuditLogStore
@@ -60,12 +60,14 @@ configure_logging(_LOG_LEVEL)
 logger = logging.getLogger(__name__)
 
 
-class ProjectionWorker(ProcessedEventKafkaWorker[EventEnvelope, None]):
+class ProjectionWorker(EventEnvelopeKafkaWorker[None]):
     """Instance와 Ontology 이벤트를 Elasticsearch에 프로젝션하는 워커
 
     Kafka message contract:
     - Projection topics carry EventEnvelope JSON (metadata.kind == "domain")
     """
+
+    expected_envelope_kind = "domain"
 
     def __init__(self):
         settings = get_settings()
@@ -587,39 +589,8 @@ class ProjectionWorker(ProcessedEventKafkaWorker[EventEnvelope, None]):
         finally:
             await self._shutdown()
 
-    def _parse_payload(self, payload: Any) -> EventEnvelope:  # type: ignore[override]
-        try:
-            envelope = EventEnvelope.model_validate_json(payload)
-        except Exception as exc:
-            raise ValueError(f"Invalid EventEnvelope JSON: {exc}") from exc
-
-        kind = envelope.metadata.get("kind") if isinstance(envelope.metadata, dict) else None
-        if kind != "domain":
-            raise ValueError(f"Unexpected envelope kind for projection topics: {kind}")
-
-        return envelope
-
-    def _fallback_metadata(self, payload: EventEnvelope) -> Optional[Dict[str, Any]]:  # type: ignore[override]
-        return payload.metadata if isinstance(payload.metadata, dict) else None
-
     def _span_name(self, *, payload: EventEnvelope) -> str:  # type: ignore[override]
         return "projection_worker.process_event"
-
-    def _span_attributes(  # type: ignore[override]
-        self,
-        *,
-        msg: Any,
-        payload: EventEnvelope,
-        registry_key: RegistryKey,
-    ) -> Dict[str, Any]:
-        attrs = super()._span_attributes(msg=msg, payload=payload, registry_key=registry_key)
-        attrs.update(
-            {
-                "event.type": str(payload.event_type),
-                "event.sequence_number": payload.sequence_number,
-            }
-        )
-        return attrs
 
     def _registry_handler(self, *, msg: Any, payload: EventEnvelope) -> str:  # type: ignore[override]
         return f"{self.handler}:{msg.topic()}"
@@ -640,7 +611,7 @@ class ProjectionWorker(ProcessedEventKafkaWorker[EventEnvelope, None]):
     def _is_retryable_error(self, exc: Exception, *, payload: EventEnvelope) -> bool:  # type: ignore[override]
         if self._is_transient_infra_error(exc):
             return True
-        return ProcessedEventKafkaWorker._is_retryable_error(self, exc, payload=payload)
+        return super()._is_retryable_error(exc, payload=payload)
 
     def _max_retries_for_error(  # type: ignore[override]
         self,

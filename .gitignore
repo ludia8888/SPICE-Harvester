@@ -175,6 +175,7 @@ ehthumbs_vista.db
 # Logs
 logs/
 *.log
+backend/test_logs/
 
 # Test results
 test_results/
