@@ -84,6 +84,19 @@ def _extract_constant_dict(node: ast.AST) -> dict[str, object]:
     return out
 
 
+def _extract_constant_kwargs(node: ast.AST) -> dict[str, object]:
+    """Extract a best-effort {str: constant} mapping from an ast.Call keyword list."""
+    if not isinstance(node, ast.Call):
+        return {}
+    out: dict[str, object] = {}
+    for kw in node.keywords:
+        if not kw.arg:
+            continue
+        if isinstance(kw.value, ast.Constant):
+            out[kw.arg] = kw.value.value
+    return out
+
+
 # =============================================================================
 # Test: SafeKafkaConsumer Configuration
 # =============================================================================
@@ -235,7 +248,7 @@ class TestKafkaProducerConfiguration:
             source = f.read()
         tree = ast.parse(source, filename=spec.origin)
 
-        config: dict[str, object] = {}
+        legacy_config: dict[str, object] = {}
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
                 continue
@@ -243,12 +256,34 @@ class TestKafkaProducerConfiguration:
                 continue
             if not node.args or not isinstance(node.args[0], ast.Dict):
                 continue
-            config = _extract_constant_dict(node.args[0])
+            legacy_config = _extract_constant_dict(node.args[0])
             break
 
-        assert config.get("acks") == "all"
-        assert config.get("enable.idempotence") is True
-        assert config.get("max.in.flight.requests.per.connection") == 5
+        if legacy_config:
+            assert legacy_config.get("acks") == "all"
+            assert legacy_config.get("enable.idempotence") is True
+            assert legacy_config.get("max.in.flight.requests.per.connection") == 5
+            return
+
+        factory_kwargs: dict[str, object] = {}
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            if not (isinstance(node.func, ast.Name) and node.func.id in {"create_kafka_producer", "create_kafka_dlq_producer"}):
+                continue
+            factory_kwargs = _extract_constant_kwargs(node)
+            break
+
+        assert factory_kwargs, "Expected Producer({...}) or create_kafka_producer(...) in pipeline_job_queue"
+
+        acks = factory_kwargs.get("acks")
+        if acks is None:
+            from shared.services.kafka.producer_factory import DEFAULT_ACKS
+            assert DEFAULT_ACKS == "all"
+        else:
+            assert acks == "all"
+        assert factory_kwargs.get("enable_idempotence") is True
+        assert factory_kwargs.get("max_in_flight_requests_per_connection") == 5
 
     def test_connector_trigger_producer_is_idempotent(self) -> None:
         import importlib.util
@@ -259,7 +294,7 @@ class TestKafkaProducerConfiguration:
             source = f.read()
         tree = ast.parse(source, filename=spec.origin)
 
-        config: dict[str, object] = {}
+        legacy_config: dict[str, object] = {}
         for node in ast.walk(tree):
             if not isinstance(node, ast.Assign):
                 continue
@@ -267,12 +302,34 @@ class TestKafkaProducerConfiguration:
                 continue
             if node.targets[0].id != "kafka_config":
                 continue
-            config = _extract_constant_dict(node.value)
+            legacy_config = _extract_constant_dict(node.value)
             break
 
-        assert config.get("acks") == "all"
-        assert config.get("enable.idempotence") is True
-        assert config.get("max.in.flight.requests.per.connection") == 5
+        if legacy_config:
+            assert legacy_config.get("acks") == "all"
+            assert legacy_config.get("enable.idempotence") is True
+            assert legacy_config.get("max.in.flight.requests.per.connection") == 5
+            return
+
+        factory_kwargs: dict[str, object] = {}
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            if not (isinstance(node.func, ast.Name) and node.func.id in {"create_kafka_producer", "create_kafka_dlq_producer"}):
+                continue
+            factory_kwargs = _extract_constant_kwargs(node)
+            break
+
+        assert factory_kwargs, "Expected kafka_config={{...}} or create_kafka_producer(...) in connector_trigger_service"
+
+        acks = factory_kwargs.get("acks")
+        if acks is None:
+            from shared.services.kafka.producer_factory import DEFAULT_ACKS
+            assert DEFAULT_ACKS == "all"
+        else:
+            assert acks == "all"
+        assert factory_kwargs.get("enable_idempotence") is True
+        assert factory_kwargs.get("max_in_flight_requests_per_connection") == 5
 
 
 # =============================================================================
