@@ -378,7 +378,14 @@ class TracingService:
             yield from nullcontext()
             return
 
-        with self.tracer.start_as_current_span(name, kind=kind, attributes=attributes or {}) as span:
+        # IMPORTANT: Do not pass `kind=None` explicitly. Some OpenTelemetry SDK versions
+        # persist the literal None onto the span, which breaks OTLP export (KeyError in
+        # span kind mapping). When `kind` is omitted, the SDK defaults to INTERNAL.
+        start_kwargs: dict[str, Any] = {"attributes": attributes or {}}
+        if kind is not None:
+            start_kwargs["kind"] = kind
+
+        with self.tracer.start_as_current_span(name, **start_kwargs) as span:
             try:
                 yield span
             except Exception as e:
