@@ -1,6 +1,6 @@
 # Backend Method Index
 
-> Generated: 2026-02-06T01:17:19+09:00
+> Generated: 2026-02-06T01:44:00+09:00
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 
 ## action_outbox_worker
@@ -6180,11 +6180,11 @@
 
 ### `backend/shared/observability/tracing.py`
 - **Functions**
-  - `get_tracing_service(service_name)` (line 469): no docstring
-  - `trace_endpoint(name)` (line 478): Lazily create a tracing decorator for request handlers.
-  - `trace_db_operation(name)` (line 491): no docstring
-  - `trace_external_call(name)` (line 497): no docstring
-  - `_lazy_trace(name, kind, attributes)` (line 502): no docstring
+  - `get_tracing_service(service_name)` (line 476): no docstring
+  - `trace_endpoint(name)` (line 485): Lazily create a tracing decorator for request handlers.
+  - `trace_db_operation(name)` (line 498): no docstring
+  - `trace_external_call(name)` (line 504): no docstring
+  - `_lazy_trace(name, kind, attributes)` (line 509): no docstring
 - **Classes**
   - `_SettingsValue` (line 128): no docstring
     - `__init__(self, getter)` (line 129): no docstring
@@ -6197,14 +6197,14 @@
     - `instrument_fastapi(self, app)` (line 276): no docstring
     - `instrument_clients(self)` (line 292): no docstring
     - `span(self, name, kind, attributes)` (line 376): no docstring
-    - `trace(self, name, kind, attributes)` (line 391): no docstring
-    - `get_current_span(self)` (line 411): no docstring
-    - `record_exception(self, exception)` (line 416): no docstring
-    - `set_span_attribute(self, key, value)` (line 423): no docstring
-    - `get_trace_id(self)` (line 429): no docstring
-    - `get_span_id(self)` (line 438): no docstring
-    - `inject_trace_context(self, headers)` (line 447): no docstring
-    - `extract_trace_context(self, headers)` (line 456): no docstring
+    - `trace(self, name, kind, attributes)` (line 398): no docstring
+    - `get_current_span(self)` (line 418): no docstring
+    - `record_exception(self, exception)` (line 423): no docstring
+    - `set_span_attribute(self, key, value)` (line 430): no docstring
+    - `get_trace_id(self)` (line 436): no docstring
+    - `get_span_id(self)` (line 445): no docstring
+    - `inject_trace_context(self, headers)` (line 454): no docstring
+    - `extract_trace_context(self, headers)` (line 463): no docstring
 
 ### `backend/shared/routers/__init__.py`
 
@@ -9784,6 +9784,8 @@
 - **Functions**
   - `_set_env(**updates)` (line 11): no docstring
   - `test_otlp_export_disabled_when_no_endpoint()` (line 29): no docstring
+  - `test_span_omits_kind_when_none()` (line 36): no docstring
+  - `test_span_passes_kind_when_set()` (line 74): no docstring
 
 ### `backend/tests/unit/openapi/test_wip_hidden.py`
 - **Functions**
