@@ -1,6 +1,6 @@
 # Backend Method Index
 
-> Generated: 2026-02-06T00:35:26+09:00
+> Generated: 2026-02-06T00:48:25+09:00
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 
 ## action_outbox_worker
@@ -3665,13 +3665,13 @@
   - `async ensure_database_exists(db_name, terminus)` (line 266): 데이터베이스 존재 확인 및 검증된 이름 반환 - Modernized version
   - `async check_oms_dependencies_health(container)` (line 304): Check health of all OMS dependencies
 - **Classes**
-  - `OMSDependencyProvider` (line 51): Modern dependency provider for OMS services
-    - `async get_terminus_service(container)` (line 60): Get AsyncTerminusService from container
-    - `async get_jsonld_converter(container)` (line 90): Get JSON-LD converter from container
-    - `async get_label_mapper(container)` (line 114): Get label mapper from container
-    - `async get_event_store(container)` (line 138): Get S3/MinIO Event Store - The Single Source of Truth.
-    - `async get_command_status_service(container)` (line 148): Get command status service from container
-    - `async get_processed_event_registry(container)` (line 209): no docstring
+  - `OMSDependencyProvider` (line 52): Modern dependency provider for OMS services
+    - `async get_terminus_service(container)` (line 61): Get AsyncTerminusService from container
+    - `async get_jsonld_converter(container)` (line 91): Get JSON-LD converter from container
+    - `async get_label_mapper(container)` (line 115): Get label mapper from container
+    - `async get_event_store(container)` (line 139): Get S3/MinIO Event Store - The Single Source of Truth.
+    - `async get_command_status_service(container)` (line 149): Get command status service from container
+    - `async get_processed_event_registry(container)` (line 210): no docstring
 
 ### `backend/oms/entities/__init__.py`
 
@@ -4981,7 +4981,7 @@
 
 ### `backend/scripts/processed_event_registry_smoke.py`
 - **Functions**
-  - `async _main()` (line 18): no docstring
+  - `async _main()` (line 19): no docstring
 
 ### `backend/scripts/run_coverage_report.py`
 - **Functions**
