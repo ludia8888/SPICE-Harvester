@@ -9,7 +9,6 @@ from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
 
-import bff.routers.pipeline_datasets_ops as ops
 from bff.routers.pipeline_datasets_ops import (
     _build_funnel_analysis_payload,
     _build_schema_columns,
@@ -21,11 +20,8 @@ from bff.routers.pipeline_datasets_ops import (
 )
 from bff.routers.pipeline_datasets_deps import get_objectify_job_queue
 from bff.routers.pipeline_deps import get_dataset_registry, get_objectify_registry, get_pipeline_registry
-from bff.services.pipeline_dataset_upload_context import (
-    _build_dataset_upload_response,
-    _prepare_dataset_upload_context,
-)
-from bff.services.pipeline_dataset_upload_service import TabularDatasetUploadInput, upload_tabular_dataset
+from bff.services.pipeline_dataset_upload_context import _prepare_dataset_upload_context
+from bff.services.pipeline_tabular_upload_facade import finalize_tabular_upload
 from shared.config.settings import get_settings
 from shared.dependencies.providers import LineageStoreDep
 from shared.models.requests import ApiResponse
@@ -67,10 +63,6 @@ async def upload_csv_dataset(
         )
         db_name = ctx.db_name
         dataset_branch = ctx.dataset_branch
-        actor_user_id = ctx.actor_user_id
-        lakefs_storage_service = ctx.lakefs_storage_service
-        lakefs_client = ctx.lakefs_client
-        idempotency_key = ctx.idempotency_key
 
         filename = file.filename or "upload.csv"
         if not filename.lower().endswith(".csv"):
@@ -139,67 +131,48 @@ async def upload_csv_dataset(
             "has_header": has_header,
         }
         sample_json = {"columns": _columns_from_schema(schema_columns), "rows": sample_rows}
-        result = await upload_tabular_dataset(
-            inputs=TabularDatasetUploadInput(
-                db_name=db_name,
-                dataset_branch=dataset_branch,
-                dataset_name=resolved_name,
-                description=description.strip() if description else None,
-                source_type="csv_upload",
-                source_ref=filename,
-                idempotency_key=idempotency_key,
-                actor_user_id=actor_user_id,
-                request_fingerprint_payload={
-                    "db_name": db_name,
-                    "branch": dataset_branch,
-                    "dataset_name": resolved_name,
-                    "source_type": "csv_upload",
-                    "filename": filename,
-                    "delimiter": resolved_delimiter,
-                    "has_header": has_header,
-                    "content_sha256": content_hash,
-                },
-                schema_json=schema_json,
-                sample_json=sample_json,
-                row_count=row_count,
-                source_metadata=source_metadata,
-                artifact_fileobj=file.file,
-                artifact_basename="source.csv",
-                artifact_content_type="text/csv",
-                content_sha256=content_hash,
-                commit_message=f"CSV dataset upload {db_name}/{resolved_name}",
-                commit_metadata_extra={
-                    "delimiter": resolved_delimiter,
-                    "has_header": has_header,
-                },
-                lineage_label="csv_upload",
-            ),
-            lakefs_client=lakefs_client,
-            lakefs_storage_service=lakefs_storage_service,
-            dataset_registry=dataset_registry,
-            objectify_registry=objectify_registry,
-            objectify_job_queue=objectify_job_queue,
-            lineage_store=lineage_store,
-            build_dataset_event_payload=ops.build_dataset_event_payload,
-            flush_dataset_ingest_outbox=ops.flush_dataset_ingest_outbox,
-        )
-
         preview_payload: Dict[str, Any] = {
             "columns": _columns_from_schema(schema_columns),
             "rows": sample_rows,
         }
-        data = _build_dataset_upload_response(
-            result=result,
-            preview=preview_payload,
-            source=source_metadata,
-            funnel_analysis=funnel_analysis,
+        return await finalize_tabular_upload(
+            ctx=ctx,
+            dataset_name=resolved_name,
+            description=description,
+            source_type="csv_upload",
+            source_ref=filename,
+            request_fingerprint_payload={
+                "db_name": db_name,
+                "branch": dataset_branch,
+                "dataset_name": resolved_name,
+                "source_type": "csv_upload",
+                "filename": filename,
+                "delimiter": resolved_delimiter,
+                "has_header": has_header,
+                "content_sha256": content_hash,
+            },
             schema_json=schema_json,
+            sample_json=sample_json,
+            row_count=row_count,
+            source_metadata=source_metadata,
+            artifact_fileobj=file.file,
+            artifact_basename="source.csv",
+            artifact_content_type="text/csv",
+            content_sha256=content_hash,
+            commit_message=f"CSV dataset upload {db_name}/{resolved_name}",
+            commit_metadata_extra={
+                "delimiter": resolved_delimiter,
+                "has_header": has_header,
+            },
+            lineage_label="csv_upload",
+            dataset_registry=dataset_registry,
+            objectify_registry=objectify_registry,
+            objectify_job_queue=objectify_job_queue,
+            lineage_store=lineage_store,
+            preview_payload=preview_payload,
+            funnel_analysis=funnel_analysis,
+            success_message="CSV dataset created",
         )
-
-        return ApiResponse.success(
-            message="CSV dataset created",
-            data=data,
-        ).to_dict()
     except HTTPException:
         raise
     except Exception as exc:

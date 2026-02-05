@@ -1,6 +1,6 @@
 # Backend Method Index
 
-> Generated: 2026-02-06T06:02:32+09:00
+> Generated: 2026-02-06T06:15:16+09:00
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 
 ## action_outbox_worker
@@ -805,11 +805,11 @@
 
 ### `backend/bff/routers/pipeline_datasets_uploads_csv.py`
 - **Functions**
-  - `async upload_csv_dataset(db_name, branch, file, dataset_name, description, delimiter, has_header, request, pipeline_registry, dataset_registry, objectify_registry, objectify_job_queue, lineage_store)` (line 45): no docstring
+  - `async upload_csv_dataset(db_name, branch, file, dataset_name, description, delimiter, has_header, request, pipeline_registry, dataset_registry, objectify_registry, objectify_job_queue, lineage_store)` (line 41): no docstring
 
 ### `backend/bff/routers/pipeline_datasets_uploads_excel.py`
 - **Functions**
-  - `async upload_excel_dataset(db_name, branch, file, dataset_name, description, sheet_name, table_id, table_top, table_left, table_bottom, table_right, request, pipeline_registry, dataset_registry, objectify_registry, objectify_job_queue, lineage_store)` (line 46): no docstring
+  - `async upload_excel_dataset(db_name, branch, file, dataset_name, description, sheet_name, table_id, table_top, table_left, table_bottom, table_right, request, pipeline_registry, dataset_registry, objectify_registry, objectify_job_queue, lineage_store)` (line 42): no docstring
 
 ### `backend/bff/routers/pipeline_datasets_uploads_media.py`
 - **Functions**
@@ -1893,6 +1893,10 @@
   - `async submit_pipeline_proposal(pipeline_id, payload, audit_store, pipeline_registry, dataset_registry, objectify_registry, request)` (line 245): no docstring
   - `async approve_pipeline_proposal(pipeline_id, payload, audit_store, pipeline_registry, request)` (line 321): no docstring
   - `async reject_pipeline_proposal(pipeline_id, payload, audit_store, pipeline_registry, request)` (line 406): no docstring
+
+### `backend/bff/services/pipeline_tabular_upload_facade.py`
+- **Functions**
+  - `async finalize_tabular_upload(ctx, dataset_name, description, source_type, source_ref, request_fingerprint_payload, schema_json, sample_json, row_count, source_metadata, artifact_fileobj, artifact_basename, artifact_content_type, content_sha256, commit_message, commit_metadata_extra, lineage_label, dataset_registry, objectify_registry, objectify_job_queue, lineage_store, preview_payload, funnel_analysis, success_message)` (line 11): no docstring
 
 ### `backend/bff/services/pipeline_udf_service.py`
 - **Functions**
