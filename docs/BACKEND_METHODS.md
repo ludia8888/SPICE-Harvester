@@ -1,6 +1,6 @@
 # Backend Method Index
 
-> Generated: 2026-02-06T00:52:28+09:00
+> Generated: 2026-02-06T01:02:33+09:00
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 
 ## action_outbox_worker
@@ -6790,25 +6790,25 @@
 
 ### `backend/shared/services/core/watermark_monitor.py`
 - **Functions**
-  - `async create_watermark_monitor(kafka_config, redis_url, consumer_groups, topics)` (line 423): Create and start a watermark monitor
+  - `async create_watermark_monitor(kafka_config, redis_url, consumer_groups, topics)` (line 430): Create and start a watermark monitor
 - **Classes**
-  - `PartitionWatermark` (line 24): Watermark information for a single partition
-    - `progress_percentage(self)` (line 35): Calculate progress as percentage
-  - `GlobalWatermark` (line 45): Aggregated watermark across all partitions
-    - `is_healthy(self)` (line 58): Check if lag is within acceptable limits
-    - `estimated_catch_up_time_ms(self)` (line 64): Estimate time to catch up based on processing rate
-  - `WatermarkMonitor` (line 74): Monitor Kafka consumer lag and watermarks across all partitions
-    - `__init__(self, kafka_config, redis_client, consumer_groups, topics, alert_threshold_ms)` (line 86): Initialize watermark monitor
-    - `async start_monitoring(self, interval_seconds)` (line 124): Start monitoring watermarks
-    - `async stop_monitoring(self)` (line 141): Stop monitoring watermarks
-    - `async _monitor_loop(self, interval_seconds)` (line 158): Main monitoring loop
-    - `async update_watermarks(self, consumer_group)` (line 185): Update watermarks for a consumer group
-    - `calculate_global_watermark(self)` (line 238): Calculate global watermark across all partitions
-    - `async store_metrics(self)` (line 276): Store metrics in Redis for historical tracking
-    - `async check_alerts(self)` (line 320): Check for lag alerts and trigger notifications
-    - `async export_prometheus_metrics(self)` (line 346): Export metrics in Prometheus format
-    - `async get_current_lag(self)` (line 372): Get current lag information
-    - `async get_partition_details(self, topic)` (line 396): Get detailed lag information for a specific topic
+  - `PartitionWatermark` (line 26): Watermark information for a single partition
+    - `progress_percentage(self)` (line 37): Calculate progress as percentage
+  - `GlobalWatermark` (line 47): Aggregated watermark across all partitions
+    - `is_healthy(self)` (line 60): Check if lag is within acceptable limits
+    - `estimated_catch_up_time_ms(self)` (line 66): Estimate time to catch up based on processing rate
+  - `WatermarkMonitor` (line 76): Monitor Kafka consumer lag and watermarks across all partitions
+    - `__init__(self, kafka_config, redis_client, consumer_groups, topics, alert_threshold_ms)` (line 88): Initialize watermark monitor
+    - `async start_monitoring(self, interval_seconds)` (line 126): Start monitoring watermarks
+    - `async stop_monitoring(self)` (line 143): Stop monitoring watermarks
+    - `async _monitor_loop(self, interval_seconds)` (line 160): Main monitoring loop
+    - `async update_watermarks(self, consumer_group)` (line 187): Update watermarks for a consumer group
+    - `calculate_global_watermark(self)` (line 245): Calculate global watermark across all partitions
+    - `async store_metrics(self)` (line 283): Store metrics in Redis for historical tracking
+    - `async check_alerts(self)` (line 327): Check for lag alerts and trigger notifications
+    - `async export_prometheus_metrics(self)` (line 353): Export metrics in Prometheus format
+    - `async get_current_lag(self)` (line 379): Get current lag information
+    - `async get_partition_details(self, topic)` (line 403): Get detailed lag information for a specific topic
 
 ### `backend/shared/services/core/websocket_service.py`
 - **Functions**
@@ -7048,8 +7048,8 @@
 
 ### `backend/shared/services/kafka/safe_consumer.py`
 - **Functions**
-  - `create_safe_consumer(group_id, topics, service_name, **kwargs)` (line 500): Factory function to create a SafeKafkaConsumer.
-  - `validate_consumer_config(config)` (line 529): Validate that a consumer config meets safety requirements.
+  - `create_safe_consumer(group_id, topics, service_name, **kwargs)` (line 510): Factory function to create a SafeKafkaConsumer.
+  - `validate_consumer_config(config)` (line 539): Validate that a consumer config meets safety requirements.
 - **Classes**
   - `ConsumerState` (line 29): Consumer lifecycle states.
   - `PartitionState` (line 39): Track state for each assigned partition.
@@ -7058,23 +7058,25 @@
     - `on_revoke(self, consumer, partitions)` (line 68): Called before partitions are revoked.
     - `on_assign(self, consumer, partitions)` (line 120): Called after partitions are assigned.
   - `SafeKafkaConsumer` (line 152): Production-hardened Kafka consumer with strong consistency guarantees.
-    - `__init__(self, group_id, topics, service_name, extra_config, on_revoke, on_assign, session_timeout_ms, max_poll_interval_ms, heartbeat_interval_ms)` (line 185): Create a safe Kafka consumer.
-    - `state(self)` (line 273): Current consumer state.
-    - `is_rebalancing(self)` (line 278): Check if consumer is currently rebalancing.
-    - `poll(self, timeout)` (line 282): Poll for a message with rebalance awareness.
-    - `wait_for_assignment(self, timeout_seconds)` (line 314): Block until partitions are assigned (or timeout).
-    - `mark_processed(self, msg)` (line 338): Mark a message as successfully processed.
-    - `commit(self, message, offsets, asynchronous, msg)` (line 355): Commit offsets.
-    - `commit_sync(self, msg)` (line 424): Synchronously commit a specific message offset.
-    - `seek(self, partition)` (line 428): Seek to a specific offset for a partition.
-    - `close(self, timeout)` (line 446): Gracefully close the consumer.
-    - `__enter__(self)` (line 468): no docstring
-    - `__exit__(self, exc_type, exc_val, exc_tb)` (line 471): no docstring
-    - `list_topics(self, topic, timeout)` (line 475): List available topics.
-    - `assignment(self)` (line 479): Get current partition assignment.
-    - `position(self, partitions)` (line 483): Get current position for partitions.
-    - `pause(self, partitions)` (line 487): Pause fetching from the provided partitions (backpressure).
-    - `resume(self, partitions)` (line 493): Resume fetching from the provided partitions (backpressure).
+    - `__init__(self, group_id, topics, service_name, extra_config, on_revoke, on_assign, subscribe, session_timeout_ms, max_poll_interval_ms, heartbeat_interval_ms)` (line 185): Create a safe Kafka consumer.
+    - `state(self)` (line 275): Current consumer state.
+    - `is_rebalancing(self)` (line 280): Check if consumer is currently rebalancing.
+    - `poll(self, timeout)` (line 284): Poll for a message with rebalance awareness.
+    - `wait_for_assignment(self, timeout_seconds)` (line 316): Block until partitions are assigned (or timeout).
+    - `mark_processed(self, msg)` (line 340): Mark a message as successfully processed.
+    - `commit(self, message, offsets, asynchronous, msg)` (line 357): Commit offsets.
+    - `commit_sync(self, msg)` (line 426): Synchronously commit a specific message offset.
+    - `seek(self, partition)` (line 430): Seek to a specific offset for a partition.
+    - `close(self, timeout)` (line 448): Gracefully close the consumer.
+    - `__enter__(self)` (line 470): no docstring
+    - `__exit__(self, exc_type, exc_val, exc_tb)` (line 473): no docstring
+    - `list_topics(self, topic, timeout)` (line 477): List available topics.
+    - `get_watermark_offsets(self, partition, timeout)` (line 481): Return (low, high) offsets for a partition.
+    - `committed(self, partitions, timeout)` (line 485): Return committed offsets for partitions in this consumer group.
+    - `assignment(self)` (line 489): Get current partition assignment.
+    - `position(self, partitions)` (line 493): Get current position for partitions.
+    - `pause(self, partitions)` (line 497): Pause fetching from the provided partitions (backpressure).
+    - `resume(self, partitions)` (line 503): Resume fetching from the provided partitions (backpressure).
 
 ### `backend/shared/services/pipeline/__init__.py`
 
