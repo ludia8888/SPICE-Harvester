@@ -1184,7 +1184,7 @@ class ProjectionWorker(ProcessedEventKafkaWorker[EventEnvelope, None]):
                 event_meta = {}
             ontology_ref, ontology_commit = split_ref_commit(event_meta.get("ontology"))
 
-            lifecycle_id = str(event_data.get("command_id") or "").strip()
+            lifecycle_id = str(event_meta.get("command_id") or event_data.get("command_id") or "").strip()
             if not lifecycle_id:
                 lifecycle_id = str(event_id).strip()
 

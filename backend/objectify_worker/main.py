@@ -596,7 +596,19 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
         )
 
     async def _process_payload(self, payload: ObjectifyJob) -> None:  # type: ignore[override]
-        await self._process_job(payload)
+        try:
+            await self._process_job(payload)
+        except Exception:
+            logger.error(
+                "Objectify job failed (job_id=%s db_name=%s mapping_spec_id=%s mapping_spec_version=%s): %s",
+                payload.job_id,
+                payload.db_name,
+                payload.mapping_spec_id,
+                payload.mapping_spec_version,
+                payload,
+                exc_info=True,
+            )
+            raise
 
     def _fallback_metadata(self, payload: ObjectifyJob) -> Optional[Dict[str, Any]]:  # type: ignore[override]
         return {
@@ -3064,6 +3076,12 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                 stats["full_sync_total_instances"] = total_instances
                 stats["full_sync_cleared"] = cleared_instances
             except Exception as exc:
+                # Full-sync enumeration is an OMS transport operation and can fail transiently
+                # (RemoteProtocolError "Server disconnected...", timeouts, etc). Treat those
+                # as retryable so the Kafka worker can backoff/retry instead of marking a
+                # permanent FAIL + DLQ on the relationship spec.
+                if isinstance(exc, (httpx.RequestError, httpx.TimeoutException)):
+                    raise
                 await _fail_link(
                     [
                         {

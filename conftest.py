@@ -57,11 +57,20 @@ def _ensure_test_tokens() -> None:
             token = value
             break
     if not token:
+        for key in candidate_keys:
+            value = (dotenv.get(key) or "").strip()
+            if value:
+                token = value
+                break
+    if not token:
         token = "test-token"
 
     for key in ("ADMIN_TOKEN", "BFF_ADMIN_TOKEN", "OMS_ADMIN_TOKEN", "SMOKE_ADMIN_TOKEN"):
-        if not (os.getenv(key) or "").strip():
-            os.environ[key] = token
+        existing = (os.getenv(key) or "").strip()
+        if existing:
+            continue
+        dotenv_value = (dotenv.get(key) or "").strip()
+        os.environ[key] = dotenv_value or token
 
     os.environ.setdefault("RUN_LIVE_OMS_SMOKE", "true")
     os.environ.setdefault("RUN_LIVE_BRANCH_VIRTUALIZATION", "true")

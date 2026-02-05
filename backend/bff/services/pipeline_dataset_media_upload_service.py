@@ -11,9 +11,10 @@ from uuid import uuid4
 from fastapi import HTTPException, status
 
 import bff.routers.pipeline_datasets_ops as ops
-from bff.services.pipeline_dataset_upload_context import _prepare_dataset_upload_context
 from bff.services.dataset_ingest_outbox_builder import DatasetIngestOutboxBuilder
+from bff.services.dataset_ingest_outbox_flusher import maybe_flush_dataset_ingest_outbox_inline
 from bff.services.dataset_ingest_failures import mark_ingest_failed
+from bff.services.pipeline_dataset_upload_context import _prepare_dataset_upload_context
 from shared.models.requests import ApiResponse
 from shared.utils.path_utils import safe_path_segment
 from shared.utils.s3_uri import build_s3_uri
@@ -167,9 +168,10 @@ async def upload_media_dataset(
                 ingest_request_id=ingest_request.ingest_request_id
             )
             if existing_version:
-                await flush_dataset_ingest_outbox(
+                await maybe_flush_dataset_ingest_outbox_inline(
                     dataset_registry=dataset_registry,
                     lineage_store=lineage_store,
+                    flush_dataset_ingest_outbox=flush_dataset_ingest_outbox,
                 )
                 return ApiResponse.success(
                     message="Media dataset created",
@@ -347,9 +349,10 @@ async def upload_media_dataset(
             actor_user_id=actor_user_id,
         )
 
-        await flush_dataset_ingest_outbox(
+        await maybe_flush_dataset_ingest_outbox_inline(
             dataset_registry=dataset_registry,
             lineage_store=lineage_store,
+            flush_dataset_ingest_outbox=flush_dataset_ingest_outbox,
         )
 
         return ApiResponse.success(

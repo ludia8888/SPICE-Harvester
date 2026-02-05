@@ -26,6 +26,7 @@ import pytest
 
 from shared.config.search_config import get_instances_index_name
 from shared.services.storage.event_store import event_store
+from shared.utils.repo_dotenv import load_repo_dotenv
 from shared.utils.writeback_lifecycle import overlay_doc_id
 from tests.utils.auth import bff_auth_headers
 
@@ -43,26 +44,7 @@ OMS_URL = (os.getenv("OMS_BASE_URL") or os.getenv("OMS_URL") or "http://127.0.0.
 
 
 def _load_repo_dotenv() -> Dict[str, str]:
-    try:
-        repo_root = Path(__file__).resolve().parents[2]
-    except Exception:  # pragma: no cover
-        return {}
-
-    env_path = repo_root / ".env"
-    if not env_path.exists():
-        return {}
-
-    values: Dict[str, str] = {}
-    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        key = key.strip()
-        value = value.strip().strip("'").strip('"')
-        if key:
-            values[key] = value
-    return values
+    return load_repo_dotenv()
 
 
 def _truthy(value: Optional[str]) -> bool:
@@ -116,7 +98,7 @@ async def _wait_for_command_completed(
     session: aiohttp.ClientSession,
     *,
     command_id: str,
-    timeout_seconds: int = 240,
+    timeout_seconds: int = 600,
     poll_interval_seconds: float = 1.0,
 ) -> Dict[str, Any]:
     deadline = time.monotonic() + timeout_seconds
@@ -258,16 +240,22 @@ async def _wait_for_es_overlay_doc(
     last_body = None
     async with aiohttp.ClientSession() as session:
         while time.monotonic() < deadline:
-            async with session.get(f"{es_base_url}/{index_name}/_doc/{doc_id}") as resp:
-                last_status = resp.status
-                last_body = await resp.text()
-                if resp.status == 200:
-                    try:
-                        payload = json.loads(last_body) if last_body else None
-                    except Exception:
-                        payload = None
-                    if isinstance(payload, dict) and isinstance(payload.get("_source"), dict):
-                        return payload["_source"]
+            try:
+                async with session.get(f"{es_base_url}/{index_name}/_doc/{doc_id}") as resp:
+                    last_status = resp.status
+                    last_body = await resp.text()
+                    if resp.status == 200:
+                        try:
+                            payload = json.loads(last_body) if last_body else None
+                        except Exception:
+                            payload = None
+                        if isinstance(payload, dict) and isinstance(payload.get("_source"), dict):
+                            return payload["_source"]
+            except aiohttp.ClientError as exc:
+                # Elasticsearch can restart transiently on resource-constrained local stacks.
+                # Treat transport disconnects as retryable to make the smoke test resilient.
+                last_status = "CLIENT_ERROR"
+                last_body = str(exc)
             await asyncio.sleep(poll_interval_seconds)
 
     raise AssertionError(
@@ -364,6 +352,74 @@ async def _ensure_action_worker_docker_running(*, repo_root: Path, build: bool) 
     # Give the consumer a moment to subscribe before we submit actions.
     await asyncio.sleep(2.0)
     return True
+
+
+async def _docker_container_health(container_name: str) -> str:
+    code, out, _ = await _run_subprocess(
+        "docker",
+        "inspect",
+        "-f",
+        "{{if .State.Health}}{{.State.Health.Status}}{{else}}n/a{{end}}",
+        container_name,
+        timeout_seconds=15.0,
+    )
+    if code != 0:
+        return "missing"
+    value = out.strip().lower()
+    return value or "unknown"
+
+
+async def _wait_for_container_healthy(
+    *,
+    container_name: str,
+    timeout_seconds: float = 180.0,
+    poll_interval_seconds: float = 2.0,
+) -> None:
+    deadline = time.monotonic() + timeout_seconds
+    last = None
+    while time.monotonic() < deadline:
+        last = await _docker_container_health(container_name)
+        if last in {"healthy", "n/a"}:
+            return
+        await asyncio.sleep(poll_interval_seconds)
+    raise AssertionError(f"Timed out waiting for container health (container={container_name}, last={last})")
+
+
+async def _ensure_kafka_docker_running(*, repo_root: Path) -> None:
+    """
+    Ensure Kafka is running before submitting commands.
+
+    Command processing relies on EventStore → Relay → Kafka → worker consumption.
+    If Kafka is stopped (often due to local OOM restarts), commands will remain PENDING.
+    """
+
+    container_name = "spice-harvester-kafka"
+    if await _docker_container_running(container_name):
+        health = await _docker_container_health(container_name)
+        if health in {"healthy", "n/a"}:
+            return
+
+    compose_file = repo_root / "docker-compose.full.yml"
+    if not compose_file.exists():
+        raise AssertionError(f"Missing docker-compose.full.yml at {compose_file}")
+
+    code, _, err = await _run_subprocess(
+        "docker",
+        "compose",
+        "-f",
+        str(compose_file),
+        "up",
+        "-d",
+        "--force-recreate",
+        "kafka",
+        cwd=repo_root,
+        env=os.environ.copy(),
+        timeout_seconds=600.0,
+    )
+    if code != 0:
+        raise AssertionError(f"Failed to start kafka via docker compose (exit={code}): {err}")
+
+    await _wait_for_container_healthy(container_name=container_name, timeout_seconds=180.0)
 
 
 async def _stop_action_worker_docker(*, repo_root: Path) -> None:
@@ -557,6 +613,8 @@ async def test_action_writeback_e2e_smoke() -> None:
     action_worker_proc: Optional[asyncio.subprocess.Process] = None
     started_action_worker_docker = False
     created_db = False
+
+    await _ensure_kafka_docker_running(repo_root=backend_dir.parent)
 
     async with aiohttp.ClientSession(headers=headers) as session:
         try:
@@ -826,6 +884,11 @@ async def test_action_writeback_e2e_verification_suite() -> None:
     old_materializer_base_branch = os.environ.get("WRITEBACK_MATERIALIZER_BASE_BRANCH")
 
     headers = _base_headers(db_name=None, actor_id=owner_id)
+
+    async def _stop_worker() -> None:
+        return
+
+    await _ensure_kafka_docker_running(repo_root=repo_root)
 
     async with aiohttp.ClientSession(headers=headers) as session:
         try:

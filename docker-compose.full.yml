@@ -372,6 +372,7 @@ services:
     container_name: spice_jaeger
     environment:
       - COLLECTOR_OTLP_ENABLED=true
+    command: ["--memory.max-traces=2000"]
     ports:
       - "16686:16686"
     networks:
