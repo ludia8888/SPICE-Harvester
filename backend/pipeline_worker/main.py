@@ -83,6 +83,7 @@ from shared.services.pipeline.pipeline_validation_utils import (
     validate_schema_checks,
     validate_schema_contract,
 )
+from shared.services.pipeline.pipeline_schema_casts import extract_schema_casts
 from shared.services.pipeline.pipeline_schema_utils import normalize_schema_type
 from shared.services.pipeline.pipeline_type_utils import normalize_cast_mode, spark_type_to_xsd, xsd_to_spark_type
 from shared.services.pipeline.pipeline_transform_spec import (
@@ -3754,29 +3755,6 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
             in_set_mismatch=in_set_mismatch,
         )
 
-    def _extract_schema_casts(self, schema_json: Any) -> List[Dict[str, str]]:
-        if not isinstance(schema_json, dict):
-            return []
-        columns = schema_json.get("columns")
-        if not isinstance(columns, list):
-            columns = schema_json.get("fields")
-        if isinstance(columns, list):
-            casts: List[Dict[str, str]] = []
-            for col in columns:
-                if isinstance(col, dict):
-                    name = str(col.get("name") or "").strip()
-                    if not name:
-                        continue
-                    cast_type = normalize_schema_type(col.get("type") or col.get("data_type"))
-                    casts.append({"column": name, "type": cast_type or "xsd:string"})
-                elif isinstance(col, str):
-                    casts.append({"column": col, "type": "xsd:string"})
-            return casts
-        properties = schema_json.get("properties")
-        if isinstance(properties, dict):
-            return [{"column": name, "type": "xsd:string"} for name in properties.keys() if name]
-        return []
-
     def _sql_ident(self, name: str) -> str:
         return f"`{str(name).replace('`', '``')}`"
 
@@ -3835,9 +3813,9 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
 
     def _apply_schema_casts(self, df: DataFrame, *, dataset: Any, version: Any) -> DataFrame:
         schema_json = getattr(dataset, "schema_json", None)
-        casts = self._extract_schema_casts(schema_json)
+        casts = extract_schema_casts(schema_json)
         if not casts and version is not None:
-            casts = self._extract_schema_casts(getattr(version, "sample_json", None))
+            casts = extract_schema_casts(getattr(version, "sample_json", None))
         if not casts:
             return df
         return self._apply_casts(df, casts)

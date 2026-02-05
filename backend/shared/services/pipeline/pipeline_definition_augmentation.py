@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Optional
 from shared.services.pipeline.pipeline_dataset_utils import normalize_dataset_selection, resolve_dataset_version
 from shared.services.pipeline.pipeline_definition_utils import split_expectation_columns
 from shared.services.pipeline.pipeline_graph_utils import normalize_edges, unique_node_id
-from shared.services.pipeline.pipeline_schema_utils import normalize_schema_type
+from shared.services.pipeline.pipeline_schema_casts import extract_schema_casts
 from shared.services.pipeline.pipeline_transform_spec import normalize_operation
 from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.utils.time_utils import utcnow
@@ -499,30 +499,6 @@ def augment_definition_with_canonical_contract(
     return updated_definition
 
 
-def _extract_schema_casts(schema_json: Any) -> List[Dict[str, str]]:
-    if not isinstance(schema_json, dict):
-        return []
-    columns = schema_json.get("columns")
-    if not isinstance(columns, list):
-        columns = schema_json.get("fields")
-    if isinstance(columns, list):
-        casts: List[Dict[str, str]] = []
-        for col in columns:
-            if isinstance(col, dict):
-                name = str(col.get("name") or "").strip()
-                if not name:
-                    continue
-                cast_type = normalize_schema_type(col.get("type") or col.get("data_type"))
-                casts.append({"column": name, "type": cast_type or "xsd:string"})
-            elif isinstance(col, str):
-                casts.append({"column": col, "type": "xsd:string"})
-        return casts
-    properties = schema_json.get("properties")
-    if isinstance(properties, dict):
-        return [{"column": name, "type": "xsd:string"} for name in properties.keys() if name]
-    return []
-
-
 def _is_cast_transform(node: Dict[str, Any]) -> bool:
     if not isinstance(node, dict):
         return False
@@ -581,7 +557,7 @@ async def augment_definition_with_casts(
         schema_json = getattr(dataset, "schema_json", None) if dataset else None
         if not schema_json and version is not None:
             schema_json = getattr(version, "sample_json", None)
-        casts = _extract_schema_casts(schema_json)
+        casts = extract_schema_casts(schema_json)
         if not casts:
             continue
 
@@ -617,4 +593,3 @@ async def augment_definition_with_casts(
     updated_definition["nodes"] = nodes
     updated_definition["edges"] = edges
     return updated_definition
-
