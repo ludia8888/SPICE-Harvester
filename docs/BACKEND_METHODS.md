@@ -1,6 +1,6 @@
 # Backend Method Index
 
-> Generated: 2026-02-06T01:02:33+09:00
+> Generated: 2026-02-06T01:08:52+09:00
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 
 ## action_outbox_worker
@@ -6895,27 +6895,27 @@
 
 ### `backend/shared/services/events/dlq_handler_fixed.py`
 - **Classes**
-  - `RetryStrategy` (line 27): Retry strategies for failed messages
-  - `RetryPolicy` (line 36): Configuration for retry behavior
-  - `FailedMessage` (line 47): Representation of a failed message
-    - `is_poison(self)` (line 63): Check if message should be considered poison
-    - `age_hours(self)` (line 75): Get age of the message in hours
-    - `calculate_next_retry_time(self, policy)` (line 80): Calculate when this message should be retried
-  - `DLQHandlerFixed` (line 100): FIXED: Handles Dead Letter Queue processing with intelligent retry
-    - `__init__(self, dlq_topic, kafka_config, redis_client, retry_policy, poison_topic, consumer_group)` (line 112): Initialize DLQ handler
-    - `register_processor(self, topic, processor)` (line 155): Register a message processor for a specific topic
-    - `async start_processing(self)` (line 160): Start processing DLQ messages
-    - `async stop_processing(self)` (line 189): Stop processing DLQ messages
-    - `_poll_message(self, timeout)` (line 208): Poll for message in thread (blocking operation)
-    - `async _process_loop(self)` (line 212): Main DLQ processing loop - FIXED to not block event loop
-    - `async _process_dlq_message(self, msg)` (line 241): Process a message from the DLQ
-    - `async _retry_scheduler(self)` (line 289): Background task to retry messages when their time comes
-    - `async _retry_message(self, failed_msg)` (line 316): Retry a failed message
-    - `async _add_to_retry_queue(self, failed_msg)` (line 360): Add message to retry queue
-    - `async _move_to_poison_queue(self, failed_msg)` (line 386): Move message to poison queue
-    - `async _record_recovery(self, failed_msg)` (line 422): Record successful recovery metrics
-    - `_generate_message_id(self, value)` (line 438): Generate unique ID for a message
-    - `async get_metrics(self)` (line 442): Get current metrics
+  - `RetryStrategy` (line 30): Retry strategies for failed messages
+  - `RetryPolicy` (line 39): Configuration for retry behavior
+  - `FailedMessage` (line 50): Representation of a failed message
+    - `is_poison(self)` (line 66): Check if message should be considered poison
+    - `age_hours(self)` (line 78): Get age of the message in hours
+    - `calculate_next_retry_time(self, policy)` (line 83): Calculate when this message should be retried
+  - `DLQHandlerFixed` (line 103): FIXED: Handles Dead Letter Queue processing with intelligent retry
+    - `__init__(self, dlq_topic, kafka_config, redis_client, retry_policy, poison_topic, consumer_group)` (line 115): Initialize DLQ handler
+    - `register_processor(self, topic, processor)` (line 158): Register a message processor for a specific topic
+    - `async start_processing(self)` (line 163): Start processing DLQ messages
+    - `async stop_processing(self)` (line 201): Stop processing DLQ messages
+    - `_poll_message(self, timeout)` (line 220): Poll for message in thread (blocking operation)
+    - `async _process_loop(self)` (line 224): Main DLQ processing loop - FIXED to not block event loop
+    - `async _process_dlq_message(self, msg)` (line 254): Process a message from the DLQ
+    - `async _retry_scheduler(self)` (line 302): Background task to retry messages when their time comes
+    - `async _retry_message(self, failed_msg)` (line 329): Retry a failed message
+    - `async _add_to_retry_queue(self, failed_msg)` (line 373): Add message to retry queue
+    - `async _move_to_poison_queue(self, failed_msg)` (line 399): Move message to poison queue
+    - `async _record_recovery(self, failed_msg)` (line 435): Record successful recovery metrics
+    - `_generate_message_id(self, value)` (line 451): Generate unique ID for a message
+    - `async get_metrics(self)` (line 455): Get current metrics
 
 ### `backend/shared/services/events/event_replay.py`
 - **Functions**
