@@ -27,6 +27,7 @@ from confluent_kafka import KafkaError, TopicPartition
 
 from shared.models.event_envelope import EventEnvelope
 from shared.observability.context_propagation import attach_context_from_kafka
+from shared.services.kafka.consumer_ops import InlineKafkaConsumerOps, KafkaConsumerOps
 from shared.services.registries.processed_event_heartbeat import run_processed_event_heartbeat_loop
 from shared.services.registries.processed_event_registry import (
     ClaimDecision,
@@ -67,6 +68,7 @@ class ProcessedEventKafkaWorker(Generic[PayloadT, ResultT], ABC):
 
     # --- Required wiring (provided by concrete worker instances) ---
     consumer: Any  # SafeKafkaConsumer
+    consumer_ops: Optional[KafkaConsumerOps]
     processed: Optional[ProcessedEventRegistry]
     handler: str
     max_retries: int
@@ -226,6 +228,8 @@ class ProcessedEventKafkaWorker(Generic[PayloadT, ResultT], ABC):
     async def _commit(self, msg: Any) -> None:
         if not getattr(self, "consumer", None):
             return
+        if not hasattr(self, "_revoked_partitions"):
+            self._init_partition_state(reset=False)
         key = self._partition_key(msg)
         if key in self._revoked_partitions:
             logger.info(
@@ -236,11 +240,13 @@ class ProcessedEventKafkaWorker(Generic[PayloadT, ResultT], ABC):
                 int(msg.offset()),
             )
             return
-        self.consumer.commit_sync(msg)
+        await self._get_consumer_ops().commit_sync(msg)
 
     async def _seek(self, *, topic: str, partition: int, offset: int) -> None:
         if not getattr(self, "consumer", None):
             return
+        if not hasattr(self, "_revoked_partitions"):
+            self._init_partition_state(reset=False)
         key: PartitionKey = (str(topic), int(partition))
         if key in self._revoked_partitions:
             logger.info(
@@ -251,7 +257,7 @@ class ProcessedEventKafkaWorker(Generic[PayloadT, ResultT], ABC):
                 int(offset),
             )
             return
-        self.consumer.seek(TopicPartition(topic, partition, offset))
+        await self._get_consumer_ops().seek(TopicPartition(topic, partition, offset))
 
     def _heartbeat_options(self) -> HeartbeatOptions:
         return HeartbeatOptions()
@@ -275,7 +281,18 @@ class ProcessedEventKafkaWorker(Generic[PayloadT, ResultT], ABC):
             return await poller(timeout)
         if not getattr(self, "consumer", None):
             return None
-        return await asyncio.to_thread(self.consumer.poll, timeout)
+        return await self._get_consumer_ops().poll(timeout=timeout)
+
+    def _get_consumer_ops(self) -> KafkaConsumerOps:
+        ops = getattr(self, "consumer_ops", None)
+        if ops is not None:
+            return ops
+        consumer = getattr(self, "consumer", None)
+        if consumer is None:
+            raise RuntimeError("consumer not initialized")
+        ops = InlineKafkaConsumerOps(consumer)
+        setattr(self, "consumer_ops", ops)
+        return ops
 
     def _is_partition_eof(self, msg: Any) -> bool:
         try:
@@ -498,6 +515,7 @@ class ProcessedEventKafkaWorker(Generic[PayloadT, ResultT], ABC):
         seek_on_error: bool = True,
         catch_exceptions: bool = True,
     ) -> None:
+        self._init_partition_state(reset=False)
         while self.running:
             if not getattr(self, "consumer", None):
                 if missing_consumer_sleep:

@@ -150,6 +150,10 @@ class _FakeConsumer:
         self.commit_calls.append({"msg": msg, "async": asynchronous})
         self.worker.running = False
 
+    def commit_sync(self, msg):  # noqa: ANN001
+        self.commit_calls.append({"msg": msg, "async": False})
+        self.worker.running = False
+
 
 @pytest.mark.asyncio
 async def test_sync_worker_bff_scope_headers() -> None:

@@ -19,14 +19,13 @@ import json
 import logging
 import os
 import time
-from concurrent.futures import ThreadPoolExecutor
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional, Set, List, Union
 from uuid import uuid4
 
-from confluent_kafka import Producer, TopicPartition
+from confluent_kafka import Producer
 import boto3
 import httpx
 from botocore.exceptions import ClientError
@@ -47,6 +46,7 @@ from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
 from shared.security.auth_utils import BFF_TOKEN_ENV_KEYS, get_expected_token
 from shared.security.input_sanitizer import validate_branch_name, validate_class_id, validate_instance_id
+from shared.services.kafka.consumer_ops import ExecutorKafkaConsumerOps
 from shared.services.kafka.processed_event_worker import RegistryKey, StrictHeartbeatKafkaWorker
 from shared.services.registries.processed_event_registry import (
     ProcessedEventRegistry,
@@ -58,7 +58,6 @@ from shared.services.registries.lineage_store import LineageStore
 from shared.services.core.audit_log_store import AuditLogStore
 from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.utils.chaos import maybe_crash
-from shared.utils.executor_utils import call_in_executor
 from shared.utils.ontology_version import normalize_ontology_version, resolve_ontology_version
 from shared.utils.app_logger import configure_logging
 from shared.utils.deterministic_ids import deterministic_uuid5_hex_prefix, deterministic_uuid5_str
@@ -147,7 +146,7 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
         self.audit_store: Optional[AuditLogStore] = None
         self.dataset_registry: Optional[DatasetRegistry] = None
         self.bff_http: Optional[httpx.AsyncClient] = None
-        self._consumer_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="instance-worker-kafka")
+        self.consumer_ops = None
         self.tracing = get_tracing_service(self.service_name)
         self.metrics = get_metrics_collector(self.service_name)
         self.run_id = settings.observability.run_id
@@ -192,13 +191,16 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
         
         # Kafka Consumer (strong consistency: read_committed + rebalance-safe offsets)
         group_id = (AppConfig.INSTANCE_WORKER_GROUP or "instance-worker-group").strip()
-        self.consumer = await self._consumer_call(
-            create_safe_consumer,
-            group_id,
-            [AppConfig.INSTANCE_COMMANDS_TOPIC],
-            "instance-worker",
+        self.consumer = create_safe_consumer(
+            group_id=group_id,
+            topics=[AppConfig.INSTANCE_COMMANDS_TOPIC],
+            service_name="instance-worker",
             max_poll_interval_ms=300000,
             session_timeout_ms=45000,
+        )
+        self.consumer_ops = ExecutorKafkaConsumerOps(
+            self.consumer,
+            thread_name_prefix="instance-worker-kafka",
         )
         logger.info(f"Using consumer group: {group_id}")
         
@@ -327,14 +329,6 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
     async def _s3_read_body(self, body) -> bytes:
         return await asyncio.to_thread(body.read)
 
-    async def _consumer_call(self, func, *args, **kwargs):
-        return await call_in_executor(self._consumer_executor, func, *args, **kwargs)
-
-    async def _poll_message(self, *, timeout: float) -> Any:
-        if not self.consumer:
-            return None
-        return await self._consumer_call(self.consumer.poll, timeout=timeout)
-        
     def _extract_payload_from_message(self, message: Dict[str, Any]) -> Dict[str, Any]:
         """
         Unwrap a command from the canonical EventEnvelope message.
@@ -2969,16 +2963,6 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
             cap = max(1, int(self.untyped_ref_backoff_max_seconds))
         return min(cap, int(2 ** max(attempt_count - 1, 0)))
 
-    async def _commit(self, msg: Any) -> None:  # type: ignore[override]
-        if not self.consumer:
-            return
-        await self._consumer_call(self.consumer.commit, msg, asynchronous=False)
-
-    async def _seek(self, *, topic: str, partition: int, offset: int) -> None:  # type: ignore[override]
-        if not self.consumer:
-            return
-        await self._consumer_call(self.consumer.seek, TopicPartition(topic, partition, offset))
-
     async def _on_parse_error(self, *, msg: Any, raw_payload: Optional[str], error: Exception) -> None:  # type: ignore[override]
         stage = "parse"
         payload_text = raw_payload
@@ -3112,8 +3096,13 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
         logger.info("Shutting down STRICT Instance Worker...")
         self.running = False
         
-        if self.consumer:
-            await self._consumer_call(self.consumer.close)
+        if self.consumer_ops:
+            await self.consumer_ops.close()
+            self.consumer_ops = None
+            self.consumer = None
+        elif self.consumer:
+            self.consumer.close()
+            self.consumer = None
         if self.producer:
             self.producer.flush()
         if self.redis_client:
@@ -3126,7 +3115,6 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
             await self.dataset_registry.close()
         if self.bff_http:
             await self.bff_http.aclose()
-        self._consumer_executor.shutdown(wait=True, cancel_futures=True)
             
 
 async def main():

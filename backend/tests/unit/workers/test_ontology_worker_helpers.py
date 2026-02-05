@@ -5,6 +5,7 @@ import asyncio
 import pytest
 
 from ontology_worker.main import OntologyWorker
+from shared.services.kafka.consumer_ops import InlineKafkaConsumerOps
 
 
 class _StubTerminus:
@@ -33,14 +34,17 @@ async def test_wait_for_database_exists_timeout() -> None:
 
 
 @pytest.mark.asyncio
-async def test_consumer_call_executes() -> None:
+async def test_consumer_ops_defaults_to_inline() -> None:
     worker = OntologyWorker()
 
-    def add(a, b):
-        return a + b
+    class _StubConsumer:
+        def poll(self, timeout):
+            return ("ok", timeout)
 
-    result = await worker._consumer_call(add, 1, 2)
-    assert result == 3
+    worker.consumer = _StubConsumer()
+    ops = worker._get_consumer_ops()
+    assert isinstance(ops, InlineKafkaConsumerOps)
+    assert await ops.poll(timeout=0.0) == ("ok", 0.0)
 
 
 @pytest.mark.asyncio

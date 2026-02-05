@@ -7,13 +7,12 @@ import asyncio
 import json
 import logging
 import os
-from concurrent.futures import ThreadPoolExecutor
 import signal
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any
-from confluent_kafka import Producer, TopicPartition
+from confluent_kafka import Producer
 
 from shared.config.app_config import AppConfig
 from shared.config.settings import get_settings
@@ -31,6 +30,7 @@ from oms.services.async_terminus import AsyncTerminusService
 from oms.services.event_store import EventStore
 from shared.services.storage.redis_service import RedisService, create_redis_service
 from shared.services.core.command_status_service import CommandStatus, CommandStatusService
+from shared.services.kafka.consumer_ops import ExecutorKafkaConsumerOps
 from shared.services.kafka.processed_event_worker import RegistryKey, StrictHeartbeatKafkaWorker
 from shared.services.kafka.producer_factory import create_kafka_producer
 from shared.services.registries.processed_event_registry import (
@@ -42,7 +42,6 @@ from shared.services.core.audit_log_store import AuditLogStore
 from shared.services.registries.ontology_key_spec_registry import OntologyKeySpecRegistry
 from shared.services.registries.processed_event_registry_factory import create_processed_event_registry
 from shared.security.input_sanitizer import validate_branch_name
-from shared.utils.executor_utils import call_in_executor
 from shared.utils.spice_event_ids import spice_event_id
 from shared.utils.ontology_version import resolve_ontology_version
 from oms.exceptions import DuplicateOntologyError, DatabaseError
@@ -124,7 +123,7 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
         self.metrics_collector = None
         self.tracing = None
         self.metrics = None
-        self._consumer_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="ontology-worker-kafka")
+        self.consumer_ops = None
 
     @staticmethod
     def _extract_key_spec_from_payload(payload: Dict[str, Any]) -> tuple[list[str], list[str]]:
@@ -180,14 +179,6 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
             f"Database '{db_name}' existence check timed out (expected={expected}, last_exists={last})"
         )
 
-    async def _consumer_call(self, func, *args, **kwargs):
-        return await call_in_executor(self._consumer_executor, func, *args, **kwargs)
-
-    async def _poll_message(self, *, timeout: float) -> Any:
-        if not self.consumer:
-            return None
-        return await self._consumer_call(self.consumer.poll, timeout=timeout)
-        
     async def initialize(self):
         """워커 초기화"""
         settings = get_settings()
@@ -195,13 +186,16 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
         group_id = (AppConfig.ONTOLOGY_WORKER_GROUP or "ontology-worker-group").strip()
 
         # Kafka Consumer (strong consistency: read_committed + rebalance-safe offsets)
-        self.consumer = await self._consumer_call(
-            create_safe_consumer,
-            group_id,
-            [AppConfig.ONTOLOGY_COMMANDS_TOPIC, AppConfig.DATABASE_COMMANDS_TOPIC],
-            "ontology-worker",
+        self.consumer = create_safe_consumer(
+            group_id=group_id,
+            topics=[AppConfig.ONTOLOGY_COMMANDS_TOPIC, AppConfig.DATABASE_COMMANDS_TOPIC],
+            service_name="ontology-worker",
             max_poll_interval_ms=300000,
             session_timeout_ms=45000,
+        )
+        self.consumer_ops = ExecutorKafkaConsumerOps(
+            self.consumer,
+            thread_name_prefix="ontology-worker-kafka",
         )
         
         # Kafka Producer 설정 (Event 발행용)
@@ -1329,16 +1323,6 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
         ]
         return not any(marker in msg for marker in non_retryable_markers)
 
-    async def _commit(self, msg: Any) -> None:  # type: ignore[override]
-        if not self.consumer:
-            return
-        await self._consumer_call(self.consumer.commit_sync, msg)
-
-    async def _seek(self, *, topic: str, partition: int, offset: int) -> None:  # type: ignore[override]
-        if not self.consumer:
-            return
-        await self._consumer_call(self.consumer.seek, TopicPartition(topic, partition, offset))
-
     async def _on_parse_error(self, *, msg: Any, raw_payload: Optional[str], error: Exception) -> None:  # type: ignore[override]
         stage = "parse"
         payload_text = raw_payload
@@ -1444,8 +1428,13 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
         logger.info("Shutting down Ontology Worker...")
         self.running = False
         
-        if self.consumer:
-            await self._consumer_call(self.consumer.close)
+        if self.consumer_ops:
+            await self.consumer_ops.close()
+            self.consumer_ops = None
+            self.consumer = None
+        elif self.consumer:
+            self.consumer.close()
+            self.consumer = None
             
         if self.terminus_service:
             await self.terminus_service.disconnect()
@@ -1458,7 +1447,6 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
         if self.key_spec_registry:
             with suppress(Exception):
                 await self.key_spec_registry.close()
-        self._consumer_executor.shutdown(wait=True, cancel_futures=True)
             
         logger.info("Ontology Worker shut down successfully")
 

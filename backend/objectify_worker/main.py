@@ -573,11 +573,6 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
             await self._cancel_inflight_tasks()
             await self.close()
 
-    async def _poll_message(self, *, timeout: float) -> Any:  # type: ignore[override]
-        if not self.consumer:
-            return None
-        return self.consumer.poll(timeout)
-
     # --- ProcessedEventKafkaWorker Strategy hooks ---
     def _parse_payload(self, payload: Any) -> ObjectifyJob:  # type: ignore[override]
         return ObjectifyJob.model_validate_json(payload)

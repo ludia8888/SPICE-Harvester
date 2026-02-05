@@ -583,11 +583,6 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
     def _uses_commit_state(self) -> bool:  # type: ignore[override]
         return True
 
-    async def _poll_message(self, *, timeout: float) -> Any:  # type: ignore[override]
-        if not self.consumer:
-            return None
-        return self.consumer.poll(timeout)
-
     def _parse_payload(self, payload: Any) -> PipelineJob:  # type: ignore[override]
         if not isinstance(payload, (bytes, bytearray)):
             raise _PipelinePayloadParseError(

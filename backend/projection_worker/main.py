@@ -7,13 +7,12 @@ import asyncio
 import json
 import logging
 import os
-from concurrent.futures import ThreadPoolExecutor
 import signal
 from contextlib import suppress
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
 
-from confluent_kafka import Producer, TopicPartition
+from confluent_kafka import Producer
 
 from shared.config.search_config import (
     get_instances_index_name,
@@ -40,13 +39,13 @@ from shared.services.kafka.safe_consumer import SafeKafkaConsumer, create_safe_c
 from shared.services.registries.lineage_store import LineageStore
 from shared.services.core.audit_log_store import AuditLogStore
 from shared.services.registries.processed_event_registry_factory import create_processed_event_registry
+from shared.services.kafka.consumer_ops import ExecutorKafkaConsumerOps
 from shared.utils.chaos import maybe_crash
 from shared.utils.ontology_version import split_ref_commit
 from shared.utils.language import coerce_localized_text, select_localized_text, get_default_language
 from shared.utils.resource_rid import strip_rid_revision
 from shared.utils.writeback_paths import ref_key, writeback_patchset_key
 from shared.utils.writeback_lifecycle import overlay_doc_id
-from shared.utils.executor_utils import call_in_executor
 
 # Observability imports
 from shared.observability.tracing import get_tracing_service
@@ -83,7 +82,7 @@ class ProjectionWorker(StrictHeartbeatEventEnvelopeKafkaWorker[None]):
         self.projection_manager: Optional[ProjectionManager] = None
         self.tracing_service = None
         self.metrics_collector = None
-        self._consumer_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="projection-worker-kafka")
+        self.consumer_ops = None
         self.lakefs_storage: Optional[LakeFSStorageService] = None
 
         # Durable idempotency (Postgres)
@@ -350,14 +349,6 @@ class ProjectionWorker(StrictHeartbeatEventEnvelopeKafkaWorker[None]):
                 )
             except Exception as e:
                 logger.debug(f"Lineage record failed (non-fatal): {e}")
-
-    async def _consumer_call(self, func, *args, **kwargs):
-        return await call_in_executor(self._consumer_executor, func, *args, **kwargs)
-
-    async def _poll_message(self, *, timeout: float) -> Any:
-        if not self.consumer:
-            return None
-        return await self._consumer_call(self.consumer.poll, timeout=timeout)
         
     async def initialize(self):
         """워커 초기화"""
@@ -367,13 +358,16 @@ class ProjectionWorker(StrictHeartbeatEventEnvelopeKafkaWorker[None]):
 
         # Kafka Consumer (strong consistency: read_committed + rebalance-safe offsets)
         topics = [AppConfig.INSTANCE_EVENTS_TOPIC, AppConfig.ONTOLOGY_EVENTS_TOPIC, AppConfig.ACTION_EVENTS_TOPIC]
-        self.consumer = await self._consumer_call(
-            create_safe_consumer,
-            group_id,
-            topics,
-            "projection-worker",
+        self.consumer = create_safe_consumer(
+            group_id=group_id,
+            topics=topics,
+            service_name="projection-worker",
             max_poll_interval_ms=300000,
             session_timeout_ms=45000,
+        )
+        self.consumer_ops = ExecutorKafkaConsumerOps(
+            self.consumer,
+            thread_name_prefix="projection-worker-kafka",
         )
         
         # Kafka Producer 설정 (실패 이벤트 발행용)
@@ -713,12 +707,7 @@ class ProjectionWorker(StrictHeartbeatEventEnvelopeKafkaWorker[None]):
         if not self.consumer:
             return
         maybe_crash("projection_worker:before_commit", logger=logger)
-        await self._consumer_call(self.consumer.commit_sync, msg)
-
-    async def _seek(self, *, topic: str, partition: int, offset: int) -> None:  # type: ignore[override]
-        if not self.consumer:
-            return
-        await self._consumer_call(self.consumer.seek, TopicPartition(topic, partition, offset))
+        await super()._commit(msg)
 
     async def _publish_to_dlq(
         self,
@@ -2710,9 +2699,13 @@ class ProjectionWorker(StrictHeartbeatEventEnvelopeKafkaWorker[None]):
         
         self.running = False
         
-        if self.consumer:
-            await self._consumer_call(self.consumer.close)
-        self._consumer_executor.shutdown(wait=True, cancel_futures=True)
+        if self.consumer_ops:
+            await self.consumer_ops.close()
+            self.consumer_ops = None
+            self.consumer = None
+        elif self.consumer:
+            self.consumer.close()
+            self.consumer = None
             
         if self.producer:
             self.producer.flush()

@@ -20,8 +20,9 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
-from confluent_kafka import Producer, TopicPartition
+from confluent_kafka import Producer
 
+from shared.services.kafka.consumer_ops import ExecutorKafkaConsumerOps
 from shared.services.kafka.safe_consumer import SafeKafkaConsumer, create_safe_consumer
 from shared.services.kafka.producer_factory import create_kafka_dlq_producer
 
@@ -132,6 +133,7 @@ class ActionWorker(StrictHeartbeatKafkaWorker[_ActionCommandPayload, None]):
         self.metrics = get_metrics_collector("action-worker")
         self.kafka_servers = settings.database.kafka_servers
         self.consumer: Optional[SafeKafkaConsumer] = None
+        self.consumer_ops = None
         self.dlq_producer: Optional[Producer] = None
         self.dlq_topic = AppConfig.ACTION_COMMANDS_DLQ_TOPIC
         self.dlq_flush_timeout_seconds = float(cfg.dlq_flush_timeout_seconds)
@@ -166,6 +168,10 @@ class ActionWorker(StrictHeartbeatKafkaWorker[_ActionCommandPayload, None]):
             session_timeout_ms=45000,
             on_revoke=self._on_partitions_revoked,
             on_assign=self._on_partitions_assigned,
+        )
+        self.consumer_ops = ExecutorKafkaConsumerOps(
+            self.consumer,
+            thread_name_prefix="action-worker-kafka",
         )
         self._rebalance_in_progress = False
         logger.info("ActionWorker subscribed to topic=%s group=%s", topic, group_id)
@@ -228,8 +234,13 @@ class ActionWorker(StrictHeartbeatKafkaWorker[_ActionCommandPayload, None]):
 
     async def shutdown(self) -> None:
         self.running = False
-        if self.consumer:
+        if self.consumer_ops:
+            await self.consumer_ops.close()
+            self.consumer_ops = None
+            self.consumer = None
+        elif self.consumer:
             self.consumer.close()
+            self.consumer = None
         if self.dlq_producer:
             try:
                 await asyncio.to_thread(self.dlq_producer.flush, self.dlq_flush_timeout_seconds)
@@ -242,11 +253,6 @@ class ActionWorker(StrictHeartbeatKafkaWorker[_ActionCommandPayload, None]):
             await self.dataset_registry.close()
         if self.terminus:
             await self.terminus.close()
-
-    async def _commit(self, msg: Any) -> None:
-        if not self.consumer:
-            return
-        await asyncio.to_thread(self.consumer.commit_sync, msg)
 
     def _parse_payload(self, payload: Any) -> _ActionCommandPayload:  # type: ignore[override]
         if not isinstance(payload, (bytes, bytearray)):
@@ -376,11 +382,6 @@ class ActionWorker(StrictHeartbeatKafkaWorker[_ActionCommandPayload, None]):
 
     def _metric_event_name(self, *, payload: _ActionCommandPayload) -> Optional[str]:  # type: ignore[override]
         return str(payload.envelope.event_type or "").strip() or None
-
-    async def _seek(self, *, topic: str, partition: int, offset: int) -> None:  # type: ignore[override]
-        if not self.consumer:
-            return
-        await asyncio.to_thread(self.consumer.seek, TopicPartition(topic, partition, offset))
 
     async def _on_parse_error(self, *, msg: Any, raw_payload: Optional[str], error: Exception) -> None:  # type: ignore[override]
         stage = "parse"
