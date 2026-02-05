@@ -32,6 +32,7 @@ from oms.services.event_store import EventStore
 from shared.services.storage.redis_service import RedisService, create_redis_service
 from shared.services.core.command_status_service import CommandStatus, CommandStatusService
 from shared.services.kafka.processed_event_worker import HeartbeatOptions, ProcessedEventKafkaWorker, RegistryKey
+from shared.services.kafka.producer_factory import create_kafka_producer
 from shared.services.registries.processed_event_registry import (
     ProcessedEventRegistry,
     validate_registry_enabled,
@@ -207,13 +208,10 @@ class OntologyWorker(ProcessedEventKafkaWorker[_OntologyCommandPayload, None]):
         )
         
         # Kafka Producer 설정 (Event 발행용)
-        self.producer = Producer({
-            'bootstrap.servers': self.kafka_servers,
-            'client.id': 'ontology-worker',
-            'acks': 'all',
-            'retries': 3,
-            'compression.type': 'snappy',
-        })
+        self.producer = create_kafka_producer(
+            bootstrap_servers=self.kafka_servers,
+            client_id="ontology-worker",
+        )
         self.dlq_producer = self.producer
         
         # TerminusDB 연결 설정 - 올바른 인증 정보 사용

@@ -25,6 +25,7 @@ from shared.services.kafka.processed_event_worker import (
     ProcessedEventKafkaWorker,
     RegistryKey,
 )
+from shared.services.kafka.producer_factory import create_kafka_dlq_producer
 from shared.services.kafka.safe_consumer import SafeKafkaConsumer
 
 from shared.config.app_config import AppConfig
@@ -510,16 +511,9 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
         )
         self._init_partition_state(reset=True)
 
-        self.dlq_producer = Producer(
-            {
-                "bootstrap.servers": settings.database.kafka_servers,
-                "client.id": settings.observability.service_name or "objectify-worker",
-                "acks": "all",
-                "retries": 3,
-                "retry.backoff.ms": 100,
-                "linger.ms": 20,
-                "compression.type": "snappy",
-            }
+        self.dlq_producer = create_kafka_dlq_producer(
+            bootstrap_servers=settings.database.kafka_servers,
+            client_id=settings.observability.service_name or "objectify-worker",
         )
 
     def _on_partitions_revoked(self, partitions: list) -> None:

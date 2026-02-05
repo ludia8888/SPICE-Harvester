@@ -37,6 +37,7 @@ from shared.services.registries.processed_event_registry import (
     validate_lease_settings,
 )
 from shared.services.kafka.processed_event_worker import EventEnvelopeKafkaWorker, HeartbeatOptions, RegistryKey
+from shared.services.kafka.producer_factory import create_kafka_producer
 from shared.services.kafka.safe_consumer import SafeKafkaConsumer
 from shared.services.registries.lineage_store import LineageStore
 from shared.services.core.audit_log_store import AuditLogStore
@@ -379,13 +380,10 @@ class ProjectionWorker(EventEnvelopeKafkaWorker[None]):
         )
         
         # Kafka Producer 설정 (실패 이벤트 발행용)
-        self.producer = Producer({
-            'bootstrap.servers': self.kafka_servers,
-            'client.id': 'projection-worker',
-            'acks': 'all',
-            'retries': 3,
-            'compression.type': 'snappy',
-        })
+        self.producer = create_kafka_producer(
+            bootstrap_servers=self.kafka_servers,
+            client_id="projection-worker",
+        )
         
         # Redis 연결 설정 (온톨로지 캐싱용)
         self.redis_service = create_redis_service(settings)

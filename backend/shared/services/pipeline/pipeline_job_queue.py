@@ -17,6 +17,7 @@ from shared.config.app_config import AppConfig
 from shared.config.settings import get_settings
 from shared.models.pipeline_job import PipelineJob
 from shared.observability.context_propagation import kafka_headers_with_dedup
+from shared.services.kafka.producer_factory import create_kafka_producer
 
 logger = logging.getLogger(__name__)
 
@@ -30,18 +31,13 @@ class PipelineJobQueue:
     def _producer_instance(self) -> Producer:
         if self._producer is None:
             service_name = get_settings().observability.service_name or "pipeline-job-queue"
-            self._producer = Producer(
-                {
-                    "bootstrap.servers": get_settings().database.kafka_servers,
-                    "client.id": service_name,
-                    "acks": "all",
-                    "retries": 3,
-                    "retry.backoff.ms": 100,
-                    "linger.ms": 10,
-                    "compression.type": "snappy",
-                    "enable.idempotence": True,
-                    "max.in.flight.requests.per.connection": 5,
-                }
+            self._producer = create_kafka_producer(
+                bootstrap_servers=get_settings().database.kafka_servers,
+                client_id=service_name,
+                retry_backoff_ms=100,
+                linger_ms=10,
+                enable_idempotence=True,
+                max_in_flight_requests_per_connection=5,
             )
         return self._producer
 

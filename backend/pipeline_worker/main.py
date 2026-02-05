@@ -56,6 +56,7 @@ from shared.observability.context_propagation import kafka_headers_from_current_
 from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
 from shared.services.kafka.processed_event_worker import HeartbeatOptions, ProcessedEventKafkaWorker, RegistryKey
+from shared.services.kafka.producer_factory import create_kafka_dlq_producer
 from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.services.storage.lakefs_client import LakeFSClient, LakeFSConflictError, LakeFSError
 from shared.services.storage.lakefs_storage_service import LakeFSStorageService
@@ -330,16 +331,9 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
         self._init_partition_state(reset=True)
         logger.info("PipelineWorker initialized (topic=%s)", self.topic)
 
-        self.dlq_producer = Producer(
-            {
-                "bootstrap.servers": settings.database.kafka_servers,
-                "client.id": self.service_name or "pipeline-worker-dlq",
-                "acks": "all",
-                "retries": 3,
-                "retry.backoff.ms": 100,
-                "linger.ms": 20,
-                "compression.type": "snappy",
-            }
+        self.dlq_producer = create_kafka_dlq_producer(
+            bootstrap_servers=settings.database.kafka_servers,
+            client_id=self.service_name or "pipeline-worker-dlq",
         )
 
     def _on_partitions_revoked(self, partitions: list) -> None:

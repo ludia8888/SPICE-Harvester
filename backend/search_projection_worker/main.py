@@ -23,6 +23,7 @@ from shared.observability.context_propagation import (
 from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
 from shared.services.kafka.processed_event_worker import EventEnvelopeKafkaWorker, HeartbeatOptions
+from shared.services.kafka.producer_factory import create_kafka_dlq_producer
 from shared.services.kafka.safe_consumer import SafeKafkaConsumer
 from shared.services.storage.elasticsearch_service import create_elasticsearch_service_legacy
 from shared.services.registries.processed_event_registry import ProcessedEventRegistry
@@ -85,16 +86,9 @@ class SearchProjectionWorker(EventEnvelopeKafkaWorker[None]):
         self._rebalance_in_progress = False
 
         service_name = settings.observability.service_name or self.service_name
-        self.dlq_producer = Producer(
-            {
-                "bootstrap.servers": settings.database.kafka_servers,
-                "client.id": service_name,
-                "acks": "all",
-                "retries": 3,
-                "retry.backoff.ms": 100,
-                "linger.ms": 20,
-                "compression.type": "snappy",
-            }
+        self.dlq_producer = create_kafka_dlq_producer(
+            bootstrap_servers=settings.database.kafka_servers,
+            client_id=service_name,
         )
 
     def _on_partitions_revoked(self, partitions: list) -> None:

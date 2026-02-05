@@ -23,6 +23,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from confluent_kafka import Producer, TopicPartition
 
 from shared.services.kafka.safe_consumer import SafeKafkaConsumer
+from shared.services.kafka.producer_factory import create_kafka_dlq_producer
 
 from oms.services.async_terminus import AsyncTerminusService
 from oms.services.ontology_resources import OntologyResourceService
@@ -173,18 +174,14 @@ class ActionWorker(ProcessedEventKafkaWorker[_ActionCommandPayload, None]):
         settings = get_settings()
         cfg = settings.workers.action
         service_name = settings.observability.service_name or "action-worker-dlq"
-        self.dlq_producer = Producer(
-            {
-                "bootstrap.servers": self.kafka_servers,
-                "client.id": service_name,
-                "acks": "all",
-                "retries": int(cfg.dlq_retries),
-                "retry.backoff.ms": 250,
-                "linger.ms": 10,
-                "compression.type": "snappy",
-                "enable.idempotence": True,
-                "max.in.flight.requests.per.connection": 5,
-            }
+        self.dlq_producer = create_kafka_dlq_producer(
+            bootstrap_servers=self.kafka_servers,
+            client_id=service_name,
+            retries=int(cfg.dlq_retries),
+            retry_backoff_ms=250,
+            linger_ms=10,
+            enable_idempotence=True,
+            max_in_flight_requests_per_connection=5,
         )
 
         self.processed_event_registry = ProcessedEventRegistry()

@@ -37,6 +37,7 @@ from shared.observability.context_propagation import (
 from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
 from shared.services.kafka.processed_event_worker import EventEnvelopeKafkaWorker, HeartbeatOptions
+from shared.services.kafka.producer_factory import create_kafka_dlq_producer
 from shared.services.kafka.safe_consumer import SafeKafkaConsumer
 from shared.services.registries.connector_registry import ConnectorRegistry
 from shared.services.registries.lineage_store import LineageStore
@@ -134,16 +135,9 @@ class ConnectorSyncWorker(EventEnvelopeKafkaWorker[Optional[str]]):
         self._rebalance_in_progress = False
 
         # DLQ producer (best-effort)
-        self.dlq_producer = Producer(
-            {
-                "bootstrap.servers": settings.database.kafka_servers,
-                "client.id": settings.observability.service_name or "connector-sync-worker",
-                "acks": "all",
-                "retries": 3,
-                "retry.backoff.ms": 100,
-                "linger.ms": 20,
-                "compression.type": "snappy",
-            }
+        self.dlq_producer = create_kafka_dlq_producer(
+            bootstrap_servers=settings.database.kafka_servers,
+            client_id=settings.observability.service_name or "connector-sync-worker",
         )
 
         logger.info(f"✅ ConnectorSyncWorker initialized (topic={self.topic}, group={self.group_id})")
