@@ -5,31 +5,28 @@ Ontology deployment registry (Postgres SSoT).
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
 from oms.database.postgres import db as postgres_db
+from oms.services.ontology_deploy_outbox_store import (
+    OntologyDeployOutboxItem,
+    OntologyDeployOutboxStore,
+    OntologyDeployOutboxTableSpec,
+)
 from shared.config.app_config import AppConfig
 from shared.utils.deterministic_ids import deterministic_uuid5_str
 
 logger = logging.getLogger(__name__)
 
-
-@dataclass
-class OntologyDeployOutboxItem:
-    outbox_id: str
-    deployment_id: str
-    payload: Dict[str, Any]
-    status: str
-    publish_attempts: int
-    error: Optional[str]
-    claimed_by: Optional[str]
-    claimed_at: Optional[datetime]
-    next_attempt_at: Optional[datetime]
-    created_at: datetime
-    updated_at: datetime
+_OUTBOX_STORE = OntologyDeployOutboxStore(
+    table=OntologyDeployOutboxTableSpec(
+        table_name="ontology_deploy_outbox",
+        attempts_column="publish_attempts",
+        error_column="error",
+    )
+)
 
 
 class OntologyDeploymentRegistry:
@@ -219,83 +216,14 @@ class OntologyDeploymentRegistry:
         claimed_by: Optional[str] = None,
         claim_timeout_seconds: int = 300,
     ) -> List[OntologyDeployOutboxItem]:
-        async with postgres_db.transaction() as conn:
-            claim_timeout = max(0, int(claim_timeout_seconds))
-            clause = """
-                WHERE (
-                    status IN ('pending', 'failed')
-                    AND (next_attempt_at IS NULL OR next_attempt_at <= NOW())
-                )
-            """
-            values: List[Any] = [limit]
-            if claim_timeout > 0:
-                clause += f"""
-                    OR (
-                        status = 'publishing'
-                        AND (claimed_at IS NULL OR claimed_at <= NOW() - (${len(values) + 1}::int * INTERVAL '1 second'))
-                    )
-                """
-                values.append(claim_timeout)
-
-            rows = await conn.fetch(
-                f"""
-                SELECT outbox_id, deployment_id, payload, status, publish_attempts, error,
-                       claimed_by, claimed_at, next_attempt_at, created_at, updated_at
-                FROM ontology_deploy_outbox
-                {clause}
-                ORDER BY created_at ASC
-                LIMIT $1
-                FOR UPDATE SKIP LOCKED
-                """,
-                *values,
-            )
-            if not rows:
-                return []
-            outbox_ids = [str(row["outbox_id"]) for row in rows]
-            await conn.execute(
-                """
-                UPDATE ontology_deploy_outbox
-                SET status = 'publishing',
-                    publish_attempts = publish_attempts + 1,
-                    claimed_by = $2,
-                    claimed_at = NOW(),
-                    updated_at = NOW()
-                WHERE outbox_id = ANY($1::uuid[])
-                """,
-                outbox_ids,
-                claimed_by,
-            )
-            return [
-                OntologyDeployOutboxItem(
-                    outbox_id=str(row["outbox_id"]),
-                    deployment_id=str(row["deployment_id"]),
-                    payload=row["payload"] or {},
-                    status=str(row["status"]),
-                    publish_attempts=int(row["publish_attempts"]),
-                    error=row["error"],
-                    claimed_by=str(row["claimed_by"]) if row["claimed_by"] else None,
-                    claimed_at=row["claimed_at"],
-                    next_attempt_at=row["next_attempt_at"],
-                    created_at=row["created_at"],
-                    updated_at=row["updated_at"],
-                )
-                for row in rows
-            ]
+        return await _OUTBOX_STORE.claim_batch(
+            limit=limit,
+            claimed_by=claimed_by,
+            claim_timeout_seconds=claim_timeout_seconds,
+        )
 
     async def mark_outbox_published(self, *, outbox_id: str) -> None:
-        await postgres_db.execute(
-            """
-            UPDATE ontology_deploy_outbox
-            SET status = 'published',
-                updated_at = NOW(),
-                next_attempt_at = NULL,
-                error = NULL,
-                claimed_by = NULL,
-                claimed_at = NULL
-            WHERE outbox_id = $1::uuid
-            """,
-            outbox_id,
-        )
+        await _OUTBOX_STORE.mark_published(outbox_id=outbox_id)
 
     async def mark_outbox_failed(
         self,
@@ -304,19 +232,7 @@ class OntologyDeploymentRegistry:
         error: str,
         next_attempt_at: Optional[datetime] = None,
     ) -> None:
-        await postgres_db.execute(
-            """
-            UPDATE ontology_deploy_outbox
-            SET status = 'failed',
-                error = $2,
-                next_attempt_at = $3,
-                updated_at = NOW()
-            WHERE outbox_id = $1::uuid
-            """,
-            outbox_id,
-            error,
-            next_attempt_at,
-        )
+        await _OUTBOX_STORE.mark_failed(outbox_id=outbox_id, error=error, next_attempt_at=next_attempt_at)
 
     async def purge_outbox(self, *, retention_days: int, limit: int = 10000) -> int:
         if retention_days <= 0:

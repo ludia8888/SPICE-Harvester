@@ -18,7 +18,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from typing import Any, Dict, Optional
 
@@ -36,8 +35,10 @@ from shared.observability.context_propagation import (
 )
 from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
-from shared.services.kafka.processed_event_worker import EventEnvelopeKafkaWorker, HeartbeatOptions
+from shared.services.kafka.consumer_ops import ExecutorKafkaConsumerOps
+from shared.services.kafka.processed_event_worker import StrictHeartbeatEventEnvelopeKafkaWorker
 from shared.services.kafka.producer_factory import create_kafka_dlq_producer
+from shared.services.kafka.producer_ops import ExecutorKafkaProducerOps, KafkaProducerOps
 from shared.services.kafka.safe_consumer import SafeKafkaConsumer, create_safe_consumer
 from shared.services.registries.connector_registry import ConnectorRegistry
 from shared.services.registries.lineage_store import LineageStore
@@ -47,13 +48,12 @@ from shared.services.core.sheet_import_service import FieldMapping, SheetImportS
 from shared.security.auth_utils import BFF_TOKEN_ENV_KEYS, get_expected_token
 from shared.utils.app_logger import configure_logging
 from shared.utils.import_type_normalization import normalize_import_target_type
-from shared.utils.executor_utils import call_in_executor
 from shared.utils.time_utils import utcnow
 
 logger = logging.getLogger(__name__)
 
 
-class ConnectorSyncWorker(EventEnvelopeKafkaWorker[Optional[str]]):
+class ConnectorSyncWorker(StrictHeartbeatEventEnvelopeKafkaWorker[Optional[str]]):
     def __init__(self) -> None:
         settings = get_settings()
         cfg = settings.workers.connector_sync
@@ -72,27 +72,15 @@ class ConnectorSyncWorker(EventEnvelopeKafkaWorker[Optional[str]]):
         self.tracing = get_tracing_service(self.service_name)
         self.metrics = get_metrics_collector(self.service_name)
 
-        self._consumer_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="kafka-consumer")
-        self._producer_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="kafka-producer")
-
         self.consumer: Optional[SafeKafkaConsumer] = None
+        self.consumer_ops = None
         self.dlq_producer: Optional[Producer] = None
+        self.dlq_producer_ops: Optional[KafkaProducerOps] = None
         self.registry: Optional[ConnectorRegistry] = None
         self.processed: Optional[ProcessedEventRegistry] = None
         self.lineage: Optional[LineageStore] = None
         self.sheets: Optional[GoogleSheetsService] = None
         self.http: Optional[httpx.AsyncClient] = None
-
-    async def _consumer_call(self, func, *args, **kwargs):
-        return await call_in_executor(self._consumer_executor, func, *args, **kwargs)
-
-    async def _producer_call(self, func, *args, **kwargs):
-        return await call_in_executor(self._producer_executor, func, *args, **kwargs)
-
-    async def _poll_message(self, *, timeout: float) -> Any:
-        if not self.consumer:
-            return None
-        return await self._consumer_call(self.consumer.poll, timeout=timeout)
 
     async def initialize(self) -> None:
         settings = get_settings()
@@ -127,10 +115,12 @@ class ConnectorSyncWorker(EventEnvelopeKafkaWorker[Optional[str]]):
             group_id=self.group_id,
             topics=[self.topic],
             service_name="connector-sync-worker",
-            max_poll_interval_ms=300000,
-            session_timeout_ms=45000,
             on_revoke=self._on_partitions_revoked,
             on_assign=self._on_partitions_assigned,
+        )
+        self.consumer_ops = ExecutorKafkaConsumerOps(
+            self.consumer,
+            thread_name_prefix="connector-sync-worker-kafka",
         )
         self._rebalance_in_progress = False
 
@@ -139,24 +129,12 @@ class ConnectorSyncWorker(EventEnvelopeKafkaWorker[Optional[str]]):
             bootstrap_servers=settings.database.kafka_servers,
             client_id=settings.observability.service_name or "connector-sync-worker",
         )
+        self.dlq_producer_ops = ExecutorKafkaProducerOps(
+            self.dlq_producer,
+            thread_name_prefix="connector-sync-worker-kafka-producer",
+        )
 
         logger.info(f"✅ ConnectorSyncWorker initialized (topic={self.topic}, group={self.group_id})")
-
-    def _on_partitions_revoked(self, partitions: list) -> None:
-        """Handle partition revocation during rebalance."""
-        self._rebalance_in_progress = True
-        logger.info(
-            "Connector sync worker partitions revoked: %s",
-            [(p.topic, p.partition) for p in partitions],
-        )
-
-    def _on_partitions_assigned(self, partitions: list) -> None:
-        """Handle partition assignment during rebalance."""
-        self._rebalance_in_progress = False
-        logger.info(
-            "Connector sync worker partitions assigned: %s",
-            [(p.topic, p.partition) for p in partitions],
-        )
 
     async def close(self) -> None:
         if self.http:
@@ -174,27 +152,14 @@ class ConnectorSyncWorker(EventEnvelopeKafkaWorker[Optional[str]]):
         if self.registry:
             await self.registry.close()
             self.registry = None
-        if self.consumer:
+        await self._close_consumer_runtime()
+        if self.dlq_producer_ops:
             try:
-                await self._consumer_call(self.consumer.close)
-            except Exception as exc:
-                logger.warning("Kafka consumer close failed during shutdown: %s", exc, exc_info=True)
-            self.consumer = None
-        if self.dlq_producer:
-            try:
-                await self._producer_call(self.dlq_producer.flush, 5)
+                await self.dlq_producer_ops.close(timeout_s=5.0)
             except Exception as exc:
                 logger.warning("DLQ producer flush failed during shutdown: %s", exc, exc_info=True)
-            self.dlq_producer = None
-
-        self._consumer_executor.shutdown(wait=False, cancel_futures=True)
-        self._producer_executor.shutdown(wait=False, cancel_futures=True)
-
-    def _heartbeat_options(self) -> HeartbeatOptions:  # type: ignore[override]
-        return HeartbeatOptions(
-            stop_when_false=True,
-            continue_on_exception=False,
-        )
+            self.dlq_producer_ops = None
+        self.dlq_producer = None
 
     async def _send_to_dlq(  # type: ignore[override]
         self,
@@ -205,7 +170,7 @@ class ConnectorSyncWorker(EventEnvelopeKafkaWorker[Optional[str]]):
         error: str,
         attempt_count: int,
     ) -> None:
-        if not self.dlq_producer:
+        if not self.dlq_producer_ops:
             return
 
         dlq_env = payload.model_copy(deep=True)
@@ -238,14 +203,13 @@ class ConnectorSyncWorker(EventEnvelopeKafkaWorker[Optional[str]]):
                     "event.id": str(dlq_env.event_id),
                 },
             ):
-                await self._producer_call(
-                    self.dlq_producer.produce,
+                await self.dlq_producer_ops.produce(
                     topic=self.dlq_topic,
                     key=key,
                     value=value,
                     headers=headers or None,
                 )
-                await self._producer_call(self.dlq_producer.flush, 10)
+                await self.dlq_producer_ops.flush(10)
 
     # --- EventEnvelopeKafkaWorker hooks ---
     async def _process_payload(self, payload: EventEnvelope) -> Optional[str]:  # type: ignore[override]
@@ -268,18 +232,6 @@ class ConnectorSyncWorker(EventEnvelopeKafkaWorker[Optional[str]]):
 
     def _should_mark_done_after_dlq(self, *, payload: EventEnvelope, error: str) -> bool:  # type: ignore[override]
         return True
-
-    async def _commit(self, msg: Any) -> None:  # type: ignore[override]
-        if not self.consumer:
-            return
-        await self._consumer_call(self.consumer.commit, msg, asynchronous=False)
-
-    async def _seek(self, *, topic: str, partition: int, offset: int) -> None:  # type: ignore[override]
-        if not self.consumer:
-            return
-        from confluent_kafka import TopicPartition
-
-        await self._consumer_call(self.consumer.seek, TopicPartition(topic, partition, offset))
 
     async def _on_success(self, *, payload: EventEnvelope, result: Optional[str], duration_s: float) -> None:  # type: ignore[override]
         if self.registry:

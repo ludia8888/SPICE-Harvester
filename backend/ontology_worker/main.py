@@ -7,13 +7,12 @@ import asyncio
 import json
 import logging
 import os
-from concurrent.futures import ThreadPoolExecutor
 import signal
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any
-from confluent_kafka import Producer, TopicPartition
+from confluent_kafka import Producer
 
 from shared.config.app_config import AppConfig
 from shared.config.settings import get_settings
@@ -31,7 +30,9 @@ from oms.services.async_terminus import AsyncTerminusService
 from oms.services.event_store import EventStore
 from shared.services.storage.redis_service import RedisService, create_redis_service
 from shared.services.core.command_status_service import CommandStatus, CommandStatusService
-from shared.services.kafka.processed_event_worker import HeartbeatOptions, ProcessedEventKafkaWorker, RegistryKey
+from shared.services.kafka.consumer_ops import ExecutorKafkaConsumerOps
+from shared.services.kafka.dlq_publisher import DlqPublishSpec, build_standard_dlq_payload, publish_dlq_json
+from shared.services.kafka.processed_event_worker import RegistryKey, StrictHeartbeatKafkaWorker
 from shared.services.kafka.producer_factory import create_kafka_producer
 from shared.services.registries.processed_event_registry import (
     ProcessedEventRegistry,
@@ -40,9 +41,8 @@ from shared.services.kafka.safe_consumer import SafeKafkaConsumer, create_safe_c
 from shared.services.registries.lineage_store import LineageStore
 from shared.services.core.audit_log_store import AuditLogStore
 from shared.services.registries.ontology_key_spec_registry import OntologyKeySpecRegistry
-from shared.services.registries.processed_event_registry_factory import create_processed_event_registry
+from shared.services.core.worker_stores import initialize_worker_stores
 from shared.security.input_sanitizer import validate_branch_name
-from shared.utils.executor_utils import call_in_executor
 from shared.utils.spice_event_ids import spice_event_id
 from shared.utils.ontology_version import resolve_ontology_version
 from oms.exceptions import DuplicateOntologyError, DatabaseError
@@ -50,10 +50,6 @@ from oms.exceptions import DuplicateOntologyError, DatabaseError
 # Observability imports
 from shared.observability.tracing import get_tracing_service
 from shared.observability.metrics import get_metrics_collector
-from shared.observability.context_propagation import (
-    attach_context_from_kafka,
-    kafka_headers_from_current_context,
-)
 from shared.utils.app_logger import configure_logging
 
 # 로깅 설정
@@ -86,7 +82,7 @@ class _OntologyCommandParseError(ValueError):
         self.cause = cause
 
 
-class OntologyWorker(ProcessedEventKafkaWorker[_OntologyCommandPayload, None]):
+class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
     """온톨로지 Command를 처리하는 워커"""
     
     def __init__(self):
@@ -124,7 +120,7 @@ class OntologyWorker(ProcessedEventKafkaWorker[_OntologyCommandPayload, None]):
         self.metrics_collector = None
         self.tracing = None
         self.metrics = None
-        self._consumer_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="ontology-worker-kafka")
+        self.consumer_ops = None
 
     @staticmethod
     def _extract_key_spec_from_payload(payload: Dict[str, Any]) -> tuple[list[str], list[str]]:
@@ -180,14 +176,6 @@ class OntologyWorker(ProcessedEventKafkaWorker[_OntologyCommandPayload, None]):
             f"Database '{db_name}' existence check timed out (expected={expected}, last_exists={last})"
         )
 
-    async def _consumer_call(self, func, *args, **kwargs):
-        return await call_in_executor(self._consumer_executor, func, *args, **kwargs)
-
-    async def _poll_message(self, *, timeout: float) -> Any:
-        if not self.consumer:
-            return None
-        return await self._consumer_call(self.consumer.poll, timeout=timeout)
-        
     async def initialize(self):
         """워커 초기화"""
         settings = get_settings()
@@ -195,13 +183,16 @@ class OntologyWorker(ProcessedEventKafkaWorker[_OntologyCommandPayload, None]):
         group_id = (AppConfig.ONTOLOGY_WORKER_GROUP or "ontology-worker-group").strip()
 
         # Kafka Consumer (strong consistency: read_committed + rebalance-safe offsets)
-        self.consumer = await self._consumer_call(
-            create_safe_consumer,
-            group_id,
-            [AppConfig.ONTOLOGY_COMMANDS_TOPIC, AppConfig.DATABASE_COMMANDS_TOPIC],
-            "ontology-worker",
-            max_poll_interval_ms=300000,
-            session_timeout_ms=45000,
+        self.consumer = create_safe_consumer(
+            group_id=group_id,
+            topics=[AppConfig.ONTOLOGY_COMMANDS_TOPIC, AppConfig.DATABASE_COMMANDS_TOPIC],
+            service_name="ontology-worker",
+            on_revoke=self._on_partitions_revoked,
+            on_assign=self._on_partitions_assigned,
+        )
+        self.consumer_ops = ExecutorKafkaConsumerOps(
+            self.consumer,
+            thread_name_prefix="ontology-worker-kafka",
         )
         
         # Kafka Producer 설정 (Event 발행용)
@@ -244,29 +235,15 @@ class OntologyWorker(ProcessedEventKafkaWorker[_OntologyCommandPayload, None]):
         await self.event_store.connect()
         logger.info("✅ Event Store connected (domain events will be appended to S3/MinIO)")
 
-        # Durable processed-events registry (idempotency + ordering guard)
-        self.processed_event_registry = await create_processed_event_registry()
-        self.processed = self.processed_event_registry
-        logger.info("✅ ProcessedEventRegistry connected (Postgres)")
-
-        # First-class lineage/audit (best-effort; do not fail the worker)
-        if self.enable_lineage:
-            try:
-                self.lineage_store = LineageStore()
-                await self.lineage_store.initialize()
-                logger.info("✅ LineageStore connected (Postgres)")
-            except Exception as e:
-                logger.warning(f"⚠️ LineageStore unavailable (continuing without lineage): {e}")
-                self.lineage_store = None
-
-        if self.enable_audit_logs:
-            try:
-                self.audit_store = AuditLogStore()
-                await self.audit_store.initialize()
-                logger.info("✅ AuditLogStore connected (Postgres)")
-            except Exception as e:
-                logger.warning(f"⚠️ AuditLogStore unavailable (continuing without audit logs): {e}")
-                self.audit_store = None
+        stores = await initialize_worker_stores(
+            enable_lineage=self.enable_lineage,
+            enable_audit_logs=self.enable_audit_logs,
+            logger=logger,
+        )
+        self.processed_event_registry = stores.processed
+        self.processed = stores.processed
+        self.lineage_store = stores.lineage_store
+        self.audit_store = stores.audit_store
         
         # Initialize OpenTelemetry
         self.tracing_service = get_tracing_service("ontology-worker")
@@ -291,53 +268,32 @@ class OntologyWorker(ProcessedEventKafkaWorker[_OntologyCommandPayload, None]):
         if not self.dlq_producer:
             raise RuntimeError("DLQ producer not configured")
 
-        try:
-            original_value = payload_text if payload_text is not None else msg.value().decode("utf-8", errors="replace")
-        except Exception:
-            original_value = "<unavailable>"
-
-        dlq_message: Dict[str, Any] = {
-            "original_topic": msg.topic(),
-            "original_partition": msg.partition(),
-            "original_offset": msg.offset(),
-            "original_timestamp": msg.timestamp()[1] if msg.timestamp() else None,
-            "original_key": msg.key().decode("utf-8", errors="replace") if msg.key() else None,
-            "original_value": original_value,
-            "stage": stage,
-            "error": (error or "").strip()[:4000],
-            "attempt_count": int(attempt_count),
-            "worker": "ontology-worker",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
-        if payload_obj is not None:
-            dlq_message["parsed_payload"] = payload_obj
-
-        key = f"{msg.topic()}:{msg.partition()}:{msg.offset()}".encode("utf-8")
-        value = json.dumps(dlq_message, ensure_ascii=False, default=str).encode("utf-8")
-
-        with attach_context_from_kafka(
+        dlq_payload = build_standard_dlq_payload(
+            msg=msg,
+            worker="ontology-worker",
+            stage=stage,
+            error=error,
+            attempt_count=int(attempt_count),
+            payload_text=payload_text,
+            payload_obj=payload_obj,
+        )
+        spec = DlqPublishSpec(
+            dlq_topic=self.dlq_topic,
+            service_name="ontology-worker",
+            span_name="ontology_worker.dlq_produce",
+            metric_event_name="ONTOLOGY_COMMAND_DLQ",
+            flush_timeout_seconds=float(self.dlq_flush_timeout_seconds),
+        )
+        await publish_dlq_json(
+            producer=self.dlq_producer,
+            spec=spec,
+            msg=msg,
+            payload=dlq_payload,
+            tracing=self.tracing_service,
+            metrics=self.metrics_collector,
             kafka_headers=kafka_headers,
             fallback_metadata=fallback_metadata if isinstance(fallback_metadata, dict) else None,
-            service_name="ontology-worker",
-        ):
-            headers = kafka_headers_from_current_context()
-            with self.tracing_service.span(
-                "ontology_worker.dlq_produce",
-                attributes={
-                    "messaging.system": "kafka",
-                    "messaging.destination": self.dlq_topic,
-                    "messaging.destination_kind": "topic",
-                    "messaging.kafka.partition": msg.partition(),
-                    "messaging.kafka.offset": msg.offset(),
-                },
-            ):
-                self.dlq_producer.produce(self.dlq_topic, key=key, value=value, headers=headers or None)
-                await asyncio.to_thread(self.dlq_producer.flush, self.dlq_flush_timeout_seconds)
-
-        try:
-            self.metrics_collector.record_event("ONTOLOGY_COMMAND_DLQ", action="published")
-        except Exception:
-            pass
+        )
 
     async def _send_to_dlq(  # type: ignore[override]
         self,
@@ -1187,12 +1143,6 @@ class OntologyWorker(ProcessedEventKafkaWorker[_OntologyCommandPayload, None]):
         await self.publish_event(event)
 
     # --- ProcessedEventKafkaWorker hooks ---
-    def _heartbeat_options(self) -> HeartbeatOptions:  # type: ignore[override]
-        return HeartbeatOptions(
-            stop_when_false=True,
-            continue_on_exception=False,
-        )
-
     def _parse_payload(self, payload: Any) -> _OntologyCommandPayload:  # type: ignore[override]
         if not isinstance(payload, (bytes, bytearray)):
             raise _OntologyCommandParseError(
@@ -1335,16 +1285,6 @@ class OntologyWorker(ProcessedEventKafkaWorker[_OntologyCommandPayload, None]):
         ]
         return not any(marker in msg for marker in non_retryable_markers)
 
-    async def _commit(self, msg: Any) -> None:  # type: ignore[override]
-        if not self.consumer:
-            return
-        await self._consumer_call(self.consumer.commit_sync, msg)
-
-    async def _seek(self, *, topic: str, partition: int, offset: int) -> None:  # type: ignore[override]
-        if not self.consumer:
-            return
-        await self._consumer_call(self.consumer.seek, TopicPartition(topic, partition, offset))
-
     async def _on_parse_error(self, *, msg: Any, raw_payload: Optional[str], error: Exception) -> None:  # type: ignore[override]
         stage = "parse"
         payload_text = raw_payload
@@ -1450,8 +1390,7 @@ class OntologyWorker(ProcessedEventKafkaWorker[_OntologyCommandPayload, None]):
         logger.info("Shutting down Ontology Worker...")
         self.running = False
         
-        if self.consumer:
-            await self._consumer_call(self.consumer.close)
+        await self._close_consumer_runtime()
             
         if self.terminus_service:
             await self.terminus_service.disconnect()
@@ -1464,7 +1403,6 @@ class OntologyWorker(ProcessedEventKafkaWorker[_OntologyCommandPayload, None]):
         if self.key_spec_registry:
             with suppress(Exception):
                 await self.key_spec_registry.close()
-        self._consumer_executor.shutdown(wait=True, cancel_futures=True)
             
         logger.info("Ontology Worker shut down successfully")
 

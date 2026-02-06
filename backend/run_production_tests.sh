@@ -19,10 +19,20 @@ RUN_CHAOS_SOAK="false"
 CLEAN_SEARCH="${CLEAN_SEARCH:-true}"
 SOAK_SECONDS="${SOAK_SECONDS:-300}"
 SOAK_SEED="${SOAK_SEED:-0}"
+AUTO_DOCKER_GC="${AUTO_DOCKER_GC:-true}"
+DOCKER_GC_MODE="${DOCKER_GC_MODE:-safe}"
+DOCKER_GC_BUILDER_UNTIL="${DOCKER_GC_BUILDER_UNTIL:-24h}"
+DOCKER_GC_WITH_VOLUMES="${DOCKER_GC_WITH_VOLUMES:-false}"
 
 trim_trailing_slash() {
   local value="${1:-}"
   echo "${value%/}"
+}
+
+truthy() {
+  local v
+  v="$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]' | xargs)"
+  [[ "${v}" == "1" || "${v}" == "true" || "${v}" == "yes" || "${v}" == "y" || "${v}" == "on" ]]
 }
 
 OMS_URL="$(trim_trailing_slash "${OMS_BASE_URL:-http://127.0.0.1:8000}")"
@@ -232,6 +242,38 @@ PY
   fi
   return 0
 }
+
+run_docker_gc_if_enabled() {
+  if ! truthy "${AUTO_DOCKER_GC}"; then
+    return 0
+  fi
+  if ! command -v docker >/dev/null 2>&1; then
+    echo "⚠️  Skipping Docker GC (docker command not found)"
+    return 0
+  fi
+
+  local gc_script="${REPO_ROOT}/scripts/ops/docker_gc.sh"
+  if [[ ! -f "$gc_script" ]]; then
+    echo "⚠️  Skipping Docker GC (script not found: ${gc_script})"
+    return 0
+  fi
+
+  local gc_args=()
+  if [[ "${DOCKER_GC_MODE}" == "aggressive" ]]; then
+    gc_args+=(--aggressive)
+  fi
+  if truthy "${DOCKER_GC_WITH_VOLUMES}"; then
+    gc_args+=(--with-volumes)
+  fi
+  gc_args+=(--builder-until "${DOCKER_GC_BUILDER_UNTIL}")
+
+  echo "🧹 Running Docker GC (mode=${DOCKER_GC_MODE}, builder_until=${DOCKER_GC_BUILDER_UNTIL})..."
+  if ! "$gc_script" "${gc_args[@]}"; then
+    echo "⚠️  Docker GC failed (continuing)"
+  fi
+}
+
+trap run_docker_gc_if_enabled EXIT
 
 # Ensure we run the suite in a Python environment that includes the required deps.
 # If the user didn't explicitly pin PYTHON_BIN, try to auto-select a usable Python.

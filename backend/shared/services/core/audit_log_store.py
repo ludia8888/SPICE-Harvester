@@ -17,9 +17,10 @@ import asyncpg
 
 from shared.config.settings import get_settings
 from shared.models.audit_log import AuditLogEntry, AuditStatus
+from shared.services.registries.postgres_schema_registry import PostgresSchemaRegistry
 
 
-class AuditLogStore:
+class AuditLogStore(PostgresSchemaRegistry):
     def __init__(
         self,
         *,
@@ -28,35 +29,16 @@ class AuditLogStore:
         pool_min: Optional[int] = None,
         pool_max: Optional[int] = None,
     ):
-        self._dsn = dsn or get_settings().database.postgres_url
-        self._schema = schema
-        self._pool: Optional[asyncpg.Pool] = None
         perf = get_settings().performance
-        self._pool_min = int(pool_min) if pool_min is not None else int(perf.audit_pg_pool_min)
-        self._pool_max = int(pool_max) if pool_max is not None else int(perf.audit_pg_pool_max)
-        self._command_timeout = int(perf.audit_pg_command_timeout_seconds)
-
-    async def initialize(self) -> None:
-        await self.connect()
-
-    async def connect(self) -> None:
-        if self._pool:
-            return
-        self._pool = await asyncpg.create_pool(
-            self._dsn,
-            min_size=self._pool_min,
-            max_size=self._pool_max,
-            command_timeout=self._command_timeout,
+        pool_min_value = int(pool_min) if pool_min is not None else int(perf.audit_pg_pool_min)
+        pool_max_value = int(pool_max) if pool_max is not None else int(perf.audit_pg_pool_max)
+        super().__init__(
+            dsn=dsn,
+            schema=schema,
+            pool_min=pool_min_value,
+            pool_max=pool_max_value,
+            command_timeout=int(perf.audit_pg_command_timeout_seconds),
         )
-        await self.ensure_schema()
-
-    async def shutdown(self) -> None:
-        await self.close()
-
-    async def close(self) -> None:
-        if self._pool:
-            await self._pool.close()
-            self._pool = None
 
     async def health_check(self) -> bool:
         try:
@@ -68,65 +50,59 @@ class AuditLogStore:
         except Exception:
             return False
 
-    async def ensure_schema(self) -> None:
-        if not self._pool:
-            raise RuntimeError("AuditLogStore not connected")
+    async def _ensure_tables(self, conn: asyncpg.Connection) -> None:
+        await conn.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS {self._schema}.audit_chain_heads (
+                partition_key TEXT PRIMARY KEY,
+                head_audit_id UUID,
+                head_hash TEXT,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+            """
+        )
 
-        async with self._pool.acquire() as conn:
-            await conn.execute(f"CREATE SCHEMA IF NOT EXISTS {self._schema}")
+        await conn.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS {self._schema}.audit_logs (
+                audit_id UUID PRIMARY KEY,
+                partition_key TEXT NOT NULL,
+                occurred_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                actor TEXT,
+                action TEXT NOT NULL,
+                status TEXT NOT NULL,
+                resource_type TEXT,
+                resource_id TEXT,
+                event_id TEXT,
+                command_id TEXT,
+                trace_id TEXT,
+                correlation_id TEXT,
+                metadata JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                error TEXT,
+                prev_hash TEXT,
+                entry_hash TEXT NOT NULL
+            )
+            """
+        )
 
-            await conn.execute(
-                f"""
-                CREATE TABLE IF NOT EXISTS {self._schema}.audit_chain_heads (
-                    partition_key TEXT PRIMARY KEY,
-                    head_audit_id UUID,
-                    head_hash TEXT,
-                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-                )
-                """
-            )
-
-            await conn.execute(
-                f"""
-                CREATE TABLE IF NOT EXISTS {self._schema}.audit_logs (
-                    audit_id UUID PRIMARY KEY,
-                    partition_key TEXT NOT NULL,
-                    occurred_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    actor TEXT,
-                    action TEXT NOT NULL,
-                    status TEXT NOT NULL,
-                    resource_type TEXT,
-                    resource_id TEXT,
-                    event_id TEXT,
-                    command_id TEXT,
-                    trace_id TEXT,
-                    correlation_id TEXT,
-                    metadata JSONB NOT NULL DEFAULT '{{}}'::jsonb,
-                    error TEXT,
-                    prev_hash TEXT,
-                    entry_hash TEXT NOT NULL
-                )
-                """
-            )
-
-            await conn.execute(
-                f"CREATE INDEX IF NOT EXISTS idx_audit_logs_partition ON {self._schema}.audit_logs(partition_key)"
-            )
-            await conn.execute(
-                f"CREATE INDEX IF NOT EXISTS idx_audit_logs_time ON {self._schema}.audit_logs(occurred_at)"
-            )
-            await conn.execute(
-                f"CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON {self._schema}.audit_logs(action)"
-            )
-            await conn.execute(
-                f"CREATE INDEX IF NOT EXISTS idx_audit_logs_event ON {self._schema}.audit_logs(event_id)"
-            )
-            await conn.execute(
-                f"""
-                CREATE INDEX IF NOT EXISTS idx_audit_logs_resource
-                ON {self._schema}.audit_logs(resource_type, resource_id)
-                """
-            )
+        await conn.execute(
+            f"CREATE INDEX IF NOT EXISTS idx_audit_logs_partition ON {self._schema}.audit_logs(partition_key)"
+        )
+        await conn.execute(
+            f"CREATE INDEX IF NOT EXISTS idx_audit_logs_time ON {self._schema}.audit_logs(occurred_at)"
+        )
+        await conn.execute(
+            f"CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON {self._schema}.audit_logs(action)"
+        )
+        await conn.execute(
+            f"CREATE INDEX IF NOT EXISTS idx_audit_logs_event ON {self._schema}.audit_logs(event_id)"
+        )
+        await conn.execute(
+            f"""
+            CREATE INDEX IF NOT EXISTS idx_audit_logs_resource
+            ON {self._schema}.audit_logs(resource_type, resource_id)
+            """
+        )
 
     @staticmethod
     def _canonical_json(value: Dict[str, Any]) -> str:

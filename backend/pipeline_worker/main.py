@@ -25,6 +25,7 @@ from uuid import UUID, uuid4
 import httpx
 from confluent_kafka import Producer
 
+from shared.services.kafka.consumer_ops import ExecutorKafkaConsumerOps
 from shared.services.kafka.safe_consumer import SafeKafkaConsumer
 
 try:
@@ -52,10 +53,10 @@ from shared.errors.error_envelope import build_error_envelope
 from shared.errors.error_types import ErrorCategory, ErrorCode
 from shared.models.event_envelope import EventEnvelope
 from shared.models.pipeline_job import PipelineJob
-from shared.observability.context_propagation import kafka_headers_from_current_context
 from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
 from shared.services.kafka.processed_event_worker import HeartbeatOptions, ProcessedEventKafkaWorker, RegistryKey
+from shared.services.kafka.dlq_publisher import DlqPublishSpec, build_standard_dlq_payload, publish_dlq_json
 from shared.services.kafka.producer_factory import create_kafka_dlq_producer
 from shared.services.kafka.safe_consumer import create_safe_consumer
 from shared.services.registries.dataset_registry import DatasetRegistry
@@ -65,6 +66,10 @@ from shared.services.registries.lineage_store import LineageStore
 from shared.services.pipeline.pipeline_profiler import compute_column_stats
 from shared.services.registries.pipeline_registry import PipelineRegistry
 from shared.services.pipeline.pipeline_control_plane_events import emit_pipeline_control_plane_event
+from shared.services.pipeline.pipeline_definition_validator import (
+    PipelineDefinitionValidationPolicy,
+    validate_pipeline_definition,
+)
 from shared.services.pipeline.pipeline_graph_utils import build_incoming, normalize_edges, normalize_nodes, topological_sort
 from shared.services.pipeline.pipeline_parameter_utils import apply_parameters, normalize_parameters
 from shared.services.pipeline.pipeline_definition_utils import (
@@ -83,6 +88,7 @@ from shared.services.pipeline.pipeline_validation_utils import (
     validate_schema_checks,
     validate_schema_contract,
 )
+from shared.services.pipeline.pipeline_schema_casts import extract_schema_casts
 from shared.services.pipeline.pipeline_schema_utils import normalize_schema_type
 from shared.services.pipeline.pipeline_type_utils import normalize_cast_mode, spark_type_to_xsd, xsd_to_spark_type
 from shared.services.pipeline.pipeline_transform_spec import (
@@ -327,9 +333,12 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
             topics=[self.topic],
             service_name="pipeline-worker",
             max_poll_interval_ms=int(self.max_poll_interval_ms),
-            session_timeout_ms=45000,
             on_revoke=self._on_partitions_revoked,
             on_assign=self._on_partitions_assigned,
+        )
+        self.consumer_ops = ExecutorKafkaConsumerOps(
+            self.consumer,
+            thread_name_prefix="pipeline-worker-kafka",
         )
         self._init_partition_state(reset=True)
         logger.info("PipelineWorker initialized (topic=%s)", self.topic)
@@ -339,28 +348,8 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
             client_id=self.service_name or "pipeline-worker-dlq",
         )
 
-    def _on_partitions_revoked(self, partitions: list) -> None:
-        """Handle partition revocation during rebalance."""
-        self._rebalance_in_progress = True
-        logger.info(
-            "Pipeline worker partitions revoked: %s",
-            [(p.topic, p.partition) for p in partitions],
-        )
-        self._handle_partitions_revoked(partitions, clear_pending=True)
-
-    def _on_partitions_assigned(self, partitions: list) -> None:
-        """Handle partition assignment during rebalance."""
-        self._rebalance_in_progress = False
-        logger.info(
-            "Pipeline worker partitions assigned: %s",
-            [(p.topic, p.partition) for p in partitions],
-        )
-        self._handle_partitions_assigned(partitions, resume=True)
-
     async def close(self) -> None:
-        if self.consumer:
-            self.consumer.close()
-            self.consumer = None
+        await self._close_consumer_runtime()
         self._pending_by_partition.clear()
         if self.dlq_producer:
             try:
@@ -583,11 +572,6 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
     def _uses_commit_state(self) -> bool:  # type: ignore[override]
         return True
 
-    async def _poll_message(self, *, timeout: float) -> Any:  # type: ignore[override]
-        if not self.consumer:
-            return None
-        return self.consumer.poll(timeout)
-
     def _parse_payload(self, payload: Any) -> PipelineJob:  # type: ignore[override]
         if not isinstance(payload, (bytes, bytearray)):
             raise _PipelinePayloadParseError(
@@ -741,16 +725,6 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
             error=error,
         )
 
-    async def _commit(self, msg: Any) -> None:  # type: ignore[override]
-        key = (str(msg.topic()), int(msg.partition()))
-        self._commit_state_by_partition[key] = True
-        await super()._commit(msg)
-
-    async def _seek(self, *, topic: str, partition: int, offset: int) -> None:  # type: ignore[override]
-        key = (str(topic), int(partition))
-        self._commit_state_by_partition[key] = False
-        await super()._seek(topic=topic, partition=partition, offset=offset)
-
     async def _on_parse_error(self, *, msg: Any, raw_payload: Optional[str], error: Exception) -> None:  # type: ignore[override]
         stage = "parse"
         payload_text = raw_payload
@@ -852,37 +826,39 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
             logger.error("DLQ producer not configured; dropping message (stage=%s error=%s)", stage, error)
             return
 
-        try:
-            original_value = payload_text if payload_text is not None else msg.value().decode("utf-8", errors="replace")
-        except Exception:
-            original_value = "<unavailable>"
-
-        dlq_message: Dict[str, Any] = {
-            "original_topic": msg.topic(),
-            "original_partition": msg.partition(),
-            "original_offset": msg.offset(),
-            "original_timestamp": msg.timestamp()[1] if msg.timestamp() else None,
-            "original_key": msg.key().decode("utf-8", errors="replace") if msg.key() else None,
-            "original_value": original_value,
-            "stage": stage,
-            "error": error,
-            "attempt_count": attempt_count,
-            "worker": self.pipeline_label,
-            "timestamp": utcnow().isoformat(),
-        }
-        if payload_obj is not None:
-            dlq_message["parsed_payload"] = payload_obj
+        extra: Optional[Dict[str, Any]] = None
         if job is not None:
-            dlq_message["job"] = job.model_dump(mode="json")
+            extra = {"job": job.model_dump(mode="json")}
+
+        dlq_payload = build_standard_dlq_payload(
+            msg=msg,
+            worker=str(self.pipeline_label or "pipeline-worker"),
+            stage=stage,
+            error=error,
+            attempt_count=int(attempt_count) if attempt_count is not None else None,
+            payload_text=payload_text,
+            payload_obj=payload_obj,
+            extra=extra,
+        )
+        spec = DlqPublishSpec(
+            dlq_topic=self.dlq_topic,
+            service_name=str(self.pipeline_label or "pipeline-worker"),
+            flush_timeout_seconds=10.0,
+            poll_after_produce=True,
+        )
 
         try:
-            key = f"{msg.topic()}:{msg.partition()}:{msg.offset()}".encode("utf-8")
-            value = json.dumps(dlq_message, ensure_ascii=False, default=str).encode("utf-8")
-            headers = kafka_headers_from_current_context()
-            async with self._dlq_lock:
-                self.dlq_producer.produce(self.dlq_topic, key=key, value=value, headers=headers or None)
-                self.dlq_producer.poll(0)
-                await asyncio.to_thread(self.dlq_producer.flush, 10)
+            await publish_dlq_json(
+                producer=self.dlq_producer,
+                spec=spec,
+                msg=msg,
+                payload=dlq_payload,
+                tracing=None,
+                metrics=None,
+                kafka_headers=None,
+                fallback_metadata=None,
+                lock=self._dlq_lock,
+            )
             logger.info("Sent message to pipeline DLQ (topic=%s stage=%s)", self.dlq_topic, stage)
         except Exception as exc:
             logger.error("Failed to send message to pipeline DLQ (stage=%s): %s", stage, exc)
@@ -3463,169 +3439,20 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                 errors.append(f"{node_type} node {node_id} has no input")
         return errors
 
-    def _normalize_transform_metadata(self, metadata: Any) -> Dict[str, Any]:
-        if not isinstance(metadata, dict):
-            return {}
-        normalized = dict(metadata)
-        if not normalized.get("columns"):
-            fields = normalized.get("fields")
-            if isinstance(fields, list):
-                normalized["columns"] = fields
-        if not normalized.get("groupBy"):
-            for key in ("groupKeys", "keys"):
-                value = normalized.get(key)
-                if isinstance(value, list):
-                    normalized["groupBy"] = value
-                    break
-        if not normalized.get("aggregates"):
-            aggregations = normalized.get("aggregations")
-            if isinstance(aggregations, list):
-                normalized["aggregates"] = aggregations
-        aggregates = normalized.get("aggregates")
-        if isinstance(aggregates, list):
-            normalized_items: list[dict[str, Any]] = []
-            for item in aggregates:
-                if not isinstance(item, dict):
-                    continue
-                column = item.get("column") or item.get("field") or item.get("name")
-                op = item.get("op") or item.get("function") or item.get("agg")
-                alias = item.get("alias") or item.get("as")
-                updated = dict(item)
-                if column and not updated.get("column"):
-                    updated["column"] = column
-                if op and not updated.get("op"):
-                    updated["op"] = op
-                if alias and not updated.get("alias"):
-                    updated["alias"] = alias
-                normalized_items.append(updated)
-            normalized["aggregates"] = normalized_items
-        return normalized
-
-    def _normalize_nodes_metadata(self, nodes: Dict[str, Dict[str, Any]]) -> None:
-        for node in nodes.values():
-            node["metadata"] = self._normalize_transform_metadata(node.get("metadata"))
-
     def _validate_definition(self, definition: Dict[str, Any], *, require_output: bool = True) -> List[str]:
-        errors: List[str] = []
-        nodes_raw = definition.get("nodes")
-        if not isinstance(nodes_raw, list) or not nodes_raw:
-            errors.append("Pipeline has no nodes")
-            return errors
-        nodes = normalize_nodes(nodes_raw)
-        self._normalize_nodes_metadata(nodes)
-        edges = normalize_edges(definition.get("edges"))
-        node_ids = set(nodes.keys())
-        for edge in edges:
-            if edge["from"] not in node_ids or edge["to"] not in node_ids:
-                errors.append(f"Pipeline edge references missing node: {edge['from']}->{edge['to']}")
-        has_output = any(node.get("type") == "output" for node in nodes.values())
-        if require_output and not has_output:
-            errors.append("Pipeline has no output node")
+        policy = PipelineDefinitionValidationPolicy(
+            supported_ops=SUPPORTED_TRANSFORMS_SPARK,
+            require_output=require_output,
+            normalize_metadata=True,
+        )
+        validation = validate_pipeline_definition(definition, policy=policy)
+        errors: List[str] = list(validation.errors)
+        nodes = validation.nodes
 
-        incoming = build_incoming(edges)
-        supported_ops = SUPPORTED_TRANSFORMS_SPARK
         for node_id, node in nodes.items():
             if node.get("type") != "transform":
                 continue
             metadata = node.get("metadata") or {}
-            operation = normalize_operation(metadata.get("operation"))
-            if not operation:
-                if len(incoming.get(node_id, [])) >= 2:
-                    errors.append(f"transform node {node_id} has multiple inputs but no operation")
-                continue
-            if operation not in supported_ops:
-                errors.append(f"Unsupported operation '{operation}' on node {node_id}")
-                continue
-            if operation == "filter" and not str(metadata.get("expression") or "").strip():
-                errors.append(f"{operation} missing expression on node {node_id}")
-            if operation == "compute":
-                has_expression = bool(str(metadata.get("expression") or "").strip())
-                target = metadata.get("targetColumn") or metadata.get("target_column") or metadata.get("target")
-                formula = metadata.get("formula") or metadata.get("expr")
-                has_target_formula = bool(str(target or "").strip()) and bool(str(formula or "").strip())
-                assignments = (
-                    metadata.get("assignments")
-                    or metadata.get("computedColumns")
-                    or metadata.get("computed_columns")
-                )
-                has_assignments = (
-                    isinstance(assignments, list)
-                    and any(
-                        isinstance(item, dict)
-                        and str(item.get("column") or item.get("target") or item.get("name") or "").strip()
-                        and str(item.get("expression") or item.get("expr") or item.get("formula") or "").strip()
-                        for item in assignments
-                    )
-                )
-                if not (has_expression or has_target_formula or has_assignments):
-                    errors.append(f"compute missing expression/targetColumn/formula/assignments on node {node_id}")
-            if operation in {"select", "drop", "sort", "dedupe", "explode"}:
-                columns = metadata.get("columns") or []
-                expressions = metadata.get("expressions") or metadata.get("selectExpr") or metadata.get("select_expr")
-                if operation == "select":
-                    if not columns and not (isinstance(expressions, list) and expressions):
-                        errors.append(f"{operation} missing columns/expressions on node {node_id}")
-                else:
-                    if not columns:
-                        errors.append(f"{operation} missing columns on node {node_id}")
-            if operation == "rename":
-                rename_map = metadata.get("rename") or {}
-                if not rename_map:
-                    errors.append(f"rename missing mapping on node {node_id}")
-            if operation == "cast":
-                casts = metadata.get("casts") or []
-                if not casts:
-                    errors.append(f"cast missing columns on node {node_id}")
-            if operation in {"groupBy", "aggregate"}:
-                aggregates = metadata.get("aggregates") or []
-                expr_items = (
-                    metadata.get("aggregateExpressions")
-                    or metadata.get("aggExpressions")
-                    or metadata.get("aggregate_expressions")
-                )
-                has_exprs = isinstance(expr_items, list) and len(expr_items) > 0
-                has_aggs = isinstance(aggregates, list) and any(
-                    isinstance(item, dict) and item.get("column") and item.get("op")
-                    for item in aggregates
-                )
-                if not (has_aggs or has_exprs):
-                    errors.append(f"{operation} missing aggregates/aggregateExpressions on node {node_id}")
-            if operation == "join":
-                if len(incoming.get(node_id, [])) < 2:
-                    errors.append(f"join requires two inputs on node {node_id}")
-                join_spec = resolve_join_spec(metadata)
-                left_keys = list(join_spec.left_keys or [])
-                right_keys = list(join_spec.right_keys or [])
-                if join_spec.left_key and not left_keys:
-                    left_keys = [join_spec.left_key]
-                if join_spec.right_key and not right_keys:
-                    right_keys = [join_spec.right_key]
-                if not join_spec.allow_cross_join and (not left_keys or not right_keys):
-                    errors.append(f"join requires leftKey/rightKey or leftKeys/rightKeys (or joinKey) on node {node_id}")
-                if left_keys and right_keys and len(left_keys) != len(right_keys):
-                    errors.append(f"join requires leftKeys/rightKeys of the same length on node {node_id}")
-                if join_spec.allow_cross_join and not left_keys and not right_keys:
-                    if join_spec.join_type != "cross":
-                        errors.append(f"join allowCrossJoin requires joinType='cross' on node {node_id}")
-            if operation == "union":
-                if len(incoming.get(node_id, [])) < 2:
-                    errors.append(f"union requires two inputs on node {node_id}")
-                union_mode = normalize_union_mode(metadata)
-                if union_mode not in {"strict", "common_only", "pad_missing_nulls", "pad"}:
-                    errors.append(f"union has invalid unionMode '{union_mode}' on node {node_id}")
-            if operation == "pivot":
-                pivot_meta = metadata.get("pivot") or {}
-                index_cols = pivot_meta.get("index") or []
-                columns_col = pivot_meta.get("columns")
-                values_col = pivot_meta.get("values")
-                if not index_cols or not columns_col or not values_col:
-                    errors.append(f"pivot missing fields on node {node_id}")
-            if operation == "window":
-                window_meta = metadata.get("window") or {}
-                order_by = window_meta.get("orderBy") or []
-                expressions = window_meta.get("expressions") if isinstance(window_meta.get("expressions"), list) else None
-                if not order_by and not (isinstance(expressions, list) and expressions):
-                    errors.append(f"window missing orderBy/expressions on node {node_id}")
 
             checks = metadata.get("schemaChecks") or []
             if checks:
@@ -3759,29 +3586,6 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
             in_set_mismatch=in_set_mismatch,
         )
 
-    def _extract_schema_casts(self, schema_json: Any) -> List[Dict[str, str]]:
-        if not isinstance(schema_json, dict):
-            return []
-        columns = schema_json.get("columns")
-        if not isinstance(columns, list):
-            columns = schema_json.get("fields")
-        if isinstance(columns, list):
-            casts: List[Dict[str, str]] = []
-            for col in columns:
-                if isinstance(col, dict):
-                    name = str(col.get("name") or "").strip()
-                    if not name:
-                        continue
-                    cast_type = normalize_schema_type(col.get("type") or col.get("data_type"))
-                    casts.append({"column": name, "type": cast_type or "xsd:string"})
-                elif isinstance(col, str):
-                    casts.append({"column": col, "type": "xsd:string"})
-            return casts
-        properties = schema_json.get("properties")
-        if isinstance(properties, dict):
-            return [{"column": name, "type": "xsd:string"} for name in properties.keys() if name]
-        return []
-
     def _sql_ident(self, name: str) -> str:
         return f"`{str(name).replace('`', '``')}`"
 
@@ -3840,9 +3644,9 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
 
     def _apply_schema_casts(self, df: DataFrame, *, dataset: Any, version: Any) -> DataFrame:
         schema_json = getattr(dataset, "schema_json", None)
-        casts = self._extract_schema_casts(schema_json)
+        casts = extract_schema_casts(schema_json)
         if not casts and version is not None:
-            casts = self._extract_schema_casts(getattr(version, "sample_json", None))
+            casts = extract_schema_casts(getattr(version, "sample_json", None))
         if not casts:
             return df
         return self._apply_casts(df, casts)

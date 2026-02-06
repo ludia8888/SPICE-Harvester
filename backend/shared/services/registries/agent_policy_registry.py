@@ -16,7 +16,7 @@ from typing import Any, Dict, List, Optional
 
 import asyncpg
 
-from shared.config.settings import get_settings
+from shared.services.registries.postgres_schema_registry import PostgresSchemaRegistry
 from shared.utils.json_utils import normalize_json_payload
 
 
@@ -50,66 +50,25 @@ class AgentTenantPolicyRecord:
     updated_at: datetime
 
 
-class AgentPolicyRegistry:
-    def __init__(
-        self,
-        *,
-        dsn: Optional[str] = None,
-        schema: str = "spice_agent",
-        pool_min: Optional[int] = None,
-        pool_max: Optional[int] = None,
-    ) -> None:
-        self._dsn = dsn or get_settings().database.postgres_url
-        self._schema = schema
-        self._pool: Optional[asyncpg.Pool] = None
-        self._pool_min = int(pool_min or 1)
-        self._pool_max = int(pool_max or 5)
-
-    async def initialize(self) -> None:
-        await self.connect()
-
-    async def connect(self) -> None:
-        if self._pool:
-            return
-        self._pool = await asyncpg.create_pool(
-            self._dsn,
-            min_size=self._pool_min,
-            max_size=self._pool_max,
-            command_timeout=30,
+class AgentPolicyRegistry(PostgresSchemaRegistry):
+    async def _ensure_tables(self, conn: asyncpg.Connection) -> None:  # type: ignore[override]
+        await conn.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS {self._schema}.agent_tenant_policies (
+                tenant_id TEXT PRIMARY KEY,
+                allowed_models JSONB NOT NULL DEFAULT '[]'::jsonb,
+                allowed_tools JSONB NOT NULL DEFAULT '[]'::jsonb,
+                default_model TEXT,
+                auto_approve_rules JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                data_policies JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+            """
         )
-        await self.ensure_schema()
-
-    async def close(self) -> None:
-        if self._pool:
-            await self._pool.close()
-            self._pool = None
-
-    async def shutdown(self) -> None:
-        await self.close()
-
-    async def ensure_schema(self) -> None:
-        if not self._pool:
-            raise RuntimeError("AgentPolicyRegistry not connected")
-
-        async with self._pool.acquire() as conn:
-            await conn.execute(f"CREATE SCHEMA IF NOT EXISTS {self._schema}")
-            await conn.execute(
-                f"""
-                CREATE TABLE IF NOT EXISTS {self._schema}.agent_tenant_policies (
-                    tenant_id TEXT PRIMARY KEY,
-                    allowed_models JSONB NOT NULL DEFAULT '[]'::jsonb,
-                    allowed_tools JSONB NOT NULL DEFAULT '[]'::jsonb,
-                    default_model TEXT,
-                    auto_approve_rules JSONB NOT NULL DEFAULT '{{}}'::jsonb,
-                    data_policies JSONB NOT NULL DEFAULT '{{}}'::jsonb,
-                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-                )
-                """
-            )
-            await conn.execute(
-                f"CREATE INDEX IF NOT EXISTS idx_agent_tenant_policies_updated_at ON {self._schema}.agent_tenant_policies(updated_at)"
-            )
+        await conn.execute(
+            f"CREATE INDEX IF NOT EXISTS idx_agent_tenant_policies_updated_at ON {self._schema}.agent_tenant_policies(updated_at)"
+        )
 
     def _row_to_policy(self, row: asyncpg.Record) -> AgentTenantPolicyRecord:
         return AgentTenantPolicyRecord(

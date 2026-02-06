@@ -15,7 +15,7 @@ from contextlib import contextmanager
 
 import pytest
 
-from instance_worker.main import StrictInstanceWorker
+from shared.services.kafka.consumer_ops import ExecutorKafkaConsumerOps
 from shared.services.registries.processed_event_registry import validate_lease_settings, validate_registry_enabled
 
 
@@ -59,7 +59,6 @@ def test_registry_disable_rejected():
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_heartbeat_not_blocked_by_poll():
-    worker = StrictInstanceWorker()
     ticks = 0
 
     async def ticker():
@@ -68,13 +67,25 @@ async def test_heartbeat_not_blocked_by_poll():
             await asyncio.sleep(0.05)
             ticks += 1
 
-    def blocking_poll():
-        time.sleep(0.25)
-        return "ok"
+    class _BlockingConsumer:
+        def poll(self, timeout):
+            time.sleep(0.25)
+            return "ok"
 
+        def commit_sync(self, msg):  # pragma: no cover
+            return None
+
+        def seek(self, tp):  # pragma: no cover
+            return None
+
+        def close(self):  # pragma: no cover
+            return None
+
+    ops = ExecutorKafkaConsumerOps(_BlockingConsumer(), thread_name_prefix="test-kafka-consumer")
     task = asyncio.create_task(ticker())
-    result = await worker._consumer_call(blocking_poll)
+    result = await ops.poll(timeout=0.1)
     await task
+    await ops.close()
 
     assert result == "ok"
     assert ticks > 0

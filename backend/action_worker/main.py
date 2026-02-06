@@ -13,15 +13,15 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import signal
 from collections import Counter
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
-from confluent_kafka import Producer, TopicPartition
+from confluent_kafka import Producer
 
+from shared.services.kafka.consumer_ops import ExecutorKafkaConsumerOps
 from shared.services.kafka.safe_consumer import SafeKafkaConsumer, create_safe_consumer
 from shared.services.kafka.producer_factory import create_kafka_dlq_producer
 
@@ -33,16 +33,16 @@ from shared.errors.enterprise_catalog import is_external_code, resolve_enterpris
 from shared.errors.error_types import ErrorCode
 from shared.models.event_envelope import EventEnvelope
 from shared.models.events import ActionAppliedEvent
-from shared.observability.context_propagation import attach_context_from_kafka, kafka_headers_from_current_context
 from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
 from shared.security.database_access import DOMAIN_MODEL_ROLES, get_database_access_role
+from shared.services.kafka.dlq_publisher import DlqPublishSpec, build_standard_dlq_payload, publish_dlq_json
 from shared.services.registries.action_log_registry import ActionLogRegistry, ActionLogStatus
 from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.services.storage.event_store import event_store
 from shared.services.storage.lakefs_client import LakeFSClient, LakeFSConflictError, LakeFSError
 from shared.services.storage.lakefs_storage_service import create_lakefs_storage_service, LakeFSStorageService
-from shared.services.kafka.processed_event_worker import HeartbeatOptions, ProcessedEventKafkaWorker, RegistryKey
+from shared.services.kafka.processed_event_worker import RegistryKey, StrictHeartbeatKafkaWorker
 from shared.services.registries.processed_event_registry import (
     ProcessedEventRegistry,
 )
@@ -57,6 +57,7 @@ from shared.utils.action_input_schema import (
 from shared.utils.action_audit_policy import audit_action_log_result
 from shared.utils.access_policy import apply_access_policy
 from shared.utils.principal_policy import build_principal_tags, policy_allows
+from shared.utils.worker_runner import run_worker_until_stopped
 from shared.utils.resource_rid import format_resource_rid, parse_metadata_rev, strip_rid_revision
 from shared.utils.writeback_conflicts import (
     compute_base_token,
@@ -120,7 +121,7 @@ class _ActionRejected(Exception):
     """Used to short-circuit retries when the ActionLog is already finalized with a rejection result."""
 
 
-class ActionWorker(ProcessedEventKafkaWorker[_ActionCommandPayload, None]):
+class ActionWorker(StrictHeartbeatKafkaWorker[_ActionCommandPayload, None]):
     def __init__(self) -> None:
         settings = get_settings()
         cfg = settings.workers.action
@@ -132,6 +133,7 @@ class ActionWorker(ProcessedEventKafkaWorker[_ActionCommandPayload, None]):
         self.metrics = get_metrics_collector("action-worker")
         self.kafka_servers = settings.database.kafka_servers
         self.consumer: Optional[SafeKafkaConsumer] = None
+        self.consumer_ops = None
         self.dlq_producer: Optional[Producer] = None
         self.dlq_topic = AppConfig.ACTION_COMMANDS_DLQ_TOPIC
         self.dlq_flush_timeout_seconds = float(cfg.dlq_flush_timeout_seconds)
@@ -162,10 +164,12 @@ class ActionWorker(ProcessedEventKafkaWorker[_ActionCommandPayload, None]):
             group_id=group_id,
             topics=[topic],
             service_name="action-worker",
-            max_poll_interval_ms=300000,
-            session_timeout_ms=45000,
             on_revoke=self._on_partitions_revoked,
             on_assign=self._on_partitions_assigned,
+        )
+        self.consumer_ops = ExecutorKafkaConsumerOps(
+            self.consumer,
+            thread_name_prefix="action-worker-kafka",
         )
         self._rebalance_in_progress = False
         logger.info("ActionWorker subscribed to topic=%s group=%s", topic, group_id)
@@ -210,26 +214,9 @@ class ActionWorker(ProcessedEventKafkaWorker[_ActionCommandPayload, None]):
         )
         self.terminus = AsyncTerminusService(connection_info)
 
-    def _on_partitions_revoked(self, partitions: list) -> None:
-        """Handle partition revocation during rebalance."""
-        self._rebalance_in_progress = True
-        logger.info(
-            "Action worker partitions revoked: %s",
-            [(p.topic, p.partition) for p in partitions],
-        )
-
-    def _on_partitions_assigned(self, partitions: list) -> None:
-        """Handle partition assignment during rebalance."""
-        self._rebalance_in_progress = False
-        logger.info(
-            "Action worker partitions assigned: %s",
-            [(p.topic, p.partition) for p in partitions],
-        )
-
     async def shutdown(self) -> None:
         self.running = False
-        if self.consumer:
-            self.consumer.close()
+        await self._close_consumer_runtime()
         if self.dlq_producer:
             try:
                 await asyncio.to_thread(self.dlq_producer.flush, self.dlq_flush_timeout_seconds)
@@ -242,22 +229,6 @@ class ActionWorker(ProcessedEventKafkaWorker[_ActionCommandPayload, None]):
             await self.dataset_registry.close()
         if self.terminus:
             await self.terminus.close()
-
-    async def _poll(self, timeout: float) -> Any:
-        if not self.consumer:
-            return None
-        return await asyncio.to_thread(self.consumer.poll, timeout)
-
-    async def _commit(self, msg: Any) -> None:
-        if not self.consumer:
-            return
-        await asyncio.to_thread(self.consumer.commit_sync, msg)
-
-    def _heartbeat_options(self) -> HeartbeatOptions:  # type: ignore[override]
-        return HeartbeatOptions(
-            stop_when_false=True,
-            continue_on_exception=False,
-        )
 
     def _parse_payload(self, payload: Any) -> _ActionCommandPayload:  # type: ignore[override]
         if not isinstance(payload, (bytes, bytearray)):
@@ -388,11 +359,6 @@ class ActionWorker(ProcessedEventKafkaWorker[_ActionCommandPayload, None]):
     def _metric_event_name(self, *, payload: _ActionCommandPayload) -> Optional[str]:  # type: ignore[override]
         return str(payload.envelope.event_type or "").strip() or None
 
-    async def _seek(self, *, topic: str, partition: int, offset: int) -> None:  # type: ignore[override]
-        if not self.consumer:
-            return
-        await asyncio.to_thread(self.consumer.seek, TopicPartition(topic, partition, offset))
-
     async def _on_parse_error(self, *, msg: Any, raw_payload: Optional[str], error: Exception) -> None:  # type: ignore[override]
         stage = "parse"
         payload_text = raw_payload
@@ -513,52 +479,32 @@ class ActionWorker(ProcessedEventKafkaWorker[_ActionCommandPayload, None]):
         if not self.dlq_producer:
             raise RuntimeError("DLQ producer not configured")
 
-        try:
-            original_value = payload_text if payload_text is not None else msg.value().decode("utf-8", errors="replace")
-        except Exception:
-            original_value = "<unavailable>"
-
-        dlq_message: dict[str, Any] = {
-            "original_topic": msg.topic(),
-            "original_partition": msg.partition(),
-            "original_offset": msg.offset(),
-            "original_timestamp": msg.timestamp()[1] if msg.timestamp() else None,
-            "original_key": msg.key().decode("utf-8", errors="replace") if msg.key() else None,
-            "original_value": original_value,
-            "stage": stage,
-            "error": (error or "").strip()[:4000],
-            "attempt_count": int(attempt_count),
-            "worker": "action-worker",
-            "timestamp": utcnow().isoformat(),
-        }
-        if payload_obj is not None:
-            dlq_message["parsed_payload"] = payload_obj
-
-        key = f"{msg.topic()}:{msg.partition()}:{msg.offset()}".encode("utf-8")
-        value = json.dumps(dlq_message, ensure_ascii=False, default=str).encode("utf-8")
-
-        with attach_context_from_kafka(
+        dlq_payload = build_standard_dlq_payload(
+            msg=msg,
+            worker="action-worker",
+            stage=stage,
+            error=error,
+            attempt_count=int(attempt_count),
+            payload_text=payload_text,
+            payload_obj=payload_obj,
+        )
+        spec = DlqPublishSpec(
+            dlq_topic=self.dlq_topic,
+            service_name=str(self.service_name or "action-worker"),
+            span_name="action_worker.dlq_produce",
+            metric_event_name="ACTION_COMMAND_DLQ",
+            flush_timeout_seconds=float(self.dlq_flush_timeout_seconds),
+        )
+        await publish_dlq_json(
+            producer=self.dlq_producer,
+            spec=spec,
+            msg=msg,
+            payload=dlq_payload,
+            tracing=self.tracing,
+            metrics=self.metrics,
             kafka_headers=kafka_headers,
             fallback_metadata=fallback_metadata if isinstance(fallback_metadata, dict) else None,
-            service_name=self.service_name,
-        ):
-            headers = kafka_headers_from_current_context()
-            with self.tracing.span(
-                "action_worker.dlq_produce",
-                attributes={
-                    "messaging.system": "kafka",
-                    "messaging.destination": self.dlq_topic,
-                    "messaging.destination_kind": "topic",
-                    "messaging.kafka.partition": msg.partition(),
-                    "messaging.kafka.offset": msg.offset(),
-                },
-            ):
-                self.dlq_producer.produce(self.dlq_topic, key=key, value=value, headers=headers or None)
-                await asyncio.to_thread(self.dlq_producer.flush, self.dlq_flush_timeout_seconds)
-        try:
-            self.metrics.record_event("ACTION_COMMAND_DLQ", action="published")
-        except Exception:
-            pass
+        )
 
     async def _send_to_dlq(  # type: ignore[override]
         self,
@@ -1829,28 +1775,10 @@ class ActionWorker(ProcessedEventKafkaWorker[_ActionCommandPayload, None]):
 
 
 async def main() -> None:
-    worker = ActionWorker()
-
-    loop = asyncio.get_running_loop()
-    stop_event = asyncio.Event()
-
-    def _stop(*_: Any) -> None:
-        stop_event.set()
-
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        with suppress(NotImplementedError):
-            loop.add_signal_handler(sig, _stop)
-
-    try:
-        await worker.initialize()
-        task = asyncio.create_task(worker.run())
-        await stop_event.wait()
-        worker.running = False
-        task.cancel()
-        with suppress(asyncio.CancelledError):
-            await task
-    finally:
-        await worker.shutdown()
+    await run_worker_until_stopped(
+        ActionWorker(),
+        task_name="action-worker.run",
+    )
 
 
 if __name__ == "__main__":

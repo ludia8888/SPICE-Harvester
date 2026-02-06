@@ -301,7 +301,7 @@ QUERY_OPERATORS = {
 
 
 # Import the standardized ApiResponse
-from .requests import ApiResponse
+from .responses import ApiResponse
 
 # Backward compatibility alias for BaseResponse
 # TODO: Remove this alias after all services migrate to ApiResponse

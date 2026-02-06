@@ -16,7 +16,6 @@ import asyncio
 import json
 import logging
 import time
-from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
 from confluent_kafka import Producer
@@ -34,9 +33,9 @@ from shared.observability.context_propagation import (
 from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
 from shared.services.kafka.producer_factory import create_kafka_producer
+from shared.services.kafka.producer_ops import ExecutorKafkaProducerOps, InlineKafkaProducerOps, KafkaProducerOps
 from shared.services.registries.connector_registry import ConnectorRegistry, ConnectorSource
 from shared.utils.app_logger import configure_logging
-from shared.utils.executor_utils import call_in_executor
 from shared.utils.time_utils import utcnow
 
 logger = logging.getLogger(__name__)
@@ -56,9 +55,9 @@ class ConnectorTriggerService:
         self.tracing = get_tracing_service("connector-trigger-service")
         self.metrics = get_metrics_collector("connector-trigger-service")
 
-        self._producer_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="kafka-producer")
         self.registry: Optional[ConnectorRegistry] = None
         self.producer: Optional[Producer] = None
+        self.producer_ops: Optional[KafkaProducerOps] = None
         self.sheets: Optional[GoogleSheetsService] = None
 
     async def initialize(self) -> None:
@@ -79,6 +78,11 @@ class ConnectorTriggerService:
             linger_ms=20,
             enable_idempotence=True,
             max_in_flight_requests_per_connection=5,
+            producer_ctor=Producer,
+        )
+        self.producer_ops = ExecutorKafkaProducerOps(
+            self.producer,
+            thread_name_prefix="connector-trigger-service-kafka-producer",
         )
 
         logger.info(
@@ -93,22 +97,37 @@ class ConnectorTriggerService:
             except Exception:
                 logger.warning("Failed to close GoogleSheetsService", exc_info=True)
             self.sheets = None
-        if self.producer:
+        ops = self.producer_ops
+        producer = self.producer
+        if ops:
             try:
-                await call_in_executor(self._producer_executor, self.producer.flush, 5)
+                await ops.close(timeout_s=5.0)
             except Exception:
                 logger.warning("Failed to flush Kafka producer", exc_info=True)
-            self.producer = None
+        elif producer:
+            try:
+                producer.flush(5.0)
+            except Exception:
+                logger.warning("Failed to flush Kafka producer", exc_info=True)
+        self.producer_ops = None
+        self.producer = None
         if self.registry:
             try:
                 await self.registry.close()
             except Exception:
                 logger.warning("Failed to close ConnectorRegistry", exc_info=True)
             self.registry = None
-        self._producer_executor.shutdown(wait=False, cancel_futures=True)
 
-    async def _producer_call(self, func, *args, **kwargs):
-        return await call_in_executor(self._producer_executor, func, *args, **kwargs)
+    def _get_producer_ops(self) -> KafkaProducerOps:
+        ops = self.producer_ops
+        if ops is not None:
+            return ops
+        producer = self.producer
+        if producer is None:
+            raise RuntimeError("ConnectorTriggerService producer not configured")
+        ops = InlineKafkaProducerOps(producer)
+        self.producer_ops = ops
+        return ops
 
     async def _is_due(self, source: ConnectorSource) -> bool:
         if not self.registry:
@@ -225,6 +244,7 @@ class ConnectorTriggerService:
         if not self.registry or not self.producer:
             raise RuntimeError("Trigger service not initialized")
 
+        producer_ops = self._get_producer_ops()
         while self.running:
             try:
                 batch = await self.registry.claim_outbox_batch(limit=self.outbox_batch)
@@ -271,8 +291,7 @@ class ConnectorTriggerService:
                                 )
                                 value = json.dumps(item.payload, ensure_ascii=False).encode("utf-8")
                                 key = f"{item.source_type}:{item.source_id}".encode("utf-8")
-                                await self._producer_call(
-                                    self.producer.produce,
+                                await producer_ops.produce(
                                     topic=self.topic,
                                     value=value,
                                     key=key,
@@ -284,7 +303,7 @@ class ConnectorTriggerService:
                                 except Exception:
                                     pass
 
-                    remaining = await self._producer_call(self.producer.flush, 10)
+                    remaining = await producer_ops.flush(10)
                     if remaining != 0:
                         logger.warning(f"Producer flush incomplete (remaining={remaining}); will retry outbox")
 

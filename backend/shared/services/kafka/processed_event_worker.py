@@ -27,6 +27,8 @@ from confluent_kafka import KafkaError, TopicPartition
 
 from shared.models.event_envelope import EventEnvelope
 from shared.observability.context_propagation import attach_context_from_kafka
+from shared.services.kafka.consumer_ops import InlineKafkaConsumerOps, KafkaConsumerOps
+from shared.services.kafka.worker_consumer_runtime import WorkerConsumerRuntime
 from shared.services.registries.processed_event_heartbeat import run_processed_event_heartbeat_loop
 from shared.services.registries.processed_event_registry import (
     ClaimDecision,
@@ -67,6 +69,7 @@ class ProcessedEventKafkaWorker(Generic[PayloadT, ResultT], ABC):
 
     # --- Required wiring (provided by concrete worker instances) ---
     consumer: Any  # SafeKafkaConsumer
+    consumer_ops: Optional[KafkaConsumerOps]
     processed: Optional[ProcessedEventRegistry]
     handler: str
     max_retries: int
@@ -226,32 +229,16 @@ class ProcessedEventKafkaWorker(Generic[PayloadT, ResultT], ABC):
     async def _commit(self, msg: Any) -> None:
         if not getattr(self, "consumer", None):
             return
-        key = self._partition_key(msg)
-        if key in self._revoked_partitions:
-            logger.info(
-                "Skipping %s commit; partition revoked (topic=%s partition=%s offset=%s)",
-                self._loop_label(),
-                str(msg.topic()),
-                int(msg.partition()),
-                int(msg.offset()),
-            )
-            return
-        self.consumer.commit_sync(msg)
+        if not hasattr(self, "_revoked_partitions"):
+            self._init_partition_state(reset=False)
+        await self._get_consumer_runtime().commit(msg)
 
     async def _seek(self, *, topic: str, partition: int, offset: int) -> None:
         if not getattr(self, "consumer", None):
             return
-        key: PartitionKey = (str(topic), int(partition))
-        if key in self._revoked_partitions:
-            logger.info(
-                "Skipping %s seek; partition revoked (topic=%s partition=%s offset=%s)",
-                self._loop_label(),
-                str(topic),
-                int(partition),
-                int(offset),
-            )
-            return
-        self.consumer.seek(TopicPartition(topic, partition, offset))
+        if not hasattr(self, "_revoked_partitions"):
+            self._init_partition_state(reset=False)
+        await self._get_consumer_runtime().seek(topic=topic, partition=partition, offset=offset)
 
     def _heartbeat_options(self) -> HeartbeatOptions:
         return HeartbeatOptions()
@@ -271,11 +258,69 @@ class ProcessedEventKafkaWorker(Generic[PayloadT, ResultT], ABC):
 
     async def _poll_message(self, *, timeout: float) -> Any:
         poller = getattr(self, "_poll", None)
-        if callable(poller):
-            return await poller(timeout)
         if not getattr(self, "consumer", None):
             return None
-        return await asyncio.to_thread(self.consumer.poll, timeout)
+        return await self._get_consumer_runtime().poll_message(
+            timeout=timeout,
+            poller=poller if callable(poller) else None,
+        )
+
+    def _get_consumer_ops(self) -> KafkaConsumerOps:
+        ops = getattr(self, "consumer_ops", None)
+        if ops is not None:
+            return ops
+        consumer = getattr(self, "consumer", None)
+        if consumer is None:
+            raise RuntimeError("consumer not initialized")
+        ops = InlineKafkaConsumerOps(consumer)
+        setattr(self, "consumer_ops", ops)
+        return ops
+
+    def _get_consumer_runtime(self) -> WorkerConsumerRuntime:
+        if not hasattr(self, "_event_loop"):
+            with suppress(RuntimeError):
+                setattr(self, "_event_loop", asyncio.get_running_loop())
+        if not hasattr(self, "_revoked_partitions"):
+            self._init_partition_state(reset=False)
+        return WorkerConsumerRuntime(
+            ops=self._get_consumer_ops(),
+            loop_label=self._loop_label,
+            revoked_partitions=self._revoked_partitions,
+            uses_commit_state=self._uses_commit_state,
+            commit_state_by_partition=self._commit_state_by_partition,
+        )
+
+    async def _close_consumer_runtime(self) -> None:
+        ops = getattr(self, "consumer_ops", None)
+        consumer = getattr(self, "consumer", None)
+
+        if ops is not None:
+            try:
+                await ops.close()
+            except Exception as exc:
+                logger.warning(
+                    "Kafka consumer close failed during %s shutdown: %s",
+                    self._loop_label(),
+                    exc,
+                    exc_info=True,
+                )
+            finally:
+                setattr(self, "consumer_ops", None)
+                setattr(self, "consumer", None)
+            return
+
+        if consumer is not None:
+            try:
+                consumer.close()
+            except Exception as exc:
+                logger.warning(
+                    "Kafka consumer close failed during %s shutdown: %s",
+                    self._loop_label(),
+                    exc,
+                    exc_info=True,
+                )
+            finally:
+                setattr(self, "consumer", None)
 
     def _is_partition_eof(self, msg: Any) -> bool:
         try:
@@ -313,6 +358,9 @@ class ProcessedEventKafkaWorker(Generic[PayloadT, ResultT], ABC):
             )
 
     def _init_partition_state(self, *, reset: bool = True) -> None:
+        if not hasattr(self, "_event_loop"):
+            with suppress(RuntimeError):
+                setattr(self, "_event_loop", asyncio.get_running_loop())
         if reset or not hasattr(self, "_revoked_partitions"):
             self._revoked_partitions: set[PartitionKey] = set()
         if reset or not hasattr(self, "_inflight_by_partition"):
@@ -353,33 +401,15 @@ class ProcessedEventKafkaWorker(Generic[PayloadT, ResultT], ABC):
             msg.offset(),
         )
 
-    def _pause_partition(self, *, topic: str, partition: int) -> None:
+    async def _pause_partition(self, *, topic: str, partition: int) -> None:
         if not getattr(self, "consumer", None):
             return
-        try:
-            self.consumer.pause([TopicPartition(topic, partition)])
-        except Exception as exc:
-            logger.warning(
-                "Failed to pause %s partition (topic=%s partition=%s): %s",
-                self._loop_label(),
-                topic,
-                partition,
-                exc,
-            )
+        await self._get_consumer_runtime().pause_partition(topic=topic, partition=partition)
 
-    def _resume_partition(self, *, topic: str, partition: int) -> None:
+    async def _resume_partition(self, *, topic: str, partition: int) -> None:
         if not getattr(self, "consumer", None):
             return
-        try:
-            self.consumer.resume([TopicPartition(topic, partition)])
-        except Exception as exc:
-            logger.warning(
-                "Failed to resume %s partition (topic=%s partition=%s): %s",
-                self._loop_label(),
-                topic,
-                partition,
-                exc,
-            )
+        await self._get_consumer_runtime().resume_partition(topic=topic, partition=partition)
 
     def _log_background_task_exception(self, task: asyncio.Task) -> None:
         try:
@@ -392,15 +422,38 @@ class ProcessedEventKafkaWorker(Generic[PayloadT, ResultT], ABC):
         if exc:
             logger.error("Background task crashed: %s", exc, exc_info=True)
 
+    def _run_on_event_loop_thread(self, fn) -> None:  # noqa: ANN001
+        loop = getattr(self, "_event_loop", None)
+        if loop is None:
+            # If we have no captured loop, only execute inline when we are already
+            # on the asyncio event-loop thread.
+            try:
+                asyncio.get_running_loop()
+            except RuntimeError:
+                logger.warning("Event loop not captured; skipping thread-unsafe rebalance side-effects")
+                return
+            fn()
+            return
+        try:
+            loop.call_soon_threadsafe(fn)
+        except RuntimeError:
+            logger.warning("Event loop unavailable; skipping thread-unsafe rebalance side-effects")
+
     def _handle_partitions_revoked(self, partitions: list, *, clear_pending: bool = True) -> None:
         revoked = {(p.topic, int(p.partition)) for p in partitions}
         self._revoked_partitions |= revoked
-        for key in revoked:
-            task = self._inflight_by_partition.get(key)
-            if task and self._cancel_inflight_on_revoke():
-                task.cancel()
-            if clear_pending:
-                self._pending_by_partition.pop(key, None)
+
+        def _apply_revocation() -> None:
+            for key in revoked:
+                task = self._inflight_by_partition.get(key)
+                if task and self._cancel_inflight_on_revoke():
+                    task.cancel()
+                if clear_pending:
+                    self._pending_by_partition.pop(key, None)
+
+        # Rebalance callbacks can run on the Kafka consumer thread; cancelling asyncio tasks must happen
+        # on the event-loop thread.
+        self._run_on_event_loop_thread(_apply_revocation)
 
     def _handle_partitions_assigned(self, partitions: list, *, resume: bool = True) -> None:
         for p in partitions:
@@ -410,6 +463,38 @@ class ProcessedEventKafkaWorker(Generic[PayloadT, ResultT], ABC):
                 self.consumer.resume([TopicPartition(p.topic, p.partition) for p in partitions])
             except Exception as exc:
                 logger.warning("Failed to resume %s partitions after assign: %s", self._loop_label(), exc)
+
+    def _on_partitions_revoked(self, partitions: list) -> None:
+        """
+        Default SafeKafkaConsumer rebalance revoke callback.
+
+        Concrete workers can pass this as `on_revoke=self._on_partitions_revoked`
+        without duplicating boilerplate. Override in workers that need custom
+        behavior.
+        """
+        self._init_partition_state(reset=False)
+        self._rebalance_in_progress = True
+        logger.info(
+            "%s partitions revoked: %s",
+            self._loop_label(),
+            [(p.topic, int(p.partition)) for p in partitions],
+        )
+        self._handle_partitions_revoked(partitions, clear_pending=True)
+
+    def _on_partitions_assigned(self, partitions: list) -> None:
+        """
+        Default SafeKafkaConsumer rebalance assign callback.
+
+        Override in workers that need custom resume semantics.
+        """
+        self._init_partition_state(reset=False)
+        self._rebalance_in_progress = False
+        logger.info(
+            "%s partitions assigned: %s",
+            self._loop_label(),
+            [(p.topic, int(p.partition)) for p in partitions],
+        )
+        self._handle_partitions_assigned(partitions, resume=True)
 
     async def _handle_busy_partition_message(self, msg: Any) -> None:
         topic = str(msg.topic())
@@ -423,19 +508,19 @@ class ProcessedEventKafkaWorker(Generic[PayloadT, ResultT], ABC):
         )
         try:
             await self._seek(topic=topic, partition=partition, offset=int(msg.offset()))
-            self._pause_partition(topic=topic, partition=partition)
+            await self._pause_partition(topic=topic, partition=partition)
         except Exception as exc:
             logger.warning("Failed to rewind/pause busy partition: %s", exc)
         await asyncio.sleep(self._busy_partition_sleep_seconds())
 
-    def _start_partition_task(self, msg: Any) -> None:
+    async def _start_partition_task(self, msg: Any) -> None:
         if not getattr(self, "consumer", None):
             return
         topic = str(msg.topic())
         partition = int(msg.partition())
         key = (topic, partition)
 
-        self._pause_partition(topic=topic, partition=partition)
+        await self._pause_partition(topic=topic, partition=partition)
         task = asyncio.create_task(
             self._handle_partition_message(msg),
             name=self._partition_task_name(msg),
@@ -467,17 +552,17 @@ class ProcessedEventKafkaWorker(Generic[PayloadT, ResultT], ABC):
             if self._buffer_messages():
                 if not committed:
                     self._pending_by_partition.pop(key, None)
-                    self._resume_partition(topic=key[0], partition=key[1])
+                    await self._resume_partition(topic=key[0], partition=key[1])
                     return
                 pending = self._pending_by_partition.get(key)
                 if pending and len(pending) > 0:
                     next_msg = pending.popleft()
                     if len(pending) == 0:
                         self._pending_by_partition.pop(key, None)
-                    self._start_partition_task(next_msg)
+                    await self._start_partition_task(next_msg)
                     return
 
-            self._resume_partition(topic=key[0], partition=key[1])
+            await self._resume_partition(topic=key[0], partition=key[1])
 
     async def _cancel_inflight_tasks(self) -> None:
         inflight = list(self._inflight_by_partition.values())
@@ -485,6 +570,48 @@ class ProcessedEventKafkaWorker(Generic[PayloadT, ResultT], ABC):
             task.cancel()
         if inflight:
             await asyncio.gather(*inflight, return_exceptions=True)
+
+    async def _poll_for_message(
+        self,
+        *,
+        poll_timeout: float,
+        idle_sleep: Optional[float],
+        missing_consumer_sleep: float,
+        poll_exception_sleep: float,
+    ) -> Any:  # noqa: ANN401
+        """
+        Shared polling template for worker loops.
+
+        Returns a *valid* Kafka message (no errors) or None when the caller
+        should continue the loop. This centralizes common control-flow and
+        reduces drift between run-loop implementations.
+        """
+
+        if not getattr(self, "consumer", None):
+            if missing_consumer_sleep:
+                await asyncio.sleep(missing_consumer_sleep)
+            return None
+
+        try:
+            msg = await self._poll_message(timeout=poll_timeout)
+        except Exception as exc:
+            await self._on_poll_exception(exc)
+            if poll_exception_sleep:
+                await asyncio.sleep(poll_exception_sleep)
+            return None
+
+        if msg is None:
+            if idle_sleep is not None:
+                await asyncio.sleep(idle_sleep)
+            return None
+
+        if msg.error():
+            if self._is_partition_eof(msg):
+                return None
+            await self._on_kafka_message_error(msg)
+            return None
+
+        return msg
 
     async def run_loop(
         self,
@@ -498,29 +625,15 @@ class ProcessedEventKafkaWorker(Generic[PayloadT, ResultT], ABC):
         seek_on_error: bool = True,
         catch_exceptions: bool = True,
     ) -> None:
+        self._init_partition_state(reset=False)
         while self.running:
-            if not getattr(self, "consumer", None):
-                if missing_consumer_sleep:
-                    await asyncio.sleep(missing_consumer_sleep)
-                continue
-
-            try:
-                msg = await self._poll_message(timeout=poll_timeout)
-            except Exception as exc:
-                await self._on_poll_exception(exc)
-                if poll_exception_sleep:
-                    await asyncio.sleep(poll_exception_sleep)
-                continue
-
+            msg = await self._poll_for_message(
+                poll_timeout=poll_timeout,
+                idle_sleep=idle_sleep,
+                missing_consumer_sleep=missing_consumer_sleep,
+                poll_exception_sleep=poll_exception_sleep,
+            )
             if msg is None:
-                if idle_sleep is not None:
-                    await asyncio.sleep(idle_sleep)
-                continue
-
-            if msg.error():
-                if self._is_partition_eof(msg):
-                    continue
-                await self._on_kafka_message_error(msg)
                 continue
 
             if not catch_exceptions:
@@ -551,28 +664,13 @@ class ProcessedEventKafkaWorker(Generic[PayloadT, ResultT], ABC):
         self._init_partition_state(reset=False)
 
         while self.running:
-            if not getattr(self, "consumer", None):
-                if missing_consumer_sleep:
-                    await asyncio.sleep(missing_consumer_sleep)
-                continue
-
-            try:
-                msg = await self._poll_message(timeout=poll_timeout)
-            except Exception as exc:
-                await self._on_poll_exception(exc)
-                if poll_exception_sleep:
-                    await asyncio.sleep(poll_exception_sleep)
-                continue
-
+            msg = await self._poll_for_message(
+                poll_timeout=poll_timeout,
+                idle_sleep=idle_sleep,
+                missing_consumer_sleep=missing_consumer_sleep,
+                poll_exception_sleep=poll_exception_sleep,
+            )
             if msg is None:
-                if idle_sleep is not None:
-                    await asyncio.sleep(idle_sleep)
-                continue
-
-            if msg.error():
-                if self._is_partition_eof(msg):
-                    continue
-                await self._on_kafka_message_error(msg)
                 continue
 
             key = self._partition_key(msg)
@@ -596,7 +694,7 @@ class ProcessedEventKafkaWorker(Generic[PayloadT, ResultT], ABC):
             else:
                 msg_to_process = msg
 
-            self._start_partition_task(msg_to_process)
+            await self._start_partition_task(msg_to_process)
 
     async def handle_message(self, msg: Any) -> None:
         """
@@ -835,6 +933,29 @@ class ProcessedEventKafkaWorker(Generic[PayloadT, ResultT], ABC):
                     pass
 
 
+class StrictHeartbeatPolicyMixin:
+    """
+    Shared strict heartbeat policy for ProcessedEventRegistry-backed workers.
+
+    When heartbeat updates fail, workers fail closed so lease ownership does not
+    silently continue without durable idempotency guarantees.
+    """
+
+    def _heartbeat_options(self) -> HeartbeatOptions:
+        return HeartbeatOptions(
+            stop_when_false=True,
+            continue_on_exception=False,
+        )
+
+
+class StrictHeartbeatKafkaWorker(
+    StrictHeartbeatPolicyMixin,
+    ProcessedEventKafkaWorker[PayloadT, ResultT],
+    ABC,
+):
+    """ProcessedEventKafkaWorker with strict heartbeat behavior."""
+
+
 class EventEnvelopeKafkaWorker(ProcessedEventKafkaWorker[EventEnvelope, ResultT], ABC):
     """
     Specialization of ProcessedEventKafkaWorker for EventEnvelope payloads.
@@ -884,3 +1005,11 @@ class EventEnvelopeKafkaWorker(ProcessedEventKafkaWorker[EventEnvelope, ResultT]
     def _metric_event_name(self, *, payload: EventEnvelope) -> Optional[str]:  # type: ignore[override]
         event_type = str(payload.event_type or "").strip()
         return event_type or None
+
+
+class StrictHeartbeatEventEnvelopeKafkaWorker(
+    StrictHeartbeatPolicyMixin,
+    EventEnvelopeKafkaWorker[ResultT],
+    ABC,
+):
+    """EventEnvelopeKafkaWorker with strict heartbeat behavior."""

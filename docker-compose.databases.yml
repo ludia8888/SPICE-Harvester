@@ -63,7 +63,7 @@ services:
       - cluster.name=spice-harvester-cluster
       - node.name=spice-harvester-node
       - bootstrap.memory_lock=true
-      - "ES_JAVA_OPTS=-Xms256m -Xmx256m"
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
       # Dev/test only: avoid RED cluster when the Docker VM disk is tight (shards become unassigned).
       - cluster.routing.allocation.disk.threshold_enabled=false
       - xpack.security.enabled=false
@@ -84,11 +84,11 @@ services:
     volumes:
       - elasticsearch-data:/usr/share/elasticsearch/data
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      test: ["CMD-SHELL", "curl -fsS 'http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=5s' > /dev/null || exit 1"]
       interval: 30s
       timeout: 10s
-      retries: 5
-      start_period: 60s
+      retries: 10
+      start_period: 240s
     restart: unless-stopped
     networks:
       - spice_network

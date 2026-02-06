@@ -11,6 +11,7 @@ from uuid import uuid4
 from fastapi import HTTPException, status
 
 import bff.routers.pipeline_datasets_ops as ops
+from bff.services.dataset_ingest_idempotency import resolve_existing_version_or_raise
 from bff.services.dataset_ingest_outbox_builder import DatasetIngestOutboxBuilder
 from bff.services.dataset_ingest_outbox_flusher import maybe_flush_dataset_ingest_outbox_inline
 from bff.services.dataset_ingest_failures import mark_ingest_failed
@@ -147,41 +148,27 @@ async def upload_media_dataset(
             dataset_registry,
             ingest_request_id=ingest_request.ingest_request_id,
         )
-        if ingest_request.dataset_id != dataset.dataset_id:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Idempotency key already used for a different dataset",
+        existing_version = await resolve_existing_version_or_raise(
+            dataset_registry=dataset_registry,
+            ingest_request=ingest_request,
+            expected_dataset_id=str(dataset.dataset_id),
+            request_fingerprint=str(request_fingerprint),
+        )
+        if existing_version:
+            await maybe_flush_dataset_ingest_outbox_inline(
+                dataset_registry=dataset_registry,
+                lineage_store=lineage_store,
+                flush_dataset_ingest_outbox=flush_dataset_ingest_outbox,
             )
-        if ingest_request.request_fingerprint and ingest_request.request_fingerprint != request_fingerprint:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Idempotency key reuse detected with different payload",
-            )
-        if ingest_request.status == "FAILED":
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=ingest_request.error or "Previous ingest failed",
-            )
-
-        if ingest_request.status == "PUBLISHED":
-            existing_version = await dataset_registry.get_version_by_ingest_request(
-                ingest_request_id=ingest_request.ingest_request_id
-            )
-            if existing_version:
-                await maybe_flush_dataset_ingest_outbox_inline(
-                    dataset_registry=dataset_registry,
-                    lineage_store=lineage_store,
-                    flush_dataset_ingest_outbox=flush_dataset_ingest_outbox,
-                )
-                return ApiResponse.success(
-                    message="Media dataset created",
-                    data={
-                        "dataset": dataset.__dict__,
-                        "version": existing_version.__dict__,
-                        "preview": {"columns": schema_columns, "rows": []},
-                        "artifact_key": existing_version.artifact_key,
-                    },
-                ).to_dict()
+            return ApiResponse.success(
+                message="Media dataset created",
+                data={
+                    "dataset": dataset.__dict__,
+                    "version": existing_version.__dict__,
+                    "preview": {"columns": schema_columns, "rows": []},
+                    "artifact_key": existing_version.artifact_key,
+                },
+            ).to_dict()
 
         repo = ops._resolve_lakefs_raw_repository()
         await ops._ensure_lakefs_branch_exists(

@@ -16,11 +16,11 @@ from dataclasses import dataclass, field
 from enum import Enum
 import logging
 import hashlib
-from concurrent.futures import ThreadPoolExecutor
 
 from confluent_kafka import Producer, KafkaError
 import redis.asyncio as aioredis
 
+from shared.services.kafka.consumer_ops import ExecutorKafkaConsumerOps, KafkaConsumerOps
 from shared.services.kafka.producer_factory import create_kafka_producer
 from shared.services.kafka.safe_consumer import SafeKafkaConsumer, create_safe_consumer
 
@@ -131,14 +131,12 @@ class DLQHandlerFixed:
         
         # Kafka clients
         self.consumer: Optional[SafeKafkaConsumer] = None
+        self.consumer_ops: Optional[KafkaConsumerOps] = None
         self.producer: Optional[Producer] = None
         
         # Processing state
         self.processing = False
         self.process_task: Optional[asyncio.Task] = None
-        
-        # Thread pool for blocking operations
-        self.executor = ThreadPoolExecutor(max_workers=2)
         
         # Retry queue
         self.retry_queue: List[FailedMessage] = []
@@ -175,6 +173,10 @@ class DLQHandlerFixed:
             service_name="dlq-handler",
             extra_config=consumer_extra,
         )
+        self.consumer_ops = ExecutorKafkaConsumerOps(
+            self.consumer,
+            thread_name_prefix="dlq-handler-kafka",
+        )
 
         bootstrap_servers = str((self.kafka_config or {}).get("bootstrap.servers") or "").strip()
         if not bootstrap_servers:
@@ -208,27 +210,26 @@ class DLQHandlerFixed:
                 await self.process_task
             except asyncio.CancelledError:
                 pass
-        
-        if self.consumer:
+
+        if self.consumer_ops:
+            await self.consumer_ops.close()
+            self.consumer_ops = None
+            self.consumer = None
+        elif self.consumer:
             self.consumer.close()
-        
-        # Shutdown thread pool
-        self.executor.shutdown(wait=False)
+            self.consumer = None
         
         logger.info("Stopped DLQ processing")
     
-    def _poll_message(self, timeout: float = 1.0):
-        """Poll for message in thread (blocking operation)"""
-        return self.consumer.poll(timeout=timeout)
-    
     async def _process_loop(self):
         """Main DLQ processing loop - FIXED to not block event loop"""
-        loop = asyncio.get_event_loop()
+        if not self.consumer_ops:
+            raise RuntimeError("DLQ consumer not initialized")
         
         while self.processing:
             try:
-                # Poll for message in thread pool (non-blocking for event loop)
-                msg = await loop.run_in_executor(self.executor, self._poll_message, 0.5)
+                # Poll for message on a dedicated thread (non-blocking for event loop)
+                msg = await self.consumer_ops.poll(timeout=0.5)
                 
                 if msg is None:
                     # No message, yield control
@@ -244,8 +245,7 @@ class DLQHandlerFixed:
                 await self._process_dlq_message(msg)
                 
                 # Commit offset
-                if self.consumer:
-                    self.consumer.commit_sync(msg)
+                await self.consumer_ops.commit_sync(msg)
                 
             except Exception as e:
                 logger.error(f"Error in DLQ processing loop: {e}")

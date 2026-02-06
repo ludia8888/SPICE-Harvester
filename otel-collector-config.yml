@@ -8,10 +8,10 @@ processors:
   batch:
 
 exporters:
-  logging:
-    loglevel: info
-  otlp/jaeger:
-    endpoint: jaeger:4317
+  # Use OTLP/HTTP since Jaeger all-in-one reliably exposes OTLP on 4318.
+  # This avoids gRPC DeadlineExceeded loops when OTLP gRPC is unavailable/misconfigured.
+  otlphttp/jaeger:
+    endpoint: http://jaeger:4318
     tls:
       insecure: true
   prometheus:
@@ -22,8 +22,8 @@ service:
     traces:
       receivers: [otlp]
       processors: [batch]
-      exporters: [logging, otlp/jaeger]
+      exporters: [otlphttp/jaeger]
     metrics:
       receivers: [otlp]
       processors: [batch]
-      exporters: [logging, prometheus]
+      exporters: [prometheus]

@@ -203,5 +203,3 @@ async def test_instance_worker_send_to_dlq_payload_shape() -> None:
     assert payload["stage"] == "process_command"
     assert payload["attempt_count"] == 5
     assert payload["worker"] == "instance-worker"
-
-    worker._consumer_executor.shutdown(wait=False, cancel_futures=True)

@@ -5,7 +5,6 @@ OMS 비동기 인스턴스 라우터 - Command Pattern 기반
 
 import logging
 from datetime import datetime, timezone
-import os
 from typing import Any, Dict, List, Optional
 from uuid import UUID, uuid4
 
@@ -23,6 +22,7 @@ from oms.dependencies import (
     ValidatedClassId,
     ensure_database_exists
 )
+from oms.routers._event_sourcing import append_event_sourcing_command, build_command_status_metadata
 from shared.dependencies.providers import RedisServiceDep
 from shared.config.app_config import AppConfig
 from shared.models.commands import CommandType, InstanceCommand, CommandResult, CommandStatus
@@ -30,8 +30,6 @@ from shared.models.common import BaseResponse
 from shared.services.core.command_status_service import CommandStatusService
 from shared.services.registries.processed_event_registry import ProcessedEventRegistry
 from shared.services.storage.redis_service import RedisService
-from shared.models.event_envelope import EventEnvelope
-from shared.services.events.aggregate_sequence_allocator import OptimisticConcurrencyError
 from shared.utils.ontology_version import resolve_ontology_version
 from oms.utils.command_status_utils import map_registry_status
 from oms.utils.ontology_stamp import merge_ontology_stamp
@@ -47,6 +45,7 @@ from shared.security.input_sanitizer import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/instances/{db_name}/async", tags=["Async Instance Management"])
+
 
 def _enforce_ingest_only_if_writeback_enabled(
     *,
@@ -113,25 +112,54 @@ async def _fallback_from_registry(
     )
 
 
-async def _append_command_event(command: InstanceCommand, *, event_store, topic: str, actor: Optional[str]) -> None:
-    """Store command as an immutable event in S3/MinIO for the publisher to relay to Kafka."""
-    # Ordering contract: for ingestion/enterprise DAG workflows, we partition instance command
-    # delivery by db+branch so dependent classes are processed in enqueue order. We keep
-    # aggregate_id semantics intact (debugging/idempotency) and expose ordering_key separately.
+def _derive_ordering_key(command: InstanceCommand) -> str:
     branch = validate_branch_name(command.branch or "main")
-    ordering_key = None
     if isinstance(command.metadata, dict):
-        ordering_key = str(command.metadata.get("ordering_key") or "").strip() or None
-    if not ordering_key:
-        ordering_key = f"{command.db_name}:{branch}"
-    envelope = EventEnvelope.from_command(
-        command,
+        value = str(command.metadata.get("ordering_key") or "").strip()
+        if value:
+            return value
+    return f"{command.db_name}:{branch}"
+
+
+async def _publish_instance_command(
+    *,
+    command: InstanceCommand,
+    event_store: Any,
+    command_status_service: Optional[CommandStatusService],
+    actor: Optional[str],
+    status_extra: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Append an InstanceCommand to the Event Store + best-effort Redis status."""
+    ordering_key = _derive_ordering_key(command)
+
+    extra: Dict[str, Any] = {
+        "db_name": command.db_name,
+        "class_id": command.class_id,
+        "branch": command.branch,
+    }
+    if getattr(command, "instance_id", None):
+        extra["instance_id"] = command.instance_id
+    if status_extra:
+        extra.update(status_extra)
+
+    envelope = await append_event_sourcing_command(
+        event_store=event_store,
+        command=command,
         actor=actor,
-        kafka_topic=topic,
-        metadata={"service": "oms", "mode": "event_sourcing", "ordering_key": ordering_key},
+        kafka_topic=AppConfig.INSTANCE_COMMANDS_TOPIC,
+        envelope_metadata={"ordering_key": ordering_key},
+        command_status_service=command_status_service,
+        command_status_metadata=build_command_status_metadata(command=command, extra=extra),
     )
-    await event_store.append_event(envelope)
-    logger.info(f"Stored command event {envelope.event_id} (seq={envelope.sequence_number}) to Event Store")
+    logger.info(
+        "Stored %s command event %s (seq=%s) to Event Store",
+        command.command_type,
+        envelope.event_id,
+        envelope.sequence_number,
+    )
+
+    if not command_status_service:
+        logger.warning("Command status tracking disabled for command %s", command.command_id)
 
 
 def _derive_instance_id(class_id: str, payload: Dict[str, Any]) -> str:
@@ -234,48 +262,13 @@ async def create_instance_async(
             },
             created_by=user_id
         )
-        
-        try:
-            await _append_command_event(
-                command,
-                event_store=event_store,
-                topic=AppConfig.INSTANCE_COMMANDS_TOPIC,
-                actor=user_id,
-            )
-        except OptimisticConcurrencyError as e:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={
-                    "error": "optimistic_concurrency_conflict",
-                    "aggregate_id": e.aggregate_id,
-                    "expected_seq": e.expected_last_sequence,
-                    "actual_seq": e.actual_last_sequence,
-                },
-            )
-        
-        # Redis에 상태 저장 (if available)
-        if command_status_service:
-            try:
-                await command_status_service.set_command_status(
-                    command_id=str(command.command_id),
-                    status=CommandStatus.PENDING,
-                    metadata={
-                        "command_type": command.command_type,
-                        "db_name": db_name,
-                        "class_id": class_id,
-                        "instance_id": instance_id,
-                        "branch": branch,
-                        "aggregate_id": command.aggregate_id,
-                        "created_at": command.created_at.isoformat(),
-                        "created_by": user_id,
-                    },
-                )
-            except Exception as e:
-                logger.warning(
-                    f"Failed to persist command status (continuing without Redis): {e}"
-                )
-        else:
-            logger.warning(f"Command status tracking disabled for command {command.command_id}")
+
+        await _publish_instance_command(
+            command=command,
+            event_store=event_store,
+            command_status_service=command_status_service,
+            actor=user_id,
+        )
         
         # 응답
         return CommandResult(
@@ -351,48 +344,17 @@ async def update_instance_async(
             },
             created_by=user_id
         )
-        
-        try:
-            await _append_command_event(
-                command,
-                event_store=event_store,
-                topic=AppConfig.INSTANCE_COMMANDS_TOPIC,
-                actor=user_id,
-            )
-        except OptimisticConcurrencyError as e:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={
-                    "error": "optimistic_concurrency_conflict",
-                    "aggregate_id": e.aggregate_id,
-                    "expected_seq": e.expected_last_sequence,
-                    "actual_seq": e.actual_last_sequence,
-                },
-            )
-        
-        # Redis에 상태 저장
-        if command_status_service:
-            try:
-                await command_status_service.set_command_status(
-                    command_id=str(command.command_id),
-                    status=CommandStatus.PENDING,
-                    metadata={
-                        "command_type": command.command_type,
-                        "db_name": db_name,
-                        "class_id": class_id,
-                        "instance_id": instance_id,
-                        "branch": branch,
-                        "aggregate_id": command.aggregate_id,
-                        "updated_at": datetime.now(timezone.utc).isoformat(),
-                        "updated_by": user_id,
-                    },
-                )
-            except Exception as e:
-                logger.warning(
-                    f"Failed to persist command status (continuing without Redis): {e}"
-                )
-        else:
-            logger.warning(f"Command status tracking disabled for command {command.command_id}")
+
+        await _publish_instance_command(
+            command=command,
+            event_store=event_store,
+            command_status_service=command_status_service,
+            actor=user_id,
+            status_extra={
+                "updated_at": command.metadata.get("updated_at") if isinstance(command.metadata, dict) else None,
+                "updated_by": user_id,
+            },
+        )
         
         return CommandResult(
             command_id=command.command_id,
@@ -466,48 +428,17 @@ async def delete_instance_async(
             },
             created_by=user_id
         )
-        
-        try:
-            await _append_command_event(
-                command,
-                event_store=event_store,
-                topic=AppConfig.INSTANCE_COMMANDS_TOPIC,
-                actor=user_id,
-            )
-        except OptimisticConcurrencyError as e:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={
-                    "error": "optimistic_concurrency_conflict",
-                    "aggregate_id": e.aggregate_id,
-                    "expected_seq": e.expected_last_sequence,
-                    "actual_seq": e.actual_last_sequence,
-                },
-            )
-        
-        # Redis에 상태 저장
-        if command_status_service:
-            try:
-                await command_status_service.set_command_status(
-                    command_id=str(command.command_id),
-                    status=CommandStatus.PENDING,
-                    metadata={
-                        "command_type": command.command_type,
-                        "db_name": db_name,
-                        "class_id": class_id,
-                        "instance_id": instance_id,
-                        "branch": branch,
-                        "aggregate_id": command.aggregate_id,
-                        "deleted_at": datetime.now(timezone.utc).isoformat(),
-                        "deleted_by": user_id,
-                    },
-                )
-            except Exception as e:
-                logger.warning(
-                    f"Failed to persist command status (continuing without Redis): {e}"
-                )
-        else:
-            logger.warning(f"Command status tracking disabled for command {command.command_id}")
+
+        await _publish_instance_command(
+            command=command,
+            event_store=event_store,
+            command_status_service=command_status_service,
+            actor=user_id,
+            status_extra={
+                "deleted_at": command.metadata.get("deleted_at") if isinstance(command.metadata, dict) else None,
+                "deleted_by": user_id,
+            },
+        )
         
         return CommandResult(
             command_id=command.command_id,
@@ -584,48 +515,14 @@ async def bulk_create_instances_async(
             },
             created_by=user_id
         )
-        
-        try:
-            await _append_command_event(
-                command,
-                event_store=event_store,
-                topic=AppConfig.INSTANCE_COMMANDS_TOPIC,
-                actor=user_id,
-            )
-        except OptimisticConcurrencyError as e:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={
-                    "error": "optimistic_concurrency_conflict",
-                    "aggregate_id": e.aggregate_id,
-                    "expected_seq": e.expected_last_sequence,
-                    "actual_seq": e.actual_last_sequence,
-                },
-            )
-        
-        # Redis에 상태 저장
-        if command_status_service:
-            try:
-                await command_status_service.set_command_status(
-                    command_id=str(command.command_id),
-                    status=CommandStatus.PENDING,
-                    metadata={
-                        "command_type": command.command_type,
-                        "db_name": db_name,
-                        "class_id": class_id,
-                        "branch": branch,
-                        "instance_count": len(sanitized_instances),
-                        "aggregate_id": command.aggregate_id,
-                        "created_at": command.created_at.isoformat(),
-                        "created_by": user_id,
-                    },
-                )
-            except Exception as e:
-                logger.warning(
-                    f"Failed to persist command status (continuing without Redis): {e}"
-                )
-        else:
-            logger.warning(f"Command status tracking disabled for command {command.command_id}")
+
+        await _publish_instance_command(
+            command=command,
+            event_store=event_store,
+            command_status_service=command_status_service,
+            actor=user_id,
+            status_extra={"instance_count": len(sanitized_instances)},
+        )
         
         # Add background task for progress tracking
         if len(sanitized_instances) > 10:  # Only for large batches
@@ -725,39 +622,13 @@ async def bulk_update_instances_async(
             created_by=user_id,
         )
 
-        try:
-            await _append_command_event(
-                command,
-                event_store=event_store,
-                topic=AppConfig.INSTANCE_COMMANDS_TOPIC,
-                actor=user_id,
-            )
-        except OptimisticConcurrencyError as e:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={
-                    "error": "optimistic_concurrency_conflict",
-                    "aggregate_id": e.aggregate_id,
-                    "expected_seq": e.expected_last_sequence,
-                    "actual_seq": e.actual_last_sequence,
-                },
-            )
-
-        if command_status_service:
-            try:
-                await command_status_service.set_command_status(
-                    command_id=str(command.command_id),
-                    status=CommandStatus.PENDING,
-                    metadata={
-                        "command_type": command.command_type,
-                        "db_name": db_name,
-                        "class_id": class_id,
-                        "branch": branch,
-                        "count": len(sanitized_instances),
-                    },
-                )
-            except Exception as e:
-                logger.warning(f"Redis status update failed for bulk update: {e}")
+        await _publish_instance_command(
+            command=command,
+            event_store=event_store,
+            command_status_service=command_status_service,
+            actor=user_id,
+            status_extra={"count": len(sanitized_instances)},
+        )
 
         return CommandResult(
             command_id=command.command_id,
@@ -1002,7 +873,7 @@ async def _process_bulk_create_in_background(
     user_id: Optional[str],
     ontology_version: Dict[str, str],
     event_store,
-    command_status_service: CommandStatusService
+    command_status_service: Optional[CommandStatusService],
 ) -> None:
     """
     Process bulk create operation in background with proper error handling.
@@ -1029,11 +900,12 @@ async def _process_bulk_create_in_background(
             created_by=user_id
         )
         
-        await _append_command_event(
-            command,
+        await _publish_instance_command(
+            command=command,
             event_store=event_store,
-            topic=AppConfig.INSTANCE_COMMANDS_TOPIC,
+            command_status_service=command_status_service,
             actor=user_id,
+            status_extra={"task_id": task_id, "instance_count": len(instances)},
         )
         
         # Update task status (best-effort; Redis may be unavailable)

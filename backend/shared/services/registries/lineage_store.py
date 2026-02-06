@@ -18,10 +18,11 @@ import asyncpg
 from shared.config.settings import get_settings
 from shared.models.event_envelope import EventEnvelope
 from shared.models.lineage import LineageDirection, LineageEdge, LineageGraph, LineageNode
+from shared.services.registries.postgres_schema_registry import PostgresSchemaRegistry
 from shared.utils.ontology_version import extract_ontology_version
 
 
-class LineageStore:
+class LineageStore(PostgresSchemaRegistry):
     """
     Postgres-backed lineage store.
 
@@ -39,35 +40,16 @@ class LineageStore:
         pool_min: Optional[int] = None,
         pool_max: Optional[int] = None,
     ):
-        self._dsn = dsn or get_settings().database.postgres_url
-        self._schema = schema
-        self._pool: Optional[asyncpg.Pool] = None
         perf = get_settings().performance
-        self._pool_min = int(pool_min) if pool_min is not None else int(perf.lineage_pg_pool_min)
-        self._pool_max = int(pool_max) if pool_max is not None else int(perf.lineage_pg_pool_max)
-        self._command_timeout = int(perf.lineage_pg_command_timeout_seconds)
-
-    async def initialize(self) -> None:
-        await self.connect()
-
-    async def connect(self) -> None:
-        if self._pool:
-            return
-        self._pool = await asyncpg.create_pool(
-            self._dsn,
-            min_size=self._pool_min,
-            max_size=self._pool_max,
-            command_timeout=self._command_timeout,
+        pool_min_value = int(pool_min) if pool_min is not None else int(perf.lineage_pg_pool_min)
+        pool_max_value = int(pool_max) if pool_max is not None else int(perf.lineage_pg_pool_max)
+        super().__init__(
+            dsn=dsn,
+            schema=schema,
+            pool_min=pool_min_value,
+            pool_max=pool_max_value,
+            command_timeout=int(perf.lineage_pg_command_timeout_seconds),
         )
-        await self.ensure_schema()
-
-    async def shutdown(self) -> None:
-        await self.close()
-
-    async def close(self) -> None:
-        if self._pool:
-            await self._pool.close()
-            self._pool = None
 
     async def health_check(self) -> bool:
         try:
@@ -79,209 +61,204 @@ class LineageStore:
         except Exception:
             return False
 
-    async def ensure_schema(self) -> None:
-        if not self._pool:
-            raise RuntimeError("LineageStore not connected")
+    async def _ensure_tables(self, conn: asyncpg.Connection) -> None:
+        await conn.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS {self._schema}.lineage_nodes (
+                node_id TEXT PRIMARY KEY,
+                node_type TEXT NOT NULL,
+                label TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                recorded_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                event_id TEXT,
+                aggregate_type TEXT,
+                aggregate_id TEXT,
+                artifact_kind TEXT,
+                artifact_key TEXT,
+                db_name TEXT,
+                run_id TEXT,
+                code_sha TEXT,
+                schema_version TEXT,
+                metadata JSONB NOT NULL DEFAULT '{{}}'::jsonb
+            )
+            """
+        )
+        await conn.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS {self._schema}.lineage_edges (
+                edge_id UUID PRIMARY KEY,
+                from_node_id TEXT NOT NULL,
+                to_node_id TEXT NOT NULL,
+                edge_type TEXT NOT NULL,
+                projection_name TEXT NOT NULL DEFAULT '',
+                occurred_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                recorded_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                db_name TEXT,
+                run_id TEXT,
+                code_sha TEXT,
+                schema_version TEXT,
+                metadata JSONB NOT NULL DEFAULT '{{}}'::jsonb
+            )
+            """
+        )
 
-        async with self._pool.acquire() as conn:
-            await conn.execute(f"CREATE SCHEMA IF NOT EXISTS {self._schema}")
+        await conn.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS {self._schema}.lineage_backfill_queue (
+                backfill_id UUID PRIMARY KEY,
+                event_id TEXT NOT NULL,
+                s3_bucket TEXT,
+                s3_key TEXT,
+                db_name TEXT,
+                occurred_at TIMESTAMPTZ,
+                status TEXT NOT NULL DEFAULT 'pending',
+                attempts INTEGER NOT NULL DEFAULT 0,
+                last_attempt_at TIMESTAMPTZ,
+                last_error TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+            """
+        )
+        await conn.execute(
+            f"""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_lineage_backfill_event_unique
+            ON {self._schema}.lineage_backfill_queue(event_id)
+            """
+        )
+        await conn.execute(
+            f"CREATE INDEX IF NOT EXISTS idx_lineage_backfill_status_time ON {self._schema}.lineage_backfill_queue(status, created_at)"
+        )
+        # Add missing columns if the table already existed (best-effort forwards compatibility).
+        await conn.execute(
+            f"ALTER TABLE {self._schema}.lineage_nodes ADD COLUMN IF NOT EXISTS recorded_at TIMESTAMPTZ NOT NULL DEFAULT NOW()"
+        )
+        await conn.execute(
+            f"ALTER TABLE {self._schema}.lineage_nodes ADD COLUMN IF NOT EXISTS event_id TEXT"
+        )
+        await conn.execute(
+            f"ALTER TABLE {self._schema}.lineage_nodes ADD COLUMN IF NOT EXISTS aggregate_type TEXT"
+        )
+        await conn.execute(
+            f"ALTER TABLE {self._schema}.lineage_nodes ADD COLUMN IF NOT EXISTS aggregate_id TEXT"
+        )
+        await conn.execute(
+            f"ALTER TABLE {self._schema}.lineage_nodes ADD COLUMN IF NOT EXISTS artifact_kind TEXT"
+        )
+        await conn.execute(
+            f"ALTER TABLE {self._schema}.lineage_nodes ADD COLUMN IF NOT EXISTS artifact_key TEXT"
+        )
+        await conn.execute(
+            f"ALTER TABLE {self._schema}.lineage_nodes ADD COLUMN IF NOT EXISTS db_name TEXT"
+        )
+        await conn.execute(
+            f"ALTER TABLE {self._schema}.lineage_nodes ADD COLUMN IF NOT EXISTS run_id TEXT"
+        )
+        await conn.execute(
+            f"ALTER TABLE {self._schema}.lineage_nodes ADD COLUMN IF NOT EXISTS code_sha TEXT"
+        )
+        await conn.execute(
+            f"ALTER TABLE {self._schema}.lineage_nodes ADD COLUMN IF NOT EXISTS schema_version TEXT"
+        )
+
+        await conn.execute(
+            f"ALTER TABLE {self._schema}.lineage_edges ADD COLUMN IF NOT EXISTS projection_name TEXT NOT NULL DEFAULT ''"
+        )
+        await conn.execute(
+            f"ALTER TABLE {self._schema}.lineage_edges ADD COLUMN IF NOT EXISTS recorded_at TIMESTAMPTZ NOT NULL DEFAULT NOW()"
+        )
+        await conn.execute(
+            f"ALTER TABLE {self._schema}.lineage_edges ADD COLUMN IF NOT EXISTS db_name TEXT"
+        )
+        await conn.execute(
+            f"ALTER TABLE {self._schema}.lineage_edges ADD COLUMN IF NOT EXISTS run_id TEXT"
+        )
+        await conn.execute(
+            f"ALTER TABLE {self._schema}.lineage_edges ADD COLUMN IF NOT EXISTS code_sha TEXT"
+        )
+        await conn.execute(
+            f"ALTER TABLE {self._schema}.lineage_edges ADD COLUMN IF NOT EXISTS schema_version TEXT"
+        )
+
+        # Backfill db_name columns from existing metadata (best-effort).
+        try:
             await conn.execute(
                 f"""
-                CREATE TABLE IF NOT EXISTS {self._schema}.lineage_nodes (
-                    node_id TEXT PRIMARY KEY,
-                    node_type TEXT NOT NULL,
-                    label TEXT,
-                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    recorded_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    event_id TEXT,
-                    aggregate_type TEXT,
-                    aggregate_id TEXT,
-                    artifact_kind TEXT,
-                    artifact_key TEXT,
-                    db_name TEXT,
-                    run_id TEXT,
-                    code_sha TEXT,
-                    schema_version TEXT,
-                    metadata JSONB NOT NULL DEFAULT '{{}}'::jsonb
-                )
+                UPDATE {self._schema}.lineage_edges
+                SET db_name = COALESCE(db_name, metadata->>'db_name')
+                WHERE db_name IS NULL AND (metadata ? 'db_name')
                 """
             )
+        except Exception:
+            pass
+        try:
             await conn.execute(
                 f"""
-                CREATE TABLE IF NOT EXISTS {self._schema}.lineage_edges (
-                    edge_id UUID PRIMARY KEY,
-                    from_node_id TEXT NOT NULL,
-                    to_node_id TEXT NOT NULL,
-                    edge_type TEXT NOT NULL,
-                    projection_name TEXT NOT NULL DEFAULT '',
-                    occurred_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    recorded_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    db_name TEXT,
-                    run_id TEXT,
-                    code_sha TEXT,
-                    schema_version TEXT,
-                    metadata JSONB NOT NULL DEFAULT '{{}}'::jsonb
-                )
+                UPDATE {self._schema}.lineage_nodes
+                SET db_name = COALESCE(db_name, metadata->>'db_name')
+                WHERE db_name IS NULL AND (metadata ? 'db_name')
                 """
             )
+        except Exception:
+            pass
 
+        await conn.execute(
+            f"CREATE INDEX IF NOT EXISTS idx_lineage_edges_from ON {self._schema}.lineage_edges(from_node_id)"
+        )
+        await conn.execute(
+            f"CREATE INDEX IF NOT EXISTS idx_lineage_edges_to ON {self._schema}.lineage_edges(to_node_id)"
+        )
+        await conn.execute(
+            f"CREATE INDEX IF NOT EXISTS idx_lineage_edges_type ON {self._schema}.lineage_edges(edge_type)"
+        )
+        # Idempotency: ensure retries don't create duplicate edges.
+        # If duplicates already exist (older runs), deduplicate before creating the unique index.
+        try:
             await conn.execute(
                 f"""
-                CREATE TABLE IF NOT EXISTS {self._schema}.lineage_backfill_queue (
-                    backfill_id UUID PRIMARY KEY,
-                    event_id TEXT NOT NULL,
-                    s3_bucket TEXT,
-                    s3_key TEXT,
-                    db_name TEXT,
-                    occurred_at TIMESTAMPTZ,
-                    status TEXT NOT NULL DEFAULT 'pending',
-                    attempts INTEGER NOT NULL DEFAULT 0,
-                    last_attempt_at TIMESTAMPTZ,
-                    last_error TEXT,
-                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                WITH ranked AS (
+                    SELECT edge_id,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY from_node_id, to_node_id, edge_type, projection_name
+                               ORDER BY recorded_at ASC, edge_id ASC
+                           ) AS rn
+                    FROM {self._schema}.lineage_edges
                 )
+                DELETE FROM {self._schema}.lineage_edges
+                WHERE edge_id IN (SELECT edge_id FROM ranked WHERE rn > 1)
                 """
             )
-            await conn.execute(
-                f"""
-                CREATE UNIQUE INDEX IF NOT EXISTS idx_lineage_backfill_event_unique
-                ON {self._schema}.lineage_backfill_queue(event_id)
-                """
-            )
-            await conn.execute(
-                f"CREATE INDEX IF NOT EXISTS idx_lineage_backfill_status_time ON {self._schema}.lineage_backfill_queue(status, created_at)"
-            )
-            # Add missing columns if the table already existed (best-effort forwards compatibility).
-            await conn.execute(
-                f"ALTER TABLE {self._schema}.lineage_nodes ADD COLUMN IF NOT EXISTS recorded_at TIMESTAMPTZ NOT NULL DEFAULT NOW()"
-            )
-            await conn.execute(
-                f"ALTER TABLE {self._schema}.lineage_nodes ADD COLUMN IF NOT EXISTS event_id TEXT"
-            )
-            await conn.execute(
-                f"ALTER TABLE {self._schema}.lineage_nodes ADD COLUMN IF NOT EXISTS aggregate_type TEXT"
-            )
-            await conn.execute(
-                f"ALTER TABLE {self._schema}.lineage_nodes ADD COLUMN IF NOT EXISTS aggregate_id TEXT"
-            )
-            await conn.execute(
-                f"ALTER TABLE {self._schema}.lineage_nodes ADD COLUMN IF NOT EXISTS artifact_kind TEXT"
-            )
-            await conn.execute(
-                f"ALTER TABLE {self._schema}.lineage_nodes ADD COLUMN IF NOT EXISTS artifact_key TEXT"
-            )
-            await conn.execute(
-                f"ALTER TABLE {self._schema}.lineage_nodes ADD COLUMN IF NOT EXISTS db_name TEXT"
-            )
-            await conn.execute(
-                f"ALTER TABLE {self._schema}.lineage_nodes ADD COLUMN IF NOT EXISTS run_id TEXT"
-            )
-            await conn.execute(
-                f"ALTER TABLE {self._schema}.lineage_nodes ADD COLUMN IF NOT EXISTS code_sha TEXT"
-            )
-            await conn.execute(
-                f"ALTER TABLE {self._schema}.lineage_nodes ADD COLUMN IF NOT EXISTS schema_version TEXT"
-            )
+        except Exception:
+            # Best-effort cleanup; index creation will still enforce correctness.
+            pass
 
-            await conn.execute(
-                f"ALTER TABLE {self._schema}.lineage_edges ADD COLUMN IF NOT EXISTS projection_name TEXT NOT NULL DEFAULT ''"
-            )
-            await conn.execute(
-                f"ALTER TABLE {self._schema}.lineage_edges ADD COLUMN IF NOT EXISTS recorded_at TIMESTAMPTZ NOT NULL DEFAULT NOW()"
-            )
-            await conn.execute(
-                f"ALTER TABLE {self._schema}.lineage_edges ADD COLUMN IF NOT EXISTS db_name TEXT"
-            )
-            await conn.execute(
-                f"ALTER TABLE {self._schema}.lineage_edges ADD COLUMN IF NOT EXISTS run_id TEXT"
-            )
-            await conn.execute(
-                f"ALTER TABLE {self._schema}.lineage_edges ADD COLUMN IF NOT EXISTS code_sha TEXT"
-            )
-            await conn.execute(
-                f"ALTER TABLE {self._schema}.lineage_edges ADD COLUMN IF NOT EXISTS schema_version TEXT"
-            )
-
-            # Backfill db_name columns from existing metadata (best-effort).
-            try:
-                await conn.execute(
-                    f"""
-                    UPDATE {self._schema}.lineage_edges
-                    SET db_name = COALESCE(db_name, metadata->>'db_name')
-                    WHERE db_name IS NULL AND (metadata ? 'db_name')
-                    """
-                )
-            except Exception:
-                pass
-            try:
-                await conn.execute(
-                    f"""
-                    UPDATE {self._schema}.lineage_nodes
-                    SET db_name = COALESCE(db_name, metadata->>'db_name')
-                    WHERE db_name IS NULL AND (metadata ? 'db_name')
-                    """
-                )
-            except Exception:
-                pass
-
-            await conn.execute(
-                f"CREATE INDEX IF NOT EXISTS idx_lineage_edges_from ON {self._schema}.lineage_edges(from_node_id)"
-            )
-            await conn.execute(
-                f"CREATE INDEX IF NOT EXISTS idx_lineage_edges_to ON {self._schema}.lineage_edges(to_node_id)"
-            )
-            await conn.execute(
-                f"CREATE INDEX IF NOT EXISTS idx_lineage_edges_type ON {self._schema}.lineage_edges(edge_type)"
-            )
-            # Idempotency: ensure retries don't create duplicate edges.
-            # If duplicates already exist (older runs), deduplicate before creating the unique index.
-            try:
-                await conn.execute(
-                    f"""
-                    WITH ranked AS (
-                        SELECT edge_id,
-                               ROW_NUMBER() OVER (
-                                   PARTITION BY from_node_id, to_node_id, edge_type, projection_name
-                                   ORDER BY recorded_at ASC, edge_id ASC
-                               ) AS rn
-                        FROM {self._schema}.lineage_edges
-                    )
-                    DELETE FROM {self._schema}.lineage_edges
-                    WHERE edge_id IN (SELECT edge_id FROM ranked WHERE rn > 1)
-                    """
-                )
-            except Exception:
-                # Best-effort cleanup; index creation will still enforce correctness.
-                pass
-
-            await conn.execute(
-                f"""
-                CREATE UNIQUE INDEX IF NOT EXISTS idx_lineage_edges_unique
-                ON {self._schema}.lineage_edges(from_node_id, to_node_id, edge_type, projection_name)
-                """
-            )
-            await conn.execute(
-                f"CREATE INDEX IF NOT EXISTS idx_lineage_edges_from_type ON {self._schema}.lineage_edges(from_node_id, edge_type)"
-            )
-            await conn.execute(
-                f"CREATE INDEX IF NOT EXISTS idx_lineage_edges_to_type ON {self._schema}.lineage_edges(to_node_id, edge_type)"
-            )
-            await conn.execute(
-                f"CREATE INDEX IF NOT EXISTS idx_lineage_edges_db_time ON {self._schema}.lineage_edges(db_name, occurred_at)"
-            )
-            await conn.execute(
-                f"CREATE INDEX IF NOT EXISTS idx_lineage_nodes_event_id ON {self._schema}.lineage_nodes(event_id)"
-            )
-            await conn.execute(
-                f"CREATE INDEX IF NOT EXISTS idx_lineage_nodes_aggregate ON {self._schema}.lineage_nodes(aggregate_type, aggregate_id)"
-            )
-            await conn.execute(
-                f"CREATE INDEX IF NOT EXISTS idx_lineage_nodes_artifact ON {self._schema}.lineage_nodes(artifact_kind, artifact_key)"
-            )
-            await conn.execute(
-                f"CREATE INDEX IF NOT EXISTS idx_lineage_nodes_db ON {self._schema}.lineage_nodes(db_name)"
-            )
+        await conn.execute(
+            f"""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_lineage_edges_unique
+            ON {self._schema}.lineage_edges(from_node_id, to_node_id, edge_type, projection_name)
+            """
+        )
+        await conn.execute(
+            f"CREATE INDEX IF NOT EXISTS idx_lineage_edges_from_type ON {self._schema}.lineage_edges(from_node_id, edge_type)"
+        )
+        await conn.execute(
+            f"CREATE INDEX IF NOT EXISTS idx_lineage_edges_to_type ON {self._schema}.lineage_edges(to_node_id, edge_type)"
+        )
+        await conn.execute(
+            f"CREATE INDEX IF NOT EXISTS idx_lineage_edges_db_time ON {self._schema}.lineage_edges(db_name, occurred_at)"
+        )
+        await conn.execute(
+            f"CREATE INDEX IF NOT EXISTS idx_lineage_nodes_event_id ON {self._schema}.lineage_nodes(event_id)"
+        )
+        await conn.execute(
+            f"CREATE INDEX IF NOT EXISTS idx_lineage_nodes_aggregate ON {self._schema}.lineage_nodes(aggregate_type, aggregate_id)"
+        )
+        await conn.execute(
+            f"CREATE INDEX IF NOT EXISTS idx_lineage_nodes_artifact ON {self._schema}.lineage_nodes(artifact_kind, artifact_key)"
+        )
+        await conn.execute(
+            f"CREATE INDEX IF NOT EXISTS idx_lineage_nodes_db ON {self._schema}.lineage_nodes(db_name)"
+        )
 
     # -------------------------
     # Node/edge helpers

@@ -20,6 +20,7 @@ from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
 import httpx
 from confluent_kafka import Producer
 
+from shared.services.kafka.consumer_ops import ExecutorKafkaConsumerOps
 from shared.services.kafka.processed_event_worker import (
     HeartbeatOptions,
     ProcessedEventKafkaWorker,
@@ -504,10 +505,12 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
             group_id=self.group_id,
             topics=[self.topic],
             service_name="objectify-worker",
-            max_poll_interval_ms=300000,
-            session_timeout_ms=45000,
             on_revoke=self._on_partitions_revoked,
             on_assign=self._on_partitions_assigned,
+        )
+        self.consumer_ops = ExecutorKafkaConsumerOps(
+            self.consumer,
+            thread_name_prefix="objectify-worker-kafka",
         )
         self._init_partition_state(reset=True)
 
@@ -516,28 +519,8 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
             client_id=settings.observability.service_name or "objectify-worker",
         )
 
-    def _on_partitions_revoked(self, partitions: list) -> None:
-        """Handle partition revocation during rebalance."""
-        self._rebalance_in_progress = True
-        logger.info(
-            "Objectify worker partitions revoked: %s",
-            [(p.topic, p.partition) for p in partitions],
-        )
-        self._handle_partitions_revoked(partitions, clear_pending=True)
-
-    def _on_partitions_assigned(self, partitions: list) -> None:
-        """Handle partition assignment during rebalance."""
-        self._rebalance_in_progress = False
-        logger.info(
-            "Objectify worker partitions assigned: %s",
-            [(p.topic, p.partition) for p in partitions],
-        )
-        self._handle_partitions_assigned(partitions, resume=True)
-
     async def close(self) -> None:
-        if self.consumer:
-            self.consumer.close()
-            self.consumer = None
+        await self._close_consumer_runtime()
         if self.http:
             await self.http.aclose()
             self.http = None
@@ -572,11 +555,6 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
         finally:
             await self._cancel_inflight_tasks()
             await self.close()
-
-    async def _poll_message(self, *, timeout: float) -> Any:  # type: ignore[override]
-        if not self.consumer:
-            return None
-        return self.consumer.poll(timeout)
 
     # --- ProcessedEventKafkaWorker Strategy hooks ---
     def _parse_payload(self, payload: Any) -> ObjectifyJob:  # type: ignore[override]

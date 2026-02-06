@@ -7,13 +7,12 @@ import asyncio
 import json
 import logging
 import os
-from concurrent.futures import ThreadPoolExecutor
 import signal
 from contextlib import suppress
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
 
-from confluent_kafka import Producer, TopicPartition
+from confluent_kafka import Producer
 
 from shared.config.search_config import (
     get_instances_index_name,
@@ -34,24 +33,25 @@ from shared.services.core.projection_manager import ProjectionManager
 from shared.services.registries.processed_event_registry import (
     ProcessedEventRegistry,
 )
-from shared.services.kafka.processed_event_worker import EventEnvelopeKafkaWorker, HeartbeatOptions, RegistryKey
+from shared.services.kafka.processed_event_worker import RegistryKey, StrictHeartbeatEventEnvelopeKafkaWorker
 from shared.services.kafka.producer_factory import create_kafka_producer
 from shared.services.kafka.safe_consumer import SafeKafkaConsumer, create_safe_consumer
 from shared.services.registries.lineage_store import LineageStore
 from shared.services.core.audit_log_store import AuditLogStore
-from shared.services.registries.processed_event_registry_factory import create_processed_event_registry
+from shared.services.core.worker_stores import WorkerObservability, initialize_worker_stores
+from shared.services.kafka.consumer_ops import ExecutorKafkaConsumerOps
+from shared.services.kafka.dlq_publisher import DlqPublishSpec, build_standard_dlq_payload, publish_dlq_json
 from shared.utils.chaos import maybe_crash
 from shared.utils.ontology_version import split_ref_commit
 from shared.utils.language import coerce_localized_text, select_localized_text, get_default_language
 from shared.utils.resource_rid import strip_rid_revision
 from shared.utils.writeback_paths import ref_key, writeback_patchset_key
 from shared.utils.writeback_lifecycle import overlay_doc_id
-from shared.utils.executor_utils import call_in_executor
+from shared.utils.writeback_patch_apply import apply_changes_to_payload
 
 # Observability imports
 from shared.observability.tracing import get_tracing_service
 from shared.observability.metrics import get_metrics_collector
-from shared.observability.context_propagation import attach_context_from_kafka, kafka_headers_from_current_context
 from shared.utils.app_logger import configure_logging
 
 # 로깅 설정
@@ -60,7 +60,7 @@ configure_logging(_LOG_LEVEL)
 logger = logging.getLogger(__name__)
 
 
-class ProjectionWorker(EventEnvelopeKafkaWorker[None]):
+class ProjectionWorker(StrictHeartbeatEventEnvelopeKafkaWorker[None]):
     """Instance와 Ontology 이벤트를 Elasticsearch에 프로젝션하는 워커
 
     Kafka message contract:
@@ -83,7 +83,7 @@ class ProjectionWorker(EventEnvelopeKafkaWorker[None]):
         self.projection_manager: Optional[ProjectionManager] = None
         self.tracing_service = None
         self.metrics_collector = None
-        self._consumer_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="projection-worker-kafka")
+        self.consumer_ops = None
         self.lakefs_storage: Optional[LakeFSStorageService] = None
 
         # Durable idempotency (Postgres)
@@ -95,12 +95,18 @@ class ProjectionWorker(EventEnvelopeKafkaWorker[None]):
         self.enable_audit_logs = bool(settings.observability.enable_audit_logs)
         self.lineage_store: Optional[LineageStore] = None
         self.audit_store: Optional[AuditLogStore] = None
+        self.observability = WorkerObservability(
+            lineage_store=None,
+            audit_store=None,
+            logger=logger,
+        )
 
         # 생성된 인덱스 캐시 (중복 생성 방지)
         self.created_indices = set()
 
         # DLQ 토픽
         self.dlq_topic = AppConfig.PROJECTION_DLQ_TOPIC
+        self.dlq_flush_timeout_seconds = float(worker_cfg.dlq_flush_timeout_seconds)
 
         # 재시도 설정
         max_retries = int(worker_cfg.max_retries)
@@ -287,77 +293,63 @@ class ProjectionWorker(EventEnvelopeKafkaWorker[None]):
         if meta.get("ontology_commit"):
             ontology_payload["commit"] = str(meta["ontology_commit"])
 
-        if self.audit_store:
-            try:
-                action = "PROJECTION_ES_INDEX" if operation == "index" else "PROJECTION_ES_DELETE"
-                audit_metadata = {
+        action = "PROJECTION_ES_INDEX" if operation == "index" else "PROJECTION_ES_DELETE"
+        audit_metadata = {
+            "db_name": db_name,
+            "index": index_name,
+            "doc_id": doc_id,
+            "operation": operation,
+            "event_type": event_data.get("event_type"),
+            "aggregate_id": event_data.get("aggregate_id"),
+            "sequence_number": seq,
+            "skipped": bool(skip_reason),
+            "skip_reason": skip_reason,
+            "origin_service": meta.get("origin_service"),
+            "ontology_ref": meta.get("ontology_ref"),
+            "ontology_commit": meta.get("ontology_commit"),
+            "run_id": get_settings().observability.run_id,
+            "code_sha": get_settings().observability.code_sha,
+        }
+        if ontology_payload:
+            audit_metadata["ontology"] = ontology_payload
+        if isinstance(extra_metadata, dict) and extra_metadata:
+            audit_metadata.update(extra_metadata)
+
+        await self.observability.audit_log(
+            partition_key=f"db:{db_name}",
+            actor="projection_worker",
+            action=action,
+            status=status,
+            resource_type="es_document",
+            resource_id=f"{index_name}/{doc_id}",
+            event_id=str(event_id) if event_id else None,
+            command_id=meta.get("command_id"),
+            trace_id=meta.get("trace_id"),
+            correlation_id=meta.get("correlation_id"),
+            metadata=audit_metadata,
+            error=error,
+            occurred_at=occurred_at,
+        )
+
+        if record_lineage:
+            edge_type = "event_deleted_es_document" if operation == "delete" else "event_materialized_es_document"
+            await self.observability.record_link(
+                from_node_id=LineageStore.node_event(str(event_id)),
+                to_node_id=LineageStore.node_artifact("es", index_name, doc_id),
+                edge_type=edge_type,
+                occurred_at=occurred_at,
+                to_label=f"es:{index_name}/{doc_id}",
+                edge_metadata={
                     "db_name": db_name,
                     "index": index_name,
                     "doc_id": doc_id,
                     "operation": operation,
-                    "event_type": event_data.get("event_type"),
-                    "aggregate_id": event_data.get("aggregate_id"),
                     "sequence_number": seq,
-                    "skipped": bool(skip_reason),
-                    "skip_reason": skip_reason,
-                    "origin_service": meta.get("origin_service"),
                     "ontology_ref": meta.get("ontology_ref"),
                     "ontology_commit": meta.get("ontology_commit"),
-                    "run_id": get_settings().observability.run_id,
-                    "code_sha": get_settings().observability.code_sha,
-                }
-                if ontology_payload:
-                    audit_metadata["ontology"] = ontology_payload
-                if isinstance(extra_metadata, dict) and extra_metadata:
-                    audit_metadata.update(extra_metadata)
-                await self.audit_store.log(
-                    partition_key=f"db:{db_name}",
-                    actor="projection_worker",
-                    action=action,
-                    status=status,
-                    resource_type="es_document",
-                    resource_id=f"{index_name}/{doc_id}",
-                    event_id=str(event_id) if event_id else None,
-                    command_id=meta.get("command_id"),
-                    trace_id=meta.get("trace_id"),
-                    correlation_id=meta.get("correlation_id"),
-                    metadata=audit_metadata,
-                    error=error,
-                    occurred_at=occurred_at,
-                )
-            except Exception as e:
-                logger.debug(f"Audit record failed (non-fatal): {e}")
-
-        if self.lineage_store and record_lineage:
-            try:
-                edge_type = "event_deleted_es_document" if operation == "delete" else "event_materialized_es_document"
-                await self.lineage_store.record_link(
-                    from_node_id=self.lineage_store.node_event(str(event_id)),
-                    to_node_id=self.lineage_store.node_artifact("es", index_name, doc_id),
-                    edge_type=edge_type,
-                    occurred_at=occurred_at,
-                    to_label=f"es:{index_name}/{doc_id}",
-                    edge_metadata={
-                        "db_name": db_name,
-                        "index": index_name,
-                        "doc_id": doc_id,
-                        "operation": operation,
-                        "sequence_number": seq,
-                        "ontology_ref": meta.get("ontology_ref"),
-                        "ontology_commit": meta.get("ontology_commit"),
-                        "ontology": ontology_payload or None,
-                    },
-                )
-            except Exception as e:
-                logger.debug(f"Lineage record failed (non-fatal): {e}")
-
-    async def _consumer_call(self, func, *args, **kwargs):
-        return await call_in_executor(self._consumer_executor, func, *args, **kwargs)
-
-    async def _poll_message(self, *, timeout: float) -> Any:
-        if not self.consumer:
-            return None
-        return await self._consumer_call(self.consumer.poll, timeout=timeout)
+                    "ontology": ontology_payload or None,
+                },
+            )
         
     async def initialize(self):
         """워커 초기화"""
@@ -367,13 +359,16 @@ class ProjectionWorker(EventEnvelopeKafkaWorker[None]):
 
         # Kafka Consumer (strong consistency: read_committed + rebalance-safe offsets)
         topics = [AppConfig.INSTANCE_EVENTS_TOPIC, AppConfig.ONTOLOGY_EVENTS_TOPIC, AppConfig.ACTION_EVENTS_TOPIC]
-        self.consumer = await self._consumer_call(
-            create_safe_consumer,
-            group_id,
-            topics,
-            "projection-worker",
-            max_poll_interval_ms=300000,
-            session_timeout_ms=45000,
+        self.consumer = create_safe_consumer(
+            group_id=group_id,
+            topics=topics,
+            service_name="projection-worker",
+            on_revoke=self._on_partitions_revoked,
+            on_assign=self._on_partitions_assigned,
+        )
+        self.consumer_ops = ExecutorKafkaConsumerOps(
+            self.consumer,
+            thread_name_prefix="projection-worker-kafka",
         )
         
         # Kafka Producer 설정 (실패 이벤트 발행용)
@@ -403,29 +398,20 @@ class ProjectionWorker(EventEnvelopeKafkaWorker[None]):
             logger.warning(f"lakeFS storage unavailable - ActionApplied projection will be degraded: {e}")
             self.lakefs_storage = None
 
-        # Durable processed-events registry (idempotency + ordering guard)
-        self.processed_event_registry = await create_processed_event_registry()
-        self.processed = self.processed_event_registry
-        logger.info("✅ ProcessedEventRegistry connected (Postgres)")
-
-        # First-class lineage/audit (best-effort; do not fail the worker)
-        if self.enable_lineage:
-            try:
-                self.lineage_store = LineageStore()
-                await self.lineage_store.initialize()
-                logger.info("✅ LineageStore connected (Postgres)")
-            except Exception as e:
-                logger.warning(f"⚠️ LineageStore unavailable (continuing without lineage): {e}")
-                self.lineage_store = None
-
-        if self.enable_audit_logs:
-            try:
-                self.audit_store = AuditLogStore()
-                await self.audit_store.initialize()
-                logger.info("✅ AuditLogStore connected (Postgres)")
-            except Exception as e:
-                logger.warning(f"⚠️ AuditLogStore unavailable (continuing without audit logs): {e}")
-                self.audit_store = None
+        stores = await initialize_worker_stores(
+            enable_lineage=self.enable_lineage,
+            enable_audit_logs=self.enable_audit_logs,
+            logger=logger,
+        )
+        self.processed_event_registry = stores.processed
+        self.processed = stores.processed
+        self.lineage_store = stores.lineage_store
+        self.audit_store = stores.audit_store
+        self.observability = WorkerObservability(
+            lineage_store=self.lineage_store,
+            audit_store=self.audit_store,
+            logger=logger,
+        )
         
         # 인덱스 생성 및 매핑 설정
         await self._setup_indices()
@@ -596,12 +582,6 @@ class ProjectionWorker(EventEnvelopeKafkaWorker[None]):
             sequence_number=int(payload.sequence_number) if payload.sequence_number is not None else None,
         )
 
-    def _heartbeat_options(self) -> HeartbeatOptions:  # type: ignore[override]
-        return HeartbeatOptions(
-            stop_when_false=True,
-            continue_on_exception=False,
-        )
-
     def _is_retryable_error(self, exc: Exception, *, payload: EventEnvelope) -> bool:  # type: ignore[override]
         if self._is_transient_infra_error(exc):
             return True
@@ -719,12 +699,7 @@ class ProjectionWorker(EventEnvelopeKafkaWorker[None]):
         if not self.consumer:
             return
         maybe_crash("projection_worker:before_commit", logger=logger)
-        await self._consumer_call(self.consumer.commit_sync, msg)
-
-    async def _seek(self, *, topic: str, partition: int, offset: int) -> None:  # type: ignore[override]
-        if not self.consumer:
-            return
-        await self._consumer_call(self.consumer.seek, TopicPartition(topic, partition, offset))
+        await super()._commit(msg)
 
     async def _publish_to_dlq(
         self,
@@ -739,42 +714,31 @@ class ProjectionWorker(EventEnvelopeKafkaWorker[None]):
         if not self.producer:
             logger.error("DLQ producer not configured; dropping DLQ message: %s", error)
             return
-
-        dlq_message = {
-            "original_topic": msg.topic(),
-            "original_partition": msg.partition(),
-            "original_offset": msg.offset(),
-            "original_value": payload_text,
-            "error": str(error),
-            "attempt_count": int(attempt_count),
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "worker": "projection-worker",
-        }
-
-        with attach_context_from_kafka(
-            kafka_headers=kafka_headers,
-            fallback_metadata=fallback_metadata,
+        dlq_payload = build_standard_dlq_payload(
+            msg=msg,
+            worker="projection-worker",
+            stage=None,
+            error=str(error),
+            attempt_count=int(attempt_count),
+            payload_text=payload_text,
+            payload_obj=None,
+        )
+        spec = DlqPublishSpec(
+            dlq_topic=self.dlq_topic,
             service_name="projection-worker",
-        ):
-            headers = kafka_headers_from_current_context()
-            with self.tracing_service.span(
-                "projection_worker.dlq_produce",
-                attributes={
-                    "messaging.system": "kafka",
-                    "messaging.destination": self.dlq_topic,
-                    "messaging.destination_kind": "topic",
-                    "messaging.kafka.partition": msg.partition(),
-                    "messaging.kafka.offset": msg.offset(),
-                },
-            ):
-                self.producer.produce(
-                    self.dlq_topic,
-                    key=f"{msg.topic()}:{msg.partition()}:{msg.offset()}",
-                    value=json.dumps(dlq_message, ensure_ascii=False, default=str).encode("utf-8"),
-                    headers=headers or None,
-                )
-                self.producer.flush()
-
+            span_name="projection_worker.dlq_produce",
+            flush_timeout_seconds=float(self.dlq_flush_timeout_seconds),
+        )
+        await publish_dlq_json(
+            producer=self.producer,
+            spec=spec,
+            msg=msg,
+            payload=dlq_payload,
+            tracing=self.tracing_service,
+            metrics=self.metrics_collector,
+            kafka_headers=kafka_headers,
+            fallback_metadata=fallback_metadata if isinstance(fallback_metadata, dict) else None,
+        )
         logger.info(
             "Message sent to DLQ (topic=%s partition=%s offset=%s)",
             msg.topic(),
@@ -984,7 +948,8 @@ class ProjectionWorker(EventEnvelopeKafkaWorker[None]):
                 data_payload = {}
             effective["data"] = data_payload
 
-            if bool(changes.get("delete")):
+            tombstone = apply_changes_to_payload(data_payload, changes)
+            if tombstone:
                 effective = {
                     "instance_id": instance_id,
                     "class_id": class_id,
@@ -1002,52 +967,6 @@ class ProjectionWorker(EventEnvelopeKafkaWorker[None]):
                     "updated_at": datetime.now(timezone.utc).isoformat(),
                 }
             else:
-                set_ops = changes.get("set") if isinstance(changes.get("set"), dict) else {}
-                unset_ops = changes.get("unset") if isinstance(changes.get("unset"), list) else []
-
-                for k, v in (set_ops or {}).items():
-                    if isinstance(k, str) and k:
-                        data_payload[k] = v
-                for k in unset_ops or []:
-                    if isinstance(k, str) and k:
-                        data_payload.pop(k, None)
-
-                for op_key, add in (("link_add", True), ("link_remove", False)):
-                    ops = changes.get(op_key)
-                    if not isinstance(ops, list):
-                        continue
-                    for item in ops:
-                        field = None
-                        target = None
-                        if isinstance(item, dict):
-                            field = item.get("field") or item.get("predicate") or item.get("name")
-                            target = item.get("value") or item.get("to") or item.get("target")
-                            if (field is None or target is None) and len(item) == 1:
-                                k, v = next(iter(item.items()))
-                                field = k
-                                target = v
-                        elif isinstance(item, str):
-                            raw = item.strip()
-                            if ":" in raw:
-                                field, target = raw.split(":", 1)
-                        field_str = str(field or "").strip()
-                        target_str = str(target or "").strip()
-                        if not field_str or not target_str:
-                            continue
-                        existing = data_payload.get(field_str)
-                        if isinstance(existing, list):
-                            values = [str(v) for v in existing if v is not None]
-                        elif existing is None:
-                            values = []
-                        else:
-                            values = [str(existing)]
-                        if add:
-                            if target_str not in values:
-                                values.append(target_str)
-                        else:
-                            values = [v for v in values if v != target_str]
-                        data_payload[field_str] = values
-
                 effective.update(
                     {
                         "instance_id": instance_id,
@@ -2716,9 +2635,7 @@ class ProjectionWorker(EventEnvelopeKafkaWorker[None]):
         
         self.running = False
         
-        if self.consumer:
-            await self._consumer_call(self.consumer.close)
-        self._consumer_executor.shutdown(wait=True, cancel_futures=True)
+        await self._close_consumer_runtime()
             
         if self.producer:
             self.producer.flush()

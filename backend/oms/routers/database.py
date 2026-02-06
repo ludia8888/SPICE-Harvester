@@ -11,14 +11,13 @@ from fastapi import APIRouter, HTTPException, status, Query
 from fastapi.responses import JSONResponse
 
 from oms.dependencies import TerminusServiceDep, EventStoreDep, CommandStatusServiceDep
+from oms.routers._event_sourcing import append_event_sourcing_command, build_command_status_metadata
 from oms.services.async_terminus import AsyncTerminusService
 from shared.models.requests import ApiResponse
-from shared.models.commands import DatabaseCommand, CommandType, CommandStatus
+from shared.models.commands import DatabaseCommand, CommandType
 from shared.security.input_sanitizer import SecurityViolationError, sanitize_input, validate_db_name
 from shared.config.app_config import AppConfig
 from shared.config.settings import get_settings
-from shared.models.event_envelope import EventEnvelope
-from shared.services.events.aggregate_sequence_allocator import OptimisticConcurrencyError
 
 logger = logging.getLogger(__name__)
 
@@ -87,40 +86,17 @@ async def create_database(
             metadata={"source": "OMS", "user": "system"},
         )
 
-        envelope = EventEnvelope.from_command(
-            command,
+        envelope = await append_event_sourcing_command(
+            event_store=event_store,
+            command=command,
             actor="system",
             kafka_topic=AppConfig.DATABASE_COMMANDS_TOPIC,
-            metadata={"service": "oms", "mode": "event_sourcing"},
+            command_status_service=command_status_service,
+            command_status_metadata=build_command_status_metadata(
+                command=command,
+                extra={"db_name": db_name},
+            ),
         )
-        try:
-            await event_store.append_event(envelope)
-        except OptimisticConcurrencyError as e:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={
-                    "error": "optimistic_concurrency_conflict",
-                    "aggregate_id": e.aggregate_id,
-                    "expected_seq": e.expected_last_sequence,
-                    "actual_seq": e.actual_last_sequence,
-                },
-            )
-
-        if command_status_service:
-            try:
-                await command_status_service.set_command_status(
-                    command_id=str(command.command_id),
-                    status=CommandStatus.PENDING,
-                    metadata={
-                        "command_type": command.command_type,
-                        "aggregate_id": command.aggregate_id,
-                        "db_name": db_name,
-                        "created_at": command.created_at.isoformat(),
-                        "created_by": command.created_by or "system",
-                    },
-                )
-            except Exception as e:
-                logger.warning(f"Failed to persist command status (continuing without Redis): {e}")
 
         # Best-effort synchronous fallback to keep E2E flows unblocked even if workers lag.
         sync_fallback_enabled = bool(get_settings().features.enable_sync_database_create_fallback)
@@ -230,40 +206,17 @@ async def delete_database(
             metadata={"source": "OMS", "user": "system"},
         )
 
-        envelope = EventEnvelope.from_command(
-            command,
+        envelope = await append_event_sourcing_command(
+            event_store=event_store,
+            command=command,
             actor="system",
             kafka_topic=AppConfig.DATABASE_COMMANDS_TOPIC,
-            metadata={"service": "oms", "mode": "event_sourcing"},
+            command_status_service=command_status_service,
+            command_status_metadata=build_command_status_metadata(
+                command=command,
+                extra={"db_name": db_name},
+            ),
         )
-        try:
-            await event_store.append_event(envelope)
-        except OptimisticConcurrencyError as e:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={
-                    "error": "optimistic_concurrency_conflict",
-                    "aggregate_id": e.aggregate_id,
-                    "expected_seq": e.expected_last_sequence,
-                    "actual_seq": e.actual_last_sequence,
-                },
-            )
-
-        if command_status_service:
-            try:
-                await command_status_service.set_command_status(
-                    command_id=str(command.command_id),
-                    status=CommandStatus.PENDING,
-                    metadata={
-                        "command_type": command.command_type,
-                        "aggregate_id": command.aggregate_id,
-                        "db_name": db_name,
-                        "created_at": command.created_at.isoformat(),
-                        "created_by": command.created_by or "system",
-                    },
-                )
-            except Exception as e:
-                logger.warning(f"Failed to persist command status (continuing without Redis): {e}")
 
         return JSONResponse(
             status_code=status.HTTP_202_ACCEPTED,

@@ -16,13 +16,13 @@ from __future__ import annotations
 import argparse
 import asyncio
 import re
-import time
 from typing import Iterable, Optional
 
 import asyncpg
 import httpx
 
 from shared.config.settings import get_settings
+from shared.tools.bff_admin_api import delete_database, list_databases, normalize_base_url
 
 
 def _postgres_dsn_candidates() -> list[str]:
@@ -31,30 +31,13 @@ def _postgres_dsn_candidates() -> list[str]:
 
 
 def _bff_base_url() -> str:
-    base = get_settings().services.bff_base_url.rstrip("/")
-    if base.endswith("/api/v1"):
-        return base
-    return f"{base}/api/v1"
+    return normalize_base_url(get_settings().services.bff_base_url)
 
 
 def _admin_token() -> str:
     cfg = get_settings()
     token = str(cfg.clients.bff_admin_token or cfg.clients.oms_client_token or "").strip()
     return token or "change_me"
-
-
-def _extract_command_id(payload: object) -> Optional[str]:
-    if not isinstance(payload, dict):
-        return None
-    data = payload.get("data")
-    if isinstance(data, dict):
-        cmd = data.get("command_id")
-        if isinstance(cmd, str) and cmd:
-            return cmd
-    cmd = payload.get("command_id")
-    if isinstance(cmd, str) and cmd:
-        return cmd
-    return None
 
 
 async def _connect_postgres() -> asyncpg.Connection:
@@ -87,69 +70,6 @@ async def _fetch_db_expected_seq(conn: asyncpg.Connection, *, db_name: str) -> O
     return int(row["last_sequence"] or 0)
 
 
-async def _wait_for_command(
-    client: httpx.AsyncClient,
-    *,
-    base_url: str,
-    command_id: str,
-    timeout_seconds: int = 180,
-) -> dict:
-    deadline = time.monotonic() + timeout_seconds
-    last: dict = {}
-    while time.monotonic() < deadline:
-        resp = await client.get(f"{base_url}/commands/{command_id}/status")
-        if resp.status_code == 404:
-            await asyncio.sleep(0.5)
-            continue
-        resp.raise_for_status()
-        last = resp.json()
-        status = last.get("status")
-        if status in {"COMPLETED", "FAILED", "CANCELLED"}:
-            return last
-        await asyncio.sleep(0.5)
-    raise TimeoutError(last)
-
-
-async def _list_databases(client: httpx.AsyncClient, *, base_url: str) -> list[str]:
-    resp = await client.get(f"{base_url}/databases")
-    resp.raise_for_status()
-    payload = resp.json()
-    data = payload.get("data") if isinstance(payload, dict) else None
-    if isinstance(data, dict) and isinstance(data.get("databases"), list):
-        items = data.get("databases") or []
-    elif isinstance(payload, dict) and isinstance(payload.get("databases"), list):
-        items = payload.get("databases") or []
-    else:
-        items = []
-
-    names: list[str] = []
-    for item in items:
-        if isinstance(item, dict) and isinstance(item.get("name"), str):
-            names.append(item["name"])
-        elif isinstance(item, str):
-            names.append(item)
-    return names
-
-
-async def _delete_database(
-    client: httpx.AsyncClient,
-    *,
-    base_url: str,
-    db_name: str,
-    expected_seq: int,
-) -> dict:
-    resp = await client.delete(f"{base_url}/databases/{db_name}", params={"expected_seq": expected_seq})
-    if resp.status_code == 409:
-        raise RuntimeError(f"OCC conflict deleting {db_name} (expected_seq={expected_seq})")
-    resp.raise_for_status()
-
-    payload = resp.json()
-    cmd = _extract_command_id(payload)
-    if cmd:
-        return await _wait_for_command(client, base_url=base_url, command_id=cmd, timeout_seconds=180)
-    return payload if isinstance(payload, dict) else {"raw": payload}
-
-
 def _matches_any_prefix(name: str, prefixes: Iterable[str]) -> bool:
     for prefix in prefixes:
         if prefix and name.startswith(prefix):
@@ -176,7 +96,7 @@ async def main() -> int:
         if explicit_dbs:
             targets = explicit_dbs
         else:
-            names = await _list_databases(client, base_url=base_url)
+            names = await list_databases(client, base_url=base_url)
             targets = [n for n in names if _matches_any_prefix(n, prefixes)]
 
         targets = sorted(set(targets))
@@ -200,7 +120,12 @@ async def main() -> int:
                     print(f"Skipping {name}: no aggregate_versions row found.")
                     continue
                 print(f"Deleting {name} (expected_seq={expected_seq})...")
-                result = await _delete_database(client, base_url=base_url, db_name=name, expected_seq=expected_seq)
+                result = await delete_database(
+                    client,
+                    base_url=base_url,
+                    db_name=name,
+                    expected_seq=expected_seq,
+                )
                 print(f"  -> {result.get('status')}")
         finally:
             await conn.close()

@@ -22,6 +22,7 @@ from shared.observability.context_propagation import (
 )
 from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
+from shared.services.kafka.consumer_ops import ExecutorKafkaConsumerOps
 from shared.services.kafka.processed_event_worker import EventEnvelopeKafkaWorker, HeartbeatOptions
 from shared.services.kafka.producer_factory import create_kafka_dlq_producer
 from shared.services.kafka.safe_consumer import SafeKafkaConsumer, create_safe_consumer
@@ -52,6 +53,7 @@ class SearchProjectionWorker(EventEnvelopeKafkaWorker[None]):
         self.backoff_base = int(cfg.backoff_base_seconds)
         self.backoff_max = int(cfg.backoff_max_seconds)
         self.consumer: Optional[SafeKafkaConsumer] = None
+        self.consumer_ops = None
         self.dlq_producer: Optional[Producer] = None
         self.processed: Optional[ProcessedEventRegistry] = None
         self.es = None
@@ -78,10 +80,12 @@ class SearchProjectionWorker(EventEnvelopeKafkaWorker[None]):
             group_id=self.group_id,
             topics=[self.topic],
             service_name="search-projection-worker",
-            max_poll_interval_ms=300000,
-            session_timeout_ms=45000,
             on_revoke=self._on_partitions_revoked,
             on_assign=self._on_partitions_assigned,
+        )
+        self.consumer_ops = ExecutorKafkaConsumerOps(
+            self.consumer,
+            thread_name_prefix="search-projection-worker-kafka",
         )
         self._rebalance_in_progress = False
 
@@ -91,26 +95,8 @@ class SearchProjectionWorker(EventEnvelopeKafkaWorker[None]):
             client_id=service_name,
         )
 
-    def _on_partitions_revoked(self, partitions: list) -> None:
-        """Handle partition revocation during rebalance."""
-        self._rebalance_in_progress = True
-        logger.info(
-            "Search projection worker partitions revoked: %s",
-            [(p.topic, p.partition) for p in partitions],
-        )
-
-    def _on_partitions_assigned(self, partitions: list) -> None:
-        """Handle partition assignment during rebalance."""
-        self._rebalance_in_progress = False
-        logger.info(
-            "Search projection worker partitions assigned: %s",
-            [(p.topic, p.partition) for p in partitions],
-        )
-
     async def close(self) -> None:
-        if self.consumer:
-            self.consumer.close()
-            self.consumer = None
+        await self._close_consumer_runtime()
         if self.dlq_producer:
             try:
                 self.dlq_producer.flush(5)
@@ -123,11 +109,6 @@ class SearchProjectionWorker(EventEnvelopeKafkaWorker[None]):
         if self.es:
             await self.es.disconnect()
             self.es = None
-
-    async def _poll_message(self, *, timeout: float) -> Any:
-        if not self.consumer:
-            return None
-        return self.consumer.poll(timeout)
 
     async def run(self) -> None:
         await self.initialize()

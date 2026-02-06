@@ -1083,7 +1083,7 @@ class PipelineSettings(BaseSettings):
         description="Worker lock acquire timeout seconds (PIPELINE_LOCK_ACQUIRE_TIMEOUT_SECONDS)",
     )
     publish_lock_acquire_timeout_seconds: int = Field(
-        default=120,
+        default=30,
         description=(
             "BFF publish lock acquire timeout seconds "
             "(PIPELINE_PUBLISH_LOCK_ACQUIRE_TIMEOUT_SECONDS; fallback PIPELINE_LOCK_ACQUIRE_TIMEOUT_SECONDS)"
@@ -1252,7 +1252,7 @@ class PipelineSettings(BaseSettings):
     @field_validator("publish_lock_acquire_timeout_seconds", mode="before")
     @classmethod
     def clamp_publish_lock_acquire_timeout_seconds(cls, v):  # noqa: ANN001
-        return _clamp_int(v, default=120, min_value=5, max_value=3_600)
+        return _clamp_int(v, default=30, min_value=5, max_value=3_600)
 
     @field_validator("scheduler_poll_seconds", mode="before")
     @classmethod
@@ -2769,6 +2769,10 @@ class ProjectionWorkerSettings(BaseSettings):
         extra="ignore",
     )
 
+    dlq_flush_timeout_seconds: float = Field(
+        default=10.0,
+        description="DLQ flush timeout seconds (PROJECTION_WORKER_DLQ_FLUSH_TIMEOUT_SECONDS)",
+    )
     max_retries: int = Field(
         default=5,
         description="Max retries for projection worker (PROJECTION_WORKER_MAX_RETRIES)",
