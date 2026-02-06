@@ -38,7 +38,7 @@ from shared.services.kafka.producer_factory import create_kafka_producer
 from shared.services.kafka.safe_consumer import SafeKafkaConsumer, create_safe_consumer
 from shared.services.registries.lineage_store import LineageStore
 from shared.services.core.audit_log_store import AuditLogStore
-from shared.services.core.worker_stores import initialize_worker_stores
+from shared.services.core.worker_stores import WorkerObservability, initialize_worker_stores
 from shared.services.kafka.consumer_ops import ExecutorKafkaConsumerOps
 from shared.utils.chaos import maybe_crash
 from shared.utils.ontology_version import split_ref_commit
@@ -95,6 +95,11 @@ class ProjectionWorker(StrictHeartbeatEventEnvelopeKafkaWorker[None]):
         self.enable_audit_logs = bool(settings.observability.enable_audit_logs)
         self.lineage_store: Optional[LineageStore] = None
         self.audit_store: Optional[AuditLogStore] = None
+        self.observability = WorkerObservability(
+            lineage_store=None,
+            audit_store=None,
+            logger=logger,
+        )
 
         # 생성된 인덱스 캐시 (중복 생성 방지)
         self.created_indices = set()
@@ -287,69 +292,63 @@ class ProjectionWorker(StrictHeartbeatEventEnvelopeKafkaWorker[None]):
         if meta.get("ontology_commit"):
             ontology_payload["commit"] = str(meta["ontology_commit"])
 
-        if self.audit_store:
-            try:
-                action = "PROJECTION_ES_INDEX" if operation == "index" else "PROJECTION_ES_DELETE"
-                audit_metadata = {
+        action = "PROJECTION_ES_INDEX" if operation == "index" else "PROJECTION_ES_DELETE"
+        audit_metadata = {
+            "db_name": db_name,
+            "index": index_name,
+            "doc_id": doc_id,
+            "operation": operation,
+            "event_type": event_data.get("event_type"),
+            "aggregate_id": event_data.get("aggregate_id"),
+            "sequence_number": seq,
+            "skipped": bool(skip_reason),
+            "skip_reason": skip_reason,
+            "origin_service": meta.get("origin_service"),
+            "ontology_ref": meta.get("ontology_ref"),
+            "ontology_commit": meta.get("ontology_commit"),
+            "run_id": get_settings().observability.run_id,
+            "code_sha": get_settings().observability.code_sha,
+        }
+        if ontology_payload:
+            audit_metadata["ontology"] = ontology_payload
+        if isinstance(extra_metadata, dict) and extra_metadata:
+            audit_metadata.update(extra_metadata)
+
+        await self.observability.audit_log(
+            partition_key=f"db:{db_name}",
+            actor="projection_worker",
+            action=action,
+            status=status,
+            resource_type="es_document",
+            resource_id=f"{index_name}/{doc_id}",
+            event_id=str(event_id) if event_id else None,
+            command_id=meta.get("command_id"),
+            trace_id=meta.get("trace_id"),
+            correlation_id=meta.get("correlation_id"),
+            metadata=audit_metadata,
+            error=error,
+            occurred_at=occurred_at,
+        )
+
+        if record_lineage:
+            edge_type = "event_deleted_es_document" if operation == "delete" else "event_materialized_es_document"
+            await self.observability.record_link(
+                from_node_id=LineageStore.node_event(str(event_id)),
+                to_node_id=LineageStore.node_artifact("es", index_name, doc_id),
+                edge_type=edge_type,
+                occurred_at=occurred_at,
+                to_label=f"es:{index_name}/{doc_id}",
+                edge_metadata={
                     "db_name": db_name,
                     "index": index_name,
                     "doc_id": doc_id,
                     "operation": operation,
-                    "event_type": event_data.get("event_type"),
-                    "aggregate_id": event_data.get("aggregate_id"),
                     "sequence_number": seq,
-                    "skipped": bool(skip_reason),
-                    "skip_reason": skip_reason,
-                    "origin_service": meta.get("origin_service"),
                     "ontology_ref": meta.get("ontology_ref"),
                     "ontology_commit": meta.get("ontology_commit"),
-                    "run_id": get_settings().observability.run_id,
-                    "code_sha": get_settings().observability.code_sha,
-                }
-                if ontology_payload:
-                    audit_metadata["ontology"] = ontology_payload
-                if isinstance(extra_metadata, dict) and extra_metadata:
-                    audit_metadata.update(extra_metadata)
-                await self.audit_store.log(
-                    partition_key=f"db:{db_name}",
-                    actor="projection_worker",
-                    action=action,
-                    status=status,
-                    resource_type="es_document",
-                    resource_id=f"{index_name}/{doc_id}",
-                    event_id=str(event_id) if event_id else None,
-                    command_id=meta.get("command_id"),
-                    trace_id=meta.get("trace_id"),
-                    correlation_id=meta.get("correlation_id"),
-                    metadata=audit_metadata,
-                    error=error,
-                    occurred_at=occurred_at,
-                )
-            except Exception as e:
-                logger.debug(f"Audit record failed (non-fatal): {e}")
-
-        if self.lineage_store and record_lineage:
-            try:
-                edge_type = "event_deleted_es_document" if operation == "delete" else "event_materialized_es_document"
-                await self.lineage_store.record_link(
-                    from_node_id=self.lineage_store.node_event(str(event_id)),
-                    to_node_id=self.lineage_store.node_artifact("es", index_name, doc_id),
-                    edge_type=edge_type,
-                    occurred_at=occurred_at,
-                    to_label=f"es:{index_name}/{doc_id}",
-                    edge_metadata={
-                        "db_name": db_name,
-                        "index": index_name,
-                        "doc_id": doc_id,
-                        "operation": operation,
-                        "sequence_number": seq,
-                        "ontology_ref": meta.get("ontology_ref"),
-                        "ontology_commit": meta.get("ontology_commit"),
-                        "ontology": ontology_payload or None,
-                    },
-                )
-            except Exception as e:
-                logger.debug(f"Lineage record failed (non-fatal): {e}")
+                    "ontology": ontology_payload or None,
+                },
+            )
         
     async def initialize(self):
         """워커 초기화"""
@@ -363,6 +362,8 @@ class ProjectionWorker(StrictHeartbeatEventEnvelopeKafkaWorker[None]):
             group_id=group_id,
             topics=topics,
             service_name="projection-worker",
+            on_revoke=self._on_partitions_revoked,
+            on_assign=self._on_partitions_assigned,
         )
         self.consumer_ops = ExecutorKafkaConsumerOps(
             self.consumer,
@@ -405,6 +406,11 @@ class ProjectionWorker(StrictHeartbeatEventEnvelopeKafkaWorker[None]):
         self.processed = stores.processed
         self.lineage_store = stores.lineage_store
         self.audit_store = stores.audit_store
+        self.observability = WorkerObservability(
+            lineage_store=self.lineage_store,
+            audit_store=self.audit_store,
+            logger=logger,
+        )
         
         # 인덱스 생성 및 매핑 설정
         await self._setup_indices()

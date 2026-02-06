@@ -20,6 +20,7 @@ from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
 import httpx
 from confluent_kafka import Producer
 
+from shared.services.kafka.consumer_ops import ExecutorKafkaConsumerOps
 from shared.services.kafka.processed_event_worker import (
     HeartbeatOptions,
     ProcessedEventKafkaWorker,
@@ -507,31 +508,16 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
             on_revoke=self._on_partitions_revoked,
             on_assign=self._on_partitions_assigned,
         )
-        self.consumer_ops = None
+        self.consumer_ops = ExecutorKafkaConsumerOps(
+            self.consumer,
+            thread_name_prefix="objectify-worker-kafka",
+        )
         self._init_partition_state(reset=True)
 
         self.dlq_producer = create_kafka_dlq_producer(
             bootstrap_servers=settings.database.kafka_servers,
             client_id=settings.observability.service_name or "objectify-worker",
         )
-
-    def _on_partitions_revoked(self, partitions: list) -> None:
-        """Handle partition revocation during rebalance."""
-        self._rebalance_in_progress = True
-        logger.info(
-            "Objectify worker partitions revoked: %s",
-            [(p.topic, p.partition) for p in partitions],
-        )
-        self._handle_partitions_revoked(partitions, clear_pending=True)
-
-    def _on_partitions_assigned(self, partitions: list) -> None:
-        """Handle partition assignment during rebalance."""
-        self._rebalance_in_progress = False
-        logger.info(
-            "Objectify worker partitions assigned: %s",
-            [(p.topic, p.partition) for p in partitions],
-        )
-        self._handle_partitions_assigned(partitions, resume=True)
 
     async def close(self) -> None:
         await self._close_consumer_runtime()

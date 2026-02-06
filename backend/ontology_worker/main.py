@@ -190,6 +190,8 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
             group_id=group_id,
             topics=[AppConfig.ONTOLOGY_COMMANDS_TOPIC, AppConfig.DATABASE_COMMANDS_TOPIC],
             service_name="ontology-worker",
+            on_revoke=self._on_partitions_revoked,
+            on_assign=self._on_partitions_assigned,
         )
         self.consumer_ops = ExecutorKafkaConsumerOps(
             self.consumer,

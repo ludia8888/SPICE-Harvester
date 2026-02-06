@@ -277,6 +277,9 @@ class ProcessedEventKafkaWorker(Generic[PayloadT, ResultT], ABC):
         return ops
 
     def _get_consumer_runtime(self) -> WorkerConsumerRuntime:
+        if not hasattr(self, "_event_loop"):
+            with suppress(RuntimeError):
+                setattr(self, "_event_loop", asyncio.get_running_loop())
         if not hasattr(self, "_revoked_partitions"):
             self._init_partition_state(reset=False)
         return WorkerConsumerRuntime(
@@ -355,6 +358,9 @@ class ProcessedEventKafkaWorker(Generic[PayloadT, ResultT], ABC):
             )
 
     def _init_partition_state(self, *, reset: bool = True) -> None:
+        if not hasattr(self, "_event_loop"):
+            with suppress(RuntimeError):
+                setattr(self, "_event_loop", asyncio.get_running_loop())
         if reset or not hasattr(self, "_revoked_partitions"):
             self._revoked_partitions: set[PartitionKey] = set()
         if reset or not hasattr(self, "_inflight_by_partition"):
@@ -416,15 +422,38 @@ class ProcessedEventKafkaWorker(Generic[PayloadT, ResultT], ABC):
         if exc:
             logger.error("Background task crashed: %s", exc, exc_info=True)
 
+    def _run_on_event_loop_thread(self, fn) -> None:  # noqa: ANN001
+        loop = getattr(self, "_event_loop", None)
+        if loop is None:
+            # If we have no captured loop, only execute inline when we are already
+            # on the asyncio event-loop thread.
+            try:
+                asyncio.get_running_loop()
+            except RuntimeError:
+                logger.warning("Event loop not captured; skipping thread-unsafe rebalance side-effects")
+                return
+            fn()
+            return
+        try:
+            loop.call_soon_threadsafe(fn)
+        except RuntimeError:
+            logger.warning("Event loop unavailable; skipping thread-unsafe rebalance side-effects")
+
     def _handle_partitions_revoked(self, partitions: list, *, clear_pending: bool = True) -> None:
         revoked = {(p.topic, int(p.partition)) for p in partitions}
         self._revoked_partitions |= revoked
-        for key in revoked:
-            task = self._inflight_by_partition.get(key)
-            if task and self._cancel_inflight_on_revoke():
-                task.cancel()
-            if clear_pending:
-                self._pending_by_partition.pop(key, None)
+
+        def _apply_revocation() -> None:
+            for key in revoked:
+                task = self._inflight_by_partition.get(key)
+                if task and self._cancel_inflight_on_revoke():
+                    task.cancel()
+                if clear_pending:
+                    self._pending_by_partition.pop(key, None)
+
+        # Rebalance callbacks can run on the Kafka consumer thread; cancelling asyncio tasks must happen
+        # on the event-loop thread.
+        self._run_on_event_loop_thread(_apply_revocation)
 
     def _handle_partitions_assigned(self, partitions: list, *, resume: bool = True) -> None:
         for p in partitions:
@@ -434,6 +463,38 @@ class ProcessedEventKafkaWorker(Generic[PayloadT, ResultT], ABC):
                 self.consumer.resume([TopicPartition(p.topic, p.partition) for p in partitions])
             except Exception as exc:
                 logger.warning("Failed to resume %s partitions after assign: %s", self._loop_label(), exc)
+
+    def _on_partitions_revoked(self, partitions: list) -> None:
+        """
+        Default SafeKafkaConsumer rebalance revoke callback.
+
+        Concrete workers can pass this as `on_revoke=self._on_partitions_revoked`
+        without duplicating boilerplate. Override in workers that need custom
+        behavior.
+        """
+        self._init_partition_state(reset=False)
+        self._rebalance_in_progress = True
+        logger.info(
+            "%s partitions revoked: %s",
+            self._loop_label(),
+            [(p.topic, int(p.partition)) for p in partitions],
+        )
+        self._handle_partitions_revoked(partitions, clear_pending=True)
+
+    def _on_partitions_assigned(self, partitions: list) -> None:
+        """
+        Default SafeKafkaConsumer rebalance assign callback.
+
+        Override in workers that need custom resume semantics.
+        """
+        self._init_partition_state(reset=False)
+        self._rebalance_in_progress = False
+        logger.info(
+            "%s partitions assigned: %s",
+            self._loop_label(),
+            [(p.topic, int(p.partition)) for p in partitions],
+        )
+        self._handle_partitions_assigned(partitions, resume=True)
 
     async def _handle_busy_partition_message(self, msg: Any) -> None:
         topic = str(msg.topic())

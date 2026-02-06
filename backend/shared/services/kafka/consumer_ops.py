@@ -15,11 +15,13 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any, Callable, Optional, TypeVar
 
 from confluent_kafka import TopicPartition
 
 from shared.utils.executor_utils import call_in_executor
+
+T = TypeVar("T")
 
 
 class KafkaConsumerOps(ABC):
@@ -49,6 +51,15 @@ class KafkaConsumerOps(ABC):
     async def close(self) -> None:
         raise NotImplementedError
 
+    @abstractmethod
+    async def call(self, fn: Callable[..., T], *args: Any, **kwargs: Any) -> T:
+        """
+        Execute an arbitrary call in the consumer's execution context.
+
+        The provided `fn` is invoked as: `fn(consumer, *args, **kwargs)`.
+        """
+        raise NotImplementedError
+
 
 @dataclass(slots=True)
 class InlineKafkaConsumerOps(KafkaConsumerOps):
@@ -73,6 +84,9 @@ class InlineKafkaConsumerOps(KafkaConsumerOps):
 
     async def close(self) -> None:
         self.consumer.close()
+
+    async def call(self, fn: Callable[..., T], *args: Any, **kwargs: Any) -> T:
+        return fn(self.consumer, *args, **kwargs)
 
 
 class ExecutorKafkaConsumerOps(KafkaConsumerOps):
@@ -121,3 +135,6 @@ class ExecutorKafkaConsumerOps(KafkaConsumerOps):
                     self._executor.shutdown(wait=False, cancel_futures=True)
                 except TypeError:
                     self._executor.shutdown(wait=False)
+
+    async def call(self, fn: Callable[..., T], *args: Any, **kwargs: Any) -> T:
+        return await call_in_executor(self._executor, fn, self._consumer, *args, **kwargs)

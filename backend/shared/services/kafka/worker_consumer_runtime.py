@@ -41,24 +41,46 @@ class WorkerConsumerRuntime:
             return await poller(timeout)
         return await self.ops.poll(timeout=timeout)
 
-    async def commit(self, msg: Any) -> None:  # noqa: ANN401
-        key: PartitionKey = (str(msg.topic()), int(msg.partition()))
-        if key in self.revoked_partitions:
+    async def commit(self, msg: Any) -> bool:  # noqa: ANN401
+        topic = str(msg.topic())
+        partition = int(msg.partition())
+        offset = int(msg.offset())
+        key: PartitionKey = (topic, partition)
+        revoked = self.revoked_partitions
+
+        def _commit_if_not_revoked(consumer: Any) -> bool:  # noqa: ANN401
+            if key in revoked:
+                return False
+            consumer.commit_sync(msg)
+            return True
+
+        did_commit = await self.ops.call(_commit_if_not_revoked)
+        if not did_commit:
             logger.info(
                 "Skipping %s commit; partition revoked (topic=%s partition=%s offset=%s)",
                 self.loop_label(),
-                str(msg.topic()),
-                int(msg.partition()),
-                int(msg.offset()),
+                topic,
+                partition,
+                offset,
             )
-            return
+            return False
+
         if self.uses_commit_state():
             self.commit_state_by_partition[key] = True
-        await self.ops.commit_sync(msg)
+        return True
 
-    async def seek(self, *, topic: str, partition: int, offset: int) -> None:
+    async def seek(self, *, topic: str, partition: int, offset: int) -> bool:
         key: PartitionKey = (str(topic), int(partition))
-        if key in self.revoked_partitions:
+        revoked = self.revoked_partitions
+
+        def _seek_if_not_revoked(consumer: Any) -> bool:  # noqa: ANN401
+            if key in revoked:
+                return False
+            consumer.seek(TopicPartition(topic, partition, offset))
+            return True
+
+        did_seek = await self.ops.call(_seek_if_not_revoked)
+        if not did_seek:
             logger.info(
                 "Skipping %s seek; partition revoked (topic=%s partition=%s offset=%s)",
                 self.loop_label(),
@@ -66,10 +88,11 @@ class WorkerConsumerRuntime:
                 int(partition),
                 int(offset),
             )
-            return
+            return False
+
         if self.uses_commit_state():
             self.commit_state_by_partition[key] = False
-        await self.ops.seek(TopicPartition(topic, partition, offset))
+        return True
 
     async def pause_partition(self, *, topic: str, partition: int) -> None:
         try:
@@ -94,4 +117,3 @@ class WorkerConsumerRuntime:
                 partition,
                 exc,
             )
-

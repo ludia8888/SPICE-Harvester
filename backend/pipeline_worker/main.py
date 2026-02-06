@@ -25,6 +25,7 @@ from uuid import UUID, uuid4
 import httpx
 from confluent_kafka import Producer
 
+from shared.services.kafka.consumer_ops import ExecutorKafkaConsumerOps
 from shared.services.kafka.safe_consumer import SafeKafkaConsumer
 
 try:
@@ -335,7 +336,10 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
             on_revoke=self._on_partitions_revoked,
             on_assign=self._on_partitions_assigned,
         )
-        self.consumer_ops = None
+        self.consumer_ops = ExecutorKafkaConsumerOps(
+            self.consumer,
+            thread_name_prefix="pipeline-worker-kafka",
+        )
         self._init_partition_state(reset=True)
         logger.info("PipelineWorker initialized (topic=%s)", self.topic)
 
@@ -343,24 +347,6 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
             bootstrap_servers=settings.database.kafka_servers,
             client_id=self.service_name or "pipeline-worker-dlq",
         )
-
-    def _on_partitions_revoked(self, partitions: list) -> None:
-        """Handle partition revocation during rebalance."""
-        self._rebalance_in_progress = True
-        logger.info(
-            "Pipeline worker partitions revoked: %s",
-            [(p.topic, p.partition) for p in partitions],
-        )
-        self._handle_partitions_revoked(partitions, clear_pending=True)
-
-    def _on_partitions_assigned(self, partitions: list) -> None:
-        """Handle partition assignment during rebalance."""
-        self._rebalance_in_progress = False
-        logger.info(
-            "Pipeline worker partitions assigned: %s",
-            [(p.topic, p.partition) for p in partitions],
-        )
-        self._handle_partitions_assigned(partitions, resume=True)
 
     async def close(self) -> None:
         await self._close_consumer_runtime()

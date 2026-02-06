@@ -53,7 +53,7 @@ from shared.services.registries.processed_event_registry import (
 )
 from shared.services.kafka.safe_consumer import SafeKafkaConsumer, create_safe_consumer
 from shared.services.kafka.producer_factory import create_kafka_dlq_producer
-from shared.services.core.worker_stores import initialize_worker_stores
+from shared.services.core.worker_stores import WorkerObservability, initialize_worker_stores
 from shared.services.registries.lineage_store import LineageStore
 from shared.services.core.audit_log_store import AuditLogStore
 from shared.services.registries.dataset_registry import DatasetRegistry
@@ -144,6 +144,11 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
         self.strict_relationship_schema = bool(worker_cfg.relationship_strict)
         self.lineage_store: Optional[LineageStore] = None
         self.audit_store: Optional[AuditLogStore] = None
+        self.observability = WorkerObservability(
+            lineage_store=None,
+            audit_store=None,
+            logger=logger,
+        )
         self.dataset_registry: Optional[DatasetRegistry] = None
         self.bff_http: Optional[httpx.AsyncClient] = None
         self.consumer_ops = None
@@ -195,6 +200,8 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
             group_id=group_id,
             topics=[AppConfig.INSTANCE_COMMANDS_TOPIC],
             service_name="instance-worker",
+            on_revoke=self._on_partitions_revoked,
+            on_assign=self._on_partitions_assigned,
         )
         self.consumer_ops = ExecutorKafkaConsumerOps(
             self.consumer,
@@ -271,6 +278,11 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
         self.processed = stores.processed
         self.lineage_store = stores.lineage_store
         self.audit_store = stores.audit_store
+        self.observability = WorkerObservability(
+            lineage_store=self.lineage_store,
+            audit_store=self.audit_store,
+            logger=logger,
+        )
 
         # Dataset registry for edit tracking (best-effort)
         try:
@@ -735,55 +747,44 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
             },
         )
 
-        if self.lineage_store:
-            try:
-                etag = put_resp.get("ETag") if isinstance(put_resp, dict) else None
-                version_id = put_resp.get("VersionId") if isinstance(put_resp, dict) else None
-                await self.lineage_store.record_link(
-                    from_node_id=self.lineage_store.node_event(str(command_id)),
-                    to_node_id=self.lineage_store.node_artifact("s3", self.instance_bucket, s3_path),
-                    edge_type="event_wrote_s3_object",
-                    occurred_at=datetime.now(timezone.utc),
-                    db_name=db_name,
-                    to_label=f"s3://{self.instance_bucket}/{s3_path}",
-                    edge_metadata={
-                        "bucket": self.instance_bucket,
-                        "key": s3_path,
-                        "purpose": "instance_command_log",
-                        "db_name": db_name,
-                        "etag": etag,
-                        "version_id": version_id,
-                        "ontology": ontology_version,
-                    },
-                )
-            except Exception as e:
-                logger.debug(f"Lineage record failed (non-fatal): {e}")
-
-        if self.audit_store:
-            try:
-                etag = put_resp.get("ETag") if isinstance(put_resp, dict) else None
-                version_id = put_resp.get("VersionId") if isinstance(put_resp, dict) else None
-                await self.audit_store.log(
-                    partition_key=f"db:{db_name}",
-                    actor="instance_worker",
-                    action="INSTANCE_S3_WRITE",
-                    status="success",
-                    resource_type="s3_object",
-                    resource_id=f"s3://{self.instance_bucket}/{s3_path}",
-                    event_id=str(command_id),
-                    command_id=str(command_id),
-                    metadata={
-                        "class_id": class_id,
-                        "instance_id": instance_id,
-                        "bucket": self.instance_bucket,
-                        "key": s3_path,
-                        "etag": etag,
-                        "version_id": version_id,
-                        "ontology": ontology_version,
-                    },
-                )
-            except Exception as e:
-                logger.debug(f"Audit record failed (non-fatal): {e}")
+        etag = put_resp.get("ETag") if isinstance(put_resp, dict) else None
+        version_id = put_resp.get("VersionId") if isinstance(put_resp, dict) else None
+        await self.observability.record_link(
+            from_node_id=LineageStore.node_event(str(command_id)),
+            to_node_id=LineageStore.node_artifact("s3", self.instance_bucket, s3_path),
+            edge_type="event_wrote_s3_object",
+            occurred_at=datetime.now(timezone.utc),
+            db_name=db_name,
+            to_label=f"s3://{self.instance_bucket}/{s3_path}",
+            edge_metadata={
+                "bucket": self.instance_bucket,
+                "key": s3_path,
+                "purpose": "instance_command_log",
+                "db_name": db_name,
+                "etag": etag,
+                "version_id": version_id,
+                "ontology": ontology_version,
+            },
+        )
+        await self.observability.audit_log(
+            partition_key=f"db:{db_name}",
+            actor="instance_worker",
+            action="INSTANCE_S3_WRITE",
+            status="success",
+            resource_type="s3_object",
+            resource_id=f"s3://{self.instance_bucket}/{s3_path}",
+            event_id=str(command_id),
+            command_id=str(command_id),
+            metadata={
+                "class_id": class_id,
+                "instance_id": instance_id,
+                "bucket": self.instance_bucket,
+                "key": s3_path,
+                "etag": etag,
+                "version_id": version_id,
+                "ontology": ontology_version,
+            },
+        )
 
         # 2) Extract ONLY relationships for graph
         relationships = await self.extract_relationships(
@@ -852,47 +853,38 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
             )
             maybe_crash("instance_worker:after_terminus", logger=logger)
 
-            if self.lineage_store:
-                try:
-                    await self.lineage_store.record_link(
-                        from_node_id=self.lineage_store.node_event(str(command_id)),
-                        to_node_id=self.lineage_store.node_artifact("terminus", db_name, branch, terminus_id),
-                        edge_type="event_wrote_terminus_document",
-                        occurred_at=datetime.now(timezone.utc),
-                        db_name=db_name,
-                        to_label=f"terminus:{db_name}:{branch}:{terminus_id}",
-                        edge_metadata={
-                            "db_name": db_name,
-                            "branch": branch,
-                            "terminus_id": terminus_id,
-                            "class_id": class_id,
-                            "ontology": ontology_version,
-                        },
-                    )
-                except Exception as e:
-                    logger.debug(f"Lineage record failed (non-fatal): {e}")
-
-            if self.audit_store:
-                try:
-                    await self.audit_store.log(
-                        partition_key=f"db:{db_name}",
-                        actor="instance_worker",
-                        action="INSTANCE_TERMINUS_WRITE",
-                        status="success",
-                        resource_type="terminus_document",
-                        resource_id=f"terminus:{db_name}:{branch}:{terminus_id}",
-                        event_id=str(command_id),
-                        command_id=str(command_id),
-                        metadata={
-                            "class_id": class_id,
-                            "branch": branch,
-                            "instance_id": instance_id,
-                            "terminus_id": terminus_id,
-                            "ontology": ontology_version,
-                        },
-                    )
-                except Exception as e:
-                    logger.debug(f"Audit record failed (non-fatal): {e}")
+            await self.observability.record_link(
+                from_node_id=LineageStore.node_event(str(command_id)),
+                to_node_id=LineageStore.node_artifact("terminus", db_name, branch, terminus_id),
+                edge_type="event_wrote_terminus_document",
+                occurred_at=datetime.now(timezone.utc),
+                db_name=db_name,
+                to_label=f"terminus:{db_name}:{branch}:{terminus_id}",
+                edge_metadata={
+                    "db_name": db_name,
+                    "branch": branch,
+                    "terminus_id": terminus_id,
+                    "class_id": class_id,
+                    "ontology": ontology_version,
+                },
+            )
+            await self.observability.audit_log(
+                partition_key=f"db:{db_name}",
+                actor="instance_worker",
+                action="INSTANCE_TERMINUS_WRITE",
+                status="success",
+                resource_type="terminus_document",
+                resource_id=f"terminus:{db_name}:{branch}:{terminus_id}",
+                event_id=str(command_id),
+                command_id=str(command_id),
+                metadata={
+                    "class_id": class_id,
+                    "branch": branch,
+                    "instance_id": instance_id,
+                    "terminus_id": terminus_id,
+                    "ontology": ontology_version,
+                },
+            )
         except Exception as e:
             existing = None
             try:
@@ -912,31 +904,24 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
                     branch=branch,
                 )
             else:
-                if self.audit_store:
-                    try:
-                        await self.audit_store.log(
-                            partition_key=f"db:{db_name}",
-                            actor="instance_worker",
-                            action="INSTANCE_TERMINUS_WRITE",
-                            status="failure",
-                            resource_type="terminus_document",
-                            resource_id=f"terminus:{db_name}:{branch}:{terminus_id}",
-                            event_id=str(command_id),
-                            command_id=str(command_id),
-                            metadata={
-                                "class_id": class_id,
-                                "branch": branch,
-                                "instance_id": instance_id,
-                                "terminus_id": terminus_id,
-                                "ontology": ontology_version,
-                            },
-                            error=str(e),
-                        )
-                    except Exception as audit_err:
-                        logger.debug(
-                            f"Audit record failed while handling Terminus write failure (non-fatal): {audit_err}",
-                            exc_info=True,
-                        )
+                await self.observability.audit_log(
+                    partition_key=f"db:{db_name}",
+                    actor="instance_worker",
+                    action="INSTANCE_TERMINUS_WRITE",
+                    status="failure",
+                    resource_type="terminus_document",
+                    resource_id=f"terminus:{db_name}:{branch}:{terminus_id}",
+                    event_id=str(command_id),
+                    command_id=str(command_id),
+                    metadata={
+                        "class_id": class_id,
+                        "branch": branch,
+                        "instance_id": instance_id,
+                        "terminus_id": terminus_id,
+                        "ontology": ontology_version,
+                    },
+                    error=str(e),
+                )
                 raise
 
         # 4) Store/publish domain event (Event Sourcing: S3/MinIO -> EventPublisher -> Kafka)
@@ -986,21 +971,28 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
             "domain_event_id": domain_event_id,
         }
         
-    async def process_create_instance(self, command: Dict[str, Any]):
+    async def process_create_instance(self, command: Dict[str, Any]) -> None:
         """Process CREATE_INSTANCE command - strict lightweight mode."""
-        db_name = command.get('db_name')
-        class_id = command.get('class_id')
-        command_id = command.get('command_id')
+        db_name = command.get("db_name")
+        class_id = command.get("class_id")
+        command_id = str(command.get("command_id") or "").strip()
         branch = validate_branch_name(command.get("branch") or "main")
-        payload = command.get('payload', {}) or {}
+        payload = command.get("payload", {}) or {}
         is_objectify = self._is_objectify_command(command)
 
+        if not command_id:
+            raise ValueError("command_id is required")
+
         # Set command status early (202 already returned to user).
-        await self.set_command_status(command_id, 'processing')
+        await self.set_command_status(command_id, "processing")
 
         try:
             if not isinstance(payload, dict):
                 raise ValueError("CREATE_INSTANCE payload must be an object")
+            if not db_name:
+                raise ValueError("db_name is required")
+            if not class_id:
+                raise ValueError("class_id is required")
 
             provided_instance_id = command.get("instance_id")
             if provided_instance_id:
@@ -1015,26 +1007,20 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
                     )
 
                 expected_aggregate_id = f"{db_name}:{branch}:{class_id}:{instance_id}"
-                if command.get("aggregate_id") and command.get("aggregate_id") != expected_aggregate_id:
+                aggregate_id_raw = command.get("aggregate_id")
+                if aggregate_id_raw and str(aggregate_id_raw) != expected_aggregate_id:
                     raise ValueError(
-                        f"aggregate_id mismatch: command.aggregate_id={command.get('aggregate_id')} "
-                        f"expected={expected_aggregate_id}"
+                        f"aggregate_id mismatch: command.aggregate_id={aggregate_id_raw} expected={expected_aggregate_id}"
                     )
             else:
-                # Extract primary key value dynamically
                 instance_id = self.get_primary_key_value(
-                    class_id, payload, allow_generate=self.allow_pk_generation and not is_objectify
+                    class_id,
+                    payload,
+                    allow_generate=self.allow_pk_generation and not is_objectify,
                 )
                 validate_instance_id(instance_id)
 
-            # Ensure downstream uses the resolved instance_id consistently
             command["instance_id"] = instance_id
-            primary_key_value = instance_id
-
-            if not db_name:
-                raise ValueError("db_name is required")
-            if not class_id:
-                raise ValueError("class_id is required")
 
             # Stamp semantic contract version (ontology ref/commit) for reproducibility.
             ontology_version = await self._stamp_ontology_version(
@@ -1042,271 +1028,33 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
                 db_name=db_name,
                 branch=branch,
             )
+            created_by = str(command.get("created_by") or "system")
 
             logger.info(f"🔷 STRICT: Creating {class_id}/{instance_id}")
 
-            # 1. Save FULL data to S3 (Event Store)
-            s3_path = f"{db_name}/{branch}/{class_id}/{instance_id}/{command_id}.json"
-            s3_data = {
-                'command': command,
-                'payload': payload,
-                'instance_id': instance_id,
-                'class_id': class_id,
-                'branch': branch,
-                'created_at': datetime.now(timezone.utc).isoformat()
-            }
-            
-            put_resp = await self._s3_call(
-                self.s3_client.put_object,
-                Bucket=self.instance_bucket,
-                Key=s3_path,
-                Body=json.dumps(s3_data, indent=2),
-                ContentType='application/json',
-                Metadata={
-                    'command_id': command_id,
-                    'instance_id': instance_id,
-                    'class_id': class_id
-                }
-            )
-            logger.info(f"  ✅ Saved to S3: {s3_path}")
-
-            # Provenance/Audit: command event -> instance command object
-            if self.lineage_store:
-                try:
-                    etag = put_resp.get("ETag") if isinstance(put_resp, dict) else None
-                    version_id = put_resp.get("VersionId") if isinstance(put_resp, dict) else None
-                    await self.lineage_store.record_link(
-                        from_node_id=self.lineage_store.node_event(str(command_id)),
-                        to_node_id=self.lineage_store.node_artifact("s3", self.instance_bucket, s3_path),
-                        edge_type="event_wrote_s3_object",
-                        occurred_at=datetime.now(timezone.utc),
-                        db_name=db_name,
-                        to_label=f"s3://{self.instance_bucket}/{s3_path}",
-                        edge_metadata={
-                            "bucket": self.instance_bucket,
-                            "key": s3_path,
-                            "purpose": "instance_command_log",
-                            "db_name": db_name,
-                            "etag": etag,
-                            "version_id": version_id,
-                            "ontology": ontology_version,
-                        },
-                    )
-                except Exception as e:
-                    logger.debug(f"Lineage record failed (non-fatal): {e}")
-
-            if self.audit_store:
-                try:
-                    etag = put_resp.get("ETag") if isinstance(put_resp, dict) else None
-                    version_id = put_resp.get("VersionId") if isinstance(put_resp, dict) else None
-                    await self.audit_store.log(
-                        partition_key=f"db:{db_name}",
-                        actor="instance_worker",
-                        action="INSTANCE_S3_WRITE",
-                        status="success",
-                        resource_type="s3_object",
-                        resource_id=f"s3://{self.instance_bucket}/{s3_path}",
-                        event_id=str(command_id),
-                        command_id=str(command_id),
-                        metadata={
-                            "class_id": class_id,
-                            "instance_id": instance_id,
-                            "bucket": self.instance_bucket,
-                            "key": s3_path,
-                            "etag": etag,
-                            "version_id": version_id,
-                            "ontology": ontology_version,
-                        },
-                    )
-                except Exception as e:
-                    logger.debug(f"Audit record failed (non-fatal): {e}")
-            
-            # 2. Extract ONLY relationships for graph
-            relationships = await self.extract_relationships(
-                db_name,
-                class_id,
-                payload,
+            result = await self._apply_create_instance_side_effects(
+                command_id=command_id,
+                db_name=db_name,
+                class_id=class_id,
                 branch=branch,
+                payload=payload,
+                instance_id=instance_id,
+                command_log=command,
+                ontology_version=ontology_version,
+                created_by=created_by,
                 allow_pattern_fallback=not is_objectify,
-                strict_schema=self.strict_relationship_schema,
-            )
-            
-            # 3. Create PURE lightweight node for TerminusDB (NO system fields!)
-            graph_node = {
-                "@id": f"{class_id}/{primary_key_value}",
-                "@type": class_id,
-            }
-            
-            # Add the primary key field dynamically
-            primary_key_field = f"{class_id.lower()}_id"
-            graph_node[primary_key_field] = payload.get(primary_key_field, primary_key_value)
-            
-            # Add ONLY relationships (no domain fields!)
-            for rel_field, rel_target in relationships.items():
-                graph_node[rel_field] = rel_target
-
-            # Include required scalar properties to satisfy TerminusDB schema checks.
-            for field in await self.extract_required_properties(db_name, class_id, branch=branch):
-                if field in graph_node:
-                    continue
-                if field in payload:
-                    graph_node[field] = payload[field]
-                
-            # Lightweight graph principle: NO domain attributes in TerminusDB!
-            # TerminusDB stores ONLY lightweight nodes (IDs + relationships)
-            # All domain data goes to Elasticsearch
-            
-            # Stable graph identifier used across TerminusDB + ES federation.
-            terminus_id = f"{class_id}/{primary_key_value}"
-
-            # Store lightweight node in TerminusDB for graph traversal
-            try:
-                # Create instance using TerminusDB service
-                # This will store ONLY the lightweight node with relationships
-                # Note: The instance_id is already part of graph_node["@id"]
-                maybe_crash("instance_worker:before_terminus", logger=logger)
-                await self.terminus_service.create_instance(
-                    db_name,
-                    class_id,
-                    graph_node,  # Contains only @id, @type, relationships
-                    branch=branch,
-                )
-                maybe_crash("instance_worker:after_terminus", logger=logger)
-                logger.info("  ✅ Stored lightweight node in TerminusDB")
-                logger.info(f"  📊 Relationships: {list(relationships.keys())}")
-
-                if self.lineage_store:
-                    try:
-                        await self.lineage_store.record_link(
-                            from_node_id=self.lineage_store.node_event(str(command_id)),
-                            to_node_id=self.lineage_store.node_artifact("terminus", db_name, branch, terminus_id),
-                            edge_type="event_wrote_terminus_document",
-                            occurred_at=datetime.now(timezone.utc),
-                            db_name=db_name,
-                            to_label=f"terminus:{db_name}:{branch}:{terminus_id}",
-                            edge_metadata={
-                                "db_name": db_name,
-                                "branch": branch,
-                                "terminus_id": terminus_id,
-                                "class_id": class_id,
-                                "ontology": ontology_version,
-                            },
-                        )
-                    except Exception as e:
-                        logger.debug(f"Lineage record failed (non-fatal): {e}")
-
-                if self.audit_store:
-                    try:
-                        await self.audit_store.log(
-                            partition_key=f"db:{db_name}",
-                            actor="instance_worker",
-                            action="INSTANCE_TERMINUS_WRITE",
-                            status="success",
-                            resource_type="terminus_document",
-                            resource_id=f"terminus:{db_name}:{branch}:{terminus_id}",
-                            event_id=str(command_id),
-                            command_id=str(command_id),
-                            metadata={
-                                "class_id": class_id,
-                                "branch": branch,
-                                "instance_id": instance_id,
-                                "terminus_id": terminus_id,
-                                "ontology": ontology_version,
-                            },
-                        )
-                    except Exception as e:
-                        logger.debug(f"Audit record failed (non-fatal): {e}")
-            except Exception as e:
-                existing = None
-                try:
-                    existing = await self.terminus_service.document_service.get_document(
-                        db_name, terminus_id, graph_type="instance", branch=branch
-                    )
-                except Exception:
-                    existing = None
-
-                if existing:
-                    logger.info(
-                        f"  ✅ TerminusDB node already exists (idempotent create): {terminus_id}"
-                    )
-                else:
-                    logger.warning(f"  ⚠️ Could not store in TerminusDB: {e}")
-                    if self.audit_store:
-                        try:
-                            await self.audit_store.log(
-                                partition_key=f"db:{db_name}",
-                                actor="instance_worker",
-                                action="INSTANCE_TERMINUS_WRITE",
-                                status="failure",
-                                resource_type="terminus_document",
-                                resource_id=f"terminus:{db_name}:{branch}:{terminus_id}",
-                                event_id=str(command_id),
-                                command_id=str(command_id),
-                                metadata={
-                                    "class_id": class_id,
-                                    "branch": branch,
-                                    "instance_id": instance_id,
-                                    "terminus_id": terminus_id,
-                                    "ontology": ontology_version,
-                                },
-                                error=str(e),
-                            )
-                        except Exception as audit_err:
-                            logger.debug(
-                                f"Audit record failed while handling Terminus write failure (non-fatal): {audit_err}",
-                                exc_info=True,
-                            )
-                    # TerminusDB is the graph authority; if we cannot write it, we must retry.
-                    raise
-            
-            # 4. Store/publish domain event (Event Sourcing: S3/MinIO -> EventPublisher -> Kafka)
-            
-            # NOTE: Elasticsearch indexing is handled by projection_worker (single writer) for schema consistency.
-            event_payload = {
-                "db_name": db_name,
-                "branch": branch,
-                "class_id": class_id,
-                "instance_id": instance_id,
-                **payload,  # Include full payload in event
-            }
-            aggregate_id = f"{db_name}:{branch}:{class_id}:{instance_id}"
-
-            domain_event_id = (
-                spice_event_id(command_id=str(command_id), event_type="INSTANCE_CREATED", aggregate_id=aggregate_id)
-                if command_id
-                else str(uuid4())
             )
 
-            envelope = EventEnvelope(
-                event_id=domain_event_id,
-                event_type="INSTANCE_CREATED",
-                aggregate_type="Instance",
-                aggregate_id=aggregate_id,
-                occurred_at=datetime.now(timezone.utc),
-                actor=command.get("created_by") or "system",
-                data=event_payload,
-                metadata={
-                    "kind": "domain",
-                    "kafka_topic": AppConfig.INSTANCE_EVENTS_TOPIC,
-                    "service": "instance_worker",
-                    "command_id": command_id,
-                    "ontology": ontology_version,
-                    "run_id": self.run_id,
-                    "code_sha": self.code_sha,
+            s3_path = str(result.get("s3_path") or "")
+            await self.set_command_status(
+                command_id,
+                "completed",
+                {
+                    "instance_id": instance_id,
+                    "es_doc_id": instance_id,
+                    "s3_uri": f"s3://{self.instance_bucket}/{s3_path}",
                 },
             )
-
-            if not self.event_store:
-                raise RuntimeError("Event Store not initialized (ENABLE_EVENT_SOURCING requires Event Store)")
-            await self.event_store.append_event(envelope)
-            logger.info(f"  ✅ Stored INSTANCE_CREATED in Event Store (seq={envelope.sequence_number})")
-            
-            # Set success status
-            await self.set_command_status(command_id, 'completed', {
-                'instance_id': instance_id,
-                'es_doc_id': instance_id,
-                's3_uri': f"s3://{self.instance_bucket}/{s3_path}"
-            })
 
             await self._record_instance_edit(
                 db_name=db_name,
@@ -1317,7 +1065,7 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
                 metadata={
                     "command_id": command_id,
                     "branch": branch,
-                    "actor": command.get("created_by") or "system",
+                    "actor": created_by,
                     "ontology": ontology_version,
                     "objectify": bool(is_objectify),
                 },
@@ -1334,12 +1082,11 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
                     )
                 except Exception as exc:
                     logger.debug("Relationship object link sync failed: %s", exc, exc_info=True)
-            
+
             logger.info("✅ STRICT: Instance created successfully")
-            
         except Exception as e:
             logger.error(f"❌ Failed to create instance: {e}")
-            await self.set_command_status(command_id, 'failed', {'error': str(e)})
+            await self.set_command_status(command_id, "failed", {"error": str(e)})
             raise
 
     async def process_bulk_create_instances(self, command: Dict[str, Any]) -> None:
@@ -1861,79 +1608,67 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
                     "branch": branch,
                 },
             )
-            if command_id and self.lineage_store:
-                try:
-                    etag = put_resp.get("ETag") if isinstance(put_resp, dict) else None
-                    version_id = put_resp.get("VersionId") if isinstance(put_resp, dict) else None
-                    await self.lineage_store.record_link(
-                        from_node_id=self.lineage_store.node_event(str(command_id)),
-                        to_node_id=self.lineage_store.node_artifact("s3", self.instance_bucket, s3_path),
-                        edge_type="event_wrote_s3_object",
-                        occurred_at=datetime.now(timezone.utc),
-                        db_name=db_name,
-                        to_label=f"s3://{self.instance_bucket}/{s3_path}",
-                        edge_metadata={
-                            "bucket": self.instance_bucket,
-                            "key": s3_path,
-                            "purpose": "instance_update_snapshot",
-                            "db_name": db_name,
-                            "etag": etag,
-                            "version_id": version_id,
-                            "ontology": ontology_version,
-                        },
-                    )
-                except Exception as e:
-                    logger.debug(f"Lineage record failed (non-fatal): {e}")
-            if command_id and self.audit_store:
-                try:
-                    etag = put_resp.get("ETag") if isinstance(put_resp, dict) else None
-                    version_id = put_resp.get("VersionId") if isinstance(put_resp, dict) else None
-                    await self.audit_store.log(
-                        partition_key=f"db:{db_name}",
-                        actor="instance_worker",
-                        action="INSTANCE_S3_WRITE",
-                        status="success",
-                        resource_type="s3_object",
-                        resource_id=f"s3://{self.instance_bucket}/{s3_path}",
-                        event_id=str(command_id),
-                        command_id=str(command_id),
-                        metadata={
-                            "class_id": class_id,
-                            "instance_id": instance_id,
-                            "bucket": self.instance_bucket,
-                            "key": s3_path,
-                            "etag": etag,
-                            "version_id": version_id,
-                            "ontology": ontology_version,
-                        },
-                    )
-                except Exception as e:
-                    logger.debug(f"Audit record failed (non-fatal): {e}")
+            if command_id:
+                etag = put_resp.get("ETag") if isinstance(put_resp, dict) else None
+                version_id = put_resp.get("VersionId") if isinstance(put_resp, dict) else None
+                await self.observability.record_link(
+                    from_node_id=LineageStore.node_event(str(command_id)),
+                    to_node_id=LineageStore.node_artifact("s3", self.instance_bucket, s3_path),
+                    edge_type="event_wrote_s3_object",
+                    occurred_at=datetime.now(timezone.utc),
+                    db_name=db_name,
+                    to_label=f"s3://{self.instance_bucket}/{s3_path}",
+                    edge_metadata={
+                        "bucket": self.instance_bucket,
+                        "key": s3_path,
+                        "purpose": "instance_update_snapshot",
+                        "db_name": db_name,
+                        "etag": etag,
+                        "version_id": version_id,
+                        "ontology": ontology_version,
+                    },
+                )
+                await self.observability.audit_log(
+                    partition_key=f"db:{db_name}",
+                    actor="instance_worker",
+                    action="INSTANCE_S3_WRITE",
+                    status="success",
+                    resource_type="s3_object",
+                    resource_id=f"s3://{self.instance_bucket}/{s3_path}",
+                    event_id=str(command_id),
+                    command_id=str(command_id),
+                    metadata={
+                        "class_id": class_id,
+                        "instance_id": instance_id,
+                        "bucket": self.instance_bucket,
+                        "key": s3_path,
+                        "etag": etag,
+                        "version_id": version_id,
+                        "ontology": ontology_version,
+                    },
+                )
         except Exception as e:
             # Blob snapshot is best-effort; continue (Event Store is SSoT for events).
             logger.warning(f"Failed to store update snapshot to S3 (continuing): {e}")
-            if command_id and self.audit_store:
-                try:
-                    await self.audit_store.log(
-                        partition_key=f"db:{db_name}",
-                        actor="instance_worker",
-                        action="INSTANCE_S3_WRITE",
-                        status="failure",
-                        resource_type="s3_object",
-                        resource_id=f"s3://{self.instance_bucket}/{s3_path}",
-                        event_id=str(command_id),
-                        command_id=str(command_id),
-                        metadata={
-                            "class_id": class_id,
-                            "instance_id": instance_id,
-                            "bucket": self.instance_bucket,
-                            "key": s3_path,
-                            "ontology": ontology_version,
-                        },
-                        error=str(e),
-                    )
-                except Exception as audit_err:
-                    logger.debug(f"Audit record failed (non-fatal): {audit_err}", exc_info=True)
+            if command_id:
+                await self.observability.audit_log(
+                    partition_key=f"db:{db_name}",
+                    actor="instance_worker",
+                    action="INSTANCE_S3_WRITE",
+                    status="failure",
+                    resource_type="s3_object",
+                    resource_id=f"s3://{self.instance_bucket}/{s3_path}",
+                    event_id=str(command_id),
+                    command_id=str(command_id),
+                    metadata={
+                        "class_id": class_id,
+                        "instance_id": instance_id,
+                        "bucket": self.instance_bucket,
+                        "key": s3_path,
+                        "ontology": ontology_version,
+                    },
+                    error=str(e),
+                )
 
         # Update lightweight node (relationships + required scalar fields)
         relationships = await self.extract_relationships(
@@ -1963,70 +1698,60 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
             await self.terminus_service.update_instance(db_name, class_id, terminus_id, graph_node, branch=branch)
             maybe_crash("instance_worker:after_terminus", logger=logger)
             logger.info("  ✅ Updated lightweight node in TerminusDB")
-            if command_id and self.lineage_store:
-                try:
-                    await self.lineage_store.record_link(
-                        from_node_id=self.lineage_store.node_event(str(command_id)),
-                        to_node_id=self.lineage_store.node_artifact("terminus", db_name, branch, terminus_id),
-                        edge_type="event_wrote_terminus_document",
-                        occurred_at=datetime.now(timezone.utc),
-                        db_name=db_name,
-                        to_label=f"terminus:{db_name}:{branch}:{terminus_id}",
-                        edge_metadata={
-                            "db_name": db_name,
-                            "branch": branch,
-                            "terminus_id": terminus_id,
-                            "class_id": class_id,
-                            "ontology": ontology_version,
-                        },
-                    )
-                except Exception as e:
-                    logger.debug(f"Lineage record failed (non-fatal): {e}")
-            if command_id and self.audit_store:
-                try:
-                    await self.audit_store.log(
-                        partition_key=f"db:{db_name}",
-                        actor="instance_worker",
-                        action="INSTANCE_TERMINUS_WRITE",
-                        status="success",
-                        resource_type="terminus_document",
-                        resource_id=f"terminus:{db_name}:{branch}:{terminus_id}",
-                        event_id=str(command_id),
-                        command_id=str(command_id),
-                        metadata={
-                            "class_id": class_id,
-                            "branch": branch,
-                            "instance_id": instance_id,
-                            "terminus_id": terminus_id,
-                            "ontology": ontology_version,
-                        },
-                    )
-                except Exception as e:
-                    logger.debug(f"Audit record failed (non-fatal): {e}")
+            if command_id:
+                await self.observability.record_link(
+                    from_node_id=LineageStore.node_event(str(command_id)),
+                    to_node_id=LineageStore.node_artifact("terminus", db_name, branch, terminus_id),
+                    edge_type="event_wrote_terminus_document",
+                    occurred_at=datetime.now(timezone.utc),
+                    db_name=db_name,
+                    to_label=f"terminus:{db_name}:{branch}:{terminus_id}",
+                    edge_metadata={
+                        "db_name": db_name,
+                        "branch": branch,
+                        "terminus_id": terminus_id,
+                        "class_id": class_id,
+                        "ontology": ontology_version,
+                    },
+                )
+                await self.observability.audit_log(
+                    partition_key=f"db:{db_name}",
+                    actor="instance_worker",
+                    action="INSTANCE_TERMINUS_WRITE",
+                    status="success",
+                    resource_type="terminus_document",
+                    resource_id=f"terminus:{db_name}:{branch}:{terminus_id}",
+                    event_id=str(command_id),
+                    command_id=str(command_id),
+                    metadata={
+                        "class_id": class_id,
+                        "branch": branch,
+                        "instance_id": instance_id,
+                        "terminus_id": terminus_id,
+                        "ontology": ontology_version,
+                    },
+                )
         except Exception as e:
             logger.warning(f"  ⚠️ Could not update TerminusDB node: {e}")
-            if command_id and self.audit_store:
-                try:
-                    await self.audit_store.log(
-                        partition_key=f"db:{db_name}",
-                        actor="instance_worker",
-                        action="INSTANCE_TERMINUS_WRITE",
-                        status="failure",
-                        resource_type="terminus_document",
-                        resource_id=f"terminus:{db_name}:{branch}:{terminus_id}",
-                        event_id=str(command_id),
-                        command_id=str(command_id),
-                        metadata={
-                            "class_id": class_id,
-                            "branch": branch,
-                            "instance_id": instance_id,
-                            "terminus_id": terminus_id,
-                            "ontology": ontology_version,
-                        },
-                        error=str(e),
-                    )
-                except Exception as audit_err:
-                    logger.debug(f"Audit record failed (non-fatal): {audit_err}", exc_info=True)
+            if command_id:
+                await self.observability.audit_log(
+                    partition_key=f"db:{db_name}",
+                    actor="instance_worker",
+                    action="INSTANCE_TERMINUS_WRITE",
+                    status="failure",
+                    resource_type="terminus_document",
+                    resource_id=f"terminus:{db_name}:{branch}:{terminus_id}",
+                    event_id=str(command_id),
+                    command_id=str(command_id),
+                    metadata={
+                        "class_id": class_id,
+                        "branch": branch,
+                        "instance_id": instance_id,
+                        "terminus_id": terminus_id,
+                        "ontology": ontology_version,
+                    },
+                    error=str(e),
+                )
             # TerminusDB is the graph authority; retry until it is updated.
             raise
 
@@ -2161,49 +1886,43 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
             # TerminusDB is the graph authority; never succeed the command if delete could not be applied.
             raise RuntimeError(f"Failed to delete TerminusDB node {terminus_id}: {terminus_error or 'unknown'}")
 
-        if command_id and terminus_deleted and self.lineage_store:
-            try:
-                await self.lineage_store.record_link(
-                    from_node_id=self.lineage_store.node_event(str(command_id)),
-                    to_node_id=self.lineage_store.node_artifact("terminus", db_name, branch, terminus_id),
-                    edge_type="event_deleted_terminus_document",
-                    occurred_at=datetime.now(timezone.utc),
-                    db_name=db_name,
-                    to_label=f"terminus:{db_name}:{branch}:{terminus_id}",
-                    edge_metadata={
-                        "db_name": db_name,
-                        "branch": branch,
-                        "terminus_id": terminus_id,
-                        "class_id": class_id,
-                        "ontology": ontology_version,
-                    },
-                )
-            except Exception as e:
-                logger.debug(f"Lineage record failed (non-fatal): {e}")
+        if command_id and terminus_deleted:
+            await self.observability.record_link(
+                from_node_id=LineageStore.node_event(str(command_id)),
+                to_node_id=LineageStore.node_artifact("terminus", db_name, branch, terminus_id),
+                edge_type="event_deleted_terminus_document",
+                occurred_at=datetime.now(timezone.utc),
+                db_name=db_name,
+                to_label=f"terminus:{db_name}:{branch}:{terminus_id}",
+                edge_metadata={
+                    "db_name": db_name,
+                    "branch": branch,
+                    "terminus_id": terminus_id,
+                    "class_id": class_id,
+                    "ontology": ontology_version,
+                },
+            )
 
-        if command_id and self.audit_store:
-            try:
-                await self.audit_store.log(
-                    partition_key=f"db:{db_name}",
-                    actor="instance_worker",
-                    action="INSTANCE_TERMINUS_DELETE",
-                    status="success" if terminus_deleted else "failure",
-                    resource_type="terminus_document",
-                    resource_id=f"terminus:{db_name}:{branch}:{terminus_id}",
-                    event_id=str(command_id),
-                    command_id=str(command_id),
-                    metadata={
-                        "class_id": class_id,
-                        "branch": branch,
-                        "instance_id": instance_id,
-                        "terminus_id": terminus_id,
-                        "already_missing": terminus_already_missing,
-                        "ontology": ontology_version,
-                    },
-                    error=None if terminus_deleted else (terminus_error or "delete_failed"),
-                )
-            except Exception as e:
-                logger.debug(f"Audit record failed (non-fatal): {e}")
+        if command_id:
+            await self.observability.audit_log(
+                partition_key=f"db:{db_name}",
+                actor="instance_worker",
+                action="INSTANCE_TERMINUS_DELETE",
+                status="success" if terminus_deleted else "failure",
+                resource_type="terminus_document",
+                resource_id=f"terminus:{db_name}:{branch}:{terminus_id}",
+                event_id=str(command_id),
+                command_id=str(command_id),
+                metadata={
+                    "class_id": class_id,
+                    "branch": branch,
+                    "instance_id": instance_id,
+                    "terminus_id": terminus_id,
+                    "already_missing": terminus_already_missing,
+                    "ontology": ontology_version,
+                },
+                error=None if terminus_deleted else (terminus_error or "delete_failed"),
+            )
 
         # Elasticsearch deletion is handled by projection_worker (single writer) for schema consistency.
 
@@ -2239,62 +1958,12 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
             s3_written = True
         except Exception as e:
             logger.warning(f"Failed to store delete tombstone to S3 (continuing): {e}")
-            if command_id and self.audit_store:
-                try:
-                    await self.audit_store.log(
-                        partition_key=f"db:{db_name}",
-                        actor="instance_worker",
-                        action="INSTANCE_S3_TOMBSTONE_WRITE",
-                        status="failure",
-                        resource_type="s3_object",
-                        resource_id=f"s3://{self.instance_bucket}/{s3_path}",
-                        event_id=str(command_id),
-                        command_id=str(command_id),
-                        metadata={
-                            "class_id": class_id,
-                            "instance_id": instance_id,
-                            "bucket": self.instance_bucket,
-                            "key": s3_path,
-                            "ontology": ontology_version,
-                        },
-                        error=str(e),
-                    )
-                except Exception as audit_err:
-                    logger.debug(f"Audit record failed (non-fatal): {audit_err}", exc_info=True)
-
-        if command_id and s3_written and self.lineage_store:
-            try:
-                etag = tombstone_resp.get("ETag") if isinstance(tombstone_resp, dict) else None
-                version_id = tombstone_resp.get("VersionId") if isinstance(tombstone_resp, dict) else None
-                await self.lineage_store.record_link(
-                    from_node_id=self.lineage_store.node_event(str(command_id)),
-                    to_node_id=self.lineage_store.node_artifact("s3", self.instance_bucket, s3_path),
-                    edge_type="event_wrote_s3_object",
-                    occurred_at=datetime.now(timezone.utc),
-                    db_name=db_name,
-                    to_label=f"s3://{self.instance_bucket}/{s3_path}",
-                    edge_metadata={
-                        "bucket": self.instance_bucket,
-                        "key": s3_path,
-                        "purpose": "instance_delete_tombstone",
-                        "db_name": db_name,
-                        "etag": etag,
-                        "version_id": version_id,
-                        "ontology": ontology_version,
-                    },
-                )
-            except Exception as e:
-                logger.debug(f"Lineage record failed (non-fatal): {e}")
-
-        if command_id and s3_written and self.audit_store:
-            try:
-                etag = tombstone_resp.get("ETag") if isinstance(tombstone_resp, dict) else None
-                version_id = tombstone_resp.get("VersionId") if isinstance(tombstone_resp, dict) else None
-                await self.audit_store.log(
+            if command_id:
+                await self.observability.audit_log(
                     partition_key=f"db:{db_name}",
                     actor="instance_worker",
                     action="INSTANCE_S3_TOMBSTONE_WRITE",
-                    status="success",
+                    status="failure",
                     resource_type="s3_object",
                     resource_id=f"s3://{self.instance_bucket}/{s3_path}",
                     event_id=str(command_id),
@@ -2304,13 +1973,50 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
                         "instance_id": instance_id,
                         "bucket": self.instance_bucket,
                         "key": s3_path,
-                        "etag": etag,
-                        "version_id": version_id,
                         "ontology": ontology_version,
                     },
+                    error=str(e),
                 )
-            except Exception as e:
-                logger.debug(f"Audit record failed (non-fatal): {e}")
+
+        if command_id and s3_written:
+            etag = tombstone_resp.get("ETag") if isinstance(tombstone_resp, dict) else None
+            version_id = tombstone_resp.get("VersionId") if isinstance(tombstone_resp, dict) else None
+            await self.observability.record_link(
+                from_node_id=LineageStore.node_event(str(command_id)),
+                to_node_id=LineageStore.node_artifact("s3", self.instance_bucket, s3_path),
+                edge_type="event_wrote_s3_object",
+                occurred_at=datetime.now(timezone.utc),
+                db_name=db_name,
+                to_label=f"s3://{self.instance_bucket}/{s3_path}",
+                edge_metadata={
+                    "bucket": self.instance_bucket,
+                    "key": s3_path,
+                    "purpose": "instance_delete_tombstone",
+                    "db_name": db_name,
+                    "etag": etag,
+                    "version_id": version_id,
+                    "ontology": ontology_version,
+                },
+            )
+            await self.observability.audit_log(
+                partition_key=f"db:{db_name}",
+                actor="instance_worker",
+                action="INSTANCE_S3_TOMBSTONE_WRITE",
+                status="success",
+                resource_type="s3_object",
+                resource_id=f"s3://{self.instance_bucket}/{s3_path}",
+                event_id=str(command_id),
+                command_id=str(command_id),
+                metadata={
+                    "class_id": class_id,
+                    "instance_id": instance_id,
+                    "bucket": self.instance_bucket,
+                    "key": s3_path,
+                    "etag": etag,
+                    "version_id": version_id,
+                    "ontology": ontology_version,
+                },
+            )
 
         aggregate_id = expected_aggregate_id
         domain_event_id = (

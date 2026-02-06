@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Optional
 
 from shared.config.settings import get_settings
 from shared.services.core.audit_log_store import AuditLogStore, create_audit_log_store
@@ -27,6 +27,36 @@ class WorkerStores:
     processed: ProcessedEventRegistry
     lineage_store: Optional[LineageStore]
     audit_store: Optional[AuditLogStore]
+
+
+@dataclass(slots=True)
+class WorkerObservability:
+    """
+    Facade over optional provenance stores used by many workers.
+
+    These stores are "fail-open" by design: observability failures should not
+    block the primary side-effect (Terminus/ES/S3 writes).
+    """
+
+    lineage_store: Optional[LineageStore]
+    audit_store: Optional[AuditLogStore]
+    logger: logging.Logger
+
+    async def record_link(self, **kwargs: Any) -> None:
+        if not self.lineage_store:
+            return
+        try:
+            await self.lineage_store.record_link(**kwargs)
+        except Exception as exc:
+            self.logger.debug("Lineage record failed (non-fatal): %s", exc)
+
+    async def audit_log(self, **kwargs: Any) -> None:
+        if not self.audit_store:
+            return
+        try:
+            await self.audit_store.log(**kwargs)
+        except Exception as exc:
+            self.logger.debug("Audit record failed (non-fatal): %s", exc)
 
 
 async def initialize_worker_stores(

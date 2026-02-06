@@ -214,22 +214,6 @@ class ActionWorker(StrictHeartbeatKafkaWorker[_ActionCommandPayload, None]):
         )
         self.terminus = AsyncTerminusService(connection_info)
 
-    def _on_partitions_revoked(self, partitions: list) -> None:
-        """Handle partition revocation during rebalance."""
-        self._rebalance_in_progress = True
-        logger.info(
-            "Action worker partitions revoked: %s",
-            [(p.topic, p.partition) for p in partitions],
-        )
-
-    def _on_partitions_assigned(self, partitions: list) -> None:
-        """Handle partition assignment during rebalance."""
-        self._rebalance_in_progress = False
-        logger.info(
-            "Action worker partitions assigned: %s",
-            [(p.topic, p.partition) for p in partitions],
-        )
-
     async def shutdown(self) -> None:
         self.running = False
         await self._close_consumer_runtime()
