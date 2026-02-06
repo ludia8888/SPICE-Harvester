@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 from bff.dependencies import OMSClientDep
 from bff.routers.registry_deps import get_agent_policy_registry, get_dataset_registry
+from bff.services.pipeline_plan_tenant_service import resolve_verified_tenant_user
 from bff.services.oms_client import OMSClient
 from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.models.responses import ApiResponse
@@ -17,14 +18,6 @@ from shared.services.registries.agent_policy_registry import AgentPolicyRegistry
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/context-tools", tags=["Context Tools"])
-
-
-def _resolve_verified_principal(request: Request) -> str:
-    user = getattr(request.state, "user", None)
-    if user is None or not getattr(user, "verified", False):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User JWT required")
-    tenant_id = getattr(user, "tenant_id", None) or getattr(user, "org_id", None) or "default"
-    return str(tenant_id)
 
 
 def _policy_set(value: Any) -> set[str]:
@@ -76,7 +69,7 @@ async def describe_datasets(
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
     policy_registry: AgentPolicyRegistry = Depends(get_agent_policy_registry),
 ) -> ApiResponse:
-    tenant_id = _resolve_verified_principal(request)
+    tenant_id, _user_id = resolve_verified_tenant_user(request)
     policy = await policy_registry.get_tenant_policy(tenant_id=tenant_id)
     data_policies = getattr(policy, "data_policies", None) if policy is not None else None
     data_policies = data_policies if isinstance(data_policies, dict) else {}
@@ -135,7 +128,7 @@ async def snapshot_ontology(
     oms_client: OMSClient = OMSClientDep,
     policy_registry: AgentPolicyRegistry = Depends(get_agent_policy_registry),
 ) -> ApiResponse:
-    tenant_id = _resolve_verified_principal(request)
+    tenant_id, _user_id = resolve_verified_tenant_user(request)
     policy = await policy_registry.get_tenant_policy(tenant_id=tenant_id)
     data_policies = getattr(policy, "data_policies", None) if policy is not None else None
     data_policies = data_policies if isinstance(data_policies, dict) else {}

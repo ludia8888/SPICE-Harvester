@@ -323,23 +323,7 @@ async def get_branch_info(
         db_name = validate_db_name(db_name)
         branch_name = validate_branch_name(branch_name)
 
-        # 브랜치 존재 확인
-        branches = await terminus.list_branches(db_name)
-        if branch_name not in branches:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"브랜치 '{branch_name}'을(를) 찾을 수 없습니다",
-            )
-
-        # 현재 브랜치 확인
-        current_branch = await terminus.get_current_branch(db_name)
-
-        # 브랜치 정보 구성
-        info = {
-            "name": branch_name,
-            "current": branch_name == current_branch,
-            "protected": branch_name in ["main", "master", "production"],
-        }
+        info = await terminus.get_branch_info(db_name, branch_name)
 
         # 추가 정보 조회 가능 (커밋 히스토리, 통계 등)
 
@@ -358,6 +342,11 @@ async def get_branch_info(
         raise
     except Exception as e:
         logger.error(f"Failed to get branch info: {e}")
+        if "branch not found" in str(e).lower():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"브랜치 '{branch_name}'을(를) 찾을 수 없습니다",
+            ) from e
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"브랜치 정보 조회 실패: {str(e)}",

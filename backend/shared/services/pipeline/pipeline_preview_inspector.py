@@ -7,10 +7,16 @@ and propose safe cleansing actions.
 
 from __future__ import annotations
 
-from datetime import datetime
 import re
 from typing import Any, Dict, Iterable, List, Optional
 
+from shared.services.pipeline.pipeline_math_utils import safe_ratio
+from shared.services.pipeline.pipeline_value_predicates import (
+    is_bool_like,
+    is_datetime_like,
+    is_decimal_like,
+    is_int_like,
+)
 
 _CAST_THRESHOLD = 0.9
 _WHITESPACE_THRESHOLD = 0.05
@@ -55,58 +61,20 @@ def _iter_values(rows: Iterable[Dict[str, Any]], column: str) -> List[Any]:
     return values
 
 
-def _ratio(count: int, total: int) -> float:
-    if total <= 0:
-        return 0.0
-    return round(count / float(total), 4)
-
-
 def _is_bool(value: Any) -> bool:
-    if isinstance(value, bool):
-        return True
-    if isinstance(value, str):
-        return value.strip().lower() in {"true", "false"}
-    return False
+    return is_bool_like(value)
 
 
 def _is_int(value: Any) -> bool:
-    if isinstance(value, bool):
-        return False
-    if isinstance(value, int):
-        return True
-    if isinstance(value, str):
-        try:
-            int(value.strip())
-            return True
-        except Exception:
-            return False
-    return False
+    return is_int_like(value)
 
 
 def _is_decimal(value: Any) -> bool:
-    if isinstance(value, bool):
-        return False
-    if isinstance(value, float):
-        return True
-    if isinstance(value, str):
-        try:
-            float(value.strip())
-            return True
-        except Exception:
-            return False
-    return False
+    return is_decimal_like(value, include_int=False)
 
 
 def _is_datetime(value: Any) -> bool:
-    if isinstance(value, datetime):
-        return True
-    if isinstance(value, str):
-        try:
-            datetime.fromisoformat(value.replace("Z", "+00:00"))
-            return True
-        except Exception:
-            return False
-    return False
+    return is_datetime_like(value, iso_only=True)
 
 
 def _looks_like_id(name: str) -> bool:
@@ -208,10 +176,10 @@ def _parseability(values: List[Any]) -> Dict[str, float]:
             "xsd:dateTime": 0.0,
         }
     return {
-        "xsd:boolean": _ratio(sum(1 for value in values if _is_bool(value)), total),
-        "xsd:integer": _ratio(sum(1 for value in values if _is_int(value)), total),
-        "xsd:decimal": _ratio(sum(1 for value in values if _is_decimal(value)), total),
-        "xsd:dateTime": _ratio(sum(1 for value in values if _is_datetime(value)), total),
+        "xsd:boolean": safe_ratio(sum(1 for value in values if _is_bool(value)), total),
+        "xsd:integer": safe_ratio(sum(1 for value in values if _is_int(value)), total),
+        "xsd:decimal": safe_ratio(sum(1 for value in values if _is_decimal(value)), total),
+        "xsd:dateTime": safe_ratio(sum(1 for value in values if _is_datetime(value)), total),
     }
 
 
@@ -277,11 +245,11 @@ def inspect_preview(
         if isinstance(cast_stats.get(col_name), dict):
             cast_failure = cast_stats[col_name].get("failure_rate")
 
-        distinct_ratio = _ratio(distinct_count, non_null) if non_null else 0.0
+        distinct_ratio = safe_ratio(distinct_count, non_null) if non_null else 0.0
         duplicate_ratio = round(max(0.0, 1.0 - distinct_ratio), 4) if non_null else 0.0
-        null_ratio = _ratio(null_count, sample_row_count)
-        empty_ratio = _ratio(empty_count, sample_row_count)
-        whitespace_ratio = _ratio(whitespace_count, sample_row_count)
+        null_ratio = safe_ratio(null_count, sample_row_count)
+        empty_ratio = safe_ratio(empty_count, sample_row_count)
+        whitespace_ratio = safe_ratio(whitespace_count, sample_row_count)
         case_variation = _case_variation_ratio(values) if inferred_type == "xsd:string" else 0.0
 
         report_columns[col_name] = {
@@ -383,7 +351,7 @@ def inspect_preview(
             domain = _domain_hint(col_name)
             if domain == "phone":
                 noisy = sum(1 for value in values if re.search(r"[^0-9+]", str(value)))
-                if _ratio(noisy, len(values)) >= _REGEX_CLEANSE_THRESHOLD:
+                if safe_ratio(noisy, len(values)) >= _REGEX_CLEANSE_THRESHOLD:
                     suggestions.append(
                         {
                             "column": col_name,
@@ -395,7 +363,7 @@ def inspect_preview(
                     )
             elif domain == "postal":
                 noisy = sum(1 for value in values if re.search(r"[\s-]", str(value)))
-                if _ratio(noisy, len(values)) >= _REGEX_CLEANSE_THRESHOLD:
+                if safe_ratio(noisy, len(values)) >= _REGEX_CLEANSE_THRESHOLD:
                     suggestions.append(
                         {
                             "column": col_name,
@@ -407,7 +375,7 @@ def inspect_preview(
                     )
             elif domain == "email":
                 noisy = sum(1 for value in values if re.search(r"\s", str(value)))
-                if _ratio(noisy, len(values)) >= _REGEX_CLEANSE_THRESHOLD:
+                if safe_ratio(noisy, len(values)) >= _REGEX_CLEANSE_THRESHOLD:
                     suggestions.append(
                         {
                             "column": col_name,
@@ -429,7 +397,7 @@ def inspect_preview(
                 column_names.append(name)
         if column_names:
             unique_rows = len({_row_key(row, column_names) for row in rows if isinstance(row, dict)})
-            duplicate_ratio = _ratio(len(rows) - unique_rows, len(rows))
+            duplicate_ratio = safe_ratio(len(rows) - unique_rows, len(rows))
             if duplicate_ratio >= _DUPLICATE_ROW_THRESHOLD:
                 # Enterprise Enhancement: Detect event/log tables
                 is_event_table = _is_event_or_log_table(table_name, column_names)

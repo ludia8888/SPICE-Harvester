@@ -10,6 +10,7 @@ from enum import Enum
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from shared.models.ontology import OntologyResponse, Relationship
+from oms.utils.cardinality_utils import inverse_cardinality
 
 logger = logging.getLogger(__name__)
 
@@ -126,7 +127,7 @@ class CircularReferenceDetector:
                         source=target_class,
                         target=source_class,
                         predicate=rel.inverse_predicate,
-                        cardinality=self._get_inverse_cardinality(edge.cardinality),
+                        cardinality=inverse_cardinality(edge.cardinality),
                         is_bidirectional=True,
                     )
 
@@ -538,19 +539,6 @@ class CircularReferenceDetector:
 
         # 모든 predicate가 허용된 패턴이면 끊을 수 없음
         return not all(pred in self.allowed_self_references for pred in predicates)
-
-    def _get_inverse_cardinality(self, cardinality: str) -> str:
-        """카디널리티의 역관계 반환"""
-
-        inverse_map = {
-            "1:1": "1:1",
-            "1:n": "n:1",
-            "n:1": "1:n",
-            "n:m": "n:m",
-            "one": "many",
-            "many": "one",
-        }
-        return inverse_map.get(cardinality, cardinality)
 
     def _deduplicate_cycles(self, cycles: List[CycleInfo]) -> List[CycleInfo]:
         """중복 순환 제거"""

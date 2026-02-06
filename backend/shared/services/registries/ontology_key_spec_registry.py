@@ -20,6 +20,7 @@ from typing import Any, Dict, List, Optional
 import asyncpg
 
 from shared.config.settings import get_settings
+from shared.utils.json_utils import json_default
 
 logger = logging.getLogger(__name__)
 
@@ -45,13 +46,6 @@ def _normalize_str_list(values: Any) -> List[str]:
         seen.add(text)
         out.append(text)
     return out
-
-
-def _json_default(value: Any) -> Any:
-    if isinstance(value, datetime):
-        return value.isoformat()
-    return str(value)
-
 
 @dataclass(frozen=True)
 class OntologyKeySpec:
@@ -150,8 +144,8 @@ class OntologyKeySpecRegistry:
                 str(db_name),
                 str(branch),
                 str(class_id),
-                json.dumps(pk, default=_json_default),
-                json.dumps(title, default=_json_default),
+                json.dumps(pk, default=json_default),
+                json.dumps(title, default=json_default),
             )
         return self._row_to_model(row)
 

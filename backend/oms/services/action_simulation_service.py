@@ -14,6 +14,7 @@ from shared.security.database_access import DOMAIN_MODEL_ROLES, get_database_acc
 from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.services.storage.lakefs_storage_service import LakeFSStorageService
 from shared.services.storage.storage_service import StorageService
+from shared.services.core.object_type_meta_resolver import build_object_type_meta_resolver
 from shared.services.core.writeback_merge_service import WritebackMergeService
 from shared.utils.access_policy import apply_access_policy
 from shared.utils.action_input_schema import (
@@ -28,7 +29,7 @@ from shared.utils.action_template_engine import (
     compile_template_v1_change_shape,
 )
 from shared.utils.principal_policy import build_principal_tags, policy_allows
-from shared.utils.resource_rid import format_resource_rid, parse_metadata_rev, strip_rid_revision
+from shared.utils.resource_rid import format_resource_rid, strip_rid_revision
 from shared.utils.safe_bool_expression import BoolExpressionError, safe_eval_bool_expression
 from shared.utils.submission_criteria_diagnostics import infer_submission_criteria_failure_reason
 from shared.utils.writeback_conflicts import (
@@ -766,29 +767,11 @@ async def preflight_action_writeback(
         )
 
     action_conflict_policy = parse_conflict_policy(action_spec.get("conflict_policy"))
-    object_type_meta_cache: Dict[str, Dict[str, Any]] = {}
-
-    async def _get_object_type_meta(class_id: str) -> Dict[str, Any]:
-        cached = object_type_meta_cache.get(class_id)
-        if isinstance(cached, dict):
-            return cached
-        meta: Dict[str, Any] = {"conflict_policy": None, "rev": 1}
-        try:
-            object_resource = await resources.get_resource(
-                db_name,
-                branch=ontology_commit_id,
-                resource_type="object_type",
-                resource_id=class_id,
-            )
-            obj_spec = object_resource.get("spec") if isinstance(object_resource, dict) else None
-            if isinstance(obj_spec, dict):
-                meta["conflict_policy"] = parse_conflict_policy(obj_spec.get("conflict_policy"))
-            obj_meta = object_resource.get("metadata") if isinstance(object_resource, dict) else None
-            meta["rev"] = parse_metadata_rev(obj_meta)
-        except Exception:
-            pass
-        object_type_meta_cache[class_id] = meta
-        return meta
+    get_object_type_meta = build_object_type_meta_resolver(
+        resources=resources,
+        db_name=db_name,
+        branch=ontology_commit_id,
+    )
 
     target_docs: Dict[Tuple[str, str], Dict[str, Any]] = {}
     access_docs: Dict[Tuple[str, str], Dict[str, Any]] = {}
@@ -878,7 +861,7 @@ async def preflight_action_writeback(
             )
 
         lifecycle_id = derive_lifecycle_id(base_state) or DEFAULT_LIFECYCLE_ID
-        obj_meta = await _get_object_type_meta(class_id)
+        obj_meta = await get_object_type_meta(class_id)
         object_type_rid = format_resource_rid(
             resource_type="object_type",
             resource_id=class_id,

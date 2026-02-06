@@ -14,47 +14,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-import json
 from typing import Any, Dict, List, Optional
 
 import asyncpg
 
 from shared.services.registries.postgres_schema_registry import PostgresSchemaRegistry
-from shared.utils.json_utils import normalize_json_payload
-
-
-def _coerce_json_list(value: Any) -> List[Any]:
-    if value is None:
-        return []
-    if isinstance(value, list):
-        return list(value)
-    if isinstance(value, str):
-        raw = value.strip()
-        if not raw:
-            return []
-        try:
-            parsed = json.loads(raw)
-        except Exception:
-            return []
-        return list(parsed) if isinstance(parsed, list) else []
-    return []
-
-
-def _coerce_json_dict(value: Any) -> Dict[str, Any]:
-    if value is None:
-        return {}
-    if isinstance(value, dict):
-        return dict(value)
-    if isinstance(value, str):
-        raw = value.strip()
-        if not raw:
-            return {}
-        try:
-            parsed = json.loads(raw)
-        except Exception:
-            return {}
-        return dict(parsed) if isinstance(parsed, dict) else {"value": parsed}
-    return {}
+from shared.utils.json_utils import coerce_json_dict, coerce_json_list, normalize_json_payload
 
 
 @dataclass(frozen=True)
@@ -105,11 +70,11 @@ class AgentFunctionRegistry(PostgresSchemaRegistry):
             version=str(row["version"]),
             status=str(row["status"]),
             handler=str(row["handler"]),
-            tags=[str(t).strip() for t in _coerce_json_list(row.get("tags")) if str(t).strip()],
-            roles=[str(r).strip() for r in _coerce_json_list(row.get("roles")) if str(r).strip()],
-            input_schema=_coerce_json_dict(row.get("input_schema")),
-            output_schema=_coerce_json_dict(row.get("output_schema")),
-            metadata=_coerce_json_dict(row.get("metadata")),
+            tags=[str(t).strip() for t in coerce_json_list(row.get("tags")) if str(t).strip()],
+            roles=[str(r).strip() for r in coerce_json_list(row.get("roles")) if str(r).strip()],
+            input_schema=coerce_json_dict(row.get("input_schema")),
+            output_schema=coerce_json_dict(row.get("output_schema")),
+            metadata=coerce_json_dict(row.get("metadata")),
             created_at=row["created_at"],
             updated_at=row["updated_at"],
         )

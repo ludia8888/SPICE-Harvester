@@ -12,7 +12,10 @@ from bff.services.link_types_mapping_service import extract_ontology_properties,
 from shared.services.pipeline.pipeline_schema_utils import normalize_schema_type
 from shared.utils.import_type_normalization import resolve_import_type
 from shared.utils.payload_utils import unwrap_data_payload
-from shared.utils.schema_columns import extract_schema_columns as _extract_schema_columns_raw
+from shared.utils.schema_columns import (
+    extract_schema_column_names as _extract_schema_column_names_raw,
+    extract_schema_type_map as _extract_schema_type_map_raw,
+)
 from shared.utils.schema_hash import compute_schema_hash_from_sample
 from shared.utils.schema_type_compatibility import is_type_compatible as _is_type_compatible
 from shared.utils.objectify_outputs import match_output_name as _match_output_name_raw
@@ -37,23 +40,11 @@ def _compute_schema_hash_from_sample(sample_json: Any) -> Optional[str]:
 
 
 def _extract_schema_columns(schema: Any) -> List[str]:
-    columns = _extract_schema_columns_raw(schema)
-    names: List[str] = []
-    for col in columns:
-        name = str(col.get("name") or "").strip()
-        if name:
-            names.append(name)
-    return names
+    return _extract_schema_column_names_raw(schema)
 
 
 def _extract_schema_types(schema: Any) -> Dict[str, str]:
-    output: Dict[str, str] = {}
-    for col in _extract_schema_columns_raw(schema):
-        name = str(col.get("name") or "").strip()
-        raw_type = col.get("type")
-        if name:
-            output[name] = normalize_schema_type(raw_type)
-    return output
+    return _extract_schema_type_map_raw(schema, normalizer=normalize_schema_type)
 
 
 def _normalize_mapping_pair(item: Any) -> Optional[tuple[str, str]]:

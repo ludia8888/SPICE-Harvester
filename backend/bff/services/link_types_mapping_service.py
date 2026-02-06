@@ -28,9 +28,13 @@ from shared.services.pipeline.pipeline_schema_utils import normalize_schema_type
 from shared.utils.import_type_normalization import normalize_import_target_type
 from shared.utils.key_spec import normalize_key_spec
 from shared.utils.payload_utils import unwrap_data_payload
-from shared.utils.schema_columns import extract_schema_columns as _extract_schema_columns_raw
-from shared.utils.schema_hash import compute_schema_hash as _compute_schema_hash_raw
+from shared.utils.schema_columns import (
+    extract_schema_columns as _extract_schema_columns_raw,
+    extract_schema_type_map as _extract_schema_type_map_raw,
+)
+from shared.utils.schema_hash import compute_schema_hash_from_payload
 from shared.utils.schema_type_compatibility import is_type_compatible
+from shared.utils.string_list_utils import normalize_string_list
 
 
 def extract_schema_columns(schema: Any) -> List[Dict[str, Any]]:
@@ -38,21 +42,11 @@ def extract_schema_columns(schema: Any) -> List[Dict[str, Any]]:
 
 
 def extract_schema_types(schema: Any) -> Dict[str, str]:
-    columns = extract_schema_columns(schema)
-    output: Dict[str, str] = {}
-    for col in columns:
-        name = str(col.get("name") or "").strip()
-        raw_type = col.get("type")
-        if name:
-            output[name] = normalize_schema_type(raw_type)
-    return output
+    return _extract_schema_type_map_raw(schema, normalizer=normalize_schema_type)
 
 
 def compute_schema_hash(schema: Any) -> Optional[str]:
-    columns = extract_schema_columns(schema)
-    if not columns:
-        return None
-    return _compute_schema_hash_raw(columns)
+    return compute_schema_hash_from_payload(schema)
 
 
 def build_join_schema(
@@ -110,13 +104,7 @@ def normalize_policy(value: Optional[str], *, default: str) -> str:
 
 
 def normalize_pk_fields(value: Any) -> List[str]:
-    if value is None:
-        return []
-    if isinstance(value, list):
-        return [str(v).strip() for v in value if str(v).strip()]
-    if isinstance(value, str):
-        return [v.strip() for v in value.split(",") if v.strip()]
-    return []
+    return normalize_string_list(value)
 
 
 async def resolve_object_type_contract(

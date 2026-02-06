@@ -7,6 +7,7 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from shared.config.settings import get_settings
+from shared.utils.collection_utils import ensure_list
 
 from .base import BaseTerminusService
 from oms.exceptions import DatabaseError
@@ -36,14 +37,6 @@ class QueryService(BaseTerminusService):
         if isinstance(value, dict):
             return value.get("@value", value.get("value", value))
         return value
-
-    @staticmethod
-    def _as_list(value: Any) -> List[Any]:
-        if value is None:
-            return []
-        if isinstance(value, list):
-            return value
-        return [value]
 
     @staticmethod
     def _try_float(value: Any) -> Optional[float]:
@@ -82,8 +75,8 @@ class QueryService(BaseTerminusService):
             expected = self._coerce_scalar(raw_expected)
 
             # Normalize lists
-            actual_list = self._as_list(actual) if isinstance(actual, list) else None
-            expected_list = self._as_list(expected) if isinstance(expected, list) else None
+            actual_list = ensure_list(actual) if isinstance(actual, list) else None
+            expected_list = ensure_list(expected) if isinstance(expected, list) else None
 
             if op == "eq":
                 if actual_list is not None:
@@ -129,7 +122,7 @@ class QueryService(BaseTerminusService):
                     return False
             elif op == "in":
                 if expected_list is None:
-                    expected_list = self._as_list(expected)
+                    expected_list = ensure_list(expected)
                 if actual_list is not None:
                     if not any(v in expected_list for v in actual_list):
                         return False
@@ -138,7 +131,7 @@ class QueryService(BaseTerminusService):
                         return False
             elif op == "not_in":
                 if expected_list is None:
-                    expected_list = self._as_list(expected)
+                    expected_list = ensure_list(expected)
                 if actual_list is not None:
                     if any(v in expected_list for v in actual_list):
                         return False

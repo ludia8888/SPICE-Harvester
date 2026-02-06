@@ -25,6 +25,7 @@ from oms.exceptions import DatabaseError
 from shared.utils.commit_utils import coerce_commit_id
 from shared.utils.terminus_branch import encode_branch_name
 from shared.utils.diff_utils import normalize_diff_response
+from shared.utils.json_utils import maybe_decode_json
 
 logger = logging.getLogger(__name__)
 
@@ -35,16 +36,6 @@ class PullRequestStatus:
     MERGED = "merged"
     CLOSED = "closed"
     REJECTED = "rejected"
-
-
-def _maybe_decode_json(value: Any) -> Any:
-    if isinstance(value, str):
-        try:
-            return json.loads(value)
-        except Exception:
-            return value
-    return value
-
 
 class PullRequestService(BaseTerminusService):
     """
@@ -376,7 +367,7 @@ class PullRequestService(BaseTerminusService):
                 
                 if not pr_data:
                     return None
-                diff_cache = _maybe_decode_json(pr_data['diff_cache'])
+                diff_cache = maybe_decode_json(pr_data['diff_cache'])
                 if diff_cache is not None:
                     diff_cache = normalize_diff_response(
                         pr_data['source_branch'],
@@ -395,7 +386,7 @@ class PullRequestService(BaseTerminusService):
                     "status": pr_data['status'],
                     "version": pr_data['version'],
                     "diff_cache": diff_cache,
-                    "conflicts": _maybe_decode_json(pr_data['conflicts']),
+                    "conflicts": maybe_decode_json(pr_data['conflicts']),
                     "merge_commit_id": pr_data['merge_commit_id'],
                     "source_commit_id": pr_data.get("source_commit_id"),
                     "created_at": pr_data['created_at'].isoformat() if pr_data['created_at'] else None,

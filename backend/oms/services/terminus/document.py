@@ -8,8 +8,7 @@ from typing import Any, Dict, List, Optional, Union
 from datetime import datetime, timezone
 import json
 
-from .base import BaseTerminusService
-from .database import DatabaseService
+from .db_backed import DatabaseBackedTerminusService
 from oms.exceptions import (
     DatabaseError,
     OntologyNotFoundError
@@ -18,24 +17,12 @@ from oms.exceptions import (
 logger = logging.getLogger(__name__)
 
 
-class DocumentService(BaseTerminusService):
+class DocumentService(DatabaseBackedTerminusService):
     """
     TerminusDB 문서(인스턴스) 관리 서비스
     
     문서 생성, 수정, 삭제 및 조회 기능을 제공합니다.
     """
-    
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        # DatabaseService 인스턴스 (데이터베이스 존재 확인용)
-        self.db_service = DatabaseService(*args, **kwargs)
-
-    async def disconnect(self) -> None:
-        # Close nested db_service first to avoid leaking its httpx client in short-lived contexts/tests.
-        try:
-            await self.db_service.disconnect()
-        finally:
-            await super().disconnect()
     
     async def create_document(
         self,

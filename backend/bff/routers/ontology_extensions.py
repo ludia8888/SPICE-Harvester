@@ -47,7 +47,10 @@ def _resource_routes(resource_type: str):
         db_name: str,
         payload: OntologyResourceRequest,
         branch: str = Query(..., description="Target branch"),
-        expected_head_commit: str = Query(..., description="Optimistic concurrency guard"),
+        expected_head_commit: Optional[str] = Query(
+            default=None,
+            description="Optimistic concurrency guard (defaults to branch head)",
+        ),
         oms_client: OMSClient = OMSClientDep,
     ):
         return await ontology_extensions_service.create_resource(
@@ -78,7 +81,10 @@ def _resource_routes(resource_type: str):
         resource_id: str,
         payload: OntologyResourceRequest,
         branch: str = Query(..., description="Target branch"),
-        expected_head_commit: str = Query(..., description="Optimistic concurrency guard"),
+        expected_head_commit: Optional[str] = Query(
+            default=None,
+            description="Optimistic concurrency guard (defaults to branch head)",
+        ),
         oms_client: OMSClient = OMSClientDep,
     ):
         return await ontology_extensions_service.update_resource(
@@ -95,7 +101,10 @@ def _resource_routes(resource_type: str):
         db_name: str,
         resource_id: str,
         branch: str = Query(..., description="Target branch"),
-        expected_head_commit: str = Query(..., description="Optimistic concurrency guard"),
+        expected_head_commit: Optional[str] = Query(
+            default=None,
+            description="Optimistic concurrency guard (defaults to branch head)",
+        ),
         oms_client: OMSClient = OMSClientDep,
     ):
         return await ontology_extensions_service.delete_resource(

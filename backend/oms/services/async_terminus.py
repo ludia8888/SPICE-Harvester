@@ -441,6 +441,10 @@ class AsyncTerminusService:
     # ==========================================
     # Version Control - Facade Methods
     # ==========================================
+
+    @staticmethod
+    def _is_protected_branch_name(branch_name: str) -> bool:
+        return str(branch_name) in {"main", "master", "production"}
     
     async def create_branch(self, db_name: str, branch_name: str, from_branch: str = "main") -> bool:
         """브랜치 생성"""
@@ -453,6 +457,17 @@ class AsyncTerminusService:
         if branches and isinstance(branches[0], dict):
             return [b.get("name") for b in branches if isinstance(b, dict) and b.get("name")]
         return [str(b) for b in branches] if isinstance(branches, list) else []
+
+    async def get_branch_info(self, db_name: str, branch_name: str) -> Dict[str, Any]:
+        branches = await self.list_branches(db_name)
+        if branch_name not in branches:
+            raise ValueError(f"branch not found: {branch_name}")
+        current_branch = await self.get_current_branch(db_name)
+        return {
+            "name": branch_name,
+            "current": branch_name == current_branch,
+            "protected": self._is_protected_branch_name(branch_name),
+        }
 
     async def get_current_branch(self, db_name: str) -> str:
         """현재 브랜치 (best-effort, 기본값: main)"""

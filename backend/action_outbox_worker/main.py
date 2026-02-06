@@ -29,6 +29,7 @@ from shared.observability.tracing import get_tracing_service
 from shared.services.registries.action_log_registry import ActionLogRecord, ActionLogRegistry, ActionLogStatus
 from shared.services.storage.event_store import event_store
 from shared.services.storage.lakefs_client import LakeFSClient, LakeFSConflictError, LakeFSError
+from shared.services.storage.lakefs_branch_utils import ensure_lakefs_branch
 from shared.services.storage.lakefs_storage_service import create_lakefs_storage_service, LakeFSStorageService
 from shared.services.registries.processed_event_registry import (
     ClaimDecision,
@@ -148,12 +149,7 @@ class ActionOutboxWorker:
         return str(action_env.event_id), int(seq)
 
     async def _ensure_branch(self, *, repository: str, branch: str) -> None:
-        if not self.lakefs_client:
-            raise RuntimeError("lakefs_client not initialized")
-        try:
-            await self.lakefs_client.create_branch(repository=repository, name=branch, source="main")
-        except LakeFSConflictError:
-            return
+        await ensure_lakefs_branch(lakefs_client=self.lakefs_client, repository=repository, branch=branch, source="main")
 
     async def _append_queue_entries(
         self,

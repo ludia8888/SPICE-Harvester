@@ -16,16 +16,19 @@ from elasticsearch.exceptions import ApiError as ElasticsearchException, Request
 from shared.config.app_config import AppConfig
 from shared.config.settings import get_settings
 from shared.models.event_envelope import EventEnvelope
-from shared.observability.context_propagation import (
-    attach_context_from_kafka,
-    kafka_headers_from_envelope_metadata,
-)
 from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
-from shared.services.kafka.consumer_ops import ExecutorKafkaConsumerOps
+from shared.services.kafka.dlq_publisher import (
+    EnvelopeDlqSpec,
+)
 from shared.services.kafka.processed_event_worker import EventEnvelopeKafkaWorker, HeartbeatOptions
 from shared.services.kafka.producer_factory import create_kafka_dlq_producer
-from shared.services.kafka.safe_consumer import SafeKafkaConsumer, create_safe_consumer
+from shared.services.kafka.producer_ops import ExecutorKafkaProducerOps, KafkaProducerOps, close_kafka_producer
+from shared.services.kafka.retry_classifier import (
+    SEARCH_PROJECTION_RETRY_PROFILE,
+    classify_retryable_with_profile,
+)
+from shared.services.kafka.safe_consumer import SafeKafkaConsumer
 from shared.services.storage.elasticsearch_service import create_elasticsearch_service_legacy
 from shared.services.registries.processed_event_registry import ProcessedEventRegistry
 from shared.services.registries.processed_event_registry_factory import create_processed_event_registry
@@ -52,9 +55,17 @@ class SearchProjectionWorker(EventEnvelopeKafkaWorker[None]):
         self.max_retries = int(cfg.max_retries)
         self.backoff_base = int(cfg.backoff_base_seconds)
         self.backoff_max = int(cfg.backoff_max_seconds)
+        self._dlq_spec = EnvelopeDlqSpec(
+            dlq_topic=self.dlq_topic,
+            service_name=self.service_name,
+            kind="search_projection_dlq",
+            failed_event_type="SEARCH_PROJECTION_FAILED",
+            span_name="search_projection.dlq_produce",
+        )
         self.consumer: Optional[SafeKafkaConsumer] = None
         self.consumer_ops = None
         self.dlq_producer: Optional[Producer] = None
+        self.dlq_producer_ops: Optional[KafkaProducerOps] = None
         self.processed: Optional[ProcessedEventRegistry] = None
         self.es = None
         self.tracing = get_tracing_service(self.service_name)
@@ -75,34 +86,33 @@ class SearchProjectionWorker(EventEnvelopeKafkaWorker[None]):
         except Exception as exc:
             logger.warning("Failed to ensure search index exists: %s", exc)
 
-        # Use SafeKafkaConsumer for strong consistency guarantees
-        self.consumer = create_safe_consumer(
+        self._initialize_safe_consumer_runtime(
             group_id=self.group_id,
             topics=[self.topic],
             service_name="search-projection-worker",
-            on_revoke=self._on_partitions_revoked,
-            on_assign=self._on_partitions_assigned,
-        )
-        self.consumer_ops = ExecutorKafkaConsumerOps(
-            self.consumer,
             thread_name_prefix="search-projection-worker-kafka",
         )
-        self._rebalance_in_progress = False
 
         service_name = settings.observability.service_name or self.service_name
         self.dlq_producer = create_kafka_dlq_producer(
             bootstrap_servers=settings.database.kafka_servers,
             client_id=service_name,
         )
+        self.dlq_producer_ops = ExecutorKafkaProducerOps(
+            self.dlq_producer,
+            thread_name_prefix="search-projection-worker-kafka-producer",
+        )
 
     async def close(self) -> None:
         await self._close_consumer_runtime()
-        if self.dlq_producer:
-            try:
-                self.dlq_producer.flush(5)
-            except Exception as exc:
-                logger.warning("DLQ producer flush failed during shutdown: %s", exc, exc_info=True)
-            self.dlq_producer = None
+        await close_kafka_producer(
+            producer_ops=self.dlq_producer_ops,
+            timeout_s=5.0,
+            warning_logger=logger,
+            warning_message="DLQ producer flush failed during shutdown: %s",
+        )
+        self.dlq_producer_ops = None
+        self.dlq_producer = None
         if self.processed:
             await self.processed.close()
             self.processed = None
@@ -153,43 +163,16 @@ class SearchProjectionWorker(EventEnvelopeKafkaWorker[None]):
         error: str,
         attempt_count: int,
     ) -> None:
-        if not self.dlq_producer:
-            logger.error("DLQ producer not configured; dropping search projection DLQ payload: %s", error)
-            return
-
-        dlq_env = payload.model_copy(deep=True)
-        if not isinstance(dlq_env.metadata, dict):
-            dlq_env.metadata = {}
-        dlq_env.metadata.update(
-            {
-                "kind": "search_projection_dlq",
-                "dlq_error": (error or "").strip()[:4000],
-                "dlq_attempt_count": int(attempt_count),
-                "dlq_topic": self.dlq_topic,
-            }
+        await self._send_envelope_failure_to_dlq(
+            msg=msg,
+            payload=payload,
+            error=error,
+            attempt_count=attempt_count,
+            producer_ops=self.dlq_producer_ops,
+            spec=self._dlq_spec,
+            key_fallback="search_projection",
+            missing_producer_message="DLQ producer not configured; dropping search projection DLQ payload: %s",
         )
-        dlq_env.event_type = "SEARCH_PROJECTION_FAILED"
-        key = str(dlq_env.aggregate_id or dlq_env.event_id or "search_projection").encode("utf-8")
-        value = dlq_env.model_dump_json().encode("utf-8")
-
-        dlq_metadata = dlq_env.metadata
-        headers = kafka_headers_from_envelope_metadata(dlq_metadata) if isinstance(dlq_metadata, dict) else []
-        with attach_context_from_kafka(
-            kafka_headers=headers,
-            fallback_metadata=dlq_metadata if isinstance(dlq_metadata, dict) else None,
-            service_name=self.service_name,
-        ):
-            with self.tracing.span(
-                "search_projection.dlq_produce",
-                attributes={
-                    "messaging.system": "kafka",
-                    "messaging.destination": self.dlq_topic,
-                    "messaging.destination_kind": "topic",
-                    "event.id": str(envelope.event_id) if envelope else None,
-                },
-            ):
-                self.dlq_producer.produce(self.dlq_topic, key=key, value=value, headers=headers or None)
-                self.dlq_producer.flush(10)
 
     async def _process_payload(self, payload: EventEnvelope) -> None:  # type: ignore[override]
         await self._index_event(payload)
@@ -211,15 +194,7 @@ class SearchProjectionWorker(EventEnvelopeKafkaWorker[None]):
             if status == 429 or (status is not None and status >= 500):
                 return True
             return False
-        msg = str(exc).lower()
-        non_retryable_markers = [
-            "mapper_parsing_exception",
-            "document_parsing_exception",
-            "illegal_argument_exception",
-            "validation",
-            "bad request",
-        ]
-        return not any(marker in msg for marker in non_retryable_markers)
+        return classify_retryable_with_profile(exc, SEARCH_PROJECTION_RETRY_PROFILE)
 
 
 async def main() -> None:

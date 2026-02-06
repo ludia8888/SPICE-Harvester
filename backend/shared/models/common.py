@@ -7,6 +7,8 @@ from enum import Enum
 from typing import Any, Dict, List, Optional, Union
 import logging
 
+from .query_operator_mixin import QueryOperatorApplicabilityMixin
+
 logger = logging.getLogger(__name__)
 
 
@@ -225,18 +227,13 @@ class Cardinality(Enum):
 
 
 @dataclass
-class QueryOperator:
+class QueryOperator(QueryOperatorApplicabilityMixin):
     """Query operator definition"""
 
     name: str
     symbol: str
     description: str
     applies_to: List[DataType]
-
-    def can_apply_to(self, data_type: DataType) -> bool:
-        """Check if operator can apply to data type"""
-        return data_type in self.applies_to
-
 
 # Common query operators
 QUERY_OPERATORS = {

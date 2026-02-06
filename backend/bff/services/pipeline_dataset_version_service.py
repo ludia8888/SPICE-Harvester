@@ -10,6 +10,10 @@ from uuid import uuid4
 from fastapi import HTTPException, Request, status
 
 import bff.routers.pipeline_datasets_ops as ops
+from bff.services.dataset_ingest_commit_service import (
+    ensure_lakefs_commit_artifact,
+    persist_ingest_commit_state,
+)
 from bff.services.dataset_ingest_idempotency import resolve_existing_version_or_raise
 from bff.services.dataset_ingest_outbox_builder import DatasetIngestOutboxBuilder
 from bff.services.dataset_ingest_outbox_flusher import maybe_flush_dataset_ingest_outbox_inline
@@ -188,12 +192,6 @@ async def create_dataset_version(
             lakefs_commit_id = lakefs_commit_id or ref
         else:
             repo = ops._resolve_lakefs_raw_repository()
-            await ops._ensure_lakefs_branch_exists(
-                lakefs_client=lakefs_client,
-                repository=repo,
-                branch=dataset_branch,
-                source_branch="main",
-            )
             prefix = ops._dataset_artifact_prefix(
                 db_name=dataset.db_name,
                 dataset_id=dataset.dataset_id,
@@ -215,13 +213,16 @@ async def create_dataset_version(
                     }
                 ),
             )
-            lakefs_commit_id = await ops._commit_lakefs_with_predicate_fallback(
+            commit_state = await ensure_lakefs_commit_artifact(
+                ingest_request=ingest_request,
+                initial_commit_id=lakefs_commit_id,
+                initial_artifact_key=artifact_key,
                 lakefs_client=lakefs_client,
                 lakefs_storage_service=lakefs_storage_service,
                 repository=repo,
                 branch=dataset_branch,
-                message=f"Manual dataset version {dataset.db_name}/{dataset.name}",
-                metadata={
+                commit_message=f"Manual dataset version {dataset.db_name}/{dataset.name}",
+                commit_metadata={
                     "dataset_id": dataset.dataset_id,
                     "db_name": dataset.db_name,
                     "dataset_name": dataset.name,
@@ -232,21 +233,19 @@ async def create_dataset_version(
                 object_key=object_key,
                 expected_checksum=checksum,
             )
-            artifact_key = build_s3_uri(repo, f"{lakefs_commit_id}/{object_key}")
+            lakefs_commit_id = commit_state.commit_id
+            artifact_key = commit_state.artifact_key
 
         if not lakefs_commit_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="lakefs_commit_id is required")
-        ingest_request = await dataset_registry.mark_ingest_committed(
-            ingest_request_id=ingest_request.ingest_request_id,
-            lakefs_commit_id=lakefs_commit_id,
-            artifact_key=artifact_key,
+        ingest_request = await persist_ingest_commit_state(
+            dataset_registry=dataset_registry,
+            ingest_request=ingest_request,
+            ingest_transaction=ingest_transaction,
+            commit_id=lakefs_commit_id,
+            artifact_key=artifact_key or "",
+            force=True,
         )
-        if ingest_transaction:
-            await dataset_registry.mark_ingest_transaction_committed(
-                ingest_request_id=ingest_request.ingest_request_id,
-                lakefs_commit_id=lakefs_commit_id,
-                artifact_key=artifact_key,
-            )
         version_event_id = ingest_request.ingest_request_id
         transaction_id = ingest_transaction.transaction_id if ingest_transaction else None
         outbox_builder = DatasetIngestOutboxBuilder(

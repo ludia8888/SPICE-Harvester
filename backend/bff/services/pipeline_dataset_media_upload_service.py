@@ -11,6 +11,10 @@ from uuid import uuid4
 from fastapi import HTTPException, status
 
 import bff.routers.pipeline_datasets_ops as ops
+from bff.services.dataset_ingest_commit_service import (
+    ensure_lakefs_commit_artifact,
+    persist_ingest_commit_state,
+)
 from bff.services.dataset_ingest_idempotency import resolve_existing_version_or_raise
 from bff.services.dataset_ingest_outbox_builder import DatasetIngestOutboxBuilder
 from bff.services.dataset_ingest_outbox_flusher import maybe_flush_dataset_ingest_outbox_inline
@@ -171,12 +175,6 @@ async def upload_media_dataset(
             ).to_dict()
 
         repo = ops._resolve_lakefs_raw_repository()
-        await ops._ensure_lakefs_branch_exists(
-            lakefs_client=lakefs_client,
-            repository=repo,
-            branch=dataset_branch,
-            source_branch="main",
-        )
         commit_id = ingest_request.lakefs_commit_id
         artifact_key = ingest_request.artifact_key
         staging_prefix = ops._ingest_staging_prefix(prefix, ingest_request.ingest_request_id)
@@ -208,13 +206,16 @@ async def upload_media_dataset(
                     ),
                 )
 
-            commit_id = await ops._commit_lakefs_with_predicate_fallback(
+            commit_state = await ensure_lakefs_commit_artifact(
+                ingest_request=ingest_request,
+                initial_commit_id=commit_id,
+                initial_artifact_key=artifact_key,
                 lakefs_client=lakefs_client,
                 lakefs_storage_service=lakefs_storage_service,
                 repository=repo,
                 branch=dataset_branch,
-                message=f"Media dataset upload {db_name}/{resolved_name}",
-                metadata={
+                commit_message=f"Media dataset upload {db_name}/{resolved_name}",
+                commit_metadata={
                     "dataset_id": dataset.dataset_id,
                     "db_name": db_name,
                     "dataset_name": resolved_name,
@@ -225,20 +226,17 @@ async def upload_media_dataset(
                 },
                 object_key=fallback_object_key or staging_prefix,
                 expected_checksum=fallback_checksum,
+                artifact_key_builder=lambda resolved_commit: build_s3_uri(repo, f"{resolved_commit}/{staging_prefix}"),
             )
-
-            artifact_key = build_s3_uri(repo, f"{commit_id}/{staging_prefix}")
-            ingest_request = await dataset_registry.mark_ingest_committed(
-                ingest_request_id=ingest_request.ingest_request_id,
-                lakefs_commit_id=commit_id,
+            commit_id = commit_state.commit_id
+            artifact_key = commit_state.artifact_key
+            ingest_request = await persist_ingest_commit_state(
+                dataset_registry=dataset_registry,
+                ingest_request=ingest_request,
+                ingest_transaction=ingest_transaction,
+                commit_id=commit_id,
                 artifact_key=artifact_key,
             )
-            if ingest_transaction:
-                await dataset_registry.mark_ingest_transaction_committed(
-                    ingest_request_id=ingest_request.ingest_request_id,
-                    lakefs_commit_id=commit_id,
-                    artifact_key=artifact_key,
-                )
         sample_rows: list[dict[str, Any]] = []
         for index, item in enumerate(uploaded):
             filename = str(item.get("filename") or f"upload-{index}")

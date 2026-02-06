@@ -9,6 +9,12 @@ def split_expectation_columns(column: str) -> List[str]:
     return [part.strip() for part in str(column or "").split(",") if part.strip()]
 
 
+def normalize_expectation_columns(value: Any) -> List[str]:
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    return split_expectation_columns(str(value or ""))
+
+
 def resolve_execution_semantics(
     definition: Dict[str, Any],
     *,

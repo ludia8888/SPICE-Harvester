@@ -7,11 +7,16 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
+from shared.models.ontology_validation_mixin import (
+    CardinalityValidationMixin,
+    PropertyValueValidationMixin,
+)
+
 # Using simple strings for labels and descriptions
 
 
 @dataclass
-class Property:
+class Property(PropertyValueValidationMixin):
     """속성 엔티티"""
 
     name: str
@@ -22,39 +27,8 @@ class Property:
     description: Optional[str] = None
     constraints: Dict[str, Any] = field(default_factory=dict)
 
-    def validate_value(self, value: Any) -> List[str]:
-        """값 유효성 검증"""
-        errors = []
-
-        if self.required and value is None:
-            errors.append(f"Property '{self.name}' is required")
-
-        # 타입 검증
-        if value is not None:
-            if self.type == "xsd:string" and not isinstance(value, str):
-                errors.append(f"Property '{self.name}' must be a string")
-            elif self.type == "xsd:integer" and not isinstance(value, int):
-                errors.append(f"Property '{self.name}' must be an integer")
-            elif self.type == "xsd:boolean" and not isinstance(value, bool):
-                errors.append(f"Property '{self.name}' must be a boolean")
-
-        # 제약조건 검증
-        if self.constraints and value is not None:
-            if "min" in self.constraints and value < self.constraints["min"]:
-                errors.append(f"Property '{self.name}' must be >= {self.constraints['min']}")
-            if "max" in self.constraints and value > self.constraints["max"]:
-                errors.append(f"Property '{self.name}' must be <= {self.constraints['max']}")
-            if "pattern" in self.constraints:
-                import re
-
-                if not re.match(self.constraints["pattern"], str(value)):
-                    errors.append(f"Property '{self.name}' does not match pattern")
-
-        return errors
-
-
 @dataclass
-class Relationship:
+class Relationship(CardinalityValidationMixin):
     """관계 엔티티"""
 
     predicate: str
@@ -64,12 +38,6 @@ class Relationship:
     description: Optional[str] = None
     inverse_predicate: Optional[str] = None
     inverse_label: Optional[str] = None
-
-    def is_valid_cardinality(self) -> bool:
-        """카디널리티 유효성 확인"""
-        valid_cardinalities = ["1:1", "1:n", "n:1", "n:m"]
-        return self.cardinality in valid_cardinalities
-
 
 @dataclass
 class Ontology:

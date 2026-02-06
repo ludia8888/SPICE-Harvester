@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Callable, Dict, List, Optional
 
 
 def extract_schema_columns(
@@ -21,9 +21,6 @@ def extract_schema_columns(
     The result is a list of dicts with at least a ``name`` key and an optional
     ``type`` key when available.
     """
-    if not isinstance(schema, dict):
-        return []
-
     def _normalize_name(value: Any) -> str:
         name = str(value or "").strip()
         if strip_bom:
@@ -40,6 +37,25 @@ def extract_schema_columns(
         while f"{base}__{idx}" in seen:
             idx += 1
         return f"{base}__{idx}"
+
+    if isinstance(schema, list):
+        output: List[Dict[str, Any]] = []
+        seen: set[str] = set()
+        for col in schema:
+            if isinstance(col, dict):
+                name = _normalize_name(col.get("name") or col.get("column") or "")
+                raw_type = col.get("type") or col.get("data_type") or col.get("datatype")
+            else:
+                name = _normalize_name(col)
+                raw_type = None
+            if name:
+                deduped = _dedupe_name(name, seen)
+                seen.add(deduped)
+                output.append({"name": deduped, "type": raw_type})
+        return output
+
+    if not isinstance(schema, dict):
+        return []
 
     columns = schema.get("columns")
     if isinstance(columns, list):
@@ -90,3 +106,36 @@ def extract_schema_columns(
         return output
 
     return []
+
+
+def extract_schema_column_names(
+    schema: Any,
+    *,
+    strip_bom: bool = False,
+    dedupe: bool = False,
+) -> List[str]:
+    names: List[str] = []
+    for col in extract_schema_columns(schema, strip_bom=strip_bom, dedupe=dedupe):
+        name = str(col.get("name") or "").strip()
+        if name:
+            names.append(name)
+    return names
+
+
+def extract_schema_type_map(
+    schema: Any,
+    *,
+    strip_bom: bool = False,
+    dedupe: bool = False,
+    normalizer: Optional[Callable[[Any], Any]] = None,
+) -> Dict[str, Any]:
+    output: Dict[str, Any] = {}
+    for col in extract_schema_columns(schema, strip_bom=strip_bom, dedupe=dedupe):
+        name = str(col.get("name") or "").strip()
+        if not name:
+            continue
+        value = col.get("type")
+        if normalizer is not None:
+            value = normalizer(value)
+        output[name] = value
+    return output

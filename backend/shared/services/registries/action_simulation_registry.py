@@ -16,38 +16,7 @@ from typing import Any, Dict, List, Optional
 import asyncpg
 
 from shared.config.settings import get_settings
-from shared.utils.json_utils import coerce_json_dataset, normalize_json_payload
-
-
-def _coerce_json_list(value: Any) -> List[Dict[str, Any]]:
-    if value is None:
-        return []
-    if isinstance(value, list):
-        return [item for item in value if isinstance(item, dict)]
-    if isinstance(value, dict):
-        # Some callers may accidentally store {"value": [...]}.
-        nested = value.get("value")
-        if isinstance(nested, list):
-            return [item for item in nested if isinstance(item, dict)]
-        return []
-    if isinstance(value, str):
-        raw = value.strip()
-        if not raw:
-            return []
-        try:
-            import json
-
-            parsed = json.loads(raw)
-        except Exception:
-            return []
-        if isinstance(parsed, list):
-            return [item for item in parsed if isinstance(item, dict)]
-        if isinstance(parsed, dict):
-            nested = parsed.get("value")
-            if isinstance(nested, list):
-                return [item for item in nested if isinstance(item, dict)]
-        return []
-    return []
+from shared.utils.json_utils import coerce_json_dataset, coerce_json_list, normalize_json_payload
 
 
 @dataclass(frozen=True)
@@ -209,7 +178,11 @@ class ActionSimulationRegistry:
             preview_action_log_id=row.get("preview_action_log_id"),
             input=coerce_json_dataset(row.get("input")),
             assumptions=coerce_json_dataset(row.get("assumptions")),
-            scenarios=_coerce_json_list(row.get("scenarios")),
+            scenarios=[
+                item
+                for item in coerce_json_list(row.get("scenarios"), allow_wrapped_value=True)
+                if isinstance(item, dict)
+            ],
             result=coerce_json_dataset(row.get("result")) if row.get("result") is not None else None,
             error=coerce_json_dataset(row.get("error")) if row.get("error") is not None else None,
             created_by=str(row["created_by"]),

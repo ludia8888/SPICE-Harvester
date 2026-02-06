@@ -31,7 +31,10 @@ async def create_link_type(
     body: LinkTypeRequest,
     request: Request,
     branch: str = Query("main", description="Target branch"),
-    expected_head_commit: str = Query(..., description="Optimistic concurrency guard"),
+    expected_head_commit: Optional[str] = Query(
+        default=None,
+        description="Optimistic concurrency guard (defaults to branch head)",
+    ),
     oms_client: OMSClient = OMSClientDep,
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
     objectify_registry: ObjectifyRegistry = Depends(get_objectify_registry),
@@ -58,7 +61,10 @@ async def update_link_type(
     body: LinkTypeUpdateRequest,
     request: Request,
     branch: str = Query(..., description="Target branch"),
-    expected_head_commit: str = Query(..., description="Optimistic concurrency guard"),
+    expected_head_commit: Optional[str] = Query(
+        default=None,
+        description="Optimistic concurrency guard (defaults to branch head)",
+    ),
     oms_client: OMSClient = OMSClientDep,
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
     objectify_registry: ObjectifyRegistry = Depends(get_objectify_registry),
@@ -98,4 +104,3 @@ async def reindex_link_type(
         enforce_role=enforce_required_database_role,
         enqueue_job=enqueue_objectify_job_for_mapping_spec,
     )
-

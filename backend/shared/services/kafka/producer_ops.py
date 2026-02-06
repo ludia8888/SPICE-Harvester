@@ -9,12 +9,16 @@ duplicated per-service boilerplate around:
 
 from __future__ import annotations
 
+import asyncio
+import logging
 from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any, Optional
 
 from shared.utils.executor_utils import call_in_executor
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class KafkaProducerOps(ABC):
@@ -88,3 +92,28 @@ class ExecutorKafkaProducerOps(KafkaProducerOps):
                 except TypeError:
                     self._executor.shutdown(wait=False)
 
+
+async def close_kafka_producer(
+    *,
+    producer: Any = None,
+    producer_ops: Optional[KafkaProducerOps] = None,
+    timeout_s: float = 5.0,
+    warning_logger: Optional[logging.Logger] = None,
+    warning_message: str = "Kafka producer flush failed during shutdown: %s",
+) -> None:
+    timeout = float(timeout_s)
+    logger = warning_logger or _LOGGER
+    try:
+        if producer_ops is not None:
+            await producer_ops.close(timeout_s=timeout)
+            return
+
+        if producer is None:
+            return
+
+        try:
+            await asyncio.to_thread(producer.flush, timeout)
+        except TypeError:
+            await asyncio.to_thread(producer.flush)
+    except Exception as exc:
+        logger.warning(warning_message, exc, exc_info=True)

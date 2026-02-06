@@ -11,6 +11,7 @@ from enum import Enum
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 from shared.models.ontology import OntologyResponse, Relationship
+from oms.utils.cardinality_utils import inverse_cardinality
 
 logger = logging.getLogger(__name__)
 
@@ -200,10 +201,10 @@ class RelationshipPathTracker:
 
                 # 역방향 홉 (inverse_predicate가 있는 경우)
                 if rel.inverse_predicate:
-                    inverse_cardinality = self._get_inverse_cardinality(cardinality)
+                    inverse_card = inverse_cardinality(cardinality)
                     inverse_weight = self.default_weights.get(rel.inverse_predicate, 1.0)
                     inverse_cardinality_modifier = self.cardinality_weights.get(
-                        inverse_cardinality, 1.0
+                        inverse_card, 1.0
                     )
                     inverse_total_weight = inverse_weight * inverse_cardinality_modifier
 
@@ -211,7 +212,7 @@ class RelationshipPathTracker:
                         source=target_entity,
                         target=source_entity,
                         predicate=rel.inverse_predicate,
-                        cardinality=inverse_cardinality,
+                        cardinality=inverse_card,
                         is_inverse=True,
                         weight=inverse_total_weight,
                         metadata={
@@ -500,19 +501,6 @@ class RelationshipPathTracker:
         score *= length_penalty
 
         return score
-
-    def _get_inverse_cardinality(self, cardinality: str) -> str:
-        """카디널리티의 역관계 반환"""
-
-        inverse_map = {
-            "1:1": "1:1",
-            "1:n": "n:1",
-            "n:1": "1:n",
-            "n:m": "n:m",
-            "one": "many",
-            "many": "one",
-        }
-        return inverse_map.get(cardinality, cardinality)
 
     def get_path_statistics(self, paths: List[RelationshipPath]) -> Dict[str, Any]:
         """경로 통계 정보"""

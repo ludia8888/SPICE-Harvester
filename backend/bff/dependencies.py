@@ -18,7 +18,6 @@ Key improvements:
 
 from typing import Any, Dict, List, Optional
 import json
-import inspect
 
 import httpx
 from fastapi import HTTPException, status, Depends
@@ -27,6 +26,8 @@ from fastapi import HTTPException, status, Depends
 from shared.dependencies import get_container, ServiceContainer
 from shared.dependencies.providers import (
     get_elasticsearch_service,
+    get_jsonld_converter as get_shared_jsonld_converter,
+    get_label_mapper as get_shared_label_mapper,
     get_storage_service,
     StorageServiceDep,
     RedisServiceDep,
@@ -39,6 +40,7 @@ from shared.errors.error_types import ErrorCategory, ErrorCode
 from shared.observability.request_context import get_correlation_id, get_request_id
 from shared.utils.label_mapper import LabelMapper
 from shared.utils.jsonld import JSONToJSONLDConverter
+from shared.utils.async_utils import raise_for_status_async, response_json_async
 from shared.services.storage.elasticsearch_service import ElasticsearchService
 from shared.services.registries.action_log_registry import ActionLogRegistry
 
@@ -81,54 +83,6 @@ class BFFDependencyProvider:
             )
     
     @staticmethod
-    async def get_label_mapper(
-        container: ServiceContainer = Depends(get_container)
-    ) -> LabelMapper:
-        """
-        Get label mapper from container
-        
-        This replaces the global label_mapper variable and get_label_mapper() function.
-        """
-        # Register LabelMapper factory if not already registered
-        if not container.has(LabelMapper):
-            def create_label_mapper(settings: ApplicationSettings) -> LabelMapper:
-                return LabelMapper()
-            
-            container.register_singleton(LabelMapper, create_label_mapper)
-        
-        try:
-            return await container.get(LabelMapper)
-        except Exception as e:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=f"Label mapper not available: {str(e)}",
-            )
-    
-    @staticmethod
-    async def get_jsonld_converter(
-        container: ServiceContainer = Depends(get_container)
-    ) -> JSONToJSONLDConverter:
-        """
-        Get JSON-LD converter from container
-        
-        This provides a centralized way to get the JSON-LD converter.
-        """
-        # Register JSONToJSONLDConverter factory if not already registered
-        if not container.has(JSONToJSONLDConverter):
-            def create_jsonld_converter(settings: ApplicationSettings) -> JSONToJSONLDConverter:
-                return JSONToJSONLDConverter()
-            
-            container.register_singleton(JSONToJSONLDConverter, create_jsonld_converter)
-        
-        try:
-            return await container.get(JSONToJSONLDConverter)
-        except Exception as e:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=f"JSON-LD converter not available: {str(e)}",
-            )
-
-    @staticmethod
     async def get_action_log_registry(
         container: ServiceContainer = Depends(get_container),
     ) -> ActionLogRegistry:
@@ -154,8 +108,8 @@ class BFFDependencyProvider:
 
 # Type-safe dependency annotations for cleaner injection
 OMSClientDep = Depends(BFFDependencyProvider.get_oms_client)
-LabelMapperDep = Depends(BFFDependencyProvider.get_label_mapper)
-JSONLDConverterDep = Depends(BFFDependencyProvider.get_jsonld_converter)
+LabelMapperDep = Depends(get_shared_label_mapper)
+JSONLDConverterDep = Depends(get_shared_jsonld_converter)
 # TerminusServiceDep is defined after get_terminus_service function
 
 
@@ -176,18 +130,6 @@ class TerminusService:
         """
         self.oms_client = oms_client
         self.connected = False
-
-    @staticmethod
-    async def _await_if_needed(value: Any) -> Any:
-        if inspect.isawaitable(value):
-            return await value
-        return value
-
-    async def _raise_for_status(self, response: Any) -> None:
-        await self._await_if_needed(response.raise_for_status())
-
-    async def _response_json(self, response: Any) -> Any:
-        return await self._await_if_needed(response.json())
 
     async def list_databases(self):
         """데이터베이스 목록 조회"""
@@ -404,8 +346,8 @@ class TerminusService:
             response = await self.oms_client.client.post(
                 f"/api/v1/version/{db_name}/rollback", json=rollback_data
             )
-            await self._raise_for_status(response)
-            return await self._response_json(response)
+            await raise_for_status_async(response)
+            return await response_json_async(response)
         except (httpx.HTTPError, httpx.TimeoutException, ValueError) as e:
             raise RuntimeError(f"롤백 실패 ({db_name}): {e}")
 
@@ -415,8 +357,8 @@ class TerminusService:
             response = await self.oms_client.client.get(
                 f"/api/v1/branch/{db_name}/branch/{branch_name}/info"
             )
-            await self._raise_for_status(response)
-            return await self._response_json(response)
+            await raise_for_status_async(response)
+            return await response_json_async(response)
         except (httpx.HTTPError, httpx.TimeoutException, ValueError) as e:
             raise RuntimeError(f"브랜치 정보 조회 실패 ({db_name}/{branch_name}): {e}")
 
@@ -434,8 +376,8 @@ class TerminusService:
             response = await self.oms_client.client.post(
                 f"/api/v1/database/{db_name}/merge/simulate", json=merge_data
             )
-            await self._raise_for_status(response)
-            return await self._response_json(response)
+            await raise_for_status_async(response)
+            return await response_json_async(response)
         except (httpx.HTTPError, httpx.TimeoutException, ValueError) as e:
             raise RuntimeError(f"병합 시뮬레이션 실패 ({db_name}): {e}")
 
@@ -465,8 +407,8 @@ class TerminusService:
             response = await self.oms_client.client.post(
                 f"/api/v1/database/{db_name}/merge/resolve", json=resolve_data
             )
-            await self._raise_for_status(response)
-            return await self._response_json(response)
+            await raise_for_status_async(response)
+            return await response_json_async(response)
         except (httpx.HTTPError, httpx.TimeoutException, ValueError) as e:
             raise RuntimeError(f"충돌 해결 실패 ({db_name}): {e}")
 
@@ -622,8 +564,8 @@ TerminusServiceDep = Depends(get_terminus_service)
 
 # Convenience dependency annotations for backward compatibility
 get_oms_client = BFFDependencyProvider.get_oms_client
-get_label_mapper = BFFDependencyProvider.get_label_mapper
-get_jsonld_converter = BFFDependencyProvider.get_jsonld_converter
+get_label_mapper = get_shared_label_mapper
+get_jsonld_converter = get_shared_jsonld_converter
 get_action_log_registry = BFFDependencyProvider.get_action_log_registry
 
 

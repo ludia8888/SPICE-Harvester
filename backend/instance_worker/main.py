@@ -25,7 +25,6 @@ from datetime import datetime, timezone
 from typing import Dict, Any, Optional, Set, List, Union
 from uuid import uuid4
 
-from confluent_kafka import Producer
 import boto3
 import httpx
 from botocore.exceptions import ClientError
@@ -42,14 +41,22 @@ from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
 from shared.security.auth_utils import BFF_TOKEN_ENV_KEYS, get_expected_token
 from shared.security.input_sanitizer import validate_branch_name, validate_class_id, validate_instance_id
-from shared.services.kafka.consumer_ops import ExecutorKafkaConsumerOps
-from shared.services.kafka.dlq_publisher import DlqPublishSpec, build_standard_dlq_payload, publish_dlq_json
-from shared.services.kafka.processed_event_worker import RegistryKey, StrictHeartbeatKafkaWorker
+from shared.services.kafka.dlq_publisher import DlqPublishSpec
+from shared.services.kafka.processed_event_worker import (
+    CommandParseError,
+    RegistryKey,
+    StrictHeartbeatKafkaWorker,
+    WorkerRuntimeConfig,
+)
+from shared.services.kafka.retry_classifier import (
+    INSTANCE_COMMAND_RETRY_PROFILE,
+    classify_retryable_with_profile,
+)
 from shared.services.registries.processed_event_registry import (
     ProcessedEventRegistry,
 )
-from shared.services.kafka.safe_consumer import SafeKafkaConsumer, create_safe_consumer
 from shared.services.kafka.producer_factory import create_kafka_dlq_producer
+from shared.services.kafka.producer_ops import close_kafka_producer
 from shared.services.core.worker_stores import WorkerObservability, initialize_worker_stores
 from shared.services.registries.lineage_store import LineageStore
 from shared.services.core.audit_log_store import AuditLogStore
@@ -58,6 +65,7 @@ from shared.utils.chaos import maybe_crash
 from shared.utils.ontology_version import normalize_ontology_version, resolve_ontology_version
 from shared.utils.app_logger import configure_logging
 from shared.utils.deterministic_ids import deterministic_uuid5_hex_prefix, deterministic_uuid5_str
+from shared.utils.blank_utils import strip_to_none
 from shared.utils.spice_event_ids import spice_event_id
 
 # ULTRA CRITICAL: Import TerminusDB service
@@ -76,22 +84,8 @@ class _InstanceCommandPayload:
     envelope_metadata: Optional[Dict[str, Any]] = None
 
 
-class _InstanceCommandParseError(ValueError):
-    def __init__(
-        self,
-        *,
-        stage: str,
-        payload_text: Optional[str],
-        payload_obj: Optional[Dict[str, Any]],
-        fallback_metadata: Optional[Dict[str, Any]],
-        cause: Exception,
-    ) -> None:
-        super().__init__(str(cause))
-        self.stage = str(stage)
-        self.payload_text = payload_text
-        self.payload_obj = payload_obj
-        self.fallback_metadata = fallback_metadata
-        self.cause = cause
+class _InstanceCommandParseError(CommandParseError):
+    pass
 
 
 class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, None]):
@@ -101,25 +95,39 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
 
     Command input is consumed exclusively as EventEnvelope JSON.
     """
-    
+    parse_error_enable_dlq = True
+    parse_error_publish_failure_message = "Failed to publish invalid instance payload to DLQ: %s"
+    parse_error_invalid_payload_message = "Invalid instance payload; skipping: %s"
+    parse_error_raise_on_publish_failure = False
+
     def __init__(self):
         settings = get_settings()
         worker_cfg = settings.workers.instance
 
-        self.running = False
-        self.kafka_servers = settings.database.kafka_servers
+        self._bootstrap_worker_runtime(
+            config=WorkerRuntimeConfig(
+                service_name="instance-worker",
+                handler="instance_worker",
+                kafka_servers=settings.database.kafka_servers,
+                dlq_topic=AppConfig.INSTANCE_COMMANDS_DLQ_TOPIC,
+                dlq_flush_timeout_seconds=float(worker_cfg.dlq_flush_timeout_seconds),
+                max_retry_attempts=int(worker_cfg.max_retry_attempts),
+                backoff_base=1,
+                backoff_max=60,
+            ),
+            tracing=get_tracing_service("instance-worker"),
+            metrics=get_metrics_collector("instance-worker"),
+        )
+
         self.enable_event_sourcing = bool(settings.event_sourcing.enable_event_sourcing)
-        self.consumer: Optional[SafeKafkaConsumer] = None
         self.producer = None
-        self.dlq_producer: Optional[Producer] = None
-        self.dlq_topic = AppConfig.INSTANCE_COMMANDS_DLQ_TOPIC
-        self.dlq_flush_timeout_seconds = float(worker_cfg.dlq_flush_timeout_seconds)
-        self.max_retry_attempts = int(worker_cfg.max_retry_attempts)
-        self.service_name = "instance-worker"
-        self.handler = "instance_worker"
-        self.max_retries = int(self.max_retry_attempts)
-        self.backoff_base = 1
-        self.backoff_max = 60
+        self._dlq_spec = DlqPublishSpec(
+            dlq_topic=self.dlq_topic,
+            service_name=self.service_name,
+            span_name="instance_worker.dlq_produce",
+            metric_event_name="INSTANCE_COMMAND_DLQ",
+            flush_timeout_seconds=self.dlq_flush_timeout_seconds,
+        )
         self.untyped_ref_max_retry_attempts = int(worker_cfg.untyped_ref_max_retry_attempts)
         self.untyped_ref_backoff_max_seconds = float(worker_cfg.untyped_ref_backoff_max_seconds)
         self.redis_client = None
@@ -148,9 +156,6 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
         )
         self.dataset_registry: Optional[DatasetRegistry] = None
         self.bff_http: Optional[httpx.AsyncClient] = None
-        self.consumer_ops = None
-        self.tracing = get_tracing_service(self.service_name)
-        self.metrics = get_metrics_collector(self.service_name)
         self.run_id = settings.observability.run_id
         self.code_sha = settings.observability.code_sha
         
@@ -191,17 +196,11 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
 
         settings = get_settings()
         
-        # Kafka Consumer (strong consistency: read_committed + rebalance-safe offsets)
         group_id = (AppConfig.INSTANCE_WORKER_GROUP or "instance-worker-group").strip()
-        self.consumer = create_safe_consumer(
+        self._initialize_safe_consumer_runtime(
             group_id=group_id,
             topics=[AppConfig.INSTANCE_COMMANDS_TOPIC],
             service_name="instance-worker",
-            on_revoke=self._on_partitions_revoked,
-            on_assign=self._on_partitions_assigned,
-        )
-        self.consumer_ops = ExecutorKafkaConsumerOps(
-            self.consumer,
             thread_name_prefix="instance-worker-kafka",
         )
         logger.info(f"Using consumer group: {group_id}")
@@ -2218,22 +2217,16 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
             if not source_key or not target_key:
                 continue
 
-            def _normalize_edit_value(value: Any) -> Optional[str]:
-                if value is None:
-                    return None
-                text = str(value).strip()
-                return text or None
-
             prev_source = None
             prev_target = None
             if isinstance(previous_payload, dict):
-                prev_source = _normalize_edit_value(previous_payload.get(source_key))
-                prev_target = _normalize_edit_value(previous_payload.get(target_key))
+                prev_source = strip_to_none(previous_payload.get(source_key))
+                prev_target = strip_to_none(previous_payload.get(target_key))
             curr_source = None
             curr_target = None
             if isinstance(current_payload, dict):
-                curr_source = _normalize_edit_value(current_payload.get(source_key))
-                curr_target = _normalize_edit_value(current_payload.get(target_key))
+                curr_source = strip_to_none(current_payload.get(source_key))
+                curr_target = strip_to_none(current_payload.get(target_key))
 
             edits: List[Dict[str, Any]] = []
             if prev_source and prev_target and (prev_source != curr_source or prev_target != curr_target):
@@ -2341,23 +2334,11 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
         # Example: Product references Customer that hasn't been created yet.
         if "references_untyped_object" in msg or "no_unique_type_for_document" in msg:
             return True
-        non_retryable_markers = [
-            "aggregate_id mismatch",
-            "instance_id mismatch",
-            "payload must be",
-            "db_name is required",
-            "class_id is required",
-            "instance_id is required",
-            "unknown command type",
-            "security violation",
-            "invalid",
-            "bad request",
-        ]
         # Default: Terminus 400s are treated as non-retryable unless we explicitly
         # recognize them as transient above.
         if "api error: 400" in msg:
             return False
-        return not any(marker in msg for marker in non_retryable_markers)
+        return classify_retryable_with_profile(exc, INSTANCE_COMMAND_RETRY_PROFILE)
 
     async def _publish_to_dlq(
         self,
@@ -2371,34 +2352,20 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
         kafka_headers: Optional[Any] = None,
         fallback_metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
-        if not self.dlq_producer:
-            raise RuntimeError("DLQ producer not configured")
-
-        dlq_payload = build_standard_dlq_payload(
+        await self._publish_standard_dlq_record(
+            producer=self.dlq_producer,
             msg=msg,
-            worker="instance-worker",
-            stage=stage,
+            worker=self.service_name,
+            dlq_spec=self._dlq_spec,
             error=error,
             attempt_count=int(attempt_count),
+            stage=stage,
             payload_text=payload_text,
             payload_obj=payload_obj,
-        )
-        spec = DlqPublishSpec(
-            dlq_topic=self.dlq_topic,
-            service_name="instance-worker",
-            span_name="instance_worker.dlq_produce",
-            metric_event_name="INSTANCE_COMMAND_DLQ",
-            flush_timeout_seconds=float(self.dlq_flush_timeout_seconds),
-        )
-        await publish_dlq_json(
-            producer=self.dlq_producer,
-            spec=spec,
-            msg=msg,
-            payload=dlq_payload,
+            kafka_headers=kafka_headers,
+            fallback_metadata=fallback_metadata,
             tracing=self.tracing,
             metrics=self.metrics,
-            kafka_headers=kafka_headers,
-            fallback_metadata=fallback_metadata if isinstance(fallback_metadata, dict) else None,
         )
 
     # --- ProcessedEventKafkaWorker hooks ---
@@ -2594,38 +2561,6 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
             cap = max(1, int(self.untyped_ref_backoff_max_seconds))
         return min(cap, int(2 ** max(attempt_count - 1, 0)))
 
-    async def _on_parse_error(self, *, msg: Any, raw_payload: Optional[str], error: Exception) -> None:  # type: ignore[override]
-        stage = "parse"
-        payload_text = raw_payload
-        payload_obj = None
-        fallback_metadata = None
-        cause = error
-
-        if isinstance(error, _InstanceCommandParseError):
-            stage = error.stage
-            payload_text = error.payload_text if error.payload_text is not None else raw_payload
-            payload_obj = error.payload_obj
-            fallback_metadata = error.fallback_metadata
-            cause = error.cause
-
-        kafka_headers = None
-        with suppress(Exception):
-            kafka_headers = msg.headers()
-        try:
-            await self._publish_to_dlq(
-                msg=msg,
-                stage=stage,
-                error=str(cause),
-                attempt_count=1,
-                payload_text=payload_text,
-                payload_obj=payload_obj,
-                kafka_headers=kafka_headers,
-                fallback_metadata=fallback_metadata,
-            )
-        except Exception:
-            logger.exception("Failed to publish invalid instance payload to DLQ")
-        logger.exception("Invalid instance payload; skipping: %s", cause)
-
     async def _on_retry_scheduled(  # type: ignore[override]
         self,
         *,
@@ -2672,44 +2607,6 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
             error,
         )
 
-    async def _send_to_dlq(  # type: ignore[override]
-        self,
-        *,
-        msg: Any,
-        error: str,
-        attempt_count: int,
-        payload: Optional[_InstanceCommandPayload] = None,
-        raw_payload: Optional[str] = None,
-        stage: str = "process_command",
-        payload_text: Optional[str] = None,
-        payload_obj: Optional[Dict[str, Any]] = None,
-        kafka_headers: Optional[Any] = None,
-        fallback_metadata: Optional[Dict[str, Any]] = None,
-    ) -> None:
-        if kafka_headers is None:
-            with suppress(Exception):
-                kafka_headers = msg.headers()
-
-        if payload_text is None:
-            payload_text = raw_payload
-
-        if payload_obj is None and payload is not None and isinstance(payload.command, dict):
-            payload_obj = payload.command
-
-        if fallback_metadata is None and payload is not None:
-            fallback_metadata = payload.envelope_metadata
-
-        await self._publish_to_dlq(
-            msg=msg,
-            stage=str(stage),
-            error=error,
-            attempt_count=int(attempt_count),
-            payload_text=payload_text,
-            payload_obj=payload_obj,
-            kafka_headers=kafka_headers,
-            fallback_metadata=fallback_metadata,
-        )
-
     async def run(self):
         """Main processing loop"""
         self.running = True
@@ -2728,8 +2625,14 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
         self.running = False
         
         await self._close_consumer_runtime()
-        if self.producer:
-            self.producer.flush()
+        await close_kafka_producer(
+            producer=self.producer,
+            timeout_s=5.0,
+            warning_logger=logger,
+            warning_message="Kafka producer flush failed during shutdown: %s",
+        )
+        self.producer = None
+        self.dlq_producer = None
         if self.redis_client:
             await self.redis_client.close()
         if self.terminus_service:

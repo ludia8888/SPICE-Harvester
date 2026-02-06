@@ -13,6 +13,7 @@ from shared.config.settings import build_client_ssl_config, get_settings
 from shared.errors.error_envelope import build_error_envelope
 from shared.errors.error_types import ErrorCategory, ErrorCode
 from shared.observability.request_context import get_correlation_id, get_request_id
+from bff.services.base_http_client import ManagedAsyncClient
 
 # shared 모델 import
 from shared.models.ontology import (
@@ -34,7 +35,7 @@ class OntologyRef:
     type: str  # "Class" | "Property"
 
 
-class OMSClient:
+class OMSClient(ManagedAsyncClient):
     """OMS HTTP 클라이언트"""
 
     def __init__(self, base_url: Optional[str] = None):
@@ -66,9 +67,9 @@ class OMSClient:
         token = get_settings().clients.oms_client_token
         return (token or "").strip() or None
 
-    async def close(self):
-        """클라이언트 연결 종료"""
-        await self.client.aclose()
+    @staticmethod
+    def _branch_base_path(db_name: str) -> str:
+        return f"/api/v1/branch/{db_name}"
 
     # -----------------------------
     # Generic HTTP helpers
@@ -296,11 +297,22 @@ class OMSClient:
     async def list_branches(self, db_name: str) -> Dict[str, Any]:
         """브랜치 목록 조회"""
         try:
-            response = await self.client.get(f"/api/v1/branch/{db_name}/list")
+            response = await self.client.get(f"{self._branch_base_path(db_name)}/list")
             response.raise_for_status()
             return response.json()
         except Exception as e:
             logger.error(f"브랜치 목록 조회 실패 ({db_name}): {e}")
+            raise
+
+    async def get_branch_info(self, db_name: str, branch_name: str) -> Dict[str, Any]:
+        try:
+            response = await self.client.get(
+                f"{self._branch_base_path(db_name)}/branch/{branch_name}/info"
+            )
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            logger.error(f"브랜치 정보 조회 실패 ({db_name}/{branch_name}): {e}")
             raise
 
     async def list_ontology_resources(
@@ -521,14 +533,39 @@ class OMSClient:
             logger.error(f"Ontology health failed ({db_name}): {e}")
             raise
 
-    async def create_branch(self, db_name: str, branch_data: Dict[str, Any]) -> Dict[str, Any]:
+    async def create_branch(
+        self,
+        db_name: str,
+        branch_data: Dict[str, Any] | str,
+        *,
+        from_branch: str = "main",
+    ) -> Dict[str, Any]:
         """브랜치 생성"""
         try:
-            response = await self.client.post(f"/api/v1/branch/{db_name}/create", json=branch_data)
+            payload = (
+                {"branch_name": branch_data, "from_branch": from_branch}
+                if isinstance(branch_data, str)
+                else dict(branch_data)
+            )
+            response = await self.client.post(f"{self._branch_base_path(db_name)}/create", json=payload)
             response.raise_for_status()
             return response.json()
         except Exception as e:
             logger.error(f"브랜치 생성 실패 ({db_name}): {e}")
+            raise
+
+    async def delete_branch(self, db_name: str, branch_name: str, *, force: bool = False) -> Dict[str, Any]:
+        try:
+            response = await self.client.delete(
+                f"{self._branch_base_path(db_name)}/branch/{branch_name}",
+                params={"force": force},
+            )
+            response.raise_for_status()
+            if not response.text:
+                return {}
+            return response.json()
+        except Exception as e:
+            logger.error(f"브랜치 삭제 실패 ({db_name}/{branch_name}): {e}")
             raise
 
     async def get_version_history(self, db_name: str) -> Dict[str, Any]:

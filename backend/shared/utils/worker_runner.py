@@ -10,6 +10,7 @@ This helper centralizes that control-flow to reduce duplication and drift.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import signal
 from contextlib import suppress
 from typing import Any, Optional
@@ -20,6 +21,7 @@ async def run_worker_until_stopped(
     *,
     task_name: Optional[str] = None,
     running_attr: str = "running",
+    shutdown_on_exit: bool = True,
 ) -> None:
     loop = asyncio.get_running_loop()
     stop_event = asyncio.Event()
@@ -64,4 +66,26 @@ async def run_worker_until_stopped(
             run_task.cancel()
             with suppress(asyncio.CancelledError):
                 await run_task
-        await worker.shutdown()
+        if shutdown_on_exit and hasattr(worker, "shutdown"):
+            await worker.shutdown()
+
+
+async def run_component_lifecycle(
+    component: Any,
+    *,
+    init_method: str = "initialize",
+    run_method: str = "run",
+    close_method: str = "close",
+) -> None:
+    initializer = getattr(component, init_method)
+    await initializer()
+    try:
+        runner = getattr(component, run_method)
+        await runner()
+    finally:
+        closer = getattr(component, close_method, None)
+        if closer is None:
+            return
+        result = closer()
+        if inspect.isawaitable(result):
+            await result

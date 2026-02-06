@@ -19,10 +19,12 @@ from elasticsearch.exceptions import (
 )
 from elasticsearch.helpers import async_bulk
 
+from shared.services.storage.connectivity import AsyncClientPingMixin
+
 logger = logging.getLogger(__name__)
 
 
-class ElasticsearchService:
+class ElasticsearchService(AsyncClientPingMixin):
     """
     Async Elasticsearch client service with connection pooling and error handling.
     
@@ -36,6 +38,8 @@ class ElasticsearchService:
     - Alias management with filters
     """
     
+    _ping_exception_types = (ElasticsearchException,)
+
     def __init__(
         self,
         host: str = "localhost",
@@ -586,14 +590,6 @@ class ElasticsearchService:
             logger.error(f"Failed to refresh index: {e}")
             raise
             
-    async def ping(self) -> bool:
-        """Check Elasticsearch connection."""
-        try:
-            return await self.client.ping()
-        except ElasticsearchException:
-            return False
-
-
 # Factory function for creating Elasticsearch service instances
 def create_elasticsearch_service(settings: 'ApplicationSettings') -> ElasticsearchService:
     """

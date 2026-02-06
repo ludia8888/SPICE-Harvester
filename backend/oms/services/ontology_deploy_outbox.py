@@ -2,13 +2,18 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Optional
 
 from shared.config.settings import get_settings
+from shared.services.events.outbox_runtime import (
+    build_outbox_worker_id,
+    maybe_purge_with_interval,
+    run_outbox_poll_loop,
+)
 from shared.services.storage.event_store import event_store
 from shared.models.event_envelope import EventEnvelope
+from shared.utils.backoff_utils import next_exponential_backoff_at
 
 from oms.services.ontology_deployment_registry import OntologyDeploymentRegistry
 
@@ -33,18 +38,13 @@ class OntologyDeployOutboxPublisher:
         self.purge_interval_seconds = int(cfg.purge_interval_seconds)
         self.purge_limit = int(cfg.purge_limit)
 
-        configured_worker_id = str(cfg.worker_id or "").strip()
-        if configured_worker_id:
-            self.worker_id = configured_worker_id
-        else:
-            service_name = (settings.observability.service_name or "ontology-deploy-outbox").strip() or "ontology-deploy-outbox"
-            hostname = (settings.observability.hostname or "local").strip() or "local"
-            self.worker_id = f"{service_name}:{hostname}:{os.getpid()}"
+        self.worker_id = build_outbox_worker_id(
+            configured_worker_id=cfg.worker_id,
+            service_name=settings.observability.service_name,
+            hostname=settings.observability.hostname,
+            default_service_name="ontology-deploy-outbox",
+        )
         self._last_purge = datetime.now(timezone.utc)
-
-    def _next_attempt_at(self, attempts: int) -> datetime:
-        delay = min(self.backoff_max, self.backoff_base * (2 ** max(0, attempts - 1)))
-        return datetime.now(timezone.utc) + timedelta(seconds=delay)
 
     async def flush_once(self) -> None:
         await event_store.connect()
@@ -76,25 +76,25 @@ class OntologyDeployOutboxPublisher:
                 await self.registry.mark_outbox_failed(
                     outbox_id=item.outbox_id,
                     error=str(exc),
-                    next_attempt_at=self._next_attempt_at(attempts),
+                    next_attempt_at=next_exponential_backoff_at(
+                        attempts,
+                        base_seconds=self.backoff_base,
+                        max_seconds=self.backoff_max,
+                    ),
                 )
 
     async def maybe_purge(self) -> None:
-        if self.retention_days <= 0:
-            return
-        now = datetime.now(timezone.utc)
-        if (now - self._last_purge).total_seconds() < self.purge_interval_seconds:
-            return
-        self._last_purge = now
-        try:
-            deleted = await self.registry.purge_outbox(
-                retention_days=self.retention_days,
-                limit=self.purge_limit,
-            )
-            if deleted:
-                logger.info("Purged %s ontology deploy outbox rows", deleted)
-        except Exception as exc:
-            logger.warning("Failed to purge ontology deploy outbox rows: %s", exc)
+        self._last_purge = await maybe_purge_with_interval(
+            retention_days=self.retention_days,
+            purge_interval_seconds=self.purge_interval_seconds,
+            purge_limit=self.purge_limit,
+            last_purge=self._last_purge,
+            purge_call=self.registry.purge_outbox,
+            info_logger=logger.info,
+            warning_logger=logger.warning,
+            success_message="Purged %s ontology deploy outbox rows",
+            failure_message="Failed to purge ontology deploy outbox rows: %s",
+        )
 
 
 async def run_ontology_deploy_outbox_worker(
@@ -104,15 +104,11 @@ async def run_ontology_deploy_outbox_worker(
     batch_size: int = 50,
     stop_event: Optional[asyncio.Event] = None,
 ) -> None:
-    stop_event = stop_event or asyncio.Event()
     publisher = OntologyDeployOutboxPublisher(registry=registry, batch_size=batch_size)
-    while not stop_event.is_set():
-        try:
-            await publisher.flush_once()
-            await publisher.maybe_purge()
-        except Exception as exc:
-            logger.warning("Ontology deploy outbox worker failed: %s", exc)
-        try:
-            await asyncio.wait_for(stop_event.wait(), timeout=poll_interval_seconds)
-        except asyncio.TimeoutError:
-            continue
+    await run_outbox_poll_loop(
+        publisher=publisher,
+        poll_interval_seconds=poll_interval_seconds,
+        stop_event=stop_event,
+        warning_logger=logger.warning,
+        failure_message="Ontology deploy outbox worker failed: %s",
+    )

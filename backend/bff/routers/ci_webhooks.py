@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import contextlib
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Optional
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -24,6 +24,7 @@ from bff.routers.registry_deps import get_agent_session_registry
 from shared.models.requests import ApiResponse
 from shared.security.input_sanitizer import sanitize_input
 from shared.services.registries.agent_session_registry import AgentSessionRegistry
+from shared.utils.uuid_utils import safe_uuid as _safe_uuid
 
 router = APIRouter(prefix="/admin/ci", tags=["Admin"])
 
@@ -44,15 +45,6 @@ class AgentSessionCIResultIngestRequest(BaseModel):
 
 
 _CI_STATUSES = {"queued", "in_progress", "success", "failure", "cancelled", "skipped", "unknown"}
-
-
-def _safe_uuid(value: Any) -> Optional[str]:
-    if value in (None, ""):
-        return None
-    try:
-        return str(UUID(str(value)))
-    except Exception:
-        return None
 
 
 @router.post("/ci-results", response_model=ApiResponse, status_code=status.HTTP_201_CREATED)

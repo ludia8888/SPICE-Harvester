@@ -58,6 +58,16 @@ class PostgresSchemaRegistry(ABC):
     async def shutdown(self) -> None:
         await self.close()
 
+    async def health_check(self) -> bool:
+        try:
+            if not self._pool:
+                await self.connect()
+            async with self._pool.acquire() as conn:  # type: ignore[union-attr]
+                await conn.execute("SELECT 1")
+            return True
+        except Exception:
+            return False
+
     async def ensure_schema(self) -> None:
         if not self._pool:
             raise RuntimeError(f"{self.__class__.__name__} not connected")

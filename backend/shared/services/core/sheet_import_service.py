@@ -20,6 +20,7 @@ import json
 import re
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+from shared.utils.blank_utils import is_blank_value
 from shared.validators.money_validator import MoneyValidator
 
 
@@ -47,9 +48,7 @@ class SheetImportService:
 
     @staticmethod
     def _is_blank(value: Any) -> bool:
-        if value is None:
-            return True
-        return str(value).strip() == ""
+        return is_blank_value(value)
 
     @staticmethod
     def _strip_numeric_affixes(raw: str) -> str:

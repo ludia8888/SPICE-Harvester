@@ -3,8 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Optional
 
 from confluent_kafka import Producer
@@ -19,7 +18,13 @@ from shared.observability.context_propagation import (
 )
 from shared.observability.tracing import get_tracing_service
 from shared.services.registries.objectify_registry import ObjectifyOutboxItem, ObjectifyRegistry
+from shared.services.events.outbox_runtime import (
+    build_outbox_worker_id,
+    maybe_purge_with_interval,
+    run_outbox_poll_loop,
+)
 from shared.services.kafka.producer_factory import create_kafka_producer
+from shared.utils.backoff_utils import next_exponential_backoff_at
 
 logger = logging.getLogger(__name__)
 
@@ -45,13 +50,12 @@ class ObjectifyOutboxPublisher:
         self.retention_days = int(cfg.retention_days)
         self.purge_limit = int(cfg.purge_limit)
 
-        configured_worker_id = str(cfg.worker_id or "").strip()
-        if configured_worker_id:
-            self.worker_id = configured_worker_id
-        else:
-            service_name = (settings.observability.service_name or "objectify-outbox").strip() or "objectify-outbox"
-            hostname = (settings.observability.hostname or "local").strip() or "local"
-            self.worker_id = f"{service_name}:{hostname}:{os.getpid()}"
+        self.worker_id = build_outbox_worker_id(
+            configured_worker_id=cfg.worker_id,
+            service_name=settings.observability.service_name,
+            hostname=settings.observability.hostname,
+            default_service_name="objectify-outbox",
+        )
         self._last_purge = datetime.now(timezone.utc)
         max_in_flight = int(cfg.producer_max_in_flight)
         delivery_timeout_ms = int(cfg.producer_delivery_timeout_ms)
@@ -81,10 +85,6 @@ class ObjectifyOutboxPublisher:
             await asyncio.to_thread(self.producer.flush, self.flush_timeout_seconds)
         except Exception as exc:
             logger.warning("Kafka producer flush failed during shutdown: %s", exc, exc_info=True)
-
-    def _next_attempt_at(self, attempts: int) -> datetime:
-        delay = min(self.backoff_max, self.backoff_base * (2 ** max(0, attempts - 1)))
-        return datetime.now(timezone.utc) + timedelta(seconds=delay)
 
     async def _publish_batch(self, batch: list[ObjectifyOutboxItem]) -> None:
         """
@@ -201,7 +201,11 @@ class ObjectifyOutboxPublisher:
                     await self.registry.mark_objectify_outbox_failed(
                         outbox_id=outbox_id,
                         error=err,
-                        next_attempt_at=self._next_attempt_at(attempts),
+                        next_attempt_at=next_exponential_backoff_at(
+                            attempts,
+                            base_seconds=self.backoff_base,
+                            max_seconds=self.backoff_max,
+                        ),
                     )
             else:
                 # No callback received - delivery status unknown
@@ -210,7 +214,11 @@ class ObjectifyOutboxPublisher:
                 await self.registry.mark_objectify_outbox_failed(
                     outbox_id=outbox_id,
                     error="delivery callback not received; status unknown",
-                    next_attempt_at=self._next_attempt_at(attempts),
+                    next_attempt_at=next_exponential_backoff_at(
+                        attempts,
+                        base_seconds=self.backoff_base,
+                        max_seconds=self.backoff_max,
+                    ),
                 )
                 logger.warning(
                     "Outbox item %s delivery callback not received after flush",
@@ -228,21 +236,17 @@ class ObjectifyOutboxPublisher:
         await self._publish_batch(batch)
 
     async def maybe_purge(self) -> None:
-        if self.retention_days <= 0:
-            return
-        now = datetime.now(timezone.utc)
-        if (now - self._last_purge).total_seconds() < self.purge_interval_seconds:
-            return
-        self._last_purge = now
-        try:
-            deleted = await self.registry.purge_objectify_outbox(
-                retention_days=self.retention_days,
-                limit=self.purge_limit,
-            )
-            if deleted:
-                logger.info("Purged %s published objectify outbox rows", deleted)
-        except Exception as exc:
-            logger.warning("Failed to purge objectify outbox rows: %s", exc)
+        self._last_purge = await maybe_purge_with_interval(
+            retention_days=self.retention_days,
+            purge_interval_seconds=self.purge_interval_seconds,
+            purge_limit=self.purge_limit,
+            last_purge=self._last_purge,
+            purge_call=self.registry.purge_objectify_outbox,
+            info_logger=logger.info,
+            warning_logger=logger.warning,
+            success_message="Purged %s published objectify outbox rows",
+            failure_message="Failed to purge objectify outbox rows: %s",
+        )
 
 
 async def run_objectify_outbox_worker(
@@ -252,21 +256,14 @@ async def run_objectify_outbox_worker(
     batch_size: int = 50,
     stop_event: Optional[asyncio.Event] = None,
 ) -> None:
-    stop_event = stop_event or asyncio.Event()
     publisher = ObjectifyOutboxPublisher(
         objectify_registry=objectify_registry,
         batch_size=batch_size,
     )
-    try:
-        while not stop_event.is_set():
-            try:
-                await publisher.flush_once()
-                await publisher.maybe_purge()
-            except Exception as exc:
-                logger.warning("Objectify outbox worker failed: %s", exc)
-            try:
-                await asyncio.wait_for(stop_event.wait(), timeout=poll_interval_seconds)
-            except asyncio.TimeoutError:
-                continue
-    finally:
-        await publisher.close()
+    await run_outbox_poll_loop(
+        publisher=publisher,
+        poll_interval_seconds=poll_interval_seconds,
+        stop_event=stop_event,
+        warning_logger=logger.warning,
+        failure_message="Objectify outbox worker failed: %s",
+    )

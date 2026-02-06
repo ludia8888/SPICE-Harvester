@@ -17,9 +17,11 @@ from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import Any, Mapping, Optional
 
+from shared.models.event_envelope import EventEnvelope
 from shared.observability.context_propagation import (
     attach_context_from_kafka,
     kafka_headers_from_current_context,
+    kafka_headers_from_envelope_metadata,
 )
 from shared.utils.time_utils import utcnow
 
@@ -98,6 +100,33 @@ class DlqPublishSpec:
     poll_after_produce: bool = False
 
 
+@dataclass(frozen=True, slots=True)
+class EnvelopeDlqSpec:
+    dlq_topic: str
+    service_name: str
+    kind: str
+    failed_event_type: str
+    span_name: Optional[str] = None
+    metric_event_name: Optional[str] = None
+    flush_timeout_seconds: float = 10.0
+
+
+@dataclass(frozen=True, slots=True)
+class _SyntheticKafkaMessage:
+    topic_name: str
+    partition_id: int = -1
+    offset_id: int = -1
+
+    def topic(self) -> str:
+        return str(self.topic_name)
+
+    def partition(self) -> int:
+        return int(self.partition_id)
+
+    def offset(self) -> int:
+        return int(self.offset_id)
+
+
 def default_dlq_span_attributes(*, dlq_topic: str, msg: Any) -> dict[str, Any]:
     return {
         "messaging.system": "kafka",
@@ -108,12 +137,141 @@ def default_dlq_span_attributes(*, dlq_topic: str, msg: Any) -> dict[str, Any]:
     }
 
 
+def build_envelope_dlq_event(
+    *,
+    envelope: EventEnvelope,
+    spec: EnvelopeDlqSpec,
+    error: str,
+    attempt_count: int,
+    extra_metadata: Optional[Mapping[str, Any]] = None,
+) -> EventEnvelope:
+    dlq_env = envelope.model_copy(deep=True)
+    metadata = dlq_env.metadata if isinstance(dlq_env.metadata, dict) else {}
+    dlq_env.metadata = dict(metadata)
+    dlq_env.metadata.update(
+        {
+            "kind": str(spec.kind or "").strip(),
+            "dlq_error": (error or "").strip()[:4000],
+            "dlq_attempt_count": int(attempt_count),
+            "dlq_topic": str(spec.dlq_topic or "").strip(),
+        }
+    )
+    if extra_metadata:
+        dlq_env.metadata.update(dict(extra_metadata))
+    dlq_env.event_type = str(spec.failed_event_type or "").strip() or dlq_env.event_type
+    return dlq_env
+
+
+def default_envelope_dlq_span_attributes(*, spec: EnvelopeDlqSpec, envelope: EventEnvelope) -> dict[str, Any]:
+    return {
+        "messaging.system": "kafka",
+        "messaging.destination": spec.dlq_topic,
+        "messaging.destination_kind": "topic",
+        "event.id": str(envelope.event_id),
+        "event.aggregate_id": str(envelope.aggregate_id or ""),
+        "event.type": str(envelope.event_type),
+    }
+
+
+async def publish_envelope_dlq(
+    *,
+    producer_ops: Any,
+    spec: EnvelopeDlqSpec,
+    envelope: EventEnvelope,
+    tracing: Optional[Any] = None,
+    metrics: Optional[Any] = None,
+    key: Optional[bytes] = None,
+    span_attributes: Optional[Mapping[str, Any]] = None,
+) -> None:
+    key_bytes = key
+    if key_bytes is None:
+        key_text = str(envelope.aggregate_id or envelope.event_id or spec.service_name or "dlq")
+        key_bytes = key_text.encode("utf-8")
+
+    value = envelope.model_dump_json().encode("utf-8")
+    metadata = envelope.metadata if isinstance(envelope.metadata, dict) else None
+    headers = kafka_headers_from_envelope_metadata(metadata or {})
+
+    with attach_context_from_kafka(
+        kafka_headers=headers,
+        fallback_metadata=metadata,
+        service_name=str(spec.service_name or "").strip() or None,
+    ):
+        span_cm = nullcontext()
+        if tracing is not None and getattr(tracing, "span", None) and spec.span_name:
+            attrs = (
+                dict(span_attributes)
+                if span_attributes is not None
+                else default_envelope_dlq_span_attributes(spec=spec, envelope=envelope)
+            )
+            span_cm = tracing.span(str(spec.span_name), attributes=attrs)
+
+        with span_cm:
+            await producer_ops.produce(
+                topic=spec.dlq_topic,
+                key=key_bytes,
+                value=value,
+                headers=headers or None,
+            )
+            await producer_ops.flush(float(spec.flush_timeout_seconds))
+
+    if metrics is not None and spec.metric_event_name:
+        try:
+            metrics.record_event(str(spec.metric_event_name), action="published")
+        except Exception:
+            pass
+
+
+async def publish_standard_dlq(
+    *,
+    producer: Any,
+    msg: Any,
+    worker: str,
+    dlq_spec: DlqPublishSpec,
+    error: str,
+    attempt_count: Optional[int],
+    stage: Optional[str] = None,
+    payload_text: Optional[str] = None,
+    payload_obj: Optional[Mapping[str, Any]] = None,
+    extra: Optional[Mapping[str, Any]] = None,
+    tracing: Optional[Any] = None,
+    metrics: Optional[Any] = None,
+    kafka_headers: Optional[Any] = None,
+    fallback_metadata: Optional[Mapping[str, Any]] = None,
+    lock: Optional[asyncio.Lock] = None,
+    error_max_chars: int = 4000,
+) -> None:
+    dlq_payload = build_standard_dlq_payload(
+        msg=msg,
+        worker=str(worker or "").strip() or worker,
+        stage=stage,
+        error=error,
+        attempt_count=int(attempt_count) if attempt_count is not None else None,
+        payload_text=payload_text,
+        payload_obj=payload_obj,
+        error_max_chars=int(error_max_chars),
+        extra=extra,
+    )
+    await publish_dlq_json(
+        producer=producer,
+        spec=dlq_spec,
+        msg=msg,
+        payload=dlq_payload,
+        tracing=tracing,
+        metrics=metrics,
+        kafka_headers=kafka_headers,
+        fallback_metadata=dict(fallback_metadata) if isinstance(fallback_metadata, Mapping) else None,
+        lock=lock,
+    )
+
+
 async def publish_dlq_json(
     *,
     producer: Any,
     spec: DlqPublishSpec,
     msg: Any,
     payload: Mapping[str, Any],
+    message_key: Optional[bytes] = None,
     tracing: Optional[Any] = None,
     metrics: Optional[Any] = None,
     kafka_headers: Optional[Any] = None,
@@ -121,9 +279,11 @@ async def publish_dlq_json(
     lock: Optional[asyncio.Lock] = None,
     span_attributes: Optional[Mapping[str, Any]] = None,
 ) -> None:
-    key = f"{getattr(msg, 'topic')()}:{int(getattr(msg, 'partition')())}:{int(getattr(msg, 'offset')())}".encode(
-        "utf-8"
-    )
+    key = message_key
+    if key is None:
+        key = f"{getattr(msg, 'topic')()}:{int(getattr(msg, 'partition')())}:{int(getattr(msg, 'offset')())}".encode(
+            "utf-8"
+        )
     value = json.dumps(dict(payload), ensure_ascii=False, default=str).encode("utf-8")
 
     with attach_context_from_kafka(
@@ -165,3 +325,54 @@ async def publish_dlq_json(
             metrics.record_event(str(spec.metric_event_name), action="published")
         except Exception:
             pass
+
+
+async def publish_contextual_dlq_json(
+    *,
+    producer: Any,
+    spec: DlqPublishSpec,
+    payload: Mapping[str, Any],
+    message_key: Optional[bytes] = None,
+    msg: Optional[Any] = None,
+    source_topic: Optional[str] = None,
+    source_partition: int = -1,
+    source_offset: int = -1,
+    tracing: Optional[Any] = None,
+    metrics: Optional[Any] = None,
+    kafka_headers: Optional[Any] = None,
+    fallback_metadata: Optional[Mapping[str, Any]] = None,
+    lock: Optional[asyncio.Lock] = None,
+    span_attributes: Optional[Mapping[str, Any]] = None,
+) -> None:
+    effective_msg = msg
+    if effective_msg is None:
+        effective_msg = _SyntheticKafkaMessage(
+            topic_name=str(source_topic or "unknown"),
+            partition_id=int(source_partition),
+            offset_id=int(source_offset),
+        )
+
+    attrs = span_attributes
+    if attrs is None and msg is None:
+        attrs = {
+            "messaging.system": "kafka",
+            "messaging.destination": spec.dlq_topic,
+            "messaging.destination_kind": "topic",
+            "messaging.source_name": str(source_topic or "unknown"),
+            "messaging.source_partition": int(source_partition),
+            "messaging.source_offset": int(source_offset),
+        }
+
+    await publish_dlq_json(
+        producer=producer,
+        spec=spec,
+        msg=effective_msg,
+        payload=payload,
+        message_key=message_key,
+        tracing=tracing,
+        metrics=metrics,
+        kafka_headers=kafka_headers,
+        fallback_metadata=fallback_metadata,
+        lock=lock,
+        span_attributes=attrs,
+    )

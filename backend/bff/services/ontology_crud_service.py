@@ -9,25 +9,22 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, Optional, Sequence
 
-import httpx
 from fastapi import HTTPException, Request, status
 from fastapi.responses import JSONResponse
 
-from bff.routers.ontology_ops import _localized_to_string, _transform_properties_for_oms
+from bff.routers.ontology_ops import _transform_properties_for_oms
+from bff.services.ontology_class_id_service import resolve_or_generate_class_id
 from bff.services.ontology_label_mapper_service import register_ontology_label_mappings
+from bff.services.oms_error_policy import raise_oms_boundary_exception
 from bff.services.oms_client import OMSClient
-from bff.utils.httpx_exceptions import raise_httpx_as_http_exception
 from bff.utils.request_headers import extract_forward_headers
 from shared.models.ontology import OntologyCreateRequestBFF, OntologyResponse, OntologyUpdateInput
 from shared.models.responses import ApiResponse
 from shared.security.input_sanitizer import (
-    SecurityViolationError,
     sanitize_input,
     validate_branch_name,
-    validate_class_id,
     validate_db_name,
 )
-from shared.utils.id_generator import generate_simple_id
 from shared.utils.label_mapper import LabelMapper
 from shared.utils.language import get_accept_language
 
@@ -72,14 +69,7 @@ async def create_ontology(
 
         ontology_dict = sanitize_input(body.model_dump(exclude_unset=True))
 
-        if ontology_dict.get("id"):
-            class_id = validate_class_id(ontology_dict["id"])
-        else:
-            class_id = generate_simple_id(
-                label=_localized_to_string(ontology_dict.get("label", "")),
-                use_timestamp_for_korean=True,
-                default_fallback="UnnamedClass",
-            )
+        class_id = resolve_or_generate_class_id(ontology_dict)
 
         ontology_dict["id"] = class_id
         _transform_properties_for_oms(ontology_dict, log_conversions=True)
@@ -109,18 +99,8 @@ async def create_ontology(
             ).to_dict(),
         )
 
-    except httpx.HTTPStatusError as exc:
-        raise_httpx_as_http_exception(exc)
-    except (SecurityViolationError, ValueError) as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    except HTTPException:
-        raise
     except Exception as exc:
-        logger.error("Failed to create ontology: %s", exc)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"온톨로지 생성 실패: {str(exc)}",
-        ) from exc
+        raise_oms_boundary_exception(exc=exc, action="온톨로지 생성", logger=logger)
 
 
 async def list_ontologies(
@@ -174,23 +154,15 @@ async def list_ontologies(
             "branch": branch,
         }
 
-    except httpx.HTTPStatusError as exc:
-        if exc.response.status_code == status.HTTP_404_NOT_FOUND:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"데이터베이스 '{db_name}'을(를) 찾을 수 없습니다",
-            ) from exc
-        raise_httpx_as_http_exception(exc)
-    except (SecurityViolationError, ValueError) as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    except HTTPException:
-        raise
     except Exception as exc:
-        logger.error("Failed to list ontologies: %s", exc)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"온톨로지 목록 조회 실패: {str(exc)}",
-        ) from exc
+        raise_oms_boundary_exception(
+            exc=exc,
+            action="온톨로지 목록 조회",
+            logger=logger,
+            custom_http_status_details={
+                status.HTTP_404_NOT_FOUND: f"데이터베이스 '{db_name}'을(를) 찾을 수 없습니다",
+            },
+        )
 
 
 async def get_ontology(
@@ -245,18 +217,8 @@ async def get_ontology(
         }
         return OntologyResponse(**ontology_base_data)
 
-    except httpx.HTTPStatusError as exc:
-        raise_httpx_as_http_exception(exc)
-    except (SecurityViolationError, ValueError) as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    except HTTPException:
-        raise
     except Exception as exc:
-        logger.error("Failed to get ontology: %s", exc)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"온톨로지 조회 실패: {str(exc)}",
-        ) from exc
+        raise_oms_boundary_exception(exc=exc, action="온톨로지 조회", logger=logger)
 
 
 async def validate_ontology_create(
@@ -272,18 +234,8 @@ async def validate_ontology_create(
         branch = validate_branch_name(branch)
         payload = sanitize_input(body.model_dump(exclude_unset=True))
         return await oms_client.validate_ontology_create(db_name, payload, branch=branch)
-    except httpx.HTTPStatusError as exc:
-        raise_httpx_as_http_exception(exc)
-    except (SecurityViolationError, ValueError) as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    except HTTPException:
-        raise
     except Exception as exc:
-        logger.error("Failed to validate ontology create: %s", exc)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"온톨로지 생성 검증 실패: {str(exc)}",
-        ) from exc
+        raise_oms_boundary_exception(exc=exc, action="온톨로지 생성 검증", logger=logger)
 
 
 async def validate_ontology_update(
@@ -306,18 +258,8 @@ async def validate_ontology_update(
         class_id = await _resolve_class_id(db_name=db_name, class_label=class_label, lang=lang, mapper=mapper)
         payload = sanitize_input(body.model_dump(exclude_unset=True))
         return await oms_client.validate_ontology_update(db_name, class_id, payload, branch=branch)
-    except httpx.HTTPStatusError as exc:
-        raise_httpx_as_http_exception(exc)
-    except (SecurityViolationError, ValueError) as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    except HTTPException:
-        raise
     except Exception as exc:
-        logger.error("Failed to validate ontology update: %s", exc)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"온톨로지 업데이트 검증 실패: {str(exc)}",
-        ) from exc
+        raise_oms_boundary_exception(exc=exc, action="온톨로지 업데이트 검증", logger=logger)
 
 
 async def update_ontology(
@@ -370,18 +312,8 @@ async def update_ontology(
             ).to_dict(),
         )
 
-    except httpx.HTTPStatusError as exc:
-        raise_httpx_as_http_exception(exc)
-    except (SecurityViolationError, ValueError) as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    except HTTPException:
-        raise
     except Exception as exc:
-        logger.error("Failed to update ontology: %s", exc)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"온톨로지 수정 실패: {str(exc)}",
-        ) from exc
+        raise_oms_boundary_exception(exc=exc, action="온톨로지 수정", logger=logger)
 
 
 async def delete_ontology(
@@ -429,18 +361,8 @@ async def delete_ontology(
             ).to_dict(),
         )
 
-    except httpx.HTTPStatusError as exc:
-        raise_httpx_as_http_exception(exc)
-    except (SecurityViolationError, ValueError) as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    except HTTPException:
-        raise
     except Exception as exc:
-        logger.error("Failed to delete ontology: %s", exc)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"온톨로지 삭제 실패: {str(exc)}",
-        ) from exc
+        raise_oms_boundary_exception(exc=exc, action="온톨로지 삭제", logger=logger)
 
 
 async def get_ontology_schema(
@@ -490,15 +412,5 @@ async def get_ontology_schema(
             return schema
         return ontology
 
-    except httpx.HTTPStatusError as exc:
-        raise_httpx_as_http_exception(exc)
-    except (SecurityViolationError, ValueError) as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    except HTTPException:
-        raise
     except Exception as exc:
-        logger.error("Failed to get ontology schema: %s", exc)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"온톨로지 스키마 조회 실패: {str(exc)}",
-        ) from exc
+        raise_oms_boundary_exception(exc=exc, action="온톨로지 스키마 조회", logger=logger)

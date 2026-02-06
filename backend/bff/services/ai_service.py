@@ -38,6 +38,7 @@ from shared.observability.request_context import get_correlation_id, get_request
 from shared.security.input_sanitizer import sanitize_input, validate_branch_name, validate_db_name
 from shared.services.storage.redis_service import RedisService
 from shared.services.agent.llm_gateway import LLMOutputValidationError, LLMRequestError, LLMUnavailableError
+from shared.utils.token_count import approx_token_count_json as _approx_token_count
 from shared.utils.language import detect_language_from_text, get_accept_language, normalize_language
 from shared.utils.llm_safety import digest_for_audit, mask_pii, sample_items
 
@@ -48,14 +49,6 @@ from shared.services.registries.agent_session_registry import AgentSessionRegist
 from shared.services.registries.dataset_registry import DatasetRegistry
 
 logger = logging.getLogger(__name__)
-
-
-def _approx_token_count(payload: Any) -> int:
-    try:
-        text = json.dumps(payload, ensure_ascii=False, separators=(",", ":"), default=str)
-    except Exception:
-        text = str(payload)
-    return max(1, int((len(text) + 3) / 4))
 
 
 def _trim_text(value: str, *, max_chars: int = 1200) -> str:

@@ -16,39 +16,37 @@ from fastapi import HTTPException, Request, status
 from bff.services.http_idempotency import get_idempotency_key as _get_idempotency_key
 from bff.services.http_idempotency import require_idempotency_key as _require_idempotency_key_impl
 from shared.dependencies.providers import AuditLogStoreDep
+from shared.security.principal_utils import actor_label, resolve_principal_from_headers
 from shared.services.registries.pipeline_registry import PipelineRegistry
 
 
 def _resolve_principal(request: Optional[Request]) -> tuple[str, str]:
-    if request is None:
+    headers = request.headers if request else None
+    principal_id_headers = (
+        "X-Principal-Id",
+        "X-Principal-ID",
+        "X-Actor",
+        "X-User-Id",
+        "X-User-ID",
+    )
+    if not headers or not any(str(headers.get(key) or "").strip() for key in principal_id_headers):
         return "service", "bff"
-    headers = request.headers
-    principal_id = (
-        headers.get("X-Principal-Id")
-        or headers.get("X-Principal-ID")
-        or headers.get("X-Actor")
-        or headers.get("X-User-Id")
-        or headers.get("X-User-ID")
-        or ""
-    ).strip()
-    principal_type = (
-        headers.get("X-Principal-Type")
-        or headers.get("X-Principal-TYPE")
-        or headers.get("X-Actor-Type")
-        or ""
-    ).strip()
-    if not principal_id:
-        return "service", "bff"
-    normalized_type = principal_type.lower()
-    if normalized_type not in {"user", "service"}:
-        normalized_type = "user"
-    return normalized_type, principal_id
+    return resolve_principal_from_headers(
+        headers,
+        principal_id_headers=principal_id_headers,
+        principal_type_headers=(
+            "X-Principal-Type",
+            "X-Principal-TYPE",
+            "X-Actor-Type",
+        ),
+        default_principal_type="user",
+        default_principal_id="bff",
+        allowed_principal_types={"user", "service"},
+    )
 
 
 def _actor_label(principal_type: str, principal_id: str) -> str:
-    principal_type = principal_type or "user"
-    principal_id = principal_id or "unknown"
-    return f"{principal_type}:{principal_id}"
+    return actor_label(principal_type, principal_id)
 
 
 async def _filter_pipeline_records_for_read_access(

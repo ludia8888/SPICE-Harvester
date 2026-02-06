@@ -22,6 +22,8 @@ from fastapi import HTTPException, status, Path, Depends
 # Modern dependency injection imports
 from shared.dependencies import get_container, ServiceContainer
 from shared.dependencies.providers import (
+    get_jsonld_converter as get_shared_jsonld_converter,
+    get_label_mapper as get_shared_label_mapper,
     RedisServiceDep,
     ElasticsearchServiceDep,
     SettingsDep
@@ -85,54 +87,6 @@ class OMSDependencyProvider:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail=f"TerminusDB 서비스가 초기화되지 않았습니다: {str(e)}",
-            )
-    
-    @staticmethod
-    async def get_jsonld_converter(
-        container: ServiceContainer = Depends(get_container)
-    ) -> JSONToJSONLDConverter:
-        """
-        Get JSON-LD converter from container
-        
-        This replaces the global jsonld_converter variable and get_jsonld_converter() function.
-        """
-        # Register JSONToJSONLDConverter factory if not already registered
-        if not container.has(JSONToJSONLDConverter):
-            def create_jsonld_converter(settings: ApplicationSettings) -> JSONToJSONLDConverter:
-                return JSONToJSONLDConverter()
-            
-            container.register_singleton(JSONToJSONLDConverter, create_jsonld_converter)
-        
-        try:
-            return await container.get(JSONToJSONLDConverter)
-        except Exception as e:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=f"JSON-LD 변환기가 초기화되지 않았습니다: {str(e)}",
-            )
-    
-    @staticmethod
-    async def get_label_mapper(
-        container: ServiceContainer = Depends(get_container)
-    ) -> LabelMapper:
-        """
-        Get label mapper from container
-        
-        This replaces the global label_mapper variable and get_label_mapper() function.
-        """
-        # Register LabelMapper factory if not already registered
-        if not container.has(LabelMapper):
-            def create_label_mapper(settings: ApplicationSettings) -> LabelMapper:
-                return LabelMapper()
-            
-            container.register_singleton(LabelMapper, create_label_mapper)
-        
-        try:
-            return await container.get(LabelMapper)
-        except Exception as e:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=f"레이블 매퍼가 초기화되지 않았습니다: {str(e)}",
             )
     
     @staticmethod
@@ -232,8 +186,8 @@ class OMSDependencyProvider:
 
 # Type-safe dependency annotations for cleaner injection
 TerminusServiceDep = Depends(OMSDependencyProvider.get_terminus_service)
-JSONLDConverterDep = Depends(OMSDependencyProvider.get_jsonld_converter)
-LabelMapperDep = Depends(OMSDependencyProvider.get_label_mapper)
+JSONLDConverterDep = Depends(get_shared_jsonld_converter)
+LabelMapperDep = Depends(get_shared_label_mapper)
 EventStoreDep = Depends(OMSDependencyProvider.get_event_store)
 CommandStatusServiceDep = Depends(OMSDependencyProvider.get_command_status_service)
 ProcessedEventRegistryDep = Depends(OMSDependencyProvider.get_processed_event_registry)
@@ -293,8 +247,8 @@ async def ensure_database_exists(
 
 # Convenience dependency annotations for backward compatibility
 get_terminus_service = OMSDependencyProvider.get_terminus_service
-get_jsonld_converter = OMSDependencyProvider.get_jsonld_converter
-get_label_mapper = OMSDependencyProvider.get_label_mapper
+get_jsonld_converter = get_shared_jsonld_converter
+get_label_mapper = get_shared_label_mapper
 get_redis_service = RedisServiceDep
 get_command_status_service = OMSDependencyProvider.get_command_status_service
 get_elasticsearch_service = ElasticsearchServiceDep

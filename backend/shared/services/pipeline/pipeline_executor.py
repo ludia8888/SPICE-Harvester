@@ -57,6 +57,7 @@ from shared.services.pipeline.pipeline_validation_utils import (
     validate_schema_contract,
 )
 from shared.utils.s3_uri import parse_s3_uri
+from shared.services.pipeline.pipeline_join_keys import normalize_join_key_list
 
 
 class PipelineExpectationError(ValueError):
@@ -952,6 +953,11 @@ def _pivot_table(table: PipelineTable, pivot_meta: Dict[str, Any]) -> PipelineTa
     return PipelineTable(columns=columns, rows=rows)
 
 
+def _nulls_last_sort_key(*, row: Dict[str, Any], column: str) -> Any:
+    value = row.get(column)
+    return (value is None, value)
+
+
 def _window_table(table: PipelineTable, window_meta: Dict[str, Any]) -> PipelineTable:
     partition_by = window_meta.get("partitionBy") or []
     order_by = window_meta.get("orderBy") or []
@@ -993,13 +999,10 @@ def _window_table(table: PipelineTable, window_meta: Dict[str, Any]) -> Pipeline
         # Multi-key sort with per-column direction (stable sort from last key to first).
         for col, direction in reversed(specs):
             reverse = direction == "desc"
-
-            def _key(row: Dict[str, Any], *, _col: str = col) -> Any:
-                value = row.get(_col)
-                # Keep NULLs last regardless of direction.
-                return (value is None, value)
-
-            bucket_sorted.sort(key=_key, reverse=reverse)
+            bucket_sorted.sort(
+                key=lambda row, _col=col: _nulls_last_sort_key(row=row, column=_col),
+                reverse=reverse,
+            )
         for idx, row in enumerate(bucket_sorted, start=1):
             next_row = dict(row)
             next_row["row_number"] = idx
@@ -1200,13 +1203,10 @@ def _sort_table(table: PipelineTable, columns: List[Any]) -> PipelineTable:
     # Multi-key sort with per-column direction (stable sort from last key to first).
     for col, direction in reversed(specs):
         reverse = direction == "desc"
-
-        def _key(row: Dict[str, Any], *, _col: str = col) -> Any:
-            value = row.get(_col)
-            # Keep NULLs last regardless of direction.
-            return (value is None, value)
-
-        rows_sorted.sort(key=_key, reverse=reverse)
+        rows_sorted.sort(
+            key=lambda row, _col=col: _nulls_last_sort_key(row=row, column=_col),
+            reverse=reverse,
+        )
 
     return PipelineTable(columns=table.columns, rows=rows_sorted)
 
@@ -1270,23 +1270,14 @@ def _join_tables(
         if limit is not None and limit <= 0:
             limit = None
 
-    def _normalize_keys(value: Any) -> List[str]:
-        if isinstance(value, list):
-            return [str(item).strip() for item in value if str(item).strip()]
-        if isinstance(value, tuple):
-            return [str(item).strip() for item in value if str(item).strip()]
-        if isinstance(value, str) and value.strip():
-            return [value.strip()]
-        return []
-
     join_type = (join_type or "inner").lower()
     if join_key and not left_key:
         left_key = join_key
     if join_key and not right_key:
         right_key = join_key
 
-    resolved_left = _normalize_keys(left_keys)
-    resolved_right = _normalize_keys(right_keys)
+    resolved_left = normalize_join_key_list(left_keys)
+    resolved_right = normalize_join_key_list(right_keys)
     if left_key and not resolved_left:
         resolved_left = [left_key]
     if right_key and not resolved_right:

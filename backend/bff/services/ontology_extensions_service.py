@@ -19,6 +19,7 @@ from bff.schemas.ontology_extensions_requests import (
     OntologyResourceRequest,
 )
 from bff.services.oms_client import OMSClient
+from bff.services.ontology_occ_guard_service import resolve_expected_head_commit
 from bff.utils.httpx_exceptions import raise_httpx_as_http_exception
 from shared.models.requests import BranchCreateRequest
 from shared.security.input_sanitizer import SecurityViolationError, sanitize_input, validate_db_name
@@ -33,6 +34,8 @@ T = TypeVar("T")
 async def _call_oms(*, action: str, func: Callable[[], Awaitable[T]]) -> T:
     try:
         return await func()
+    except HTTPException:
+        raise
     except SecurityViolationError as exc:
         logger.warning("Security violation in %s: %s", action, exc)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=_SECURITY_VIOLATION_DETAIL) from exc
@@ -74,14 +77,24 @@ async def create_resource(
     branch: str,
     expected_head_commit: Optional[str],
 ) -> Dict[str, Any]:
+    resolved_db_name = validate_db_name(db_name)
+    resolved_expected_head = await _call_oms(
+        action="resolve ontology expected head commit",
+        func=lambda: resolve_expected_head_commit(
+            oms_client=oms_client,
+            db_name=resolved_db_name,
+            branch=branch,
+            expected_head_commit=expected_head_commit,
+        ),
+    )
     return await _call_oms(
         action="create ontology resource",
         func=lambda: oms_client.create_ontology_resource(
-            validate_db_name(db_name),
+            resolved_db_name,
             resource_type=resource_type,
             payload=sanitize_input(payload.model_dump(exclude_unset=True)),
             branch=branch,
-            expected_head_commit=expected_head_commit,
+            expected_head_commit=resolved_expected_head,
         ),
     )
 
@@ -96,15 +109,25 @@ async def update_resource(
     branch: str,
     expected_head_commit: Optional[str],
 ) -> Dict[str, Any]:
+    resolved_db_name = validate_db_name(db_name)
+    resolved_expected_head = await _call_oms(
+        action="resolve ontology expected head commit",
+        func=lambda: resolve_expected_head_commit(
+            oms_client=oms_client,
+            db_name=resolved_db_name,
+            branch=branch,
+            expected_head_commit=expected_head_commit,
+        ),
+    )
     return await _call_oms(
         action="update ontology resource",
         func=lambda: oms_client.update_ontology_resource(
-            validate_db_name(db_name),
+            resolved_db_name,
             resource_type=resource_type,
             resource_id=resource_id,
             payload=sanitize_input(payload.model_dump(exclude_unset=True)),
             branch=branch,
-            expected_head_commit=expected_head_commit,
+            expected_head_commit=resolved_expected_head,
         ),
     )
 
@@ -137,14 +160,24 @@ async def delete_resource(
     branch: str,
     expected_head_commit: Optional[str],
 ) -> Dict[str, Any]:
+    resolved_db_name = validate_db_name(db_name)
+    resolved_expected_head = await _call_oms(
+        action="resolve ontology expected head commit",
+        func=lambda: resolve_expected_head_commit(
+            oms_client=oms_client,
+            db_name=resolved_db_name,
+            branch=branch,
+            expected_head_commit=expected_head_commit,
+        ),
+    )
     return await _call_oms(
         action="delete ontology resource",
         func=lambda: oms_client.delete_ontology_resource(
-            validate_db_name(db_name),
+            resolved_db_name,
             resource_type=resource_type,
             resource_id=resource_id,
             branch=branch,
-            expected_head_commit=expected_head_commit,
+            expected_head_commit=resolved_expected_head,
         ),
     )
 

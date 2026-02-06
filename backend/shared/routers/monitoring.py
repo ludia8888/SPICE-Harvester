@@ -23,20 +23,13 @@ from starlette.responses import RedirectResponse
 
 from shared.config.settings import ApplicationSettings
 from shared.dependencies import get_container, ServiceContainer
-from shared.dependencies.providers import InitializedBackgroundTaskManagerDep
+from shared.dependencies.providers import InitializedBackgroundTaskManagerDep, get_settings_dependency
 from shared.config.settings import get_settings as get_settings_ssot
 from shared.errors.error_envelope import build_error_envelope
 from shared.errors.error_types import ErrorCategory, ErrorCode
 from shared.observability.request_context import get_correlation_id, get_request_id
 
 router = APIRouter(tags=["Monitoring"])
-
-
-# Dependency injection for monitoring endpoints
-async def get_settings() -> ApplicationSettings:
-    """Get application settings for monitoring"""
-    return get_settings_ssot()
-
 
 def _resolve_service_name(request: Optional[Request]) -> str:
     if request is not None:
@@ -109,7 +102,7 @@ async def basic_health_check():
            description="Comprehensive health check with service details")
 async def detailed_health_check(
     include_metrics: bool = Query(False, description="Include performance metrics"),
-    settings: ApplicationSettings = Depends(get_settings),
+    settings: ApplicationSettings = Depends(get_settings_dependency),
     container: ServiceContainer = Depends(get_container),
 ):
     """
@@ -274,7 +267,7 @@ async def get_service_status(
            description="Current application configuration for debugging")
 async def get_configuration_overview(
     include_sensitive: bool = Query(False, description="Include sensitive configuration values"),
-    settings: ApplicationSettings = Depends(get_settings)
+    settings: ApplicationSettings = Depends(get_settings_dependency)
 ):
     """
     Get current application configuration

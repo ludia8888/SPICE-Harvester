@@ -28,6 +28,10 @@ from bff.routers.pipeline_shared import (
     _resolve_principal,
 )
 from bff.services.oms_client import OMSClient
+from bff.services.ontology_occ_guard_service import (
+    fetch_branch_head_commit_id,
+    resolve_branch_head_commit_with_bootstrap,
+)
 from shared.config.app_config import AppConfig
 from shared.dependencies.providers import AuditLogStoreDep, LineageStoreDep
 from shared.errors.error_envelope import build_error_envelope
@@ -404,61 +408,25 @@ async def build_pipeline(
         ontology_branch = branch or pipeline.branch or "main"
         ontology_head_commit_id: Optional[str] = None
         try:
-            head_response = await oms_client.get_version_head(db_name, branch=ontology_branch)
-            if isinstance(head_response, dict) and head_response.get("status") == "success":
-                data = head_response.get("data") if isinstance(head_response.get("data"), dict) else {}
-                ontology_head_commit_id = str(data.get("head_commit_id") or "").strip() or None
+            ontology_head_commit_id = await resolve_branch_head_commit_with_bootstrap(
+                oms_client=oms_client,
+                db_name=db_name,
+                branch=ontology_branch,
+                source_branch="main",
+                max_attempts=5,
+                initial_backoff_seconds=0.15,
+                max_backoff_seconds=1.0,
+                warning_logger=logger,
+            )
         except httpx.HTTPStatusError as exc:
-            # Enterprise safety: if the ontology branch doesn't exist yet, create it and retry once.
-            # This prevents "build succeeds but deploy fails" due to missing ontology.commit in build output.
             status_code = getattr(getattr(exc, "response", None), "status_code", None)
-            if status_code == 404 and ontology_branch != "main":
-                try:
-                    try:
-                        await oms_client.create_branch(
-                            db_name,
-                            {"branch_name": ontology_branch, "from_branch": "main"},
-                        )
-                    except httpx.HTTPStatusError as create_exc:
-                        create_status = getattr(getattr(create_exc, "response", None), "status_code", None)
-                        # Branch may already exist (race). Still retry head resolution below.
-                        if create_status != 409:
-                            raise
-
-                    backoff_seconds = 0.15
-                    for attempt in range(5):
-                        try:
-                            head_response = await oms_client.get_version_head(db_name, branch=ontology_branch)
-                            if isinstance(head_response, dict) and head_response.get("status") == "success":
-                                data = head_response.get("data") if isinstance(head_response.get("data"), dict) else {}
-                                ontology_head_commit_id = str(data.get("head_commit_id") or "").strip() or None
-                            if ontology_head_commit_id:
-                                break
-                        except httpx.HTTPStatusError as head_exc:
-                            head_status = getattr(getattr(head_exc, "response", None), "status_code", None)
-                            if head_status == 404 and attempt < 4:
-                                await asyncio.sleep(backoff_seconds)
-                                backoff_seconds = min(backoff_seconds * 2, 1.0)
-                                continue
-                            raise
-                        if attempt < 4 and not ontology_head_commit_id:
-                            await asyncio.sleep(backoff_seconds)
-                            backoff_seconds = min(backoff_seconds * 2, 1.0)
-                except Exception as inner_exc:
-                    logger.warning(
-                        "Failed to ensure ontology branch (db=%s branch=%s): %s",
-                        db_name,
-                        ontology_branch,
-                        inner_exc,
-                    )
-            else:
-                logger.warning(
-                    "Failed to resolve ontology head commit (db=%s branch=%s http=%s): %s",
-                    db_name,
-                    ontology_branch,
-                    status_code,
-                    exc,
-                )
+            logger.warning(
+                "Failed to resolve ontology head commit (db=%s branch=%s http=%s): %s",
+                db_name,
+                ontology_branch,
+                status_code,
+                exc,
+            )
         except Exception as exc:
             logger.warning("Failed to resolve ontology head commit (db=%s branch=%s): %s", db_name, ontology_branch, exc)
 
@@ -928,10 +896,11 @@ async def deploy_pipeline(
                             },
                         )
             try:
-                head_response = await oms_client.get_version_head(db_name, branch=resolved_branch)
-                head_data = head_response.get("data") if isinstance(head_response, dict) else {}
-                prod_head_commit = str(head_data.get("head_commit_id") or "").strip() if isinstance(head_data, dict) else ""
-                prod_head_commit = prod_head_commit or None
+                prod_head_commit = await fetch_branch_head_commit_id(
+                    oms_client=oms_client,
+                    db_name=db_name,
+                    branch=resolved_branch,
+                )
             except Exception as exc:
                 raise HTTPException(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

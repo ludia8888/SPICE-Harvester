@@ -14,10 +14,12 @@ import redis.asyncio as redis
 from redis.asyncio.connection import ConnectionPool
 from redis.exceptions import RedisError
 
+from shared.services.storage.connectivity import AsyncClientPingMixin
+
 logger = logging.getLogger(__name__)
 
 
-class RedisService:
+class RedisService(AsyncClientPingMixin):
     """
     Async Redis client service with connection pooling and error handling.
     
@@ -29,6 +31,8 @@ class RedisService:
     - Pub/Sub support for real-time updates
     """
     
+    _ping_exception_types = (RedisError,)
+
     def __init__(
         self,
         host: str = "redis",
@@ -380,13 +384,6 @@ class RedisService:
         """Get keys matching pattern."""
         return await self.client.keys(pattern)
         
-    async def ping(self) -> bool:
-        """Check Redis connection."""
-        try:
-            return await self.client.ping()
-        except RedisError:
-            return False
-    
     async def cleanup_listeners(self) -> None:
         """Clean up all active pub/sub listeners."""
         if hasattr(self, '_listener_tasks'):

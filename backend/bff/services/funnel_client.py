@@ -11,11 +11,12 @@ from typing import Any, Dict, List, Optional
 import httpx
 
 from shared.config.settings import build_client_ssl_config, get_settings
+from bff.services.base_http_client import ManagedAsyncClient
 
 logger = logging.getLogger(__name__)
 
 
-class FunnelClient:
+class FunnelClient(ManagedAsyncClient):
     """Funnel HTTP 클라이언트"""
 
     def __init__(self, base_url: str = None):
@@ -37,10 +38,6 @@ class FunnelClient:
     @staticmethod
     def _resolve_excel_timeout_seconds() -> float:
         return float(get_settings().services.funnel_excel_timeout_seconds)
-
-    async def close(self):
-        """클라이언트 연결 종료"""
-        await self.client.aclose()
 
     async def check_health(self) -> bool:
         """Funnel 서비스 상태 확인"""

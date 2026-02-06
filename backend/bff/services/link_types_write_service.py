@@ -22,11 +22,17 @@ from bff.services.link_types_mapping_service import (
     normalize_spec_type,
     resolve_object_type_contract,
 )
+from bff.services.input_validation_service import (
+    sanitized_payload,
+    validated_branch_name,
+    validated_db_name,
+)
 from bff.services.oms_client import OMSClient
+from bff.services.ontology_occ_guard_service import resolve_expected_head_commit
 from bff.utils.httpx_exceptions import raise_httpx_as_http_exception
 from shared.models.requests import ApiResponse
 from shared.security.database_access import DATA_ENGINEER_ROLES, DOMAIN_MODEL_ROLES
-from shared.security.input_sanitizer import SecurityViolationError, sanitize_input, validate_branch_name, validate_db_name
+from shared.security.input_sanitizer import SecurityViolationError
 from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.services.registries.objectify_registry import ObjectifyRegistry
 
@@ -35,27 +41,6 @@ logger = logging.getLogger(__name__)
 EnforceRoleFn = Callable[[Request], Awaitable[None]]
 CreateMappingSpecFn = Callable[..., Awaitable[Dict[str, Any]]]
 EnqueueObjectifyJobFn = Callable[..., Awaitable[Optional[str]]]
-
-
-def _validated_db_name(db_name: str) -> str:
-    try:
-        return validate_db_name(db_name)
-    except (SecurityViolationError, ValueError) as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-
-
-def _validated_branch(branch: str) -> str:
-    try:
-        return validate_branch_name(branch)
-    except (SecurityViolationError, ValueError) as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-
-
-def _sanitize_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    try:
-        return sanitize_input(payload)
-    except SecurityViolationError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
 async def _require_role(
@@ -111,7 +96,7 @@ async def create_link_type(
     body: LinkTypeRequest,
     request: Request,
     branch: str,
-    expected_head_commit: str,
+    expected_head_commit: Optional[str],
     oms_client: OMSClient,
     dataset_registry: DatasetRegistry,
     objectify_registry: ObjectifyRegistry,
@@ -120,10 +105,10 @@ async def create_link_type(
     enqueue_job: EnqueueObjectifyJobFn,
 ) -> ApiResponse:
     try:
-        db_name = _validated_db_name(db_name)
-        branch = _validated_branch(branch)
+        db_name = validated_db_name(db_name)
+        branch = validated_branch_name(branch)
         await _require_role(request=request, db_name=db_name, roles=DOMAIN_MODEL_ROLES, enforce_role=enforce_role)
-        payload = _sanitize_payload(body.model_dump(by_alias=True))
+        payload = sanitized_payload(body.model_dump(by_alias=True))
 
         link_type_id = _require_non_empty(payload.get("id"), detail="id is required")
         source_class = _require_non_empty(payload.get("from"), detail="from/to are required")
@@ -238,13 +223,20 @@ async def create_link_type(
             },
         }
 
+        resolved_expected_head = await resolve_expected_head_commit(
+            oms_client=oms_client,
+            db_name=db_name,
+            branch=branch,
+            expected_head_commit=expected_head_commit,
+        )
+
         try:
             link_response = await oms_client.create_ontology_resource(
                 db_name,
                 resource_type="link_type",
                 payload=link_payload,
                 branch=branch,
-                expected_head_commit=expected_head_commit,
+                expected_head_commit=resolved_expected_head,
             )
         except httpx.HTTPStatusError as exc:
             raise_httpx_as_http_exception(exc)
@@ -306,7 +298,7 @@ async def update_link_type(
     body: LinkTypeUpdateRequest,
     request: Request,
     branch: str,
-    expected_head_commit: str,
+    expected_head_commit: Optional[str],
     oms_client: OMSClient,
     dataset_registry: DatasetRegistry,
     objectify_registry: ObjectifyRegistry,
@@ -315,8 +307,8 @@ async def update_link_type(
     enqueue_job: EnqueueObjectifyJobFn,
 ) -> ApiResponse:
     try:
-        db_name = _validated_db_name(db_name)
-        branch = _validated_branch(branch)
+        db_name = validated_db_name(db_name)
+        branch = validated_branch_name(branch)
         await _require_role(request=request, db_name=db_name, roles=DOMAIN_MODEL_ROLES, enforce_role=enforce_role)
         link_type_id = _require_non_empty(link_type_id, detail="link_type_id is required")
 
@@ -324,7 +316,7 @@ async def update_link_type(
         if not existing:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Relationship spec not found")
 
-        payload = _sanitize_payload(body.model_dump(exclude_unset=True))
+        payload = sanitized_payload(body.model_dump(exclude_unset=True))
         relationship_spec_payload = (
             payload.get("relationship_spec") if isinstance(payload.get("relationship_spec"), dict) else None
         )
@@ -471,13 +463,20 @@ async def update_link_type(
             }
         )
 
+        resolved_expected_head = await resolve_expected_head_commit(
+            oms_client=oms_client,
+            db_name=db_name,
+            branch=branch,
+            expected_head_commit=expected_head_commit,
+        )
+
         updated_resource = await oms_client.update_ontology_resource(
             db_name,
             resource_type="link_type",
             resource_id=link_type_id,
             payload=resource,
             branch=branch,
-            expected_head_commit=expected_head_commit,
+            expected_head_commit=resolved_expected_head,
         )
 
         if payload.get("trigger_index"):
@@ -522,7 +521,7 @@ async def reindex_link_type(
     enqueue_job: EnqueueObjectifyJobFn,
 ) -> ApiResponse:
     try:
-        db_name = _validated_db_name(db_name)
+        db_name = validated_db_name(db_name)
         await _require_role(request=request, db_name=db_name, roles=DATA_ENGINEER_ROLES, enforce_role=enforce_role)
         link_type_id = _require_non_empty(link_type_id, detail="link_type_id is required")
 
@@ -550,4 +549,3 @@ async def reindex_link_type(
     except Exception as exc:
         logger.error("Failed to reindex link type: %s", exc)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
-

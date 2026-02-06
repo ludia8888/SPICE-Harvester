@@ -7,7 +7,25 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator
 
 
-class GoogleSheetPreviewRequest(BaseModel):
+def _validate_google_sheet_url_field(value: HttpUrl) -> HttpUrl:
+    from ..validators import get_validator
+
+    validator = get_validator("google_sheets_url")
+    if validator:
+        result = validator.validate(str(value))
+        if not result.is_valid:
+            raise ValueError(result.message)
+    return value
+
+
+class GoogleSheetUrlValidatedModel(BaseModel):
+    @field_validator("sheet_url", check_fields=False)
+    @classmethod
+    def validate_google_sheet_url(cls, v: HttpUrl) -> HttpUrl:
+        return _validate_google_sheet_url_field(v)
+
+
+class GoogleSheetPreviewRequest(GoogleSheetUrlValidatedModel):
     """Google Sheet preview request model"""
 
     sheet_url: HttpUrl = Field(
@@ -22,19 +40,6 @@ class GoogleSheetPreviewRequest(BaseModel):
     connection_id: Optional[str] = Field(
         default=None, description="Optional OAuth connection id"
     )
-
-    @field_validator("sheet_url")
-    @classmethod
-    def validate_google_sheet_url(cls, v):
-        """Validate Google Sheets URL format"""
-        from ..validators import get_validator
-
-        validator = get_validator("google_sheets_url")
-        if validator:
-            result = validator.validate(str(v))
-            if not result.is_valid:
-                raise ValueError(result.message)
-        return v
 
 
 class GoogleSheetPreviewResponse(BaseModel):
@@ -107,7 +112,7 @@ class GoogleSheetError(BaseModel):
     detail: Optional[str] = Field(None, description="Detailed error information")
 
 
-class GoogleSheetRegisterRequest(BaseModel):
+class GoogleSheetRegisterRequest(GoogleSheetUrlValidatedModel):
     """Google Sheet registration request model"""
 
     sheet_url: HttpUrl = Field(
@@ -121,19 +126,6 @@ class GoogleSheetRegisterRequest(BaseModel):
     polling_interval: Optional[int] = Field(
         default=300, ge=60, le=3600, description="Polling interval in seconds (60-3600)"
     )
-
-    @field_validator("sheet_url")
-    @classmethod
-    def validate_google_sheet_url(cls, v):
-        """Validate Google Sheets URL format"""
-        from ..validators import get_validator
-
-        validator = get_validator("google_sheets_url")
-        if validator:
-            result = validator.validate(str(v))
-            if not result.is_valid:
-                raise ValueError(result.message)
-        return v
 
 
 class GoogleSheetRegisterResponse(BaseModel):

@@ -371,45 +371,20 @@ def infer_xsd_type_from_values(values: Iterable[Any]) -> str:
     if not sample:
         return "xsd:string"
 
-    def is_bool(value: Any) -> bool:
-        if isinstance(value, bool):
-            return True
-        if isinstance(value, str):
-            return value.strip().lower() in {"true", "false"}
-        return False
+    from shared.services.pipeline.pipeline_value_predicates import (
+        is_bool_like,
+        is_datetime_like,
+        is_decimal_like,
+        is_int_like,
+    )
 
-    def is_int(value: Any) -> bool:
-        if isinstance(value, bool):
-            return False
-        if isinstance(value, int):
-            return True
-        if isinstance(value, str):
-            return parse_int_text(value) is not None
-        return False
-
-    def is_decimal(value: Any) -> bool:
-        if isinstance(value, bool):
-            return False
-        if isinstance(value, float):
-            return True
-        if isinstance(value, str):
-            return parse_decimal_text(value) is not None
-        return False
-
-    def is_datetime(value: Any) -> bool:
-        if isinstance(value, datetime):
-            return True
-        if isinstance(value, str):
-            return parse_datetime_text(value, allow_ambiguous=False) is not None
-        return False
-
-    if all(is_bool(value) for value in sample):
+    if all(is_bool_like(value) for value in sample):
         return "xsd:boolean"
-    if all(is_int(value) for value in sample):
+    if all(is_int_like(value) for value in sample):
         return "xsd:integer"
-    if all(is_decimal(value) for value in sample):
+    if all(is_decimal_like(value) for value in sample):
         return "xsd:decimal"
-    if all(is_datetime(value) for value in sample):
+    if all(is_datetime_like(value, allow_ambiguous=False) for value in sample):
         return "xsd:dateTime"
     return "xsd:string"
 

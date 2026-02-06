@@ -10,30 +10,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-import json
 from typing import Any, Dict, List, Optional
 
 import asyncpg
 
 from shared.services.registries.postgres_schema_registry import PostgresSchemaRegistry
-from shared.utils.json_utils import normalize_json_payload
-
-
-def _coerce_json(value: Any) -> Dict[str, Any]:
-    if value is None:
-        return {}
-    if isinstance(value, dict):
-        return dict(value)
-    if isinstance(value, str):
-        raw = value.strip()
-        if not raw:
-            return {}
-        try:
-            parsed = json.loads(raw)
-        except Exception:
-            return {}
-        return dict(parsed) if isinstance(parsed, dict) else {}
-    return {}
+from shared.utils.json_utils import coerce_json_dict, normalize_json_payload
 
 
 @dataclass(frozen=True)
@@ -99,7 +81,7 @@ class AgentModelRegistry(PostgresSchemaRegistry):
             max_output_tokens=row.get("max_output_tokens"),
             prompt_per_1k=row.get("prompt_per_1k"),
             completion_per_1k=row.get("completion_per_1k"),
-            metadata=_coerce_json(row.get("metadata")),
+            metadata=coerce_json_dict(row.get("metadata"), parsed_fallback_key=None),
             created_at=row["created_at"],
             updated_at=row["updated_at"],
         )

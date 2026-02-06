@@ -14,73 +14,12 @@ import subprocess
 import importlib.util
 from pathlib import Path
 from typing import Dict, List, Set, Optional, Tuple
-try:
-    import tomllib  # Python 3.11+
-except ImportError:
-    try:
-        import tomli as tomllib  # Fallback for older Python
-    except ImportError:
-        import toml as tomllib  # Last resort fallback
 import json
 
 # Add backend directory to path
 backend_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(backend_dir))
-
-def parse_requirements_txt(file_path: Path) -> Dict[str, Optional[str]]:
-    """Parse requirements.txt file and return dependencies with versions"""
-    deps = {}
-    if not file_path.exists():
-        return deps
-    
-    with open(file_path, 'r') as f:
-        for line in f:
-            line = line.strip()
-            if line and not line.startswith('#') and not line.startswith('-e'):
-                if '==' in line:
-                    name, version = line.split('==', 1)
-                    deps[name] = version
-                elif '>=' in line:
-                    name, version = line.split('>=', 1)
-                    deps[name] = f">={version}"
-                else:
-                    deps[line] = None
-    return deps
-
-def parse_pyproject_toml(file_path: Path) -> Dict[str, str]:
-    """Parse pyproject.toml dependencies"""
-    deps = {}
-    if not file_path.exists():
-        return deps
-    
-    try:
-        with open(file_path, 'rb') as f:
-            data = tomllib.load(f)
-        
-        project_deps = data.get('project', {}).get('dependencies', [])
-        for dep in project_deps:
-            if '>=' in dep:
-                name, version = dep.split('>=', 1)
-                deps[name] = f">={version}"
-            elif '==' in dep:
-                name, version = dep.split('==', 1)  
-                deps[name] = version
-            else:
-                # Handle special cases like redis[hiredis]
-                if '[' in dep:
-                    name = dep.split('[')[0]
-                    if '>=' in dep:
-                        version = dep.split('>=')[1]
-                        deps[name] = f">={version}"
-                    else:
-                        deps[name] = None
-                else:
-                    deps[dep] = None
-        
-        return deps
-    except Exception as e:
-        print(f"Error parsing {file_path}: {e}")
-        return {}
+from scripts.dependency_parsing import parse_pyproject_toml, parse_requirements_txt
 
 def check_service_imports(service_dir: Path) -> Set[str]:
     """Check what external libraries a service actually imports"""

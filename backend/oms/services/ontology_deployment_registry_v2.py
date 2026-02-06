@@ -6,18 +6,17 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from datetime import datetime
+from typing import Any, Dict, Optional
 from uuid import uuid4
 
 from oms.database.postgres import db as postgres_db
 from oms.services.ontology_deploy_outbox_store import (
-    OntologyDeployOutboxItem,
     OntologyDeployOutboxStore,
     OntologyDeployOutboxTableSpec,
 )
-from shared.config.app_config import AppConfig
-from shared.utils.deterministic_ids import deterministic_uuid5_str
+from oms.services.ontology_deployment_registry_base import BaseOntologyDeploymentRegistry
+from shared.utils.json_utils import json_default, maybe_decode_json
 
 logger = logging.getLogger(__name__)
 
@@ -30,83 +29,45 @@ _OUTBOX_STORE = OntologyDeployOutboxStore(
 )
 
 
-class OntologyDeploymentRegistryV2:
+class OntologyDeploymentRegistryV2(BaseOntologyDeploymentRegistry):
     """Record ontology deployments in Postgres (v2 schema)."""
 
-    @staticmethod
-    def _json_default(value: Any) -> Any:
-        if isinstance(value, datetime):
-            return value.isoformat()
-        return str(value)
-
-    @staticmethod
-    def _maybe_decode_json(value: Any) -> Any:
-        if isinstance(value, str):
-            try:
-                return json.loads(value)
-            except Exception:
-                return value
-        return value
-
-    async def ensure_schema(self) -> None:
-        await postgres_db.execute(
-            """
-            CREATE TABLE IF NOT EXISTS ontology_deployments_v2 (
-                deployment_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                db_name VARCHAR(255) NOT NULL,
-                target_branch VARCHAR(255) NOT NULL,
-                ontology_commit_id VARCHAR(255) NOT NULL,
-                snapshot_rid VARCHAR(255),
-                proposal_id UUID,
-                status VARCHAR(50) NOT NULL DEFAULT 'succeeded'
-                    CHECK (status IN ('pending', 'running', 'succeeded', 'failed')),
-                gate_policy JSONB,
-                health_summary JSONB,
-                deployed_by VARCHAR(255) DEFAULT 'system',
-                deployed_at TIMESTAMPTZ DEFAULT NOW() NOT NULL,
-                error TEXT,
-                metadata JSONB
-            );
-            """
-        )
-        await postgres_db.execute(
-            """
-            CREATE TABLE IF NOT EXISTS ontology_deploy_outbox_v2 (
-                outbox_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                deployment_id UUID NOT NULL REFERENCES ontology_deployments_v2(deployment_id) ON DELETE CASCADE,
-                payload JSONB NOT NULL,
-                status TEXT NOT NULL DEFAULT 'pending',
-                retry_count INTEGER NOT NULL DEFAULT 0,
-                last_error TEXT,
-                claimed_by TEXT,
-                claimed_at TIMESTAMPTZ,
-                next_attempt_at TIMESTAMPTZ,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            );
-            """
-        )
-        await postgres_db.execute(
-            "CREATE INDEX IF NOT EXISTS idx_ontology_deployments_v2_db ON ontology_deployments_v2(db_name);"
-        )
-        await postgres_db.execute(
-            "CREATE INDEX IF NOT EXISTS idx_ontology_deployments_v2_target_branch ON ontology_deployments_v2(target_branch);"
-        )
-        await postgres_db.execute(
-            "CREATE INDEX IF NOT EXISTS idx_ontology_deployments_v2_proposal ON ontology_deployments_v2(proposal_id);"
-        )
-        await postgres_db.execute(
-            "CREATE INDEX IF NOT EXISTS idx_ontology_deployments_v2_created_at ON ontology_deployments_v2(deployed_at DESC);"
-        )
-        await postgres_db.execute(
-            "CREATE INDEX IF NOT EXISTS idx_ontology_deploy_outbox_v2_status ON ontology_deploy_outbox_v2(status, next_attempt_at, created_at);"
-        )
-        await postgres_db.execute(
-            "CREATE INDEX IF NOT EXISTS idx_ontology_deploy_outbox_v2_claimed ON ontology_deploy_outbox_v2(status, claimed_at);"
-        )
-        await postgres_db.execute(
-            "CREATE INDEX IF NOT EXISTS idx_ontology_deploy_outbox_v2_deployment ON ontology_deploy_outbox_v2(deployment_id, status, created_at);"
-        )
+    DEPLOYMENT_TABLE = "ontology_deployments_v2"
+    OUTBOX_TABLE = "ontology_deploy_outbox_v2"
+    OUTBOX_STORE = _OUTBOX_STORE
+    DEPLOYMENT_TABLE_DDL = """
+        CREATE TABLE IF NOT EXISTS ontology_deployments_v2 (
+            deployment_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            db_name VARCHAR(255) NOT NULL,
+            target_branch VARCHAR(255) NOT NULL,
+            ontology_commit_id VARCHAR(255) NOT NULL,
+            snapshot_rid VARCHAR(255),
+            proposal_id UUID,
+            status VARCHAR(50) NOT NULL DEFAULT 'succeeded'
+                CHECK (status IN ('pending', 'running', 'succeeded', 'failed')),
+            gate_policy JSONB,
+            health_summary JSONB,
+            deployed_by VARCHAR(255) DEFAULT 'system',
+            deployed_at TIMESTAMPTZ DEFAULT NOW() NOT NULL,
+            error TEXT,
+            metadata JSONB
+        );
+    """
+    OUTBOX_TABLE_DDL = """
+        CREATE TABLE IF NOT EXISTS ontology_deploy_outbox_v2 (
+            outbox_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            deployment_id UUID NOT NULL REFERENCES ontology_deployments_v2(deployment_id) ON DELETE CASCADE,
+            payload JSONB NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            retry_count INTEGER NOT NULL DEFAULT 0,
+            last_error TEXT,
+            claimed_by TEXT,
+            claimed_at TIMESTAMPTZ,
+            next_attempt_at TIMESTAMPTZ,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+    """
 
     @staticmethod
     def build_deploy_event_payload(
@@ -122,16 +83,6 @@ class OntologyDeploymentRegistryV2:
         health_summary: Optional[Dict[str, Any]],
         occurred_at: Optional[datetime] = None,
     ) -> Dict[str, Any]:
-        event_id = deterministic_uuid5_str(f"ontology-deploy:{deployment_id}")
-        occurred_at = occurred_at or datetime.now(timezone.utc)
-        metadata = {
-            "kind": "domain",
-            "kafka_topic": AppConfig.ONTOLOGY_EVENTS_TOPIC,
-            "ontology": {
-                "ref": f"branch:{target_branch}",
-                "commit": ontology_commit_id,
-            },
-        }
         data = {
             "deployment_id": deployment_id,
             "db_name": db_name,
@@ -142,16 +93,14 @@ class OntologyDeploymentRegistryV2:
             "gate_policy": gate_policy,
             "health_summary": health_summary,
         }
-        return {
-            "event_id": event_id,
-            "event_type": "ONTOLOGY_DEPLOYED",
-            "aggregate_type": "OntologyDeployment",
-            "aggregate_id": deployment_id,
-            "occurred_at": occurred_at,
-            "actor": deployed_by,
-            "data": data,
-            "metadata": metadata,
-        }
+        return OntologyDeploymentRegistryV2.build_common_event_payload(
+            deployment_id=deployment_id,
+            target_branch=target_branch,
+            ontology_commit_id=ontology_commit_id,
+            deployed_by=deployed_by,
+            data=data,
+            occurred_at=occurred_at,
+        )
 
     async def record_deployment(
         self,
@@ -224,7 +173,7 @@ class OntologyDeploymentRegistryV2:
                 """,
                 str(uuid4()),
                 deployment_id,
-                json.dumps(payload, default=self._json_default),
+                json.dumps(payload, default=json_default),
             )
 
         return {
@@ -239,6 +188,10 @@ class OntologyDeploymentRegistryV2:
             "gate_policy": gate_policy,
             "health_summary": health_summary,
         }
+
+    def _normalize_claimed_payload(self, payload: Any) -> Dict[str, Any]:
+        decoded = maybe_decode_json(payload)
+        return decoded if isinstance(decoded, dict) else {}
 
     async def get_latest_deployed_commit(
         self,
@@ -277,61 +230,8 @@ class OntologyDeploymentRegistryV2:
             "status": row["status"],
             "deployed_by": row["deployed_by"],
             "deployed_at": row["deployed_at"].isoformat() if row["deployed_at"] else None,
-            "gate_policy": self._maybe_decode_json(row["gate_policy"]),
-            "health_summary": self._maybe_decode_json(row["health_summary"]),
+            "gate_policy": maybe_decode_json(row["gate_policy"]),
+            "health_summary": maybe_decode_json(row["health_summary"]),
             "error": row["error"],
-            "metadata": self._maybe_decode_json(row["metadata"]),
+            "metadata": maybe_decode_json(row["metadata"]),
         }
-
-    async def claim_outbox_batch(
-        self,
-        *,
-        limit: int = 50,
-        claimed_by: Optional[str] = None,
-        claim_timeout_seconds: int = 300,
-    ) -> List[OntologyDeployOutboxItem]:
-        batch = await _OUTBOX_STORE.claim_batch(
-            limit=limit,
-            claimed_by=claimed_by,
-            claim_timeout_seconds=claim_timeout_seconds,
-        )
-        for item in batch:
-            decoded = self._maybe_decode_json(item.payload)
-            item.payload = decoded if isinstance(decoded, dict) else {}
-        return batch
-
-    async def mark_outbox_published(self, *, outbox_id: str) -> None:
-        await _OUTBOX_STORE.mark_published(outbox_id=outbox_id)
-
-    async def mark_outbox_failed(
-        self,
-        *,
-        outbox_id: str,
-        error: str,
-        next_attempt_at: Optional[datetime] = None,
-    ) -> None:
-        await _OUTBOX_STORE.mark_failed(outbox_id=outbox_id, error=error, next_attempt_at=next_attempt_at)
-
-    async def purge_outbox(self, *, retention_days: int, limit: int = 10000) -> int:
-        if retention_days <= 0:
-            return 0
-        cutoff = datetime.now(timezone.utc) - timedelta(days=retention_days)
-        row = await postgres_db.fetchrow(
-            """
-            WITH deleted AS (
-                DELETE FROM ontology_deploy_outbox_v2
-                WHERE outbox_id IN (
-                    SELECT outbox_id
-                    FROM ontology_deploy_outbox_v2
-                    WHERE status = 'published' AND updated_at < $1
-                    ORDER BY updated_at ASC
-                    LIMIT $2
-                )
-                RETURNING outbox_id
-            )
-            SELECT COUNT(*) AS count FROM deleted;
-            """,
-            cutoff,
-            limit,
-        )
-        return int(row["count"] or 0) if row else 0

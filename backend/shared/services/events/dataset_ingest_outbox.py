@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
-import os
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 from confluent_kafka import Producer
@@ -14,14 +12,22 @@ from shared.config.settings import get_settings
 from shared.observability.context_propagation import (
     attach_context_from_carrier,
     carrier_from_envelope_metadata,
-    kafka_headers_from_envelope_metadata,
 )
 from shared.observability.tracing import get_tracing_service
 from shared.services.registries.dataset_registry import DatasetRegistry, DatasetIngestOutboxItem
 from shared.services.storage.event_store import event_store
 from shared.services.registries.lineage_store import LineageStore
 from shared.models.event_envelope import EventEnvelope
+from shared.services.kafka.dlq_publisher import DlqPublishSpec, publish_contextual_dlq_json
 from shared.services.kafka.producer_factory import create_kafka_dlq_producer
+from shared.services.kafka.producer_ops import close_kafka_producer
+from shared.services.events.outbox_runtime import (
+    build_outbox_worker_id,
+    flush_outbox_until_empty,
+    maybe_purge_with_interval,
+    run_outbox_poll_loop,
+)
+from shared.utils.backoff_utils import next_exponential_backoff_at
 
 logger = logging.getLogger(__name__)
 
@@ -48,16 +54,21 @@ class DatasetIngestOutboxPublisher:
         self.retention_days = int(cfg.retention_days)
         self.purge_limit = int(cfg.purge_limit)
 
-        configured_worker_id = str(cfg.worker_id or "").strip()
-        if configured_worker_id:
-            self.worker_id = configured_worker_id
-        else:
-            service_name = (settings.observability.service_name or "dataset-ingest-outbox").strip() or "dataset-ingest-outbox"
-            hostname = (settings.observability.hostname or "local").strip() or "local"
-            self.worker_id = f"{service_name}:{hostname}:{os.getpid()}"
+        self.worker_id = build_outbox_worker_id(
+            configured_worker_id=cfg.worker_id,
+            service_name=settings.observability.service_name,
+            hostname=settings.observability.hostname,
+            default_service_name="dataset-ingest-outbox",
+        )
         self._last_purge = datetime.now(timezone.utc)
         self.enable_dlq = bool(cfg.enable_dlq)
         self.dlq_topic = (AppConfig.DATASET_INGEST_OUTBOX_DLQ_TOPIC or "").strip() or "dataset-ingest-outbox-dlq"
+        self._dlq_spec = DlqPublishSpec(
+            dlq_topic=self.dlq_topic,
+            service_name="dataset-ingest-outbox",
+            span_name="dataset_ingest_outbox.dlq_produce",
+            flush_timeout_seconds=self.flush_timeout_seconds,
+        )
         self.dlq_producer: Optional[Producer] = None
         self.tracing = get_tracing_service("dataset-ingest-outbox")
         if self.enable_dlq:
@@ -83,15 +94,13 @@ class DatasetIngestOutboxPublisher:
             )
 
     async def close(self) -> None:
-        if self.dlq_producer:
-            try:
-                await asyncio.to_thread(self.dlq_producer.flush, self.flush_timeout_seconds)
-            except Exception as exc:
-                logger.warning("DLQ producer flush failed during shutdown: %s", exc, exc_info=True)
-
-    def _next_attempt_at(self, attempts: int) -> datetime:
-        delay = min(self.backoff_max, self.backoff_base * (2 ** max(0, attempts - 1)))
-        return datetime.now(timezone.utc) + timedelta(seconds=delay)
+        await close_kafka_producer(
+            producer=self.dlq_producer,
+            timeout_s=self.flush_timeout_seconds,
+            warning_logger=logger,
+            warning_message="DLQ producer flush failed during shutdown: %s",
+        )
+        self.dlq_producer = None
 
     async def _send_to_dlq(self, item: DatasetIngestOutboxItem, *, error: str, attempts: int) -> bool:
         if not self.dlq_producer:
@@ -108,27 +117,28 @@ class DatasetIngestOutboxPublisher:
             "failed_at": datetime.now(timezone.utc).isoformat(),
             "source": "dataset_ingest_outbox",
         }
-        encoded = json.dumps(payload, ensure_ascii=False, default=str).encode("utf-8")
         key = item.ingest_request_id.encode("utf-8")
         try:
-            headers = kafka_headers_from_envelope_metadata(item.payload)
-            carrier = carrier_from_envelope_metadata(item.payload)
-            with attach_context_from_carrier(carrier, service_name="dataset-ingest-outbox"):
-                with self.tracing.span(
-                    "dataset_ingest_outbox.dlq_produce",
-                    attributes={
-                        "messaging.system": "kafka",
-                        "messaging.destination": self.dlq_topic,
-                        "messaging.destination_kind": "topic",
-                        "dataset.ingest_request_id": item.ingest_request_id,
-                        "dataset.outbox_id": item.outbox_id,
-                    },
-                ):
-                    self.dlq_producer.produce(topic=self.dlq_topic, value=encoded, key=key, headers=headers or None)
-            remaining = await asyncio.to_thread(self.dlq_producer.flush, self.flush_timeout_seconds)
-            if remaining != 0:
-                logger.warning("Dataset ingest DLQ flush incomplete (remaining=%s)", remaining)
-                return False
+            await publish_contextual_dlq_json(
+                producer=self.dlq_producer,
+                spec=self._dlq_spec,
+                payload=payload,
+                message_key=key,
+                source_topic="dataset_ingest_outbox",
+                source_partition=-1,
+                source_offset=-1,
+                tracing=self.tracing,
+                metrics=None,
+                kafka_headers=None,
+                fallback_metadata=item.payload if isinstance(item.payload, dict) else None,
+                span_attributes={
+                    "messaging.system": "kafka",
+                    "messaging.destination": self.dlq_topic,
+                    "messaging.destination_kind": "topic",
+                    "dataset.ingest_request_id": item.ingest_request_id,
+                    "dataset.outbox_id": item.outbox_id,
+                },
+            )
             return True
         except Exception as exc:
             logger.warning("Failed to publish dataset ingest DLQ payload: %s", exc)
@@ -144,13 +154,21 @@ class DatasetIngestOutboxPublisher:
                 await self.registry.mark_ingest_outbox_failed(
                     outbox_id=item.outbox_id,
                     error=f"dlq_publish_failed: {error}",
-                    next_attempt_at=self._next_attempt_at(attempts),
+                    next_attempt_at=next_exponential_backoff_at(
+                        attempts,
+                        base_seconds=self.backoff_base,
+                        max_seconds=self.backoff_max,
+                    ),
                 )
             return
         await self.registry.mark_ingest_outbox_failed(
             outbox_id=item.outbox_id,
             error=error,
-            next_attempt_at=self._next_attempt_at(attempts),
+            next_attempt_at=next_exponential_backoff_at(
+                attempts,
+                base_seconds=self.backoff_base,
+                max_seconds=self.backoff_max,
+            ),
         )
 
     async def _publish_item(self, item: DatasetIngestOutboxItem) -> None:
@@ -220,21 +238,17 @@ class DatasetIngestOutboxPublisher:
         return len(batch)
 
     async def maybe_purge(self) -> None:
-        if self.retention_days <= 0:
-            return
-        now = datetime.now(timezone.utc)
-        if (now - self._last_purge).total_seconds() < self.purge_interval_seconds:
-            return
-        self._last_purge = now
-        try:
-            deleted = await self.registry.purge_ingest_outbox(
-                retention_days=self.retention_days,
-                limit=self.purge_limit,
-            )
-            if deleted:
-                logger.info("Purged %s published ingest outbox rows", deleted)
-        except Exception as exc:
-            logger.warning("Failed to purge ingest outbox rows: %s", exc)
+        self._last_purge = await maybe_purge_with_interval(
+            retention_days=self.retention_days,
+            purge_interval_seconds=self.purge_interval_seconds,
+            purge_limit=self.purge_limit,
+            last_purge=self._last_purge,
+            purge_call=self.registry.purge_ingest_outbox,
+            info_logger=logger.info,
+            warning_logger=logger.warning,
+            success_message="Purged %s published ingest outbox rows",
+            failure_message="Failed to purge ingest outbox rows: %s",
+        )
 
 
 async def flush_dataset_ingest_outbox(
@@ -248,13 +262,10 @@ async def flush_dataset_ingest_outbox(
         lineage_store=lineage_store,
         batch_size=batch_size,
     )
-    try:
-        while True:
-            processed = await publisher.flush_once()
-            if processed == 0:
-                break
-    finally:
-        await publisher.close()
+    await flush_outbox_until_empty(
+        publisher=publisher,
+        is_empty=lambda processed: processed == 0,
+    )
 
 
 async def run_dataset_ingest_outbox_worker(
@@ -265,25 +276,18 @@ async def run_dataset_ingest_outbox_worker(
     batch_size: int = 50,
     stop_event: Optional[asyncio.Event] = None,
 ) -> None:
-    stop_event = stop_event or asyncio.Event()
     publisher = DatasetIngestOutboxPublisher(
         dataset_registry=dataset_registry,
         lineage_store=lineage_store,
         batch_size=batch_size,
     )
-    try:
-        while not stop_event.is_set():
-            try:
-                await publisher.flush_once()
-                await publisher.maybe_purge()
-            except Exception as exc:
-                logger.warning("Dataset ingest outbox worker failed: %s", exc)
-            try:
-                await asyncio.wait_for(stop_event.wait(), timeout=poll_interval_seconds)
-            except asyncio.TimeoutError:
-                continue
-    finally:
-        await publisher.close()
+    await run_outbox_poll_loop(
+        publisher=publisher,
+        poll_interval_seconds=poll_interval_seconds,
+        stop_event=stop_event,
+        warning_logger=logger.warning,
+        failure_message="Dataset ingest outbox worker failed: %s",
+    )
 
 
 def build_dataset_event_payload(

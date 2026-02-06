@@ -20,6 +20,7 @@ from shared.models.event_envelope import EventEnvelope
 from shared.models.lineage import LineageDirection, LineageEdge, LineageGraph, LineageNode
 from shared.services.registries.postgres_schema_registry import PostgresSchemaRegistry
 from shared.utils.ontology_version import extract_ontology_version
+from shared.utils.sql_filter_builder import SqlFilterBuilder
 
 
 class LineageStore(PostgresSchemaRegistry):
@@ -50,16 +51,6 @@ class LineageStore(PostgresSchemaRegistry):
             pool_max=pool_max_value,
             command_timeout=int(perf.lineage_pg_command_timeout_seconds),
         )
-
-    async def health_check(self) -> bool:
-        try:
-            if not self._pool:
-                await self.connect()
-            async with self._pool.acquire() as conn:
-                await conn.execute("SELECT 1")
-            return True
-        except Exception:
-            return False
 
     async def _ensure_tables(self, conn: asyncpg.Connection) -> None:
         await conn.execute(
@@ -704,28 +695,23 @@ class LineageStore(PostgresSchemaRegistry):
         if not self._pool:
             await self.connect()
 
-        clauses: List[str] = []
-        params: List[Any] = []
-
-        def _add(condition: str, value: Any) -> None:
-            params.append(value)
-            clauses.append(condition.replace("$X", f"${len(params)}"))
+        filters = SqlFilterBuilder()
 
         if edge_type:
-            _add("edge_type = $X", edge_type)
+            filters.add("edge_type = $X", edge_type)
         if db_name:
-            _add("db_name = $X", db_name)
+            filters.add("db_name = $X", db_name)
         if since:
-            _add("occurred_at >= $X", since)
+            filters.add("occurred_at >= $X", since)
         if until:
-            _add("occurred_at <= $X", until)
+            filters.add("occurred_at <= $X", until)
 
-        where = " WHERE " + " AND ".join(clauses) if clauses else ""
+        where = filters.where()
 
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
                 f"SELECT COUNT(*)::bigint AS c FROM {self._schema}.lineage_edges{where}",
-                *params,
+                *filters.params,
             )
         return int(row["c"] or 0) if row else 0
 
@@ -755,21 +741,19 @@ class LineageStore(PostgresSchemaRegistry):
         if len(ids) > max_ids:
             raise ValueError(f"too many node ids (max={max_ids})")
 
-        clauses: List[str] = ["to_node_id = ANY($1::text[])"]
-        params: List[Any] = [ids]
-
-        def _add(condition: str, value: Any) -> None:
-            params.append(value)
-            clauses.append(condition.replace("$X", f"${len(params)}"))
+        filters = SqlFilterBuilder(
+            clauses=["to_node_id = ANY($1::text[])"],
+            params=[ids],
+        )
 
         if edge_type:
-            _add("edge_type = $X", edge_type)
+            filters.add("edge_type = $X", edge_type)
         if projection_name is not None:
-            _add("projection_name = $X", projection_name)
+            filters.add("projection_name = $X", projection_name)
         if db_name:
-            _add("db_name = $X", db_name)
+            filters.add("db_name = $X", db_name)
 
-        where = " AND ".join(clauses)
+        where = filters.join()
 
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(
@@ -781,7 +765,7 @@ class LineageStore(PostgresSchemaRegistry):
                 WHERE {where}
                 ORDER BY to_node_id, occurred_at DESC, recorded_at DESC
                 """,
-                *params,
+                *filters.params,
             )
 
         latest: Dict[str, Dict[str, Any]] = {}

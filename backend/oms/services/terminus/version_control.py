@@ -10,41 +10,20 @@ from typing import Any, Dict, List, Optional
 from datetime import datetime, timezone
 from shared.utils.terminus_branch import decode_branch_name, encode_branch_name
 
-from .base import BaseTerminusService
-from .database import DatabaseService
+from .db_backed import DatabaseBackedTerminusService
 from oms.exceptions import DatabaseError
 from shared.config.settings import get_settings
 
 logger = logging.getLogger(__name__)
 
 
-class VersionControlService(BaseTerminusService):
+class VersionControlService(DatabaseBackedTerminusService):
     """
     TerminusDB 버전 관리 서비스
     
     브랜치 생성/삭제, 커밋, 머지, 이력 조회 등의 기능을 제공합니다.
     """
     
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        # DatabaseService 인스턴스 (데이터베이스 존재 확인용)
-        self.db_service = DatabaseService(*args, **kwargs)
-
-    async def disconnect(self) -> None:
-        """
-        Close nested services before closing this client's HTTP resources.
-
-        Why:
-        - VersionControlService internally instantiates a DatabaseService to run `ensure_db_exists`.
-        - If callers only disconnect the outer service, the inner DatabaseService's httpx client
-          remains open and triggers `ResourceWarning: unclosed transport` in tests and short-lived
-          processes.
-        """
-        try:
-            await self.db_service.disconnect()
-        finally:
-            await super().disconnect()
-
     _encode_branch_name = staticmethod(encode_branch_name)
     _decode_branch_name = staticmethod(decode_branch_name)
 

@@ -20,17 +20,13 @@ from shared.security.input_sanitizer import validate_db_name
 from shared.services.registries.connector_registry import ConnectorRegistry
 from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.services.registries.lineage_store import LineageStore
+from shared.utils.number_utils import to_int_or_none
 
 logger = logging.getLogger(__name__)
 
 
 def _as_int_or_none(value: Any) -> Optional[int]:
-    if value is None:
-        return None
-    try:
-        return int(value)
-    except Exception:
-        return None
+    return to_int_or_none(value)
 
 
 async def _resolve_tokens(

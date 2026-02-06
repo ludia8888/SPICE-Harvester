@@ -25,7 +25,6 @@ from uuid import UUID, uuid4
 import httpx
 from confluent_kafka import Producer
 
-from shared.services.kafka.consumer_ops import ExecutorKafkaConsumerOps
 from shared.services.kafka.safe_consumer import SafeKafkaConsumer
 
 try:
@@ -56,9 +55,9 @@ from shared.models.pipeline_job import PipelineJob
 from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
 from shared.services.kafka.processed_event_worker import HeartbeatOptions, ProcessedEventKafkaWorker, RegistryKey
-from shared.services.kafka.dlq_publisher import DlqPublishSpec, build_standard_dlq_payload, publish_dlq_json
+from shared.services.kafka.dlq_publisher import DlqPublishSpec
 from shared.services.kafka.producer_factory import create_kafka_dlq_producer
-from shared.services.kafka.safe_consumer import create_safe_consumer
+from shared.services.kafka.producer_ops import close_kafka_producer
 from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.services.storage.lakefs_client import LakeFSClient, LakeFSConflictError, LakeFSError
 from shared.services.storage.lakefs_storage_service import LakeFSStorageService
@@ -74,6 +73,7 @@ from shared.services.pipeline.pipeline_graph_utils import build_incoming, normal
 from shared.services.pipeline.pipeline_parameter_utils import apply_parameters, normalize_parameters
 from shared.services.pipeline.pipeline_definition_utils import (
     build_expectations_with_pk,
+    normalize_expectation_columns,
     resolve_delete_column,
     resolve_incremental_config,
     resolve_pk_columns,
@@ -169,6 +169,7 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
         self.group_id = pipeline_settings.jobs_group
         self.handler = pipeline_settings.worker_handler
         self.pipeline_label = pipeline_settings.worker_name
+        self._pipeline_worker_name = str(self.pipeline_label or "pipeline-worker")
 
         self.max_retries = pipeline_settings.jobs_max_retries
         self.backoff_base = pipeline_settings.jobs_backoff_base_seconds
@@ -219,6 +220,12 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
         self._dlq_lock = asyncio.Lock()
         self.tracing = get_tracing_service("pipeline-worker")
         self.metrics = get_metrics_collector("pipeline-worker")
+        self._dlq_spec = DlqPublishSpec(
+            dlq_topic=self.dlq_topic,
+            service_name=self._pipeline_worker_name,
+            flush_timeout_seconds=10.0,
+            poll_after_produce=True,
+        )
 
     def _build_error_payload(
         self,
@@ -326,21 +333,14 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                 thread_name_prefix="pipeline-spark",
             )
 
-        # Use SafeKafkaConsumer for strong consistency guarantees
-        # Critical: Enforces isolation.level=read_committed and proper rebalance handling
-        self.consumer = create_safe_consumer(
+        self._initialize_safe_consumer_runtime(
             group_id=self.group_id,
             topics=[self.topic],
             service_name="pipeline-worker",
-            max_poll_interval_ms=int(self.max_poll_interval_ms),
-            on_revoke=self._on_partitions_revoked,
-            on_assign=self._on_partitions_assigned,
-        )
-        self.consumer_ops = ExecutorKafkaConsumerOps(
-            self.consumer,
             thread_name_prefix="pipeline-worker-kafka",
+            max_poll_interval_ms=int(self.max_poll_interval_ms),
+            reset_partition_state=True,
         )
-        self._init_partition_state(reset=True)
         logger.info("PipelineWorker initialized (topic=%s)", self.topic)
 
         self.dlq_producer = create_kafka_dlq_producer(
@@ -351,12 +351,13 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
     async def close(self) -> None:
         await self._close_consumer_runtime()
         self._pending_by_partition.clear()
-        if self.dlq_producer:
-            try:
-                self.dlq_producer.flush(5)
-            except Exception as exc:
-                logger.warning("DLQ producer flush failed during shutdown: %s", exc, exc_info=True)
-            self.dlq_producer = None
+        await close_kafka_producer(
+            producer=self.dlq_producer,
+            timeout_s=5.0,
+            warning_logger=logger,
+            warning_message="DLQ producer flush failed during shutdown: %s",
+        )
+        self.dlq_producer = None
         if self.http:
             await self.http.aclose()
             self.http = None
@@ -726,40 +727,44 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
         )
 
     async def _on_parse_error(self, *, msg: Any, raw_payload: Optional[str], error: Exception) -> None:  # type: ignore[override]
-        stage = "parse"
-        payload_text = raw_payload
-        payload_obj = None
-        err_text = str(error)
-
-        if isinstance(error, _PipelinePayloadParseError):
-            stage = str(error.stage)
-            payload_text = error.payload_text if error.payload_text is not None else raw_payload
-            payload_obj = error.payload_obj
-            err_text = str(error.cause)
-
-        try:
+        async def _send(
+            stage: str,
+            cause_text: str,
+            payload_text: Optional[str],
+            payload_obj: Optional[Dict[str, Any]],
+            _kafka_headers: Optional[Any],
+            _fallback_metadata: Optional[Dict[str, Any]],
+        ) -> None:
             await self._publish_to_dlq(
                 msg=msg,
                 stage=stage,
-                error=err_text,
+                error=cause_text,
                 payload_text=payload_text,
                 payload_obj=payload_obj,
                 job=None,
                 attempt_count=None,
             )
-            if stage == "validate" and isinstance(payload_obj, dict):
-                try:
-                    await self._best_effort_record_invalid_job(payload_obj, error=err_text)
-                except Exception as record_exc:
-                    logger.warning(
-                        "Failed to record invalid pipeline job (best-effort): %s",
-                        record_exc,
-                        exc_info=True,
-                    )
-        except Exception:
-            logger.exception("Failed to publish invalid pipeline job payload to DLQ")
+            if stage != "validate" or not isinstance(payload_obj, dict):
+                return
+            try:
+                await self._best_effort_record_invalid_job(payload_obj, error=cause_text)
+            except Exception as record_exc:
+                logger.warning(
+                    "Failed to record invalid pipeline job (best-effort): %s",
+                    record_exc,
+                    exc_info=True,
+                )
 
-        logger.exception("Invalid pipeline job payload; skipping: %s", err_text)
+        await self._publish_parse_error_to_dlq(
+            msg=msg,
+            raw_payload=raw_payload,
+            error=error,
+            dlq_sender=_send,
+            publish_failure_message="Failed to publish invalid pipeline job payload to DLQ: %s",
+            invalid_payload_message="Invalid pipeline job payload; skipping: %s",
+            raise_on_publish_failure=False,
+            logger_instance=logger,
+        )
 
     async def _on_retry_scheduled(  # type: ignore[override]
         self,
@@ -822,43 +827,32 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
         job: Optional[PipelineJob],
         attempt_count: Optional[int],
     ) -> None:
-        if not self.dlq_producer:
-            logger.error("DLQ producer not configured; dropping message (stage=%s error=%s)", stage, error)
-            return
-
         extra: Optional[Dict[str, Any]] = None
         if job is not None:
             extra = {"job": job.model_dump(mode="json")}
 
-        dlq_payload = build_standard_dlq_payload(
-            msg=msg,
-            worker=str(self.pipeline_label or "pipeline-worker"),
-            stage=stage,
-            error=error,
-            attempt_count=int(attempt_count) if attempt_count is not None else None,
-            payload_text=payload_text,
-            payload_obj=payload_obj,
-            extra=extra,
-        )
-        spec = DlqPublishSpec(
-            dlq_topic=self.dlq_topic,
-            service_name=str(self.pipeline_label or "pipeline-worker"),
-            flush_timeout_seconds=10.0,
-            poll_after_produce=True,
-        )
-
         try:
-            await publish_dlq_json(
+            sent = await self._publish_standard_dlq_record(
                 producer=self.dlq_producer,
-                spec=spec,
                 msg=msg,
-                payload=dlq_payload,
+                worker=self._pipeline_worker_name,
+                dlq_spec=self._dlq_spec,
+                error=error,
+                attempt_count=int(attempt_count) if attempt_count is not None else None,
+                stage=stage,
+                payload_text=payload_text,
+                payload_obj=payload_obj,
+                extra=extra,
                 tracing=None,
                 metrics=None,
                 kafka_headers=None,
                 fallback_metadata=None,
                 lock=self._dlq_lock,
+                raise_on_missing_producer=False,
+                missing_producer_message="DLQ producer not configured",
             )
+            if not sent:
+                return
             logger.info("Sent message to pipeline DLQ (topic=%s stage=%s)", self.dlq_topic, stage)
         except Exception as exc:
             logger.error("Failed to send message to pipeline DLQ (stage=%s): %s", stage, exc)
@@ -3651,11 +3645,6 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
             return df
         return self._apply_casts(df, casts)
 
-    def _normalize_fk_columns(self, value: Any) -> List[str]:
-        if isinstance(value, list):
-            return [str(item).strip() for item in value if str(item).strip()]
-        return split_expectation_columns(str(value or ""))
-
     def _parse_fk_expectation(
         self,
         expectation: Dict[str, Any],
@@ -3665,9 +3654,9 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
         rule = str(expectation.get("rule") or "").strip().lower()
         if rule != "fk_exists":
             return None
-        columns = self._normalize_fk_columns(expectation.get("columns") or expectation.get("column"))
+        columns = normalize_expectation_columns(expectation.get("columns") or expectation.get("column"))
         reference = expectation.get("reference") if isinstance(expectation.get("reference"), dict) else {}
-        ref_columns = self._normalize_fk_columns(
+        ref_columns = normalize_expectation_columns(
             reference.get("columns")
             or reference.get("column")
             or expectation.get("ref_columns")

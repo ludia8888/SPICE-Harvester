@@ -18,6 +18,7 @@ from shared.config.app_config import AppConfig
 from shared.config.settings import get_settings
 from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
+from shared.services.storage.lakefs_branch_utils import ensure_lakefs_branch
 from shared.services.storage.lakefs_client import LakeFSClient, LakeFSConflictError
 from shared.services.storage.lakefs_storage_service import LakeFSStorageService, create_lakefs_storage_service
 from shared.services.storage.storage_service import StorageService, create_storage_service
@@ -91,12 +92,7 @@ class WritebackMaterializerWorker:
         self.running = False
 
     async def _ensure_branch(self, *, repository: str, branch: str) -> None:
-        if not self.lakefs_client:
-            raise RuntimeError("lakefs_client not initialized")
-        try:
-            await self.lakefs_client.create_branch(repository=repository, name=branch, source="main")
-        except LakeFSConflictError:
-            return
+        await ensure_lakefs_branch(lakefs_client=self.lakefs_client, repository=repository, branch=branch, source="main")
 
     async def _scan_queue(
         self,

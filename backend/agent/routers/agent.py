@@ -13,30 +13,15 @@ from agent.services.agent_runtime import AgentRuntime
 from shared.config.settings import get_settings
 from shared.services.registries.agent_registry import AgentRegistry
 from shared.models.responses import ApiResponse
+from shared.security.principal_utils import actor_label, resolve_principal_from_headers
 from shared.utils.llm_safety import digest_for_audit, mask_pii
 
 router = APIRouter(prefix="/agent", tags=["Agent"])
 
 
 def _resolve_principal(request: Optional[Request]) -> tuple[str, str]:
-    headers = request.headers if request else {}
-    principal_id = (
-        headers.get("X-Principal-Id")
-        or headers.get("X-User")
-        or headers.get("X-Actor")
-        or headers.get("X-User-Id")
-        or headers.get("X-User-ID")
-        or ""
-    ).strip()
-    principal_type = (
-        headers.get("X-Principal-Type")
-        or headers.get("X-Actor-Type")
-        or headers.get("X-User-Type")
-        or "user"
-    ).strip()
-    if not principal_id:
-        principal_id = "system"
-    return principal_type.lower(), principal_id
+    headers = request.headers if request else None
+    return resolve_principal_from_headers(headers)
 
 
 def _resolve_tenant_id(request: Optional[Request]) -> str:
@@ -47,9 +32,7 @@ def _resolve_tenant_id(request: Optional[Request]) -> str:
 
 
 def _actor_label(principal_type: str, principal_id: str) -> str:
-    principal_type = principal_type or "user"
-    principal_id = principal_id or "unknown"
-    return f"{principal_type}:{principal_id}"
+    return actor_label(principal_type, principal_id)
 
 
 def _request_meta(request: Request, body: AgentRunRequest) -> Dict[str, Any]:

@@ -5,9 +5,11 @@ Adapts FunnelTypeInferenceService to conform to TypeInferenceInterface
 
 from typing import Any, Dict, List, Optional
 
-from funnel.services.type_inference import FunnelTypeInferenceService
-from shared.interfaces.type_inference import TypeInferenceInterface
-from shared.models.type_inference import ColumnAnalysisResult, TypeInferenceResult
+from shared.interfaces.type_inference import (
+    TypeInferenceInterface,
+    get_production_type_inference_service,
+)
+from shared.models.type_inference import ColumnAnalysisResult
 
 
 class FunnelTypeInferenceAdapter(TypeInferenceInterface):
@@ -19,12 +21,11 @@ class FunnelTypeInferenceAdapter(TypeInferenceInterface):
     """
 
     def __init__(self):
-        """🔥 REAL IMPLEMENTATION! Initialize adapter with logging and validation."""
-        # We use class methods on FunnelTypeInferenceService, so no instance needed.
         import logging
 
         self.logger = logging.getLogger(__name__)
-        self.logger.info("🔥 FunnelTypeInferenceAdapter initialized with REAL implementation")
+        self._delegate = get_production_type_inference_service()
+        self.logger.info("🔥 FunnelTypeInferenceAdapter initialized with shared production delegate")
 
     async def infer_column_type(
         self,
@@ -37,14 +38,12 @@ class FunnelTypeInferenceAdapter(TypeInferenceInterface):
         """
         Analyze a column of data and infer its type.
         """
-        if metadata:
-            include_complex_types = metadata.get("include_complex_types", include_complex_types)
-
-        return FunnelTypeInferenceService.infer_column_type(
+        return await self._delegate.infer_column_type(
             column_data=column_data,
             column_name=column_name,
             include_complex_types=include_complex_types,
             context_columns=context_columns,
+            metadata=metadata,
         )
 
     async def analyze_dataset(
@@ -58,37 +57,10 @@ class FunnelTypeInferenceAdapter(TypeInferenceInterface):
         """
         Analyze an entire dataset and infer types for all columns.
         """
-        if metadata:
-            include_complex_types = metadata.get("include_complex_types", include_complex_types)
-            sample_size = metadata.get("sample_size", sample_size)
-
-        return FunnelTypeInferenceService.analyze_dataset(
+        return await self._delegate.analyze_dataset(
             data=data,
             columns=columns,
             sample_size=sample_size,
             include_complex_types=include_complex_types,
+            metadata=metadata,
         )
-
-    async def infer_single_value_type(
-        self, value: Any, context: Optional[Dict[str, Any]] = None
-    ) -> TypeInferenceResult:
-        """
-        Infer the type of a single value.
-        
-        Args:
-            value: The value to analyze
-            context: Optional context for inference
-            
-        Returns:
-            TypeInferenceResult with inferred type and confidence
-        """
-        column_name = context.get("column_name") if context else None
-        include_complex_types = context.get("include_complex_types", False) if context else False
-
-        analysis = await self.infer_column_type(
-            column_data=[value],
-            column_name=column_name,
-            include_complex_types=include_complex_types,
-            metadata=context,
-        )
-        return analysis.inferred_type

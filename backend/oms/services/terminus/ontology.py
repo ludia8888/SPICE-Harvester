@@ -8,8 +8,7 @@ import logging
 from typing import Any, Dict, List, Optional, Union
 from datetime import datetime, timezone
 
-from .base import BaseTerminusService
-from .database import DatabaseService
+from .db_backed import DatabaseBackedTerminusService
 from oms.exceptions import (
     DatabaseError,
     DuplicateOntologyError,
@@ -24,7 +23,7 @@ from shared.services.registries.ontology_key_spec_registry import OntologyKeySpe
 logger = logging.getLogger(__name__)
 
 
-class OntologyService(BaseTerminusService):
+class OntologyService(DatabaseBackedTerminusService):
     """
     TerminusDB 온톨로지 관리 서비스
     
@@ -33,8 +32,6 @@ class OntologyService(BaseTerminusService):
     
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # DatabaseService 인스턴스 (데이터베이스 존재 확인용)
-        self.db_service = DatabaseService(*args, **kwargs)
         self._key_spec_registry = OntologyKeySpecRegistry()
 
     async def disconnect(self) -> None:
@@ -42,7 +39,6 @@ class OntologyService(BaseTerminusService):
         try:
             with contextlib.suppress(Exception):
                 await self._key_spec_registry.close()
-            await self.db_service.disconnect()
         finally:
             await super().disconnect()
 

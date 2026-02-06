@@ -28,6 +28,8 @@ from shared.services.core.background_task_manager import (
     create_background_task_manager,
 )
 from shared.services.agent.llm_gateway import LLMGateway, create_llm_gateway
+from shared.utils.jsonld import JSONToJSONLDConverter
+from shared.utils.label_mapper import LabelMapper
 
 # Import container and settings
 from shared.dependencies.container import get_container, ServiceContainer
@@ -42,6 +44,26 @@ async def get_settings_dependency() -> ApplicationSettings:
         ApplicationSettings: The global settings instance
     """
     return get_settings()
+
+
+async def get_label_mapper(
+    container: ServiceContainer = Depends(get_container),
+) -> LabelMapper:
+    if not container.has(LabelMapper):
+        def create_label_mapper(settings: ApplicationSettings) -> LabelMapper:  # noqa: ARG001
+            return LabelMapper()
+        container.register_singleton(LabelMapper, create_label_mapper)
+    return await container.get(LabelMapper)
+
+
+async def get_jsonld_converter(
+    container: ServiceContainer = Depends(get_container),
+) -> JSONToJSONLDConverter:
+    if not container.has(JSONToJSONLDConverter):
+        def create_jsonld_converter(settings: ApplicationSettings) -> JSONToJSONLDConverter:  # noqa: ARG001
+            return JSONToJSONLDConverter()
+        container.register_singleton(JSONToJSONLDConverter, create_jsonld_converter)
+    return await container.get(JSONToJSONLDConverter)
 
 
 async def get_storage_service(
@@ -183,6 +205,8 @@ ElasticsearchServiceDep = Annotated[ElasticsearchService, Depends(get_elasticsea
 LineageStoreDep = Annotated[LineageStore, Depends(get_lineage_store)]
 AuditLogStoreDep = Annotated[AuditLogStore, Depends(get_audit_log_store)]
 LLMGatewayDep = Annotated[LLMGateway, Depends(get_llm_gateway)]
+LabelMapperDep = Annotated[LabelMapper, Depends(get_label_mapper)]
+JSONLDConverterDep = Annotated[JSONToJSONLDConverter, Depends(get_jsonld_converter)]
 SettingsDep = Annotated[ApplicationSettings, Depends(get_settings_dependency)]
 BackgroundTaskManagerDep = Annotated[BackgroundTaskManager, Depends(get_background_task_manager)]
 InitializedBackgroundTaskManagerDep = Annotated[

@@ -12,6 +12,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 # Import VersionedModelMixin for MVCC support
 from .base import VersionedModelMixin
 from .i18n import LocalizedText
+from .query_operator_mixin import QueryOperatorApplicabilityMixin
+from .ontology_validation_mixin import CardinalityValidationMixin, PropertyValueValidationMixin
 
 
 class Cardinality(Enum):
@@ -62,18 +64,29 @@ def _validate_localized_optional(value: Any, *, field_name: str) -> Optional[Loc
     return _validate_localized_required(value, field_name=field_name)
 
 
-class QueryOperator(BaseModel):
+def _validate_unique_property_list(value: Optional[List['Property']]) -> Optional[List['Property']]:
+    if value:
+        names = [item.name for item in value]
+        if len(names) != len(set(names)):
+            raise ValueError("Properties must have unique names")
+    return value
+
+
+def _validate_unique_relationship_list(value: Optional[List['Relationship']]) -> Optional[List['Relationship']]:
+    if value:
+        predicates = [item.predicate for item in value]
+        if len(predicates) != len(set(predicates)):
+            raise ValueError("Relationships must have unique predicates")
+    return value
+
+
+class QueryOperator(QueryOperatorApplicabilityMixin, BaseModel):
     """Query operator definition"""
 
     name: str
     symbol: str
     description: str
     applies_to: List[str] = Field(default_factory=list)
-
-    def can_apply_to(self, data_type: str) -> bool:
-        """Check if operator can apply to data type"""
-        return data_type in self.applies_to
-
 
 class OntologyBase(VersionedModelMixin):
     """
@@ -134,7 +147,7 @@ class OntologyBase(VersionedModelMixin):
         return values
 
 
-class Relationship(BaseModel):
+class Relationship(CardinalityValidationMixin, BaseModel):
     """Relationship model"""
 
     predicate: str = Field(..., description="Relationship predicate")
@@ -172,13 +185,7 @@ class Relationship(BaseModel):
             return "n:m"
         return v
 
-    def is_valid_cardinality(self) -> bool:
-        """Check if cardinality is valid"""
-        valid_cardinalities = ["1:1", "1:n", "n:1", "n:m"]
-        return self.cardinality in valid_cardinalities
-
-
-class Property(BaseModel):
+class Property(PropertyValueValidationMixin, BaseModel):
     """Property model with class reference support"""
 
     model_config = ConfigDict(populate_by_name=True)
@@ -246,34 +253,6 @@ class Property(BaseModel):
     def validate_description(cls, v) -> Optional[LocalizedText]:
         return _validate_localized_optional(v, field_name="property.description")
 
-    def validate_value(self, value: Any) -> List[str]:
-        """Validate property value"""
-        errors = []
-
-        if self.required and value is None:
-            errors.append(f"Property '{self.name}' is required")
-
-        if value is not None:
-            if self.type == "xsd:string" and not isinstance(value, str):
-                errors.append(f"Property '{self.name}' must be a string")
-            elif self.type == "xsd:integer" and not isinstance(value, int):
-                errors.append(f"Property '{self.name}' must be an integer")
-            elif self.type == "xsd:boolean" and not isinstance(value, bool):
-                errors.append(f"Property '{self.name}' must be a boolean")
-
-        if self.constraints and value is not None:
-            if "min" in self.constraints and value < self.constraints["min"]:
-                errors.append(f"Property '{self.name}' must be >= {self.constraints['min']}")
-            if "max" in self.constraints and value > self.constraints["max"]:
-                errors.append(f"Property '{self.name}' must be <= {self.constraints['max']}")
-            if "pattern" in self.constraints:
-                import re
-
-                if not re.match(self.constraints["pattern"], str(value)):
-                    errors.append(f"Property '{self.name}' does not match pattern")
-
-        return errors
-    
     def is_class_reference(self) -> bool:
         """Check if this property is a class reference (ObjectProperty)"""
         # Support explicit type="link"
@@ -384,23 +363,13 @@ class OntologyCreateRequest(BaseModel):
 
     @field_validator("properties")
     @classmethod
-    def validate_properties(cls, v) -> List[Any]:
-        """Validate properties don't have duplicate names"""
-        if v:
-            names = [p.name for p in v]
-            if len(names) != len(set(names)):
-                raise ValueError("Properties must have unique names")
-        return v
+    def validate_properties(cls, v) -> Optional[List[Any]]:
+        return _validate_unique_property_list(v)
 
     @field_validator("relationships")
     @classmethod
-    def validate_relationships(cls, v) -> List[Any]:
-        """Validate relationships don't have duplicate predicates"""
-        if v:
-            predicates = [r.predicate for r in v]
-            if len(predicates) != len(set(predicates)):
-                raise ValueError("Relationships must have unique predicates")
-        return v
+    def validate_relationships(cls, v) -> Optional[List[Any]]:
+        return _validate_unique_relationship_list(v)
 
 
 class OntologyUpdateRequest(BaseModel):
@@ -426,23 +395,13 @@ class OntologyUpdateRequest(BaseModel):
 
     @field_validator("properties")
     @classmethod
-    def validate_properties(cls, v) -> List[Any]:
-        """Validate properties don't have duplicate names"""
-        if v:
-            names = [p.name for p in v]
-            if len(names) != len(set(names)):
-                raise ValueError("Properties must have unique names")
-        return v
+    def validate_properties(cls, v) -> Optional[List[Any]]:
+        return _validate_unique_property_list(v)
 
     @field_validator("relationships")
     @classmethod
-    def validate_relationships(cls, v) -> List[Any]:
-        """Validate relationships don't have duplicate predicates"""
-        if v:
-            predicates = [r.predicate for r in v]
-            if len(predicates) != len(set(predicates)):
-                raise ValueError("Relationships must have unique predicates")
-        return v
+    def validate_relationships(cls, v) -> Optional[List[Any]]:
+        return _validate_unique_relationship_list(v)
 
     def has_changes(self) -> bool:
         """Check if request has any changes"""

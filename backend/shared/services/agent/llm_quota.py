@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from shared.services.storage.redis_service import RedisService
+from shared.utils.token_count import approx_token_count
 
 
 @dataclass(frozen=True)
@@ -21,17 +22,6 @@ class LLMQuotaExceededError(RuntimeError):
         self.spec = spec
         self.used_calls = int(used_calls)
         self.used_tokens = int(used_tokens)
-
-
-def approx_token_count(payload: Any) -> int:
-    if payload is None:
-        return 0
-    text = str(payload)
-    text = text.strip()
-    if not text:
-        return 0
-    # Rough heuristic: ~4 chars/token for English-ish text; safe for budgeting.
-    return max(1, int((len(text) + 3) / 4))
 
 
 def _sanitize_key_part(value: str) -> str:

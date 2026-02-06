@@ -5,18 +5,16 @@ Ontology deployment registry (Postgres SSoT).
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from datetime import datetime
+from typing import Any, Dict, Optional
 from uuid import uuid4
 
 from oms.database.postgres import db as postgres_db
 from oms.services.ontology_deploy_outbox_store import (
-    OntologyDeployOutboxItem,
     OntologyDeployOutboxStore,
     OntologyDeployOutboxTableSpec,
 )
-from shared.config.app_config import AppConfig
-from shared.utils.deterministic_ids import deterministic_uuid5_str
+from oms.services.ontology_deployment_registry_base import BaseOntologyDeploymentRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -29,67 +27,44 @@ _OUTBOX_STORE = OntologyDeployOutboxStore(
 )
 
 
-class OntologyDeploymentRegistry:
+class OntologyDeploymentRegistry(BaseOntologyDeploymentRegistry):
     """Record ontology deployments in Postgres."""
 
-    async def ensure_schema(self) -> None:
-        await postgres_db.execute(
-            """
-            CREATE TABLE IF NOT EXISTS ontology_deployments (
-                deployment_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                db_name VARCHAR(255) NOT NULL,
-                proposal_id UUID NOT NULL,
-                source_branch VARCHAR(255) NOT NULL,
-                target_branch VARCHAR(255) NOT NULL,
-                approved_ontology_commit_id VARCHAR(255) NOT NULL,
-                merge_commit_id VARCHAR(255) NOT NULL,
-                definition_hash VARCHAR(255),
-                status VARCHAR(50) NOT NULL DEFAULT 'succeeded'
-                    CHECK (status IN ('succeeded', 'failed')),
-                deployed_by VARCHAR(255) DEFAULT 'system',
-                deployed_at TIMESTAMPTZ DEFAULT NOW() NOT NULL,
-                metadata JSONB
-            );
-            """
-        )
-        await postgres_db.execute(
-            """
-            CREATE TABLE IF NOT EXISTS ontology_deploy_outbox (
-                outbox_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                deployment_id UUID NOT NULL REFERENCES ontology_deployments(deployment_id) ON DELETE CASCADE,
-                payload JSONB NOT NULL,
-                status TEXT NOT NULL DEFAULT 'pending',
-                publish_attempts INTEGER NOT NULL DEFAULT 0,
-                error TEXT,
-                claimed_by TEXT,
-                claimed_at TIMESTAMPTZ,
-                next_attempt_at TIMESTAMPTZ,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            );
-            """
-        )
-        await postgres_db.execute(
-            "CREATE INDEX IF NOT EXISTS idx_ontology_deployments_db ON ontology_deployments(db_name);"
-        )
-        await postgres_db.execute(
-            "CREATE INDEX IF NOT EXISTS idx_ontology_deployments_target_branch ON ontology_deployments(target_branch);"
-        )
-        await postgres_db.execute(
-            "CREATE INDEX IF NOT EXISTS idx_ontology_deployments_proposal ON ontology_deployments(proposal_id);"
-        )
-        await postgres_db.execute(
-            "CREATE INDEX IF NOT EXISTS idx_ontology_deployments_created_at ON ontology_deployments(deployed_at DESC);"
-        )
-        await postgres_db.execute(
-            "CREATE INDEX IF NOT EXISTS idx_ontology_deploy_outbox_status ON ontology_deploy_outbox(status, next_attempt_at, created_at);"
-        )
-        await postgres_db.execute(
-            "CREATE INDEX IF NOT EXISTS idx_ontology_deploy_outbox_claimed ON ontology_deploy_outbox(status, claimed_at);"
-        )
-        await postgres_db.execute(
-            "CREATE INDEX IF NOT EXISTS idx_ontology_deploy_outbox_deployment ON ontology_deploy_outbox(deployment_id, status, created_at);"
-        )
+    DEPLOYMENT_TABLE = "ontology_deployments"
+    OUTBOX_TABLE = "ontology_deploy_outbox"
+    OUTBOX_STORE = _OUTBOX_STORE
+    DEPLOYMENT_TABLE_DDL = """
+        CREATE TABLE IF NOT EXISTS ontology_deployments (
+            deployment_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            db_name VARCHAR(255) NOT NULL,
+            proposal_id UUID NOT NULL,
+            source_branch VARCHAR(255) NOT NULL,
+            target_branch VARCHAR(255) NOT NULL,
+            approved_ontology_commit_id VARCHAR(255) NOT NULL,
+            merge_commit_id VARCHAR(255) NOT NULL,
+            definition_hash VARCHAR(255),
+            status VARCHAR(50) NOT NULL DEFAULT 'succeeded'
+                CHECK (status IN ('succeeded', 'failed')),
+            deployed_by VARCHAR(255) DEFAULT 'system',
+            deployed_at TIMESTAMPTZ DEFAULT NOW() NOT NULL,
+            metadata JSONB
+        );
+    """
+    OUTBOX_TABLE_DDL = """
+        CREATE TABLE IF NOT EXISTS ontology_deploy_outbox (
+            outbox_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            deployment_id UUID NOT NULL REFERENCES ontology_deployments(deployment_id) ON DELETE CASCADE,
+            payload JSONB NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            publish_attempts INTEGER NOT NULL DEFAULT 0,
+            error TEXT,
+            claimed_by TEXT,
+            claimed_at TIMESTAMPTZ,
+            next_attempt_at TIMESTAMPTZ,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+    """
 
     @staticmethod
     def build_deploy_event_payload(
@@ -105,16 +80,6 @@ class OntologyDeploymentRegistry:
         definition_hash: Optional[str],
         occurred_at: Optional[datetime] = None,
     ) -> Dict[str, Any]:
-        event_id = deterministic_uuid5_str(f"ontology-deploy:{deployment_id}")
-        occurred_at = occurred_at or datetime.now(timezone.utc)
-        metadata = {
-            "kind": "domain",
-            "kafka_topic": AppConfig.ONTOLOGY_EVENTS_TOPIC,
-            "ontology": {
-                "ref": f"branch:{target_branch}",
-                "commit": approved_ontology_commit_id,
-            },
-        }
         data = {
             "deployment_id": deployment_id,
             "db_name": db_name,
@@ -125,16 +90,14 @@ class OntologyDeploymentRegistry:
             "merge_commit_id": merge_commit_id,
             "definition_hash": definition_hash,
         }
-        return {
-            "event_id": event_id,
-            "event_type": "ONTOLOGY_DEPLOYED",
-            "aggregate_type": "OntologyDeployment",
-            "aggregate_id": deployment_id,
-            "occurred_at": occurred_at,
-            "actor": deployed_by,
-            "data": data,
-            "metadata": metadata,
-        }
+        return OntologyDeploymentRegistry.build_common_event_payload(
+            deployment_id=deployment_id,
+            target_branch=target_branch,
+            ontology_commit_id=approved_ontology_commit_id,
+            deployed_by=deployed_by,
+            data=data,
+            occurred_at=occurred_at,
+        )
 
     async def record_deployment(
         self,
@@ -208,52 +171,3 @@ class OntologyDeploymentRegistry:
             "deployment_id": deployment_id,
             "deployed_at": row["deployed_at"].isoformat() if row and row["deployed_at"] else None,
         }
-
-    async def claim_outbox_batch(
-        self,
-        *,
-        limit: int = 50,
-        claimed_by: Optional[str] = None,
-        claim_timeout_seconds: int = 300,
-    ) -> List[OntologyDeployOutboxItem]:
-        return await _OUTBOX_STORE.claim_batch(
-            limit=limit,
-            claimed_by=claimed_by,
-            claim_timeout_seconds=claim_timeout_seconds,
-        )
-
-    async def mark_outbox_published(self, *, outbox_id: str) -> None:
-        await _OUTBOX_STORE.mark_published(outbox_id=outbox_id)
-
-    async def mark_outbox_failed(
-        self,
-        *,
-        outbox_id: str,
-        error: str,
-        next_attempt_at: Optional[datetime] = None,
-    ) -> None:
-        await _OUTBOX_STORE.mark_failed(outbox_id=outbox_id, error=error, next_attempt_at=next_attempt_at)
-
-    async def purge_outbox(self, *, retention_days: int, limit: int = 10000) -> int:
-        if retention_days <= 0:
-            return 0
-        cutoff = datetime.now(timezone.utc) - timedelta(days=retention_days)
-        row = await postgres_db.fetchrow(
-            """
-            WITH deleted AS (
-                DELETE FROM ontology_deploy_outbox
-                WHERE outbox_id IN (
-                    SELECT outbox_id
-                    FROM ontology_deploy_outbox
-                    WHERE status = 'published' AND updated_at < $1
-                    ORDER BY updated_at ASC
-                    LIMIT $2
-                )
-                RETURNING outbox_id
-            )
-            SELECT COUNT(*) AS count FROM deleted;
-            """,
-            cutoff,
-            limit,
-        )
-        return int(row["count"] or 0) if row else 0

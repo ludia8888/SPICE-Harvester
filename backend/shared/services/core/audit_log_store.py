@@ -18,6 +18,7 @@ import asyncpg
 from shared.config.settings import get_settings
 from shared.models.audit_log import AuditLogEntry, AuditStatus
 from shared.services.registries.postgres_schema_registry import PostgresSchemaRegistry
+from shared.utils.sql_filter_builder import SqlFilterBuilder
 
 
 class AuditLogStore(PostgresSchemaRegistry):
@@ -39,16 +40,6 @@ class AuditLogStore(PostgresSchemaRegistry):
             pool_max=pool_max_value,
             command_timeout=int(perf.audit_pg_command_timeout_seconds),
         )
-
-    async def health_check(self) -> bool:
-        try:
-            if not self._pool:
-                await self.connect()
-            async with self._pool.acquire() as conn:
-                await conn.execute("SELECT 1")
-            return True
-        except Exception:
-            return False
 
     async def _ensure_tables(self, conn: asyncpg.Connection) -> None:
         await conn.execute(
@@ -269,35 +260,30 @@ class AuditLogStore(PostgresSchemaRegistry):
         if not self._pool:
             await self.connect()
 
-        clauses: List[str] = []
-        params: List[Any] = []
-
-        def _add(condition: str, value: Any) -> None:
-            params.append(value)
-            clauses.append(condition.replace("$X", f"${len(params)}"))
+        filters = SqlFilterBuilder()
 
         if partition_key:
-            _add("partition_key = $X", partition_key)
+            filters.add("partition_key = $X", partition_key)
         if action:
-            _add("action = $X", action)
+            filters.add("action = $X", action)
         if status:
-            _add("status = $X", status)
+            filters.add("status = $X", status)
         if resource_type:
-            _add("resource_type = $X", resource_type)
+            filters.add("resource_type = $X", resource_type)
         if resource_id:
-            _add("resource_id = $X", resource_id)
+            filters.add("resource_id = $X", resource_id)
         if event_id:
-            _add("event_id = $X", event_id)
+            filters.add("event_id = $X", event_id)
         if command_id:
-            _add("command_id = $X", command_id)
+            filters.add("command_id = $X", command_id)
         if actor:
-            _add("actor = $X", actor)
+            filters.add("actor = $X", actor)
         if since:
-            _add("occurred_at >= $X", since)
+            filters.add("occurred_at >= $X", since)
         if until:
-            _add("occurred_at <= $X", until)
+            filters.add("occurred_at <= $X", until)
 
-        where = " WHERE " + " AND ".join(clauses) if clauses else ""
+        where = filters.where()
         limit = max(1, min(int(limit), 1000))
         offset = max(0, int(offset))
 
@@ -313,7 +299,7 @@ class AuditLogStore(PostgresSchemaRegistry):
         )
 
         async with self._pool.acquire() as conn:
-            rows = await conn.fetch(query, *params)
+            rows = await conn.fetch(query, *filters.params)
 
         items: List[AuditLogEntry] = []
         for row in rows:
@@ -355,40 +341,35 @@ class AuditLogStore(PostgresSchemaRegistry):
         if not self._pool:
             await self.connect()
 
-        clauses: List[str] = []
-        params: List[Any] = []
-
-        def _add(condition: str, value: Any) -> None:
-            params.append(value)
-            clauses.append(condition.replace("$X", f"${len(params)}"))
+        filters = SqlFilterBuilder()
 
         if partition_key:
-            _add("partition_key = $X", partition_key)
+            filters.add("partition_key = $X", partition_key)
         if action:
-            _add("action = $X", action)
+            filters.add("action = $X", action)
         if status:
-            _add("status = $X", status)
+            filters.add("status = $X", status)
         if resource_type:
-            _add("resource_type = $X", resource_type)
+            filters.add("resource_type = $X", resource_type)
         if resource_id:
-            _add("resource_id = $X", resource_id)
+            filters.add("resource_id = $X", resource_id)
         if event_id:
-            _add("event_id = $X", event_id)
+            filters.add("event_id = $X", event_id)
         if command_id:
-            _add("command_id = $X", command_id)
+            filters.add("command_id = $X", command_id)
         if actor:
-            _add("actor = $X", actor)
+            filters.add("actor = $X", actor)
         if since:
-            _add("occurred_at >= $X", since)
+            filters.add("occurred_at >= $X", since)
         if until:
-            _add("occurred_at <= $X", until)
+            filters.add("occurred_at <= $X", until)
 
-        where = " WHERE " + " AND ".join(clauses) if clauses else ""
+        where = filters.where()
 
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
                 f"SELECT COUNT(*)::bigint AS c FROM {self._schema}.audit_logs{where}",
-                *params,
+                *filters.params,
             )
         return int(row["c"] or 0) if row else 0
 

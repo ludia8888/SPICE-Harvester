@@ -6,7 +6,6 @@ Tracks dataset→ontology mapping specs and objectify job lifecycle.
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -20,7 +19,7 @@ from shared.observability.context_propagation import enrich_metadata_with_curren
 from shared.services.registries.postgres_schema_registry import PostgresSchemaRegistry
 
 from shared.models.objectify_job import ObjectifyJob
-from shared.utils.json_utils import coerce_json_dataset, normalize_json_payload
+from shared.utils.json_utils import coerce_json_dataset, coerce_json_list, normalize_json_payload
 
 
 class OCCConflictError(RuntimeError):
@@ -42,32 +41,6 @@ class OCCConflictError(RuntimeError):
             f"OCC conflict: {table}[{record_id}] expected version {expected_version}, "
             f"actual version {actual_version}"
         )
-
-
-def _coerce_json_list(value: Any) -> List[Dict[str, Any]]:
-    if value is None:
-        return []
-    if isinstance(value, list):
-        return list(value)
-    if isinstance(value, dict):
-        return [value]
-    if isinstance(value, str):
-        raw = value.strip()
-        if not raw:
-            return []
-        try:
-            parsed = json.loads(raw)
-        except Exception:
-            return []
-        if isinstance(parsed, list):
-            return parsed
-        if isinstance(parsed, dict):
-            return [parsed]
-        return []
-    try:
-        return list(value)
-    except Exception:
-        return []
 
 
 @dataclass(frozen=True)
@@ -533,7 +506,7 @@ class ObjectifyRegistry(PostgresSchemaRegistry):
                     str(record["backing_datasource_version_id"]) if record["backing_datasource_version_id"] else None
                 ),
                 target_class_id=str(record["target_class_id"]),
-                mappings=_coerce_json_list(record["mappings"]),
+                mappings=coerce_json_list(record["mappings"], wrap_dict=True),
                 target_field_types=coerce_json_dataset(record["target_field_types"]) or {},
                 status=str(record["status"]),
                 version=int(record["version"]),
@@ -571,7 +544,7 @@ class ObjectifyRegistry(PostgresSchemaRegistry):
                     str(row["backing_datasource_version_id"]) if row["backing_datasource_version_id"] else None
                 ),
                 target_class_id=str(row["target_class_id"]),
-                mappings=_coerce_json_list(row["mappings"]),
+                mappings=coerce_json_list(row["mappings"], wrap_dict=True),
                 target_field_types=coerce_json_dataset(row["target_field_types"]) or {},
                 status=str(row["status"]),
                 version=int(row["version"]),
@@ -634,7 +607,7 @@ class ObjectifyRegistry(PostgresSchemaRegistry):
                             str(row["backing_datasource_version_id"]) if row["backing_datasource_version_id"] else None
                         ),
                         target_class_id=str(row["target_class_id"]),
-                        mappings=_coerce_json_list(row["mappings"]),
+                        mappings=coerce_json_list(row["mappings"], wrap_dict=True),
                         target_field_types=coerce_json_dataset(row["target_field_types"]) or {},
                         status=str(row["status"]),
                         version=int(row["version"]),
@@ -699,7 +672,7 @@ class ObjectifyRegistry(PostgresSchemaRegistry):
                     str(row["backing_datasource_version_id"]) if row["backing_datasource_version_id"] else None
                 ),
                 target_class_id=str(row["target_class_id"]),
-                mappings=_coerce_json_list(row["mappings"]),
+                mappings=coerce_json_list(row["mappings"], wrap_dict=True),
                 target_field_types=coerce_json_dataset(row["target_field_types"]) or {},
                 status=str(row["status"]),
                 version=int(row["version"]),

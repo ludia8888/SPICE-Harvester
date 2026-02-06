@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional
 
 from .base_validator import BaseValidator, ValidationResult
 from .constraint_validator import ConstraintValidator
+from shared.utils.json_utils import maybe_decode_json
 
 
 class VectorValidator(BaseValidator):
@@ -64,12 +65,7 @@ class VectorValidator(BaseValidator):
         )
 
     def normalize(self, value: Any) -> Any:
-        if isinstance(value, str):
-            try:
-                return json.loads(value)
-            except Exception:
-                return value
-        return value
+        return maybe_decode_json(value)
 
     def get_supported_types(self) -> List[str]:
         return ["vector"]

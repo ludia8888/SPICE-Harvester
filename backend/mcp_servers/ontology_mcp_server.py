@@ -25,21 +25,10 @@ for _path in (str(_backend_root), str(_repo_root)):
     if _path and _path not in sys.path:
         sys.path.append(_path)
 
-from shared.config.settings import get_settings
 from shared.utils.llm_safety import mask_pii
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
-
-
-def _bff_api_base_url() -> str:
-    """Internal helper for MCP tools that need to call the BFF's REST API."""
-    base = get_settings().services.bff_base_url.rstrip("/")
-    return f"{base}/api/v1"
-
-
-def _bff_admin_token() -> Optional[str]:
-    return (get_settings().clients.bff_admin_token or "").strip() or None
 
 
 def _normalize_string(value: Any) -> str:

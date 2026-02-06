@@ -16,6 +16,10 @@ from bff.schemas.objectify_requests import CreateMappingSpecRequest, MappingSpec
 from bff.schemas.object_types_requests import ObjectTypeContractRequest, ObjectTypeContractUpdate
 from bff.services.mapping_suggestion_service import MappingSuggestionService
 from bff.services.oms_client import OMSClient
+from bff.services.ontology_occ_guard_service import (
+    fetch_branch_head_commit_id,
+    resolve_expected_head_commit,
+)
 from bff.services.objectify_mapping_spec_service import create_mapping_spec as create_mapping_spec_service
 from bff.routers.objectify_job_ops import enqueue_objectify_job_for_mapping_spec
 from shared.models.requests import ApiResponse
@@ -49,42 +53,6 @@ def _schema_hash_from_version(sample_json: Any, schema_json: Any) -> Optional[st
         if isinstance(columns, list) and columns:
             return compute_schema_hash(columns)
     return None
-
-
-async def _maybe_get_head_commit_id(oms_client: OMSClient, *, db_name: str, branch: str) -> Optional[str]:
-    head_payload = await oms_client.get_version_head(db_name, branch=branch)
-    head_data = head_payload.get("data") if isinstance(head_payload, dict) else {}
-    if not isinstance(head_data, dict):
-        return None
-    return (
-        str(
-            head_data.get("head_commit_id")
-            or head_data.get("commit")
-            or head_data.get("head_commit")
-            or ""
-        ).strip()
-        or None
-    )
-
-
-async def _resolve_expected_head_commit(
-    oms_client: OMSClient,
-    *,
-    db_name: str,
-    branch: str,
-    expected_head_commit: Optional[str],
-) -> str:
-    expected_head = str(expected_head_commit or "").strip() or None
-    if expected_head:
-        return expected_head
-
-    expected_head = await _maybe_get_head_commit_id(oms_client, db_name=db_name, branch=branch)
-    if not expected_head:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="expected_head_commit is required (could not resolve branch head)",
-        )
-    return expected_head
 
 
 async def _resolve_backing(
@@ -292,8 +260,8 @@ async def create_object_type_contract(
             },
         }
 
-        expected_head = await _resolve_expected_head_commit(
-            oms_client,
+        expected_head = await resolve_expected_head_commit(
+            oms_client=oms_client,
             db_name=db_name,
             branch=branch,
             expected_head_commit=expected_head_commit,
@@ -358,7 +326,11 @@ async def create_object_type_contract(
                     "mapping_spec_version": mapping_payload.get("version"),
                     "status": mapping_payload.get("status"),
                 }
-                head_commit_id = await _maybe_get_head_commit_id(oms_client, db_name=db_name, branch=branch)
+                head_commit_id = await fetch_branch_head_commit_id(
+                    oms_client=oms_client,
+                    db_name=db_name,
+                    branch=branch,
+                )
                 response = await oms_client.update_ontology_resource(
                     db_name,
                     resource_type="object_type",
@@ -860,8 +832,8 @@ async def update_object_type_contract(
             },
         }
 
-        expected_head = await _resolve_expected_head_commit(
-            oms_client,
+        expected_head = await resolve_expected_head_commit(
+            oms_client=oms_client,
             db_name=db_name,
             branch=branch,
             expected_head_commit=expected_head_commit,

@@ -6,7 +6,6 @@ centralize merge simulation + conflict resolution flows (Facade pattern).
 
 from __future__ import annotations
 
-import inspect
 import logging
 from typing import Any, Dict, List, Optional
 
@@ -17,25 +16,14 @@ from bff.dependencies import OMSClient
 from bff.utils.conflict_converter import ConflictConverter
 from shared.models.requests import ApiResponse, MergeRequest
 from shared.security.input_sanitizer import SecurityViolationError, validate_branch_name, validate_db_name
+from shared.utils.async_utils import await_if_needed as _await_if_needed
+from shared.utils.async_utils import raise_for_status_async as _raise_for_status
+from shared.utils.async_utils import response_json_async as _response_json
 from shared.utils.diff_utils import normalize_diff_changes
 
 logger = logging.getLogger(__name__)
 
 _SECURITY_VIOLATION_DETAIL = "입력 데이터에 보안 위반이 감지되었습니다"
-
-
-async def _await_if_needed(value: Any) -> Any:
-    if inspect.isawaitable(value):
-        return await value
-    return value
-
-
-async def _raise_for_status(response: Any) -> None:
-    await _await_if_needed(response.raise_for_status())
-
-
-async def _response_json(response: Any) -> Any:
-    return await _await_if_needed(response.json())
 
 
 def _validate_inputs(*, db_name: str, source_branch: str, target_branch: str) -> tuple[str, str, str]:
@@ -309,4 +297,3 @@ async def _convert_resolution_to_terminus_format(resolution: Dict[str, Any]) -> 
         "value": resolution.get("resolved_value"),
         "metadata": resolution.get("metadata", {}),
     }
-

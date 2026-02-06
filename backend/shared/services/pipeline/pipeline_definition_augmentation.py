@@ -13,7 +13,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from shared.services.pipeline.pipeline_dataset_utils import normalize_dataset_selection, resolve_dataset_version
-from shared.services.pipeline.pipeline_definition_utils import split_expectation_columns
+from shared.services.pipeline.pipeline_definition_utils import normalize_expectation_columns
 from shared.services.pipeline.pipeline_graph_utils import normalize_edges, unique_node_id
 from shared.services.pipeline.pipeline_schema_casts import extract_schema_casts
 from shared.services.pipeline.pipeline_transform_spec import normalize_operation
@@ -81,12 +81,6 @@ def _concat_expr(columns: List[str], *, null_if_any: bool = False) -> str:
         return joined
     null_checks = " OR ".join(f"{expr} IS NULL" for expr in col_exprs)
     return f"case when {null_checks} then null else {joined} end"
-
-
-def _normalize_fk_columns(value: Any) -> List[str]:
-    if isinstance(value, list):
-        return [str(item).strip() for item in value if str(item).strip()]
-    return split_expectation_columns(str(value or ""))
 
 
 def _merge_schema_checks(
@@ -197,9 +191,9 @@ def _inject_fk_join_check(
     fk_spec: Dict[str, Any],
     default_branch: Optional[str],
 ) -> Optional[str]:
-    columns = _normalize_fk_columns(fk_spec.get("columns") or fk_spec.get("column"))
+    columns = normalize_expectation_columns(fk_spec.get("columns") or fk_spec.get("column"))
     reference = fk_spec.get("reference") if isinstance(fk_spec.get("reference"), dict) else {}
-    ref_columns = _normalize_fk_columns(
+    ref_columns = normalize_expectation_columns(
         reference.get("columns")
         or reference.get("column")
         or fk_spec.get("ref_columns")

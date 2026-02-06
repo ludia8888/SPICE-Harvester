@@ -9,7 +9,7 @@ import re
 import time
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Optional
-from uuid import UUID, uuid4
+from uuid import uuid4
 from datetime import datetime, timezone
 
 from fastapi import FastAPI, Request, WebSocket, status
@@ -22,7 +22,9 @@ from shared.security.auth_utils import extract_presented_token, is_exempt_path
 from shared.security.user_context import UserPrincipal, UserTokenError, extract_bearer_token, verify_user_token
 from shared.services.registries.agent_tool_registry import AgentToolPolicyRecord
 from shared.observability.request_context import get_correlation_id, get_request_id
+from shared.utils.token_count import approx_token_count_json
 from shared.utils.llm_safety import digest_for_audit
+from shared.utils.uuid_utils import safe_uuid as _safe_uuid
 
 _EXEMPT_PATHS_DEFAULT = (
     "/api/v1/health",
@@ -78,26 +80,7 @@ def _attach_dev_master_principal(request: Request) -> None:
 
 
 def _approx_token_count(payload: Any) -> int:
-    if payload is None or payload == "" or payload == {} or payload == []:
-        return 0
-    try:
-        text = json.dumps(payload, ensure_ascii=False, separators=(",", ":"), default=str)
-    except Exception:
-        text = str(payload)
-    text = text.strip()
-    if not text:
-        return 0
-    return max(1, int((len(text) + 3) / 4))
-
-
-def _safe_uuid(value: Optional[str]) -> Optional[str]:
-    raw = str(value or "").strip()
-    if not raw:
-        return None
-    try:
-        return str(UUID(raw))
-    except Exception:
-        return None
+    return approx_token_count_json(payload, empty_collections_as_zero=True)
 
 
 def _resolve_agent_tool_run_id(request: Request) -> str:

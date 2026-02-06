@@ -15,22 +15,15 @@ import httpx
 from fastapi import HTTPException, Request, status
 
 from bff.schemas.actions_requests import ActionSimulateRequest, ActionSubmitRequest
+from bff.services.input_validation_service import sanitized_payload, validated_db_name
 from bff.services.oms_client import OMSClient
 from bff.utils.action_log_serialization import dt_iso, serialize_action_log_record
 from bff.utils.httpx_exceptions import raise_httpx_as_http_exception
 from shared.security.database_access import DOMAIN_MODEL_ROLES, resolve_database_actor
-from shared.security.input_sanitizer import SecurityViolationError, sanitize_input, validate_db_name
 from shared.services.registries.action_log_registry import ActionLogRegistry
 from shared.services.registries.action_simulation_registry import ActionSimulationRegistry
 
 EnforceDatabaseRoleFn = Callable[..., Any]
-
-
-def _validated_db_name(db_name: str) -> str:
-    try:
-        return validate_db_name(db_name)
-    except (SecurityViolationError, ValueError) as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
 def _require_action_type_id(action_type_id: str) -> str:
@@ -70,13 +63,6 @@ def _oms_metadata(
         "user_id": principal_id,
         "user_type": principal_type,
     }
-
-
-def _sanitize_action_input(value: Dict[str, Any]) -> Dict[str, Any]:
-    try:
-        return sanitize_input(value)
-    except SecurityViolationError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
 async def _oms_post(*, oms_client: OMSClient, path: str, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -145,14 +131,14 @@ async def submit_action(
     oms_client: OMSClient,
     enforce_role: EnforceDatabaseRoleFn,
 ) -> Dict[str, Any]:
-    db_name = _validated_db_name(db_name)
+    db_name = validated_db_name(db_name)
     action_type_id = _require_action_type_id(action_type_id)
 
     await _enforce_domain_model_role(http_request=http_request, db_name=db_name, enforce_role=enforce_role)
     principal_type, principal_id = resolve_database_actor(http_request.headers)
 
     oms_payload = {
-        "input": _sanitize_action_input(body.input),
+        "input": sanitized_payload(body.input),
         "correlation_id": body.correlation_id,
         "metadata": _oms_metadata(
             request_metadata=body.metadata,
@@ -179,14 +165,14 @@ async def simulate_action(
     oms_client: OMSClient,
     enforce_role: EnforceDatabaseRoleFn,
 ) -> Dict[str, Any]:
-    db_name = _validated_db_name(db_name)
+    db_name = validated_db_name(db_name)
     action_type_id = _require_action_type_id(action_type_id)
 
     await _enforce_domain_model_role(http_request=http_request, db_name=db_name, enforce_role=enforce_role)
     principal_type, principal_id = resolve_database_actor(http_request.headers)
 
     oms_payload: Dict[str, Any] = {
-        "input": _sanitize_action_input(body.input),
+        "input": sanitized_payload(body.input),
         "correlation_id": body.correlation_id,
         "metadata": _oms_metadata(
             request_metadata=body.metadata,
@@ -219,7 +205,7 @@ async def get_action_log(
     action_logs: ActionLogRegistry,
     enforce_role: EnforceDatabaseRoleFn,
 ) -> Dict[str, Any]:
-    db_name = _validated_db_name(db_name)
+    db_name = validated_db_name(db_name)
     action_log_uuid = _parse_uuid(action_log_id)
 
     await _enforce_domain_model_role(http_request=http_request, db_name=db_name, enforce_role=enforce_role)
@@ -243,7 +229,7 @@ async def list_action_logs(
     action_logs: ActionLogRegistry,
     enforce_role: EnforceDatabaseRoleFn,
 ) -> Dict[str, Any]:
-    db_name = _validated_db_name(db_name)
+    db_name = validated_db_name(db_name)
 
     await _enforce_domain_model_role(http_request=http_request, db_name=db_name, enforce_role=enforce_role)
 
@@ -267,7 +253,7 @@ async def list_action_simulations(
     offset: int,
     enforce_role: EnforceDatabaseRoleFn,
 ) -> Dict[str, Any]:
-    db_name = _validated_db_name(db_name)
+    db_name = validated_db_name(db_name)
     await _enforce_domain_model_role(http_request=http_request, db_name=db_name, enforce_role=enforce_role)
 
     async with _action_simulation_registry() as registry:
@@ -289,7 +275,7 @@ async def get_action_simulation(
     version_limit: int,
     enforce_role: EnforceDatabaseRoleFn,
 ) -> Dict[str, Any]:
-    db_name = _validated_db_name(db_name)
+    db_name = validated_db_name(db_name)
     simulation_uuid = _parse_uuid(simulation_id)
     await _enforce_domain_model_role(http_request=http_request, db_name=db_name, enforce_role=enforce_role)
 
@@ -314,7 +300,7 @@ async def list_action_simulation_versions(
     offset: int,
     enforce_role: EnforceDatabaseRoleFn,
 ) -> Dict[str, Any]:
-    db_name = _validated_db_name(db_name)
+    db_name = validated_db_name(db_name)
     simulation_uuid = _parse_uuid(simulation_id)
     await _enforce_domain_model_role(http_request=http_request, db_name=db_name, enforce_role=enforce_role)
 
@@ -339,7 +325,7 @@ async def get_action_simulation_version(
     http_request: Request,
     enforce_role: EnforceDatabaseRoleFn,
 ) -> Dict[str, Any]:
-    db_name = _validated_db_name(db_name)
+    db_name = validated_db_name(db_name)
     simulation_uuid = _parse_uuid(simulation_id)
     await _enforce_domain_model_role(http_request=http_request, db_name=db_name, enforce_role=enforce_role)
 

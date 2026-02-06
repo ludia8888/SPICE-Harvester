@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field, field_validator
+from shared.utils.action_simulation_utils import reject_simulation_delete_flag
 
 
 class ActionSubmitRequest(BaseModel):
@@ -34,13 +35,7 @@ class ActionSimulateStatePatch(BaseModel):
     link_add: List[Any] = Field(default_factory=list)
     link_remove: List[Any] = Field(default_factory=list)
     delete: bool = Field(default=False, description="delete is not supported for simulation assumptions")
-
-    @field_validator("delete")
-    @classmethod
-    def _reject_delete(cls, value: bool) -> bool:
-        if value:
-            raise ValueError("delete is not supported for simulation assumptions")
-        return False
+    _reject_delete = field_validator("delete")(reject_simulation_delete_flag)
 
 
 class ActionSimulateObservedBaseOverrides(BaseModel):
@@ -85,4 +80,3 @@ class ActionSimulateRequest(BaseModel):
         default=None,
         description="Optional decision simulation assumptions (Level 2 state injection).",
     )
-

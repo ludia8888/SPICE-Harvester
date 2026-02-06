@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, List
 
+from shared.services.pipeline.pipeline_join_keys import normalize_join_key_list
+
 SUPPORTED_TRANSFORMS = frozenset(
     {
         "join",
@@ -48,22 +50,13 @@ def resolve_join_spec(metadata: Dict[str, Any]) -> JoinSpec:
     right_key = str(metadata.get("rightKey") or metadata.get("right_key") or "").strip() or None
     join_key = str(metadata.get("joinKey") or metadata.get("join_key") or "").strip() or None
 
-    def _normalize_keys(value: Any) -> List[str]:
-        if isinstance(value, list):
-            return [str(item).strip() for item in value if str(item).strip()]
-        if isinstance(value, tuple):
-            return [str(item).strip() for item in value if str(item).strip()]
-        if isinstance(value, str) and value.strip():
-            return [value.strip()]
-        return []
-
-    left_keys = _normalize_keys(
+    left_keys = normalize_join_key_list(
         metadata.get("leftKeys")
         or metadata.get("left_keys")
         or metadata.get("leftOn")
         or metadata.get("left_on")
     )
-    right_keys = _normalize_keys(
+    right_keys = normalize_join_key_list(
         metadata.get("rightKeys")
         or metadata.get("right_keys")
         or metadata.get("rightOn")

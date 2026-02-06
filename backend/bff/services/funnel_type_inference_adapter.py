@@ -128,37 +128,12 @@ class FunnelHTTPTypeInferenceAdapter(TypeInferenceInterface):
         """
         단일 컬럼 분석을 위한 비동기 헬퍼 메서드
         """
-        try:
-            from shared.config.settings import get_settings
-
-            request_data = {
-                "data": data,
-                "columns": headers,
-                "sample_size": len(data),
-                "include_complex_types": include_complex_types,
-            }
-
-            settings = get_settings()
-            response = await self.funnel_client.analyze_dataset(
-                request_data,
-                timeout_seconds=float(settings.services.funnel_infer_timeout_seconds),
-            )
-
-            # Funnel 응답을 Interface 형식으로 변환
-            return [self._convert_funnel_column_result(col) for col in response.get("columns", [])]
-
-        except Exception as e:
-            logger.error(f"Funnel 서비스 분석 실패: {e}")
-            from shared.services.pipeline.pipeline_funnel_fallback import build_funnel_analysis_fallback
-
-            fallback = build_funnel_analysis_fallback(
-                columns=headers,
-                rows=data,
-                include_complex_types=include_complex_types,
-                error=str(e),
-                stage="bff",
-            )
-            return [InterfaceColumnResult(**col) for col in (fallback.get("columns") or [])]
+        return await self._analyze_with_fallback(
+            data=data,
+            headers=headers,
+            include_complex_types=include_complex_types,
+            sample_size=len(data),
+        )
 
     async def _analyze_dataset_async(
         self,
@@ -170,15 +145,45 @@ class FunnelHTTPTypeInferenceAdapter(TypeInferenceInterface):
         """
         데이터셋 분석을 위한 비동기 헬퍼 메서드
         """
+        return await self._analyze_with_fallback(
+            data=data,
+            headers=headers,
+            include_complex_types=include_complex_types,
+            sample_size=sample_size or 1000,
+        )
+
+    @staticmethod
+    def _build_analysis_request(
+        *,
+        data: List[List[Any]],
+        headers: List[str],
+        include_complex_types: bool,
+        sample_size: int,
+    ) -> Dict[str, Any]:
+        return {
+            "data": data,
+            "columns": headers,
+            "sample_size": sample_size,
+            "include_complex_types": include_complex_types,
+        }
+
+    async def _analyze_with_fallback(
+        self,
+        *,
+        data: List[List[Any]],
+        headers: List[str],
+        include_complex_types: bool,
+        sample_size: int,
+    ) -> List[InterfaceColumnResult]:
         try:
             from shared.config.settings import get_settings
 
-            request_data = {
-                "data": data,
-                "columns": headers,
-                "sample_size": sample_size or 1000,
-                "include_complex_types": include_complex_types,
-            }
+            request_data = self._build_analysis_request(
+                data=data,
+                headers=headers,
+                sample_size=sample_size,
+                include_complex_types=include_complex_types,
+            )
 
             settings = get_settings()
             response = await self.funnel_client.analyze_dataset(
@@ -186,9 +191,7 @@ class FunnelHTTPTypeInferenceAdapter(TypeInferenceInterface):
                 timeout_seconds=float(settings.services.funnel_infer_timeout_seconds),
             )
 
-            # Funnel 응답을 Interface 형식으로 변환
             return [self._convert_funnel_column_result(col) for col in response.get("columns", [])]
-
         except Exception as e:
             logger.error(f"Funnel 서비스 분석 실패: {e}")
             from shared.services.pipeline.pipeline_funnel_fallback import build_funnel_analysis_fallback

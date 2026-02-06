@@ -5,7 +5,8 @@ from typing import Any, Dict, Optional
 
 import httpx
 
-from shared.config.settings import get_settings
+from mcp_servers.bff_auth import bff_admin_token as _bff_admin_token
+from mcp_servers.bff_auth import bff_api_base_url
 
 
 async def http_json(
@@ -35,22 +36,6 @@ async def http_json(
             "response": payload,
         }
     return payload if isinstance(payload, dict) else {"response": payload}
-
-
-def bff_api_base_url() -> str:
-    """
-    Internal helper for MCP tools that need to call the BFF's REST API.
-
-    In docker-compose, `services.bff_base_url` typically resolves to `http://bff:8002`.
-    In local dev, it resolves to `http://127.0.0.1:8002`.
-    """
-    base = get_settings().services.bff_base_url.rstrip("/")
-    return f"{base}/api/v1"
-
-
-def _bff_admin_token() -> Optional[str]:
-    # Reuse the same fallback chain as other internal clients.
-    return (get_settings().clients.bff_admin_token or "").strip() or None
 
 
 def bff_headers(
@@ -137,4 +122,3 @@ async def oms_json(
         error_prefix="OMS",
         error_path=path,
     )
-

@@ -6,6 +6,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+from shared.utils.collection_utils import ensure_list
+
 
 _SUPPORTED_OPS = {
     "eq",
@@ -20,14 +22,6 @@ _SUPPORTED_OPS = {
     "is_null",
     "not_null",
 }
-
-
-def _as_list(value: Any) -> List[Any]:
-    if value is None:
-        return []
-    if isinstance(value, list):
-        return value
-    return [value]
 
 
 def _coerce_bool(value: Any) -> Optional[bool]:
@@ -57,9 +51,9 @@ def _match_rule(value: Any, *, op: str, expected: Any) -> bool:
     if op == "lte":
         return value is not None and expected is not None and value <= expected
     if op == "in":
-        return value in _as_list(expected)
+        return value in ensure_list(expected)
     if op == "not_in":
-        return value not in _as_list(expected)
+        return value not in ensure_list(expected)
     if op == "contains":
         if value is None:
             return False
@@ -173,4 +167,3 @@ def apply_access_policy(
         filtered_rows.append(masked_row)
 
     return filtered_rows, {"filtered": filtered_out, "masked_fields": masked_fields}
-

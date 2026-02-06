@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
-from fastapi import Request
+from fastapi import HTTPException, Request, status
 
 from bff.routers.registry_deps import get_agent_policy_registry
 
@@ -24,6 +24,20 @@ def resolve_tenant_id(request: Request) -> str:
         or "default"
     )
     return str(candidate).strip() or "default"
+
+
+def require_verified_user(request: Request) -> Any:
+    user = getattr(request.state, "user", None)
+    if user is None or not getattr(user, "verified", False):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User JWT required")
+    return user
+
+
+def resolve_verified_tenant_user(request: Request) -> tuple[str, str]:
+    user = require_verified_user(request)
+    tenant_id = str(getattr(user, "tenant_id", None) or getattr(user, "org_id", None) or "default").strip() or "default"
+    user_id = str(getattr(user, "id", "") or "").strip() or "unknown"
+    return tenant_id, user_id
 
 
 def resolve_actor(request: Request) -> str:

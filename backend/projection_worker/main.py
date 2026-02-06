@@ -7,7 +7,6 @@ import asyncio
 import json
 import logging
 import os
-import signal
 from contextlib import suppress
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
@@ -35,19 +34,21 @@ from shared.services.registries.processed_event_registry import (
 )
 from shared.services.kafka.processed_event_worker import RegistryKey, StrictHeartbeatEventEnvelopeKafkaWorker
 from shared.services.kafka.producer_factory import create_kafka_producer
-from shared.services.kafka.safe_consumer import SafeKafkaConsumer, create_safe_consumer
+from shared.services.kafka.safe_consumer import SafeKafkaConsumer
 from shared.services.registries.lineage_store import LineageStore
 from shared.services.core.audit_log_store import AuditLogStore
 from shared.services.core.worker_stores import WorkerObservability, initialize_worker_stores
-from shared.services.kafka.consumer_ops import ExecutorKafkaConsumerOps
-from shared.services.kafka.dlq_publisher import DlqPublishSpec, build_standard_dlq_payload, publish_dlq_json
+from shared.services.kafka.dlq_publisher import DlqPublishSpec
+from shared.services.kafka.producer_ops import close_kafka_producer
 from shared.utils.chaos import maybe_crash
 from shared.utils.ontology_version import split_ref_commit
 from shared.utils.language import coerce_localized_text, select_localized_text, get_default_language
+from shared.utils.number_utils import to_int_or_none
 from shared.utils.resource_rid import strip_rid_revision
 from shared.utils.writeback_paths import ref_key, writeback_patchset_key
 from shared.utils.writeback_lifecycle import overlay_doc_id
 from shared.utils.writeback_patch_apply import apply_changes_to_payload
+from shared.utils.worker_runner import run_worker_until_stopped
 
 # Observability imports
 from shared.observability.tracing import get_tracing_service
@@ -107,6 +108,12 @@ class ProjectionWorker(StrictHeartbeatEventEnvelopeKafkaWorker[None]):
         # DLQ 토픽
         self.dlq_topic = AppConfig.PROJECTION_DLQ_TOPIC
         self.dlq_flush_timeout_seconds = float(worker_cfg.dlq_flush_timeout_seconds)
+        self._dlq_spec = DlqPublishSpec(
+            dlq_topic=self.dlq_topic,
+            service_name=self.service_name,
+            span_name="projection_worker.dlq_produce",
+            flush_timeout_seconds=self.dlq_flush_timeout_seconds,
+        )
 
         # 재시도 설정
         max_retries = int(worker_cfg.max_retries)
@@ -141,12 +148,7 @@ class ProjectionWorker(StrictHeartbeatEventEnvelopeKafkaWorker[None]):
 
     @staticmethod
     def _parse_sequence(value: Any) -> Optional[int]:
-        if value is None:
-            return None
-        try:
-            return int(value)
-        except Exception:
-            return None
+        return to_int_or_none(value)
 
     @staticmethod
     def _normalize_localized_field(value: Any, *, default_lang: str) -> tuple[str, Dict[str, str]]:
@@ -357,17 +359,11 @@ class ProjectionWorker(StrictHeartbeatEventEnvelopeKafkaWorker[None]):
 
         group_id = (AppConfig.PROJECTION_WORKER_GROUP or "projection-worker-group").strip()
 
-        # Kafka Consumer (strong consistency: read_committed + rebalance-safe offsets)
         topics = [AppConfig.INSTANCE_EVENTS_TOPIC, AppConfig.ONTOLOGY_EVENTS_TOPIC, AppConfig.ACTION_EVENTS_TOPIC]
-        self.consumer = create_safe_consumer(
+        self._initialize_safe_consumer_runtime(
             group_id=group_id,
             topics=topics,
             service_name="projection-worker",
-            on_revoke=self._on_partitions_revoked,
-            on_assign=self._on_partitions_assigned,
-        )
-        self.consumer_ops = ExecutorKafkaConsumerOps(
-            self.consumer,
             thread_name_prefix="projection-worker-kafka",
         )
         
@@ -667,33 +663,36 @@ class ProjectionWorker(StrictHeartbeatEventEnvelopeKafkaWorker[None]):
         )
 
     async def _on_parse_error(self, *, msg: Any, raw_payload: Optional[str], error: Exception) -> None:  # type: ignore[override]
-        kafka_headers = None
-        with suppress(Exception):
-            kafka_headers = msg.headers()
-
-        fallback_metadata = None
-        if raw_payload:
-            try:
-                decoded = json.loads(raw_payload)
-                if isinstance(decoded, dict) and isinstance(decoded.get("metadata"), dict):
-                    fallback_metadata = decoded["metadata"]
-            except Exception:
-                fallback_metadata = None
-
-        try:
+        async def _send(
+            _stage: str,
+            cause_text: str,
+            payload_text: Optional[str],
+            _payload_obj: Optional[Dict[str, Any]],
+            kafka_headers: Optional[Any],
+            fallback_metadata: Optional[Dict[str, Any]],
+        ) -> None:
+            metadata = fallback_metadata
+            if metadata is None:
+                metadata = self._fallback_metadata_from_raw_payload(payload_text)
             await self._publish_to_dlq(
                 msg=msg,
-                error=str(error),
+                error=cause_text,
                 attempt_count=1,
-                payload_text=raw_payload,
+                payload_text=payload_text,
                 kafka_headers=kafka_headers,
-                fallback_metadata=fallback_metadata,
+                fallback_metadata=metadata,
             )
-        except Exception as dlq_err:
-            logger.error("Failed to publish invalid projection payload to DLQ; retrying: %s", dlq_err, exc_info=True)
-            raise
 
-        logger.exception("Invalid projection payload; skipping: %s", error)
+        await self._publish_parse_error_to_dlq(
+            msg=msg,
+            raw_payload=raw_payload,
+            error=error,
+            dlq_sender=_send,
+            publish_failure_message="Failed to publish invalid projection payload to DLQ; retrying: %s",
+            invalid_payload_message="Invalid projection payload; skipping: %s",
+            raise_on_publish_failure=True,
+            logger_instance=logger,
+        )
 
     async def _commit(self, msg: Any) -> None:  # type: ignore[override]
         if not self.consumer:
@@ -711,34 +710,25 @@ class ProjectionWorker(StrictHeartbeatEventEnvelopeKafkaWorker[None]):
         kafka_headers: Optional[Any] = None,
         fallback_metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
-        if not self.producer:
-            logger.error("DLQ producer not configured; dropping DLQ message: %s", error)
-            return
-        dlq_payload = build_standard_dlq_payload(
+        sent = await self._publish_standard_dlq_record(
+            producer=self.producer,
             msg=msg,
-            worker="projection-worker",
-            stage=None,
-            error=str(error),
+            worker=self.service_name,
+            dlq_spec=self._dlq_spec,
+            error=error,
             attempt_count=int(attempt_count),
+            stage=None,
             payload_text=payload_text,
             payload_obj=None,
-        )
-        spec = DlqPublishSpec(
-            dlq_topic=self.dlq_topic,
-            service_name="projection-worker",
-            span_name="projection_worker.dlq_produce",
-            flush_timeout_seconds=float(self.dlq_flush_timeout_seconds),
-        )
-        await publish_dlq_json(
-            producer=self.producer,
-            spec=spec,
-            msg=msg,
-            payload=dlq_payload,
-            tracing=self.tracing_service,
-            metrics=self.metrics_collector,
             kafka_headers=kafka_headers,
-            fallback_metadata=fallback_metadata if isinstance(fallback_metadata, dict) else None,
+            fallback_metadata=fallback_metadata,
+            tracing=self.tracing_service or self.tracing,
+            metrics=self.metrics_collector or self.metrics,
+            raise_on_missing_producer=False,
+            missing_producer_message="DLQ producer not configured",
         )
+        if not sent:
+            return
         logger.info(
             "Message sent to DLQ (topic=%s partition=%s offset=%s)",
             msg.topic(),
@@ -755,17 +745,25 @@ class ProjectionWorker(StrictHeartbeatEventEnvelopeKafkaWorker[None]):
         error: str,
         attempt_count: int,
     ) -> None:
-        kafka_headers = None
-        with suppress(Exception):
-            kafka_headers = msg.headers()
+        _, payload_text, _, kafka_headers, fallback_metadata = self._normalize_dlq_publish_inputs(
+            msg=msg,
+            stage="projection",
+            default_stage="projection",
+            raw_payload=raw_payload,
+            payload_text=None,
+            payload_obj=None,
+            kafka_headers=None,
+            fallback_metadata=None,
+            inferred_metadata=payload.metadata if isinstance(payload.metadata, dict) else None,
+        )
 
         await self._publish_to_dlq(
             msg=msg,
             error=error,
             attempt_count=attempt_count,
-            payload_text=raw_payload,
+            payload_text=payload_text,
             kafka_headers=kafka_headers,
-            fallback_metadata=payload.metadata if isinstance(payload.metadata, dict) else None,
+            fallback_metadata=fallback_metadata,
         )
 
     async def _process_payload(self, payload: EventEnvelope) -> None:  # type: ignore[override]
@@ -2636,9 +2634,13 @@ class ProjectionWorker(StrictHeartbeatEventEnvelopeKafkaWorker[None]):
         self.running = False
         
         await self._close_consumer_runtime()
-            
-        if self.producer:
-            self.producer.flush()
+        await close_kafka_producer(
+            producer=self.producer,
+            timeout_s=5.0,
+            warning_logger=logger,
+            warning_message="Kafka producer flush failed during shutdown: %s",
+        )
+        self.producer = None
             
         if self.elasticsearch_service:
             await self.elasticsearch_service.disconnect()
@@ -2652,25 +2654,9 @@ class ProjectionWorker(StrictHeartbeatEventEnvelopeKafkaWorker[None]):
         logger.info("Projection Worker stopped")
 
 
-async def main():
-    """메인 함수"""
-    worker = ProjectionWorker()
-    
-    # 시그널 핸들러 설정
-    def signal_handler(sig, frame):
-        logger.info(f"Received signal {sig}")
-        worker.running = False
-    
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
-    
+if __name__ == "__main__":
     try:
-        await worker.initialize()
-        await worker.run()
+        asyncio.run(run_worker_until_stopped(ProjectionWorker(), shutdown_on_exit=False))
     except Exception as e:
         logger.error(f"Worker failed: {e}")
         raise
-
-
-if __name__ == "__main__":
-    asyncio.run(main())

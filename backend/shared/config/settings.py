@@ -55,6 +55,31 @@ def _parse_boolish(raw: Any) -> Optional[bool]:
     return None
 
 
+def _strip_optional_text(raw: Any) -> Optional[str]:
+    if raw is None:
+        return None
+    value = str(raw).strip()
+    return value or None
+
+
+def _strip_text_if_not_none(raw: Any) -> Optional[str]:
+    if raw is None:
+        return None
+    return str(raw).strip()
+
+
+def _normalize_base_branch(raw: Any) -> str:
+    return str(raw or "").strip() or "main"
+
+
+def _clamp_flush_timeout_seconds(raw: Any, *, default: float = 10.0) -> float:
+    try:
+        value = float(raw)
+    except Exception:
+        return float(default)
+    return max(0.1, min(value, 600.0))
+
+
 def _env_truthy(name: str) -> bool:
     parsed = _parse_boolish(os.getenv(name))
     return parsed is True
@@ -606,7 +631,7 @@ class LLMSettings(BaseSettings):
         description="Directory containing mock JSON files like agent_plan_compile_v1.json (LLM_MOCK_DIR)",
     )
 
-    @field_validator(
+    _normalize_provider_strings = field_validator(
         "provider",
         "base_url",
         "api_key",
@@ -621,13 +646,7 @@ class LLMSettings(BaseSettings):
         "mock_dir",
         "provider_policies_json",
         mode="before",
-    )
-    @classmethod
-    def strip_strings(cls, v):  # noqa: ANN001
-        if v is None:
-            return None
-        value = str(v).strip()
-        return value or None
+    )(_strip_optional_text)
 
     @field_validator("anthropic_api_key", mode="before")
     @classmethod
@@ -844,17 +863,16 @@ class ObservabilitySettings(BaseSettings):
         raw = str(v or "").strip().upper()
         return raw or "INFO"
 
-    @field_validator("service_name", mode="before")
-    @classmethod
-    def normalize_service_name(cls, v):  # noqa: ANN001
-        value = str(v or "").strip()
-        return value or None
-
-    @field_validator("hostname", mode="before")
-    @classmethod
-    def normalize_hostname(cls, v):  # noqa: ANN001
-        value = str(v or "").strip()
-        return value or None
+    _normalize_optional_identity_fields = field_validator(
+        "service_name",
+        "hostname",
+        "source_version",
+        "enterprise_catalog_ref",
+        "otel_service_name",
+        "otel_environment",
+        "otel_exporter_otlp_endpoint",
+        mode="before",
+    )(_strip_optional_text)
 
     @field_validator("run_id", mode="before")
     @classmethod
@@ -878,41 +896,11 @@ class ObservabilitySettings(BaseSettings):
                 return value
         return v
 
-    @field_validator("source_version", mode="before")
-    @classmethod
-    def normalize_source_version(cls, v):  # noqa: ANN001
-        value = str(v or "").strip()
-        return value or None
-
-    @field_validator("enterprise_catalog_ref", mode="before")
-    @classmethod
-    def normalize_enterprise_catalog_ref(cls, v):  # noqa: ANN001
-        value = str(v or "").strip()
-        return value or None
-
-    @field_validator("otel_service_name", mode="before")
-    @classmethod
-    def normalize_otel_service_name(cls, v):  # noqa: ANN001
-        value = str(v or "").strip()
-        return value or None
-
     @field_validator("otel_service_version", mode="before")
     @classmethod
     def normalize_otel_service_version(cls, v):  # noqa: ANN001
         value = str(v or "").strip()
         return value or "1.0.0"
-
-    @field_validator("otel_environment", mode="before")
-    @classmethod
-    def normalize_otel_environment(cls, v):  # noqa: ANN001
-        value = str(v or "").strip()
-        return value or None
-
-    @field_validator("otel_exporter_otlp_endpoint", mode="before")
-    @classmethod
-    def normalize_otel_exporter_otlp_endpoint(cls, v):  # noqa: ANN001
-        value = str(v or "").strip()
-        return value or None
 
     @field_validator("jaeger_endpoint", mode="before")
     @classmethod
@@ -1171,7 +1159,7 @@ class PipelineSettings(BaseSettings):
         description="Pipeline scheduler poll interval seconds (PIPELINE_SCHEDULER_POLL_SECONDS)",
     )
 
-    @field_validator(
+    _normalize_pipeline_strings = field_validator(
         "protected_branches",
         "fallback_branches",
         "jobs_group",
@@ -1179,12 +1167,7 @@ class PipelineSettings(BaseSettings):
         "worker_handler",
         "worker_name",
         mode="before",
-    )
-    @classmethod
-    def strip_strings(cls, v):  # noqa: ANN001
-        if v is None:
-            return v
-        return str(v).strip()
+    )(_strip_text_if_not_none)
 
     @field_validator("publish_lock_acquire_timeout_seconds", mode="before")
     @classmethod
@@ -1508,13 +1491,10 @@ class AgentRuntimeSettings(BaseSettings):
     def clamp_context_upload_max_text_chars(cls, v):  # noqa: ANN001
         return _clamp_int(v, default=20000, min_value=0, max_value=2_000_000)
 
-    @field_validator("context_upload_clamav_host", mode="before")
-    @classmethod
-    def strip_context_upload_clamav_host(cls, v):  # noqa: ANN001
-        if v is None:
-            return None
-        value = str(v).strip()
-        return value or None
+    _normalize_context_upload_clamav_host = field_validator(
+        "context_upload_clamav_host",
+        mode="before",
+    )(_strip_optional_text)
 
     @field_validator("context_upload_clamav_port", mode="before")
     @classmethod
@@ -1565,13 +1545,10 @@ class AgentPlanSettings(BaseSettings):
         description="Only bootstrap if DB table is empty (AGENT_PLAN_ALLOWLIST_BOOTSTRAP_ONLY_IF_EMPTY)",
     )
 
-    @field_validator("allowlist_bundle_path", mode="before")
-    @classmethod
-    def strip_allowlist_bundle_path(cls, v):  # noqa: ANN001
-        if v is None:
-            return None
-        value = str(v).strip()
-        return value or None
+    _normalize_allowlist_bundle_path = field_validator(
+        "allowlist_bundle_path",
+        mode="before",
+    )(_strip_optional_text)
 
 
 class PipelinePlanSettings(BaseSettings):
@@ -1670,13 +1647,10 @@ class MCPSettings(BaseSettings):
         description="Path to MCP config JSON (MCP_CONFIG_PATH)",
     )
 
-    @field_validator("config_path", mode="before")
-    @classmethod
-    def strip_config_path(cls, v):  # noqa: ANN001
-        if v is None:
-            return None
-        value = str(v).strip()
-        return value or None
+    _normalize_config_path = field_validator(
+        "config_path",
+        mode="before",
+    )(_strip_optional_text)
 
 
 class AuthSettings(BaseSettings):
@@ -1811,7 +1785,7 @@ class AuthSettings(BaseSettings):
         description="Comma-separated exempt paths for OMS (OMS_AUTH_EXEMPT_PATHS)",
     )
 
-    @field_validator(
+    _normalize_auth_strings = field_validator(
         "bff_admin_token",
         "bff_write_token",
         "bff_agent_token",
@@ -1831,13 +1805,7 @@ class AuthSettings(BaseSettings):
         "dev_master_user_type",
         "dev_master_roles",
         mode="before",
-    )
-    @classmethod
-    def strip_strings(cls, v):  # noqa: ANN001
-        if v is None:
-            return None
-        value = str(v).strip()
-        return value or None
+    )(_strip_optional_text)
 
     @property
     def bff_auth_disable_allowed(self) -> bool:
@@ -2653,11 +2621,7 @@ class BranchVirtualizationSettings(BaseSettings):
         default="main",
         description="Base branch to seed OCC when branch has no local events (BRANCH_VIRTUALIZATION_BASE_BRANCH)",
     )
-
-    @field_validator("base_branch", mode="before")
-    @classmethod
-    def normalize_base_branch(cls, v):  # noqa: ANN001
-        return str(v or "").strip() or "main"
+    _normalize_base_branch = field_validator("base_branch", mode="before")(_normalize_base_branch)
 
 
 class InstanceWorkerSettings(BaseSettings):
@@ -2984,12 +2948,11 @@ class ConnectorSyncSettings(BaseSettings):
         description="Backoff max seconds (CONNECTOR_SYNC_BACKOFF_MAX_SECONDS)",
     )
 
-    @field_validator("group", "handler", mode="before")
-    @classmethod
-    def strip_strings(cls, v):  # noqa: ANN001
-        if v is None:
-            return v
-        return str(v).strip()
+    _normalize_sync_identity = field_validator(
+        "group",
+        "handler",
+        mode="before",
+    )(_strip_text_if_not_none)
 
     @field_validator("max_retries", mode="before")
     @classmethod
@@ -3457,14 +3420,10 @@ class DatasetIngestOutboxSettings(BaseSettings):
     def clamp_poll_seconds(cls, v):  # noqa: ANN001
         return _clamp_int(v, default=5, min_value=1, max_value=3600)
 
-    @field_validator("flush_timeout_seconds", mode="before")
-    @classmethod
-    def clamp_flush_timeout_seconds(cls, v):  # noqa: ANN001
-        try:
-            value = float(v)
-        except Exception:
-            return 10.0
-        return max(0.1, min(value, 600.0))
+    _normalize_flush_timeout_seconds = field_validator(
+        "flush_timeout_seconds",
+        mode="before",
+    )(_clamp_flush_timeout_seconds)
 
     @field_validator("backoff_base_seconds", mode="before")
     @classmethod
@@ -3618,14 +3577,10 @@ class ObjectifyOutboxWorkerSettings(BaseSettings):
     def clamp_batch_size(cls, v):  # noqa: ANN001
         return _clamp_int(v, default=50, min_value=1, max_value=5000)
 
-    @field_validator("flush_timeout_seconds", mode="before")
-    @classmethod
-    def clamp_flush_timeout_seconds(cls, v):  # noqa: ANN001
-        try:
-            value = float(v)
-        except Exception:
-            return 10.0
-        return max(0.1, min(value, 600.0))
+    _normalize_flush_timeout_seconds = field_validator(
+        "flush_timeout_seconds",
+        mode="before",
+    )(_clamp_flush_timeout_seconds)
 
     @field_validator("backoff_base_seconds", mode="before")
     @classmethod
@@ -3767,17 +3722,9 @@ class WritebackMaterializerSettings(BaseSettings):
         default=None,
         description="Comma-separated db names to materialize (WRITEBACK_MATERIALIZER_DB_NAMES)",
     )
+    _normalize_base_branch = field_validator("base_branch", mode="before")(_normalize_base_branch)
 
-    @field_validator("base_branch", mode="before")
-    @classmethod
-    def normalize_base_branch(cls, v):  # noqa: ANN001
-        return str(v or "").strip() or "main"
-
-    @field_validator("db_names", mode="before")
-    @classmethod
-    def normalize_db_names(cls, v):  # noqa: ANN001
-        value = str(v or "").strip()
-        return value or None
+    _normalize_db_names = field_validator("db_names", mode="before")(_strip_optional_text)
 
     @property
     def db_names_list(self) -> list[str]:
@@ -3961,13 +3908,7 @@ class AgentRetentionWorkerSettings(BaseSettings):
             return "redact"
         return value
 
-    @field_validator("policy_json", mode="before")
-    @classmethod
-    def strip_policy_json(cls, v):  # noqa: ANN001
-        if v is None:
-            return None
-        value = str(v).strip()
-        return value or None
+    _normalize_policy_json = field_validator("policy_json", mode="before")(_strip_optional_text)
 
 
 class SchemaChangeMonitorSettings(BaseSettings):
@@ -4043,13 +3984,7 @@ class ChaosSettings(BaseSettings):
         parsed = _parse_boolish(value)
         return parsed if parsed is not None else False
 
-    @field_validator("crash_point", mode="before")
-    @classmethod
-    def blank_to_none(cls, v):  # noqa: ANN001
-        if v is None:
-            return None
-        value = str(v).strip()
-        return value or None
+    _normalize_crash_point = field_validator("crash_point", mode="before")(_strip_optional_text)
 
     @field_validator("crash_once", mode="before")
     @classmethod
@@ -4148,26 +4083,18 @@ class WritebackSettings(BaseSettings):
         description="Max targets to snapshot during writeback submission (WRITEBACK_SUBMISSION_SNAPSHOT_MAX_TARGETS)",
     )
 
-    @field_validator(
+    _normalize_writeback_strings = field_validator(
         "ontology_writeback_repo",
         "ontology_writeback_branch_prefix",
         "writeback_enabled_object_types",
         "writeback_dataset_acl_scope",
         mode="before",
-    )
-    @classmethod
-    def strip_strings(cls, v):  # noqa: ANN001
-        if v is None:
-            return v
-        return str(v).strip()
+    )(_strip_text_if_not_none)
 
-    @field_validator("ontology_writeback_dataset_id", mode="before")
-    @classmethod
-    def blank_to_none(cls, v):  # noqa: ANN001
-        if v is None:
-            return None
-        value = str(v).strip()
-        return value or None
+    _normalize_writeback_dataset_id = field_validator(
+        "ontology_writeback_dataset_id",
+        mode="before",
+    )(_strip_optional_text)
 
 
 class TestSettings(BaseSettings):

@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple, Sequence
 
 from shared.services.pipeline.pipeline_executor import PipelineExecutor, PipelineTable
+from shared.services.pipeline.pipeline_math_utils import safe_ratio
 from shared.services.storage.storage_service import StorageService
 from shared.services.pipeline.pipeline_graph_utils import build_incoming, normalize_edges, normalize_nodes
 from shared.services.pipeline.pipeline_transform_spec import resolve_join_spec, normalize_operation
@@ -38,12 +39,6 @@ class JoinEvaluation:
 
 
 _JOIN_EVAL_SAMPLE_MIN_ROWS = 800
-
-
-def _ratio(numerator: int, denominator: int) -> float:
-    if denominator <= 0:
-        return 0.0
-    return round(numerator / float(denominator), 4)
 
 
 def _count_matches(
@@ -269,11 +264,11 @@ async def evaluate_pipeline_joins(
         output_count = len(output_table.rows)
 
         matched_left, matched_right = _count_matches(left_table, right_table, left_keys, right_keys)
-        left_coverage = _ratio(matched_left, left_count)
-        right_coverage = _ratio(matched_right, right_count)
-        explosion_ratio = _ratio(output_count, max(left_count, right_count, 1))
-        left_missing_ratio = _ratio(left_count - matched_left, left_count)
-        right_missing_ratio = _ratio(right_count - matched_right, right_count)
+        left_coverage = safe_ratio(matched_left, left_count)
+        right_coverage = safe_ratio(matched_right, right_count)
+        explosion_ratio = safe_ratio(output_count, max(left_count, right_count, 1))
+        left_missing_ratio = safe_ratio(left_count - matched_left, left_count)
+        right_missing_ratio = safe_ratio(right_count - matched_right, right_count)
 
         # FIX (2026-01): Correct NULL introduced ratio semantics.
         # These ratios indicate how many OUTPUT rows will have NULL values in columns
@@ -297,16 +292,16 @@ async def evaluate_pipeline_joins(
             # LEFT JOIN: Keeps all left rows; unmatched left rows get NULL in right columns
             left_null_ratio = 0.0
             # Unmatched left rows contribute to right-side NULLs
-            right_null_ratio = _ratio(left_count - matched_left, output_count) if output_count > 0 else 0.0
+            right_null_ratio = safe_ratio(left_count - matched_left, output_count) if output_count > 0 else 0.0
         elif join_type == "right":
             # RIGHT JOIN: Keeps all right rows; unmatched right rows get NULL in left columns
             # Unmatched right rows contribute to left-side NULLs
-            left_null_ratio = _ratio(right_count - matched_right, output_count) if output_count > 0 else 0.0
+            left_null_ratio = safe_ratio(right_count - matched_right, output_count) if output_count > 0 else 0.0
             right_null_ratio = 0.0
         elif join_type == "full":
             # FULL OUTER JOIN: Both sides can have NULLs from unmatched rows
-            left_null_ratio = _ratio(right_count - matched_right, output_count) if output_count > 0 else 0.0
-            right_null_ratio = _ratio(left_count - matched_left, output_count) if output_count > 0 else 0.0
+            left_null_ratio = safe_ratio(right_count - matched_right, output_count) if output_count > 0 else 0.0
+            right_null_ratio = safe_ratio(left_count - matched_left, output_count) if output_count > 0 else 0.0
         else:
             # Unknown join type - assume no NULLs
             left_null_ratio = 0.0

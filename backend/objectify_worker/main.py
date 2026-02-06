@@ -20,19 +20,23 @@ from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
 import httpx
 from confluent_kafka import Producer
 
-from shared.services.kafka.consumer_ops import ExecutorKafkaConsumerOps
+from shared.services.kafka.dlq_publisher import DlqPublishSpec, publish_contextual_dlq_json
 from shared.services.kafka.processed_event_worker import (
     HeartbeatOptions,
     ProcessedEventKafkaWorker,
     RegistryKey,
 )
 from shared.services.kafka.producer_factory import create_kafka_dlq_producer
-from shared.services.kafka.safe_consumer import SafeKafkaConsumer, create_safe_consumer
+from shared.services.kafka.producer_ops import close_kafka_producer
+from shared.services.kafka.retry_classifier import (
+    OBJECTIFY_JOB_RETRY_PROFILE,
+    classify_retryable_with_profile,
+)
+from shared.services.kafka.safe_consumer import SafeKafkaConsumer
 
 from shared.config.app_config import AppConfig
 from shared.config.settings import get_settings
 from shared.models.objectify_job import ObjectifyJob
-from shared.observability.context_propagation import kafka_headers_from_current_context
 from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
 from shared.services.registries.dataset_registry import DatasetRegistry
@@ -48,6 +52,8 @@ from shared.utils.import_type_normalization import normalize_import_target_type,
 from shared.utils.key_spec import normalize_key_spec
 from shared.utils.ontology_type_normalization import normalize_ontology_base_type
 from shared.utils.s3_uri import parse_s3_uri
+from shared.utils.blank_utils import is_blank_value
+from shared.utils.string_list_utils import normalize_string_list
 from shared.errors.error_envelope import build_error_envelope
 from shared.security.auth_utils import get_expected_token
 from shared.validators import get_validator
@@ -103,6 +109,12 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
         self.service_name = "objectify-worker"
         self.topic = (AppConfig.OBJECTIFY_JOBS_TOPIC or "objectify-jobs").strip() or "objectify-jobs"
         self.dlq_topic = (AppConfig.OBJECTIFY_JOBS_DLQ_TOPIC or "objectify-jobs-dlq").strip() or "objectify-jobs-dlq"
+        self._dlq_spec = DlqPublishSpec(
+            dlq_topic=self.dlq_topic,
+            service_name=self.service_name,
+            span_name="objectify_worker.dlq_produce",
+            flush_timeout_seconds=10.0,
+        )
         self.group_id = (AppConfig.OBJECTIFY_JOBS_GROUP or "objectify-worker-group").strip()
         self.handler = str(cfg.worker_handler or "objectify_worker").strip() or "objectify_worker"
         self.consumer: Optional[SafeKafkaConsumer] = None
@@ -291,9 +303,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
 
     @staticmethod
     def _is_blank(value: Any) -> bool:
-        if value is None:
-            return True
-        return str(value).strip() == ""
+        return is_blank_value(value)
 
     @staticmethod
     def _normalize_relationship_ref(value: Any, *, target_class: str) -> str:
@@ -499,20 +509,13 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
             headers["X-Admin-Token"] = token
         self.http = httpx.AsyncClient(base_url=settings.services.oms_base_url, timeout=60.0, headers=headers)
 
-        # Use SafeKafkaConsumer for strong consistency guarantees
-        # Critical: Enforces isolation.level=read_committed and proper rebalance handling
-        self.consumer = create_safe_consumer(
+        self._initialize_safe_consumer_runtime(
             group_id=self.group_id,
             topics=[self.topic],
             service_name="objectify-worker",
-            on_revoke=self._on_partitions_revoked,
-            on_assign=self._on_partitions_assigned,
-        )
-        self.consumer_ops = ExecutorKafkaConsumerOps(
-            self.consumer,
             thread_name_prefix="objectify-worker-kafka",
+            reset_partition_state=True,
         )
-        self._init_partition_state(reset=True)
 
         self.dlq_producer = create_kafka_dlq_producer(
             bootstrap_servers=settings.database.kafka_servers,
@@ -539,12 +542,13 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
         if self.dataset_registry:
             await self.dataset_registry.close()
             self.dataset_registry = None
-        if self.dlq_producer:
-            try:
-                self.dlq_producer.flush(5)
-            except Exception as exc:
-                logger.warning("DLQ producer flush failed during shutdown: %s", exc, exc_info=True)
-            self.dlq_producer = None
+        await close_kafka_producer(
+            producer=self.dlq_producer,
+            timeout_s=5.0,
+            warning_logger=logger,
+            warning_message="DLQ producer flush failed during shutdown: %s",
+        )
+        self.dlq_producer = None
 
     async def run(self) -> None:
         await self.initialize()
@@ -1968,13 +1972,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
 
     @staticmethod
     def _normalize_pk_fields(value: Any) -> List[str]:
-        if value is None:
-            return []
-        if isinstance(value, list):
-            return [str(v).strip() for v in value if str(v).strip()]
-        if isinstance(value, str):
-            return [v.strip() for v in value.split(",") if v.strip()]
-        return []
+        return normalize_string_list(value)
 
     @staticmethod
     def _hash_payload(payload: Any) -> str:
@@ -3555,11 +3553,16 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
             "raw_payload": raw_payload,
         }
         key = str(payload.job_id or "objectify-job").encode("utf-8")
-        value = json.dumps(dlq_payload, ensure_ascii=True, default=str).encode("utf-8")
-        headers = kafka_headers_from_current_context()
         try:
-            self.dlq_producer.produce(self.dlq_topic, key=key, value=value, headers=headers or None)
-            self.dlq_producer.flush(10)
+            await publish_contextual_dlq_json(
+                producer=self.dlq_producer,
+                spec=self._dlq_spec,
+                payload=dlq_payload,
+                message_key=key,
+                msg=msg,
+                tracing=self.tracing,
+                metrics=self.metrics,
+            )
         except Exception as exc:
             logger.warning("Failed to publish objectify DLQ payload (job_id=%s): %s", payload.job_id, exc, exc_info=True)
 
@@ -3574,30 +3577,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
             return False
         if isinstance(exc, httpx.RequestError):
             return True
-        msg = str(exc).lower()
-        non_retryable_markers = [
-            "validation_failed",
-            "mapping_spec_not_found",
-            "mapping_spec_dataset_mismatch",
-            "dataset_version_mismatch",
-            "dataset_not_found",
-            "db_name_mismatch",
-            "artifact_key_mismatch",
-            "invalid artifact_key",
-            "invalid_artifact_key",
-            "artifact_not_found",
-            "artifact_not_success",
-            "artifact_not_build",
-            "artifact_outputs_missing",
-            "artifact_output_not_found",
-            "artifact_output_ambiguous",
-            "artifact_output_name_required",
-            "artifact_key_missing",
-            "objectify_input_conflict",
-            "objectify_input_missing",
-            "no_rows_loaded",
-        ]
-        return not any(marker in msg for marker in non_retryable_markers)
+        return classify_retryable_with_profile(exc, OBJECTIFY_JOB_RETRY_PROFILE)
 
 
 async def main() -> None:

@@ -15,11 +15,14 @@ from typing import Any, Dict, Optional
 from fastapi import HTTPException, status
 
 import bff.routers.pipeline_datasets_ops as ops
+from bff.services.dataset_ingest_commit_service import (
+    ensure_lakefs_commit_artifact,
+    persist_ingest_commit_state,
+)
 from bff.services.dataset_ingest_idempotency import resolve_existing_version_or_raise
 from bff.services.dataset_ingest_outbox_builder import DatasetIngestOutboxBuilder
 from bff.services.dataset_ingest_outbox_flusher import maybe_flush_dataset_ingest_outbox_inline
 from bff.services.dataset_ingest_failures import mark_ingest_failed
-from shared.utils.s3_uri import build_s3_uri
 
 logger = logging.getLogger(__name__)
 
@@ -172,12 +175,6 @@ async def upload_tabular_dataset(
         artifact_key = ingest_request.artifact_key
         if not commit_id or not artifact_key:
             repo = ops._resolve_lakefs_raw_repository()
-            await ops._ensure_lakefs_branch_exists(
-                lakefs_client=lakefs_client,
-                repository=repo,
-                branch=inputs.dataset_branch,
-                source_branch="main",
-            )
             prefix = ops._dataset_artifact_prefix(
                 db_name=inputs.db_name,
                 dataset_id=dataset.dataset_id,
@@ -202,13 +199,16 @@ async def upload_tabular_dataset(
                 checksum=inputs.content_sha256,
             )
             transaction_id = ingest_transaction.transaction_id if ingest_transaction else None
-            commit_id = await ops._commit_lakefs_with_predicate_fallback(
+            commit_state = await ensure_lakefs_commit_artifact(
+                ingest_request=ingest_request,
+                initial_commit_id=commit_id,
+                initial_artifact_key=artifact_key,
                 lakefs_client=lakefs_client,
                 lakefs_storage_service=lakefs_storage_service,
                 repository=repo,
                 branch=inputs.dataset_branch,
-                message=inputs.commit_message,
-                metadata={
+                commit_message=inputs.commit_message,
+                commit_metadata={
                     "dataset_id": dataset.dataset_id,
                     "db_name": inputs.db_name,
                     "dataset_name": inputs.dataset_name,
@@ -222,18 +222,15 @@ async def upload_tabular_dataset(
                 object_key=object_key,
                 expected_checksum=inputs.content_sha256,
             )
-            artifact_key = build_s3_uri(repo, f"{commit_id}/{object_key}")
-            ingest_request = await dataset_registry.mark_ingest_committed(
-                ingest_request_id=ingest_request.ingest_request_id,
-                lakefs_commit_id=commit_id,
+            commit_id = commit_state.commit_id
+            artifact_key = commit_state.artifact_key
+            ingest_request = await persist_ingest_commit_state(
+                dataset_registry=dataset_registry,
+                ingest_request=ingest_request,
+                ingest_transaction=ingest_transaction,
+                commit_id=commit_id,
                 artifact_key=artifact_key,
             )
-            if ingest_transaction:
-                await dataset_registry.mark_ingest_transaction_committed(
-                    ingest_request_id=ingest_request.ingest_request_id,
-                    lakefs_commit_id=commit_id,
-                    artifact_key=artifact_key,
-                )
 
         outbox_entries: list[dict[str, Any]] = []
         transaction_id = ingest_transaction.transaction_id if ingest_transaction else None

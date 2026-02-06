@@ -12,9 +12,9 @@ from uuid import UUID
 
 from fastapi import HTTPException, Request, status
 
+from bff.services.input_validation_service import enforce_db_scope_or_403
 from bff.services.pipeline_plan_tenant_service import resolve_tenant_id
 from shared.models.pipeline_plan import PipelinePlan
-from shared.security.auth_utils import enforce_db_scope
 from shared.services.registries.pipeline_plan_registry import PipelinePlanRegistry
 
 
@@ -50,13 +50,6 @@ def _extract_db_name_or_400(plan: PipelinePlan) -> str:
     if not db_name:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Plan missing db_name")
     return db_name
-
-
-def _enforce_db_scope_or_403(request: Request, *, db_name: str) -> None:
-    try:
-        enforce_db_scope(request.headers, db_name=db_name)
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
 
 
 @dataclass(frozen=True)

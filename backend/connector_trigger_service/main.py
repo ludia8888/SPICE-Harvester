@@ -37,6 +37,7 @@ from shared.services.kafka.producer_ops import ExecutorKafkaProducerOps, InlineK
 from shared.services.registries.connector_registry import ConnectorRegistry, ConnectorSource
 from shared.utils.app_logger import configure_logging
 from shared.utils.time_utils import utcnow
+from shared.utils.worker_runner import run_component_lifecycle
 
 logger = logging.getLogger(__name__)
 
@@ -348,15 +349,6 @@ class ConnectorTriggerService:
             await asyncio.gather(poll_task, publish_task, return_exceptions=True)
 
 
-async def _main() -> None:
-    configure_logging(get_settings().observability.log_level)
-    svc = ConnectorTriggerService()
-    await svc.initialize()
-    try:
-        await svc.run()
-    finally:
-        await svc.close()
-
-
 if __name__ == "__main__":
-    asyncio.run(_main())
+    configure_logging(get_settings().observability.log_level)
+    asyncio.run(run_component_lifecycle(ConnectorTriggerService()))

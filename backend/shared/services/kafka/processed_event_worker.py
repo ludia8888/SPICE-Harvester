@@ -15,19 +15,28 @@ ProcessedEventRegistry key, classify retryability, and publish DLQ messages.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 from abc import ABC, abstractmethod
 from collections import deque
 from contextlib import suppress
 from dataclasses import dataclass
-from typing import Any, Deque, Dict, Generic, Optional, TypeVar
+from typing import Any, Awaitable, Callable, Deque, Dict, Generic, Optional, TypeVar
 
 from confluent_kafka import KafkaError, TopicPartition
 
 from shared.models.event_envelope import EventEnvelope
 from shared.observability.context_propagation import attach_context_from_kafka
-from shared.services.kafka.consumer_ops import InlineKafkaConsumerOps, KafkaConsumerOps
+from shared.services.kafka.consumer_ops import ExecutorKafkaConsumerOps, InlineKafkaConsumerOps, KafkaConsumerOps
+from shared.services.kafka.dlq_publisher import (
+    DlqPublishSpec,
+    EnvelopeDlqSpec,
+    build_envelope_dlq_event,
+    publish_envelope_dlq,
+    publish_standard_dlq,
+)
+from shared.services.kafka.safe_consumer import create_safe_consumer
 from shared.services.kafka.worker_consumer_runtime import WorkerConsumerRuntime
 from shared.services.registries.processed_event_heartbeat import run_processed_event_heartbeat_loop
 from shared.services.registries.processed_event_registry import (
@@ -58,6 +67,45 @@ class HeartbeatOptions:
     warning_message: Optional[str] = None
 
 
+@dataclass(frozen=True)
+class ParseErrorContext:
+    stage: str
+    payload_text: Optional[str]
+    payload_obj: Optional[Dict[str, Any]]
+    fallback_metadata: Optional[Dict[str, Any]]
+    cause: Exception
+
+
+class CommandParseError(ValueError):
+    def __init__(
+        self,
+        *,
+        stage: str,
+        payload_text: Optional[str],
+        payload_obj: Optional[Dict[str, Any]],
+        fallback_metadata: Optional[Dict[str, Any]],
+        cause: Exception,
+    ) -> None:
+        super().__init__(str(cause))
+        self.stage = str(stage)
+        self.payload_text = payload_text
+        self.payload_obj = payload_obj
+        self.fallback_metadata = fallback_metadata
+        self.cause = cause
+
+
+@dataclass(frozen=True)
+class WorkerRuntimeConfig:
+    service_name: str
+    handler: str
+    kafka_servers: str
+    dlq_topic: str
+    dlq_flush_timeout_seconds: float
+    max_retry_attempts: int
+    backoff_base: int = 1
+    backoff_max: int = 60
+
+
 class ProcessedEventKafkaWorker(Generic[PayloadT, ResultT], ABC):
     """
     Template Method for Kafka workers guarded by ProcessedEventRegistry.
@@ -79,6 +127,35 @@ class ProcessedEventKafkaWorker(Generic[PayloadT, ResultT], ABC):
     # Optional observability hooks used by many workers.
     tracing: Any  # get_tracing_service(...)
     metrics: Any  # get_metrics_collector(...)
+    parse_error_enable_dlq: bool = False
+    parse_error_publish_failure_message: str = "Failed to publish invalid payload to DLQ: %s"
+    parse_error_invalid_payload_message: str = "Invalid payload; skipping: %s"
+    parse_error_raise_on_publish_failure: bool = True
+
+    def _bootstrap_worker_runtime(
+        self,
+        *,
+        config: WorkerRuntimeConfig,
+        tracing: Any = None,
+        metrics: Any = None,
+    ) -> None:
+        self.running = False
+        self.service_name = str(config.service_name or "").strip() or self.__class__.__name__
+        self.handler = str(config.handler or "").strip() or self.service_name
+        self.kafka_servers = str(config.kafka_servers or "").strip()
+        self.consumer = None
+        self.consumer_ops = None
+        self.dlq_producer = None
+        self.dlq_topic = str(config.dlq_topic or "").strip()
+        self.dlq_flush_timeout_seconds = float(config.dlq_flush_timeout_seconds)
+        self.max_retry_attempts = int(config.max_retry_attempts)
+        self.max_retries = int(self.max_retry_attempts)
+        self.backoff_base = int(config.backoff_base)
+        self.backoff_max = int(config.backoff_max)
+        if tracing is not None:
+            self.tracing = tracing
+        if metrics is not None:
+            self.metrics = metrics
 
     # --- Strategy hooks ---
     @abstractmethod
@@ -93,7 +170,6 @@ class ProcessedEventKafkaWorker(Generic[PayloadT, ResultT], ABC):
     async def _process_payload(self, payload: PayloadT) -> ResultT:
         """Perform the worker side-effect for a claimed payload."""
 
-    @abstractmethod
     async def _send_to_dlq(
         self,
         *,
@@ -104,6 +180,13 @@ class ProcessedEventKafkaWorker(Generic[PayloadT, ResultT], ABC):
         attempt_count: int,
     ) -> None:
         """Publish a DLQ record for a terminal failure."""
+        await self._send_default_command_payload_dlq(
+            msg=msg,
+            error=error,
+            attempt_count=int(attempt_count),
+            payload=payload,
+            raw_payload=raw_payload,
+        )
 
     # --- Optional overrides ---
     def _service_name(self) -> Optional[str]:
@@ -178,8 +261,332 @@ class ProcessedEventKafkaWorker(Generic[PayloadT, ResultT], ABC):
     ) -> int:
         return self._backoff_seconds(attempt_count=attempt_count, payload=payload)
 
+    async def _send_parse_error_via_publish_to_dlq(
+        self,
+        *,
+        msg: Any,
+        stage: str,
+        cause_text: str,
+        payload_text: Optional[str],
+        payload_obj: Optional[Dict[str, Any]],
+        kafka_headers: Optional[Any],
+        fallback_metadata: Optional[Dict[str, Any]],
+    ) -> None:
+        publisher = getattr(self, "_publish_to_dlq", None)
+        if not callable(publisher):
+            raise RuntimeError("parse error DLQ publishing is not configured for this worker")
+        await publisher(
+            msg=msg,
+            stage=stage,
+            error=cause_text,
+            attempt_count=1,
+            payload_text=payload_text,
+            payload_obj=payload_obj,
+            kafka_headers=kafka_headers,
+            fallback_metadata=fallback_metadata,
+        )
+
     async def _on_parse_error(self, *, msg: Any, raw_payload: Optional[str], error: Exception) -> None:
-        logger.exception("Invalid Kafka payload; skipping: %s", error)
+        if not bool(getattr(self, "parse_error_enable_dlq", False)):
+            logger.exception("Invalid Kafka payload; skipping: %s", error)
+            return
+
+        async def _send(
+            stage: str,
+            cause_text: str,
+            payload_text: Optional[str],
+            payload_obj: Optional[Dict[str, Any]],
+            kafka_headers: Optional[Any],
+            fallback_metadata: Optional[Dict[str, Any]],
+        ) -> None:
+            await self._send_parse_error_via_publish_to_dlq(
+                msg=msg,
+                stage=stage,
+                cause_text=cause_text,
+                payload_text=payload_text,
+                payload_obj=payload_obj,
+                kafka_headers=kafka_headers,
+                fallback_metadata=fallback_metadata,
+            )
+
+        await self._publish_parse_error_to_dlq(
+            msg=msg,
+            raw_payload=raw_payload,
+            error=error,
+            dlq_sender=_send,
+            publish_failure_message=str(
+                getattr(self, "parse_error_publish_failure_message", self.parse_error_publish_failure_message)
+            ),
+            invalid_payload_message=str(
+                getattr(self, "parse_error_invalid_payload_message", self.parse_error_invalid_payload_message)
+            ),
+            raise_on_publish_failure=bool(
+                getattr(self, "parse_error_raise_on_publish_failure", self.parse_error_raise_on_publish_failure)
+            ),
+            logger_instance=logger,
+        )
+
+    def _parse_error_context(self, *, raw_payload: Optional[str], error: Exception) -> ParseErrorContext:
+        stage = str(getattr(error, "stage", "parse") or "parse")
+        payload_text = getattr(error, "payload_text", None)
+        if payload_text is None:
+            payload_text = raw_payload
+        payload_obj = getattr(error, "payload_obj", None)
+        payload_obj_final = payload_obj if isinstance(payload_obj, dict) else None
+        fallback_metadata = getattr(error, "fallback_metadata", None)
+        fallback_metadata_final = fallback_metadata if isinstance(fallback_metadata, dict) else None
+        cause = getattr(error, "cause", error)
+        cause_final = cause if isinstance(cause, Exception) else Exception(str(cause))
+        return ParseErrorContext(
+            stage=stage,
+            payload_text=payload_text,
+            payload_obj=payload_obj_final,
+            fallback_metadata=fallback_metadata_final,
+            cause=cause_final,
+        )
+
+    def _safe_message_headers(self, msg: Any) -> Optional[Any]:
+        with suppress(Exception):
+            return msg.headers()
+        return None
+
+    def _fallback_metadata_from_raw_payload(self, raw_payload: Optional[str]) -> Optional[Dict[str, Any]]:
+        if not raw_payload:
+            return None
+        try:
+            payload_obj = json.loads(raw_payload)
+        except Exception:
+            return None
+        if not isinstance(payload_obj, dict):
+            return None
+        metadata = payload_obj.get("metadata")
+        if not isinstance(metadata, dict):
+            return None
+        return dict(metadata)
+
+    async def _publish_parse_error_to_dlq(
+        self,
+        *,
+        msg: Any,
+        raw_payload: Optional[str],
+        error: Exception,
+        dlq_sender: Callable[
+            [str, str, Optional[str], Optional[Dict[str, Any]], Optional[Any], Optional[Dict[str, Any]]],
+            Awaitable[None],
+        ],
+        publish_failure_message: str,
+        invalid_payload_message: str,
+        raise_on_publish_failure: bool = True,
+        logger_instance: Optional[logging.Logger] = None,
+    ) -> None:
+        log = logger_instance or logger
+        context = self._parse_error_context(raw_payload=raw_payload, error=error)
+        kafka_headers = self._safe_message_headers(msg)
+        try:
+            await dlq_sender(
+                context.stage,
+                str(context.cause),
+                context.payload_text,
+                context.payload_obj,
+                kafka_headers,
+                context.fallback_metadata,
+            )
+        except Exception as dlq_err:
+            log.error(publish_failure_message, dlq_err, exc_info=True)
+            if raise_on_publish_failure:
+                raise
+        log.exception(invalid_payload_message, context.cause)
+
+    def _normalize_dlq_publish_inputs(
+        self,
+        *,
+        msg: Any,
+        stage: str,
+        default_stage: str,
+        raw_payload: Optional[str],
+        payload_text: Optional[str],
+        payload_obj: Optional[Dict[str, Any]],
+        kafka_headers: Optional[Any],
+        fallback_metadata: Optional[Dict[str, Any]],
+        inferred_payload_obj: Optional[Dict[str, Any]] = None,
+        inferred_metadata: Optional[Dict[str, Any]] = None,
+        inferred_stage: Optional[str] = None,
+    ) -> tuple[str, Optional[str], Optional[Dict[str, Any]], Optional[Any], Optional[Dict[str, Any]]]:
+        if kafka_headers is None:
+            with suppress(Exception):
+                kafka_headers = msg.headers()
+
+        stage_final = str(stage or "").strip() or str(default_stage or "").strip() or "process_command"
+        inferred_stage_final = str(inferred_stage or "").strip()
+        if inferred_stage_final and stage_final == (str(default_stage or "").strip() or "process_command"):
+            stage_final = inferred_stage_final
+
+        payload_text_final = payload_text if payload_text is not None else raw_payload
+        payload_obj_final = payload_obj if payload_obj is not None else inferred_payload_obj
+        metadata_final = fallback_metadata if fallback_metadata is not None else inferred_metadata
+
+        return stage_final, payload_text_final, payload_obj_final, kafka_headers, metadata_final
+
+    async def _publish_standard_dlq_record(
+        self,
+        *,
+        producer: Optional[Any],
+        msg: Any,
+        worker: str,
+        dlq_spec: DlqPublishSpec,
+        error: str,
+        attempt_count: Optional[int],
+        stage: Optional[str],
+        payload_text: Optional[str],
+        payload_obj: Optional[Dict[str, Any]],
+        extra: Optional[Dict[str, Any]] = None,
+        kafka_headers: Optional[Any] = None,
+        fallback_metadata: Optional[Dict[str, Any]] = None,
+        tracing: Optional[Any] = None,
+        metrics: Optional[Any] = None,
+        lock: Optional[asyncio.Lock] = None,
+        raise_on_missing_producer: bool = True,
+        missing_producer_message: str = "DLQ producer not configured",
+    ) -> bool:
+        if not producer:
+            if raise_on_missing_producer:
+                raise RuntimeError(str(missing_producer_message or "DLQ producer not configured"))
+            logger.error("%s; dropping DLQ payload: %s", missing_producer_message, error)
+            return False
+
+        await publish_standard_dlq(
+            producer=producer,
+            msg=msg,
+            worker=str(worker or "").strip() or worker,
+            dlq_spec=dlq_spec,
+            error=error,
+            attempt_count=int(attempt_count) if attempt_count is not None else None,
+            stage=stage,
+            payload_text=payload_text,
+            payload_obj=payload_obj,
+            extra=extra,
+            tracing=tracing,
+            metrics=metrics,
+            kafka_headers=kafka_headers,
+            fallback_metadata=fallback_metadata if isinstance(fallback_metadata, dict) else None,
+            lock=lock,
+        )
+        return True
+
+    async def _send_standard_dlq_record(
+        self,
+        *,
+        msg: Any,
+        error: str,
+        attempt_count: int,
+        stage: str,
+        default_stage: str,
+        raw_payload: Optional[str],
+        payload_text: Optional[str],
+        payload_obj: Optional[Dict[str, Any]],
+        kafka_headers: Optional[Any],
+        fallback_metadata: Optional[Dict[str, Any]],
+        publisher: Callable[..., Awaitable[None]],
+        inferred_payload_obj: Optional[Dict[str, Any]] = None,
+        inferred_metadata: Optional[Dict[str, Any]] = None,
+        inferred_stage: Optional[str] = None,
+    ) -> None:
+        stage_final, payload_text_final, payload_obj_final, kafka_headers_final, fallback_metadata_final = (
+            self._normalize_dlq_publish_inputs(
+                msg=msg,
+                stage=stage,
+                default_stage=default_stage,
+                raw_payload=raw_payload,
+                payload_text=payload_text,
+                payload_obj=payload_obj,
+                kafka_headers=kafka_headers,
+                fallback_metadata=fallback_metadata,
+                inferred_payload_obj=inferred_payload_obj,
+                inferred_metadata=inferred_metadata,
+                inferred_stage=inferred_stage,
+            )
+        )
+
+        await publisher(
+            msg=msg,
+            stage=str(stage_final),
+            error=error,
+            attempt_count=int(attempt_count),
+            payload_text=payload_text_final,
+            payload_obj=payload_obj_final,
+            kafka_headers=kafka_headers_final,
+            fallback_metadata=fallback_metadata_final if isinstance(fallback_metadata_final, dict) else None,
+        )
+
+    async def _send_command_payload_dlq_record(
+        self,
+        *,
+        msg: Any,
+        error: str,
+        attempt_count: int,
+        payload: Optional[Any],
+        raw_payload: Optional[str],
+        stage: str,
+        default_stage: str,
+        payload_text: Optional[str],
+        payload_obj: Optional[Dict[str, Any]],
+        kafka_headers: Optional[Any],
+        fallback_metadata: Optional[Dict[str, Any]],
+        publisher: Callable[..., Awaitable[None]],
+    ) -> None:
+        inferred_payload_obj: Optional[Dict[str, Any]] = None
+        inferred_metadata: Optional[Dict[str, Any]] = None
+        if payload is not None:
+            command_obj = getattr(payload, "command", None)
+            metadata_obj = getattr(payload, "envelope_metadata", None)
+            if isinstance(command_obj, dict):
+                inferred_payload_obj = command_obj
+            if isinstance(metadata_obj, dict):
+                inferred_metadata = metadata_obj
+
+        await self._send_standard_dlq_record(
+            msg=msg,
+            error=error,
+            attempt_count=int(attempt_count),
+            stage=stage,
+            default_stage=default_stage,
+            raw_payload=raw_payload,
+            payload_text=payload_text,
+            payload_obj=payload_obj,
+            kafka_headers=kafka_headers,
+            fallback_metadata=fallback_metadata,
+            publisher=publisher,
+            inferred_payload_obj=inferred_payload_obj,
+            inferred_metadata=inferred_metadata,
+        )
+
+    async def _send_default_command_payload_dlq(
+        self,
+        *,
+        msg: Any,
+        error: str,
+        attempt_count: int,
+        payload: Optional[Any],
+        raw_payload: Optional[str],
+        publisher: Optional[Callable[..., Awaitable[None]]] = None,
+    ) -> None:
+        publisher_fn = publisher or getattr(self, "_publish_to_dlq", None)
+        if not callable(publisher_fn):
+            raise RuntimeError("DLQ publisher is not configured for command payload")
+        await self._send_command_payload_dlq_record(
+            msg=msg,
+            error=error,
+            attempt_count=int(attempt_count),
+            payload=payload,
+            raw_payload=raw_payload,
+            stage="process_command",
+            default_stage="process_command",
+            payload_text=None,
+            payload_obj=None,
+            kafka_headers=None,
+            fallback_metadata=None,
+            publisher=publisher_fn,
+        )
 
     async def _on_success(self, *, payload: PayloadT, result: ResultT, duration_s: float) -> None:
         metrics = getattr(self, "metrics", None)
@@ -264,6 +671,35 @@ class ProcessedEventKafkaWorker(Generic[PayloadT, ResultT], ABC):
             timeout=timeout,
             poller=poller if callable(poller) else None,
         )
+
+    def _initialize_safe_consumer_runtime(
+        self,
+        *,
+        group_id: str,
+        topics: list[str],
+        service_name: str,
+        thread_name_prefix: str,
+        max_poll_interval_ms: Optional[int] = None,
+        reset_partition_state: bool = False,
+    ) -> None:
+        create_kwargs: Dict[str, Any] = {
+            "group_id": str(group_id or "").strip(),
+            "topics": list(topics),
+            "service_name": str(service_name or "").strip() or self._loop_label(),
+            "on_revoke": self._on_partitions_revoked,
+            "on_assign": self._on_partitions_assigned,
+        }
+        if max_poll_interval_ms is not None:
+            create_kwargs["max_poll_interval_ms"] = int(max_poll_interval_ms)
+
+        self.consumer = create_safe_consumer(**create_kwargs)
+        self.consumer_ops = ExecutorKafkaConsumerOps(
+            self.consumer,
+            thread_name_prefix=str(thread_name_prefix or "worker-kafka"),
+        )
+        self._rebalance_in_progress = False
+        if reset_partition_state:
+            self._init_partition_state(reset=True)
 
     def _get_consumer_ops(self) -> KafkaConsumerOps:
         ops = getattr(self, "consumer_ops", None)
@@ -1005,6 +1441,67 @@ class EventEnvelopeKafkaWorker(ProcessedEventKafkaWorker[EventEnvelope, ResultT]
     def _metric_event_name(self, *, payload: EventEnvelope) -> Optional[str]:  # type: ignore[override]
         event_type = str(payload.event_type or "").strip()
         return event_type or None
+
+    async def _publish_envelope_failure_to_dlq(
+        self,
+        *,
+        msg: Any,
+        payload: EventEnvelope,
+        error: str,
+        attempt_count: int,
+        producer_ops: Optional[Any],
+        spec: EnvelopeDlqSpec,
+        key: Optional[bytes] = None,
+        missing_producer_message: str = "DLQ producer not configured; dropping DLQ payload: %s",
+    ) -> None:
+        if not producer_ops:
+            logger.error(missing_producer_message, error)
+            return
+
+        dlq_env = build_envelope_dlq_event(
+            envelope=payload,
+            spec=spec,
+            error=error,
+            attempt_count=attempt_count,
+        )
+        key_bytes = key
+        if key_bytes is None:
+            key_text = str(dlq_env.aggregate_id or dlq_env.event_id or self._loop_label())
+            key_bytes = key_text.encode("utf-8")
+
+        await publish_envelope_dlq(
+            producer_ops=producer_ops,
+            spec=spec,
+            envelope=dlq_env,
+            tracing=getattr(self, "tracing", None),
+            metrics=getattr(self, "metrics", None),
+            key=key_bytes,
+        )
+
+    async def _send_envelope_failure_to_dlq(
+        self,
+        *,
+        msg: Any,
+        payload: EventEnvelope,
+        error: str,
+        attempt_count: int,
+        producer_ops: Optional[Any],
+        spec: EnvelopeDlqSpec,
+        key_fallback: Optional[str] = None,
+        missing_producer_message: str = "DLQ producer not configured; dropping DLQ payload: %s",
+    ) -> None:
+        key_text = str(payload.aggregate_id or payload.event_id or key_fallback or self._loop_label())
+        key = key_text.encode("utf-8")
+        await self._publish_envelope_failure_to_dlq(
+            msg=msg,
+            payload=payload,
+            error=error,
+            attempt_count=attempt_count,
+            producer_ops=producer_ops,
+            spec=spec,
+            key=key,
+            missing_producer_message=missing_producer_message,
+        )
 
 
 class StrictHeartbeatEventEnvelopeKafkaWorker(

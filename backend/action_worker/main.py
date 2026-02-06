@@ -19,11 +19,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
-from confluent_kafka import Producer
-
-from shared.services.kafka.consumer_ops import ExecutorKafkaConsumerOps
-from shared.services.kafka.safe_consumer import SafeKafkaConsumer, create_safe_consumer
 from shared.services.kafka.producer_factory import create_kafka_dlq_producer
+from shared.services.kafka.producer_ops import close_kafka_producer
 
 from oms.services.async_terminus import AsyncTerminusService
 from oms.services.ontology_resources import OntologyResourceService
@@ -36,13 +33,24 @@ from shared.models.events import ActionAppliedEvent
 from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
 from shared.security.database_access import DOMAIN_MODEL_ROLES, get_database_access_role
-from shared.services.kafka.dlq_publisher import DlqPublishSpec, build_standard_dlq_payload, publish_dlq_json
+from shared.services.kafka.dlq_publisher import DlqPublishSpec
+from shared.services.kafka.retry_classifier import (
+    ACTION_COMMAND_RETRY_PROFILE,
+    classify_retryable_with_profile,
+)
 from shared.services.registries.action_log_registry import ActionLogRegistry, ActionLogStatus
 from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.services.storage.event_store import event_store
 from shared.services.storage.lakefs_client import LakeFSClient, LakeFSConflictError, LakeFSError
+from shared.services.storage.lakefs_branch_utils import ensure_lakefs_branch
 from shared.services.storage.lakefs_storage_service import create_lakefs_storage_service, LakeFSStorageService
-from shared.services.kafka.processed_event_worker import RegistryKey, StrictHeartbeatKafkaWorker
+from shared.services.kafka.processed_event_worker import (
+    CommandParseError,
+    RegistryKey,
+    StrictHeartbeatKafkaWorker,
+    WorkerRuntimeConfig,
+)
+from shared.services.core.object_type_meta_resolver import build_object_type_meta_resolver
 from shared.services.registries.processed_event_registry import (
     ProcessedEventRegistry,
 )
@@ -99,22 +107,8 @@ class _ActionCommandPayload:
     stage: str = "execute_action"
 
 
-class _ActionCommandParseError(ValueError):
-    def __init__(
-        self,
-        *,
-        stage: str,
-        payload_text: Optional[str],
-        payload_obj: Optional[Dict[str, Any]],
-        fallback_metadata: Optional[Dict[str, Any]],
-        cause: Exception,
-    ) -> None:
-        super().__init__(str(cause))
-        self.stage = str(stage)
-        self.payload_text = payload_text
-        self.payload_obj = payload_obj
-        self.fallback_metadata = fallback_metadata
-        self.cause = cause
+class _ActionCommandParseError(CommandParseError):
+    pass
 
 
 class _ActionRejected(Exception):
@@ -126,21 +120,27 @@ class ActionWorker(StrictHeartbeatKafkaWorker[_ActionCommandPayload, None]):
         settings = get_settings()
         cfg = settings.workers.action
 
-        self.running = False
-        self.service_name = "action-worker"
-        self.handler = "action_worker"
-        self.tracing = get_tracing_service("action-worker")
-        self.metrics = get_metrics_collector("action-worker")
-        self.kafka_servers = settings.database.kafka_servers
-        self.consumer: Optional[SafeKafkaConsumer] = None
-        self.consumer_ops = None
-        self.dlq_producer: Optional[Producer] = None
-        self.dlq_topic = AppConfig.ACTION_COMMANDS_DLQ_TOPIC
-        self.dlq_flush_timeout_seconds = float(cfg.dlq_flush_timeout_seconds)
-        self.max_retry_attempts = int(cfg.max_retry_attempts)
-        self.max_retries = int(self.max_retry_attempts)
-        self.backoff_base = 1
-        self.backoff_max = 60
+        self._bootstrap_worker_runtime(
+            config=WorkerRuntimeConfig(
+                service_name="action-worker",
+                handler="action_worker",
+                kafka_servers=settings.database.kafka_servers,
+                dlq_topic=AppConfig.ACTION_COMMANDS_DLQ_TOPIC,
+                dlq_flush_timeout_seconds=float(cfg.dlq_flush_timeout_seconds),
+                max_retry_attempts=int(cfg.max_retry_attempts),
+                backoff_base=1,
+                backoff_max=60,
+            ),
+            tracing=get_tracing_service("action-worker"),
+            metrics=get_metrics_collector("action-worker"),
+        )
+        self._dlq_spec = DlqPublishSpec(
+            dlq_topic=self.dlq_topic,
+            service_name=self.service_name,
+            span_name="action_worker.dlq_produce",
+            metric_event_name="ACTION_COMMAND_DLQ",
+            flush_timeout_seconds=self.dlq_flush_timeout_seconds,
+        )
 
         self.enable_processed_event_registry = settings.event_sourcing.enable_processed_event_registry
         self.processed_event_registry: Optional[ProcessedEventRegistry] = None
@@ -159,19 +159,12 @@ class ActionWorker(StrictHeartbeatKafkaWorker[_ActionCommandPayload, None]):
 
         group_id = (AppConfig.ACTION_WORKER_GROUP or "action-worker-group").strip()
         topic = AppConfig.ACTION_COMMANDS_TOPIC
-        # Use SafeKafkaConsumer for strong consistency guarantees
-        self.consumer = create_safe_consumer(
+        self._initialize_safe_consumer_runtime(
             group_id=group_id,
             topics=[topic],
             service_name="action-worker",
-            on_revoke=self._on_partitions_revoked,
-            on_assign=self._on_partitions_assigned,
-        )
-        self.consumer_ops = ExecutorKafkaConsumerOps(
-            self.consumer,
             thread_name_prefix="action-worker-kafka",
         )
-        self._rebalance_in_progress = False
         logger.info("ActionWorker subscribed to topic=%s group=%s", topic, group_id)
 
         settings = get_settings()
@@ -217,11 +210,13 @@ class ActionWorker(StrictHeartbeatKafkaWorker[_ActionCommandPayload, None]):
     async def shutdown(self) -> None:
         self.running = False
         await self._close_consumer_runtime()
-        if self.dlq_producer:
-            try:
-                await asyncio.to_thread(self.dlq_producer.flush, self.dlq_flush_timeout_seconds)
-            except Exception as exc:
-                logger.warning("DLQ producer flush failed during shutdown: %s", exc, exc_info=True)
+        await close_kafka_producer(
+            producer=self.dlq_producer,
+            timeout_s=self.dlq_flush_timeout_seconds,
+            warning_logger=logger,
+            warning_message="DLQ producer flush failed during shutdown: %s",
+        )
+        self.dlq_producer = None
         if self.processed_event_registry:
             await self.processed_event_registry.close()
         await self.action_logs.close()
@@ -360,39 +355,35 @@ class ActionWorker(StrictHeartbeatKafkaWorker[_ActionCommandPayload, None]):
         return str(payload.envelope.event_type or "").strip() or None
 
     async def _on_parse_error(self, *, msg: Any, raw_payload: Optional[str], error: Exception) -> None:  # type: ignore[override]
-        stage = "parse"
-        payload_text = raw_payload
-        payload_obj = None
-        fallback_metadata = None
-        cause = error
-
-        if isinstance(error, _ActionCommandParseError):
-            stage = error.stage
-            payload_text = error.payload_text if error.payload_text is not None else raw_payload
-            payload_obj = error.payload_obj
-            fallback_metadata = error.fallback_metadata
-            cause = error.cause
-
-        kafka_headers = None
-        with suppress(Exception):
-            kafka_headers = msg.headers()
-
-        try:
+        async def _send(
+            stage: str,
+            cause_text: str,
+            payload_text: Optional[str],
+            payload_obj: Optional[Dict[str, Any]],
+            kafka_headers: Optional[Any],
+            fallback_metadata: Optional[Dict[str, Any]],
+        ) -> None:
             await self._send_to_dlq(
                 msg=msg,
                 stage=stage,
-                error=str(cause),
+                error=cause_text,
                 attempt_count=1,
                 payload_text=payload_text,
                 payload_obj=payload_obj,
                 kafka_headers=kafka_headers,
                 fallback_metadata=fallback_metadata,
             )
-        except Exception as dlq_err:
-            logger.error("Failed to publish invalid action payload to DLQ; retrying: %s", dlq_err, exc_info=True)
-            raise
 
-        logger.exception("Invalid action payload; skipping: %s", cause)
+        await self._publish_parse_error_to_dlq(
+            msg=msg,
+            raw_payload=raw_payload,
+            error=error,
+            dlq_sender=_send,
+            publish_failure_message="Failed to publish invalid action payload to DLQ; retrying: %s",
+            invalid_payload_message="Invalid action payload; skipping: %s",
+            raise_on_publish_failure=True,
+            logger_instance=logger,
+        )
 
     async def _on_retry_scheduled(  # type: ignore[override]
         self,
@@ -433,36 +424,7 @@ class ActionWorker(StrictHeartbeatKafkaWorker[_ActionCommandPayload, None]):
             return False
         if isinstance(exc, ValueError):
             return False
-        msg = str(exc).lower()
-        non_retryable_markers = [
-            "permission denied",
-            "validation",
-            "schema",
-            "bad request",
-            "invalid",
-            "missing",
-        ]
-        if any(marker in msg for marker in non_retryable_markers):
-            return False
-        retryable_markers = [
-            "timeout",
-            "temporarily",
-            "unavailable",
-            "connection",
-            "reset",
-            "broken pipe",
-            "429",
-            "rate limit",
-            "too many requests",
-            "500",
-            "502",
-            "503",
-            "504",
-        ]
-        if any(marker in msg for marker in retryable_markers):
-            return True
-        # Default to retryable: unknown failures are more likely to be infra/transient.
-        return True
+        return classify_retryable_with_profile(exc, ACTION_COMMAND_RETRY_PROFILE)
 
     async def _publish_to_dlq(
         self,
@@ -476,34 +438,20 @@ class ActionWorker(StrictHeartbeatKafkaWorker[_ActionCommandPayload, None]):
         kafka_headers: Optional[Any] = None,
         fallback_metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
-        if not self.dlq_producer:
-            raise RuntimeError("DLQ producer not configured")
-
-        dlq_payload = build_standard_dlq_payload(
+        await self._publish_standard_dlq_record(
+            producer=self.dlq_producer,
             msg=msg,
-            worker="action-worker",
-            stage=stage,
+            worker=self.service_name,
+            dlq_spec=self._dlq_spec,
             error=error,
             attempt_count=int(attempt_count),
+            stage=stage,
             payload_text=payload_text,
             payload_obj=payload_obj,
-        )
-        spec = DlqPublishSpec(
-            dlq_topic=self.dlq_topic,
-            service_name=str(self.service_name or "action-worker"),
-            span_name="action_worker.dlq_produce",
-            metric_event_name="ACTION_COMMAND_DLQ",
-            flush_timeout_seconds=float(self.dlq_flush_timeout_seconds),
-        )
-        await publish_dlq_json(
-            producer=self.dlq_producer,
-            spec=spec,
-            msg=msg,
-            payload=dlq_payload,
+            kafka_headers=kafka_headers,
+            fallback_metadata=fallback_metadata,
             tracing=self.tracing,
             metrics=self.metrics,
-            kafka_headers=kafka_headers,
-            fallback_metadata=fallback_metadata if isinstance(fallback_metadata, dict) else None,
         )
 
     async def _send_to_dlq(  # type: ignore[override]
@@ -520,32 +468,21 @@ class ActionWorker(StrictHeartbeatKafkaWorker[_ActionCommandPayload, None]):
         kafka_headers: Optional[Any] = None,
         fallback_metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
-        if kafka_headers is None:
-            with suppress(Exception):
-                kafka_headers = msg.headers()
-
-        stage_final = str(stage or "").strip() or "execute_action"
-        if payload is not None and stage_final == "execute_action":
-            stage_final = str(payload.stage or stage_final).strip() or stage_final
-
-        if payload_text is None:
-            payload_text = raw_payload
-
-        if payload_obj is None and payload is not None:
-            payload_obj = payload.envelope.model_dump(mode="json")
-
-        if fallback_metadata is None and payload is not None:
-            fallback_metadata = payload.envelope_metadata
-
-        await self._publish_to_dlq(
+        await self._send_standard_dlq_record(
             msg=msg,
-            stage=stage_final,
             error=error,
             attempt_count=int(attempt_count),
+            stage=stage,
+            default_stage="execute_action",
+            raw_payload=raw_payload,
             payload_text=payload_text,
             payload_obj=payload_obj,
             kafka_headers=kafka_headers,
             fallback_metadata=fallback_metadata,
+            publisher=self._publish_to_dlq,
+            inferred_payload_obj=payload.envelope.model_dump(mode="json") if payload is not None else None,
+            inferred_metadata=payload.envelope_metadata if payload is not None else None,
+            inferred_stage=payload.stage if payload is not None else None,
         )
 
     async def run(self) -> None:
@@ -964,31 +901,11 @@ class ActionWorker(StrictHeartbeatKafkaWorker[_ActionCommandPayload, None]):
                         submission_targets[(sid_class, sid_instance, sid_lifecycle)] = item
 
                 action_conflict_policy = parse_conflict_policy(spec.get("conflict_policy"))
-                object_type_meta_cache: Dict[str, Dict[str, Any]] = {}
-
-                async def _get_object_type_meta(class_id: str) -> Dict[str, Any]:
-                    cached = object_type_meta_cache.get(class_id)
-                    if isinstance(cached, dict):
-                        return cached
-
-                    meta: Dict[str, Any] = {"conflict_policy": None, "rev": 1}
-                    try:
-                        object_resource = await resources.get_resource(
-                            db_name,
-                            branch=ontology_commit_id,
-                            resource_type="object_type",
-                            resource_id=class_id,
-                        )
-                        obj_spec = object_resource.get("spec") if isinstance(object_resource, dict) else None
-                        if isinstance(obj_spec, dict):
-                            meta["conflict_policy"] = parse_conflict_policy(obj_spec.get("conflict_policy"))
-                        obj_meta = object_resource.get("metadata") if isinstance(object_resource, dict) else None
-                        meta["rev"] = parse_metadata_rev(obj_meta)
-                    except Exception:
-                        pass
-
-                    object_type_meta_cache[class_id] = meta
-                    return meta
+                get_object_type_meta = build_object_type_meta_resolver(
+                    resources=resources,
+                    db_name=db_name,
+                    branch=ontology_commit_id,
+                )
 
                 def _is_public_identifier(value: Any) -> bool:
                     text = str(value or "").strip()
@@ -1052,7 +969,7 @@ class ActionWorker(StrictHeartbeatKafkaWorker[_ActionCommandPayload, None]):
                         raise RuntimeError("compiled changes missing for target")
 
                     lifecycle_id = derive_lifecycle_id(base_state)
-                    obj_meta = await _get_object_type_meta(class_id)
+                    obj_meta = await get_object_type_meta(class_id)
                     object_type_rid = format_resource_rid(
                         resource_type="object_type",
                         resource_id=class_id,
@@ -1430,7 +1347,7 @@ class ActionWorker(StrictHeartbeatKafkaWorker[_ActionCommandPayload, None]):
                         changes=changes,
                     )
 
-                    obj_meta = await _get_object_type_meta(class_id)
+                    obj_meta = await get_object_type_meta(class_id)
                     conflict_policy = action_conflict_policy or (
                         obj_meta.get("conflict_policy") if isinstance(obj_meta, dict) else None
                     ) or "FAIL"
@@ -1620,12 +1537,7 @@ class ActionWorker(StrictHeartbeatKafkaWorker[_ActionCommandPayload, None]):
         )
 
     async def _ensure_branch(self, *, repository: str, branch: str) -> None:
-        if not self.lakefs_client:
-            raise RuntimeError("lakefs_client not initialized")
-        try:
-            await self.lakefs_client.create_branch(repository=repository, name=branch, source="main")
-        except LakeFSConflictError:
-            return
+        await ensure_lakefs_branch(lakefs_client=self.lakefs_client, repository=repository, branch=branch, source="main")
 
     async def _write_patchset_commit(
         self,

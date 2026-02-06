@@ -14,6 +14,7 @@ import httpx
 from fastapi import HTTPException, Request, status
 from fastapi.responses import JSONResponse
 
+from bff.services.database_error_policy import MessageErrorPolicy, apply_message_error_policies
 from bff.services.oms_client import OMSClient
 from shared.config.settings import get_settings
 from shared.models.requests import ApiResponse, DatabaseCreateRequest
@@ -78,6 +79,18 @@ def _coerce_db_entry(entry: Any) -> Dict[str, Any]:
     if name and "name" not in payload:
         payload["name"] = name
     return payload
+
+
+def _validate_db_branch_pair(*, db_name: str, branch_name: str) -> tuple[str, str]:
+    return validate_db_name(db_name), validate_branch_name(branch_name)
+
+
+def _database_not_found_policy(*, db_name: str) -> MessageErrorPolicy:
+    return MessageErrorPolicy(
+        patterns=("database not found", "not found"),
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail=f"데이터베이스 '{db_name}'을(를) 찾을 수 없습니다",
+    )
 
 
 def _enrich_db_entry(
@@ -259,15 +272,20 @@ async def create_database(
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error("Failed to create database %r: %s", body.name, exc)
-
-        if "already exists" in str(exc).lower() or "duplicate" in str(exc).lower():
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=f"데이터베이스 '{body.name}'이(가) 이미 존재합니다",
-            ) from exc
-
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+        apply_message_error_policies(
+            exc=exc,
+            logger=logger,
+            log_message=f"Failed to create database {body.name!r}: %s",
+            policies=(
+                MessageErrorPolicy(
+                    patterns=("already exists", "duplicate"),
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"데이터베이스 '{body.name}'이(가) 이미 존재합니다",
+                ),
+            ),
+            default_status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            default_detail=str(exc),
+        )
 
 
 async def delete_database(
@@ -343,24 +361,21 @@ async def delete_database(
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error("Failed to delete database %r: %s", db_name, exc)
-
-        if "not found" in str(exc).lower():
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"데이터베이스 '{db_name}'을(를) 찾을 수 없습니다",
-            ) from exc
-
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+        apply_message_error_policies(
+            exc=exc,
+            logger=logger,
+            log_message=f"Failed to delete database {db_name!r}: %s",
+            policies=(_database_not_found_policy(db_name=db_name),),
+            default_status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            default_detail=str(exc),
+        )
 
 
 async def get_branch_info(*, db_name: str, branch_name: str, oms: OMSClient) -> Dict[str, Any]:
     """브랜치 정보 조회 (프론트엔드용 BFF 래핑)"""
     try:
-        db_name = validate_db_name(db_name)
-        branch_name = validate_branch_name(branch_name)
-
-        return await oms.get(f"/api/v1/branch/{db_name}/branch/{branch_name}/info")
+        db_name, branch_name = _validate_db_branch_pair(db_name=db_name, branch_name=branch_name)
+        return await oms.get_branch_info(db_name, branch_name)
     except SecurityViolationError as exc:
         logger.warning("Security validation failed for branch info (%s/%s): %s", db_name, branch_name, exc)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
@@ -379,13 +394,8 @@ async def get_branch_info(*, db_name: str, branch_name: str, oms: OMSClient) -> 
 async def delete_branch(*, db_name: str, branch_name: str, force: bool, oms: OMSClient) -> Dict[str, Any]:
     """브랜치 삭제 (프론트엔드용 BFF 래핑)"""
     try:
-        db_name = validate_db_name(db_name)
-        branch_name = validate_branch_name(branch_name)
-
-        return await oms.delete(
-            f"/api/v1/branch/{db_name}/branch/{branch_name}",
-            params={"force": force},
-        )
+        db_name, branch_name = _validate_db_branch_pair(db_name=db_name, branch_name=branch_name)
+        return await oms.delete_branch(db_name, branch_name, force=force)
     except SecurityViolationError as exc:
         logger.warning("Security validation failed for branch delete (%s/%s): %s", db_name, branch_name, exc)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
@@ -421,13 +431,14 @@ async def get_database(*, db_name: str, oms: OMSClient) -> Dict[str, Any]:
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error("Failed to get database %r: %s", db_name, exc)
-        if "not found" in str(exc).lower():
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"데이터베이스 '{db_name}'을(를) 찾을 수 없습니다",
-            ) from exc
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+        apply_message_error_policies(
+            exc=exc,
+            logger=logger,
+            log_message=f"Failed to get database {db_name!r}: %s",
+            policies=(_database_not_found_policy(db_name=db_name),),
+            default_status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            default_detail=str(exc),
+        )
 
 
 async def get_database_expected_seq(*, db_name: str) -> Dict[str, Any]:
@@ -493,13 +504,14 @@ async def list_classes(
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error("Failed to list classes for database %r: %s", db_name, exc)
-        if "not found" in str(exc).lower():
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"데이터베이스 '{db_name}'을(를) 찾을 수 없습니다",
-            ) from exc
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+        apply_message_error_policies(
+            exc=exc,
+            logger=logger,
+            log_message=f"Failed to list classes for database {db_name!r}: %s",
+            policies=(_database_not_found_policy(db_name=db_name),),
+            default_status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            default_detail=str(exc),
+        )
 
 
 async def create_class(*, db_name: str, class_data: Dict[str, Any], oms: OMSClient) -> Dict[str, Any]:
@@ -534,18 +546,25 @@ async def create_class(*, db_name: str, class_data: Dict[str, Any], oms: OMSClie
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error("Failed to create class in database %r: %s", db_name, exc)
-
-        if "already exists" in str(exc).lower() or "duplicate" in str(exc).lower():
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=f"클래스 '{class_data.get('@id')}'이(가) 이미 존재합니다",
-            ) from exc
-
-        if "invalid" in str(exc).lower():
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"잘못된 클래스 데이터: {str(exc)}") from exc
-
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+        apply_message_error_policies(
+            exc=exc,
+            logger=logger,
+            log_message=f"Failed to create class in database {db_name!r}: %s",
+            policies=(
+                MessageErrorPolicy(
+                    patterns=("already exists", "duplicate"),
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"클래스 '{class_data.get('@id')}'이(가) 이미 존재합니다",
+                ),
+                MessageErrorPolicy(
+                    patterns=("invalid",),
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"잘못된 클래스 데이터: {str(exc)}",
+                ),
+            ),
+            default_status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            default_detail=str(exc),
+        )
 
 
 async def get_class(*, db_name: str, class_id: str, oms: OMSClient) -> Dict[str, Any]:
@@ -592,15 +611,20 @@ async def get_class(*, db_name: str, class_id: str, oms: OMSClient) -> Dict[str,
         result = await oms.get_ontology(db_name, class_id)
         return result
     except Exception as exc:
-        logger.error("Failed to get class %r from database %r: %s", class_id, db_name, exc)
-
-        if "not found" in str(exc).lower():
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"클래스 '{class_id}'을(를) 찾을 수 없습니다",
-            ) from exc
-
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+        apply_message_error_policies(
+            exc=exc,
+            logger=logger,
+            log_message=f"Failed to get class {class_id!r} from database {db_name!r}: %s",
+            policies=(
+                MessageErrorPolicy(
+                    patterns=("not found",),
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"클래스 '{class_id}'을(를) 찾을 수 없습니다",
+                ),
+            ),
+            default_status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            default_detail=str(exc),
+        )
 
 
 async def list_branches(*, db_name: str, oms: OMSClient) -> Dict[str, Any]:
@@ -613,22 +637,21 @@ async def list_branches(*, db_name: str, oms: OMSClient) -> Dict[str, Any]:
 
         return {"branches": branches, "count": len(branches)}
     except Exception as exc:
-        logger.error("Failed to list branches for database %r: %s", db_name, exc)
-
-        if "database not found" in str(exc).lower() or "not found" in str(exc).lower():
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"데이터베이스 '{db_name}'을(를) 찾을 수 없습니다",
-            ) from exc
-        if "access denied" in str(exc).lower() or "unauthorized" in str(exc).lower():
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="브랜치 목록 조회 권한이 없습니다",
-            ) from exc
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"브랜치 목록 조회 실패: {str(exc)}",
-        ) from exc
+        apply_message_error_policies(
+            exc=exc,
+            logger=logger,
+            log_message=f"Failed to list branches for database {db_name!r}: %s",
+            policies=(
+                _database_not_found_policy(db_name=db_name),
+                MessageErrorPolicy(
+                    patterns=("access denied", "unauthorized"),
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="브랜치 목록 조회 권한이 없습니다",
+                ),
+            ),
+            default_status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            default_detail=f"브랜치 목록 조회 실패: {str(exc)}",
+        )
 
 
 async def create_branch(*, db_name: str, branch_data: Dict[str, Any], oms: OMSClient) -> Dict[str, Any]:
@@ -646,30 +669,27 @@ async def create_branch(*, db_name: str, branch_data: Dict[str, Any], oms: OMSCl
         if from_branch:
             from_branch = validate_branch_name(from_branch)
 
-        oms_branch_data = {"branch_name": branch_name, "from_branch": from_branch}
-
-        result = await oms.create_branch(db_name, oms_branch_data)
+        result = await oms.create_branch(db_name, branch_name, from_branch=from_branch)
 
         return {"status": "success", "name": branch_name, "data": result}
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error("Failed to create branch in database %r: %s", db_name, exc)
-
-        if "branch already exists" in str(exc).lower() or "already exists" in str(exc).lower():
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=f"브랜치 '{branch_data.get('name')}'이(가) 이미 존재합니다",
-            ) from exc
-        if "database not found" in str(exc).lower() or "not found" in str(exc).lower():
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"데이터베이스 '{db_name}'을(를) 찾을 수 없습니다",
-            ) from exc
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"브랜치 생성 실패: {str(exc)}",
-        ) from exc
+        apply_message_error_policies(
+            exc=exc,
+            logger=logger,
+            log_message=f"Failed to create branch in database {db_name!r}: %s",
+            policies=(
+                MessageErrorPolicy(
+                    patterns=("branch already exists", "already exists"),
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"브랜치 '{branch_data.get('name')}'이(가) 이미 존재합니다",
+                ),
+                _database_not_found_policy(db_name=db_name),
+            ),
+            default_status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            default_detail=f"브랜치 생성 실패: {str(exc)}",
+        )
 
 
 async def get_versions(*, db_name: str, oms: OMSClient) -> Dict[str, Any]:
@@ -682,22 +702,24 @@ async def get_versions(*, db_name: str, oms: OMSClient) -> Dict[str, Any]:
 
         return {"versions": versions, "count": len(versions)}
     except Exception as exc:
-        logger.error("Failed to get versions for database %r: %s", db_name, exc)
-
-        if "database not found" in str(exc).lower():
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"데이터베이스 '{db_name}'을(를) 찾을 수 없습니다",
-            ) from exc
-        if "access denied" in str(exc).lower() or "unauthorized" in str(exc).lower():
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="버전 히스토리 조회 권한이 없습니다",
-            ) from exc
-        if "no commits" in str(exc).lower() or "empty history" in str(exc).lower():
-            return {"versions": [], "count": 0}
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"버전 히스토리 조회 실패: {str(exc)}",
-        ) from exc
-
+        return apply_message_error_policies(
+            exc=exc,
+            logger=logger,
+            log_message=f"Failed to get versions for database {db_name!r}: %s",
+            policies=(
+                _database_not_found_policy(db_name=db_name),
+                MessageErrorPolicy(
+                    patterns=("access denied", "unauthorized"),
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="버전 히스토리 조회 권한이 없습니다",
+                ),
+                MessageErrorPolicy(
+                    patterns=("no commits", "empty history"),
+                    status_code=status.HTTP_200_OK,
+                    detail="",
+                    fallback_return={"versions": [], "count": 0},
+                ),
+            ),
+            default_status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            default_detail=f"버전 히스토리 조회 실패: {str(exc)}",
+        )

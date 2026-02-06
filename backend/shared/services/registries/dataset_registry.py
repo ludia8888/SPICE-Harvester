@@ -20,7 +20,7 @@ from shared.observability.context_propagation import enrich_metadata_with_curren
 from shared.services.registries.postgres_schema_registry import PostgresSchemaRegistry
 from shared.utils.s3_uri import is_s3_uri, parse_s3_uri
 from shared.utils.json_utils import coerce_json_dataset, normalize_json_payload
-from shared.utils.schema_hash import compute_schema_hash
+from shared.utils.schema_hash import compute_schema_hash, compute_schema_hash_from_payload
 from shared.utils.time_utils import utcnow
 
 logger = logging.getLogger(__name__)
@@ -300,39 +300,6 @@ def _inject_dataset_version(outbox_entries: List[Dict[str, Any]], dataset_versio
             if isinstance(payload.get("from_node_id"), str) and payload["from_node_id"].startswith("event:"):
                 payload["from_node_id"] = f"agg:DatasetVersion:{dataset_version_id}"
             entry["payload"] = payload
-
-
-def _extract_schema_columns(schema: Any) -> List[Dict[str, Any]]:
-    if isinstance(schema, dict):
-        columns = schema.get("columns")
-        if isinstance(columns, list):
-            normalized: List[Dict[str, Any]] = []
-            for item in columns:
-                if isinstance(item, dict):
-                    normalized.append(dict(item))
-                else:
-                    name = str(item).strip()
-                    if name:
-                        normalized.append({"name": name})
-            return normalized
-    if isinstance(schema, list):
-        normalized = []
-        for item in schema:
-            if isinstance(item, dict):
-                normalized.append(dict(item))
-            else:
-                name = str(item).strip()
-                if name:
-                    normalized.append({"name": name})
-        return normalized
-    return []
-
-
-def _compute_schema_hash_from_payload(payload: Any) -> Optional[str]:
-    columns = _extract_schema_columns(payload)
-    if not columns:
-        return None
-    return compute_schema_hash(columns)
 
 
 class DatasetRegistry(PostgresSchemaRegistry):
@@ -1797,10 +1764,10 @@ class DatasetRegistry(PostgresSchemaRegistry):
         if not version or version.dataset_id != backing.dataset_id:
             raise RuntimeError("Dataset version mismatch")
         if not schema_hash:
-            schema_hash = _compute_schema_hash_from_payload(version.sample_json)
+            schema_hash = compute_schema_hash_from_payload(version.sample_json)
             if not schema_hash:
                 dataset = await self.get_dataset(dataset_id=backing.dataset_id)
-                schema_hash = _compute_schema_hash_from_payload(
+                schema_hash = compute_schema_hash_from_payload(
                     dataset.schema_json if dataset else {}
                 )
         if not schema_hash:

@@ -14,7 +14,6 @@ Design goals:
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -25,44 +24,13 @@ import asyncpg
 from shared.config.settings import get_settings
 from shared.models.event_envelope import EventEnvelope
 from shared.services.registries.postgres_schema_registry import PostgresSchemaRegistry
-from shared.utils.json_utils import coerce_json_strict, normalize_json_payload
+from shared.utils.json_utils import coerce_json_dict, coerce_json_list, coerce_json_strict, normalize_json_payload
 from shared.utils.time_utils import utcnow
 
 
-def _parse_json_dict(value: Any) -> Dict[str, Any]:
-    if value is None:
-        return {}
-    if isinstance(value, dict):
-        return dict(value)
-    if isinstance(value, str):
-        raw = value.strip()
-        if not raw:
-            return {}
-        try:
-            parsed = json.loads(raw)
-        except Exception:
-            return {}
-        return dict(parsed) if isinstance(parsed, dict) else {}
-    return {}
-
-
 def _parse_json_list_of_dicts(value: Any) -> List[Dict[str, Any]]:
-    if value is None:
-        return []
-    if isinstance(value, list):
-        return [dict(item) for item in value if isinstance(item, dict)]
-    if isinstance(value, str):
-        raw = value.strip()
-        if not raw:
-            return []
-        try:
-            parsed = json.loads(raw)
-        except Exception:
-            return []
-        if isinstance(parsed, list):
-            return [dict(item) for item in parsed if isinstance(item, dict)]
-        return []
-    return []
+    items = coerce_json_list(value)
+    return [dict(item) for item in items if isinstance(item, dict)]
 
 
 @dataclass(frozen=True)
@@ -282,7 +250,7 @@ class ConnectorRegistry(PostgresSchemaRegistry):
                 source_type=str(row["source_type"]),
                 source_id=str(row["source_id"]),
                 enabled=bool(row["enabled"]),
-                config_json=_parse_json_dict(row["config_json"]),
+                config_json=coerce_json_dict(row["config_json"], parsed_fallback_key=None),
                 created_at=row["created_at"],
                 updated_at=row["updated_at"],
             )
@@ -326,7 +294,7 @@ class ConnectorRegistry(PostgresSchemaRegistry):
                 source_type=str(row["source_type"]),
                 source_id=str(row["source_id"]),
                 enabled=bool(row["enabled"]),
-                config_json=_parse_json_dict(row["config_json"]),
+                config_json=coerce_json_dict(row["config_json"], parsed_fallback_key=None),
                 created_at=row["created_at"],
                 updated_at=row["updated_at"],
             )
@@ -363,7 +331,7 @@ class ConnectorRegistry(PostgresSchemaRegistry):
                         source_type=str(r["source_type"]),
                         source_id=str(r["source_id"]),
                         enabled=bool(r["enabled"]),
-                        config_json=_parse_json_dict(r["config_json"]),
+                        config_json=coerce_json_dict(r["config_json"], parsed_fallback_key=None),
                         created_at=r["created_at"],
                         updated_at=r["updated_at"],
                     )
@@ -650,7 +618,7 @@ class ConnectorRegistry(PostgresSchemaRegistry):
                             source_type=str(r["source_type"]),
                             source_id=str(r["source_id"]),
                             sequence_number=int(r["sequence_number"]) if r["sequence_number"] is not None else None,
-                            payload=_parse_json_dict(r["payload"]),
+                            payload=coerce_json_dict(r["payload"], parsed_fallback_key=None),
                             status="publishing",
                             publish_attempts=int(r["publish_attempts"] or 0) + 1,
                             created_at=r["created_at"],

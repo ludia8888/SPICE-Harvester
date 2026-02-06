@@ -14,59 +14,26 @@ from fastapi import HTTPException, Request, status
 from fastapi.responses import JSONResponse
 
 from bff.dependencies import LabelMapper, TerminusService
-from bff.routers.ontology_ops import _localized_to_string, _transform_properties_for_oms
+from bff.routers.ontology_ops import _transform_properties_for_oms
+from bff.services.ontology_class_id_service import resolve_or_generate_class_id
+from bff.services.input_validation_service import (
+    sanitized_payload,
+    validated_branch_name,
+    validated_db_name,
+)
 from bff.services.ontology_label_mapper_service import map_relationship_targets, register_ontology_label_mappings
 from bff.utils.request_headers import extract_forward_headers
 from shared.models.ontology import OntologyCreateRequestBFF
 from shared.models.responses import ApiResponse
 from shared.security.input_sanitizer import (
     SecurityViolationError,
-    sanitize_input,
-    validate_branch_name,
     validate_class_id,
-    validate_db_name,
 )
-from shared.utils.id_generator import generate_simple_id
 from shared.utils.language import get_accept_language
 
 logger = logging.getLogger(__name__)
 
 _ALLOWED_PATH_TYPES = {"shortest", "all", "weighted", "semantic"}
-
-
-def _validated_db_name(db_name: str) -> str:
-    try:
-        return validate_db_name(db_name)
-    except (SecurityViolationError, ValueError) as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-
-
-def _validated_branch(branch: str) -> str:
-    try:
-        return validate_branch_name(branch)
-    except (SecurityViolationError, ValueError) as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-
-
-def _sanitize_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
-    try:
-        return sanitize_input(payload)
-    except SecurityViolationError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-
-
-def _resolve_or_generate_class_id(payload: Dict[str, Any]) -> str:
-    if payload.get("id"):
-        try:
-            return validate_class_id(str(payload["id"]))
-        except (SecurityViolationError, ValueError) as exc:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    return generate_simple_id(
-        label=_localized_to_string(payload.get("label", "")),
-        use_timestamp_for_korean=True,
-        default_fallback="UnnamedClass",
-    )
-
 
 async def create_ontology_with_relationship_validation(
     *,
@@ -99,11 +66,11 @@ async def create_ontology_with_relationship_validation(
                 ),
             )
 
-        db_name = _validated_db_name(db_name)
-        branch = _validated_branch(branch)
+        db_name = validated_db_name(db_name)
+        branch = validated_branch_name(branch)
 
-        ontology_dict = _sanitize_payload(ontology.model_dump(exclude_unset=True))
-        class_id = _resolve_or_generate_class_id(ontology_dict)
+        ontology_dict = sanitized_payload(ontology.model_dump(exclude_unset=True))
+        class_id = resolve_or_generate_class_id(ontology_dict)
         ontology_dict["id"] = class_id
 
         await map_relationship_targets(mapper=mapper, db_name=db_name, ontology_dict=ontology_dict, lang=lang)
@@ -161,12 +128,12 @@ async def validate_ontology_relationships(
     """Validate ontology relationships (no write)."""
     lang = get_accept_language(request)
     try:
-        db_name = _validated_db_name(db_name)
-        branch = _validated_branch(branch)
-        payload = _sanitize_payload(ontology.model_dump(exclude_unset=True))
+        db_name = validated_db_name(db_name)
+        branch = validated_branch_name(branch)
+        payload = sanitized_payload(ontology.model_dump(exclude_unset=True))
 
         if not payload.get("id"):
-            payload["id"] = _resolve_or_generate_class_id(payload)
+            payload["id"] = resolve_or_generate_class_id(payload)
         else:
             payload["id"] = validate_class_id(str(payload["id"]))
 
@@ -198,12 +165,12 @@ async def check_circular_references(
     """Detect circular references in ontology graph (no write)."""
     lang = get_accept_language(request)
     try:
-        db_name = _validated_db_name(db_name)
-        branch = _validated_branch(branch)
+        db_name = validated_db_name(db_name)
+        branch = validated_branch_name(branch)
 
         new_ontology: Optional[Dict[str, Any]] = None
         if ontology is not None:
-            payload = _sanitize_payload(ontology.model_dump(exclude_unset=True))
+            payload = sanitized_payload(ontology.model_dump(exclude_unset=True))
             await map_relationship_targets(mapper=mapper, db_name=db_name, ontology_dict=payload, lang=lang)
             new_ontology = payload
 
@@ -230,7 +197,7 @@ async def analyze_relationship_network(
     """Analyze ontology relationship network and return user-friendly metrics."""
     lang = get_accept_language(request)
     try:
-        db_name = _validated_db_name(db_name)
+        db_name = validated_db_name(db_name)
         analysis_result = await terminus.analyze_relationship_network(db_name)
 
         summary = analysis_result.get("summary") or analysis_result.get("relationship_summary") or {}
@@ -326,7 +293,7 @@ async def find_relationship_paths(
     """Find relationship paths between ontology entities."""
     lang = get_accept_language(request)
     try:
-        db_name = _validated_db_name(db_name)
+        db_name = validated_db_name(db_name)
         start_entity = sanitize_input(start_entity)
         if end_entity:
             end_entity = sanitize_input(end_entity)
@@ -410,4 +377,3 @@ async def find_relationship_paths(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"관계 경로 탐색 실패: {str(exc)}",
         ) from exc
-

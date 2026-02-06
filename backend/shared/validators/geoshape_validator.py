@@ -8,6 +8,7 @@ import json
 from typing import Any, Dict, List, Optional
 
 from .base_validator import BaseValidator, ValidationResult
+from shared.utils.json_utils import maybe_decode_json
 
 
 _ALLOWED_GEOMETRIES = {
@@ -67,12 +68,7 @@ class GeoShapeValidator(BaseValidator):
         return ValidationResult(is_valid=True, message="Geoshape validation passed", normalized_value=geometry)
 
     def normalize(self, value: Any) -> Any:
-        if isinstance(value, str):
-            try:
-                return json.loads(value)
-            except Exception:
-                return value
-        return value
+        return maybe_decode_json(value)
 
     def get_supported_types(self) -> List[str]:
         return ["geoshape"]

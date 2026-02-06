@@ -10,53 +10,31 @@ These utilities are intentionally sample-based and side-effect free so they can 
 """
 
 from dataclasses import dataclass
-from datetime import datetime
 from typing import Any, Dict, Iterable, List, Optional
 
 from shared.services.pipeline.pipeline_schema_utils import normalize_schema_type
-from shared.services.pipeline.pipeline_type_utils import (
-    parse_datetime_text,
-    parse_decimal_text,
-    parse_int_text,
+from shared.services.pipeline.pipeline_value_predicates import (
+    is_bool_like,
+    is_datetime_like,
+    is_decimal_like,
+    is_int_like,
 )
 
 
 def _is_bool(value: Any) -> bool:
-    if isinstance(value, bool):
-        return True
-    if isinstance(value, str):
-        return value.strip().lower() in {"true", "false"}
-    return False
+    return is_bool_like(value)
 
 
 def _is_datetime(value: Any) -> bool:
-    if isinstance(value, datetime):
-        return True
-    if isinstance(value, str):
-        return parse_datetime_text(value, allow_ambiguous=False) is not None
-    return False
+    return is_datetime_like(value, allow_ambiguous=False)
 
 
 def _is_int(value: Any) -> bool:
-    if isinstance(value, bool):
-        return False
-    if isinstance(value, int):
-        return True
-    if isinstance(value, str):
-        return parse_int_text(value) is not None
-    return False
+    return is_int_like(value)
 
 
 def _is_decimal(value: Any) -> bool:
-    if isinstance(value, bool):
-        return False
-    if isinstance(value, float):
-        return True
-    if isinstance(value, int):
-        return True
-    if isinstance(value, str):
-        return parse_decimal_text(value) is not None
-    return False
+    return is_decimal_like(value, include_int=True)
 
 
 def _sample_non_null(values: Iterable[Any], *, max_samples: int) -> List[Any]:
@@ -144,4 +122,3 @@ def common_join_key_type(left: Any, right: Any) -> str:
 def normalize_declared_type(value: Any) -> str:
     normalized = normalize_schema_type(value)
     return normalized or "xsd:string"
-

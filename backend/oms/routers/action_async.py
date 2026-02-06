@@ -44,6 +44,7 @@ from shared.utils.action_template_engine import (
     ActionImplementationError,
     compile_template_v1_change_shape,
 )
+from shared.utils.action_simulation_utils import reject_simulation_delete_flag
 from shared.utils.principal_policy import build_principal_tags, policy_allows
 from shared.utils.resource_rid import format_resource_rid, parse_metadata_rev
 from shared.utils.writeback_conflicts import (
@@ -104,13 +105,7 @@ class ActionSimulateStatePatch(BaseModel):
     link_add: List[Any] = Field(default_factory=list)
     link_remove: List[Any] = Field(default_factory=list)
     delete: bool = Field(default=False, description="delete is not supported for simulation assumptions")
-
-    @field_validator("delete")
-    @classmethod
-    def _reject_delete(cls, value: bool) -> bool:
-        if value:
-            raise ValueError("delete is not supported for simulation assumptions")
-        return False
+    _reject_delete = field_validator("delete")(reject_simulation_delete_flag)
 
 
 class ActionSimulateObservedBaseOverrides(BaseModel):

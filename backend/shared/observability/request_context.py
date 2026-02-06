@@ -21,6 +21,8 @@ from contextvars import ContextVar
 from typing import Any, Dict, Iterator, Mapping, Optional
 from urllib.parse import unquote
 
+from shared.utils.blank_utils import strip_to_none
+
 
 _REQUEST_ID: ContextVar[Optional[str]] = ContextVar("spice.request_id", default=None)
 _CORRELATION_ID: ContextVar[Optional[str]] = ContextVar("spice.correlation_id", default=None)
@@ -40,10 +42,7 @@ except Exception:  # pragma: no cover - env dependent
 
 
 def _norm(value: Any) -> Optional[str]:
-    if value is None:
-        return None
-    text = str(value).strip()
-    return text or None
+    return strip_to_none(value)
 
 
 def generate_request_id() -> str:

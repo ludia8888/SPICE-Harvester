@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 from bff.routers.context7 import get_context7_client
 from bff.routers.registry_deps import get_agent_policy_registry
+from bff.services.pipeline_plan_tenant_service import resolve_verified_tenant_user
 from shared.models.responses import ApiResponse
 from shared.security.input_sanitizer import sanitize_input
 from shared.services.registries.agent_policy_registry import AgentPolicyRegistry
@@ -15,15 +16,6 @@ from shared.services.registries.agent_policy_registry import AgentPolicyRegistry
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/document-bundles", tags=["Document Bundles"])
-
-
-def _resolve_verified_principal(request: Request) -> tuple[str, str]:
-    user = getattr(request.state, "user", None)
-    if user is None or not getattr(user, "verified", False):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User JWT required")
-    tenant_id = getattr(user, "tenant_id", None) or getattr(user, "org_id", None) or "default"
-    user_id = str(getattr(user, "id", "") or "").strip() or "unknown"
-    return str(tenant_id), user_id
 
 
 def _enforce_bundle_access(*, tenant_policy: Any, bundle_id: str) -> None:
@@ -50,7 +42,7 @@ async def search_document_bundle(
     policy_registry: AgentPolicyRegistry = Depends(get_agent_policy_registry),
     client: Any = Depends(get_context7_client),
 ) -> ApiResponse:
-    tenant_id, _user_id = _resolve_verified_principal(request)
+    tenant_id, _user_id = resolve_verified_tenant_user(request)
     policy = await policy_registry.get_tenant_policy(tenant_id=tenant_id)
     _enforce_bundle_access(tenant_policy=policy, bundle_id=bundle_id)
 

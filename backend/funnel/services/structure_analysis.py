@@ -35,6 +35,7 @@ from shared.models.structure_analysis import (
     MergeRange,
     SheetStructureAnalysisResponse,
 )
+from shared.utils.blank_utils import is_blank_value
 
 from funnel.services.type_inference import FunnelTypeInferenceService
 
@@ -78,9 +79,7 @@ class FunnelStructureAnalyzer:
 
     @staticmethod
     def _is_blank(value: Any) -> bool:
-        if value is None:
-            return True
-        return str(value).strip() == ""
+        return is_blank_value(value)
 
     # ---------------------------
     # Cache (content-based)

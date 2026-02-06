@@ -20,6 +20,7 @@ from uuid import UUID
 import asyncpg
 
 from shared.config.settings import get_settings
+from shared.services.registries.postgres_schema_registry import PostgresSchemaRegistry
 
 
 class ActionLogStatus(str, Enum):
@@ -121,7 +122,7 @@ def _row_to_record(row: Optional[asyncpg.Record]) -> Optional[ActionLogRecord]:
     )
 
 
-class ActionLogRegistry:
+class ActionLogRegistry(PostgresSchemaRegistry):
     """
     Postgres-backed Action log registry.
 
@@ -138,13 +139,16 @@ class ActionLogRegistry:
         pool_min: Optional[int] = None,
         pool_max: Optional[int] = None,
     ) -> None:
-        self._dsn = dsn or get_settings().database.postgres_url
-        self._schema = schema
-        self._pool: Optional[asyncpg.Pool] = None
         perf = get_settings().performance
-        self._pool_min = int(pool_min) if pool_min is not None else int(perf.action_log_pg_pool_min)
-        self._pool_max = int(pool_max) if pool_max is not None else int(perf.action_log_pg_pool_max)
-        self._command_timeout = int(perf.action_log_pg_command_timeout_seconds)
+        pool_min_value = int(pool_min) if pool_min is not None else int(perf.action_log_pg_pool_min)
+        pool_max_value = int(pool_max) if pool_max is not None else int(perf.action_log_pg_pool_max)
+        super().__init__(
+            dsn=dsn,
+            schema=schema,
+            pool_min=pool_min_value,
+            pool_max=pool_max_value,
+            command_timeout=int(perf.action_log_pg_command_timeout_seconds),
+        )
 
     @staticmethod
     def _jsonb_param(value: Any) -> Optional[str]:
@@ -163,97 +167,69 @@ class ActionLogRegistry:
         except TypeError:
             return json.dumps(str(value), ensure_ascii=False)
 
-    async def connect(self) -> None:
-        if self._pool:
-            return
-        self._pool = await asyncpg.create_pool(
-            self._dsn,
-            min_size=self._pool_min,
-            max_size=self._pool_max,
-            command_timeout=self._command_timeout,
-        )
-        await self.ensure_schema()
-
-    async def initialize(self) -> None:
-        await self.connect()
-
-    async def close(self) -> None:
-        if self._pool:
-            await self._pool.close()
-            self._pool = None
-
-    async def shutdown(self) -> None:
-        await self.close()
-
-    async def ensure_schema(self) -> None:
-        if not self._pool:
-            raise RuntimeError("ActionLogRegistry not connected")
-
+    async def _ensure_tables(self, conn: asyncpg.Connection) -> None:  # type: ignore[override]
         statuses = ",".join(f"'{s.value}'" for s in ActionLogStatus)
+        await conn.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS {self._schema}.ontology_action_logs (
+                action_log_id UUID PRIMARY KEY,
+                db_name TEXT NOT NULL,
+                action_type_id TEXT NOT NULL,
+                action_type_rid TEXT,
+                resource_rid TEXT,
+                ontology_commit_id TEXT,
+                input JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                status TEXT NOT NULL CHECK (status IN ({statuses})),
+                result JSONB,
+                correlation_id TEXT,
+                submitted_by TEXT,
+                submitted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                finished_at TIMESTAMPTZ,
+                writeback_target JSONB,
+                writeback_commit_id TEXT,
+                action_applied_event_id TEXT,
+                action_applied_seq BIGINT,
+                metadata JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+            """
+        )
+        await conn.execute(
+            f"CREATE INDEX IF NOT EXISTS idx_action_logs_db_status ON {self._schema}.ontology_action_logs(db_name, status, submitted_at DESC)"
+        )
+        await conn.execute(
+            f"CREATE INDEX IF NOT EXISTS idx_action_logs_status_updated ON {self._schema}.ontology_action_logs(status, updated_at DESC)"
+        )
 
-        async with self._pool.acquire() as conn:
-            await conn.execute(f"CREATE SCHEMA IF NOT EXISTS {self._schema}")
-            await conn.execute(
-                f"""
-                CREATE TABLE IF NOT EXISTS {self._schema}.ontology_action_logs (
-                    action_log_id UUID PRIMARY KEY,
-                    db_name TEXT NOT NULL,
-                    action_type_id TEXT NOT NULL,
-                    action_type_rid TEXT,
-                    resource_rid TEXT,
-                    ontology_commit_id TEXT,
-                    input JSONB NOT NULL DEFAULT '{{}}'::jsonb,
-                    status TEXT NOT NULL CHECK (status IN ({statuses})),
-                    result JSONB,
-                    correlation_id TEXT,
-                    submitted_by TEXT,
-                    submitted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    finished_at TIMESTAMPTZ,
-                    writeback_target JSONB,
-                    writeback_commit_id TEXT,
-                    action_applied_event_id TEXT,
-                    action_applied_seq BIGINT,
-                    metadata JSONB NOT NULL DEFAULT '{{}}'::jsonb,
-                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-                )
-                """
-            )
-            await conn.execute(
-                f"CREATE INDEX IF NOT EXISTS idx_action_logs_db_status ON {self._schema}.ontology_action_logs(db_name, status, submitted_at DESC)"
-            )
-            await conn.execute(
-                f"CREATE INDEX IF NOT EXISTS idx_action_logs_status_updated ON {self._schema}.ontology_action_logs(status, updated_at DESC)"
-            )
-
-            # Forward-compatible schema evolution
-            await conn.execute(
-                f"ALTER TABLE {self._schema}.ontology_action_logs ADD COLUMN IF NOT EXISTS action_type_id TEXT"
-            )
-            await conn.execute(
-                f"ALTER TABLE {self._schema}.ontology_action_logs ADD COLUMN IF NOT EXISTS db_name TEXT"
-            )
-            await conn.execute(
-                f"ALTER TABLE {self._schema}.ontology_action_logs ADD COLUMN IF NOT EXISTS action_applied_event_id TEXT"
-            )
-            await conn.execute(
-                f"ALTER TABLE {self._schema}.ontology_action_logs ADD COLUMN IF NOT EXISTS action_applied_seq BIGINT"
-            )
-            await conn.execute(
-                f"ALTER TABLE {self._schema}.ontology_action_logs ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ"
-            )
-            await conn.execute(
-                f"ALTER TABLE {self._schema}.ontology_action_logs ALTER COLUMN updated_at SET DEFAULT NOW()"
-            )
-            await conn.execute(
-                f"""
-                UPDATE {self._schema}.ontology_action_logs
-                SET updated_at = COALESCE(updated_at, submitted_at, NOW())
-                WHERE updated_at IS NULL
-                """
-            )
-            await conn.execute(
-                f"ALTER TABLE {self._schema}.ontology_action_logs ALTER COLUMN updated_at SET NOT NULL"
-            )
+        # Forward-compatible schema evolution
+        await conn.execute(
+            f"ALTER TABLE {self._schema}.ontology_action_logs ADD COLUMN IF NOT EXISTS action_type_id TEXT"
+        )
+        await conn.execute(
+            f"ALTER TABLE {self._schema}.ontology_action_logs ADD COLUMN IF NOT EXISTS db_name TEXT"
+        )
+        await conn.execute(
+            f"ALTER TABLE {self._schema}.ontology_action_logs ADD COLUMN IF NOT EXISTS action_applied_event_id TEXT"
+        )
+        await conn.execute(
+            f"ALTER TABLE {self._schema}.ontology_action_logs ADD COLUMN IF NOT EXISTS action_applied_seq BIGINT"
+        )
+        await conn.execute(
+            f"ALTER TABLE {self._schema}.ontology_action_logs ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ"
+        )
+        await conn.execute(
+            f"ALTER TABLE {self._schema}.ontology_action_logs ALTER COLUMN updated_at SET DEFAULT NOW()"
+        )
+        await conn.execute(
+            f"""
+            UPDATE {self._schema}.ontology_action_logs
+            SET updated_at = COALESCE(updated_at, submitted_at, NOW())
+            WHERE updated_at IS NULL
+            """
+        )
+        await conn.execute(
+            f"ALTER TABLE {self._schema}.ontology_action_logs ALTER COLUMN updated_at SET NOT NULL"
+        )
 
     async def create_log(
         self,

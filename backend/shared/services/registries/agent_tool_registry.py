@@ -8,50 +8,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-import json
 from typing import Any, Dict, List, Optional
 
 import asyncpg
 
 from shared.services.registries.postgres_schema_registry import PostgresSchemaRegistry
-from shared.utils.json_utils import normalize_json_payload
-
-
-def _coerce_json_list(value: Any) -> List[Any]:
-    if value is None:
-        return []
-    if isinstance(value, list):
-        return list(value)
-    if isinstance(value, str):
-        raw = value.strip()
-        if not raw:
-            return []
-        try:
-            parsed = json.loads(raw)
-            if isinstance(parsed, list):
-                return parsed
-        except Exception:
-            return []
-    return []
-
-
-def _coerce_json_dict(value: Any) -> Dict[str, Any]:
-    if value is None:
-        return {}
-    if isinstance(value, dict):
-        return dict(value)
-    if isinstance(value, str):
-        raw = value.strip()
-        if not raw:
-            return {}
-        try:
-            parsed = json.loads(raw)
-        except Exception:
-            return {}
-        if isinstance(parsed, dict):
-            return dict(parsed)
-        return {"value": parsed}
-    return {}
+from shared.utils.json_utils import coerce_json_dict, coerce_json_list, normalize_json_payload
 
 
 @dataclass(frozen=True)
@@ -147,18 +109,18 @@ class AgentToolRegistry(PostgresSchemaRegistry):
             requires_approval=bool(row["requires_approval"]),
             requires_idempotency_key=bool(row["requires_idempotency_key"]),
             status=str(row["status"]),
-            roles=[str(role) for role in _coerce_json_list(row["roles"]) if role],
+            roles=[str(role) for role in coerce_json_list(row["roles"]) if role],
             max_payload_bytes=row["max_payload_bytes"],
             created_at=row["created_at"],
             updated_at=row["updated_at"],
             version=str(row.get("version") or "v1"),
             tool_type=str(row.get("tool_type") or "unknown"),
-            input_schema=_coerce_json_dict(row.get("input_schema")),
-            output_schema=_coerce_json_dict(row.get("output_schema")),
+            input_schema=coerce_json_dict(row.get("input_schema")),
+            output_schema=coerce_json_dict(row.get("output_schema")),
             timeout_seconds=float(row["timeout_seconds"]) if row.get("timeout_seconds") is not None else None,
-            retry_policy=_coerce_json_dict(row.get("retry_policy")),
-            resource_scopes=[str(scope) for scope in _coerce_json_list(row.get("resource_scopes")) if str(scope).strip()],
-            metadata=_coerce_json_dict(row.get("metadata")),
+            retry_policy=coerce_json_dict(row.get("retry_policy")),
+            resource_scopes=[str(scope) for scope in coerce_json_list(row.get("resource_scopes")) if str(scope).strip()],
+            metadata=coerce_json_dict(row.get("metadata")),
         )
 
     async def upsert_tool_policy(

@@ -66,7 +66,6 @@ class TypeInferenceInterface(ABC):
         """
         raise NotImplementedError
 
-    @abstractmethod
     async def infer_single_value_type(
         self, value: Any, context: Optional[Dict[str, Any]] = None
     ) -> TypeInferenceResult:
@@ -80,7 +79,14 @@ class TypeInferenceInterface(ABC):
         Returns:
             TypeInferenceResult with inferred type and confidence
         """
-        raise NotImplementedError
+        context_dict = context if isinstance(context, dict) else {}
+        analysis = await self.infer_column_type(
+            column_data=[value],
+            column_name=context_dict.get("column_name"),
+            include_complex_types=bool(context_dict.get("include_complex_types", False)),
+            metadata=context_dict or None,
+        )
+        return analysis.inferred_type
 
 
 class RealTypeInferenceService(TypeInferenceInterface):
@@ -143,22 +149,6 @@ class RealTypeInferenceService(TypeInferenceInterface):
             sample_size=sample_size,
             include_complex_types=include_complex_types,
         )
-
-    async def infer_single_value_type(
-        self, value: Any, context: Optional[Dict[str, Any]] = None
-    ) -> TypeInferenceResult:
-        """🔥 REAL implementation using Funnel service algorithms."""
-        column_name = context.get("column_name") if context else None
-        include_complex_types = context.get("include_complex_types", False) if context else False
-
-        analysis = await self.infer_column_type(
-            column_data=[value],
-            column_name=column_name,
-            include_complex_types=include_complex_types,
-            metadata=context,
-        )
-        return analysis.inferred_type
-
 
 def get_production_type_inference_service() -> TypeInferenceInterface:
     """

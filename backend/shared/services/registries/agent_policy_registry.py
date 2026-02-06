@@ -11,31 +11,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-import json
 from typing import Any, Dict, List, Optional
 
 import asyncpg
 
 from shared.services.registries.postgres_schema_registry import PostgresSchemaRegistry
-from shared.utils.json_utils import normalize_json_payload
-
-
-def _coerce_json_list(value: Any) -> List[str]:
-    if value is None:
-        return []
-    if isinstance(value, list):
-        return [str(item) for item in value if str(item).strip()]
-    if isinstance(value, str):
-        raw = value.strip()
-        if not raw:
-            return []
-        try:
-            parsed = json.loads(raw)
-        except Exception:
-            return []
-        if isinstance(parsed, list):
-            return [str(item) for item in parsed if str(item).strip()]
-    return []
+from shared.utils.json_utils import coerce_json_list, normalize_json_payload
 
 
 @dataclass(frozen=True)
@@ -73,8 +54,8 @@ class AgentPolicyRegistry(PostgresSchemaRegistry):
     def _row_to_policy(self, row: asyncpg.Record) -> AgentTenantPolicyRecord:
         return AgentTenantPolicyRecord(
             tenant_id=str(row["tenant_id"]),
-            allowed_models=_coerce_json_list(row.get("allowed_models")),
-            allowed_tools=_coerce_json_list(row.get("allowed_tools")),
+            allowed_models=[str(item) for item in coerce_json_list(row.get("allowed_models")) if str(item).strip()],
+            allowed_tools=[str(item) for item in coerce_json_list(row.get("allowed_tools")) if str(item).strip()],
             default_model=row.get("default_model"),
             auto_approve_rules=dict(row.get("auto_approve_rules") or {}),
             data_policies=dict(row.get("data_policies") or {}),
