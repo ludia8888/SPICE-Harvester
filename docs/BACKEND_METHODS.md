@@ -1,6 +1,6 @@
 # Backend Method Index
 
-> Generated: 2026-02-06T10:39:29+09:00
+> Generated: 2026-02-06T12:19:24+09:00
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 
 ## action_outbox_worker
@@ -5972,22 +5972,13 @@
 
 ### `backend/shared/models/requests.py`
 - **Classes**
-  - `BranchCreateRequest` (line 11): Request model for creating a branch
-  - `CheckoutRequest` (line 20): Request model for checking out a branch or commit
-  - `CommitRequest` (line 27): Request model for creating a commit
-  - `MergeRequest` (line 35): Request model for merging branches
-  - `RollbackRequest` (line 44): Request model for rolling back changes
-  - `DatabaseCreateRequest` (line 51): Request model for creating a database
-  - `MappingImportRequest` (line 59): Request model for importing mappings
-    - `accepted(cls, message, data)` (line 70): Create accepted response (202 Accepted)
-    - `no_content(cls, message)` (line 75): Create no content response (204 No Content)
-    - `error(cls, message, errors)` (line 80): Create error response (4xx/5xx status codes)
-    - `warning(cls, message, data)` (line 85): Create warning response (successful but with warnings)
-    - `partial(cls, message, data, errors)` (line 90): Create partial success response (some operations succeeded, some failed)
-    - `health_check(cls, service_name, version, description)` (line 97): Create standardized health check response
-    - `is_success(self)` (line 107): Check if response indicates success
-    - `is_error(self)` (line 111): Check if response indicates error
-    - `is_warning(self)` (line 115): Check if response has warnings
+  - `BranchCreateRequest` (line 14): Request model for creating a branch
+  - `CheckoutRequest` (line 23): Request model for checking out a branch or commit
+  - `CommitRequest` (line 30): Request model for creating a commit
+  - `MergeRequest` (line 38): Request model for merging branches
+  - `RollbackRequest` (line 47): Request model for rolling back changes
+  - `DatabaseCreateRequest` (line 54): Request model for creating a database
+  - `MappingImportRequest` (line 62): Request model for importing mappings
 
 ### `backend/shared/models/responses.py`
 - **Classes**
