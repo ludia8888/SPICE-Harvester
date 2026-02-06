@@ -53,10 +53,10 @@ from shared.errors.error_envelope import build_error_envelope
 from shared.errors.error_types import ErrorCategory, ErrorCode
 from shared.models.event_envelope import EventEnvelope
 from shared.models.pipeline_job import PipelineJob
-from shared.observability.context_propagation import kafka_headers_from_current_context
 from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
 from shared.services.kafka.processed_event_worker import HeartbeatOptions, ProcessedEventKafkaWorker, RegistryKey
+from shared.services.kafka.dlq_publisher import DlqPublishSpec, build_standard_dlq_payload, publish_dlq_json
 from shared.services.kafka.producer_factory import create_kafka_dlq_producer
 from shared.services.kafka.safe_consumer import create_safe_consumer
 from shared.services.registries.dataset_registry import DatasetRegistry
@@ -826,37 +826,39 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
             logger.error("DLQ producer not configured; dropping message (stage=%s error=%s)", stage, error)
             return
 
-        try:
-            original_value = payload_text if payload_text is not None else msg.value().decode("utf-8", errors="replace")
-        except Exception:
-            original_value = "<unavailable>"
-
-        dlq_message: Dict[str, Any] = {
-            "original_topic": msg.topic(),
-            "original_partition": msg.partition(),
-            "original_offset": msg.offset(),
-            "original_timestamp": msg.timestamp()[1] if msg.timestamp() else None,
-            "original_key": msg.key().decode("utf-8", errors="replace") if msg.key() else None,
-            "original_value": original_value,
-            "stage": stage,
-            "error": error,
-            "attempt_count": attempt_count,
-            "worker": self.pipeline_label,
-            "timestamp": utcnow().isoformat(),
-        }
-        if payload_obj is not None:
-            dlq_message["parsed_payload"] = payload_obj
+        extra: Optional[Dict[str, Any]] = None
         if job is not None:
-            dlq_message["job"] = job.model_dump(mode="json")
+            extra = {"job": job.model_dump(mode="json")}
+
+        dlq_payload = build_standard_dlq_payload(
+            msg=msg,
+            worker=str(self.pipeline_label or "pipeline-worker"),
+            stage=stage,
+            error=error,
+            attempt_count=int(attempt_count) if attempt_count is not None else None,
+            payload_text=payload_text,
+            payload_obj=payload_obj,
+            extra=extra,
+        )
+        spec = DlqPublishSpec(
+            dlq_topic=self.dlq_topic,
+            service_name=str(self.pipeline_label or "pipeline-worker"),
+            flush_timeout_seconds=10.0,
+            poll_after_produce=True,
+        )
 
         try:
-            key = f"{msg.topic()}:{msg.partition()}:{msg.offset()}".encode("utf-8")
-            value = json.dumps(dlq_message, ensure_ascii=False, default=str).encode("utf-8")
-            headers = kafka_headers_from_current_context()
-            async with self._dlq_lock:
-                self.dlq_producer.produce(self.dlq_topic, key=key, value=value, headers=headers or None)
-                self.dlq_producer.poll(0)
-                await asyncio.to_thread(self.dlq_producer.flush, 10)
+            await publish_dlq_json(
+                producer=self.dlq_producer,
+                spec=spec,
+                msg=msg,
+                payload=dlq_payload,
+                tracing=None,
+                metrics=None,
+                kafka_headers=None,
+                fallback_metadata=None,
+                lock=self._dlq_lock,
+            )
             logger.info("Sent message to pipeline DLQ (topic=%s stage=%s)", self.dlq_topic, stage)
         except Exception as exc:
             logger.error("Failed to send message to pipeline DLQ (stage=%s): %s", stage, exc)

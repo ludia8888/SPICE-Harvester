@@ -33,10 +33,10 @@ from shared.errors.enterprise_catalog import is_external_code, resolve_enterpris
 from shared.errors.error_types import ErrorCode
 from shared.models.event_envelope import EventEnvelope
 from shared.models.events import ActionAppliedEvent
-from shared.observability.context_propagation import attach_context_from_kafka, kafka_headers_from_current_context
 from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
 from shared.security.database_access import DOMAIN_MODEL_ROLES, get_database_access_role
+from shared.services.kafka.dlq_publisher import DlqPublishSpec, build_standard_dlq_payload, publish_dlq_json
 from shared.services.registries.action_log_registry import ActionLogRegistry, ActionLogStatus
 from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.services.storage.event_store import event_store
@@ -479,52 +479,32 @@ class ActionWorker(StrictHeartbeatKafkaWorker[_ActionCommandPayload, None]):
         if not self.dlq_producer:
             raise RuntimeError("DLQ producer not configured")
 
-        try:
-            original_value = payload_text if payload_text is not None else msg.value().decode("utf-8", errors="replace")
-        except Exception:
-            original_value = "<unavailable>"
-
-        dlq_message: dict[str, Any] = {
-            "original_topic": msg.topic(),
-            "original_partition": msg.partition(),
-            "original_offset": msg.offset(),
-            "original_timestamp": msg.timestamp()[1] if msg.timestamp() else None,
-            "original_key": msg.key().decode("utf-8", errors="replace") if msg.key() else None,
-            "original_value": original_value,
-            "stage": stage,
-            "error": (error or "").strip()[:4000],
-            "attempt_count": int(attempt_count),
-            "worker": "action-worker",
-            "timestamp": utcnow().isoformat(),
-        }
-        if payload_obj is not None:
-            dlq_message["parsed_payload"] = payload_obj
-
-        key = f"{msg.topic()}:{msg.partition()}:{msg.offset()}".encode("utf-8")
-        value = json.dumps(dlq_message, ensure_ascii=False, default=str).encode("utf-8")
-
-        with attach_context_from_kafka(
+        dlq_payload = build_standard_dlq_payload(
+            msg=msg,
+            worker="action-worker",
+            stage=stage,
+            error=error,
+            attempt_count=int(attempt_count),
+            payload_text=payload_text,
+            payload_obj=payload_obj,
+        )
+        spec = DlqPublishSpec(
+            dlq_topic=self.dlq_topic,
+            service_name=str(self.service_name or "action-worker"),
+            span_name="action_worker.dlq_produce",
+            metric_event_name="ACTION_COMMAND_DLQ",
+            flush_timeout_seconds=float(self.dlq_flush_timeout_seconds),
+        )
+        await publish_dlq_json(
+            producer=self.dlq_producer,
+            spec=spec,
+            msg=msg,
+            payload=dlq_payload,
+            tracing=self.tracing,
+            metrics=self.metrics,
             kafka_headers=kafka_headers,
             fallback_metadata=fallback_metadata if isinstance(fallback_metadata, dict) else None,
-            service_name=self.service_name,
-        ):
-            headers = kafka_headers_from_current_context()
-            with self.tracing.span(
-                "action_worker.dlq_produce",
-                attributes={
-                    "messaging.system": "kafka",
-                    "messaging.destination": self.dlq_topic,
-                    "messaging.destination_kind": "topic",
-                    "messaging.kafka.partition": msg.partition(),
-                    "messaging.kafka.offset": msg.offset(),
-                },
-            ):
-                self.dlq_producer.produce(self.dlq_topic, key=key, value=value, headers=headers or None)
-                await asyncio.to_thread(self.dlq_producer.flush, self.dlq_flush_timeout_seconds)
-        try:
-            self.metrics.record_event("ACTION_COMMAND_DLQ", action="published")
-        except Exception:
-            pass
+        )
 
     async def _send_to_dlq(  # type: ignore[override]
         self,

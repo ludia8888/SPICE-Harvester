@@ -933,20 +933,27 @@ class ProcessedEventKafkaWorker(Generic[PayloadT, ResultT], ABC):
                     pass
 
 
-class StrictHeartbeatKafkaWorker(ProcessedEventKafkaWorker[PayloadT, ResultT], ABC):
+class StrictHeartbeatPolicyMixin:
     """
-    Common specialization that fails fast when ProcessedEventRegistry heartbeats fail.
+    Shared strict heartbeat policy for ProcessedEventRegistry-backed workers.
 
-    Many workers want the runtime to stop extending leases if the registry becomes
-    unavailable (fail-closed) rather than silently continuing work without durable
-    idempotency guarantees.
+    When heartbeat updates fail, workers fail closed so lease ownership does not
+    silently continue without durable idempotency guarantees.
     """
 
-    def _heartbeat_options(self) -> HeartbeatOptions:  # type: ignore[override]
+    def _heartbeat_options(self) -> HeartbeatOptions:
         return HeartbeatOptions(
             stop_when_false=True,
             continue_on_exception=False,
         )
+
+
+class StrictHeartbeatKafkaWorker(
+    StrictHeartbeatPolicyMixin,
+    ProcessedEventKafkaWorker[PayloadT, ResultT],
+    ABC,
+):
+    """ProcessedEventKafkaWorker with strict heartbeat behavior."""
 
 
 class EventEnvelopeKafkaWorker(ProcessedEventKafkaWorker[EventEnvelope, ResultT], ABC):
@@ -1000,11 +1007,9 @@ class EventEnvelopeKafkaWorker(ProcessedEventKafkaWorker[EventEnvelope, ResultT]
         return event_type or None
 
 
-class StrictHeartbeatEventEnvelopeKafkaWorker(EventEnvelopeKafkaWorker[ResultT], ABC):
-    """EventEnvelopeKafkaWorker with the common strict heartbeat policy."""
-
-    def _heartbeat_options(self) -> HeartbeatOptions:  # type: ignore[override]
-        return HeartbeatOptions(
-            stop_when_false=True,
-            continue_on_exception=False,
-        )
+class StrictHeartbeatEventEnvelopeKafkaWorker(
+    StrictHeartbeatPolicyMixin,
+    EventEnvelopeKafkaWorker[ResultT],
+    ABC,
+):
+    """EventEnvelopeKafkaWorker with strict heartbeat behavior."""

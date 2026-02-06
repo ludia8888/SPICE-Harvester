@@ -40,6 +40,7 @@ from shared.services.registries.lineage_store import LineageStore
 from shared.services.core.audit_log_store import AuditLogStore
 from shared.services.core.worker_stores import WorkerObservability, initialize_worker_stores
 from shared.services.kafka.consumer_ops import ExecutorKafkaConsumerOps
+from shared.services.kafka.dlq_publisher import DlqPublishSpec, build_standard_dlq_payload, publish_dlq_json
 from shared.utils.chaos import maybe_crash
 from shared.utils.ontology_version import split_ref_commit
 from shared.utils.language import coerce_localized_text, select_localized_text, get_default_language
@@ -51,7 +52,6 @@ from shared.utils.writeback_patch_apply import apply_changes_to_payload
 # Observability imports
 from shared.observability.tracing import get_tracing_service
 from shared.observability.metrics import get_metrics_collector
-from shared.observability.context_propagation import attach_context_from_kafka, kafka_headers_from_current_context
 from shared.utils.app_logger import configure_logging
 
 # 로깅 설정
@@ -106,6 +106,7 @@ class ProjectionWorker(StrictHeartbeatEventEnvelopeKafkaWorker[None]):
 
         # DLQ 토픽
         self.dlq_topic = AppConfig.PROJECTION_DLQ_TOPIC
+        self.dlq_flush_timeout_seconds = float(worker_cfg.dlq_flush_timeout_seconds)
 
         # 재시도 설정
         max_retries = int(worker_cfg.max_retries)
@@ -713,42 +714,31 @@ class ProjectionWorker(StrictHeartbeatEventEnvelopeKafkaWorker[None]):
         if not self.producer:
             logger.error("DLQ producer not configured; dropping DLQ message: %s", error)
             return
-
-        dlq_message = {
-            "original_topic": msg.topic(),
-            "original_partition": msg.partition(),
-            "original_offset": msg.offset(),
-            "original_value": payload_text,
-            "error": str(error),
-            "attempt_count": int(attempt_count),
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "worker": "projection-worker",
-        }
-
-        with attach_context_from_kafka(
-            kafka_headers=kafka_headers,
-            fallback_metadata=fallback_metadata,
+        dlq_payload = build_standard_dlq_payload(
+            msg=msg,
+            worker="projection-worker",
+            stage=None,
+            error=str(error),
+            attempt_count=int(attempt_count),
+            payload_text=payload_text,
+            payload_obj=None,
+        )
+        spec = DlqPublishSpec(
+            dlq_topic=self.dlq_topic,
             service_name="projection-worker",
-        ):
-            headers = kafka_headers_from_current_context()
-            with self.tracing_service.span(
-                "projection_worker.dlq_produce",
-                attributes={
-                    "messaging.system": "kafka",
-                    "messaging.destination": self.dlq_topic,
-                    "messaging.destination_kind": "topic",
-                    "messaging.kafka.partition": msg.partition(),
-                    "messaging.kafka.offset": msg.offset(),
-                },
-            ):
-                self.producer.produce(
-                    self.dlq_topic,
-                    key=f"{msg.topic()}:{msg.partition()}:{msg.offset()}",
-                    value=json.dumps(dlq_message, ensure_ascii=False, default=str).encode("utf-8"),
-                    headers=headers or None,
-                )
-                self.producer.flush()
-
+            span_name="projection_worker.dlq_produce",
+            flush_timeout_seconds=float(self.dlq_flush_timeout_seconds),
+        )
+        await publish_dlq_json(
+            producer=self.producer,
+            spec=spec,
+            msg=msg,
+            payload=dlq_payload,
+            tracing=self.tracing_service,
+            metrics=self.metrics_collector,
+            kafka_headers=kafka_headers,
+            fallback_metadata=fallback_metadata if isinstance(fallback_metadata, dict) else None,
+        )
         logger.info(
             "Message sent to DLQ (topic=%s partition=%s offset=%s)",
             msg.topic(),

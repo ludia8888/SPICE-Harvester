@@ -69,6 +69,6 @@ cleanup_stack() {
 }
 trap cleanup_stack EXIT
 
-PYTHON_BIN="$PYTHON_BIN" ./backend/run_production_tests.sh --full
+AUTO_DOCKER_GC=false PYTHON_BIN="$PYTHON_BIN" ./backend/run_production_tests.sh --full
 
 echo "✅ Local CI gates completed successfully."

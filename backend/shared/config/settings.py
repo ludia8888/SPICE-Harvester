@@ -2769,6 +2769,10 @@ class ProjectionWorkerSettings(BaseSettings):
         extra="ignore",
     )
 
+    dlq_flush_timeout_seconds: float = Field(
+        default=10.0,
+        description="DLQ flush timeout seconds (PROJECTION_WORKER_DLQ_FLUSH_TIMEOUT_SECONDS)",
+    )
     max_retries: int = Field(
         default=5,
         description="Max retries for projection worker (PROJECTION_WORKER_MAX_RETRIES)",

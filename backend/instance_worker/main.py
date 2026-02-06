@@ -38,15 +38,12 @@ from shared.services.core.command_status_service import (
 )
 from shared.config.settings import get_settings
 from shared.models.event_envelope import EventEnvelope
-from shared.observability.context_propagation import (
-    attach_context_from_kafka,
-    kafka_headers_from_current_context,
-)
 from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
 from shared.security.auth_utils import BFF_TOKEN_ENV_KEYS, get_expected_token
 from shared.security.input_sanitizer import validate_branch_name, validate_class_id, validate_instance_id
 from shared.services.kafka.consumer_ops import ExecutorKafkaConsumerOps
+from shared.services.kafka.dlq_publisher import DlqPublishSpec, build_standard_dlq_payload, publish_dlq_json
 from shared.services.kafka.processed_event_worker import RegistryKey, StrictHeartbeatKafkaWorker
 from shared.services.registries.processed_event_registry import (
     ProcessedEventRegistry,
@@ -2377,53 +2374,32 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
         if not self.dlq_producer:
             raise RuntimeError("DLQ producer not configured")
 
-        try:
-            original_value = payload_text if payload_text is not None else msg.value().decode("utf-8", errors="replace")
-        except Exception:
-            original_value = "<unavailable>"
-
-        dlq_message: Dict[str, Any] = {
-            "original_topic": msg.topic(),
-            "original_partition": msg.partition(),
-            "original_offset": msg.offset(),
-            "original_timestamp": msg.timestamp()[1] if msg.timestamp() else None,
-            "original_key": msg.key().decode("utf-8", errors="replace") if msg.key() else None,
-            "original_value": original_value,
-            "stage": stage,
-            "error": (error or "").strip()[:4000],
-            "attempt_count": int(attempt_count),
-            "worker": "instance-worker",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
-        if payload_obj is not None:
-            dlq_message["parsed_payload"] = payload_obj
-
-        key = f"{msg.topic()}:{msg.partition()}:{msg.offset()}".encode("utf-8")
-        value = json.dumps(dlq_message, ensure_ascii=False, default=str).encode("utf-8")
-
-        with attach_context_from_kafka(
+        dlq_payload = build_standard_dlq_payload(
+            msg=msg,
+            worker="instance-worker",
+            stage=stage,
+            error=error,
+            attempt_count=int(attempt_count),
+            payload_text=payload_text,
+            payload_obj=payload_obj,
+        )
+        spec = DlqPublishSpec(
+            dlq_topic=self.dlq_topic,
+            service_name="instance-worker",
+            span_name="instance_worker.dlq_produce",
+            metric_event_name="INSTANCE_COMMAND_DLQ",
+            flush_timeout_seconds=float(self.dlq_flush_timeout_seconds),
+        )
+        await publish_dlq_json(
+            producer=self.dlq_producer,
+            spec=spec,
+            msg=msg,
+            payload=dlq_payload,
+            tracing=self.tracing,
+            metrics=self.metrics,
             kafka_headers=kafka_headers,
             fallback_metadata=fallback_metadata if isinstance(fallback_metadata, dict) else None,
-            service_name="instance-worker",
-        ):
-            headers = kafka_headers_from_current_context()
-            with self.tracing.span(
-                "instance_worker.dlq_produce",
-                attributes={
-                    "messaging.system": "kafka",
-                    "messaging.destination": self.dlq_topic,
-                    "messaging.destination_kind": "topic",
-                    "messaging.kafka.partition": msg.partition(),
-                    "messaging.kafka.offset": msg.offset(),
-                },
-            ):
-                self.dlq_producer.produce(self.dlq_topic, key=key, value=value, headers=headers or None)
-                await asyncio.to_thread(self.dlq_producer.flush, self.dlq_flush_timeout_seconds)
-
-        try:
-            self.metrics.record_event("INSTANCE_COMMAND_DLQ", action="published")
-        except Exception:
-            pass
+        )
 
     # --- ProcessedEventKafkaWorker hooks ---
     def _parse_payload(self, payload: Any) -> _InstanceCommandPayload:  # type: ignore[override]
