@@ -53,7 +53,7 @@ from shared.services.registries.processed_event_registry import (
 )
 from shared.services.kafka.safe_consumer import SafeKafkaConsumer, create_safe_consumer
 from shared.services.kafka.producer_factory import create_kafka_dlq_producer
-from shared.services.registries.processed_event_registry_factory import create_processed_event_registry
+from shared.services.core.worker_stores import initialize_worker_stores
 from shared.services.registries.lineage_store import LineageStore
 from shared.services.core.audit_log_store import AuditLogStore
 from shared.services.registries.dataset_registry import DatasetRegistry
@@ -195,8 +195,6 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
             group_id=group_id,
             topics=[AppConfig.INSTANCE_COMMANDS_TOPIC],
             service_name="instance-worker",
-            max_poll_interval_ms=300000,
-            session_timeout_ms=45000,
         )
         self.consumer_ops = ExecutorKafkaConsumerOps(
             self.consumer,
@@ -264,10 +262,15 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
         self.terminus_service = AsyncTerminusService(connection_info)
         await self.terminus_service.connect()
 
-        # Durable processed-events registry (idempotency + ordering guard)
-        self.processed_event_registry = await create_processed_event_registry()
-        self.processed = self.processed_event_registry
-        logger.info("✅ ProcessedEventRegistry connected (Postgres)")
+        stores = await initialize_worker_stores(
+            enable_lineage=self.enable_lineage,
+            enable_audit_logs=self.enable_audit_logs,
+            logger=logger,
+        )
+        self.processed_event_registry = stores.processed
+        self.processed = stores.processed
+        self.lineage_store = stores.lineage_store
+        self.audit_store = stores.audit_store
 
         # Dataset registry for edit tracking (best-effort)
         try:
@@ -301,25 +304,6 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
         self.event_store = EventStore()
         await self.event_store.connect()
         logger.info("✅ Event Store connected (domain events will be appended to S3/MinIO)")
-
-        # First-class lineage/audit (best-effort; do not fail the worker)
-        if self.enable_lineage:
-            try:
-                self.lineage_store = LineageStore()
-                await self.lineage_store.initialize()
-                logger.info("✅ LineageStore connected (Postgres)")
-            except Exception as e:
-                logger.warning(f"⚠️ LineageStore unavailable (continuing without lineage): {e}")
-                self.lineage_store = None
-
-        if self.enable_audit_logs:
-            try:
-                self.audit_store = AuditLogStore()
-                await self.audit_store.initialize()
-                logger.info("✅ AuditLogStore connected (Postgres)")
-            except Exception as e:
-                logger.warning(f"⚠️ AuditLogStore unavailable (continuing without audit logs): {e}")
-                self.audit_store = None
         
         logger.info("✅ STRICT Instance Worker initialized")
 
@@ -360,6 +344,41 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
 
     async def extract_payload_from_message(self, message: Dict[str, Any]) -> Dict[str, Any]:
         return self._extract_payload_from_message(message)
+
+    async def _stamp_ontology_version(
+        self,
+        *,
+        command: Dict[str, Any],
+        db_name: str,
+        branch: str,
+    ) -> Dict[str, str]:
+        """
+        Ensure commands carry an ontology ref/commit stamp for reproducibility.
+
+        If the caller already provided partial ontology metadata (ref/commit), we
+        merge in any missing fields from the authoritative resolver.
+        """
+
+        ontology_version = await resolve_ontology_version(
+            self.terminus_service, db_name=db_name, branch=branch, logger=logger
+        )
+        command_meta = command.get("metadata")
+        if not isinstance(command_meta, dict):
+            command_meta = {}
+            command["metadata"] = command_meta
+
+        existing_ontology = normalize_ontology_version(command_meta.get("ontology"))
+        if existing_ontology:
+            merged = dict(existing_ontology)
+            if "ref" not in merged and ontology_version.get("ref"):
+                merged["ref"] = ontology_version["ref"]
+            if "commit" not in merged and ontology_version.get("commit"):
+                merged["commit"] = ontology_version["commit"]
+            command_meta["ontology"] = merged
+            return merged
+
+        command_meta["ontology"] = dict(ontology_version)
+        return dict(ontology_version)
     
     def get_primary_key_value(
         self,
@@ -1018,25 +1037,11 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
                 raise ValueError("class_id is required")
 
             # Stamp semantic contract version (ontology ref/commit) for reproducibility.
-            ontology_version = await resolve_ontology_version(
-                self.terminus_service, db_name=db_name, branch=branch, logger=logger
+            ontology_version = await self._stamp_ontology_version(
+                command=command,
+                db_name=db_name,
+                branch=branch,
             )
-            command_meta = command.get("metadata")
-            if not isinstance(command_meta, dict):
-                command_meta = {}
-                command["metadata"] = command_meta
-
-            existing_ontology = normalize_ontology_version(command_meta.get("ontology"))
-            if existing_ontology:
-                merged = dict(existing_ontology)
-                if "ref" not in merged and ontology_version.get("ref"):
-                    merged["ref"] = ontology_version["ref"]
-                if "commit" not in merged and ontology_version.get("commit"):
-                    merged["commit"] = ontology_version["commit"]
-                command_meta["ontology"] = merged
-                ontology_version = merged
-            else:
-                command_meta["ontology"] = dict(ontology_version)
 
             logger.info(f"🔷 STRICT: Creating {class_id}/{instance_id}")
 
@@ -1370,25 +1375,11 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
                 return
 
             # Stamp semantic contract version (ontology ref/commit) once for the whole bulk op.
-            ontology_version = await resolve_ontology_version(
-                self.terminus_service, db_name=db_name, branch=branch, logger=logger
+            ontology_version = await self._stamp_ontology_version(
+                command=command,
+                db_name=db_name,
+                branch=branch,
             )
-            command_meta = command.get("metadata")
-            if not isinstance(command_meta, dict):
-                command_meta = {}
-                command["metadata"] = command_meta
-
-            existing_ontology = normalize_ontology_version(command_meta.get("ontology"))
-            if existing_ontology:
-                merged = dict(existing_ontology)
-                if "ref" not in merged and ontology_version.get("ref"):
-                    merged["ref"] = ontology_version["ref"]
-                if "commit" not in merged and ontology_version.get("commit"):
-                    merged["commit"] = ontology_version["commit"]
-                command_meta["ontology"] = merged
-                ontology_version = merged
-            else:
-                command_meta["ontology"] = dict(ontology_version)
 
             created_by = command.get("created_by") or "system"
             expected_key = f"{class_id.lower()}_id"
@@ -1563,25 +1554,11 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
                 )
                 return
 
-            ontology_version = await resolve_ontology_version(
-                self.terminus_service, db_name=db_name, branch=branch, logger=logger
+            ontology_version = await self._stamp_ontology_version(
+                command=command,
+                db_name=db_name,
+                branch=branch,
             )
-            command_meta = command.get("metadata")
-            if not isinstance(command_meta, dict):
-                command_meta = {}
-                command["metadata"] = command_meta
-
-            existing_ontology = normalize_ontology_version(command_meta.get("ontology"))
-            if existing_ontology:
-                merged = dict(existing_ontology)
-                if "ref" not in merged and ontology_version.get("ref"):
-                    merged["ref"] = ontology_version["ref"]
-                if "commit" not in merged and ontology_version.get("commit"):
-                    merged["commit"] = ontology_version["commit"]
-                command_meta["ontology"] = merged
-                ontology_version = merged
-            else:
-                command_meta["ontology"] = dict(ontology_version)
 
             created_by = command.get("created_by") or "system"
             total = len(raw_instances)
@@ -1657,25 +1634,11 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
             raise ValueError("class_id is required")
 
         # Stamp semantic contract version (ontology ref/commit) for reproducibility.
-        ontology_version = await resolve_ontology_version(
-            self.terminus_service, db_name=db_name, branch=branch, logger=logger
+        ontology_version = await self._stamp_ontology_version(
+            command=command,
+            db_name=db_name,
+            branch=branch,
         )
-        command_meta = command.get("metadata")
-        if not isinstance(command_meta, dict):
-            command_meta = {}
-            command["metadata"] = command_meta
-
-        existing_ontology = normalize_ontology_version(command_meta.get("ontology"))
-        if existing_ontology:
-            merged = dict(existing_ontology)
-            if "ref" not in merged and ontology_version.get("ref"):
-                merged["ref"] = ontology_version["ref"]
-            if "commit" not in merged and ontology_version.get("commit"):
-                merged["commit"] = ontology_version["commit"]
-            command_meta["ontology"] = merged
-            ontology_version = merged
-        else:
-            command_meta["ontology"] = dict(ontology_version)
 
         instance_id = command.get("instance_id")
         if not instance_id:
@@ -2155,25 +2118,11 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
             raise ValueError("class_id is required")
 
         # Stamp semantic contract version (ontology ref/commit) for reproducibility.
-        ontology_version = await resolve_ontology_version(
-            self.terminus_service, db_name=db_name, branch=branch, logger=logger
+        ontology_version = await self._stamp_ontology_version(
+            command=command,
+            db_name=db_name,
+            branch=branch,
         )
-        command_meta = command.get("metadata")
-        if not isinstance(command_meta, dict):
-            command_meta = {}
-            command["metadata"] = command_meta
-
-        existing_ontology = normalize_ontology_version(command_meta.get("ontology"))
-        if existing_ontology:
-            merged = dict(existing_ontology)
-            if "ref" not in merged and ontology_version.get("ref"):
-                merged["ref"] = ontology_version["ref"]
-            if "commit" not in merged and ontology_version.get("commit"):
-                merged["commit"] = ontology_version["commit"]
-            command_meta["ontology"] = merged
-            ontology_version = merged
-        else:
-            command_meta["ontology"] = dict(ontology_version)
 
         instance_id = command.get("instance_id")
         if not instance_id:

@@ -17,6 +17,7 @@ import asyncpg
 
 from shared.config.settings import get_settings
 from shared.observability.context_propagation import enrich_metadata_with_current_trace
+from shared.services.registries.postgres_schema_registry import PostgresSchemaRegistry
 from shared.utils.s3_uri import is_s3_uri, parse_s3_uri
 from shared.utils.json_utils import coerce_json_dataset, normalize_json_payload
 from shared.utils.schema_hash import compute_schema_hash
@@ -334,7 +335,7 @@ def _compute_schema_hash_from_payload(payload: Any) -> Optional[str]:
     return compute_schema_hash(columns)
 
 
-class DatasetRegistry:
+class DatasetRegistry(PostgresSchemaRegistry):
     def __init__(
         self,
         *,
@@ -343,13 +344,16 @@ class DatasetRegistry:
         pool_min: Optional[int] = None,
         pool_max: Optional[int] = None,
     ):
-        self._dsn = dsn or get_settings().database.postgres_url
-        self._schema = schema
-        self._pool: Optional[asyncpg.Pool] = None
         perf = get_settings().performance
-        self._pool_min = int(pool_min) if pool_min is not None else int(perf.dataset_registry_pg_pool_min)
-        self._pool_max = int(pool_max) if pool_max is not None else int(perf.dataset_registry_pg_pool_max)
-        self._command_timeout = int(perf.dataset_registry_pg_command_timeout_seconds)
+        pool_min_value = int(pool_min) if pool_min is not None else int(perf.dataset_registry_pg_pool_min)
+        pool_max_value = int(pool_max) if pool_max is not None else int(perf.dataset_registry_pg_pool_max)
+        super().__init__(
+            dsn=dsn,
+            schema=schema,
+            pool_min=pool_min_value,
+            pool_max=pool_max_value,
+            command_timeout=int(perf.dataset_registry_pg_command_timeout_seconds),
+        )
 
     @staticmethod
     def _row_to_backing(row: asyncpg.Record) -> BackingDatasourceRecord:
@@ -531,32 +535,8 @@ class DatasetRegistry:
             updated_at=row["updated_at"],
         )
 
-    async def initialize(self) -> None:
-        await self.connect()
-
-    async def connect(self) -> None:
-        if self._pool:
-            return
-        self._pool = await asyncpg.create_pool(
-            self._dsn,
-            min_size=self._pool_min,
-            max_size=self._pool_max,
-            command_timeout=self._command_timeout,
-        )
-        await self.ensure_schema()
-
-    async def close(self) -> None:
-        if self._pool:
-            await self._pool.close()
-            self._pool = None
-
-    async def ensure_schema(self) -> None:
-        if not self._pool:
-            raise RuntimeError("DatasetRegistry not connected")
-
-        async with self._pool.acquire() as conn:
-            await conn.execute(f"CREATE SCHEMA IF NOT EXISTS {self._schema}")
-
+    async def _ensure_tables(self, conn: asyncpg.Connection) -> None:
+        async with conn.transaction():
             await conn.execute(
                 f"""
                 CREATE TABLE IF NOT EXISTS {self._schema}.datasets (

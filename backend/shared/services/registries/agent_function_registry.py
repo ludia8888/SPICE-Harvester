@@ -19,7 +19,7 @@ from typing import Any, Dict, List, Optional
 
 import asyncpg
 
-from shared.config.settings import get_settings
+from shared.services.registries.postgres_schema_registry import PostgresSchemaRegistry
 from shared.utils.json_utils import normalize_json_payload
 
 
@@ -72,72 +72,32 @@ class AgentFunctionRecord:
     updated_at: datetime
 
 
-class AgentFunctionRegistry:
-    def __init__(
-        self,
-        *,
-        dsn: Optional[str] = None,
-        schema: str = "spice_agent",
-        pool_min: Optional[int] = None,
-        pool_max: Optional[int] = None,
-    ) -> None:
-        self._dsn = dsn or get_settings().database.postgres_url
-        self._schema = schema
-        self._pool: Optional[asyncpg.Pool] = None
-        self._pool_min = int(pool_min or 1)
-        self._pool_max = int(pool_max or 5)
-
-    async def initialize(self) -> None:
-        await self.connect()
-
-    async def connect(self) -> None:
-        if self._pool:
-            return
-        self._pool = await asyncpg.create_pool(
-            self._dsn,
-            min_size=self._pool_min,
-            max_size=self._pool_max,
-            command_timeout=30,
+class AgentFunctionRegistry(PostgresSchemaRegistry):
+    async def _ensure_tables(self, conn: asyncpg.Connection) -> None:  # type: ignore[override]
+        await conn.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS {self._schema}.agent_functions (
+                function_id TEXT NOT NULL,
+                version TEXT NOT NULL DEFAULT 'v1',
+                status TEXT NOT NULL DEFAULT 'ACTIVE',
+                handler TEXT NOT NULL,
+                tags JSONB NOT NULL DEFAULT '[]'::jsonb,
+                roles JSONB NOT NULL DEFAULT '[]'::jsonb,
+                input_schema JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                output_schema JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                metadata JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                PRIMARY KEY (function_id, version)
+            )
+            """
         )
-        await self.ensure_schema()
-
-    async def close(self) -> None:
-        if self._pool:
-            await self._pool.close()
-            self._pool = None
-
-    async def shutdown(self) -> None:
-        await self.close()
-
-    async def ensure_schema(self) -> None:
-        if not self._pool:
-            raise RuntimeError("AgentFunctionRegistry not connected")
-        async with self._pool.acquire() as conn:
-            await conn.execute(f"CREATE SCHEMA IF NOT EXISTS {self._schema}")
-            await conn.execute(
-                f"""
-                CREATE TABLE IF NOT EXISTS {self._schema}.agent_functions (
-                    function_id TEXT NOT NULL,
-                    version TEXT NOT NULL DEFAULT 'v1',
-                    status TEXT NOT NULL DEFAULT 'ACTIVE',
-                    handler TEXT NOT NULL,
-                    tags JSONB NOT NULL DEFAULT '[]'::jsonb,
-                    roles JSONB NOT NULL DEFAULT '[]'::jsonb,
-                    input_schema JSONB NOT NULL DEFAULT '{{}}'::jsonb,
-                    output_schema JSONB NOT NULL DEFAULT '{{}}'::jsonb,
-                    metadata JSONB NOT NULL DEFAULT '{{}}'::jsonb,
-                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    PRIMARY KEY (function_id, version)
-                )
-                """
-            )
-            await conn.execute(
-                f"CREATE INDEX IF NOT EXISTS idx_agent_functions_status ON {self._schema}.agent_functions(status)"
-            )
-            await conn.execute(
-                f"CREATE INDEX IF NOT EXISTS idx_agent_functions_function_id ON {self._schema}.agent_functions(function_id)"
-            )
+        await conn.execute(
+            f"CREATE INDEX IF NOT EXISTS idx_agent_functions_status ON {self._schema}.agent_functions(status)"
+        )
+        await conn.execute(
+            f"CREATE INDEX IF NOT EXISTS idx_agent_functions_function_id ON {self._schema}.agent_functions(function_id)"
+        )
 
     def _row_to_record(self, row: asyncpg.Record) -> AgentFunctionRecord:
         return AgentFunctionRecord(

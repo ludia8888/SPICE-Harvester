@@ -13,7 +13,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import signal
 from collections import Counter
 from contextlib import suppress
 from dataclasses import dataclass
@@ -58,6 +57,7 @@ from shared.utils.action_input_schema import (
 from shared.utils.action_audit_policy import audit_action_log_result
 from shared.utils.access_policy import apply_access_policy
 from shared.utils.principal_policy import build_principal_tags, policy_allows
+from shared.utils.worker_runner import run_worker_until_stopped
 from shared.utils.resource_rid import format_resource_rid, parse_metadata_rev, strip_rid_revision
 from shared.utils.writeback_conflicts import (
     compute_base_token,
@@ -164,8 +164,6 @@ class ActionWorker(StrictHeartbeatKafkaWorker[_ActionCommandPayload, None]):
             group_id=group_id,
             topics=[topic],
             service_name="action-worker",
-            max_poll_interval_ms=300000,
-            session_timeout_ms=45000,
             on_revoke=self._on_partitions_revoked,
             on_assign=self._on_partitions_assigned,
         )
@@ -1813,28 +1811,10 @@ class ActionWorker(StrictHeartbeatKafkaWorker[_ActionCommandPayload, None]):
 
 
 async def main() -> None:
-    worker = ActionWorker()
-
-    loop = asyncio.get_running_loop()
-    stop_event = asyncio.Event()
-
-    def _stop(*_: Any) -> None:
-        stop_event.set()
-
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        with suppress(NotImplementedError):
-            loop.add_signal_handler(sig, _stop)
-
-    try:
-        await worker.initialize()
-        task = asyncio.create_task(worker.run())
-        await stop_event.wait()
-        worker.running = False
-        task.cancel()
-        with suppress(asyncio.CancelledError):
-            await task
-    finally:
-        await worker.shutdown()
+    await run_worker_until_stopped(
+        ActionWorker(),
+        task_name="action-worker.run",
+    )
 
 
 if __name__ == "__main__":

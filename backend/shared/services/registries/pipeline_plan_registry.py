@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional
 import asyncpg
 
 from shared.config.settings import get_settings
+from shared.services.registries.postgres_schema_registry import PostgresSchemaRegistry
 from shared.utils.canonical_json import sha256_canonical_json_prefixed
 from shared.utils.json_utils import coerce_json_dataset, normalize_json_payload
 
@@ -32,7 +33,7 @@ class PipelinePlanRecord:
     updated_at: datetime
 
 
-class PipelinePlanRegistry:
+class PipelinePlanRegistry(PostgresSchemaRegistry):
     def __init__(
         self,
         *,
@@ -41,68 +42,44 @@ class PipelinePlanRegistry:
         pool_min: Optional[int] = None,
         pool_max: Optional[int] = None,
     ) -> None:
-        self._dsn = dsn or get_settings().database.postgres_url
-        self._schema = schema
-        self._pool: Optional[asyncpg.Pool] = None
         perf = get_settings().performance
-        self._pool_min = int(pool_min) if pool_min is not None else int(perf.pipeline_registry_pg_pool_min)
-        self._pool_max = int(pool_max) if pool_max is not None else int(perf.pipeline_registry_pg_pool_max)
-        self._command_timeout = int(perf.pipeline_registry_pg_command_timeout_seconds)
-
-    async def initialize(self) -> None:
-        await self.connect()
-
-    async def connect(self) -> None:
-        if self._pool:
-            return
-        self._pool = await asyncpg.create_pool(
-            self._dsn,
-            min_size=self._pool_min,
-            max_size=self._pool_max,
-            command_timeout=self._command_timeout,
+        resolved_pool_min = int(pool_min) if pool_min is not None else int(perf.pipeline_registry_pg_pool_min)
+        resolved_pool_max = int(pool_max) if pool_max is not None else int(perf.pipeline_registry_pg_pool_max)
+        super().__init__(
+            dsn=dsn,
+            schema=schema,
+            pool_min=resolved_pool_min,
+            pool_max=resolved_pool_max,
+            command_timeout=int(perf.pipeline_registry_pg_command_timeout_seconds),
         )
-        await self.ensure_schema()
 
-    async def close(self) -> None:
-        if self._pool:
-            await self._pool.close()
-            self._pool = None
-
-    async def shutdown(self) -> None:
-        await self.close()
-
-    async def ensure_schema(self) -> None:
-        if not self._pool:
-            raise RuntimeError("PipelinePlanRegistry not connected")
-
-        async with self._pool.acquire() as conn:
-            await conn.execute(f"CREATE SCHEMA IF NOT EXISTS {self._schema}")
-            await conn.execute(
-                f"""
-                CREATE TABLE IF NOT EXISTS {self._schema}.pipeline_plans (
-                    plan_id UUID PRIMARY KEY,
-                    tenant_id TEXT NOT NULL DEFAULT 'default',
-                    status TEXT NOT NULL DEFAULT 'COMPILED',
-                    goal TEXT NOT NULL DEFAULT '',
-                    db_name TEXT,
-                    branch TEXT,
-                    plan JSONB NOT NULL DEFAULT '{{}}'::jsonb,
-                    plan_digest TEXT NOT NULL DEFAULT '',
-                    created_by TEXT,
-                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-                )
-                """
+    async def _ensure_tables(self, conn: asyncpg.Connection) -> None:  # type: ignore[override]
+        await conn.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS {self._schema}.pipeline_plans (
+                plan_id UUID PRIMARY KEY,
+                tenant_id TEXT NOT NULL DEFAULT 'default',
+                status TEXT NOT NULL DEFAULT 'COMPILED',
+                goal TEXT NOT NULL DEFAULT '',
+                db_name TEXT,
+                branch TEXT,
+                plan JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                plan_digest TEXT NOT NULL DEFAULT '',
+                created_by TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
-            await conn.execute(
-                f"CREATE INDEX IF NOT EXISTS idx_pipeline_plans_status ON {self._schema}.pipeline_plans(status)"
-            )
-            await conn.execute(
-                f"CREATE INDEX IF NOT EXISTS idx_pipeline_plans_tenant ON {self._schema}.pipeline_plans(tenant_id)"
-            )
-            await conn.execute(
-                f"CREATE INDEX IF NOT EXISTS idx_pipeline_plans_db ON {self._schema}.pipeline_plans(db_name)"
-            )
+            """
+        )
+        await conn.execute(
+            f"CREATE INDEX IF NOT EXISTS idx_pipeline_plans_status ON {self._schema}.pipeline_plans(status)"
+        )
+        await conn.execute(
+            f"CREATE INDEX IF NOT EXISTS idx_pipeline_plans_tenant ON {self._schema}.pipeline_plans(tenant_id)"
+        )
+        await conn.execute(
+            f"CREATE INDEX IF NOT EXISTS idx_pipeline_plans_db ON {self._schema}.pipeline_plans(db_name)"
+        )
 
     def _row_to_plan(self, row: asyncpg.Record) -> PipelinePlanRecord:
         return PipelinePlanRecord(

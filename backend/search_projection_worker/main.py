@@ -80,8 +80,6 @@ class SearchProjectionWorker(EventEnvelopeKafkaWorker[None]):
             group_id=self.group_id,
             topics=[self.topic],
             service_name="search-projection-worker",
-            max_poll_interval_ms=300000,
-            session_timeout_ms=45000,
             on_revoke=self._on_partitions_revoked,
             on_assign=self._on_partitions_assigned,
         )

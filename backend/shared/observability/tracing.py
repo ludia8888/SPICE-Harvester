@@ -22,6 +22,38 @@ from shared.utils.app_logger import get_logger
 
 logger = get_logger(__name__)
 
+_SPAN_ATTR_SCALAR_TYPES = (bool, str, bytes, int, float)
+
+
+def _sanitize_span_attributes(attributes: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Ensure span attributes satisfy OpenTelemetry type constraints.
+
+    The SDK only accepts scalar primitives (and sequences of them). Passing
+    `None` or unsupported types causes noisy runtime warnings and may break
+    exporters depending on SDK version.
+    """
+
+    if not attributes:
+        return {}
+
+    sanitized: Dict[str, Any] = {}
+    for key, value in attributes.items():
+        if value is None:
+            continue
+        if isinstance(value, _SPAN_ATTR_SCALAR_TYPES):
+            sanitized[key] = value
+            continue
+        if isinstance(value, (list, tuple)):
+            items = [item for item in value if item is not None and isinstance(item, _SPAN_ATTR_SCALAR_TYPES)]
+            if items:
+                sanitized[key] = items
+            continue
+        # Last-resort: preserve the signal but keep the type valid.
+        sanitized[key] = str(value)
+
+    return sanitized
+
 
 # -----------------------------
 # Optional imports (best-effort)
@@ -381,7 +413,7 @@ class TracingService:
         # IMPORTANT: Do not pass `kind=None` explicitly. Some OpenTelemetry SDK versions
         # persist the literal None onto the span, which breaks OTLP export (KeyError in
         # span kind mapping). When `kind` is omitted, the SDK defaults to INTERNAL.
-        start_kwargs: dict[str, Any] = {"attributes": attributes or {}}
+        start_kwargs: dict[str, Any] = {"attributes": _sanitize_span_attributes(attributes)}
         if kind is not None:
             start_kwargs["kind"] = kind
 

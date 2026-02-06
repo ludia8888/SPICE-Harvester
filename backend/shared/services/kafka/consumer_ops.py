@@ -6,8 +6,8 @@ Goal: eliminate duplicated per-worker boilerplate such as:
 - `_poll_message` / `_commit` / `_seek` wrappers
 
 We intentionally keep the interface narrow (poll/commit/seek/close). Partition
-pause/resume remains inline today because only partitioned workers use it and
-they run the consumer on the event-loop thread.
+pause/resume is included so partitioned workers can keep all consumer calls
+thread-consistent when using an executor strategy.
 """
 
 from __future__ import annotations
@@ -38,6 +38,14 @@ class KafkaConsumerOps(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    async def pause(self, partitions: list[TopicPartition]) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    async def resume(self, partitions: list[TopicPartition]) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
     async def close(self) -> None:
         raise NotImplementedError
 
@@ -56,6 +64,12 @@ class InlineKafkaConsumerOps(KafkaConsumerOps):
 
     async def seek(self, tp: TopicPartition) -> None:
         self.consumer.seek(tp)
+
+    async def pause(self, partitions: list[TopicPartition]) -> None:
+        self.consumer.pause(partitions)
+
+    async def resume(self, partitions: list[TopicPartition]) -> None:
+        self.consumer.resume(partitions)
 
     async def close(self) -> None:
         self.consumer.close()
@@ -92,6 +106,12 @@ class ExecutorKafkaConsumerOps(KafkaConsumerOps):
     async def seek(self, tp: TopicPartition) -> None:
         await call_in_executor(self._executor, self._consumer.seek, tp)
 
+    async def pause(self, partitions: list[TopicPartition]) -> None:
+        await call_in_executor(self._executor, self._consumer.pause, partitions)
+
+    async def resume(self, partitions: list[TopicPartition]) -> None:
+        await call_in_executor(self._executor, self._consumer.resume, partitions)
+
     async def close(self) -> None:
         try:
             await call_in_executor(self._executor, self._consumer.close)
@@ -101,4 +121,3 @@ class ExecutorKafkaConsumerOps(KafkaConsumerOps):
                     self._executor.shutdown(wait=False, cancel_futures=True)
                 except TypeError:
                     self._executor.shutdown(wait=False)
-

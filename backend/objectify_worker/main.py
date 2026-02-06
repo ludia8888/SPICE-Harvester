@@ -504,11 +504,10 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
             group_id=self.group_id,
             topics=[self.topic],
             service_name="objectify-worker",
-            max_poll_interval_ms=300000,
-            session_timeout_ms=45000,
             on_revoke=self._on_partitions_revoked,
             on_assign=self._on_partitions_assigned,
         )
+        self.consumer_ops = None
         self._init_partition_state(reset=True)
 
         self.dlq_producer = create_kafka_dlq_producer(
@@ -535,9 +534,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
         self._handle_partitions_assigned(partitions, resume=True)
 
     async def close(self) -> None:
-        if self.consumer:
-            self.consumer.close()
-            self.consumer = None
+        await self._close_consumer_runtime()
         if self.http:
             await self.http.aclose()
             self.http = None

@@ -18,6 +18,7 @@ import asyncpg
 
 from shared.config.settings import get_settings
 from shared.security.data_encryption import encryptor_from_keys, is_encrypted_json, is_encrypted_text
+from shared.services.registries.postgres_schema_registry import PostgresSchemaRegistry
 from shared.utils.json_utils import coerce_json_dataset, coerce_json_pipeline, normalize_json_payload
 
 
@@ -284,313 +285,259 @@ class AgentSessionLLMUsageAggregateRecord:
     last_at: datetime
 
 
-class AgentSessionRegistry:
-    def __init__(
-        self,
-        *,
-        dsn: Optional[str] = None,
-        schema: str = "spice_agent",
-        pool_min: Optional[int] = None,
-        pool_max: Optional[int] = None,
-    ) -> None:
-        self._dsn = dsn or get_settings().database.postgres_url
-        self._schema = schema
-        self._pool: Optional[asyncpg.Pool] = None
-        self._pool_min = int(pool_min or 1)
-        self._pool_max = int(pool_max or 5)
-
-    async def initialize(self) -> None:
-        await self.connect()
-
-    async def connect(self) -> None:
-        if self._pool:
-            return
-        self._pool = await asyncpg.create_pool(
-            self._dsn,
-            min_size=self._pool_min,
-            max_size=self._pool_max,
-            command_timeout=30,
+class AgentSessionRegistry(PostgresSchemaRegistry):
+    async def _ensure_tables(self, conn: asyncpg.Connection) -> None:  # type: ignore[override]
+        await conn.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS {self._schema}.agent_sessions (
+                session_id UUID PRIMARY KEY,
+                tenant_id TEXT NOT NULL,
+                created_by TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'ACTIVE',
+                selected_model TEXT,
+                enabled_tools JSONB NOT NULL DEFAULT '[]'::jsonb,
+                summary TEXT,
+                metadata JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                terminated_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+            """
         )
-        await self.ensure_schema()
+        await conn.execute(
+            f"CREATE INDEX IF NOT EXISTS idx_agent_sessions_tenant ON {self._schema}.agent_sessions(tenant_id)"
+        )
+        await conn.execute(
+            f"CREATE INDEX IF NOT EXISTS idx_agent_sessions_creator ON {self._schema}.agent_sessions(created_by)"
+        )
+        await conn.execute(f"CREATE INDEX IF NOT EXISTS idx_agent_sessions_status ON {self._schema}.agent_sessions(status)")
 
-    async def close(self) -> None:
-        if self._pool:
-            await self._pool.close()
-            self._pool = None
+        await conn.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS {self._schema}.agent_session_messages (
+                message_id UUID PRIMARY KEY,
+                session_id UUID NOT NULL
+                    REFERENCES {self._schema}.agent_sessions(session_id)
+                    ON DELETE CASCADE,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                content_digest TEXT,
+                is_removed BOOLEAN NOT NULL DEFAULT false,
+                removed_at TIMESTAMPTZ,
+                removed_by TEXT,
+                removed_reason TEXT,
+                token_count INTEGER,
+                cost_estimate DOUBLE PRECISION,
+                latency_ms INTEGER,
+                metadata JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+            """
+        )
+        # Forward/backward compatible schema upgrades.
+        await conn.execute(
+            f"ALTER TABLE {self._schema}.agent_session_messages ADD COLUMN IF NOT EXISTS is_removed BOOLEAN NOT NULL DEFAULT false"
+        )
+        await conn.execute(f"ALTER TABLE {self._schema}.agent_session_messages ADD COLUMN IF NOT EXISTS removed_at TIMESTAMPTZ")
+        await conn.execute(f"ALTER TABLE {self._schema}.agent_session_messages ADD COLUMN IF NOT EXISTS removed_by TEXT")
+        await conn.execute(f"ALTER TABLE {self._schema}.agent_session_messages ADD COLUMN IF NOT EXISTS removed_reason TEXT")
+        await conn.execute(
+            f"CREATE INDEX IF NOT EXISTS idx_agent_session_messages_session ON {self._schema}.agent_session_messages(session_id)"
+        )
+        await conn.execute(
+            f"CREATE INDEX IF NOT EXISTS idx_agent_session_messages_removed ON {self._schema}.agent_session_messages(session_id, is_removed)"
+        )
 
-    async def shutdown(self) -> None:
-        await self.close()
+        await conn.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS {self._schema}.agent_session_jobs (
+                job_id UUID PRIMARY KEY,
+                session_id UUID NOT NULL
+                    REFERENCES {self._schema}.agent_sessions(session_id)
+                    ON DELETE CASCADE,
+                plan_id UUID,
+                run_id UUID,
+                status TEXT NOT NULL DEFAULT 'PENDING',
+                error TEXT,
+                metadata JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                finished_at TIMESTAMPTZ
+            )
+            """
+        )
+        await conn.execute(
+            f"CREATE INDEX IF NOT EXISTS idx_agent_session_jobs_session ON {self._schema}.agent_session_jobs(session_id)"
+        )
+        await conn.execute(f"CREATE INDEX IF NOT EXISTS idx_agent_session_jobs_status ON {self._schema}.agent_session_jobs(status)")
 
-    async def ensure_schema(self) -> None:
-        if not self._pool:
-            raise RuntimeError("AgentSessionRegistry not connected")
+        await conn.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS {self._schema}.agent_session_context_items (
+                item_id UUID PRIMARY KEY,
+                session_id UUID NOT NULL
+                    REFERENCES {self._schema}.agent_sessions(session_id)
+                    ON DELETE CASCADE,
+                item_type TEXT NOT NULL,
+                include_mode TEXT NOT NULL DEFAULT 'summary',
+                ref JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                token_count INTEGER,
+                metadata JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+            """
+        )
+        await conn.execute(
+            f"CREATE INDEX IF NOT EXISTS idx_agent_session_context_items_session ON {self._schema}.agent_session_context_items(session_id)"
+        )
+        await conn.execute(
+            f"CREATE INDEX IF NOT EXISTS idx_agent_session_context_items_type ON {self._schema}.agent_session_context_items(item_type)"
+        )
+        await conn.execute(
+            f"CREATE INDEX IF NOT EXISTS idx_agent_session_context_items_updated ON {self._schema}.agent_session_context_items(updated_at)"
+        )
 
-        async with self._pool.acquire() as conn:
-            await conn.execute(f"CREATE SCHEMA IF NOT EXISTS {self._schema}")
+        await conn.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS {self._schema}.agent_session_events (
+                event_id UUID PRIMARY KEY,
+                session_id UUID NOT NULL
+                    REFERENCES {self._schema}.agent_sessions(session_id)
+                    ON DELETE CASCADE,
+                tenant_id TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                occurred_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                trace_id TEXT,
+                correlation_id TEXT,
+                data JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+            """
+        )
+        await conn.execute(
+            f"CREATE INDEX IF NOT EXISTS idx_agent_session_events_session_time ON {self._schema}.agent_session_events(session_id, occurred_at)"
+        )
+        await conn.execute(
+            f"CREATE INDEX IF NOT EXISTS idx_agent_session_events_tenant_time ON {self._schema}.agent_session_events(tenant_id, occurred_at)"
+        )
+        await conn.execute(f"CREATE INDEX IF NOT EXISTS idx_agent_session_events_type ON {self._schema}.agent_session_events(event_type)")
 
-            await conn.execute(
-                f"""
-                CREATE TABLE IF NOT EXISTS {self._schema}.agent_sessions (
-                    session_id UUID PRIMARY KEY,
-                    tenant_id TEXT NOT NULL,
-                    created_by TEXT NOT NULL,
-                    status TEXT NOT NULL DEFAULT 'ACTIVE',
-                    selected_model TEXT,
-                    enabled_tools JSONB NOT NULL DEFAULT '[]'::jsonb,
-                    summary TEXT,
-                    metadata JSONB NOT NULL DEFAULT '{{}}'::jsonb,
-                    started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    terminated_at TIMESTAMPTZ,
-                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-                )
-                """
+        await conn.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS {self._schema}.agent_session_tool_calls (
+                tool_run_id UUID PRIMARY KEY,
+                session_id UUID NOT NULL
+                    REFERENCES {self._schema}.agent_sessions(session_id)
+                    ON DELETE CASCADE,
+                tenant_id TEXT NOT NULL,
+                job_id UUID,
+                plan_id UUID,
+                run_id UUID,
+                step_id TEXT,
+                tool_id TEXT NOT NULL,
+                method TEXT NOT NULL,
+                path TEXT NOT NULL,
+                query JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                request_body JSONB,
+                request_digest TEXT,
+                request_token_count INTEGER,
+                idempotency_key TEXT,
+                status TEXT NOT NULL DEFAULT 'STARTED',
+                response_status INTEGER,
+                response_body JSONB,
+                response_digest TEXT,
+                response_token_count INTEGER,
+                error_code TEXT,
+                error_message TEXT,
+                side_effect_summary JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                latency_ms INTEGER,
+                started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                finished_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
-            await conn.execute(
-                f"CREATE INDEX IF NOT EXISTS idx_agent_sessions_tenant ON {self._schema}.agent_sessions(tenant_id)"
-            )
-            await conn.execute(
-                f"CREATE INDEX IF NOT EXISTS idx_agent_sessions_creator ON {self._schema}.agent_sessions(created_by)"
-            )
-            await conn.execute(
-                f"CREATE INDEX IF NOT EXISTS idx_agent_sessions_status ON {self._schema}.agent_sessions(status)"
-            )
+            """
+        )
+        await conn.execute(
+            f"ALTER TABLE {self._schema}.agent_session_tool_calls ADD COLUMN IF NOT EXISTS request_token_count INTEGER"
+        )
+        await conn.execute(
+            f"ALTER TABLE {self._schema}.agent_session_tool_calls ADD COLUMN IF NOT EXISTS response_token_count INTEGER"
+        )
+        await conn.execute(
+            f"CREATE INDEX IF NOT EXISTS idx_agent_session_tool_calls_session_time ON {self._schema}.agent_session_tool_calls(session_id, started_at)"
+        )
+        await conn.execute(
+            f"CREATE INDEX IF NOT EXISTS idx_agent_session_tool_calls_tenant_time ON {self._schema}.agent_session_tool_calls(tenant_id, started_at)"
+        )
+        await conn.execute(
+            f"CREATE INDEX IF NOT EXISTS idx_agent_session_tool_calls_tool_id ON {self._schema}.agent_session_tool_calls(tool_id)"
+        )
 
-            await conn.execute(
-                f"""
-                CREATE TABLE IF NOT EXISTS {self._schema}.agent_session_messages (
-                    message_id UUID PRIMARY KEY,
-                    session_id UUID NOT NULL
-                        REFERENCES {self._schema}.agent_sessions(session_id)
-                        ON DELETE CASCADE,
-                    role TEXT NOT NULL,
-                    content TEXT NOT NULL,
-                    content_digest TEXT,
-                    is_removed BOOLEAN NOT NULL DEFAULT false,
-                    removed_at TIMESTAMPTZ,
-                    removed_by TEXT,
-                    removed_reason TEXT,
-                    token_count INTEGER,
-                    cost_estimate DOUBLE PRECISION,
-                    latency_ms INTEGER,
-                    metadata JSONB NOT NULL DEFAULT '{{}}'::jsonb,
-                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-                )
-                """
+        await conn.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS {self._schema}.agent_session_llm_calls (
+                llm_call_id UUID PRIMARY KEY,
+                session_id UUID NOT NULL
+                    REFERENCES {self._schema}.agent_sessions(session_id)
+                    ON DELETE CASCADE,
+                tenant_id TEXT NOT NULL,
+                job_id UUID,
+                plan_id UUID,
+                call_type TEXT NOT NULL,
+                provider TEXT NOT NULL,
+                model_id TEXT NOT NULL,
+                cache_hit BOOLEAN NOT NULL DEFAULT false,
+                latency_ms INTEGER NOT NULL,
+                prompt_tokens INTEGER NOT NULL DEFAULT 0,
+                completion_tokens INTEGER NOT NULL DEFAULT 0,
+                total_tokens INTEGER NOT NULL DEFAULT 0,
+                cost_estimate DOUBLE PRECISION,
+                input_digest TEXT,
+                output_digest TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
-            # Forward/backward compatible schema upgrades.
-            await conn.execute(
-                f"ALTER TABLE {self._schema}.agent_session_messages ADD COLUMN IF NOT EXISTS is_removed BOOLEAN NOT NULL DEFAULT false"
-            )
-            await conn.execute(
-                f"ALTER TABLE {self._schema}.agent_session_messages ADD COLUMN IF NOT EXISTS removed_at TIMESTAMPTZ"
-            )
-            await conn.execute(
-                f"ALTER TABLE {self._schema}.agent_session_messages ADD COLUMN IF NOT EXISTS removed_by TEXT"
-            )
-            await conn.execute(
-                f"ALTER TABLE {self._schema}.agent_session_messages ADD COLUMN IF NOT EXISTS removed_reason TEXT"
-            )
-            await conn.execute(
-                f"CREATE INDEX IF NOT EXISTS idx_agent_session_messages_session ON {self._schema}.agent_session_messages(session_id)"
-            )
-            await conn.execute(
-                f"CREATE INDEX IF NOT EXISTS idx_agent_session_messages_removed ON {self._schema}.agent_session_messages(session_id, is_removed)"
-            )
+            """
+        )
+        await conn.execute(
+            f"CREATE INDEX IF NOT EXISTS idx_agent_session_llm_calls_session_time ON {self._schema}.agent_session_llm_calls(session_id, created_at)"
+        )
+        await conn.execute(
+            f"CREATE INDEX IF NOT EXISTS idx_agent_session_llm_calls_tenant_time ON {self._schema}.agent_session_llm_calls(tenant_id, created_at)"
+        )
+        await conn.execute(
+            f"CREATE INDEX IF NOT EXISTS idx_agent_session_llm_calls_model ON {self._schema}.agent_session_llm_calls(model_id)"
+        )
 
-            await conn.execute(
-                f"""
-                CREATE TABLE IF NOT EXISTS {self._schema}.agent_session_jobs (
-                    job_id UUID PRIMARY KEY,
-                    session_id UUID NOT NULL
-                        REFERENCES {self._schema}.agent_sessions(session_id)
-                        ON DELETE CASCADE,
-                    plan_id UUID,
-                    run_id UUID,
-                    status TEXT NOT NULL DEFAULT 'PENDING',
-                    error TEXT,
-                    metadata JSONB NOT NULL DEFAULT '{{}}'::jsonb,
-                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    finished_at TIMESTAMPTZ
-                )
-                """
+        await conn.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS {self._schema}.agent_session_ci_results (
+                ci_result_id UUID PRIMARY KEY,
+                session_id UUID NOT NULL
+                    REFERENCES {self._schema}.agent_sessions(session_id)
+                    ON DELETE CASCADE,
+                tenant_id TEXT NOT NULL,
+                job_id UUID,
+                plan_id UUID,
+                run_id UUID,
+                provider TEXT,
+                status TEXT NOT NULL,
+                details_url TEXT,
+                summary TEXT,
+                checks JSONB NOT NULL DEFAULT '[]'::jsonb,
+                raw JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
-            await conn.execute(
-                f"CREATE INDEX IF NOT EXISTS idx_agent_session_jobs_session ON {self._schema}.agent_session_jobs(session_id)"
-            )
-            await conn.execute(
-                f"CREATE INDEX IF NOT EXISTS idx_agent_session_jobs_status ON {self._schema}.agent_session_jobs(status)"
-            )
-
-            await conn.execute(
-                f"""
-                CREATE TABLE IF NOT EXISTS {self._schema}.agent_session_context_items (
-                    item_id UUID PRIMARY KEY,
-                    session_id UUID NOT NULL
-                        REFERENCES {self._schema}.agent_sessions(session_id)
-                        ON DELETE CASCADE,
-                    item_type TEXT NOT NULL,
-                    include_mode TEXT NOT NULL DEFAULT 'summary',
-                    ref JSONB NOT NULL DEFAULT '{{}}'::jsonb,
-                    token_count INTEGER,
-                    metadata JSONB NOT NULL DEFAULT '{{}}'::jsonb,
-                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-                )
-                """
-            )
-            await conn.execute(
-                f"CREATE INDEX IF NOT EXISTS idx_agent_session_context_items_session ON {self._schema}.agent_session_context_items(session_id)"
-            )
-            await conn.execute(
-                f"CREATE INDEX IF NOT EXISTS idx_agent_session_context_items_type ON {self._schema}.agent_session_context_items(item_type)"
-            )
-            await conn.execute(
-                f"CREATE INDEX IF NOT EXISTS idx_agent_session_context_items_updated ON {self._schema}.agent_session_context_items(updated_at)"
-            )
-
-            await conn.execute(
-                f"""
-                CREATE TABLE IF NOT EXISTS {self._schema}.agent_session_events (
-                    event_id UUID PRIMARY KEY,
-                    session_id UUID NOT NULL
-                        REFERENCES {self._schema}.agent_sessions(session_id)
-                        ON DELETE CASCADE,
-                    tenant_id TEXT NOT NULL,
-                    event_type TEXT NOT NULL,
-                    occurred_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    trace_id TEXT,
-                    correlation_id TEXT,
-                    data JSONB NOT NULL DEFAULT '{{}}'::jsonb,
-                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-                )
-                """
-            )
-            await conn.execute(
-                f"CREATE INDEX IF NOT EXISTS idx_agent_session_events_session_time ON {self._schema}.agent_session_events(session_id, occurred_at)"
-            )
-            await conn.execute(
-                f"CREATE INDEX IF NOT EXISTS idx_agent_session_events_tenant_time ON {self._schema}.agent_session_events(tenant_id, occurred_at)"
-            )
-            await conn.execute(
-                f"CREATE INDEX IF NOT EXISTS idx_agent_session_events_type ON {self._schema}.agent_session_events(event_type)"
-            )
-
-            await conn.execute(
-                f"""
-                CREATE TABLE IF NOT EXISTS {self._schema}.agent_session_tool_calls (
-                    tool_run_id UUID PRIMARY KEY,
-                    session_id UUID NOT NULL
-                        REFERENCES {self._schema}.agent_sessions(session_id)
-                        ON DELETE CASCADE,
-                    tenant_id TEXT NOT NULL,
-                    job_id UUID,
-                    plan_id UUID,
-                    run_id UUID,
-                    step_id TEXT,
-                    tool_id TEXT NOT NULL,
-                    method TEXT NOT NULL,
-                    path TEXT NOT NULL,
-                    query JSONB NOT NULL DEFAULT '{{}}'::jsonb,
-                    request_body JSONB,
-                    request_digest TEXT,
-                    request_token_count INTEGER,
-                    idempotency_key TEXT,
-                    status TEXT NOT NULL DEFAULT 'STARTED',
-                    response_status INTEGER,
-                    response_body JSONB,
-                    response_digest TEXT,
-                    response_token_count INTEGER,
-                    error_code TEXT,
-                    error_message TEXT,
-                    side_effect_summary JSONB NOT NULL DEFAULT '{{}}'::jsonb,
-                    latency_ms INTEGER,
-                    started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    finished_at TIMESTAMPTZ,
-                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-                )
-                """
-            )
-            await conn.execute(
-                f"ALTER TABLE {self._schema}.agent_session_tool_calls ADD COLUMN IF NOT EXISTS request_token_count INTEGER"
-            )
-            await conn.execute(
-                f"ALTER TABLE {self._schema}.agent_session_tool_calls ADD COLUMN IF NOT EXISTS response_token_count INTEGER"
-            )
-            await conn.execute(
-                f"CREATE INDEX IF NOT EXISTS idx_agent_session_tool_calls_session_time ON {self._schema}.agent_session_tool_calls(session_id, started_at)"
-            )
-            await conn.execute(
-                f"CREATE INDEX IF NOT EXISTS idx_agent_session_tool_calls_tenant_time ON {self._schema}.agent_session_tool_calls(tenant_id, started_at)"
-            )
-            await conn.execute(
-                f"CREATE INDEX IF NOT EXISTS idx_agent_session_tool_calls_tool_id ON {self._schema}.agent_session_tool_calls(tool_id)"
-            )
-
-            await conn.execute(
-                f"""
-                CREATE TABLE IF NOT EXISTS {self._schema}.agent_session_llm_calls (
-                    llm_call_id UUID PRIMARY KEY,
-                    session_id UUID NOT NULL
-                        REFERENCES {self._schema}.agent_sessions(session_id)
-                        ON DELETE CASCADE,
-                    tenant_id TEXT NOT NULL,
-                    job_id UUID,
-                    plan_id UUID,
-                    call_type TEXT NOT NULL,
-                    provider TEXT NOT NULL,
-                    model_id TEXT NOT NULL,
-                    cache_hit BOOLEAN NOT NULL DEFAULT false,
-                    latency_ms INTEGER NOT NULL,
-                    prompt_tokens INTEGER NOT NULL DEFAULT 0,
-                    completion_tokens INTEGER NOT NULL DEFAULT 0,
-                    total_tokens INTEGER NOT NULL DEFAULT 0,
-                    cost_estimate DOUBLE PRECISION,
-                    input_digest TEXT,
-                    output_digest TEXT,
-                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-                )
-                """
-            )
-            await conn.execute(
-                f"CREATE INDEX IF NOT EXISTS idx_agent_session_llm_calls_session_time ON {self._schema}.agent_session_llm_calls(session_id, created_at)"
-            )
-            await conn.execute(
-                f"CREATE INDEX IF NOT EXISTS idx_agent_session_llm_calls_tenant_time ON {self._schema}.agent_session_llm_calls(tenant_id, created_at)"
-            )
-            await conn.execute(
-                f"CREATE INDEX IF NOT EXISTS idx_agent_session_llm_calls_model ON {self._schema}.agent_session_llm_calls(model_id)"
-            )
-
-            await conn.execute(
-                f"""
-                CREATE TABLE IF NOT EXISTS {self._schema}.agent_session_ci_results (
-                    ci_result_id UUID PRIMARY KEY,
-                    session_id UUID NOT NULL
-                        REFERENCES {self._schema}.agent_sessions(session_id)
-                        ON DELETE CASCADE,
-                    tenant_id TEXT NOT NULL,
-                    job_id UUID,
-                    plan_id UUID,
-                    run_id UUID,
-                    provider TEXT,
-                    status TEXT NOT NULL,
-                    details_url TEXT,
-                    summary TEXT,
-                    checks JSONB NOT NULL DEFAULT '[]'::jsonb,
-                    raw JSONB NOT NULL DEFAULT '{{}}'::jsonb,
-                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-                )
-                """
-            )
-            await conn.execute(
-                f"CREATE INDEX IF NOT EXISTS idx_agent_session_ci_results_session_time ON {self._schema}.agent_session_ci_results(session_id, created_at)"
-            )
-            await conn.execute(
-                f"CREATE INDEX IF NOT EXISTS idx_agent_session_ci_results_tenant_time ON {self._schema}.agent_session_ci_results(tenant_id, created_at)"
-            )
+            """
+        )
+        await conn.execute(
+            f"CREATE INDEX IF NOT EXISTS idx_agent_session_ci_results_session_time ON {self._schema}.agent_session_ci_results(session_id, created_at)"
+        )
+        await conn.execute(
+            f"CREATE INDEX IF NOT EXISTS idx_agent_session_ci_results_tenant_time ON {self._schema}.agent_session_ci_results(tenant_id, created_at)"
+        )
 
     def _row_to_session(self, row: asyncpg.Record) -> AgentSessionRecord:
         enabled_tools_raw = coerce_json_pipeline(row["enabled_tools"])

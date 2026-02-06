@@ -16,6 +16,7 @@ from uuid import uuid4
 import asyncpg
 
 from shared.config.settings import get_settings
+from shared.services.registries.postgres_schema_registry import PostgresSchemaRegistry
 from shared.utils.canonical_json import sha256_canonical_json_prefixed
 from shared.utils.json_utils import coerce_json_dataset, normalize_json_payload
 
@@ -35,7 +36,7 @@ class DatasetProfileRecord:
     updated_at: datetime
 
 
-class DatasetProfileRegistry:
+class DatasetProfileRegistry(PostgresSchemaRegistry):
     def __init__(
         self,
         *,
@@ -44,77 +45,53 @@ class DatasetProfileRegistry:
         pool_min: Optional[int] = None,
         pool_max: Optional[int] = None,
     ) -> None:
-        self._dsn = dsn or get_settings().database.postgres_url
-        self._schema = schema
-        self._pool: Optional[asyncpg.Pool] = None
         perf = get_settings().performance
-        self._pool_min = int(pool_min) if pool_min is not None else int(perf.dataset_registry_pg_pool_min)
-        self._pool_max = int(pool_max) if pool_max is not None else int(perf.dataset_registry_pg_pool_max)
-        self._command_timeout = int(perf.dataset_registry_pg_command_timeout_seconds)
-
-    async def initialize(self) -> None:
-        await self.connect()
-
-    async def connect(self) -> None:
-        if self._pool:
-            return
-        self._pool = await asyncpg.create_pool(
-            self._dsn,
-            min_size=self._pool_min,
-            max_size=self._pool_max,
-            command_timeout=self._command_timeout,
+        resolved_pool_min = int(pool_min) if pool_min is not None else int(perf.dataset_registry_pg_pool_min)
+        resolved_pool_max = int(pool_max) if pool_max is not None else int(perf.dataset_registry_pg_pool_max)
+        super().__init__(
+            dsn=dsn,
+            schema=schema,
+            pool_min=resolved_pool_min,
+            pool_max=resolved_pool_max,
+            command_timeout=int(perf.dataset_registry_pg_command_timeout_seconds),
         )
-        await self.ensure_schema()
 
-    async def close(self) -> None:
-        if self._pool:
-            await self._pool.close()
-            self._pool = None
-
-    async def shutdown(self) -> None:
-        await self.close()
-
-    async def ensure_schema(self) -> None:
-        if not self._pool:
-            raise RuntimeError("DatasetProfileRegistry not connected")
-
-        async with self._pool.acquire() as conn:
-            await conn.execute(f"CREATE SCHEMA IF NOT EXISTS {self._schema}")
-            await conn.execute(
-                f"""
-                CREATE TABLE IF NOT EXISTS {self._schema}.dataset_profiles (
-                    profile_id UUID PRIMARY KEY,
-                    dataset_id UUID NOT NULL,
-                    dataset_version_id UUID,
-                    db_name TEXT NOT NULL,
-                    branch TEXT,
-                    schema_hash TEXT,
-                    profile JSONB NOT NULL DEFAULT '{{}}'::jsonb,
-                    profile_digest TEXT NOT NULL DEFAULT '',
-                    computed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-                )
-                """
+    async def _ensure_tables(self, conn: asyncpg.Connection) -> None:  # type: ignore[override]
+        await conn.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS {self._schema}.dataset_profiles (
+                profile_id UUID PRIMARY KEY,
+                dataset_id UUID NOT NULL,
+                dataset_version_id UUID,
+                db_name TEXT NOT NULL,
+                branch TEXT,
+                schema_hash TEXT,
+                profile JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                profile_digest TEXT NOT NULL DEFAULT '',
+                computed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
-            await conn.execute(
-                f"""
-                CREATE INDEX IF NOT EXISTS idx_dataset_profiles_dataset
-                ON {self._schema}.dataset_profiles(dataset_id, computed_at DESC)
-                """
-            )
-            await conn.execute(
-                f"""
-                CREATE UNIQUE INDEX IF NOT EXISTS idx_dataset_profiles_version
-                ON {self._schema}.dataset_profiles(dataset_version_id)
-                """
-            )
-            await conn.execute(
-                f"""
-                CREATE INDEX IF NOT EXISTS idx_dataset_profiles_db
-                ON {self._schema}.dataset_profiles(db_name, computed_at DESC)
-                """
-            )
+            """
+        )
+        await conn.execute(
+            f"""
+            CREATE INDEX IF NOT EXISTS idx_dataset_profiles_dataset
+            ON {self._schema}.dataset_profiles(dataset_id, computed_at DESC)
+            """
+        )
+        await conn.execute(
+            f"""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_dataset_profiles_version
+            ON {self._schema}.dataset_profiles(dataset_version_id)
+            """
+        )
+        await conn.execute(
+            f"""
+            CREATE INDEX IF NOT EXISTS idx_dataset_profiles_db
+            ON {self._schema}.dataset_profiles(db_name, computed_at DESC)
+            """
+        )
 
     def _row_to_profile(self, row: asyncpg.Record) -> DatasetProfileRecord:
         return DatasetProfileRecord(

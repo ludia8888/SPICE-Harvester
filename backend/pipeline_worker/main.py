@@ -332,10 +332,10 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
             topics=[self.topic],
             service_name="pipeline-worker",
             max_poll_interval_ms=int(self.max_poll_interval_ms),
-            session_timeout_ms=45000,
             on_revoke=self._on_partitions_revoked,
             on_assign=self._on_partitions_assigned,
         )
+        self.consumer_ops = None
         self._init_partition_state(reset=True)
         logger.info("PipelineWorker initialized (topic=%s)", self.topic)
 
@@ -363,9 +363,7 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
         self._handle_partitions_assigned(partitions, resume=True)
 
     async def close(self) -> None:
-        if self.consumer:
-            self.consumer.close()
-            self.consumer = None
+        await self._close_consumer_runtime()
         self._pending_by_partition.clear()
         if self.dlq_producer:
             try:

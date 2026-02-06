@@ -96,11 +96,17 @@ services:
     networks:
       - spice_network
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      # Elasticsearch can take a few minutes to bootstrap on slower hosts (e.g. emulated amd64).
+      # Mark healthy only once the cluster is at least yellow to avoid false-negatives.
+      test:
+        [
+          "CMD-SHELL",
+          "curl -fsS 'http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=5s' > /dev/null || exit 1",
+        ]
       interval: 30s
-      timeout: 30s
-      retries: 5
-      start_period: 60s
+      timeout: 10s
+      retries: 10
+      start_period: 240s
     restart: unless-stopped
 
   # Kafka

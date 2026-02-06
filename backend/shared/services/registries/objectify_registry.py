@@ -17,6 +17,7 @@ from asyncpg.exceptions import UniqueViolationError
 
 from shared.config.settings import get_settings
 from shared.observability.context_propagation import enrich_metadata_with_current_trace
+from shared.services.registries.postgres_schema_registry import PostgresSchemaRegistry
 
 from shared.models.objectify_job import ObjectifyJob
 from shared.utils.json_utils import coerce_json_dataset, normalize_json_payload
@@ -127,7 +128,7 @@ class ObjectifyOutboxItem:
     updated_at: datetime
 
 
-class ObjectifyRegistry:
+class ObjectifyRegistry(PostgresSchemaRegistry):
     def __init__(
         self,
         *,
@@ -136,236 +137,216 @@ class ObjectifyRegistry:
         pool_min: Optional[int] = None,
         pool_max: Optional[int] = None,
     ) -> None:
-        self._dsn = dsn or get_settings().database.postgres_url
-        self._schema = schema
-        self._pool: Optional[asyncpg.Pool] = None
         perf = get_settings().performance
-        self._pool_min = int(pool_min) if pool_min is not None else int(perf.objectify_pg_pool_min)
-        self._pool_max = int(pool_max) if pool_max is not None else int(perf.objectify_pg_pool_max)
-        self._command_timeout = int(perf.objectify_pg_command_timeout_seconds)
-
-    async def initialize(self) -> None:
-        await self.connect()
-
-    async def connect(self) -> None:
-        if self._pool:
-            return
-        self._pool = await asyncpg.create_pool(
-            self._dsn,
-            min_size=self._pool_min,
-            max_size=self._pool_max,
-            command_timeout=self._command_timeout,
+        resolved_pool_min = int(pool_min) if pool_min is not None else int(perf.objectify_pg_pool_min)
+        resolved_pool_max = int(pool_max) if pool_max is not None else int(perf.objectify_pg_pool_max)
+        super().__init__(
+            dsn=dsn,
+            schema=schema,
+            pool_min=resolved_pool_min,
+            pool_max=resolved_pool_max,
+            command_timeout=int(perf.objectify_pg_command_timeout_seconds),
         )
-        await self.ensure_schema()
 
-    async def close(self) -> None:
-        if self._pool:
-            await self._pool.close()
-            self._pool = None
-
-    async def ensure_schema(self) -> None:
-        if not self._pool:
-            raise RuntimeError("ObjectifyRegistry not connected")
-        async with self._pool.acquire() as conn:
-            await conn.execute(f"CREATE SCHEMA IF NOT EXISTS {self._schema}")
-            await conn.execute(
-                f"""
-                CREATE TABLE IF NOT EXISTS {self._schema}.ontology_mapping_specs (
-                    mapping_spec_id UUID PRIMARY KEY,
-                    dataset_id UUID NOT NULL,
-                    dataset_branch TEXT NOT NULL DEFAULT 'main',
-                    artifact_output_name TEXT,
-                    schema_hash TEXT,
-                    backing_datasource_id UUID,
-                    backing_datasource_version_id UUID,
-                    target_class_id TEXT NOT NULL,
-                    mappings JSONB NOT NULL DEFAULT '[]'::jsonb,
-                    target_field_types JSONB NOT NULL DEFAULT '{{}}'::jsonb,
-                    status TEXT NOT NULL DEFAULT 'ACTIVE',
-                    version INTEGER NOT NULL DEFAULT 1,
-                    auto_sync BOOLEAN NOT NULL DEFAULT true,
-                    options JSONB NOT NULL DEFAULT '{{}}'::jsonb,
-                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-                )
-                """
+    async def _ensure_tables(self, conn: asyncpg.Connection) -> None:  # type: ignore[override]
+        await conn.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS {self._schema}.ontology_mapping_specs (
+                mapping_spec_id UUID PRIMARY KEY,
+                dataset_id UUID NOT NULL,
+                dataset_branch TEXT NOT NULL DEFAULT 'main',
+                artifact_output_name TEXT,
+                schema_hash TEXT,
+                backing_datasource_id UUID,
+                backing_datasource_version_id UUID,
+                target_class_id TEXT NOT NULL,
+                mappings JSONB NOT NULL DEFAULT '[]'::jsonb,
+                target_field_types JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                status TEXT NOT NULL DEFAULT 'ACTIVE',
+                version INTEGER NOT NULL DEFAULT 1,
+                auto_sync BOOLEAN NOT NULL DEFAULT true,
+                options JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
-            await conn.execute(
-                f"""
-                CREATE INDEX IF NOT EXISTS idx_mapping_specs_dataset
-                ON {self._schema}.ontology_mapping_specs(dataset_id, dataset_branch, target_class_id)
-                """
+            """
+        )
+        await conn.execute(
+            f"""
+            CREATE INDEX IF NOT EXISTS idx_mapping_specs_dataset
+            ON {self._schema}.ontology_mapping_specs(dataset_id, dataset_branch, target_class_id)
+            """
+        )
+        await conn.execute(
+            f"ALTER TABLE {self._schema}.ontology_mapping_specs ADD COLUMN IF NOT EXISTS artifact_output_name TEXT"
+        )
+        await conn.execute(
+            f"ALTER TABLE {self._schema}.ontology_mapping_specs ADD COLUMN IF NOT EXISTS schema_hash TEXT"
+        )
+        await conn.execute(
+            f"""
+            CREATE INDEX IF NOT EXISTS idx_mapping_specs_output
+            ON {self._schema}.ontology_mapping_specs(dataset_id, dataset_branch, artifact_output_name, schema_hash, status)
+            """
+        )
+        await conn.execute(
+            f"ALTER TABLE {self._schema}.ontology_mapping_specs ADD COLUMN IF NOT EXISTS backing_datasource_id UUID"
+        )
+        await conn.execute(
+            f"ALTER TABLE {self._schema}.ontology_mapping_specs ADD COLUMN IF NOT EXISTS backing_datasource_version_id UUID"
+        )
+        await conn.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS {self._schema}.objectify_jobs (
+                job_id UUID PRIMARY KEY,
+                mapping_spec_id UUID NOT NULL,
+                mapping_spec_version INTEGER NOT NULL,
+                dedupe_key TEXT,
+                dataset_id UUID NOT NULL,
+                dataset_version_id UUID,
+                artifact_id UUID,
+                artifact_output_name TEXT,
+                dataset_branch TEXT NOT NULL DEFAULT 'main',
+                target_class_id TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'QUEUED',
+                command_id TEXT,
+                error TEXT,
+                report JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                completed_at TIMESTAMPTZ,
+                FOREIGN KEY (mapping_spec_id)
+                    REFERENCES {self._schema}.ontology_mapping_specs(mapping_spec_id)
+                    ON DELETE CASCADE
             )
-            await conn.execute(
-                f"ALTER TABLE {self._schema}.ontology_mapping_specs ADD COLUMN IF NOT EXISTS artifact_output_name TEXT"
+            """
+        )
+        await conn.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS {self._schema}.objectify_job_outbox (
+                outbox_id UUID PRIMARY KEY,
+                job_id UUID NOT NULL,
+                payload JSONB NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending',
+                publish_attempts INTEGER NOT NULL DEFAULT 0,
+                error TEXT,
+                claimed_by TEXT,
+                claimed_at TIMESTAMPTZ,
+                next_attempt_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                FOREIGN KEY (job_id)
+                    REFERENCES {self._schema}.objectify_jobs(job_id)
+                    ON DELETE CASCADE
             )
-            await conn.execute(
-                f"ALTER TABLE {self._schema}.ontology_mapping_specs ADD COLUMN IF NOT EXISTS schema_hash TEXT"
-            )
-            await conn.execute(
-                f"""
-                CREATE INDEX IF NOT EXISTS idx_mapping_specs_output
-                ON {self._schema}.ontology_mapping_specs(dataset_id, dataset_branch, artifact_output_name, schema_hash, status)
-                """
-            )
-            await conn.execute(
-                f"ALTER TABLE {self._schema}.ontology_mapping_specs ADD COLUMN IF NOT EXISTS backing_datasource_id UUID"
-            )
-            await conn.execute(
-                f"ALTER TABLE {self._schema}.ontology_mapping_specs ADD COLUMN IF NOT EXISTS backing_datasource_version_id UUID"
-            )
-            await conn.execute(
-                f"""
-                CREATE TABLE IF NOT EXISTS {self._schema}.objectify_jobs (
-                    job_id UUID PRIMARY KEY,
-                    mapping_spec_id UUID NOT NULL,
-                    mapping_spec_version INTEGER NOT NULL,
-                    dedupe_key TEXT,
-                    dataset_id UUID NOT NULL,
-                    dataset_version_id UUID,
-                    artifact_id UUID,
-                    artifact_output_name TEXT,
-                    dataset_branch TEXT NOT NULL DEFAULT 'main',
-                    target_class_id TEXT NOT NULL,
-                    status TEXT NOT NULL DEFAULT 'QUEUED',
-                    command_id TEXT,
-                    error TEXT,
-                    report JSONB NOT NULL DEFAULT '{{}}'::jsonb,
-                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    completed_at TIMESTAMPTZ,
-                    FOREIGN KEY (mapping_spec_id)
-                        REFERENCES {self._schema}.ontology_mapping_specs(mapping_spec_id)
-                        ON DELETE CASCADE
-                )
-                """
-            )
-            await conn.execute(
-                f"""
-                CREATE TABLE IF NOT EXISTS {self._schema}.objectify_job_outbox (
-                    outbox_id UUID PRIMARY KEY,
-                    job_id UUID NOT NULL,
-                    payload JSONB NOT NULL,
-                    status TEXT NOT NULL DEFAULT 'pending',
-                    publish_attempts INTEGER NOT NULL DEFAULT 0,
-                    error TEXT,
-                    claimed_by TEXT,
-                    claimed_at TIMESTAMPTZ,
-                    next_attempt_at TIMESTAMPTZ,
-                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    FOREIGN KEY (job_id)
-                        REFERENCES {self._schema}.objectify_jobs(job_id)
-                        ON DELETE CASCADE
-                )
-                """
-            )
-            await conn.execute(
-                f"""
-                CREATE INDEX IF NOT EXISTS idx_objectify_outbox_status
-                ON {self._schema}.objectify_job_outbox(status, next_attempt_at, created_at)
-                """
-            )
-            await conn.execute(
-                f"""
-                CREATE INDEX IF NOT EXISTS idx_objectify_outbox_claimed
-                ON {self._schema}.objectify_job_outbox(status, claimed_at)
-                """
-            )
-            await conn.execute(
-                f"""
-                CREATE INDEX IF NOT EXISTS idx_objectify_outbox_job
-                ON {self._schema}.objectify_job_outbox(job_id, status, created_at)
-                """
-            )
-            await conn.execute(
-                f"ALTER TABLE {self._schema}.objectify_job_outbox ADD COLUMN IF NOT EXISTS claimed_by TEXT"
-            )
-            await conn.execute(
-                f"ALTER TABLE {self._schema}.objectify_job_outbox ADD COLUMN IF NOT EXISTS claimed_at TIMESTAMPTZ"
-            )
-            await conn.execute(
-                f"ALTER TABLE {self._schema}.objectify_jobs ADD COLUMN IF NOT EXISTS artifact_id UUID"
-            )
-            await conn.execute(
-                f"ALTER TABLE {self._schema}.objectify_jobs ADD COLUMN IF NOT EXISTS artifact_output_name TEXT"
-            )
-            await conn.execute(
-                f"ALTER TABLE {self._schema}.objectify_jobs ADD COLUMN IF NOT EXISTS dedupe_key TEXT"
-            )
-            await conn.execute(
-                f"""
-                CREATE UNIQUE INDEX IF NOT EXISTS idx_objectify_jobs_dedupe_key
-                ON {self._schema}.objectify_jobs(dedupe_key)
-                WHERE dedupe_key IS NOT NULL
-                """
-            )
-            await conn.execute(
-                f"""
-                UPDATE {self._schema}.objectify_jobs
-                SET dedupe_key = COALESCE(dedupe_key, job_id::text)
-                WHERE dedupe_key IS NULL
-                """
-            )
-            await conn.execute(
-                f"ALTER TABLE {self._schema}.objectify_jobs ALTER COLUMN dataset_version_id DROP NOT NULL"
-            )
-            await conn.execute(
-                f"""
-                DO $$
-                BEGIN
-                    IF NOT EXISTS (
-                        SELECT 1 FROM pg_constraint
-                        WHERE conname = 'objectify_jobs_input_xor'
-                          AND conrelid = '{self._schema}.objectify_jobs'::regclass
-                    ) THEN
-                        ALTER TABLE {self._schema}.objectify_jobs
-                        ADD CONSTRAINT objectify_jobs_input_xor
-                        CHECK (
-                            (dataset_version_id IS NOT NULL AND artifact_id IS NULL)
-                            OR (dataset_version_id IS NULL AND artifact_id IS NOT NULL)
-                        );
-                    END IF;
-                END $$;
-                """
-            )
-            await conn.execute(
-                f"""
-                DO $$
-                BEGIN
-                    IF NOT EXISTS (
-                        SELECT 1 FROM pg_constraint
-                        WHERE conname = 'objectify_jobs_artifact_output_required'
-                          AND conrelid = '{self._schema}.objectify_jobs'::regclass
-                    ) THEN
-                        ALTER TABLE {self._schema}.objectify_jobs
-                        ADD CONSTRAINT objectify_jobs_artifact_output_required
-                        CHECK (
-                            artifact_id IS NULL
-                            OR (artifact_output_name IS NOT NULL AND length(trim(artifact_output_name)) > 0)
-                        );
-                    END IF;
-                END $$;
-                """
-            )
-            await conn.execute(
-                f"""
-                CREATE INDEX IF NOT EXISTS idx_objectify_jobs_status
-                ON {self._schema}.objectify_jobs(status, created_at)
-                """
-            )
-            await conn.execute(
-                f"""
-                CREATE INDEX IF NOT EXISTS idx_objectify_jobs_version
-                ON {self._schema}.objectify_jobs(dataset_version_id, mapping_spec_id, mapping_spec_version, status)
-                """
-            )
-            await conn.execute(
-                f"""
-                CREATE INDEX IF NOT EXISTS idx_objectify_jobs_artifact
-                ON {self._schema}.objectify_jobs(artifact_id, artifact_output_name, mapping_spec_id, mapping_spec_version, status)
-                """
-            )
+            """
+        )
+        await conn.execute(
+            f"""
+            CREATE INDEX IF NOT EXISTS idx_objectify_outbox_status
+            ON {self._schema}.objectify_job_outbox(status, next_attempt_at, created_at)
+            """
+        )
+        await conn.execute(
+            f"""
+            CREATE INDEX IF NOT EXISTS idx_objectify_outbox_claimed
+            ON {self._schema}.objectify_job_outbox(status, claimed_at)
+            """
+        )
+        await conn.execute(
+            f"""
+            CREATE INDEX IF NOT EXISTS idx_objectify_outbox_job
+            ON {self._schema}.objectify_job_outbox(job_id, status, created_at)
+            """
+        )
+        await conn.execute(
+            f"ALTER TABLE {self._schema}.objectify_job_outbox ADD COLUMN IF NOT EXISTS claimed_by TEXT"
+        )
+        await conn.execute(
+            f"ALTER TABLE {self._schema}.objectify_job_outbox ADD COLUMN IF NOT EXISTS claimed_at TIMESTAMPTZ"
+        )
+        await conn.execute(
+            f"ALTER TABLE {self._schema}.objectify_jobs ADD COLUMN IF NOT EXISTS artifact_id UUID"
+        )
+        await conn.execute(
+            f"ALTER TABLE {self._schema}.objectify_jobs ADD COLUMN IF NOT EXISTS artifact_output_name TEXT"
+        )
+        await conn.execute(
+            f"ALTER TABLE {self._schema}.objectify_jobs ADD COLUMN IF NOT EXISTS dedupe_key TEXT"
+        )
+        await conn.execute(
+            f"""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_objectify_jobs_dedupe_key
+            ON {self._schema}.objectify_jobs(dedupe_key)
+            WHERE dedupe_key IS NOT NULL
+            """
+        )
+        await conn.execute(
+            f"""
+            UPDATE {self._schema}.objectify_jobs
+            SET dedupe_key = COALESCE(dedupe_key, job_id::text)
+            WHERE dedupe_key IS NULL
+            """
+        )
+        await conn.execute(
+            f"ALTER TABLE {self._schema}.objectify_jobs ALTER COLUMN dataset_version_id DROP NOT NULL"
+        )
+        await conn.execute(
+            f"""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_constraint
+                    WHERE conname = 'objectify_jobs_input_xor'
+                      AND conrelid = '{self._schema}.objectify_jobs'::regclass
+                ) THEN
+                    ALTER TABLE {self._schema}.objectify_jobs
+                    ADD CONSTRAINT objectify_jobs_input_xor
+                    CHECK (
+                        (dataset_version_id IS NOT NULL AND artifact_id IS NULL)
+                        OR (dataset_version_id IS NULL AND artifact_id IS NOT NULL)
+                    );
+                END IF;
+            END $$;
+            """
+        )
+        await conn.execute(
+            f"""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_constraint
+                    WHERE conname = 'objectify_jobs_artifact_output_required'
+                      AND conrelid = '{self._schema}.objectify_jobs'::regclass
+                ) THEN
+                    ALTER TABLE {self._schema}.objectify_jobs
+                    ADD CONSTRAINT objectify_jobs_artifact_output_required
+                    CHECK (
+                        artifact_id IS NULL
+                        OR (artifact_output_name IS NOT NULL AND length(trim(artifact_output_name)) > 0)
+                    );
+                END IF;
+            END $$;
+            """
+        )
+        await conn.execute(
+            f"""
+            CREATE INDEX IF NOT EXISTS idx_objectify_jobs_status
+            ON {self._schema}.objectify_jobs(status, created_at)
+            """
+        )
+        await conn.execute(
+            f"""
+            CREATE INDEX IF NOT EXISTS idx_objectify_jobs_version
+            ON {self._schema}.objectify_jobs(dataset_version_id, mapping_spec_id, mapping_spec_version, status)
+            """
+        )
+        await conn.execute(
+            f"""
+            CREATE INDEX IF NOT EXISTS idx_objectify_jobs_artifact
+            ON {self._schema}.objectify_jobs(artifact_id, artifact_output_name, mapping_spec_id, mapping_spec_version, status)
+            """
+        )
 
     @staticmethod
     def _normalize_optional(value: Optional[str]) -> Optional[str]:
@@ -373,6 +354,30 @@ class ObjectifyRegistry:
             return None
         value = str(value).strip()
         return value or None
+
+    @staticmethod
+    def _row_to_objectify_job(row: asyncpg.Record) -> ObjectifyJobRecord:
+        occ_version = int(row.get("version", 1) or 1)
+        return ObjectifyJobRecord(
+            job_id=str(row["job_id"]),
+            mapping_spec_id=str(row["mapping_spec_id"]),
+            mapping_spec_version=int(row["mapping_spec_version"]),
+            dedupe_key=row.get("dedupe_key"),
+            dataset_id=str(row["dataset_id"]),
+            dataset_version_id=str(row["dataset_version_id"]) if row.get("dataset_version_id") else None,
+            artifact_id=str(row["artifact_id"]) if row.get("artifact_id") else None,
+            artifact_output_name=str(row["artifact_output_name"]) if row.get("artifact_output_name") else None,
+            dataset_branch=str(row["dataset_branch"]),
+            target_class_id=str(row["target_class_id"]),
+            status=str(row["status"]),
+            command_id=row.get("command_id"),
+            error=row.get("error"),
+            report=coerce_json_dataset(row.get("report")) or {},
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+            completed_at=row.get("completed_at"),
+            occ_version=occ_version,
+        )
 
     @staticmethod
     def build_dedupe_key(
@@ -794,25 +799,7 @@ class ObjectifyRegistry:
                     )
             if not row:
                 raise RuntimeError("Failed to create objectify job")
-            return ObjectifyJobRecord(
-                job_id=str(row["job_id"]),
-                mapping_spec_id=str(row["mapping_spec_id"]),
-                mapping_spec_version=int(row["mapping_spec_version"]),
-                dedupe_key=row["dedupe_key"],
-                dataset_id=str(row["dataset_id"]),
-                dataset_version_id=str(row["dataset_version_id"]) if row["dataset_version_id"] else None,
-                artifact_id=str(row["artifact_id"]) if row["artifact_id"] else None,
-                artifact_output_name=str(row["artifact_output_name"]) if row["artifact_output_name"] else None,
-                dataset_branch=str(row["dataset_branch"]),
-                target_class_id=str(row["target_class_id"]),
-                status=str(row["status"]),
-                command_id=row["command_id"],
-                error=row["error"],
-                report=coerce_json_dataset(row["report"]) or {},
-                created_at=row["created_at"],
-                updated_at=row["updated_at"],
-                completed_at=row["completed_at"],
-            )
+            return self._row_to_objectify_job(row)
 
     async def get_objectify_metrics(self) -> Dict[str, Any]:
         if not self._pool:
@@ -1123,28 +1110,7 @@ class ObjectifyRegistry:
                 """,
                 *values,
             )
-        return [
-            ObjectifyJobRecord(
-                job_id=str(row["job_id"]),
-                mapping_spec_id=str(row["mapping_spec_id"]),
-                mapping_spec_version=int(row["mapping_spec_version"]),
-                dedupe_key=row["dedupe_key"],
-                dataset_id=str(row["dataset_id"]),
-                dataset_version_id=str(row["dataset_version_id"]) if row["dataset_version_id"] else None,
-                artifact_id=str(row["artifact_id"]) if row["artifact_id"] else None,
-                artifact_output_name=str(row["artifact_output_name"]) if row["artifact_output_name"] else None,
-                dataset_branch=str(row["dataset_branch"]),
-                target_class_id=str(row["target_class_id"]),
-                status=str(row["status"]),
-                command_id=row["command_id"],
-                error=row["error"],
-                report=coerce_json_dataset(row["report"]) or {},
-                created_at=row["created_at"],
-                updated_at=row["updated_at"],
-                completed_at=row["completed_at"],
-            )
-            for row in rows
-        ]
+        return [self._row_to_objectify_job(row) for row in rows]
 
     async def get_objectify_job(self, *, job_id: str) -> Optional[ObjectifyJobRecord]:
         if not self._pool:
@@ -1163,26 +1129,7 @@ class ObjectifyRegistry:
             )
             if not row:
                 return None
-            return ObjectifyJobRecord(
-                job_id=str(row["job_id"]),
-                mapping_spec_id=str(row["mapping_spec_id"]),
-                mapping_spec_version=int(row["mapping_spec_version"]),
-                dedupe_key=row["dedupe_key"],
-                dataset_id=str(row["dataset_id"]),
-                dataset_version_id=str(row["dataset_version_id"]) if row["dataset_version_id"] else None,
-                artifact_id=str(row["artifact_id"]) if row["artifact_id"] else None,
-                artifact_output_name=str(row["artifact_output_name"]) if row["artifact_output_name"] else None,
-                dataset_branch=str(row["dataset_branch"]),
-                target_class_id=str(row["target_class_id"]),
-                status=str(row["status"]),
-                command_id=row["command_id"],
-                error=row["error"],
-                report=coerce_json_dataset(row["report"]) or {},
-                created_at=row["created_at"],
-                updated_at=row["updated_at"],
-                completed_at=row["completed_at"],
-                occ_version=int(row["version"]),
-            )
+            return self._row_to_objectify_job(row)
 
     async def get_objectify_job_by_dedupe_key(self, *, dedupe_key: str) -> Optional[ObjectifyJobRecord]:
         if not self._pool:
@@ -1206,26 +1153,7 @@ class ObjectifyRegistry:
             )
             if not row:
                 return None
-            return ObjectifyJobRecord(
-                job_id=str(row["job_id"]),
-                mapping_spec_id=str(row["mapping_spec_id"]),
-                mapping_spec_version=int(row["mapping_spec_version"]),
-                dedupe_key=row["dedupe_key"],
-                dataset_id=str(row["dataset_id"]),
-                dataset_version_id=str(row["dataset_version_id"]) if row["dataset_version_id"] else None,
-                artifact_id=str(row["artifact_id"]) if row["artifact_id"] else None,
-                artifact_output_name=str(row["artifact_output_name"]) if row["artifact_output_name"] else None,
-                dataset_branch=str(row["dataset_branch"]),
-                target_class_id=str(row["target_class_id"]),
-                status=str(row["status"]),
-                command_id=row["command_id"],
-                error=row["error"],
-                report=coerce_json_dataset(row["report"]) or {},
-                created_at=row["created_at"],
-                updated_at=row["updated_at"],
-                completed_at=row["completed_at"],
-                occ_version=int(row["version"]),
-            )
+            return self._row_to_objectify_job(row)
 
     async def find_objectify_job(
         self,
@@ -1261,25 +1189,7 @@ class ObjectifyRegistry:
             )
             if not row:
                 return None
-            return ObjectifyJobRecord(
-                job_id=str(row["job_id"]),
-                mapping_spec_id=str(row["mapping_spec_id"]),
-                mapping_spec_version=int(row["mapping_spec_version"]),
-                dedupe_key=row["dedupe_key"],
-                dataset_id=str(row["dataset_id"]),
-                dataset_version_id=str(row["dataset_version_id"]) if row["dataset_version_id"] else None,
-                artifact_id=str(row["artifact_id"]) if row["artifact_id"] else None,
-                artifact_output_name=str(row["artifact_output_name"]) if row["artifact_output_name"] else None,
-                dataset_branch=str(row["dataset_branch"]),
-                target_class_id=str(row["target_class_id"]),
-                status=str(row["status"]),
-                command_id=row["command_id"],
-                error=row["error"],
-                report=coerce_json_dataset(row["report"]) or {},
-                created_at=row["created_at"],
-                updated_at=row["updated_at"],
-                completed_at=row["completed_at"],
-            )
+            return self._row_to_objectify_job(row)
 
     async def find_objectify_job_for_artifact(
         self,
@@ -1320,25 +1230,7 @@ class ObjectifyRegistry:
             )
             if not row:
                 return None
-            return ObjectifyJobRecord(
-                job_id=str(row["job_id"]),
-                mapping_spec_id=str(row["mapping_spec_id"]),
-                mapping_spec_version=int(row["mapping_spec_version"]),
-                dedupe_key=row["dedupe_key"],
-                dataset_id=str(row["dataset_id"]),
-                dataset_version_id=str(row["dataset_version_id"]) if row["dataset_version_id"] else None,
-                artifact_id=str(row["artifact_id"]) if row["artifact_id"] else None,
-                artifact_output_name=str(row["artifact_output_name"]) if row["artifact_output_name"] else None,
-                dataset_branch=str(row["dataset_branch"]),
-                target_class_id=str(row["target_class_id"]),
-                status=str(row["status"]),
-                command_id=row["command_id"],
-                error=row["error"],
-                report=coerce_json_dataset(row["report"]) or {},
-                created_at=row["created_at"],
-                updated_at=row["updated_at"],
-                completed_at=row["completed_at"],
-            )
+            return self._row_to_objectify_job(row)
 
     async def update_objectify_job_status(
         self,
@@ -1436,29 +1328,10 @@ class ObjectifyRegistry:
                     error,
                     normalize_json_payload(report) if report is not None else None,
                     completed_at,
-                )
+            )
             if not row:
                 return None
-            return ObjectifyJobRecord(
-                job_id=str(row["job_id"]),
-                mapping_spec_id=str(row["mapping_spec_id"]),
-                mapping_spec_version=int(row["mapping_spec_version"]),
-                dedupe_key=row["dedupe_key"],
-                dataset_id=str(row["dataset_id"]),
-                dataset_version_id=str(row["dataset_version_id"]) if row["dataset_version_id"] else None,
-                artifact_id=str(row["artifact_id"]) if row["artifact_id"] else None,
-                artifact_output_name=str(row["artifact_output_name"]) if row["artifact_output_name"] else None,
-                dataset_branch=str(row["dataset_branch"]),
-                target_class_id=str(row["target_class_id"]),
-                status=str(row["status"]),
-                command_id=row["command_id"],
-                error=row["error"],
-                report=coerce_json_dataset(row["report"]) or {},
-                created_at=row["created_at"],
-                updated_at=row["updated_at"],
-                completed_at=row["completed_at"],
-                occ_version=int(row.get("version", 1)),
-            )
+            return self._row_to_objectify_job(row)
 
     # ============================================================
     # Incremental Objectify - Watermark Methods

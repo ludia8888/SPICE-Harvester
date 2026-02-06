@@ -101,7 +101,10 @@ OTEL_SERVICE_VERSION=1.0.0
 OTEL_ENVIRONMENT=production
 
 # Exporter endpoints
-OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
+# When running inside docker-compose, use the collector's service DNS name.
+OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+# When running on the host (outside Docker), use localhost.
+# OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
 JAEGER_ENDPOINT=localhost:14250
 
 # Sampling configuration

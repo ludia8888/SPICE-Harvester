@@ -10,6 +10,7 @@ from uuid import uuid4
 from fastapi import HTTPException, Request, status
 
 import bff.routers.pipeline_datasets_ops as ops
+from bff.services.dataset_ingest_idempotency import resolve_existing_version_or_raise
 from bff.services.dataset_ingest_outbox_builder import DatasetIngestOutboxBuilder
 from bff.services.dataset_ingest_outbox_flusher import maybe_flush_dataset_ingest_outbox_inline
 from bff.services.dataset_ingest_failures import mark_ingest_failed
@@ -155,35 +156,22 @@ async def create_dataset_version(
             dataset_registry,
             ingest_request_id=ingest_request.ingest_request_id,
         )
-        if ingest_request.dataset_id != dataset_id:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Idempotency key already used for a different dataset",
+        existing_version = await resolve_existing_version_or_raise(
+            dataset_registry=dataset_registry,
+            ingest_request=ingest_request,
+            expected_dataset_id=str(dataset_id),
+            request_fingerprint=str(request_fingerprint),
+        )
+        if existing_version:
+            await maybe_flush_dataset_ingest_outbox_inline(
+                dataset_registry=dataset_registry,
+                lineage_store=None,
+                flush_dataset_ingest_outbox=flush_dataset_ingest_outbox,
             )
-        if ingest_request.request_fingerprint and ingest_request.request_fingerprint != request_fingerprint:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Idempotency key reuse detected with different payload",
-            )
-        if ingest_request.status == "FAILED":
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=ingest_request.error or "Previous ingest failed",
-            )
-        if ingest_request.status == "PUBLISHED":
-            existing_version = await dataset_registry.get_version_by_ingest_request(
-                ingest_request_id=ingest_request.ingest_request_id
-            )
-            if existing_version:
-                await maybe_flush_dataset_ingest_outbox_inline(
-                    dataset_registry=dataset_registry,
-                    lineage_store=None,
-                    flush_dataset_ingest_outbox=flush_dataset_ingest_outbox,
-                )
-                return ApiResponse.success(
-                    message="Dataset version created",
-                    data={"version": existing_version.__dict__},
-                ).to_dict()
+            return ApiResponse.success(
+                message="Dataset version created",
+                data={"version": existing_version.__dict__},
+            ).to_dict()
 
         if artifact_key:
             ref = ops._extract_lakefs_ref_from_artifact_key(artifact_key)

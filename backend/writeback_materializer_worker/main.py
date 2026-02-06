@@ -10,9 +10,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
-import signal
 import time
-from contextlib import suppress
 from typing import Any, Dict, Optional, Set, Tuple
 from uuid import uuid4
 
@@ -27,6 +25,7 @@ from shared.services.core.writeback_merge_service import WritebackMergeService
 from shared.utils.canonical_json import CANONICAL_JSON_VERSION, sha256_canonical_json_prefixed
 from shared.utils.app_logger import configure_logging
 from shared.utils.time_utils import utcnow
+from shared.utils.worker_runner import run_worker_until_stopped
 from shared.utils.writeback_paths import (
     queue_compaction_marker_key,
     ref_key,
@@ -331,28 +330,10 @@ class WritebackMaterializerWorker:
 
 
 async def main() -> None:
-    worker = WritebackMaterializerWorker()
-
-    loop = asyncio.get_running_loop()
-    stop_event = asyncio.Event()
-
-    def _stop(*_: Any) -> None:
-        stop_event.set()
-
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        with suppress(NotImplementedError):
-            loop.add_signal_handler(sig, _stop)
-
-    try:
-        await worker.initialize()
-        task = asyncio.create_task(worker.run())
-        await stop_event.wait()
-        worker.running = False
-        task.cancel()
-        with suppress(asyncio.CancelledError):
-            await task
-    finally:
-        await worker.shutdown()
+    await run_worker_until_stopped(
+        WritebackMaterializerWorker(),
+        task_name="writeback-materializer.run",
+    )
 
 
 if __name__ == "__main__":

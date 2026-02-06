@@ -18,7 +18,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from typing import Any, Dict, Optional
 
@@ -39,6 +38,7 @@ from shared.observability.tracing import get_tracing_service
 from shared.services.kafka.consumer_ops import ExecutorKafkaConsumerOps
 from shared.services.kafka.processed_event_worker import StrictHeartbeatEventEnvelopeKafkaWorker
 from shared.services.kafka.producer_factory import create_kafka_dlq_producer
+from shared.services.kafka.producer_ops import ExecutorKafkaProducerOps, KafkaProducerOps
 from shared.services.kafka.safe_consumer import SafeKafkaConsumer, create_safe_consumer
 from shared.services.registries.connector_registry import ConnectorRegistry
 from shared.services.registries.lineage_store import LineageStore
@@ -48,7 +48,6 @@ from shared.services.core.sheet_import_service import FieldMapping, SheetImportS
 from shared.security.auth_utils import BFF_TOKEN_ENV_KEYS, get_expected_token
 from shared.utils.app_logger import configure_logging
 from shared.utils.import_type_normalization import normalize_import_target_type
-from shared.utils.executor_utils import call_in_executor
 from shared.utils.time_utils import utcnow
 
 logger = logging.getLogger(__name__)
@@ -73,19 +72,15 @@ class ConnectorSyncWorker(StrictHeartbeatEventEnvelopeKafkaWorker[Optional[str]]
         self.tracing = get_tracing_service(self.service_name)
         self.metrics = get_metrics_collector(self.service_name)
 
-        self._producer_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="kafka-producer")
-
         self.consumer: Optional[SafeKafkaConsumer] = None
         self.consumer_ops = None
         self.dlq_producer: Optional[Producer] = None
+        self.dlq_producer_ops: Optional[KafkaProducerOps] = None
         self.registry: Optional[ConnectorRegistry] = None
         self.processed: Optional[ProcessedEventRegistry] = None
         self.lineage: Optional[LineageStore] = None
         self.sheets: Optional[GoogleSheetsService] = None
         self.http: Optional[httpx.AsyncClient] = None
-
-    async def _producer_call(self, func, *args, **kwargs):
-        return await call_in_executor(self._producer_executor, func, *args, **kwargs)
 
     async def initialize(self) -> None:
         settings = get_settings()
@@ -120,8 +115,6 @@ class ConnectorSyncWorker(StrictHeartbeatEventEnvelopeKafkaWorker[Optional[str]]
             group_id=self.group_id,
             topics=[self.topic],
             service_name="connector-sync-worker",
-            max_poll_interval_ms=300000,
-            session_timeout_ms=45000,
             on_revoke=self._on_partitions_revoked,
             on_assign=self._on_partitions_assigned,
         )
@@ -135,6 +128,10 @@ class ConnectorSyncWorker(StrictHeartbeatEventEnvelopeKafkaWorker[Optional[str]]
         self.dlq_producer = create_kafka_dlq_producer(
             bootstrap_servers=settings.database.kafka_servers,
             client_id=settings.observability.service_name or "connector-sync-worker",
+        )
+        self.dlq_producer_ops = ExecutorKafkaProducerOps(
+            self.dlq_producer,
+            thread_name_prefix="connector-sync-worker-kafka-producer",
         )
 
         logger.info(f"✅ ConnectorSyncWorker initialized (topic={self.topic}, group={self.group_id})")
@@ -172,14 +169,13 @@ class ConnectorSyncWorker(StrictHeartbeatEventEnvelopeKafkaWorker[Optional[str]]
             await self.registry.close()
             self.registry = None
         await self._close_consumer_runtime()
-        if self.dlq_producer:
+        if self.dlq_producer_ops:
             try:
-                await self._producer_call(self.dlq_producer.flush, 5)
+                await self.dlq_producer_ops.close(timeout_s=5.0)
             except Exception as exc:
                 logger.warning("DLQ producer flush failed during shutdown: %s", exc, exc_info=True)
-            self.dlq_producer = None
-
-        self._producer_executor.shutdown(wait=False, cancel_futures=True)
+            self.dlq_producer_ops = None
+        self.dlq_producer = None
 
     async def _send_to_dlq(  # type: ignore[override]
         self,
@@ -190,7 +186,7 @@ class ConnectorSyncWorker(StrictHeartbeatEventEnvelopeKafkaWorker[Optional[str]]
         error: str,
         attempt_count: int,
     ) -> None:
-        if not self.dlq_producer:
+        if not self.dlq_producer_ops:
             return
 
         dlq_env = payload.model_copy(deep=True)
@@ -223,14 +219,13 @@ class ConnectorSyncWorker(StrictHeartbeatEventEnvelopeKafkaWorker[Optional[str]]
                     "event.id": str(dlq_env.event_id),
                 },
             ):
-                await self._producer_call(
-                    self.dlq_producer.produce,
+                await self.dlq_producer_ops.produce(
                     topic=self.dlq_topic,
                     key=key,
                     value=value,
                     headers=headers or None,
                 )
-                await self._producer_call(self.dlq_producer.flush, 10)
+                await self.dlq_producer_ops.flush(10)
 
     # --- EventEnvelopeKafkaWorker hooks ---
     async def _process_payload(self, payload: EventEnvelope) -> Optional[str]:  # type: ignore[override]

@@ -24,11 +24,10 @@ from oms.dependencies import (
     ValidatedClassId,
     ensure_database_exists
 )
-from shared.models.commands import CommandType, OntologyCommand, CommandStatus
+from oms.routers._event_sourcing import append_event_sourcing_command, build_command_status_metadata
+from shared.models.commands import CommandType, OntologyCommand
 from shared.models.events import EventType
 from shared.config.app_config import AppConfig
-from shared.models.event_envelope import EventEnvelope
-from shared.services.events.aggregate_sequence_allocator import OptimisticConcurrencyError
 from shared.utils.ontology_version import resolve_ontology_version
 from shared.utils.language import coerce_localized_text, get_accept_language, select_localized_text
 from shared.utils.ontology_type_normalization import normalize_ontology_base_type
@@ -736,42 +735,21 @@ async def create_ontology(
                 created_by=_extract_actor(request),
             )
 
-            envelope = EventEnvelope.from_command(
-                command,
-                actor=_extract_actor(request) or "system",
+            envelope = await append_event_sourcing_command(
+                event_store=event_store,
+                command=command,
+                actor=_extract_actor(request),
                 kafka_topic=AppConfig.ONTOLOGY_COMMANDS_TOPIC,
-                metadata={"service": "oms", "mode": "event_sourcing"},
-            )
-            try:
-                await event_store.append_event(envelope)
-            except OptimisticConcurrencyError as e:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail={
-                        "error": "optimistic_concurrency_conflict",
-                        "aggregate_id": e.aggregate_id,
-                        "expected_seq": e.expected_last_sequence,
-                        "actual_seq": e.actual_last_sequence,
+                command_status_service=command_status_service,
+                command_status_metadata=build_command_status_metadata(
+                    command=command,
+                    extra={
+                        "db_name": db_name,
+                        "branch": branch,
+                        "class_id": ontology_data.get("id"),
                     },
-                )
-
-            if command_status_service:
-                try:
-                    await command_status_service.set_command_status(
-                        command_id=str(command.command_id),
-                        status=CommandStatus.PENDING,
-                        metadata={
-                            "command_type": command.command_type,
-                            "aggregate_id": command.aggregate_id,
-                            "db_name": db_name,
-                            "branch": branch,
-                            "class_id": ontology_data.get("id"),
-                            "created_at": command.created_at.isoformat(),
-                            "created_by": command.created_by or "system",
-                        },
-                    )
-                except Exception as e:
-                    logger.warning(f"Failed to persist command status (continuing without Redis): {e}")
+                ),
+            )
 
             logger.info(
                 f"🔥 Stored CREATE_ONTOLOGY_CLASS command in Event Store: {envelope.event_id} "
@@ -1529,42 +1507,21 @@ async def update_ontology(
                 created_by=actor,
             )
 
-            envelope = EventEnvelope.from_command(
-                command,
-                actor=actor or "system",
+            envelope = await append_event_sourcing_command(
+                event_store=event_store,
+                command=command,
+                actor=actor,
                 kafka_topic=AppConfig.ONTOLOGY_COMMANDS_TOPIC,
-                metadata={"service": "oms", "mode": "event_sourcing"},
-            )
-            try:
-                await event_store.append_event(envelope)
-            except OptimisticConcurrencyError as e:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail={
-                        "error": "optimistic_concurrency_conflict",
-                        "aggregate_id": e.aggregate_id,
-                        "expected_seq": e.expected_last_sequence,
-                        "actual_seq": e.actual_last_sequence,
+                command_status_service=command_status_service,
+                command_status_metadata=build_command_status_metadata(
+                    command=command,
+                    extra={
+                        "db_name": db_name,
+                        "branch": branch,
+                        "class_id": class_id,
                     },
-                )
-
-            if command_status_service:
-                try:
-                    await command_status_service.set_command_status(
-                        command_id=str(command.command_id),
-                        status=CommandStatus.PENDING,
-                        metadata={
-                            "command_type": command.command_type,
-                            "aggregate_id": command.aggregate_id,
-                            "db_name": db_name,
-                            "branch": branch,
-                            "class_id": class_id,
-                            "created_at": command.created_at.isoformat(),
-                            "created_by": command.created_by or "system",
-                        },
-                    )
-                except Exception as e:
-                    logger.warning(f"Failed to persist command status (continuing without Redis): {e}")
+                ),
+            )
 
             return JSONResponse(
                 status_code=status.HTTP_202_ACCEPTED,
@@ -1663,42 +1620,21 @@ async def delete_ontology(
                 created_by=actor,
             )
 
-            envelope = EventEnvelope.from_command(
-                command,
-                actor=actor or "system",
+            await append_event_sourcing_command(
+                event_store=event_store,
+                command=command,
+                actor=actor,
                 kafka_topic=AppConfig.ONTOLOGY_COMMANDS_TOPIC,
-                metadata={"service": "oms", "mode": "event_sourcing"},
-            )
-            try:
-                await event_store.append_event(envelope)
-            except OptimisticConcurrencyError as e:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail={
-                        "error": "optimistic_concurrency_conflict",
-                        "aggregate_id": e.aggregate_id,
-                        "expected_seq": e.expected_last_sequence,
-                        "actual_seq": e.actual_last_sequence,
+                command_status_service=command_status_service,
+                command_status_metadata=build_command_status_metadata(
+                    command=command,
+                    extra={
+                        "db_name": db_name,
+                        "branch": branch,
+                        "class_id": class_id,
                     },
-                )
-
-            if command_status_service:
-                try:
-                    await command_status_service.set_command_status(
-                        command_id=str(command.command_id),
-                        status=CommandStatus.PENDING,
-                        metadata={
-                            "command_type": command.command_type,
-                            "aggregate_id": command.aggregate_id,
-                            "db_name": db_name,
-                            "branch": branch,
-                            "class_id": class_id,
-                            "created_at": command.created_at.isoformat(),
-                            "created_by": command.created_by or "system",
-                        },
-                    )
-                except Exception as e:
-                    logger.warning(f"Failed to persist command status (continuing without Redis): {e}")
+                ),
+            )
 
             return JSONResponse(
                 status_code=status.HTTP_202_ACCEPTED,
@@ -2015,20 +1951,11 @@ async def create_ontology_with_advanced_relationships(
         if relationship_response:
             return relationship_response
 
-        relationship_response = await _validate_relationships_gate(
-            terminus=terminus,
-            db_name=db_name,
-            branch=branch,
-            ontology_payload=ontology_data,
-            enabled=_relationship_validation_enabled(),
-        )
-        if relationship_response:
-            return relationship_response
-
         if enable_event_sourcing:
             ontology_version = await resolve_ontology_version(
                 terminus, db_name=db_name, branch=branch, logger=logger
             )
+            actor = _extract_actor(request)
             command = OntologyCommand(
                 command_type=CommandType.CREATE_ONTOLOGY_CLASS,
                 aggregate_id=f"{db_name}:{branch}:{ontology_data.get('id')}",
@@ -2053,46 +1980,26 @@ async def create_ontology_with_advanced_relationships(
                     },
                 },
                 metadata={"source": "OMS", "user": "system", "ontology": ontology_version},
-                created_by=_extract_actor(request),
+                created_by=actor,
             )
 
-            envelope = EventEnvelope.from_command(
-                command,
-                actor=_extract_actor(request) or "system",
+            await append_event_sourcing_command(
+                event_store=event_store,
+                command=command,
+                actor=actor,
                 kafka_topic=AppConfig.ONTOLOGY_COMMANDS_TOPIC,
-                metadata={"service": "oms", "mode": "event_sourcing", "variant": "advanced"},
-            )
-            try:
-                await event_store.append_event(envelope)
-            except OptimisticConcurrencyError as e:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail={
-                        "error": "optimistic_concurrency_conflict",
-                        "aggregate_id": e.aggregate_id,
-                        "expected_seq": e.expected_last_sequence,
-                        "actual_seq": e.actual_last_sequence,
+                envelope_metadata={"variant": "advanced"},
+                command_status_service=command_status_service,
+                command_status_metadata=build_command_status_metadata(
+                    command=command,
+                    extra={
+                        "db_name": db_name,
+                        "branch": branch,
+                        "class_id": ontology_data.get("id"),
+                        "advanced_options": command.payload.get("advanced_options"),
                     },
-                )
-
-            if command_status_service:
-                try:
-                    await command_status_service.set_command_status(
-                        command_id=str(command.command_id),
-                        status=CommandStatus.PENDING,
-                        metadata={
-                            "command_type": command.command_type,
-                            "aggregate_id": command.aggregate_id,
-                            "db_name": db_name,
-                            "branch": branch,
-                            "class_id": ontology_data.get("id"),
-                            "created_at": command.created_at.isoformat(),
-                            "created_by": command.created_by or "system",
-                            "advanced_options": command.payload.get("advanced_options"),
-                        },
-                    )
-                except Exception as e:
-                    logger.warning(f"Failed to persist command status (continuing without Redis): {e}")
+                ),
+            )
 
             return JSONResponse(
                 status_code=status.HTTP_202_ACCEPTED,

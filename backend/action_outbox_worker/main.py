@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import signal
 import time
 from contextlib import suppress
 from typing import Any, Dict, Optional
@@ -38,6 +37,7 @@ from shared.services.registries.processed_event_registry import (
 from shared.services.registries.processed_event_registry_factory import create_processed_event_registry
 from shared.utils.action_writeback import action_applied_event_id, is_noop_changes, safe_str
 from shared.utils.resource_rid import strip_rid_revision
+from shared.utils.worker_runner import run_worker_until_stopped
 from shared.utils.writeback_paths import queue_entry_key, ref_key, writeback_patchset_key
 from shared.utils.app_logger import configure_logging
 
@@ -393,28 +393,10 @@ class ActionOutboxWorker:
 
 
 async def main() -> None:
-    worker = ActionOutboxWorker()
-
-    loop = asyncio.get_running_loop()
-    stop_event = asyncio.Event()
-
-    def _stop(*_: Any) -> None:
-        stop_event.set()
-
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        with suppress(NotImplementedError):
-            loop.add_signal_handler(sig, _stop)
-
-    try:
-        await worker.initialize()
-        task = asyncio.create_task(worker.run())
-        await stop_event.wait()
-        worker.running = False
-        task.cancel()
-        with suppress(asyncio.CancelledError):
-            await task
-    finally:
-        await worker.shutdown()
+    await run_worker_until_stopped(
+        ActionOutboxWorker(),
+        task_name="action-outbox-worker.run",
+    )
 
 
 if __name__ == "__main__":

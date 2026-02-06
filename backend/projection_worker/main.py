@@ -38,7 +38,7 @@ from shared.services.kafka.producer_factory import create_kafka_producer
 from shared.services.kafka.safe_consumer import SafeKafkaConsumer, create_safe_consumer
 from shared.services.registries.lineage_store import LineageStore
 from shared.services.core.audit_log_store import AuditLogStore
-from shared.services.registries.processed_event_registry_factory import create_processed_event_registry
+from shared.services.core.worker_stores import initialize_worker_stores
 from shared.services.kafka.consumer_ops import ExecutorKafkaConsumerOps
 from shared.utils.chaos import maybe_crash
 from shared.utils.ontology_version import split_ref_commit
@@ -363,8 +363,6 @@ class ProjectionWorker(StrictHeartbeatEventEnvelopeKafkaWorker[None]):
             group_id=group_id,
             topics=topics,
             service_name="projection-worker",
-            max_poll_interval_ms=300000,
-            session_timeout_ms=45000,
         )
         self.consumer_ops = ExecutorKafkaConsumerOps(
             self.consumer,
@@ -398,29 +396,15 @@ class ProjectionWorker(StrictHeartbeatEventEnvelopeKafkaWorker[None]):
             logger.warning(f"lakeFS storage unavailable - ActionApplied projection will be degraded: {e}")
             self.lakefs_storage = None
 
-        # Durable processed-events registry (idempotency + ordering guard)
-        self.processed_event_registry = await create_processed_event_registry()
-        self.processed = self.processed_event_registry
-        logger.info("✅ ProcessedEventRegistry connected (Postgres)")
-
-        # First-class lineage/audit (best-effort; do not fail the worker)
-        if self.enable_lineage:
-            try:
-                self.lineage_store = LineageStore()
-                await self.lineage_store.initialize()
-                logger.info("✅ LineageStore connected (Postgres)")
-            except Exception as e:
-                logger.warning(f"⚠️ LineageStore unavailable (continuing without lineage): {e}")
-                self.lineage_store = None
-
-        if self.enable_audit_logs:
-            try:
-                self.audit_store = AuditLogStore()
-                await self.audit_store.initialize()
-                logger.info("✅ AuditLogStore connected (Postgres)")
-            except Exception as e:
-                logger.warning(f"⚠️ AuditLogStore unavailable (continuing without audit logs): {e}")
-                self.audit_store = None
+        stores = await initialize_worker_stores(
+            enable_lineage=self.enable_lineage,
+            enable_audit_logs=self.enable_audit_logs,
+            logger=logger,
+        )
+        self.processed_event_registry = stores.processed
+        self.processed = stores.processed
+        self.lineage_store = stores.lineage_store
+        self.audit_store = stores.audit_store
         
         # 인덱스 생성 및 매핑 설정
         await self._setup_indices()

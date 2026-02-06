@@ -40,7 +40,7 @@ from shared.services.kafka.safe_consumer import SafeKafkaConsumer, create_safe_c
 from shared.services.registries.lineage_store import LineageStore
 from shared.services.core.audit_log_store import AuditLogStore
 from shared.services.registries.ontology_key_spec_registry import OntologyKeySpecRegistry
-from shared.services.registries.processed_event_registry_factory import create_processed_event_registry
+from shared.services.core.worker_stores import initialize_worker_stores
 from shared.security.input_sanitizer import validate_branch_name
 from shared.utils.spice_event_ids import spice_event_id
 from shared.utils.ontology_version import resolve_ontology_version
@@ -190,8 +190,6 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
             group_id=group_id,
             topics=[AppConfig.ONTOLOGY_COMMANDS_TOPIC, AppConfig.DATABASE_COMMANDS_TOPIC],
             service_name="ontology-worker",
-            max_poll_interval_ms=300000,
-            session_timeout_ms=45000,
         )
         self.consumer_ops = ExecutorKafkaConsumerOps(
             self.consumer,
@@ -238,29 +236,15 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
         await self.event_store.connect()
         logger.info("✅ Event Store connected (domain events will be appended to S3/MinIO)")
 
-        # Durable processed-events registry (idempotency + ordering guard)
-        self.processed_event_registry = await create_processed_event_registry()
-        self.processed = self.processed_event_registry
-        logger.info("✅ ProcessedEventRegistry connected (Postgres)")
-
-        # First-class lineage/audit (best-effort; do not fail the worker)
-        if self.enable_lineage:
-            try:
-                self.lineage_store = LineageStore()
-                await self.lineage_store.initialize()
-                logger.info("✅ LineageStore connected (Postgres)")
-            except Exception as e:
-                logger.warning(f"⚠️ LineageStore unavailable (continuing without lineage): {e}")
-                self.lineage_store = None
-
-        if self.enable_audit_logs:
-            try:
-                self.audit_store = AuditLogStore()
-                await self.audit_store.initialize()
-                logger.info("✅ AuditLogStore connected (Postgres)")
-            except Exception as e:
-                logger.warning(f"⚠️ AuditLogStore unavailable (continuing without audit logs): {e}")
-                self.audit_store = None
+        stores = await initialize_worker_stores(
+            enable_lineage=self.enable_lineage,
+            enable_audit_logs=self.enable_audit_logs,
+            logger=logger,
+        )
+        self.processed_event_registry = stores.processed
+        self.processed = stores.processed
+        self.lineage_store = stores.lineage_store
+        self.audit_store = stores.audit_store
         
         # Initialize OpenTelemetry
         self.tracing_service = get_tracing_service("ontology-worker")
