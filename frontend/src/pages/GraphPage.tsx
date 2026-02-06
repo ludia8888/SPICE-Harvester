@@ -33,8 +33,10 @@ import {
 } from '../components/pipeline'
 import { UploadFilesDialog } from '../components/UploadFilesDialog'
 import {
-  createPipeline,
+  approvePipelineProposal,
   buildPipeline,
+  createPipeline,
+  createPipelineBranch,
   deployPipeline,
   getPipeline,
   getPipelineReadiness,
@@ -42,8 +44,11 @@ import {
   listDatabases,
   listDatasets,
   listPipelineArtifacts,
+  listPipelineBranches,
+  listPipelineProposals,
   listPipelines,
   previewPipelinePlan,
+  rejectPipelineProposal,
   runPipelineAgentStreaming,
   submitPipelineProposal,
   updatePipeline,
@@ -54,6 +59,7 @@ import {
   type PipelineDetailRecord,
   type PipelineRecord,
   type PipelineReadiness,
+  type ProposalRecord,
   type TransformPreviewResponse,
 } from '../api/bff'
 
@@ -1388,6 +1394,7 @@ export const GraphPage = () => {
   const [isDeploying, setIsDeploying] = useState(false)
   const [isBuilding, setIsBuilding] = useState(false)
   const [isCheckingReadiness, setIsCheckingReadiness] = useState(false)
+  const [proposalFilter, setProposalFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all')
   const lastAppliedAgentRunId = useRef<string | null>(null)
   const agentAbortRef = useRef<(() => void) | null>(null)
 
@@ -1420,14 +1427,24 @@ export const GraphPage = () => {
     queryFn: () => listPipelines(activeDbName),
     enabled: Boolean(activeDbName),
   })
+  const { data: apiBranches = [] } = useQuery({
+    queryKey: ['pipeline-branches', activeDbName],
+    queryFn: () => listPipelineBranches(activeDbName),
+    enabled: Boolean(activeDbName),
+  })
   const branchOptions = useMemo(() => {
     const branches = new Set<string>()
     pipelines.forEach((pipeline) => {
       const branch = String(pipeline.branch || 'main').trim() || 'main'
       branches.add(branch)
     })
+    apiBranches.forEach((record) => {
+      const branch = String(record.branch || '').trim()
+      if (branch) {
+        branches.add(branch)
+      }
+    })
     branches.add('main')
-    // Encourage a working branch even when no pipelines exist yet.
     if (!branches.has('dev')) {
       branches.add('dev')
     }
@@ -1439,7 +1456,7 @@ export const GraphPage = () => {
       return left.localeCompare(right)
     })
     return list
-  }, [pipelines])
+  }, [pipelines, apiBranches])
 
   useEffect(() => {
     if (!activeDbName) {
@@ -1456,6 +1473,17 @@ export const GraphPage = () => {
       return branchOptions[0] ?? 'main'
     })
   }, [activeDbName, branchOptions])
+
+  const { data: proposals = [], refetch: refetchProposals } = useQuery({
+    queryKey: ['pipeline-proposals', activeDbName, proposalFilter],
+    queryFn: () =>
+      listPipelineProposals({
+        dbName: activeDbName,
+        status: proposalFilter === 'all' ? undefined : proposalFilter,
+      }),
+    enabled: Boolean(activeDbName) && activeTab === 'proposals',
+    refetchInterval: activeTab === 'proposals' ? 5000 : false,
+  })
 
   const pipelinesForSelectedBranch = useMemo(() => {
     if (!selectedBranch) {
@@ -3007,6 +3035,74 @@ export const GraphPage = () => {
     queryClient,
   ])
 
+  const handleCreateBranch = useCallback(async () => {
+    if (!primaryPipeline || !activeDbName) {
+      return
+    }
+    const name = window.prompt('새 브랜치 이름을 입력하세요:')
+    if (!name || !name.trim()) {
+      return
+    }
+    try {
+      await createPipelineBranch(primaryPipeline.pipeline_id, {
+        branch: name.trim(),
+        dbName: activeDbName,
+      })
+      await queryClient.invalidateQueries({ queryKey: ['pipeline-branches', activeDbName] })
+      setSelectedBranch(name.trim())
+    } catch (error) {
+      console.error('Failed to create branch', error)
+      window.alert(error instanceof Error ? error.message : 'Failed to create branch')
+    }
+  }, [primaryPipeline, activeDbName, queryClient])
+
+  const handleApproveProposal = useCallback(
+    async (proposal: ProposalRecord) => {
+      if (!proposal.pipeline_id) {
+        return
+      }
+      const comment = window.prompt('승인 코멘트 (선택):') ?? undefined
+      try {
+        await approvePipelineProposal(proposal.pipeline_id, {
+          proposalId: proposal.proposal_id,
+          comment,
+          dbName: activeDbName,
+        })
+        await refetchProposals()
+        await queryClient.invalidateQueries({ queryKey: ['pipelines', activeDbName] })
+        await queryClient.invalidateQueries({ queryKey: ['pipeline-branches', activeDbName] })
+      } catch (error) {
+        console.error('Failed to approve proposal', error)
+        window.alert(error instanceof Error ? error.message : 'Failed to approve proposal')
+      }
+    },
+    [activeDbName, queryClient, refetchProposals],
+  )
+
+  const handleRejectProposal = useCallback(
+    async (proposal: ProposalRecord) => {
+      if (!proposal.pipeline_id) {
+        return
+      }
+      const comment = window.prompt('거절 사유를 입력하세요:')
+      if (comment === null) {
+        return
+      }
+      try {
+        await rejectPipelineProposal(proposal.pipeline_id, {
+          proposalId: proposal.proposal_id,
+          comment: comment || undefined,
+          dbName: activeDbName,
+        })
+        await refetchProposals()
+      } catch (error) {
+        console.error('Failed to reject proposal', error)
+        window.alert(error instanceof Error ? error.message : 'Failed to reject proposal')
+      }
+    },
+    [activeDbName, refetchProposals],
+  )
+
   const handleBuild = useCallback(async () => {
     if (!primaryPipeline) {
       return
@@ -3351,6 +3447,12 @@ export const GraphPage = () => {
               })}
               <MenuDivider />
               <MenuItem
+                icon="git-new-branch"
+                text="새 브랜치 생성..."
+                disabled={!primaryPipeline}
+                onClick={handleCreateBranch}
+              />
+              <MenuItem
                 icon="add"
                 text="새 파이프라인 생성..."
                 onClick={() => openCreatePipelineDialog({ branch: selectedBranch === 'main' ? 'dev' : selectedBranch })}
@@ -3459,7 +3561,113 @@ export const GraphPage = () => {
     <div className="page pipeline-page">
       {topbar}
       <div className="pipeline-canvas">
-        <div className={`pipeline-canvas-inner ${isAgentOpen ? 'is-agent-open' : ''}`}>
+        {activeTab === 'proposals' && (
+          <div className="pipeline-proposals-panel">
+            <div className="pipeline-proposal-header">
+              <div className="pipeline-proposal-header-left">
+                <Icon icon="git-pull" size={18} />
+                <span className="pipeline-proposal-title">Proposals</span>
+              </div>
+              <div className="pipeline-proposal-header-right">
+                <div className="pipeline-proposal-filters">
+                  {(['all', 'pending', 'approved', 'rejected'] as const).map((filter) => (
+                    <button
+                      key={filter}
+                      type="button"
+                      className={`pipeline-proposal-filter ${proposalFilter === filter ? 'is-active' : ''}`}
+                      onClick={() => setProposalFilter(filter)}
+                    >
+                      {filter === 'all' ? 'All' : filter === 'pending' ? 'Open' : filter === 'approved' ? 'Merged' : 'Rejected'}
+                    </button>
+                  ))}
+                </div>
+                <Button
+                  small
+                  icon="add"
+                  text="New Proposal"
+                  intent="primary"
+                  onClick={handlePropose}
+                  loading={isProposing}
+                  disabled={!primaryPipeline || !activeDbName}
+                />
+              </div>
+            </div>
+            <div className="pipeline-proposal-list">
+              {proposals.length === 0 ? (
+                <div className="pipeline-proposal-empty">
+                  <Icon icon="git-pull" size={40} />
+                  <p>Proposal이 없습니다</p>
+                  <span>파이프라인을 빌드한 후 Proposal을 생성하여 main 브랜치에 머지할 수 있습니다.</span>
+                </div>
+              ) : (
+                proposals.map((proposal) => {
+                  const statusLower = String(proposal.status || '').toLowerCase()
+                  const isPending = statusLower === 'pending' || statusLower === 'open'
+                  const isApproved = statusLower === 'approved' || statusLower === 'merged'
+                  const isRejected = statusLower === 'rejected'
+                  const statusClass = isPending ? 'is-open' : isApproved ? 'is-merged' : isRejected ? 'is-rejected' : ''
+                  const statusIcon: IconName = isPending ? 'git-pull' : isApproved ? 'git-merge' : 'disable'
+                  const statusLabel = isPending ? 'Open' : isApproved ? 'Merged' : isRejected ? 'Rejected' : proposal.status
+                  const branchInfo = [proposal.from_branch, proposal.to_branch].filter(Boolean).join(' \u2192 ')
+                  const createdAt = proposal.created_at
+                    ? new Date(proposal.created_at).toLocaleString('ko-KR', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+                    : ''
+                  return (
+                    <div key={proposal.proposal_id} className={`pipeline-proposal-card ${statusClass}`}>
+                      <div className="pipeline-proposal-card-header">
+                        <div className="pipeline-proposal-status">
+                          <Icon icon={statusIcon} size={14} />
+                          <span>{statusLabel}</span>
+                        </div>
+                        {proposal.build_job_id && (
+                          <Tag minimal intent="success" icon="tick" className="pipeline-proposal-build-tag">
+                            Built
+                          </Tag>
+                        )}
+                      </div>
+                      <div className="pipeline-proposal-card-title">{proposal.title}</div>
+                      {proposal.description && (
+                        <div className="pipeline-proposal-card-desc">{proposal.description}</div>
+                      )}
+                      <div className="pipeline-proposal-meta">
+                        {branchInfo && (
+                          <span className="pipeline-proposal-branch-info">
+                            <Icon icon="git-branch" size={12} />
+                            {branchInfo}
+                          </span>
+                        )}
+                        {createdAt && <span>{createdAt}</span>}
+                        {proposal.created_by && <span>{proposal.created_by}</span>}
+                      </div>
+                      {proposal.review_comment && (
+                        <div className="pipeline-proposal-review">
+                          <Icon icon="comment" size={12} />
+                          <span>{proposal.review_comment}</span>
+                        </div>
+                      )}
+                      {isPending && (
+                        <div className="pipeline-proposal-actions">
+                          <Button small intent="success" icon="tick" text="Approve" onClick={() => handleApproveProposal(proposal)} />
+                          <Button small intent="danger" icon="cross" text="Reject" onClick={() => handleRejectProposal(proposal)} />
+                        </div>
+                      )}
+                    </div>
+                  )
+                })
+              )}
+            </div>
+          </div>
+        )}
+        {activeTab === 'history' && (
+          <div className="pipeline-history-panel">
+            <div className="pipeline-history-empty">
+              <Icon icon="history" size={40} />
+              <p>History</p>
+              <span>파이프라인 변경 이력이 여기에 표시됩니다.</span>
+            </div>
+          </div>
+        )}
+        {activeTab === 'edit' && <div className={`pipeline-canvas-inner ${isAgentOpen ? 'is-agent-open' : ''}`}>
           {/* Agent Chat Panel - Left Side */}
           <div className={`pipeline-agent-panel ${isAgentOpen ? 'is-open' : ''}`}>
             <div className="pipeline-agent-panel-header">
@@ -4102,7 +4310,7 @@ export const GraphPage = () => {
               )}
             </div>
           </aside>
-        </div>
+        </div>}
       </div>
 
       <CreatePipelineDialog

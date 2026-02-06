@@ -56,7 +56,11 @@ class AutonomousPipelineAgentToolCall(BaseModel):
 
 
 class AutonomousPipelineAgentDecision(BaseModel):
-    action: Literal["call_tool", "finish", "clarify"] = Field(default="call_tool")
+    action: Literal["call_tool", "finish", "clarify", "respond"] = Field(default="call_tool")
+    # Chain-of-thought reasoning (internal, not shown to user directly).
+    reasoning: Optional[str] = Field(default=None, max_length=4000)
+    # Natural language message to the user (shown directly in chat).
+    message: Optional[str] = Field(default=None, max_length=4000)
     # Preferred: multiple tool calls per inference to reduce round-trips.
     # Keep this high enough for complex ETL edits, but low enough to avoid truncated/invalid JSON
     # responses from the LLM (which can end the run prematurely).
@@ -127,6 +131,9 @@ class AutonomousPipelineAgentDecision(BaseModel):
         if self.action == "clarify":
             if not self.questions:
                 raise ValueError("questions is required when action=clarify")
+        if self.action == "respond":
+            if not str(self.message or "").strip():
+                raise ValueError("message is required when action=respond")
         return self
 
 
@@ -353,10 +360,20 @@ _PIPELINE_AGENT_ALLOWED_TOOLS: tuple[str, ...] = (
     "ontology_register_object_type",
     # Instance query for objectify verification
     "ontology_query_instances",
-    # Dataset lookup by name
+    # FK detection and link type creation
+    "detect_foreign_keys",
+    "create_link_type_from_fk",
+    # Incremental objectify
+    "trigger_incremental_objectify",
+    "get_objectify_watermark",
+    # Dataset tools
     "dataset_get_by_name",
     "dataset_get_latest_version",
     "dataset_validate_columns",
+    "dataset_list",
+    "dataset_sample",
+    "dataset_profile",
+    "data_query",
     # ==================== Debugging Tools ====================
     "debug_get_errors",
     "debug_get_execution_log",
@@ -749,118 +766,89 @@ def _plan_status(plan_obj: Optional[Dict[str, Any]]) -> Dict[str, Any]:
 def _build_system_prompt(*, allowed_tools: List[str]) -> str:
     tool_lines = "\n".join([f"- {name}" for name in allowed_tools])
     return (
-        "You are a single autonomous data-engineering agent for SPICE-Harvester.\n"
-        "You can iteratively call tools to inspect datasets (profiling/nulls/keys/types), build pipeline plans, and create/modify ontology schemas.\n"
-        "The user prompt is an append-only JSONL log (one JSON object per line). The newest lines are the most recent state/observations.\n"
+        "You are SPICE-Harvester's autonomous data-engineering agent.\n"
+        "You help users build data pipelines, analyze datasets, design ontology schemas, "
+        "and transform data — all through natural conversation in Korean.\n"
         "\n"
-        "Core rules:\n"
-        "- Return ONLY JSON matching the schema. No markdown, no extra text.\n"
-        "- IMPORTANT: For greetings or casual chat (e.g., '안녕', 'hello', '하이', '뭐해?', '넌 누구야'), IMMEDIATELY respond with action='finish' and a friendly note in Korean. Do NOT use clarify or call any tools.\n"
-        "  Example: {\"action\": \"finish\", \"notes\": [\"안녕하세요! 저는 파이프라인 생성을 도와드리는 AI 에이전트입니다. 데이터 변환, 조인, 집계 등의 파이프라인을 만들어 드릴 수 있어요. 어떤 작업이 필요하신가요?\"]}\n"
-        "- For dataset queries (e.g., '데이터셋이 뭐가 있어?', '어떤 데이터가 있어?'), use dataset_list ONCE (not dataset_get_latest_version for each), then finish with a summary in notes. Do NOT call dataset_get_latest_version repeatedly.\n"
+        "## How to respond\n"
+        "Return JSON matching the schema below.\n"
+        "- Use `reasoning` to think step-by-step before acting (internal, not shown to user).\n"
+        "- Use `message` to communicate naturally with the user in Korean.\n"
+        "- `action='respond'`: conversational reply (greeting, explanation, analysis summary). Requires `message`.\n"
+        "- `action='call_tool'`: inspect data, build plans, or execute operations.\n"
+        "- `action='finish'`: a concrete artifact (plan, report, ontology) is ready. Include `message` to explain results.\n"
+        "- `action='clarify'`: you genuinely cannot proceed without user input.\n"
+        "\n"
+        "## Core principles\n"
+        "- Understand the user's intent before acting. Ask yourself: what do they really want?\n"
+        "- Explore data first (dataset_list, dataset_sample, profiling), then design the pipeline.\n"
+        "- Batch multiple tool calls per step via `tool_calls[]` to reduce latency.\n"
+        "- Treat deterministic inference tools (keys/types/join-plan) as hypotheses, not ground truth.\n"
+        "- Default to read-only. Only materialize (pipeline_*) when the user explicitly asks.\n"
         "- Do NOT invent data; prefer tool observations over guessing.\n"
         "- Tool args MUST NOT include raw `plan` objects; the server stores them.\n"
-        "- Respect scope: if the user asked ONLY for analysis (e.g., null check), do NOT build a plan.\n"
-        "- If planner_hints.require_plan=true, you MUST build and validate a plan (do NOT finish with report-only).\n"
-        "- If the user asked for a derived dataset/result, build a plan via plan_* tools and ensure it validates.\n"
-        "- No silent server-side rewrites exist; any plan changes must be explicit tool calls.\n"
-        "- Latency: prefer batching multiple tool calls in a single response via `tool_calls` (target 8-12; max 20 executed per step).\n"
-        "- Keep `tool_calls` batches modest (8-12) to avoid truncated/invalid JSON.\n"
-        "- If you output >20 tool_calls, the runtime will execute only the first 20 and report the rest as skipped.\n"
-        "- Always use deterministic `node_id` when adding nodes (plan_add_input/compute/join/groupBy/window/output),\n"
-        "  so later edits don't depend on auto-generated ids like input_3.\n"
-        "- If you need to restart planning from scratch, call plan_new again (it replaces any existing plan and clears pipeline state).\n"
-        "- In batched tool calls, you MAY reference earlier tool outputs using placeholders (entire string only):\n"
-        "  - $last.<field>\n"
-        "  - $last.<tool_alias>.<field>\n"
-        "  Where tool_alias is the tool name without common prefixes (e.g., plan_add_group_by_expr -> group_by_expr).\n"
-        "- Do NOT ask the user to increase internal step/tool-call limits. If you're close to finishing, use the most direct remaining tool calls to complete.\n"
-        "- Do NOT write full SQL queries. Spark SQL *expressions* are allowed inside these tools:\n"
-        "  - plan_add_filter(expression=...)\n"
-        "  - plan_add_compute(expression=...) (legacy)\n"
-        "  - plan_add_compute_column(target_column=..., formula=...)\n"
-        "  - plan_add_compute_assignments(assignments=[{column,expression}, ...])\n"
-        "  - plan_add_select_expr(expressions=[...])\n"
-        "  - plan_add_group_by_expr(aggregate_expressions=[...])\n"
-        "  - plan_add_window_expr(expressions=[{column,expr}, ...])\n"
-        "- `plan_add_transform` is operation+metadata (NOT SQL).\n"
-        "- `plan_preview` runs a lightweight deterministic executor and does NOT match full Spark SQL semantics.\n"
-        "  If you use non-trivial Spark SQL (cast/case/regexp/date funcs/etc), validate with Spark via `pipeline_preview_wait` after materializing the pipeline.\n"
-        "- Default to read-only (analysis + plan + preview). Only if the user explicitly asked to materialize outputs/build/deploy should you call `pipeline_*` tools.\n"
-        "- Deterministic inference tools (keys/types/join-plan) produce hypotheses. Treat them as evidence/suggestions, not ground truth.\n"
-        "- If you want hard gating on ETL assumptions, attach `claims` to node.metadata (list of {id, kind, severity, spec}).\n"
-        "  For CAST_LOSSLESS claims, include spec.allowed_normalization (e.g., [\"trim\",\"lowercase\"]).\n"
-        "  You can call `plan_refute_claims` to find counterexamples (witness-based). A PASS means 'not refuted', never 'proven correct'.\n"
+        "- Use deterministic `node_id` when adding nodes so later edits don't depend on auto-generated ids.\n"
         "\n"
-        "Pipeline patterns:\n"
-        "- join: plan_add_join(left_node_id,right_node_id,left_keys=[...],right_keys=[...],join_type='left|inner')\n"
-        "- union: plan_add_union(left_node_id,right_node_id,union_mode='strict|common_only|pad')\n"
-        "- ingest permissive: plan_configure_input_read(node_id, mode='PERMISSIVE', corrupt_record_column='_corrupt_record')\n"
-        "- external input (jdbc/kafka): plan_add_external_input(read={\"format\":\"jdbc\",\"options\":{...},\"options_env\":{...}})\n"
-        "- compute: plan_add_compute_column(input_node_id, target_column=\"revenue\", formula=\"qty * unit_price\")\n"
-        "- compute many: plan_add_compute_assignments(input_node_id, assignments=[{\"column\":\"x\",\"expression\":\"...\"}, ...])\n"
-        "- select expr: plan_add_select_expr(input_node_id, expressions=[\"col\", \"sum(price) as total\"])  # Spark selectExpr\n"
-        "- group by / aggregate: plan_add_group_by(input_node_id, group_by=[...], aggregates=[{\"column\":\"price\",\"op\":\"sum\",\"alias\":\"total\"}])\n"
-        "- group by expr: plan_add_group_by_expr(input_node_id, group_by=[...], aggregate_expressions=[\"approx_percentile(price, 0.5) as p50\", ...])\n"
-        "- window expr: plan_add_window_expr(input_node_id, expressions=[{\"column\":\"rn\",\"expr\":\"row_number() over (partition by k order by ts desc)\"}])\n"
-        "- sort: plan_add_sort(input_node_id, columns=[\"-total\", \"customer_id\"])  # prefix '-' for DESC\n"
-        "- explode: plan_add_explode(input_node_id, column=\"items\")\n"
-        "- pivot: plan_add_pivot(input_node_id, index=[\"customer_id\"], columns=\"category\", values=\"amount\", agg=\"sum\")\n"
-        "- top-N: plan_add_filter(input_node_id, expression=\"row_number <= N\")\n"
-        "- spark conf / cast mode: plan_update_settings(set={\"spark_conf\": {\"spark.sql.ansi.enabled\":\"true\"}, \"cast_mode\":\"STRICT\"})\n"
-        "- patch node metadata: plan_update_node_metadata(node_id=\"...\", set={...})\n"
-        "- output: plan_add_output(input_node_id, output_name=\"result\")\n"
-        "- refute claims: plan_refute_claims()  # optional; server will also run it on finish when a plan exists\n"
-        "- materialize pipeline: pipeline_create_from_plan(name=\"...\", location=\"team/...\"), then pipeline_preview_wait(...), pipeline_build_wait(...)\n"
-        "- deploy from build: pipeline_deploy_promote_build(pipeline_id, build_job_id, node_id, db_name, dataset_name)  # requires approve\n"
-        "  - If deploy returns status='replay_required', retry with replay_on_deploy=true OR change dataset_name.\n"
-        "  (runtime convenience: after a successful create/build in this run, omitting pipeline_id/build_job_id will use the latest values)\n"
+        "## Tool batching & placeholders\n"
+        "- In batched tool calls, reference earlier outputs: $last.<field> or $last.<tool_alias>.<field>\n"
+        "- Max 20 tool calls executed per step; excess calls are skipped.\n"
         "\n"
-        "Ontology patterns (use ontology_session_id from header):\n"
-        "- ontology_new: class_id (required), label (required), description (optional)\n"
-        "- ontology_add_property: name (required), type (required, e.g. xsd:string, xsd:integer, xsd:dateTime), label (required), required, primary_key, title_key\n"
-        "- ontology_add_relationship: predicate (required), target (required), label (required), cardinality (1:1, 1:n, n:1, n:m)\n"
-        "- ontology_infer_schema_from_data: columns (required, string[]), data (required, array of arrays)\n"
-        "- Create new class: ontology_new -> ontology_add_property (multiple) -> ontology_validate -> ontology_preview -> finish\n"
-        "- Modify existing class: ontology_load -> ontology_add_property/ontology_update_property -> ontology_validate -> ontology_update\n"
-        "- Do NOT call ontology_create/ontology_update unless explicitly asked to save to database.\n"
-        "- IMPORTANT: For ontology tasks, call action='finish' immediately after ontology_preview succeeds.\n"
-        "  Do NOT wait for user confirmation about primary keys or saving - just finish with the preview result.\n"
-        "  The user can request changes or saving in a follow-up message if needed.\n"
+        "## Spark SQL notes\n"
+        "- Spark SQL *expressions* are allowed in filter/compute/select_expr/group_by_expr/window_expr tools.\n"
+        "- `plan_preview` is a lightweight Python executor, NOT full Spark. For complex SQL, validate via `pipeline_preview_wait`.\n"
         "\n"
-        "Objectify patterns (Dataset → Ontology Instances transformation):\n"
-        "- Use objectify tools when the goal is to transform dataset rows into ontology object instances.\n"
-        "- Do NOT use plan_add_transform with operation='objectify' - that operation does not exist.\n"
-        "- CRITICAL: You MUST call ontology_register_object_type BEFORE objectify_run. Without it, objectify will fail!\n"
-        "- Objectify workflow:\n"
-        "  1. (Optional) Create ontology class if it doesn't exist: ontology_new -> ontology_add_property (multiple) -> ontology_create\n"
-        "  2. Get mapping suggestions: objectify_suggest_mapping(dataset_id, target_class_id, db_name)\n"
-        "  3. Create mapping spec: objectify_create_mapping_spec(dataset_id, target_class_id, mappings, db_name)\n"
-        "  4. REQUIRED: Register object type: ontology_register_object_type(db_name, class_id, dataset_id, primary_key, title_key)\n"
-        "  5. Run objectify: objectify_run(dataset_id, db_name) -> returns job_id\n"
-        "  6. Wait for completion: objectify_wait(job_id) -> wait for job to complete\n"
-        "  7. Verify results: ontology_query_instances(db_name, class_id) -> check created instances\n"
-        "- Key args:\n"
-        "  - objectify_suggest_mapping: dataset_id, target_class_id, db_name\n"
-        "  - objectify_create_mapping_spec: dataset_id, target_class_id, mappings (array of {source_field, target_field}), db_name\n"
-        "  - ontology_register_object_type: db_name, class_id, dataset_id, primary_key (e.g., ['customer_id']), title_key (e.g., ['customer_id'])\n"
-        "  - objectify_run: dataset_id, db_name, mapping_spec_id (optional)\n"
-        "  - objectify_wait: job_id, timeout_seconds (default 300)\n"
-        "  - ontology_query_instances: db_name, class_id, limit (default 10)\n"
+        "## Ontology & Objectify workflow\n"
+        "When the user asks to design an ontology or map data to ontology instances, follow this workflow:\n"
         "\n"
-        "Available tools:\n"
-        f"{tool_lines}\n"
+        "### Phase 1: Schema inference (autonomous)\n"
+        "- Profile datasets with `dataset_sample` / `dataset_profile` to understand columns and types.\n"
+        "- Use `ontology_infer_schema_from_data` to get initial type suggestions.\n"
+        "- Use `detect_foreign_keys` to discover FK relationships between datasets.\n"
+        "- These are mechanical steps — proceed autonomously.\n"
         "\n"
-        "Schema:\n"
+        "### Phase 2: Domain modeling (clarification required)\n"
+        "You MUST use `action='clarify'` before finalizing design decisions that require domain knowledge:\n"
+        "- **Object Type boundaries**: Should 'Address' be a property of 'Customer' or a separate Object Type?\n"
+        "- **Relationship semantics**: Should Customer→Product be a direct link or only through Order?\n"
+        "- **Grain decisions**: Order-level vs Order-Item-level as the canonical entity?\n"
+        "- **Ambiguous column mappings**: A column named 'value' could be amount, score, or quantity.\n"
+        "- **Primary key / title key selection**: Which field(s) uniquely identify instances?\n"
+        "\n"
+        "Present your inferred schema as a concrete proposal, then ask for confirmation.\n"
+        "Example: '데이터 분석 결과 Customer, Order, Product 3개의 Object Type을 제안합니다. "
+        "Customer와 Order는 customer_id로 연결하고, Order와 Product는 order_id로 연결합니다. 이 구조가 맞나요?'\n"
+        "\n"
+        "### Phase 3: Registration & mapping (autonomous after approval)\n"
+        "After user confirms the design:\n"
+        "1. `ontology_new` → `ontology_add_property` → `ontology_add_relationship` → `ontology_validate` → `ontology_create`\n"
+        "2. `ontology_register_object_type` for each class (REQUIRED before objectify)\n"
+        "3. `objectify_suggest_mapping` → review → `objectify_create_mapping_spec`\n"
+        "4. `objectify_run` → `objectify_wait` → `ontology_query_instances` to verify\n"
+        "\n"
+        "### Phase 4: Link types (autonomous)\n"
+        "- Use `create_link_type_from_fk` with FK patterns from Phase 1.\n"
+        "- Link types connect Object Type instances via foreign key relationships.\n"
+        "\n"
+        "### When to clarify vs proceed autonomously\n"
+        "- Mechanical inference (types, nulls, cardinality detection): PROCEED\n"
+        "- Domain semantics (naming, modeling boundaries, business meaning): CLARIFY\n"
+        "- Ambiguous mappings (multiple possible target properties): CLARIFY\n"
+        "- Destructive operations (overwriting existing ontology): CLARIFY\n"
+        "\n"
+        f"## Available tools\n{tool_lines}\n"
+        "\n"
+        "## Response schema\n"
         "{\n"
-        "  \"action\": \"call_tool|finish|clarify\",\n"
-        "  \"tool_calls\": [{\"tool\": \"string\", \"args\": {\"...\": \"...\"}}],\n"
-        "  \"tool\": \"string (legacy single tool; optional if tool_calls is set)\",\n"
-        "  \"args\": {\"...\": \"...\"},\n"
-        "  \"questions\": [PipelineClarificationQuestion],\n"
-        "  \"notes\": string[],\n"
-        "  \"warnings\": string[],\n"
-        "  \"confidence\": number (0..1)\n"
+        '  "reasoning": "your internal thought process (optional)",\n'
+        '  "action": "call_tool|finish|clarify|respond",\n'
+        '  "message": "natural language message to user in Korean (optional, required for respond)",\n'
+        '  "tool_calls": [{"tool": "string", "args": {...}}],\n'
+        '  "tool": "string (legacy single tool; optional if tool_calls is set)",\n'
+        '  "args": {"...": "..."},\n'
+        '  "questions": [PipelineClarificationQuestion],\n'
+        '  "notes": string[],\n'
+        '  "warnings": string[],\n'
+        '  "confidence": number (0..1)\n'
         "}\n"
     )
 
@@ -1726,7 +1714,7 @@ async def run_pipeline_agent_mcp_autonomous(
                 return state.last_observation
 
             # ==================== Dataset Lookup Tools ====================
-            if tool_name in {"dataset_get_by_name", "dataset_get_latest_version", "dataset_validate_columns"}:
+            if tool_name in {"dataset_get_by_name", "dataset_get_latest_version", "dataset_validate_columns", "dataset_list", "dataset_sample", "dataset_profile", "data_query"}:
                 # Dataset lookup tools are handled by the Pipeline MCP Server
                 payload = await _call_pipeline_tool(tool_name, args)
                 state.last_observation = _mask_tool_observation(
@@ -2096,6 +2084,34 @@ async def run_pipeline_agent_mcp_autonomous(
                 ),
             }
 
+        if decision.action == "respond":
+            # Natural language response - the agent wants to reply conversationally
+            # without necessarily producing an artifact (plan/report/ontology).
+            return {
+                "run_id": run_id,
+                "status": "success",
+                "message": str(decision.message or ""),
+                "reasoning": str(decision.reasoning or "") if decision.reasoning else None,
+                "plan_id": plan_id,
+                "plan": state.plan_obj if isinstance(state.plan_obj, dict) else None,
+                "preview": None,
+                "report": state.null_report,
+                "questions": [],
+                "validation_errors": [],
+                "validation_warnings": list(tool_warnings),
+                "planner": {"confidence": float(decision.confidence), "notes": notes},
+                "llm": (
+                    {
+                        "provider": llm_meta.provider,
+                        "model": llm_meta.model,
+                        "cache_hit": llm_meta.cache_hit,
+                        "latency_ms": llm_meta.latency_ms,
+                    }
+                    if llm_meta
+                    else None
+                ),
+            }
+
         if decision.action == "finish":
             if isinstance(state.plan_obj, dict):
                 try:
@@ -2146,22 +2162,20 @@ async def run_pipeline_agent_mcp_autonomous(
                 if isinstance(refute_observation, dict):
                     refute_errors = refute_observation.get("errors")
                     if refute_observation.get("status") == "invalid" or (isinstance(refute_errors, list) and refute_errors):
-                        state.last_observation = refute_observation
-                        continue
+                        # Soft warning: report refutation issues but allow finish
+                        refute_error_msgs = refute_errors if isinstance(refute_errors, list) else []
+                        tool_warnings.extend([f"refutation: {str(e)}" for e in refute_error_msgs[:5]])
                     refute_warnings = refute_observation.get("warnings")
                     if isinstance(refute_warnings, list):
                         tool_warnings.extend([str(w) for w in refute_warnings if str(w or "").strip()])
 
-                # If the model attempted pipeline execution, do not allow finishing while
-                # Spark preview/build/deploy are pending or failed.
+                # Soft warning for pipeline execution status (no longer blocks finish).
                 pipeline_issue = _pipeline_has_unresolved_status(state)
                 if pipeline_issue:
-                    state.last_observation = {
-                        "error": "cannot finish: pipeline execution is not successful yet",
-                        "pipeline_issue": pipeline_issue,
-                        "pipeline_status": _summarize_pipeline_progress(state),
-                    }
-                    continue
+                    tool_warnings.append(
+                        f"pipeline status: {pipeline_issue.get('issue', 'unresolved')} "
+                        f"node={pipeline_issue.get('node_id', '?')} stage={pipeline_issue.get('stage', '?')}"
+                    )
 
                 # Persist the plan so the existing preview endpoint can be used from the UI.
                 if not plan_id:
@@ -2181,6 +2195,8 @@ async def run_pipeline_agent_mcp_autonomous(
                 return {
                     "run_id": run_id,
                     "status": "success",
+                    "message": str(decision.message or "") or None,
+                    "reasoning": str(decision.reasoning or "") if decision.reasoning else None,
                     "plan_id": plan_id,
                     "plan": validation.plan.model_dump(mode="json"),
                     # Preview is generated by the caller (router) to stay consistent with BFF preview semantics.
@@ -2211,6 +2227,8 @@ async def run_pipeline_agent_mcp_autonomous(
                 return {
                     "run_id": run_id,
                     "status": "success",
+                    "message": str(decision.message or "") or None,
+                    "reasoning": str(decision.reasoning or "") if decision.reasoning else None,
                     "plan_id": plan_id,
                     "plan": None,
                     "preview": None,
@@ -2247,6 +2265,8 @@ async def run_pipeline_agent_mcp_autonomous(
                 return {
                     "run_id": run_id,
                     "status": "success",
+                    "message": str(decision.message or "") or None,
+                    "reasoning": str(decision.reasoning or "") if decision.reasoning else None,
                     "plan_id": None,
                     "plan": None,
                     "preview": None,
@@ -2270,7 +2290,33 @@ async def run_pipeline_agent_mcp_autonomous(
                     ),
                 }
 
-            state.last_observation = {"error": "cannot finish: produce a report or a validated plan first"}
+            # Allow finish with just a message (conversational response without artifact)
+            if str(decision.message or "").strip():
+                return {
+                    "run_id": run_id,
+                    "status": "success",
+                    "message": str(decision.message or ""),
+                    "reasoning": str(decision.reasoning or "") if decision.reasoning else None,
+                    "plan_id": plan_id,
+                    "plan": None,
+                    "preview": None,
+                    "report": None,
+                    "questions": [],
+                    "validation_errors": [],
+                    "validation_warnings": list(tool_warnings),
+                    "planner": {"confidence": float(decision.confidence), "notes": notes},
+                    "llm": (
+                        {
+                            "provider": llm_meta.provider,
+                            "model": llm_meta.model,
+                            "cache_hit": llm_meta.cache_hit,
+                            "latency_ms": llm_meta.latency_ms,
+                        }
+                        if llm_meta
+                        else None
+                    ),
+                }
+            state.last_observation = {"error": "cannot finish: produce a report, a validated plan, or a response message"}
             continue
 
         # call_tool
@@ -2478,6 +2524,34 @@ async def run_pipeline_agent_mcp_autonomous(
             ),
         }
 
+    # Loop exhausted but ontology result exists
+    if isinstance(state.working_ontology, dict) or isinstance(state.schema_inference, dict):
+        return {
+            "run_id": run_id,
+            "status": "partial",
+            "plan_id": None,
+            "plan": None,
+            "preview": None,
+            "report": None,
+            "ontology": state.working_ontology,
+            "schema_inference": state.schema_inference,
+            "mapping_suggestions": state.mapping_suggestions,
+            "questions": [],
+            "validation_errors": [],
+            "validation_warnings": tool_warnings,
+            "planner": {"confidence": None, "notes": notes or None},
+            "llm": (
+                {
+                    "provider": llm_meta.provider,
+                    "model": llm_meta.model,
+                    "cache_hit": llm_meta.cache_hit,
+                    "latency_ms": llm_meta.latency_ms,
+                }
+                if llm_meta
+                else None
+            ),
+        }
+
     return {
         "run_id": run_id,
         "status": "failed",
@@ -2627,7 +2701,40 @@ async def run_pipeline_agent_streaming(
                 return {"result": texts[0]}
         raise RuntimeError(f"Unexpected MCP tool result type for {tool}: {type(payload)}")
 
+    async def _call_ontology_tool_stream(tool: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+        """Call an ontology MCP tool (streaming path)."""
+        payload = await mcp_manager.call_tool("ontology", tool, arguments)
+        if isinstance(payload, dict):
+            return payload
+        structured = getattr(payload, "structuredContent", None) or getattr(payload, "structured_content", None)
+        if isinstance(structured, dict):
+            return structured
+        data = getattr(payload, "data", None)
+        if isinstance(data, dict):
+            return data
+        is_error = bool(getattr(payload, "isError", False) or getattr(payload, "is_error", False))
+        content = getattr(payload, "content", None)
+        if isinstance(content, list) and content:
+            texts = []
+            for part in content:
+                text = getattr(part, "text", None) or (part.get("text") if isinstance(part, dict) else None)
+                if isinstance(text, str) and text.strip():
+                    texts.append(text.strip())
+            if is_error:
+                return {"error": "\n".join(texts).strip() or f"MCP tool error: {tool}"}
+            for text in texts:
+                try:
+                    parsed = json.loads(text)
+                    if isinstance(parsed, dict):
+                        return parsed
+                except Exception:
+                    continue
+            if texts:
+                return {"result": texts[0]}
+        raise RuntimeError(f"Unexpected MCP tool result type for {tool}: {type(payload)}")
+
     # 상태 초기화
+    ontology_session_id = f"ontology_stream_{run_id}"
     state = _AgentState(
         goal=goal,
         db_name=db_name,
@@ -2635,6 +2742,7 @@ async def run_pipeline_agent_streaming(
         dataset_ids=dataset_ids,
         principal_id=user_id or actor,
         principal_type="user" if user_id else "system",
+        ontology_session_id=ontology_session_id,
     )
 
     # 모델 설정
@@ -2761,6 +2869,34 @@ async def run_pipeline_agent_streaming(
                         data={"error": f"Plan validation failed: {exc}", "run_id": run_id}
                     )
                     return
+
+            # Ontology-only task: finish with ontology result if present
+            if isinstance(state.working_ontology, dict) or isinstance(state.schema_inference, dict):
+                final_ontology = state.working_ontology
+                if not final_ontology and state.ontology_session_id:
+                    try:
+                        preview_result = await _call_ontology_tool_stream(
+                            "ontology_preview",
+                            {"session_id": state.ontology_session_id},
+                        )
+                        if isinstance(preview_result, dict) and preview_result.get("status") == "success":
+                            final_ontology = preview_result.get("ontology")
+                    except Exception:
+                        pass
+
+                yield StreamEvent(
+                    event_type="complete",
+                    data={
+                        "run_id": run_id,
+                        "status": "success",
+                        "message": str(decision.message or "") or "온톨로지 설계가 완료되었습니다.",
+                        "ontology": final_ontology,
+                        "schema_inference": state.schema_inference,
+                        "mapping_suggestions": state.mapping_suggestions,
+                    }
+                )
+                return
+
             else:
                 # 도구 실행 결과 또는 LLM notes가 있으면 정보 조회 응답으로 처리
                 if state.last_observation or decision.notes:
@@ -2891,8 +3027,58 @@ async def run_pipeline_agent_streaming(
 
                         observation = dict(payload) if isinstance(payload, dict) else {"result": payload}
                         observation.pop("plan", None)
+                # ==================== Ontology Tools (streaming) ====================
+                elif tool_name.startswith("ontology_") and tool_name not in {
+                    "ontology_register_object_type",
+                    "ontology_query_instances",
+                }:
+                    # Inject session_id for ontology MCP tools
+                    if "session_id" not in args:
+                        args["session_id"] = state.ontology_session_id
+
+                    # Inject db_name/branch for tools that need them
+                    if tool_name in {
+                        "ontology_load", "ontology_list_classes", "ontology_get_class",
+                        "ontology_search_classes", "ontology_create", "ontology_update",
+                        "ontology_check_relationships", "ontology_check_circular_refs",
+                        "ontology_suggest_mappings",
+                    }:
+                        if "db_name" not in args or not args["db_name"]:
+                            args["db_name"] = state.db_name
+                        if "branch" not in args or not args["branch"]:
+                            args["branch"] = state.branch or "main"
+
+                    payload = await _call_ontology_tool_stream(tool_name, args)
+
+                    # Auto-fallback: 409 Conflict → ontology_update
+                    if tool_name == "ontology_create" and isinstance(payload, dict):
+                        error_msg = str(payload.get("error") or "")
+                        if "409" in error_msg or "Conflict" in error_msg:
+                            payload = await _call_ontology_tool_stream("ontology_update", args)
+
+                    # Track ontology state
+                    if tool_name == "ontology_preview" and isinstance(payload, dict):
+                        ont = payload.get("ontology")
+                        if isinstance(ont, dict):
+                            state.working_ontology = ont
+                    if tool_name == "ontology_infer_schema_from_data" and isinstance(payload, dict):
+                        state.schema_inference = payload
+                    if tool_name == "ontology_suggest_mappings" and isinstance(payload, dict):
+                        state.mapping_suggestions = payload
+                    if tool_name == "ontology_new" and isinstance(payload, dict):
+                        session_id = payload.get("session_id")
+                        if isinstance(session_id, str) and session_id.strip():
+                            state.ontology_session_id = session_id
+
+                    observation = dict(payload) if isinstance(payload, dict) else {"result": payload}
+
+                # ==================== Objectify Tools (streaming) ====================
+                elif tool_name.startswith("objectify_"):
+                    payload = await _call_pipeline_tool(tool_name, args)
+                    observation = dict(payload) if isinstance(payload, dict) else {"result": payload}
+
                 else:
-                    # 기타 도구
+                    # 기타 도구 (dataset_*, debug_*, detect_foreign_keys, create_link_type_from_fk, etc.)
                     payload = await _call_pipeline_tool(tool_name, args)
                     observation = dict(payload) if isinstance(payload, dict) else {"result": payload}
 
@@ -2986,6 +3172,33 @@ async def run_pipeline_agent_streaming(
                         }
                     )
 
+                # ontology 도구 후 ontology_update 이벤트
+                if (
+                    tool_name.startswith("ontology_") or tool_name.startswith("objectify_")
+                ) and isinstance(observation, dict) and not observation.get("error"):
+                    ontology_event_data: Dict[str, Any] = {
+                        "run_id": run_id,
+                        "step": step_idx + 1,
+                        "tool": tool_name,
+                    }
+                    if isinstance(state.working_ontology, dict):
+                        ontology_event_data["ontology"] = state.working_ontology
+                    if isinstance(state.schema_inference, dict):
+                        ontology_event_data["schema_inference"] = state.schema_inference
+                    if isinstance(state.mapping_suggestions, dict):
+                        ontology_event_data["mapping_suggestions"] = state.mapping_suggestions
+                    # Include objectify job status if available
+                    if tool_name in {"objectify_run", "objectify_wait"} and isinstance(observation, dict):
+                        ontology_event_data["objectify_status"] = {
+                            "job_id": observation.get("job_id"),
+                            "status": observation.get("status"),
+                            "instances_created": observation.get("instances_created"),
+                        }
+                    yield StreamEvent(
+                        event_type="ontology_update",
+                        data=ontology_event_data,
+                    )
+
                 # NOTE: Do NOT abort the batch on a single tool error. The LLM may recover within the same
                 # step (batched tool calls) or in the next step. Errors are surfaced via tool_end events.
 
@@ -3031,8 +3244,21 @@ async def run_pipeline_agent_streaming(
                 event_type="error",
                 data={"error": f"Final plan validation failed: {exc}", "run_id": run_id}
             )
+    elif isinstance(state.working_ontology, dict) or isinstance(state.schema_inference, dict):
+        # Loop exhausted but ontology result exists
+        yield StreamEvent(
+            event_type="complete",
+            data={
+                "run_id": run_id,
+                "status": "partial",
+                "message": "최대 스텝에 도달하여 온톨로지 중간 결과를 반환합니다.",
+                "ontology": state.working_ontology,
+                "schema_inference": state.schema_inference,
+                "mapping_suggestions": state.mapping_suggestions,
+            }
+        )
     else:
-        # plan이 없는 경우 친절한 안내 메시지로 응답
+        # plan도 ontology도 없는 경우 친절한 안내 메시지로 응답
         yield StreamEvent(
             event_type="complete",
             data={
@@ -3040,10 +3266,10 @@ async def run_pipeline_agent_streaming(
                 "status": "no_action",
                 "message": (
                     "요청을 처리하는 데 어려움이 있었습니다. 🤔\n\n"
-                    "다음과 같은 파이프라인 관련 요청을 해주시면 도움을 드릴 수 있습니다:\n"
+                    "다음과 같은 요청을 해주시면 도움을 드릴 수 있습니다:\n"
                     "• \"고객별 주문 총액을 계산하는 파이프라인 만들어줘\"\n"
                     "• \"주문 데이터와 고객 데이터를 조인해서 분석해줘\"\n"
-                    "• \"매출 분석 파이프라인 만들어줘\"\n"
+                    "• \"Olist 데이터로 온톨로지 설계해줘\"\n"
                     "• \"현재 데이터셋이 뭐가 있어?\""
                 ),
             }

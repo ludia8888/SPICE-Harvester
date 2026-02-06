@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import uuid
 from typing import Any, Dict, Optional
 
 import httpx
@@ -83,6 +84,9 @@ async def bff_json(
     base = bff_api_base_url()
     url = f"{base}{path}"
     headers = bff_headers(db_name=db_name, principal_id=principal_id, principal_type=principal_type)
+    # BFF requires Idempotency-Key for mutating requests (POST/PUT/PATCH).
+    if method.upper() in {"POST", "PUT", "PATCH"} and "Idempotency-Key" not in headers:
+        headers["Idempotency-Key"] = f"mcp-{uuid.uuid4()}"
     return await http_json(
         method,
         url,

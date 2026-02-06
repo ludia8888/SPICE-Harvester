@@ -39,6 +39,23 @@ const extractQuestions = (items: unknown) => {
 }
 
 const buildPipelineReply = (response: Record<string, unknown>, status: string, runId: string, planId: string) => {
+  // If the agent provided a natural language message, use that as the primary response
+  const agentMessage = safeText(response['message']).trim()
+  if (agentMessage) {
+    const parts: string[] = [agentMessage]
+    const questions = extractQuestions(response['questions'])
+    if (questions.length > 0) {
+      parts.push(`\n---\n재질문: ${questions.join(' ')}`)
+    }
+    const validationWarnings = Array.isArray(response['validation_warnings']) ? response['validation_warnings'] : []
+    const warningText = validationWarnings.map((item) => safeText(item).trim()).filter((item) => item)
+    if (warningText.length > 0) {
+      parts.push(`\n⚠️ ${warningText.slice(0, 3).join(' | ')}`)
+    }
+    return parts.join('')
+  }
+
+  // Fallback: structured response format
   const summaryParts = [`Pipeline agent ${status}.`]
   if (runId) {
     summaryParts.push(`run_id=${runId}`)
@@ -48,6 +65,16 @@ const buildPipelineReply = (response: Record<string, unknown>, status: string, r
   }
 
   const details: string[] = []
+
+  // Include planner notes as natural language if available
+  const planner = response['planner']
+  if (planner && typeof planner === 'object') {
+    const plannerNotes = (planner as Record<string, unknown>)['notes']
+    if (Array.isArray(plannerNotes) && plannerNotes.length > 0) {
+      details.push(plannerNotes.map((n) => safeText(n).trim()).filter(Boolean).join('\n'))
+    }
+  }
+
   const questions = extractQuestions(response['questions'])
   if (questions.length > 0) {
     details.push(`재질문: ${questions.join(' ')}`)
@@ -61,8 +88,6 @@ const buildPipelineReply = (response: Record<string, unknown>, status: string, r
 
   return details.length > 0 ? `${summaryParts.join(' ')}\n${details.join('\n')}` : summaryParts.join(' ')
 }
-
-const normalizeLabel = (value: string) => value.trim().toLowerCase()
 
 export const AIAgentPage = () => {
   const pipelineContext = useAppStore((state) => state.pipelineContext)
@@ -87,20 +112,6 @@ export const AIAgentPage = () => {
     queryFn: () => listDatasets(activeDbName),
     enabled: Boolean(activeDbName),
   })
-
-  const datasetsById = useMemo(() => {
-    const map = new Map<string, DatasetRecord>()
-    datasets.forEach((dataset) => map.set(dataset.dataset_id, dataset))
-    return map
-  }, [datasets])
-
-  const datasetsByName = useMemo(() => {
-    const map = new Map<string, DatasetRecord>()
-    datasets.forEach((dataset) => {
-      map.set(normalizeLabel(dataset.name), dataset)
-    })
-    return map
-  }, [datasets])
 
   const resolveAssistantMessage = (reply: string, pendingId: string) => {
     const timestamp = new Date().toISOString()
@@ -219,10 +230,6 @@ export const AIAgentPage = () => {
   }
 
   const canSend = draft.trim().length > 0 && !isSending
-
-  // Suppress unused variable warnings
-  void datasetsById
-  void datasetsByName
 
   return (
     <div className="ai-agent">

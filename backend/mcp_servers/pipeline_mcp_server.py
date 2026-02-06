@@ -962,6 +962,67 @@ class PipelineMCPServer:
                         "required": ["dataset_id", "columns"],
                     },
                 },
+                {
+                    "name": "dataset_list",
+                    "description": "List all datasets in a database/project with their column names and metadata. Use this to understand what data is available before building pipelines.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "db_name": {"type": "string", "description": "Database/project name"},
+                            "branch": {"type": "string", "description": "Branch (default: main)"},
+                        },
+                        "required": ["db_name"],
+                    },
+                },
+                {
+                    "name": "dataset_sample",
+                    "description": "Get a small sample of actual data rows from a dataset (PII-masked). Use this to understand data patterns, values, and quality before designing transformations.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "dataset_id": {"type": "string", "description": "Dataset ID"},
+                            "limit": {"type": "integer", "description": "Number of rows to sample (default: 20, max: 50)"},
+                            "columns": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "Optional: only return these columns",
+                            },
+                        },
+                        "required": ["dataset_id"],
+                    },
+                },
+                {
+                    "name": "dataset_profile",
+                    "description": "Get column-level statistics for a dataset: null ratio, distinct count, top values, numeric histogram. Use to understand data quality and distributions.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "dataset_id": {"type": "string", "description": "Dataset ID"},
+                            "columns": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "Optional: only profile these columns",
+                            },
+                        },
+                        "required": ["dataset_id"],
+                    },
+                },
+                {
+                    "name": "data_query",
+                    "description": "Execute ad-hoc SQL query on dataset sample rows using DuckDB. Supports GROUP BY, JOIN, WINDOW, CTE, and all standard SQL. Table name is 'data'. Max 500 result rows. Query runs on sample rows, not full dataset.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "dataset_id": {"type": "string", "description": "Dataset ID to query"},
+                            "sql": {
+                                "type": "string",
+                                "description": "SQL query. Table name is 'data'. Example: SELECT category, COUNT(*) as cnt FROM data GROUP BY category ORDER BY cnt DESC",
+                            },
+                            "limit": {"type": "integer", "default": 100, "description": "Max result rows (default: 100, max: 500)"},
+                        },
+                        "required": ["dataset_id", "sql"],
+                    },
+                },
                 # ── Debugging Tools ──────────────────────────────────────────
                 {
                     "name": "debug_get_errors",

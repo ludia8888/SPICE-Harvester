@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from shared.models.agent_plan_report import PlanCompilationReport
 from shared.models.pipeline_plan import PipelinePlan
@@ -17,6 +17,14 @@ class PipelineClarificationQuestion(BaseModel):
     type: str = Field(default="string", description="string|enum|boolean|number|object")
     options: Optional[List[str]] = None
     default: Optional[Any] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _accept_key_as_id(cls, data: Any) -> Any:
+        """LLM sometimes returns ``key`` instead of ``id``."""
+        if isinstance(data, dict) and "key" in data and "id" not in data:
+            data["id"] = data.pop("key")
+        return data
 
 
 @dataclass(frozen=True)

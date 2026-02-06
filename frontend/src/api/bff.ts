@@ -669,6 +669,156 @@ export const submitPipelineProposal = async (
   return data.proposal ?? null
 }
 
+export type ProposalRecord = {
+  proposal_id: string
+  pipeline_id: string
+  title: string
+  description?: string
+  status: string
+  from_branch?: string
+  to_branch?: string
+  build_job_id?: string
+  mapping_spec_ids?: string[]
+  created_by?: string
+  reviewed_by?: string
+  review_comment?: string
+  created_at?: string
+  updated_at?: string
+}
+
+export const listPipelineProposals = async (params: {
+  dbName: string
+  branch?: string
+  status?: string
+}) => {
+  const query = new URLSearchParams()
+  query.set('db_name', params.dbName)
+  if (params.branch) {
+    query.set('branch', params.branch)
+  }
+  if (params.status) {
+    query.set('status', params.status)
+  }
+  const data = await requestApi<{ proposals?: ProposalRecord[] }>(
+    `/api/v1/pipelines/proposals?${query.toString()}`,
+    {
+      method: 'GET',
+      headers: {
+        'X-DB-Name': params.dbName,
+        'X-Project': params.dbName,
+      },
+    },
+    'Failed to list proposals',
+  )
+  return data.proposals ?? []
+}
+
+export const approvePipelineProposal = async (
+  pipelineId: string,
+  params: { proposalId: string; comment?: string; dbName?: string },
+) => {
+  const data = await requestApi<Record<string, unknown>>(
+    `/api/v1/pipelines/${pipelineId}/proposals/approve`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': createIdempotencyKey(),
+        ...(params.dbName
+          ? {
+              'X-DB-Name': params.dbName,
+              'X-Project': params.dbName,
+            }
+          : {}),
+      },
+      body: JSON.stringify({
+        proposal_id: params.proposalId,
+        review_comment: params.comment,
+      }),
+    },
+    'Failed to approve proposal',
+  )
+  return data
+}
+
+export const rejectPipelineProposal = async (
+  pipelineId: string,
+  params: { proposalId: string; comment?: string; dbName?: string },
+) => {
+  const data = await requestApi<Record<string, unknown>>(
+    `/api/v1/pipelines/${pipelineId}/proposals/reject`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': createIdempotencyKey(),
+        ...(params.dbName
+          ? {
+              'X-DB-Name': params.dbName,
+              'X-Project': params.dbName,
+            }
+          : {}),
+      },
+      body: JSON.stringify({
+        proposal_id: params.proposalId,
+        review_comment: params.comment,
+      }),
+    },
+    'Failed to reject proposal',
+  )
+  return data
+}
+
+export type PipelineBranchRecord = {
+  branch: string
+  db_name?: string
+  status?: string
+  created_at?: string
+  updated_at?: string
+}
+
+export const listPipelineBranches = async (dbName: string) => {
+  const data = await requestApi<{ branches?: PipelineBranchRecord[]; count?: number }>(
+    `/api/v1/pipelines/branches?db_name=${encodeURIComponent(dbName)}`,
+    {
+      method: 'GET',
+      headers: {
+        'X-DB-Name': dbName,
+        'X-Project': dbName,
+      },
+    },
+    'Failed to list pipeline branches',
+  )
+  return data.branches ?? []
+}
+
+export const createPipelineBranch = async (
+  pipelineId: string,
+  params: { branch: string; dbName?: string },
+) => {
+  const data = await requestApi<{ branch?: Record<string, unknown> }>(
+    `/api/v1/pipelines/${pipelineId}/branches`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': createIdempotencyKey(),
+        ...(params.dbName
+          ? {
+              'X-DB-Name': params.dbName,
+              'X-Project': params.dbName,
+            }
+          : {}),
+      },
+      body: JSON.stringify({
+        branch: params.branch,
+      }),
+    },
+    'Failed to create pipeline branch',
+  )
+  return data.branch ?? null
+}
+
 export const buildPipeline = async (
   pipelineId: string,
   params: {
@@ -1019,6 +1169,7 @@ export type AgentStreamEventType =
   | 'tool_end'
   | 'plan_update'
   | 'preview_update'
+  | 'ontology_update'
   | 'clarification'
   | 'error'
   | 'complete'
@@ -1062,6 +1213,15 @@ export type AgentStreamEvent = {
       rows?: Array<Record<string, unknown>>
       row_count?: number
     }
+    // ontology_update 이벤트용
+    ontology?: Record<string, unknown>
+    schema_inference?: Record<string, unknown>
+    mapping_suggestions?: Record<string, unknown>
+    objectify_status?: {
+      job_id?: string
+      status?: string
+      instances_created?: number
+    }
     [key: string]: unknown
   }
 }
@@ -1073,6 +1233,7 @@ export type AgentStreamCallbacks = {
   onToolEnd?: (data: AgentStreamEvent['data']) => void
   onPlanUpdate?: (data: AgentStreamEvent['data']) => void
   onPreviewUpdate?: (data: AgentStreamEvent['data']) => void
+  onOntologyUpdate?: (data: AgentStreamEvent['data']) => void
   onClarification?: (data: AgentStreamEvent['data']) => void
   onError?: (data: AgentStreamEvent['data']) => void
   onComplete?: (data: AgentStreamEvent['data']) => void
@@ -1258,6 +1419,9 @@ export const runPipelineAgentStreaming = (
               break
             case 'preview_update':
               callbacks.onPreviewUpdate?.(data)
+              break
+            case 'ontology_update':
+              callbacks.onOntologyUpdate?.(data)
               break
             case 'clarification':
               callbacks.onClarification?.(data)
