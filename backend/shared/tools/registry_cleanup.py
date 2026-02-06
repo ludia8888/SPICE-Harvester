@@ -11,17 +11,16 @@ from __future__ import annotations
 import argparse
 import asyncio
 import os
-import sys
-import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Iterable, Optional
+from typing import Iterable
 from urllib.parse import urlparse
 
 import asyncpg
 import httpx
 
 from shared.config.settings import get_settings
+from shared.tools.bff_admin_api import delete_database, list_databases, normalize_base_url
 
 
 DEFAULT_TEST_PREFIXES = [
@@ -81,16 +80,8 @@ def _ensure_dev_only(base_url: str) -> None:
         raise RuntimeError(f"Refusing to run against unsafe BFF endpoint: {base_url}")
 
 
-def _normalize_base_url(base_url: str) -> str:
-    base = base_url.rstrip("/")
-    if base.endswith("/api/v1"):
-        return base
-    return f"{base}/api/v1"
-
-
 def _resolve_bff_base_url() -> str:
-    base = get_settings().services.bff_base_url
-    return _normalize_base_url(base)
+    return normalize_base_url(get_settings().services.bff_base_url)
 
 
 def _resolve_admin_token() -> str:
@@ -107,73 +98,6 @@ def _matches_any_prefix(name: str, prefixes: Iterable[str]) -> bool:
 
 def _matches_any_name(name: str, names: Iterable[str]) -> bool:
     return any(candidate and name == candidate for candidate in names)
-
-
-def _extract_command_id(payload: object) -> Optional[str]:
-    if not isinstance(payload, dict):
-        return None
-    direct = payload.get("command_id") or payload.get("commandId")
-    if isinstance(direct, str) and direct:
-        return direct
-    data = payload.get("data")
-    if isinstance(data, dict):
-        direct = data.get("command_id") or data.get("commandId")
-        if isinstance(direct, str) and direct:
-            return direct
-        write = data.get("write")
-        if isinstance(write, dict):
-            commands = write.get("commands")
-            if isinstance(commands, list) and commands:
-                first = commands[0]
-                if isinstance(first, dict):
-                    direct = first.get("command_id") or first.get("commandId")
-                    if isinstance(direct, str) and direct:
-                        return direct
-    return None
-
-
-async def _wait_for_command(
-    client: httpx.AsyncClient,
-    *,
-    base_url: str,
-    command_id: str,
-    timeout_seconds: int = 180,
-) -> dict:
-    deadline = time.monotonic() + timeout_seconds
-    last: dict = {}
-    while time.monotonic() < deadline:
-        resp = await client.get(f"{base_url}/commands/{command_id}/status")
-        if resp.status_code == 404:
-            await asyncio.sleep(0.5)
-            continue
-        resp.raise_for_status()
-        last = resp.json()
-        status = last.get("status") or last.get("state")
-        if status in {"COMPLETED", "FAILED", "CANCELLED"}:
-            return last
-        await asyncio.sleep(0.5)
-    raise TimeoutError(last)
-
-
-async def _list_databases(client: httpx.AsyncClient, *, base_url: str) -> list[str]:
-    resp = await client.get(f"{base_url}/databases")
-    resp.raise_for_status()
-    payload = resp.json()
-    data = payload.get("data") if isinstance(payload, dict) else None
-    if isinstance(data, dict) and isinstance(data.get("databases"), list):
-        items = data.get("databases") or []
-    elif isinstance(payload, dict) and isinstance(payload.get("databases"), list):
-        items = payload.get("databases") or []
-    else:
-        items = []
-
-    names: list[str] = []
-    for item in items:
-        if isinstance(item, dict) and isinstance(item.get("name"), str):
-            names.append(item["name"])
-        elif isinstance(item, str):
-            names.append(item)
-    return names
 
 
 async def _connect_postgres() -> asyncpg.Connection:
@@ -214,23 +138,6 @@ async def _fetch_updated_at_map(
                 updated = updated.replace(tzinfo=timezone.utc)
             result[str(row.get("aggregate_id"))] = updated
     return result
-
-
-async def _delete_database(
-    client: httpx.AsyncClient,
-    *,
-    base_url: str,
-    db_name: str,
-) -> dict:
-    resp = await client.delete(f"{base_url}/databases/{db_name}")
-    if resp.status_code == 404:
-        return {"status": "missing"}
-    resp.raise_for_status()
-    payload = resp.json() if resp.content else {}
-    cmd = _extract_command_id(payload)
-    if cmd:
-        return await _wait_for_command(client, base_url=base_url, command_id=cmd, timeout_seconds=180)
-    return payload if isinstance(payload, dict) else {"raw": payload}
 
 
 @dataclass(frozen=True)
@@ -283,7 +190,7 @@ async def _run_once(plan: CleanupPlan, *, base_url: str, token: str) -> int:
         if plan.explicit:
             targets = plan.explicit
         else:
-            names = await _list_databases(client, base_url=base_url)
+            names = await list_databases(client, base_url=base_url)
             targets = [
                 name
                 for name in names
@@ -337,7 +244,7 @@ async def _run_once(plan: CleanupPlan, *, base_url: str, token: str) -> int:
             if not plan.quiet:
                 print(f"Deleting {name}...")
             try:
-                result = await _delete_database(client, base_url=base_url, db_name=name)
+                result = await delete_database(client, base_url=base_url, db_name=name, allow_missing=True)
             except Exception as exc:
                 if not plan.quiet:
                     print(f"Failed to delete {name}: {exc}")
