@@ -39,7 +39,7 @@ from shared.services.registries.pipeline_plan_registry import PipelinePlanRegist
 from shared.services.storage.redis_service import RedisService
 from shared.services.storage.event_store import EventStore
 from shared.utils.llm_safety import mask_pii, stable_json_dumps
-from shared.config.model_context_limits import get_model_context_config
+from shared.config.model_context_limits import PromptBudget, get_model_context_config
 
 logger = logging.getLogger(__name__)
 
@@ -254,6 +254,10 @@ class _AgentState:
     schema_inference: Optional[Dict[str, Any]] = None
     mapping_suggestions: Optional[Dict[str, Any]] = None
 
+    # Enterprise context management
+    knowledge_ledger: Dict[str, Any] = field(default_factory=dict)
+    tool_call_hashes: Dict[str, int] = field(default_factory=dict)  # hash(tool+args) → step_idx
+
 
 # ==================== Trimming Constants ====================
 # Consistent limits for tool response trimming to prevent context overflow
@@ -263,6 +267,172 @@ AGENT_TRIM_WARNINGS = 30  # Max warnings to return
 AGENT_TRIM_ERRORS = 30  # Max errors to return
 AGENT_TRIM_EVENTS = 50  # Max pipeline events to keep (before compaction)
 AGENT_TRIM_EVENTS_COMPACT = 30  # Events to keep after compaction
+
+# Prompt item importance scores for graduated compression (lower = pruned first)
+ITEM_PRIORITY: Dict[str, int] = {
+    "state": 1,
+    "tool_output_ref": 1,
+    "batch_summary": 2,
+    "tool_call": 2,
+    "tool_output": 3,
+    "llm_error": 4,
+    "bootstrap_observation": 5,
+}
+
+
+# ==================== Enterprise Context Management ====================
+
+
+def _extract_knowledge(tool_name: str, observation: Dict[str, Any], ledger: Dict[str, Any]) -> None:
+    """Extract key structural facts from tool results into the knowledge ledger.
+
+    The ledger survives all compression levels, ensuring the model never forgets
+    critical schema information, column names, or foreign key relationships.
+    """
+    if not isinstance(observation, dict) or observation.get("error"):
+        return
+
+    if tool_name == "dataset_sample":
+        ds_id = str(observation.get("dataset_id") or "").strip()
+        if ds_id:
+            ledger.setdefault("dataset_schemas", {})[ds_id] = {
+                "columns": list(observation.get("columns") or []),
+                "row_count": observation.get("row_count"),
+                "sample_row": (observation.get("rows") or [])[:1],
+            }
+
+    elif tool_name == "dataset_profile":
+        ds_id = str(observation.get("dataset_id") or "").strip()
+        if ds_id:
+            cols_summary = []
+            for col in (observation.get("columns") or []):
+                if isinstance(col, dict):
+                    cols_summary.append({
+                        "name": col.get("name"),
+                        "type": col.get("inferred_type") or col.get("type"),
+                        "null_ratio": col.get("null_ratio"),
+                        "distinct": col.get("distinct_count"),
+                    })
+            ledger.setdefault("dataset_profiles", {})[ds_id] = cols_summary
+
+    elif tool_name == "dataset_list":
+        datasets = []
+        for ds in (observation.get("datasets") or []):
+            if isinstance(ds, dict):
+                datasets.append({
+                    "id": ds.get("dataset_id"),
+                    "name": ds.get("dataset_name"),
+                    "row_count": ds.get("row_count"),
+                })
+        if datasets:
+            ledger["available_datasets"] = datasets
+
+    elif tool_name == "detect_foreign_keys":
+        fks = observation.get("foreign_keys")
+        if isinstance(fks, list) and fks:
+            ledger["foreign_keys"] = fks
+
+    elif tool_name == "ontology_infer_schema_from_data":
+        # Keep inferred types and property suggestions
+        inferred = observation.get("inferred_properties") or observation.get("properties")
+        if isinstance(inferred, list):
+            ledger["inferred_schema"] = inferred[:50]
+
+    elif tool_name == "plan_validate":
+        # Keep validation errors/warnings so they're not lost after compaction
+        errors = observation.get("errors")
+        warnings = observation.get("warnings")
+        if isinstance(errors, list) and errors:
+            ledger["last_validation_errors"] = errors[:10]
+        if isinstance(warnings, list) and warnings:
+            ledger["last_validation_warnings"] = warnings[:10]
+
+
+def _summarize_tool_output(tool_name: str, observation: Dict[str, Any]) -> Dict[str, Any]:
+    """Summarize large tool outputs before appending to prompt_items.
+
+    Called AFTER _extract_knowledge, so the full data is already safely stored
+    in the knowledge ledger.  The summarized version goes into the prompt
+    for the model to see without blowing the context budget.
+    """
+    if not isinstance(observation, dict):
+        return observation
+
+    if tool_name == "dataset_sample":
+        rows = observation.get("rows") or []
+        return {
+            "status": observation.get("status"),
+            "dataset_id": observation.get("dataset_id"),
+            "columns": observation.get("columns"),
+            "row_count": observation.get("row_count"),
+            "sample_rows_shown": len(rows),
+            "first_row": rows[0] if rows else None,
+            "last_row": rows[-1] if len(rows) > 1 else None,
+        }
+
+    if tool_name == "dataset_profile":
+        columns = observation.get("columns") or []
+        return {
+            "status": observation.get("status"),
+            "dataset_id": observation.get("dataset_id"),
+            "column_count": len(columns),
+            "columns": [
+                {
+                    "name": c.get("name"),
+                    "type": c.get("inferred_type") or c.get("type"),
+                    "null_ratio": c.get("null_ratio"),
+                    "distinct": c.get("distinct_count"),
+                }
+                for c in columns[:30]
+                if isinstance(c, dict)
+            ],
+        }
+
+    if tool_name == "data_query":
+        rows = observation.get("rows") or []
+        return {
+            "status": observation.get("status"),
+            "row_count": len(rows),
+            "columns": observation.get("columns"),
+            "first_3_rows": rows[:3],
+        }
+
+    if tool_name == "plan_preview":
+        rows = observation.get("rows") or observation.get("preview") or []
+        if isinstance(rows, list):
+            return {
+                "status": observation.get("status"),
+                "row_count": len(rows),
+                "columns": observation.get("columns"),
+                "first_3_rows": rows[:3],
+            }
+
+    # Generic fallback: if serialized output exceeds 5K, keep only essential keys
+    serialized = stable_json_dumps(observation)
+    if len(serialized) > 5000:
+        essential = {}
+        for k in ("status", "error", "errors", "warnings", "plan", "node_id",
+                   "pipeline_id", "dataset_id", "class_id", "session_id"):
+            if k in observation:
+                essential[k] = observation[k]
+        essential["_truncated"] = True
+        essential["_original_chars"] = len(serialized)
+        return essential
+
+    return observation
+
+
+def _deduplicate_tool_call(
+    state: _AgentState, tool_name: str, args: Dict[str, Any], step_idx: int,
+) -> Optional[int]:
+    """Return the step index of a previous identical call, or None if unique."""
+    key = f"{tool_name}:{stable_json_dumps(args)}"
+    h = hash(key)
+    existing = state.tool_call_hashes.get(h)
+    if existing is not None:
+        return existing
+    state.tool_call_hashes[h] = step_idx
+    return None
 
 
 _PIPELINE_AGENT_ALLOWED_TOOLS: tuple[str, ...] = (
@@ -941,14 +1111,14 @@ def _build_user_prompt(
     answers: Optional[Dict[str, Any]],
     planner_hints: Optional[Dict[str, Any]],
     task_spec: Optional[Dict[str, Any]],
-    target_chars: int = 50000,
+    target_chars: int = 0,
+    budget: Optional[PromptBudget] = None,
 ) -> str:
     """
-    Backward-compatible prompt builder for the SSE streaming agent path.
+    Prompt builder for both streaming and non-streaming paths.
 
-    The non-streaming autonomous loop builds an append-only `state.prompt_items` log and compacts it
-    deterministically. Some streaming code paths still call `_build_user_prompt`; keep this helper as
-    a thin wrapper so both implementations share the same header + compaction mechanics.
+    Uses PromptBudget for model-aware context limits when available,
+    with a conservative fallback for backward compatibility.
     """
     if not state.prompt_items:
         state.prompt_items.append(
@@ -970,17 +1140,22 @@ def _build_user_prompt(
                     }
                 )
             )
-
-    if target_chars and target_chars > 0:
-        current = _prompt_text(state.prompt_items)
-        if len(current) > int(target_chars):
-            state.prompt_items = _progressive_compress_prompt_items(
-                state=state,
-                answers=answers,
-                planner_hints=planner_hints,
-                task_spec=task_spec,
-                target_chars=int(target_chars),
+        # Inject knowledge ledger if present
+        if state.knowledge_ledger:
+            state.prompt_items.append(
+                stable_json_dumps({"type": "knowledge_ledger", "ledger": state.knowledge_ledger})
             )
+
+    effective_limit = budget.total_chars if budget else (target_chars if target_chars > 0 else 50000)
+    current = _prompt_text(state.prompt_items)
+    if len(current) > effective_limit:
+        state.prompt_items = _progressive_compress_prompt_items(
+            state=state,
+            answers=answers,
+            planner_hints=planner_hints,
+            task_spec=task_spec,
+            target_chars=effective_limit,
+        )
     return _prompt_text(state.prompt_items)
 
 
@@ -1037,7 +1212,42 @@ def _build_compaction_snapshot(
         snapshot["has_schema_inference"] = True
     if state.mapping_suggestions:
         snapshot["has_mapping_suggestions"] = True
+    # Knowledge ledger survives ALL compression levels
+    if state.knowledge_ledger:
+        snapshot["knowledge_ledger"] = state.knowledge_ledger
     return snapshot
+
+
+def _get_item_type(item_json: str) -> str:
+    """Fast extraction of item type from serialized JSON without full parse."""
+    # Items are stored as stable_json_dumps; "type" is always near the start.
+    try:
+        obj = json.loads(item_json)
+        return str(obj.get("type") or "unknown") if isinstance(obj, dict) else "unknown"
+    except Exception:
+        return "unknown"
+
+
+def _reshrink_tool_output(item_json: str, max_chars: int) -> str:
+    """Re-summarize a tool_output item to fit within max_chars."""
+    try:
+        obj = json.loads(item_json)
+    except Exception:
+        return item_json[:max_chars]
+    if not isinstance(obj, dict):
+        return item_json[:max_chars]
+    output = obj.get("output")
+    if isinstance(output, dict):
+        # Keep only essential keys from the output
+        shrunk = {}
+        for k in ("status", "error", "errors", "node_id", "dataset_id", "pipeline_id",
+                   "columns", "class_id", "session_id"):
+            if k in output:
+                shrunk[k] = output[k]
+        shrunk["_reshrunk"] = True
+        obj["output"] = shrunk
+    result = stable_json_dumps(obj)
+    return result[:max_chars] if len(result) > max_chars else result
 
 
 def _progressive_compress_prompt_items(
@@ -1049,32 +1259,26 @@ def _progressive_compress_prompt_items(
     target_chars: int,
     preserve_recent_n: int = 10,
 ) -> List[str]:
-    """
-    Progressive compression: remove oldest items until within target.
+    """Five-level graduated compression with importance scoring.
 
-    Strategy:
-    1. Always preserve: header (index 0)
-    2. Always preserve: last N items (tool calls + observations)
-    3. Remove from middle, oldest first
-    4. If still over limit, compact to snapshot (fallback)
-
-    Args:
-        state: Current agent state
-        target_chars: Target character limit
-        preserve_recent_n: Number of recent items to always preserve
-
-    Returns:
-        Compressed list of prompt items
+    Levels applied in order until prompt fits within target_chars:
+      L1 – Remove tool_output_ref items (duplicate references)
+      L2 – Re-summarize tool_output items to 1K chars each
+      L3 – Merge consecutive state items (keep only latest per 3-run)
+      L4 – Priority-scored removal (lowest priority first)
+      L5 – Full snapshot + knowledge_ledger (last resort)
     """
     items = list(state.prompt_items)
     if len(items) <= 2:
         return items
 
-    current_len = sum(len(item) for item in items)
-    if current_len <= target_chars:
+    def _total_len(lst: List[str]) -> int:
+        return sum(len(s) for s in lst)
+
+    if _total_len(items) <= target_chars:
         return items
 
-    # Protect header and recent items
+    # Protect header (index 0) and recent N items throughout L1-L4
     header = items[:1]
     if len(items) > preserve_recent_n + 1:
         protected_tail = items[-preserve_recent_n:]
@@ -1083,58 +1287,79 @@ def _progressive_compress_prompt_items(
         protected_tail = items[1:]
         middle = []
 
-    # Calculate budget for middle section
-    header_len = sum(len(h) for h in header)
-    tail_len = sum(len(t) for t in protected_tail)
-    available_for_middle = target_chars - header_len - tail_len
+    # --- Level 1: Drop tool_output_ref items ---
+    middle = [m for m in middle if _get_item_type(m) != "tool_output_ref"]
+    if _total_len(header + middle + protected_tail) <= target_chars:
+        return header + middle + protected_tail
 
-    # Remove oldest middle items until within budget
-    while middle and sum(len(m) for m in middle) > available_for_middle:
-        middle.pop(0)  # Remove oldest
+    # --- Level 2: Re-shrink tool_output items ---
+    for i, m in enumerate(middle):
+        if _get_item_type(m) == "tool_output" and len(m) > 1000:
+            middle[i] = _reshrink_tool_output(m, max_chars=1000)
+    if _total_len(header + middle + protected_tail) <= target_chars:
+        return header + middle + protected_tail
 
-    result = header + middle + protected_tail
-    result_len = sum(len(r) for r in result)
+    # --- Level 3: Merge consecutive state items (keep 1 per 3) ---
+    merged: List[str] = []
+    state_run: List[str] = []
+    for m in middle:
+        if _get_item_type(m) == "state":
+            state_run.append(m)
+            if len(state_run) >= 3:
+                merged.append(state_run[-1])  # keep latest of the 3
+                state_run = []
+        else:
+            if state_run:
+                merged.append(state_run[-1])
+                state_run = []
+            merged.append(m)
+    if state_run:
+        merged.append(state_run[-1])
+    middle = merged
+    if _total_len(header + middle + protected_tail) <= target_chars:
+        return header + middle + protected_tail
 
-    # If still over (protected tail too big), fall back to full compaction
-    if result_len > target_chars:
-        snapshot = _build_compaction_snapshot(
+    # --- Level 4: Priority-scored removal (lowest first) ---
+    scored = [(ITEM_PRIORITY.get(_get_item_type(m), 3), i, m) for i, m in enumerate(middle)]
+    scored.sort(key=lambda x: (x[0], x[1]))  # lowest priority & oldest first
+    budget = target_chars - _total_len(header) - _total_len(protected_tail)
+    kept: List[str] = []
+    used = 0
+    # Take items in reverse priority (highest first) until budget exhausted
+    for _, _, m in reversed(scored):
+        if used + len(m) <= budget:
+            kept.append(m)
+            used += len(m)
+    # Restore original order
+    kept_set = set(id(k) for k in kept)
+    middle = [m for m in middle if id(m) in kept_set]
+    if _total_len(header + middle + protected_tail) <= target_chars:
+        return header + middle + protected_tail
+
+    # --- Level 5: Full snapshot + knowledge_ledger ---
+    snapshot = _build_compaction_snapshot(
+        state=state,
+        answers=answers,
+        planner_hints=planner_hints,
+        task_spec=task_spec,
+    )
+    keep_recent = min(3, len(protected_tail))
+    recent = protected_tail[-keep_recent:] if keep_recent > 0 else []
+    return [
+        stable_json_dumps(_build_prompt_header(
             state=state,
             answers=answers,
             planner_hints=planner_hints,
             task_spec=task_spec,
-        )
-        # Keep last 3 items for immediate context
-        keep_recent = min(3, len(protected_tail))
-        return [
-            stable_json_dumps(_build_prompt_header(
-                state=state,
-                answers=answers,
-                planner_hints=planner_hints,
-                task_spec=task_spec,
-            )),
-            stable_json_dumps({
-                "type": "compaction",
-                "reason": "progressive_fallback",
-                "snapshot": snapshot,
-                "preserved_recent_count": keep_recent,
-                "note": "Progressive compression exhausted; snapshot is authoritative.",
-            }),
-        ] + protected_tail[-keep_recent:] if keep_recent > 0 else [
-            stable_json_dumps(_build_prompt_header(
-                state=state,
-                answers=answers,
-                planner_hints=planner_hints,
-                task_spec=task_spec,
-            )),
-            stable_json_dumps({
-                "type": "compaction",
-                "reason": "progressive_fallback",
-                "snapshot": snapshot,
-                "note": "Progressive compression exhausted; snapshot is authoritative.",
-            }),
-        ]
-
-    return result
+        )),
+        stable_json_dumps({
+            "type": "compaction",
+            "reason": "graduated_L5",
+            "snapshot": snapshot,
+            "preserved_recent_count": keep_recent,
+            "note": "Graduated compression exhausted; snapshot + knowledge_ledger is authoritative.",
+        }),
+    ] + recent
 
 
 def _compute_prompt_hash(text: str) -> str:
@@ -1523,9 +1748,15 @@ async def run_pipeline_agent_mcp_autonomous(
     # Dynamic prompt limit based on model context window
     model_id = str(selected_model or getattr(llm_gateway, "model", "") or "").strip()
     model_config = get_model_context_config(model_id)
-    gateway_limit = int(getattr(llm_gateway, "max_prompt_chars", 20000) or 20000)
-    # Use the smaller of gateway limit and model's safe prompt chars, then apply 90% buffer
-    prompt_char_limit = int(min(gateway_limit, model_config.safe_prompt_chars) * 0.9)
+    gateway_limit = int(getattr(llm_gateway, "max_prompt_chars", 0) or 0)
+    if gateway_limit > 0:
+        # Explicit cap set via LLM_MAX_PROMPT_CHARS — honour it
+        prompt_char_limit = int(min(gateway_limit, model_config.safe_prompt_chars) * 0.9)
+    else:
+        # Auto-detect: use model's full safe context minus system prompt overhead
+        system_chars = len(system_prompt)
+        prompt_char_limit = int((model_config.safe_prompt_chars - system_chars) * 0.85)
+    prompt_budget = PromptBudget(total_chars=prompt_char_limit)
 
     async def _execute_tool_call(*, tool_name: str, args: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -2403,9 +2634,20 @@ async def run_pipeline_agent_mcp_autonomous(
             executed_tools.append(tool_name)
             state.prompt_items.append(stable_json_dumps({"type": "tool_call", "step": step_idx + 1, "tool": tool_name, "args": args}))
             observation = await _execute_tool_call(tool_name=tool_name, args=args)
-            state.prompt_items.append(
-                stable_json_dumps({"type": "tool_output", "step": step_idx + 1, "tool": tool_name, "output": observation})
-            )
+            # Enterprise context: extract knowledge, summarize, deduplicate
+            if isinstance(observation, dict):
+                _extract_knowledge(tool_name, observation, state.knowledge_ledger)
+            dup_step = _deduplicate_tool_call(state, tool_name, args, step_idx)
+            if dup_step is not None:
+                state.prompt_items.append(
+                    stable_json_dumps({"type": "tool_output_ref", "step": step_idx + 1, "tool": tool_name,
+                                       "ref_step": dup_step, "note": "Same as previous call"})
+                )
+            else:
+                summarized = _summarize_tool_output(tool_name, observation) if isinstance(observation, dict) else observation
+                state.prompt_items.append(
+                    stable_json_dumps({"type": "tool_output", "step": step_idx + 1, "tool": tool_name, "output": summarized})
+                )
             if not isinstance(observation, dict):
                 stop_reason = "invalid_observation"
                 break
@@ -2807,6 +3049,16 @@ async def run_pipeline_agent_streaming(
     allowed_tools = list(_PIPELINE_AGENT_ALLOWED_TOOLS)
     system_prompt = _build_system_prompt(allowed_tools=allowed_tools)
 
+    # Model-aware prompt budget (same logic as non-streaming)
+    model_id = str(selected_model or getattr(llm_gateway, "model", "") or "").strip()
+    _model_config = get_model_context_config(model_id)
+    _gateway_limit = int(getattr(llm_gateway, "max_prompt_chars", 0) or 0)
+    if _gateway_limit > 0:
+        _prompt_char_limit = int(min(_gateway_limit, _model_config.safe_prompt_chars) * 0.9)
+    else:
+        _prompt_char_limit = int((_model_config.safe_prompt_chars - len(system_prompt)) * 0.85)
+    prompt_budget = PromptBudget(total_chars=_prompt_char_limit)
+
     # 메인 루프
     for step_idx in range(max_steps):
         # 생각 중 이벤트 - 사용자에게 진행 상황 표시
@@ -2834,7 +3086,7 @@ async def run_pipeline_agent_streaming(
             answers=answers,
             planner_hints=planner_hints,
             task_spec=task_spec,
-            target_chars=50000,
+            budget=prompt_budget,
         )
 
         # LLM 호출 (JSON 스키마 검증 포함)
@@ -3269,11 +3521,16 @@ async def run_pipeline_agent_streaming(
                 )
                 break
 
-        # 프롬프트에 관찰 결과 추가
+        # 프롬프트에 관찰 결과 추가 (enterprise: extract + summarize)
+        if isinstance(state.last_observation, dict):
+            _extract_knowledge(tool_name, state.last_observation, state.knowledge_ledger)
+            summarized_obs = _summarize_tool_output(tool_name, state.last_observation)
+        else:
+            summarized_obs = state.last_observation
         state.prompt_items.append(stable_json_dumps({
             "type": "tool_output",
             "step": step_idx + 1,
-            "output": state.last_observation,
+            "output": summarized_obs,
         }))
 
     # 루프 종료 (최대 스텝 도달)

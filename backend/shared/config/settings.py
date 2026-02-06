@@ -613,7 +613,7 @@ class LLMSettings(BaseSettings):
 
     cache_enabled: bool = Field(default=True, description="Enable Redis cache (LLM_CACHE_ENABLED)")
     cache_ttl_seconds: int = Field(default=3600, description="Cache TTL seconds (LLM_CACHE_TTL_SECONDS)")
-    max_prompt_chars: int = Field(default=20000, description="Prompt size cap chars (LLM_MAX_PROMPT_CHARS)")
+    max_prompt_chars: int = Field(default=0, description="Prompt size cap chars; 0=auto-detect from model context window (LLM_MAX_PROMPT_CHARS)")
 
     retry_max_attempts: int = Field(default=2, description="Max retry attempts (LLM_RETRY_MAX_ATTEMPTS)")
     retry_base_delay_seconds: float = Field(default=0.5, description="Retry base delay seconds (LLM_RETRY_BASE_DELAY_SECONDS)")

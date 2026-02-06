@@ -57,6 +57,37 @@ MODEL_CONTEXT_DEFAULTS: Dict[str, ModelContextConfig] = {
     "gemini-2": ModelContextConfig(max_context_tokens=1000000, max_output_tokens=8192),
 }
 
+@dataclass(frozen=True)
+class PromptBudget:
+    """Sectioned budget allocation for agent prompt context.
+
+    Divides available prompt space into four sections so that compression
+    can be applied independently per section rather than globally.
+    """
+
+    total_chars: int
+
+    @property
+    def working_state(self) -> int:
+        """Plan, analysis summaries, ontology state (15%)."""
+        return int(self.total_chars * 0.15)
+
+    @property
+    def knowledge_ledger(self) -> int:
+        """Persistent facts extracted from tool results (15%)."""
+        return int(self.total_chars * 0.15)
+
+    @property
+    def tool_history(self) -> int:
+        """Historical tool calls and observations (30%)."""
+        return int(self.total_chars * 0.30)
+
+    @property
+    def recent_context(self) -> int:
+        """Last N items — must not be compressed (40%)."""
+        return int(self.total_chars * 0.40)
+
+
 # Conservative default for unknown models
 DEFAULT_CONFIG = ModelContextConfig(
     max_context_tokens=8000,
