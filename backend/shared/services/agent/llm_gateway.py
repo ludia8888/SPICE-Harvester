@@ -426,7 +426,7 @@ class LLMGateway:
 
         self.enable_cache = bool(getattr(llm, "cache_enabled", True))
         self.cache_ttl_s = int(getattr(llm, "cache_ttl_seconds", 3600) or 3600)
-        self.max_prompt_chars = int(getattr(llm, "max_prompt_chars", 20000) or 20000)
+        self.max_prompt_chars = int(getattr(llm, "max_prompt_chars", 0) or 0)
 
         self.retry_max_attempts = int(getattr(llm, "retry_max_attempts", 2) or 2)
         self.retry_base_delay_s = float(getattr(llm, "retry_base_delay_seconds", 0.5) or 0.5)
@@ -1059,9 +1059,10 @@ class LLMGateway:
         temperature = self.temperature if temperature is None else float(temperature)
         max_tokens = self.max_tokens if max_tokens is None else int(max_tokens)
 
-        # Hard safety caps
-        system_prompt = mask_pii_text(system_prompt, max_chars=self.max_prompt_chars)
-        user_prompt = mask_pii_text(user_prompt, max_chars=self.max_prompt_chars)
+        # Hard safety caps (0 = no truncation, auto-detect in agent loop)
+        pii_cap = self.max_prompt_chars if self.max_prompt_chars > 0 else None
+        system_prompt = mask_pii_text(system_prompt, max_chars=pii_cap)
+        user_prompt = mask_pii_text(user_prompt, max_chars=pii_cap)
 
         native_flag = self.enable_native_tool_calling if use_native_tool_calling is None else bool(use_native_tool_calling)
         prompt_obj = {

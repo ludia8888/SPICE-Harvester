@@ -3132,6 +3132,9 @@ async def run_pipeline_agent_streaming(
     prompt_budget = PromptBudget(total_chars=_prompt_char_limit)
 
     # 메인 루프
+    _consecutive_dup_steps = 0  # Track steps where ALL tool calls were duplicates
+    _MAX_CONSECUTIVE_DUP_STEPS = 3  # Force progress after this many all-dup steps
+
     for step_idx in range(max_steps):
         # 생각 중 이벤트 - 사용자에게 진행 상황 표시
         thinking_messages = [
@@ -3340,12 +3343,48 @@ async def run_pipeline_agent_streaming(
         if not tool_calls:
             tool_calls = [AutonomousPipelineAgentToolCall(tool=str(decision.tool or ""), args=dict(decision.args or {}))]
 
+        _step_all_dup = True  # Track if ALL calls in this step were duplicates
         for call in tool_calls[:max_tool_calls_per_step]:
             tool_name = str(call.tool or "").strip()
             if not tool_name:
                 continue
 
             args = dict(call.args or {})
+
+            # ── Pre-execution dedup: skip tool call entirely if identical call already happened ──
+            _pre_dup = _deduplicate_tool_call(state, tool_name, args, step_idx)
+            if _pre_dup is not None:
+                state.prompt_items.append(
+                    stable_json_dumps({"type": "tool_output_ref", "step": step_idx + 1, "tool": tool_name,
+                                       "ref_step": _pre_dup, "note": "Duplicate call skipped — see previous result"})
+                )
+                yield StreamEvent(
+                    event_type="tool_end",
+                    data={
+                        "run_id": run_id,
+                        "step": step_idx + 1,
+                        "tool": tool_name,
+                        "success": True,
+                        "error": None,
+                        "observation": {"note": f"Duplicate of step {_pre_dup + 1}, skipped"},
+                    }
+                )
+                continue
+            _step_all_dup = False  # At least one non-dup call in this step
+
+            # ── Consecutive dup-step guard ──
+            # If too many consecutive steps had ALL duplicate calls, inject strong nudge
+            if _consecutive_dup_steps >= _MAX_CONSECUTIVE_DUP_STEPS:
+                state.prompt_items.append(stable_json_dumps({
+                    "type": "system_hint",
+                    "message": (
+                        "⚠️ You have been repeating the same tool calls. All data has already been explored. "
+                        "You MUST now either: (1) action='clarify' to ask the user questions, "
+                        "or (2) action='call_tool' with a NEW tool you haven't called yet, "
+                        "or (3) action='finish' with a plan. Do NOT repeat dataset_sample/dataset_profile."
+                    ),
+                }))
+                _consecutive_dup_steps = 0  # Reset after nudge
 
             # 도구 시작 이벤트 - LLM reasoning 포함
             yield StreamEvent(
@@ -3457,6 +3496,11 @@ async def run_pipeline_agent_streaming(
 
                 else:
                     # 기타 도구 (dataset_*, debug_*, detect_foreign_keys, create_link_type_from_fk, etc.)
+                    # Auto-inject db_name/branch for tools that require them
+                    if "db_name" not in args or not args.get("db_name"):
+                        args["db_name"] = state.db_name
+                    if "branch" not in args or not args.get("branch"):
+                        args["branch"] = state.branch or "main"
                     payload = await _call_pipeline_tool(tool_name, args)
                     observation = dict(payload) if isinstance(payload, dict) else {"result": payload}
 
@@ -3580,6 +3624,14 @@ async def run_pipeline_agent_streaming(
                 # NOTE: Do NOT abort the batch on a single tool error. The LLM may recover within the same
                 # step (batched tool calls) or in the next step. Errors are surfaced via tool_end events.
 
+                # ── Per-tool: extract knowledge + summarize (dedup already handled pre-execution) ──
+                if isinstance(observation, dict):
+                    _extract_knowledge(tool_name, observation, state.knowledge_ledger)
+                summarized = _summarize_tool_output(tool_name, observation) if isinstance(observation, dict) else observation
+                state.prompt_items.append(
+                    stable_json_dumps({"type": "tool_output", "step": step_idx + 1, "tool": tool_name, "output": summarized})
+                )
+
             except Exception as exc:
                 yield StreamEvent(
                     event_type="tool_end",
@@ -3593,17 +3645,11 @@ async def run_pipeline_agent_streaming(
                 )
                 break
 
-        # 프롬프트에 관찰 결과 추가 (enterprise: extract + summarize)
-        if isinstance(state.last_observation, dict):
-            _extract_knowledge(tool_name, state.last_observation, state.knowledge_ledger)
-            summarized_obs = _summarize_tool_output(tool_name, state.last_observation)
+        # ── Track consecutive all-duplicate steps ──
+        if _step_all_dup:
+            _consecutive_dup_steps += 1
         else:
-            summarized_obs = state.last_observation
-        state.prompt_items.append(stable_json_dumps({
-            "type": "tool_output",
-            "step": step_idx + 1,
-            "output": summarized_obs,
-        }))
+            _consecutive_dup_steps = 0
 
     # 루프 종료 (최대 스텝 도달)
     if isinstance(state.plan_obj, dict):

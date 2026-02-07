@@ -21,9 +21,26 @@ class PipelineClarificationQuestion(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def _accept_key_as_id(cls, data: Any) -> Any:
-        """LLM sometimes returns ``key`` instead of ``id``."""
-        if isinstance(data, dict) and "key" in data and "id" not in data:
-            data["id"] = data.pop("key")
+        """LLM sometimes returns ``key`` or ``name`` instead of ``id``,
+        and ``description`` instead of ``question``."""
+        if not isinstance(data, dict):
+            return data
+        # Alias: key / name → id
+        if "id" not in data:
+            if "key" in data:
+                data["id"] = data.pop("key")
+            elif "name" in data:
+                data["id"] = data.pop("name")
+        # Alias: description / text / label → question
+        if "question" not in data:
+            for alt in ("description", "text", "label"):
+                if alt in data:
+                    data["question"] = data.pop(alt)
+                    break
+        # Fallback: generate id from question hash if still missing
+        if "id" not in data and "question" in data:
+            import hashlib
+            data["id"] = hashlib.md5(str(data["question"]).encode()).hexdigest()[:12]
         return data
 
 
