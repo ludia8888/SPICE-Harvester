@@ -26,6 +26,7 @@ class PipelineOutputBinding(BaseModel):
 class PipelineAgentRunRequest(BaseModel):
     goal: str = Field(..., min_length=1, max_length=2000)
     data_scope: PipelinePlanDataScope
+    plan_id: Optional[str] = Field(default=None, max_length=200, description="Resume from a previous agent run")
     answers: Optional[Dict[str, Any]] = Field(default=None)
     planner_hints: Optional[Dict[str, Any]] = Field(default=None)
     task_spec: Optional[Dict[str, Any]] = Field(default=None)

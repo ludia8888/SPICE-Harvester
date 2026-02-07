@@ -80,6 +80,7 @@ async def create_pipeline_run(
     payload = await run_pipeline_agent_mcp_autonomous(
         goal=str(body.goal or "").strip(),
         data_scope=data_scope,
+        resume_plan_id=str(body.plan_id).strip() if body.plan_id else None,
         answers=body.answers if isinstance(body.answers, dict) else None,
         planner_hints=body.planner_hints if isinstance(body.planner_hints, dict) else None,
         task_spec=body.task_spec if isinstance(body.task_spec, dict) else None,
@@ -122,13 +123,14 @@ async def create_pipeline_run(
             logger.warning("Pipeline agent preview failed plan_id=%s err=%s", plan_id, exc)
 
     status_value = str(payload.get("status") or "failed").strip().lower()
+    agent_message = str(payload.get("message") or "").strip()
     if status_value == "clarification_required":
-        return ApiResponse.warning(message="Pipeline agent needs clarification", data=payload)
+        return ApiResponse.warning(message=agent_message or "Pipeline agent needs clarification", data=payload)
     if status_value == "partial":
-        return ApiResponse.partial(message="Pipeline agent completed with warnings", data=payload)
+        return ApiResponse.partial(message=agent_message or "Pipeline agent completed with warnings", data=payload)
     if status_value != "success":
-        return ApiResponse.warning(message="Pipeline agent failed", data=payload)
-    return ApiResponse.success(message="Pipeline agent completed", data=payload)
+        return ApiResponse.warning(message=agent_message or "Pipeline agent failed", data=payload)
+    return ApiResponse.success(message=agent_message or "Pipeline agent completed", data=payload)
 
 
 @router.post("/pipeline-runs/stream")
@@ -178,6 +180,7 @@ async def stream_pipeline_run(
             async for event in run_pipeline_agent_streaming(
                 goal=str(body.goal or "").strip(),
                 data_scope=data_scope,
+                resume_plan_id=str(body.plan_id).strip() if body.plan_id else None,
                 answers=body.answers if isinstance(body.answers, dict) else None,
                 planner_hints=body.planner_hints if isinstance(body.planner_hints, dict) else None,
                 task_spec=body.task_spec if isinstance(body.task_spec, dict) else None,

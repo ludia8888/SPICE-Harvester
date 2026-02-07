@@ -68,6 +68,7 @@ dependencies = [
     "numpy==1.24.3",          # 수치 계산
     "openpyxl==3.1.2",        # Excel 파일 처리
     "xlrd==2.0.1",            # Excel .xls 지원
+    "duckdb>=1.0.0",          # 에이전트 ad-hoc SQL 쿼리 (in-process, lightweight)
     
     # 🔍 Validation - CONDITIONAL IMPORT RESOLVED
     "email-validator==2.0.0",  # ✅ 이메일 검증 - 조건부 임포트 제거됨

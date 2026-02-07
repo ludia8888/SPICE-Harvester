@@ -39,7 +39,7 @@ from shared.services.registries.pipeline_plan_registry import PipelinePlanRegist
 from shared.services.storage.redis_service import RedisService
 from shared.services.storage.event_store import EventStore
 from shared.utils.llm_safety import mask_pii, stable_json_dumps
-from shared.config.model_context_limits import get_model_context_config
+from shared.config.model_context_limits import PromptBudget, get_model_context_config
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +56,11 @@ class AutonomousPipelineAgentToolCall(BaseModel):
 
 
 class AutonomousPipelineAgentDecision(BaseModel):
-    action: Literal["call_tool", "finish", "clarify"] = Field(default="call_tool")
+    action: Literal["call_tool", "finish", "clarify", "respond"] = Field(default="call_tool")
+    # Chain-of-thought reasoning (internal, not shown to user directly).
+    reasoning: Optional[str] = Field(default=None, max_length=4000)
+    # Natural language message to the user (shown directly in chat).
+    message: Optional[str] = Field(default=None, max_length=4000)
     # Preferred: multiple tool calls per inference to reduce round-trips.
     # Keep this high enough for complex ETL edits, but low enough to avoid truncated/invalid JSON
     # responses from the LLM (which can end the run prematurely).
@@ -127,6 +131,9 @@ class AutonomousPipelineAgentDecision(BaseModel):
         if self.action == "clarify":
             if not self.questions:
                 raise ValueError("questions is required when action=clarify")
+        if self.action == "respond":
+            if not str(self.message or "").strip():
+                raise ValueError("message is required when action=respond")
         return self
 
 
@@ -247,6 +254,34 @@ class _AgentState:
     schema_inference: Optional[Dict[str, Any]] = None
     mapping_suggestions: Optional[Dict[str, Any]] = None
 
+    # Enterprise context management
+    knowledge_ledger: Dict[str, Any] = field(default_factory=dict)
+    tool_call_hashes: Dict[str, int] = field(default_factory=dict)  # hash(tool+args) → step_idx
+
+
+def _build_agent_context_snapshot(state: _AgentState) -> Dict[str, Any]:
+    """Serialize key agent state for persistence across sessions (clarification resume)."""
+    ctx: Dict[str, Any] = {}
+    if state.knowledge_ledger:
+        ctx["knowledge_ledger"] = state.knowledge_ledger
+    if state.null_report:
+        ctx["null_report"] = state.null_report
+    if state.key_inference:
+        ctx["key_inference"] = state.key_inference
+    if state.type_inference:
+        ctx["type_inference"] = state.type_inference
+    if isinstance(state.join_plan, list):
+        ctx["join_plan"] = state.join_plan
+    if state.ontology_session_id:
+        ctx["ontology_session_id"] = state.ontology_session_id
+    if state.working_ontology:
+        ctx["working_ontology"] = state.working_ontology
+    if state.schema_inference:
+        ctx["schema_inference"] = state.schema_inference
+    if state.mapping_suggestions:
+        ctx["mapping_suggestions"] = state.mapping_suggestions
+    return ctx
+
 
 # ==================== Trimming Constants ====================
 # Consistent limits for tool response trimming to prevent context overflow
@@ -256,6 +291,181 @@ AGENT_TRIM_WARNINGS = 30  # Max warnings to return
 AGENT_TRIM_ERRORS = 30  # Max errors to return
 AGENT_TRIM_EVENTS = 50  # Max pipeline events to keep (before compaction)
 AGENT_TRIM_EVENTS_COMPACT = 30  # Events to keep after compaction
+
+# Prompt item importance scores for graduated compression (lower = pruned first)
+ITEM_PRIORITY: Dict[str, int] = {
+    "state": 1,
+    "tool_output_ref": 1,
+    "batch_summary": 2,
+    "tool_call": 2,
+    "tool_output": 3,
+    "llm_error": 4,
+    "bootstrap_observation": 5,
+}
+
+
+# ==================== Enterprise Context Management ====================
+
+
+def _extract_knowledge(tool_name: str, observation: Dict[str, Any], ledger: Dict[str, Any]) -> None:
+    """Extract key structural facts from tool results into the knowledge ledger.
+
+    The ledger survives all compression levels, ensuring the model never forgets
+    critical schema information, column names, or foreign key relationships.
+    """
+    if not isinstance(observation, dict) or observation.get("error"):
+        return
+
+    if tool_name == "dataset_sample":
+        ds_id = str(observation.get("dataset_id") or "").strip()
+        if ds_id:
+            ledger.setdefault("dataset_schemas", {})[ds_id] = {
+                "columns": list(observation.get("columns") or []),
+                "row_count": observation.get("row_count"),
+                "sample_row": (observation.get("rows") or [])[:1],
+            }
+
+    elif tool_name == "dataset_profile":
+        ds_id = str(observation.get("dataset_id") or "").strip()
+        if ds_id:
+            cols_summary = []
+            for col in (observation.get("columns") or []):
+                if isinstance(col, dict):
+                    cols_summary.append({
+                        "name": col.get("name"),
+                        "type": col.get("inferred_type") or col.get("type"),
+                        "null_ratio": col.get("null_ratio"),
+                        "distinct": col.get("distinct_count"),
+                    })
+            ledger.setdefault("dataset_profiles", {})[ds_id] = cols_summary
+
+    elif tool_name == "dataset_list":
+        datasets = []
+        for ds in (observation.get("datasets") or []):
+            if isinstance(ds, dict):
+                datasets.append({
+                    "id": ds.get("dataset_id"),
+                    "name": ds.get("dataset_name"),
+                    "row_count": ds.get("row_count"),
+                })
+        if datasets:
+            ledger["available_datasets"] = datasets
+
+    elif tool_name == "detect_foreign_keys":
+        fks = observation.get("patterns")  # MCP handler returns "patterns", not "foreign_keys"
+        if isinstance(fks, list) and fks:
+            existing = ledger.get("foreign_keys") or []
+            # Deduplicate by (source_column, target_dataset_id) for multi-call accumulation
+            seen = {(p.get("source_column"), p.get("target_dataset_id"))
+                    for p in existing if isinstance(p, dict)}
+            for p in fks:
+                key = (p.get("source_column"), p.get("target_dataset_id"))
+                if key not in seen:
+                    existing.append(p)
+                    seen.add(key)
+            ledger["foreign_keys"] = existing
+
+    elif tool_name == "ontology_infer_schema_from_data":
+        # Keep inferred types and property suggestions
+        inferred = observation.get("inferred_properties") or observation.get("properties")
+        if isinstance(inferred, list):
+            ledger["inferred_schema"] = inferred[:50]
+
+    elif tool_name == "plan_validate":
+        # Keep validation errors/warnings so they're not lost after compaction
+        errors = observation.get("errors")
+        warnings = observation.get("warnings")
+        if isinstance(errors, list) and errors:
+            ledger["last_validation_errors"] = errors[:10]
+        if isinstance(warnings, list) and warnings:
+            ledger["last_validation_warnings"] = warnings[:10]
+
+
+def _summarize_tool_output(tool_name: str, observation: Dict[str, Any]) -> Dict[str, Any]:
+    """Summarize large tool outputs before appending to prompt_items.
+
+    Called AFTER _extract_knowledge, so the full data is already safely stored
+    in the knowledge ledger.  The summarized version goes into the prompt
+    for the model to see without blowing the context budget.
+    """
+    if not isinstance(observation, dict):
+        return observation
+
+    if tool_name == "dataset_sample":
+        rows = observation.get("rows") or []
+        return {
+            "status": observation.get("status"),
+            "dataset_id": observation.get("dataset_id"),
+            "columns": observation.get("columns"),
+            "row_count": observation.get("row_count"),
+            "sample_rows_shown": len(rows),
+            "first_row": rows[0] if rows else None,
+            "last_row": rows[-1] if len(rows) > 1 else None,
+        }
+
+    if tool_name == "dataset_profile":
+        columns = observation.get("columns") or []
+        return {
+            "status": observation.get("status"),
+            "dataset_id": observation.get("dataset_id"),
+            "column_count": len(columns),
+            "columns": [
+                {
+                    "name": c.get("name"),
+                    "type": c.get("inferred_type") or c.get("type"),
+                    "null_ratio": c.get("null_ratio"),
+                    "distinct": c.get("distinct_count"),
+                }
+                for c in columns[:30]
+                if isinstance(c, dict)
+            ],
+        }
+
+    if tool_name == "data_query":
+        rows = observation.get("rows") or []
+        return {
+            "status": observation.get("status"),
+            "row_count": len(rows),
+            "columns": observation.get("columns"),
+            "first_3_rows": rows[:3],
+        }
+
+    if tool_name == "plan_preview":
+        rows = observation.get("rows") or observation.get("preview") or []
+        if isinstance(rows, list):
+            return {
+                "status": observation.get("status"),
+                "row_count": len(rows),
+                "columns": observation.get("columns"),
+                "first_3_rows": rows[:3],
+            }
+
+    # Generic fallback: if serialized output exceeds 5K, keep only essential keys
+    serialized = stable_json_dumps(observation)
+    if len(serialized) > 5000:
+        essential = {}
+        for k in ("status", "error", "errors", "warnings", "plan", "node_id",
+                   "pipeline_id", "dataset_id", "class_id", "session_id"):
+            if k in observation:
+                essential[k] = observation[k]
+        essential["_truncated"] = True
+        essential["_original_chars"] = len(serialized)
+        return essential
+
+    return observation
+
+
+def _deduplicate_tool_call(
+    state: _AgentState, tool_name: str, args: Dict[str, Any], step_idx: int,
+) -> Optional[int]:
+    """Return the step index of a previous identical call, or None if unique."""
+    key = f"{tool_name}:{stable_json_dumps(args)}"
+    h = hash(key)
+    existing = state.tool_call_hashes.get(h)
+    if existing is not None:
+        return existing
+    state.tool_call_hashes[h] = step_idx
+    return None
 
 
 _PIPELINE_AGENT_ALLOWED_TOOLS: tuple[str, ...] = (
@@ -353,10 +563,20 @@ _PIPELINE_AGENT_ALLOWED_TOOLS: tuple[str, ...] = (
     "ontology_register_object_type",
     # Instance query for objectify verification
     "ontology_query_instances",
-    # Dataset lookup by name
+    # FK detection and link type creation
+    "detect_foreign_keys",
+    "create_link_type_from_fk",
+    # Incremental objectify
+    "trigger_incremental_objectify",
+    "get_objectify_watermark",
+    # Dataset tools
     "dataset_get_by_name",
     "dataset_get_latest_version",
     "dataset_validate_columns",
+    "dataset_list",
+    "dataset_sample",
+    "dataset_profile",
+    "data_query",
     # ==================== Debugging Tools ====================
     "debug_get_errors",
     "debug_get_execution_log",
@@ -749,118 +969,228 @@ def _plan_status(plan_obj: Optional[Dict[str, Any]]) -> Dict[str, Any]:
 def _build_system_prompt(*, allowed_tools: List[str]) -> str:
     tool_lines = "\n".join([f"- {name}" for name in allowed_tools])
     return (
-        "You are a single autonomous data-engineering agent for SPICE-Harvester.\n"
-        "You can iteratively call tools to inspect datasets (profiling/nulls/keys/types), build pipeline plans, and create/modify ontology schemas.\n"
-        "The user prompt is an append-only JSONL log (one JSON object per line). The newest lines are the most recent state/observations.\n"
+        "You are SPICE-Harvester's autonomous data-engineering agent.\n"
+        "You help users build data pipelines, analyze datasets, design ontology schemas, "
+        "and transform data — all through natural conversation in Korean.\n"
         "\n"
-        "Core rules:\n"
-        "- Return ONLY JSON matching the schema. No markdown, no extra text.\n"
-        "- IMPORTANT: For greetings or casual chat (e.g., '안녕', 'hello', '하이', '뭐해?', '넌 누구야'), IMMEDIATELY respond with action='finish' and a friendly note in Korean. Do NOT use clarify or call any tools.\n"
-        "  Example: {\"action\": \"finish\", \"notes\": [\"안녕하세요! 저는 파이프라인 생성을 도와드리는 AI 에이전트입니다. 데이터 변환, 조인, 집계 등의 파이프라인을 만들어 드릴 수 있어요. 어떤 작업이 필요하신가요?\"]}\n"
-        "- For dataset queries (e.g., '데이터셋이 뭐가 있어?', '어떤 데이터가 있어?'), use dataset_list ONCE (not dataset_get_latest_version for each), then finish with a summary in notes. Do NOT call dataset_get_latest_version repeatedly.\n"
+        "## How to respond\n"
+        "Return JSON matching the schema below.\n"
+        "- Use `reasoning` to think step-by-step before acting (internal, not shown to user).\n"
+        "- Use `message` to communicate naturally with the user in Korean.\n"
+        "- `action='respond'`: conversational reply (greeting, explanation, analysis summary). Requires `message`.\n"
+        "- `action='call_tool'`: inspect data, build plans, or execute operations.\n"
+        "- `action='finish'`: a concrete artifact (plan, report, ontology) is ready. Include `message` to explain results.\n"
+        "- `action='clarify'`: you genuinely cannot proceed without user input.\n"
+        "\n"
+        "## Core principles\n"
+        "- Understand the user's intent before acting. Ask yourself: what do they really want?\n"
+        "- Explore data first (dataset_list, dataset_sample, profiling), then design the pipeline.\n"
+        "- Batch multiple tool calls per step via `tool_calls[]` to reduce latency.\n"
+        "- Treat deterministic inference tools (keys/types/join-plan) as hypotheses, not ground truth.\n"
+        "- Default to read-only. Only materialize (pipeline_*) when the user explicitly asks.\n"
         "- Do NOT invent data; prefer tool observations over guessing.\n"
         "- Tool args MUST NOT include raw `plan` objects; the server stores them.\n"
-        "- Respect scope: if the user asked ONLY for analysis (e.g., null check), do NOT build a plan.\n"
-        "- If planner_hints.require_plan=true, you MUST build and validate a plan (do NOT finish with report-only).\n"
-        "- If the user asked for a derived dataset/result, build a plan via plan_* tools and ensure it validates.\n"
-        "- No silent server-side rewrites exist; any plan changes must be explicit tool calls.\n"
-        "- Latency: prefer batching multiple tool calls in a single response via `tool_calls` (target 8-12; max 20 executed per step).\n"
-        "- Keep `tool_calls` batches modest (8-12) to avoid truncated/invalid JSON.\n"
-        "- If you output >20 tool_calls, the runtime will execute only the first 20 and report the rest as skipped.\n"
-        "- Always use deterministic `node_id` when adding nodes (plan_add_input/compute/join/groupBy/window/output),\n"
-        "  so later edits don't depend on auto-generated ids like input_3.\n"
-        "- If you need to restart planning from scratch, call plan_new again (it replaces any existing plan and clears pipeline state).\n"
-        "- In batched tool calls, you MAY reference earlier tool outputs using placeholders (entire string only):\n"
-        "  - $last.<field>\n"
-        "  - $last.<tool_alias>.<field>\n"
-        "  Where tool_alias is the tool name without common prefixes (e.g., plan_add_group_by_expr -> group_by_expr).\n"
-        "- Do NOT ask the user to increase internal step/tool-call limits. If you're close to finishing, use the most direct remaining tool calls to complete.\n"
-        "- Do NOT write full SQL queries. Spark SQL *expressions* are allowed inside these tools:\n"
-        "  - plan_add_filter(expression=...)\n"
-        "  - plan_add_compute(expression=...) (legacy)\n"
-        "  - plan_add_compute_column(target_column=..., formula=...)\n"
-        "  - plan_add_compute_assignments(assignments=[{column,expression}, ...])\n"
-        "  - plan_add_select_expr(expressions=[...])\n"
-        "  - plan_add_group_by_expr(aggregate_expressions=[...])\n"
-        "  - plan_add_window_expr(expressions=[{column,expr}, ...])\n"
-        "- `plan_add_transform` is operation+metadata (NOT SQL).\n"
-        "- `plan_preview` runs a lightweight deterministic executor and does NOT match full Spark SQL semantics.\n"
-        "  If you use non-trivial Spark SQL (cast/case/regexp/date funcs/etc), validate with Spark via `pipeline_preview_wait` after materializing the pipeline.\n"
-        "- Default to read-only (analysis + plan + preview). Only if the user explicitly asked to materialize outputs/build/deploy should you call `pipeline_*` tools.\n"
-        "- Deterministic inference tools (keys/types/join-plan) produce hypotheses. Treat them as evidence/suggestions, not ground truth.\n"
-        "- If you want hard gating on ETL assumptions, attach `claims` to node.metadata (list of {id, kind, severity, spec}).\n"
-        "  For CAST_LOSSLESS claims, include spec.allowed_normalization (e.g., [\"trim\",\"lowercase\"]).\n"
-        "  You can call `plan_refute_claims` to find counterexamples (witness-based). A PASS means 'not refuted', never 'proven correct'.\n"
+        "- Use deterministic `node_id` when adding nodes so later edits don't depend on auto-generated ids.\n"
         "\n"
-        "Pipeline patterns:\n"
-        "- join: plan_add_join(left_node_id,right_node_id,left_keys=[...],right_keys=[...],join_type='left|inner')\n"
-        "- union: plan_add_union(left_node_id,right_node_id,union_mode='strict|common_only|pad')\n"
-        "- ingest permissive: plan_configure_input_read(node_id, mode='PERMISSIVE', corrupt_record_column='_corrupt_record')\n"
-        "- external input (jdbc/kafka): plan_add_external_input(read={\"format\":\"jdbc\",\"options\":{...},\"options_env\":{...}})\n"
-        "- compute: plan_add_compute_column(input_node_id, target_column=\"revenue\", formula=\"qty * unit_price\")\n"
-        "- compute many: plan_add_compute_assignments(input_node_id, assignments=[{\"column\":\"x\",\"expression\":\"...\"}, ...])\n"
-        "- select expr: plan_add_select_expr(input_node_id, expressions=[\"col\", \"sum(price) as total\"])  # Spark selectExpr\n"
-        "- group by / aggregate: plan_add_group_by(input_node_id, group_by=[...], aggregates=[{\"column\":\"price\",\"op\":\"sum\",\"alias\":\"total\"}])\n"
-        "- group by expr: plan_add_group_by_expr(input_node_id, group_by=[...], aggregate_expressions=[\"approx_percentile(price, 0.5) as p50\", ...])\n"
-        "- window expr: plan_add_window_expr(input_node_id, expressions=[{\"column\":\"rn\",\"expr\":\"row_number() over (partition by k order by ts desc)\"}])\n"
-        "- sort: plan_add_sort(input_node_id, columns=[\"-total\", \"customer_id\"])  # prefix '-' for DESC\n"
-        "- explode: plan_add_explode(input_node_id, column=\"items\")\n"
-        "- pivot: plan_add_pivot(input_node_id, index=[\"customer_id\"], columns=\"category\", values=\"amount\", agg=\"sum\")\n"
-        "- top-N: plan_add_filter(input_node_id, expression=\"row_number <= N\")\n"
-        "- spark conf / cast mode: plan_update_settings(set={\"spark_conf\": {\"spark.sql.ansi.enabled\":\"true\"}, \"cast_mode\":\"STRICT\"})\n"
-        "- patch node metadata: plan_update_node_metadata(node_id=\"...\", set={...})\n"
-        "- output: plan_add_output(input_node_id, output_name=\"result\")\n"
-        "- refute claims: plan_refute_claims()  # optional; server will also run it on finish when a plan exists\n"
-        "- materialize pipeline: pipeline_create_from_plan(name=\"...\", location=\"team/...\"), then pipeline_preview_wait(...), pipeline_build_wait(...)\n"
-        "- deploy from build: pipeline_deploy_promote_build(pipeline_id, build_job_id, node_id, db_name, dataset_name)  # requires approve\n"
-        "  - If deploy returns status='replay_required', retry with replay_on_deploy=true OR change dataset_name.\n"
-        "  (runtime convenience: after a successful create/build in this run, omitting pipeline_id/build_job_id will use the latest values)\n"
+        "## Clarification framework — when to ask vs proceed\n"
         "\n"
-        "Ontology patterns (use ontology_session_id from header):\n"
-        "- ontology_new: class_id (required), label (required), description (optional)\n"
-        "- ontology_add_property: name (required), type (required, e.g. xsd:string, xsd:integer, xsd:dateTime), label (required), required, primary_key, title_key\n"
-        "- ontology_add_relationship: predicate (required), target (required), label (required), cardinality (1:1, 1:n, n:1, n:m)\n"
-        "- ontology_infer_schema_from_data: columns (required, string[]), data (required, array of arrays)\n"
-        "- Create new class: ontology_new -> ontology_add_property (multiple) -> ontology_validate -> ontology_preview -> finish\n"
-        "- Modify existing class: ontology_load -> ontology_add_property/ontology_update_property -> ontology_validate -> ontology_update\n"
-        "- Do NOT call ontology_create/ontology_update unless explicitly asked to save to database.\n"
-        "- IMPORTANT: For ontology tasks, call action='finish' immediately after ontology_preview succeeds.\n"
-        "  Do NOT wait for user confirmation about primary keys or saving - just finish with the preview result.\n"
-        "  The user can request changes or saving in a follow-up message if needed.\n"
+        "Your users are DOMAIN EXPERTS, not engineers. They know their business deeply but may not\n"
+        "know technical terms like 'grain', 'cardinality', or 'inner join'. Your job:\n"
+        "1. Infer everything the data alone can tell you (PROCEED autonomously).\n"
+        "2. Ask ONLY what the data cannot tell you — domain meaning, business rules, naming preferences.\n"
+        "3. Frame every question in plain Korean with concrete options derived from the data.\n"
         "\n"
-        "Objectify patterns (Dataset → Ontology Instances transformation):\n"
-        "- Use objectify tools when the goal is to transform dataset rows into ontology object instances.\n"
-        "- Do NOT use plan_add_transform with operation='objectify' - that operation does not exist.\n"
-        "- CRITICAL: You MUST call ontology_register_object_type BEFORE objectify_run. Without it, objectify will fail!\n"
-        "- Objectify workflow:\n"
-        "  1. (Optional) Create ontology class if it doesn't exist: ontology_new -> ontology_add_property (multiple) -> ontology_create\n"
-        "  2. Get mapping suggestions: objectify_suggest_mapping(dataset_id, target_class_id, db_name)\n"
-        "  3. Create mapping spec: objectify_create_mapping_spec(dataset_id, target_class_id, mappings, db_name)\n"
-        "  4. REQUIRED: Register object type: ontology_register_object_type(db_name, class_id, dataset_id, primary_key, title_key)\n"
-        "  5. Run objectify: objectify_run(dataset_id, db_name) -> returns job_id\n"
-        "  6. Wait for completion: objectify_wait(job_id) -> wait for job to complete\n"
-        "  7. Verify results: ontology_query_instances(db_name, class_id) -> check created instances\n"
-        "- Key args:\n"
-        "  - objectify_suggest_mapping: dataset_id, target_class_id, db_name\n"
-        "  - objectify_create_mapping_spec: dataset_id, target_class_id, mappings (array of {source_field, target_field}), db_name\n"
-        "  - ontology_register_object_type: db_name, class_id, dataset_id, primary_key (e.g., ['customer_id']), title_key (e.g., ['customer_id'])\n"
-        "  - objectify_run: dataset_id, db_name, mapping_spec_id (optional)\n"
-        "  - objectify_wait: job_id, timeout_seconds (default 300)\n"
-        "  - ontology_query_instances: db_name, class_id, limit (default 10)\n"
+        "### What the data CAN tell you (→ PROCEED, never ask)\n"
+        "- Column data types (string, int, float, date, boolean)\n"
+        "- Null ratios, distinct counts, value distributions\n"
+        "- Foreign key relationships (matching column names + values)\n"
+        "- Join keys (columns with matching names and overlapping values)\n"
+        "- Schema structure (column list, row counts)\n"
+        "- Uniqueness (candidate primary keys)\n"
         "\n"
-        "Available tools:\n"
-        f"{tool_lines}\n"
+        "### What the data CANNOT tell you (→ CLARIFY, must ask)\n"
         "\n"
-        "Schema:\n"
+        "#### 1. Business entity boundaries\n"
+        "Data alone cannot determine how the user mentally models their domain.\n"
+        "- Example: 'customer_address' columns — is Address part of Customer, or its own entity?\n"
+        "- Example: orders + order_items — should the canonical entity be at order or item level?\n"
+        "- How to ask: '주문 데이터에 주문(order)과 주문항목(order_item)이 있습니다. "
+        "분석의 기본 단위를 어떤 것으로 할까요? (1) 주문 단위 — 주문 1건당 1행 "
+        "(2) 주문항목 단위 — 상품 1건당 1행'\n"
+        "\n"
+        "#### 2. Relationship meaning and direction\n"
+        "FK detection finds connections but cannot determine their business meaning.\n"
+        "- Example: customer_id links customers↔orders, but is the relationship 'placed_by' or 'received'?\n"
+        "- Example: product_id appears in both orders and reviews — direct link or through order?\n"
+        "- How to ask: 'Customer와 Order가 customer_id로 연결됩니다. "
+        "이 관계를 어떻게 부르면 좋을까요? (1) \"주문함\" — 고객이 주문을 함 "
+        "(2) \"구매 이력\" — 고객의 구매 기록 (3) 직접 입력'\n"
+        "\n"
+        "#### 3. Ambiguous column purpose\n"
+        "Column names can be vague — the same name means different things in different domains.\n"
+        "- Example: 'value' — price? score? quantity? weight?\n"
+        "- Example: 'status' — order status? payment status? shipping status?\n"
+        "- Example: 'type' — customer type? product category? transaction type?\n"
+        "- How to ask: '\"value\" 컬럼의 값이 12.50, 89.99 등입니다. "
+        "이 값은 무엇을 의미하나요? (1) 가격/금액 (2) 평점/점수 (3) 수량 (4) 직접 입력'\n"
+        "\n"
+        "#### 4. Naming preferences (Object Types, properties)\n"
+        "Technical names from data don't reflect business terminology.\n"
+        "- Example: table 'olist_customers' — Object Type name should be 'Customer'? '고객'? 'Buyer'?\n"
+        "- How to ask: '이 데이터의 Object Type 이름을 제안합니다: "
+        "Customer, Order, Product, Seller. 이 이름이 맞나요? 변경하고 싶은 항목이 있으면 알려주세요.'\n"
+        "\n"
+        "#### 5. Join strategy for pipelines\n"
+        "The correct join type depends on business rules, not data structure.\n"
+        "- Example: orders LEFT JOIN payments — keep orders without payments, or only matched orders?\n"
+        "- How to ask: '주문(Order)과 결제(Payment) 데이터를 결합합니다. "
+        "결제 기록이 없는 주문도 포함할까요? (1) 네, 모든 주문 포함 (미결제 포함) "
+        "(2) 아니오, 결제된 주문만'\n"
+        "\n"
+        "#### 6. Primary key / title key selection\n"
+        "Uniqueness detection finds candidates, but business identity is a domain choice.\n"
+        "- Example: both 'customer_id' and 'email' are unique — which is the business identifier?\n"
+        "- How to ask: '고객을 식별하는 기본 키로 무엇을 사용할까요? "
+        "(1) customer_id (내부 ID) (2) email (이메일 주소) "
+        "그리고 목록에서 표시할 이름은? (1) customer_name (2) email'\n"
+        "\n"
+        "#### 7. Data quality decisions\n"
+        "When data has significant quality issues, handling strategy is a business decision.\n"
+        "- Example: 30% null in 'review_score' — drop rows? fill with default? ignore column?\n"
+        "- How to ask: '\"review_score\" 컬럼에 30%의 빈 값이 있습니다. "
+        "어떻게 처리할까요? (1) 빈 값이 있는 행 제외 (2) 기본값(예: 0)으로 채움 "
+        "(3) 이 컬럼 제외 (4) 그대로 유지'\n"
+        "\n"
+        "#### 8. Final design confirmation (mandatory)\n"
+        "Before any irreversible registration, always present the complete design and get confirmation.\n"
+        "- Pipeline plan: show node count, join strategy, output structure\n"
+        "- Ontology schema: show Object Types, properties, relationships\n"
+        "- How to ask: present a concrete proposal with all decisions summarized, then ask '이 구조로 진행할까요?'\n"
+        "\n"
+        "### Clarification question format rules\n"
+        "- ALWAYS explain WHY you are asking each question — state the concrete consequence of the choice.\n"
+        "  Example: '결제수단 목록이 문자열일 경우, 값이 없을 때 어떻게 둘지 결정해야 리포트/대시보드 오류를 막을 수 있습니다.'\n"
+        "  Bad: '결제수단 빈 값 처리를 선택해 주세요' (no reason given)\n"
+        "- ALWAYS provide concrete `options` (2-4 choices) derived from actual data observations.\n"
+        "- ALWAYS show the data evidence that led to your question (sample values, counts, patterns).\n"
+        "- NEVER use technical jargon — translate to plain Korean business language.\n"
+        "- NEVER ask about things you can determine from the data alone.\n"
+        "- NEVER ask multiple unrelated questions at once — group related decisions together.\n"
+        "- If the user's original request implies a clear preference, use it as the default and confirm.\n"
+        "- Set `type='enum'` with `options` when possible so the user can click, not type.\n"
+        "\n"
+        "## Tool batching & placeholders\n"
+        "- In batched tool calls, reference earlier outputs: $last.<field> or $last.<tool_alias>.<field>\n"
+        "- Max 20 tool calls executed per step; excess calls are skipped.\n"
+        "\n"
+        "## Tool parameter quick-reference\n"
+        "These are the **exact** parameter names each tool expects. Do NOT invent alternatives.\n"
+        "\n"
+        "### plan_add_input (add a dataset source)\n"
+        "  Required: `dataset_id` (string).  Optional: `dataset_name`, `dataset_branch`, `node_id`.\n"
+        "\n"
+        "### plan_add_join\n"
+        "  Required: `left_node_id`, `right_node_id`, `left_keys` (list), `right_keys` (list), `join_type` (inner|left|right|full|cross).\n"
+        "  Optional: `node_id`, `join_hints`, `broadcast_left`, `broadcast_right`.\n"
+        "  Note: Do NOT use `left_input` or `right_input` — the correct names are `left_node_id` / `right_node_id`.\n"
+        "\n"
+        "### plan_add_group_by (aggregation)\n"
+        "  Required: `input_node_id`, `aggregates` (list of `{column, op, alias?}`).\n"
+        "  Optional: `group_by` (list), `operation` (groupBy|aggregate), `node_id`.\n"
+        "  Valid `op` values: count, sum, avg, min, max, first, last, collect_list, collect_set, count_distinct.\n"
+        "  Note: Do NOT use `aggregations` or `required_columns`. The parameter is `aggregates`.\n"
+        "\n"
+        "### plan_add_group_by_expr (SQL expression-based aggregation)\n"
+        "  Required: `input_node_id`, `aggregate_expressions` (list of SQL strings).\n"
+        "  Optional: `group_by` (list), `operation`, `node_id`.\n"
+        "\n"
+        "### plan_add_select\n"
+        "  Required: `input_node_id`, `columns` (list of column names to keep).\n"
+        "  Optional: `node_id`.\n"
+        "\n"
+        "### plan_add_filter\n"
+        "  Required: `input_node_id`, `expression` (Spark SQL boolean expression).\n"
+        "  Optional: `node_id`.\n"
+        "\n"
+        "### plan_add_compute\n"
+        "  Required: `input_node_id`, `expression` (string) + `alias` (new column name).\n"
+        "  OR: `input_node_id`, `computations` (list of `{alias, expression}`).\n"
+        "  Optional: `node_id`.\n"
+        "\n"
+        "### dataset_sample\n"
+        "  Required: `dataset_id`.  Optional: `limit` (default 20, max 50), `columns` (list).\n"
+        "\n"
+        "### dataset_profile\n"
+        "  Required: `dataset_id`.  Optional: `columns` (list).\n"
+        "\n"
+        "### ontology_infer_schema_from_data\n"
+        "  Required: `columns` (list of column name strings), `data` (list of row arrays).\n"
+        "  Optional: `class_name` (string).\n"
+        "  IMPORTANT: Pass raw sample data rows, NOT dataset_ids.\n"
+        "  Example: `{\"columns\": [\"id\", \"name\", \"email\"], \"data\": [[\"1\", \"Alice\", \"a@b.com\"], [\"2\", \"Bob\", \"b@c.com\"]]}`\n"
+        "  Tip: First call `dataset_sample` to get rows, then extract columns+data from the result.\n"
+        "\n"
+        "### ontology_register_object_type\n"
+        "  Required: `db_name`, `class_id`, `dataset_id`, `primary_key` (list), `title_key` (list).\n"
+        "  Optional: `branch` (default: main).\n"
+        "\n"
+        "### detect_foreign_keys (FK relationship detection)\n"
+        "  Required: `dataset_id` (string — SINGULAR, one dataset ID).\n"
+        "  Optional: `confidence_threshold` (number, default 0.6).\n"
+        "  This tool analyzes ONE source dataset and finds FK relationships to ALL other datasets in the DB.\n"
+        "  For full bidirectional coverage, call it ONCE PER DATASET using batched `tool_calls`.\n"
+        "  ❌ Do NOT use `dataset_ids` (plural/array) — the parameter is `dataset_id` (singular string).\n"
+        "\n"
+        "## Spark SQL notes\n"
+        "- Spark SQL *expressions* are allowed in filter/compute/select_expr/group_by_expr/window_expr tools.\n"
+        "- `plan_preview` is a lightweight Python executor, NOT full Spark. For complex SQL, validate via `pipeline_preview_wait`.\n"
+        "\n"
+        "## Ontology & Objectify workflow\n"
+        "When the user asks to design an ontology or map data to ontology instances, follow this workflow:\n"
+        "\n"
+        "### Phase 1: Schema inference (autonomous)\n"
+        "1. Call `dataset_sample` for each dataset to get sample rows.\n"
+        "2. Call `dataset_profile` to understand column types, nulls, and distributions.\n"
+        "3. Call `ontology_infer_schema_from_data` with the sample data:\n"
+        "   - Extract `columns` (list of column names) and `data` (list of row arrays) from `dataset_sample` result.\n"
+        "   - Do NOT pass `dataset_ids` — this tool requires raw data, not references.\n"
+        "4. Call `detect_foreign_keys` ONCE PER DATASET with singular `dataset_id` (string, not array).\n"
+        "   - Each call analyzes one source dataset against all other datasets in the DB.\n"
+        "   - For N datasets, make N separate calls to get full bidirectional FK coverage.\n"
+        "   - Use batched `tool_calls` to issue all N calls in a single step.\n"
+        "- These are mechanical steps — proceed autonomously.\n"
+        "\n"
+        "### Phase 2: Domain modeling (clarification required)\n"
+        "Apply the clarification framework above. You MUST use `action='clarify'` for:\n"
+        "- Entity boundaries (§1), relationship meaning (§2), ambiguous columns (§3),\n"
+        "  naming preferences (§4), PK/title key (§6), and final design confirmation (§8).\n"
+        "Present your inferred schema as a concrete proposal with options, then ask for confirmation.\n"
+        "\n"
+        "### Phase 3: Registration & mapping (autonomous after approval)\n"
+        "After user confirms the design:\n"
+        "1. `ontology_new` → `ontology_add_property` → `ontology_add_relationship` → `ontology_validate` → `ontology_create`\n"
+        "2. `ontology_register_object_type` for each class (REQUIRED before objectify)\n"
+        "3. `objectify_suggest_mapping` → review → `objectify_create_mapping_spec`\n"
+        "4. `objectify_run` → `objectify_wait` → `ontology_query_instances` to verify\n"
+        "\n"
+        "### Phase 4: Link types (autonomous)\n"
+        "- Use `create_link_type_from_fk` with FK patterns from Phase 1.\n"
+        "- Link types connect Object Type instances via foreign key relationships.\n"
+        "\n"
+        f"## Available tools\n{tool_lines}\n"
+        "\n"
+        "## Response schema\n"
         "{\n"
-        "  \"action\": \"call_tool|finish|clarify\",\n"
-        "  \"tool_calls\": [{\"tool\": \"string\", \"args\": {\"...\": \"...\"}}],\n"
-        "  \"tool\": \"string (legacy single tool; optional if tool_calls is set)\",\n"
-        "  \"args\": {\"...\": \"...\"},\n"
-        "  \"questions\": [PipelineClarificationQuestion],\n"
-        "  \"notes\": string[],\n"
-        "  \"warnings\": string[],\n"
-        "  \"confidence\": number (0..1)\n"
+        '  "reasoning": "your internal thought process (optional)",\n'
+        '  "action": "call_tool|finish|clarify|respond",\n'
+        '  "message": "natural language message to user in Korean (optional, required for respond)",\n'
+        '  "tool_calls": [{"tool": "string", "args": {...}}],\n'
+        '  "tool": "string (legacy single tool; optional if tool_calls is set)",\n'
+        '  "args": {"...": "..."},\n'
+        '  "questions": [PipelineClarificationQuestion],\n'
+        '  "notes": string[],\n'
+        '  "warnings": string[],\n'
+        '  "confidence": number (0..1)\n'
         "}\n"
     )
 
@@ -890,56 +1220,15 @@ def _build_prompt_header(
     # Include ontology session_id for ontology tools
     if state.ontology_session_id:
         header["ontology_session_id"] = state.ontology_session_id
+    # Include restored context so LLM knows it's resuming a previous session
+    if state.plan_obj:
+        header["resumed_plan"] = {
+            "plan_status": _plan_status(state.plan_obj),
+            "plan_summary": _summarize_plan(state.plan_obj),
+        }
+    if state.knowledge_ledger:
+        header["resumed_knowledge"] = state.knowledge_ledger
     return header
-
-
-def _build_user_prompt(
-    *,
-    state: _AgentState,
-    answers: Optional[Dict[str, Any]],
-    planner_hints: Optional[Dict[str, Any]],
-    task_spec: Optional[Dict[str, Any]],
-    target_chars: int = 50000,
-) -> str:
-    """
-    Backward-compatible prompt builder for the SSE streaming agent path.
-
-    The non-streaming autonomous loop builds an append-only `state.prompt_items` log and compacts it
-    deterministically. Some streaming code paths still call `_build_user_prompt`; keep this helper as
-    a thin wrapper so both implementations share the same header + compaction mechanics.
-    """
-    if not state.prompt_items:
-        state.prompt_items.append(
-            stable_json_dumps(
-                _build_prompt_header(
-                    state=state,
-                    answers=answers,
-                    planner_hints=planner_hints,
-                    task_spec=task_spec,
-                )
-            )
-        )
-        if state.last_observation:
-            state.prompt_items.append(
-                stable_json_dumps(
-                    {
-                        "type": "bootstrap_observation",
-                        "observation": _mask_tool_observation(state.last_observation),
-                    }
-                )
-            )
-
-    if target_chars and target_chars > 0:
-        current = _prompt_text(state.prompt_items)
-        if len(current) > int(target_chars):
-            state.prompt_items = _progressive_compress_prompt_items(
-                state=state,
-                answers=answers,
-                planner_hints=planner_hints,
-                task_spec=task_spec,
-                target_chars=int(target_chars),
-            )
-    return _prompt_text(state.prompt_items)
 
 
 def _summarize_ontology(ontology: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
@@ -995,7 +1284,42 @@ def _build_compaction_snapshot(
         snapshot["has_schema_inference"] = True
     if state.mapping_suggestions:
         snapshot["has_mapping_suggestions"] = True
+    # Knowledge ledger survives ALL compression levels
+    if state.knowledge_ledger:
+        snapshot["knowledge_ledger"] = state.knowledge_ledger
     return snapshot
+
+
+def _get_item_type(item_json: str) -> str:
+    """Fast extraction of item type from serialized JSON without full parse."""
+    # Items are stored as stable_json_dumps; "type" is always near the start.
+    try:
+        obj = json.loads(item_json)
+        return str(obj.get("type") or "unknown") if isinstance(obj, dict) else "unknown"
+    except Exception:
+        return "unknown"
+
+
+def _reshrink_tool_output(item_json: str, max_chars: int) -> str:
+    """Re-summarize a tool_output item to fit within max_chars."""
+    try:
+        obj = json.loads(item_json)
+    except Exception:
+        return item_json[:max_chars]
+    if not isinstance(obj, dict):
+        return item_json[:max_chars]
+    output = obj.get("output")
+    if isinstance(output, dict):
+        # Keep only essential keys from the output
+        shrunk = {}
+        for k in ("status", "error", "errors", "node_id", "dataset_id", "pipeline_id",
+                   "columns", "class_id", "session_id"):
+            if k in output:
+                shrunk[k] = output[k]
+        shrunk["_reshrunk"] = True
+        obj["output"] = shrunk
+    result = stable_json_dumps(obj)
+    return result[:max_chars] if len(result) > max_chars else result
 
 
 def _progressive_compress_prompt_items(
@@ -1007,32 +1331,26 @@ def _progressive_compress_prompt_items(
     target_chars: int,
     preserve_recent_n: int = 10,
 ) -> List[str]:
-    """
-    Progressive compression: remove oldest items until within target.
+    """Five-level graduated compression with importance scoring.
 
-    Strategy:
-    1. Always preserve: header (index 0)
-    2. Always preserve: last N items (tool calls + observations)
-    3. Remove from middle, oldest first
-    4. If still over limit, compact to snapshot (fallback)
-
-    Args:
-        state: Current agent state
-        target_chars: Target character limit
-        preserve_recent_n: Number of recent items to always preserve
-
-    Returns:
-        Compressed list of prompt items
+    Levels applied in order until prompt fits within target_chars:
+      L1 – Remove tool_output_ref items (duplicate references)
+      L2 – Re-summarize tool_output items to 1K chars each
+      L3 – Merge consecutive state items (keep only latest per 3-run)
+      L4 – Priority-scored removal (lowest priority first)
+      L5 – Full snapshot + knowledge_ledger (last resort)
     """
     items = list(state.prompt_items)
     if len(items) <= 2:
         return items
 
-    current_len = sum(len(item) for item in items)
-    if current_len <= target_chars:
+    def _total_len(lst: List[str]) -> int:
+        return sum(len(s) for s in lst)
+
+    if _total_len(items) <= target_chars:
         return items
 
-    # Protect header and recent items
+    # Protect header (index 0) and recent N items throughout L1-L4
     header = items[:1]
     if len(items) > preserve_recent_n + 1:
         protected_tail = items[-preserve_recent_n:]
@@ -1041,58 +1359,79 @@ def _progressive_compress_prompt_items(
         protected_tail = items[1:]
         middle = []
 
-    # Calculate budget for middle section
-    header_len = sum(len(h) for h in header)
-    tail_len = sum(len(t) for t in protected_tail)
-    available_for_middle = target_chars - header_len - tail_len
+    # --- Level 1: Drop tool_output_ref items ---
+    middle = [m for m in middle if _get_item_type(m) != "tool_output_ref"]
+    if _total_len(header + middle + protected_tail) <= target_chars:
+        return header + middle + protected_tail
 
-    # Remove oldest middle items until within budget
-    while middle and sum(len(m) for m in middle) > available_for_middle:
-        middle.pop(0)  # Remove oldest
+    # --- Level 2: Re-shrink tool_output items ---
+    for i, m in enumerate(middle):
+        if _get_item_type(m) == "tool_output" and len(m) > 1000:
+            middle[i] = _reshrink_tool_output(m, max_chars=1000)
+    if _total_len(header + middle + protected_tail) <= target_chars:
+        return header + middle + protected_tail
 
-    result = header + middle + protected_tail
-    result_len = sum(len(r) for r in result)
+    # --- Level 3: Merge consecutive state items (keep 1 per 3) ---
+    merged: List[str] = []
+    state_run: List[str] = []
+    for m in middle:
+        if _get_item_type(m) == "state":
+            state_run.append(m)
+            if len(state_run) >= 3:
+                merged.append(state_run[-1])  # keep latest of the 3
+                state_run = []
+        else:
+            if state_run:
+                merged.append(state_run[-1])
+                state_run = []
+            merged.append(m)
+    if state_run:
+        merged.append(state_run[-1])
+    middle = merged
+    if _total_len(header + middle + protected_tail) <= target_chars:
+        return header + middle + protected_tail
 
-    # If still over (protected tail too big), fall back to full compaction
-    if result_len > target_chars:
-        snapshot = _build_compaction_snapshot(
+    # --- Level 4: Priority-scored removal (lowest first) ---
+    scored = [(ITEM_PRIORITY.get(_get_item_type(m), 3), i, m) for i, m in enumerate(middle)]
+    scored.sort(key=lambda x: (x[0], x[1]))  # lowest priority & oldest first
+    budget = target_chars - _total_len(header) - _total_len(protected_tail)
+    kept: List[str] = []
+    used = 0
+    # Take items in reverse priority (highest first) until budget exhausted
+    for _, _, m in reversed(scored):
+        if used + len(m) <= budget:
+            kept.append(m)
+            used += len(m)
+    # Restore original order
+    kept_set = set(id(k) for k in kept)
+    middle = [m for m in middle if id(m) in kept_set]
+    if _total_len(header + middle + protected_tail) <= target_chars:
+        return header + middle + protected_tail
+
+    # --- Level 5: Full snapshot + knowledge_ledger ---
+    snapshot = _build_compaction_snapshot(
+        state=state,
+        answers=answers,
+        planner_hints=planner_hints,
+        task_spec=task_spec,
+    )
+    keep_recent = min(3, len(protected_tail))
+    recent = protected_tail[-keep_recent:] if keep_recent > 0 else []
+    return [
+        stable_json_dumps(_build_prompt_header(
             state=state,
             answers=answers,
             planner_hints=planner_hints,
             task_spec=task_spec,
-        )
-        # Keep last 3 items for immediate context
-        keep_recent = min(3, len(protected_tail))
-        return [
-            stable_json_dumps(_build_prompt_header(
-                state=state,
-                answers=answers,
-                planner_hints=planner_hints,
-                task_spec=task_spec,
-            )),
-            stable_json_dumps({
-                "type": "compaction",
-                "reason": "progressive_fallback",
-                "snapshot": snapshot,
-                "preserved_recent_count": keep_recent,
-                "note": "Progressive compression exhausted; snapshot is authoritative.",
-            }),
-        ] + protected_tail[-keep_recent:] if keep_recent > 0 else [
-            stable_json_dumps(_build_prompt_header(
-                state=state,
-                answers=answers,
-                planner_hints=planner_hints,
-                task_spec=task_spec,
-            )),
-            stable_json_dumps({
-                "type": "compaction",
-                "reason": "progressive_fallback",
-                "snapshot": snapshot,
-                "note": "Progressive compression exhausted; snapshot is authoritative.",
-            }),
-        ]
-
-    return result
+        )),
+        stable_json_dumps({
+            "type": "compaction",
+            "reason": "graduated_L5",
+            "snapshot": snapshot,
+            "preserved_recent_count": keep_recent,
+            "note": "Graduated compression exhausted; snapshot + knowledge_ledger is authoritative.",
+        }),
+    ] + recent
 
 
 def _compute_prompt_hash(text: str) -> str:
@@ -1268,13 +1607,581 @@ def _is_internal_budget_clarification(questions: List[PipelineClarificationQuest
     return False
 
 
-async def run_pipeline_agent_mcp_autonomous(
+# ---------------------------------------------------------------------------
+# Module-level MCP tool caller (replaces 4 near-identical nested closures)
+# ---------------------------------------------------------------------------
+
+async def _call_mcp_tool(
+    mcp_manager: Any,
+    server: str,
+    tool: str,
+    arguments: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Call an MCP tool on *server* ("pipeline" or "ontology") and normalise the response.
+
+    Handles all known response shapes from the MCP SDK:
+    - plain dict
+    - object with structuredContent / structured_content / data attribute
+    - object with content list (text parts, possibly JSON-encoded)
+    - error flag
+    Includes ``_parse_warnings`` for non-JSON text fallbacks so callers can
+    inspect parsing issues.
+    """
+    payload = await mcp_manager.call_tool(server, tool, arguments)
+    if isinstance(payload, dict):
+        return payload
+
+    # Structured-content attribute variants
+    structured = getattr(payload, "structuredContent", None)
+    if isinstance(structured, dict):
+        return structured
+    structured = getattr(payload, "structured_content", None)
+    if isinstance(structured, dict):
+        return structured
+
+    # Generic .data wrapper
+    data = getattr(payload, "data", None)
+    if isinstance(data, dict):
+        return data
+
+    # Content-list (text parts) – the most common MCP SDK shape
+    is_error = bool(getattr(payload, "isError", False) or getattr(payload, "is_error", False))
+    content = getattr(payload, "content", None)
+    if isinstance(content, list) and content:
+        texts: List[str] = []
+        for part in content:
+            text = getattr(part, "text", None)
+            if text is None and isinstance(part, dict):
+                text = part.get("text")
+            if isinstance(text, str) and text.strip():
+                texts.append(text.strip())
+        if is_error:
+            return {"error": "\n".join(texts).strip() or f"MCP tool error: {tool}"}
+        parse_errors: List[str] = []
+        for text in texts:
+            try:
+                parsed = json.loads(text)
+            except Exception as parse_exc:
+                parse_errors.append(f"JSON parse error: {parse_exc}")
+                continue
+            if isinstance(parsed, dict):
+                return parsed
+        if parse_errors:
+            logger.warning("%s MCP tool %s returned non-JSON: %s", server, tool, parse_errors)
+        if texts:
+            return {"result": texts[0], "_parse_warnings": parse_errors if parse_errors else None}
+
+    raise RuntimeError(f"Unexpected MCP tool result type for {tool}: {type(payload)}")
+
+
+# ---------------------------------------------------------------------------
+# LLM meta helper (replaces 10+ identical inline blocks)
+# ---------------------------------------------------------------------------
+
+def _build_llm_meta_dict(llm_meta: Optional["LLMCallMeta"]) -> Optional[Dict[str, Any]]:
+    """Convert an LLMCallMeta to a plain dict (or None). Used in every return block."""
+    if llm_meta is None:
+        return None
+    return {
+        "provider": llm_meta.provider,
+        "model": llm_meta.model,
+        "cache_hit": llm_meta.cache_hit,
+        "latency_ms": llm_meta.latency_ms,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Module-level tool dispatcher (replaces ~480-line nested _execute_tool_call)
+# ---------------------------------------------------------------------------
+
+async def _execute_tool_call(
+    *,
+    tool_name: str,
+    args: Dict[str, Any],
+    state: "_AgentState",
+    mcp_manager: Any,
+    allowed_tools: List[str],
+    planner_hints: Optional[Dict[str, Any]],
+    tool_errors: List[str],
+    tool_warnings: List[str],
+    step_idx: int,
+) -> Dict[str, Any]:
+    """Execute a single MCP tool call and mutate *state*.
+
+    Extracted to module level so both the streaming and non-streaming loops
+    can share the same dispatch logic (previously duplicated/simplified in
+    the streaming path).
+    """
+    if tool_name not in allowed_tools:
+        state.last_observation = {"error": f"tool not allowed: {tool_name}"}
+        return state.last_observation
+
+    try:
+        args = _drop_none_values(dict(args or {}))
+
+        # ==================== plan_new ====================
+        if tool_name == "plan_new":
+            had_plan = isinstance(state.plan_obj, dict)
+            had_pipeline = bool(state.pipeline_id)
+            had_analysis = any([
+                state.null_report, state.key_inference, state.type_inference,
+                state.join_plan, state.schema_inference, state.mapping_suggestions,
+            ])
+            scoped: Dict[str, Any] = {
+                "goal": state.goal,
+                "db_name": state.db_name,
+                "dataset_ids": state.dataset_ids,
+            }
+            if state.branch:
+                scoped["branch"] = state.branch
+            payload = await _call_mcp_tool(mcp_manager, "pipeline", tool_name, scoped)
+            plan = payload.get("plan") if isinstance(payload, dict) else None
+            state.plan_obj = plan if isinstance(plan, dict) else None
+
+            # Reset ALL related state when creating a new plan
+            reset_warnings: List[str] = []
+            if had_plan:
+                reset_warnings.append("Previous plan was discarded")
+            if had_pipeline:
+                reset_warnings.append(f"Previous pipeline_id={state.pipeline_id} was discarded")
+            if had_analysis:
+                reset_warnings.append("Previous analysis data (null_report, key_inference, etc.) was discarded")
+
+            # Reset pipeline state
+            state.pipeline_id = None
+            state.last_build_job_id = None
+            state.last_build_artifact_id = None
+            state.pipeline_progress = {}
+            state.pipeline_events = []
+            # Reset analysis state
+            state.null_report = None
+            state.key_inference = None
+            state.type_inference = None
+            state.join_plan = None
+            state.schema_inference = None
+            state.mapping_suggestions = None
+
+            observation = dict(payload) if isinstance(payload, dict) else {"result": payload}
+            observation.pop("plan", None)
+            suggested_tools = ["plan_add_input"]
+            if state.dataset_ids and len(state.dataset_ids) > 1:
+                suggested_tools.append("plan_add_join")
+            if planner_hints and planner_hints.get("ontology_mode"):
+                suggested_tools = ["ontology_new", "ontology_infer_schema_from_data"]
+            elif planner_hints and planner_hints.get("objectify_mode"):
+                suggested_tools = ["objectify_suggest_mapping", "objectify_create_mapping_spec", "objectify_run"]
+            else:
+                suggested_tools.extend(["plan_add_transform", "plan_add_output"])
+            state.last_observation = _mask_tool_observation(
+                {
+                    **observation,
+                    "plan_status": _plan_status(state.plan_obj),
+                    "plan_replaced": bool(had_plan),
+                    "reset_warnings": reset_warnings if reset_warnings else None,
+                    "next_suggested_tools": suggested_tools,
+                }
+            )
+            return state.last_observation
+
+        # ==================== plan_reset ====================
+        if tool_name == "plan_reset":
+            if not isinstance(state.plan_obj, dict):
+                state.last_observation = {"error": "plan is not initialized; call plan_new first"}
+                return state.last_observation
+            payload = await _call_mcp_tool(mcp_manager, "pipeline", tool_name, {"plan": state.plan_obj})
+            plan = payload.get("plan") if isinstance(payload, dict) else None
+            state.plan_obj = plan if isinstance(plan, dict) else None
+            observation = dict(payload) if isinstance(payload, dict) else {"result": payload}
+            observation.pop("plan", None)
+            state.last_observation = _mask_tool_observation({**observation, "plan_status": _plan_status(state.plan_obj)})
+            return state.last_observation
+
+        # ==================== Pipeline Execution Tools ====================
+        if tool_name.startswith("pipeline_"):
+            if tool_name in {"pipeline_create_from_plan", "pipeline_update_from_plan"}:
+                if not isinstance(state.plan_obj, dict):
+                    state.last_observation = {"error": "plan is not initialized; call plan_new first"}
+                    return state.last_observation
+                args.pop("plan", None)
+                payload = await _call_mcp_tool(
+                    mcp_manager, "pipeline", tool_name,
+                    {
+                        **args,
+                        "plan": state.plan_obj,
+                        "principal_id": state.principal_id,
+                        "principal_type": state.principal_type,
+                    },
+                )
+            else:
+                args.pop("plan", None)
+                pipeline_id_arg = str(args.get("pipeline_id") or "").strip()
+                if not pipeline_id_arg and state.pipeline_id:
+                    args["pipeline_id"] = state.pipeline_id
+                if tool_name == "pipeline_deploy_promote_build":
+                    build_job_id_arg = str(args.get("build_job_id") or "").strip()
+                    if not build_job_id_arg and state.last_build_job_id:
+                        args["build_job_id"] = state.last_build_job_id
+                    artifact_id_arg = str(args.get("artifact_id") or "").strip()
+                    if not artifact_id_arg and state.last_build_artifact_id:
+                        args["artifact_id"] = state.last_build_artifact_id
+                payload = await _call_mcp_tool(
+                    mcp_manager, "pipeline", tool_name,
+                    {
+                        **args,
+                        "principal_id": state.principal_id,
+                        "principal_type": state.principal_type,
+                        "db_name": state.db_name,
+                    },
+                )
+
+            # Capture pipeline_id if returned
+            if isinstance(payload, dict):
+                pipeline_id = None
+                if isinstance(payload.get("pipeline"), dict):
+                    pipeline_id = str((payload.get("pipeline") or {}).get("pipeline_id") or "").strip() or None
+                if not pipeline_id:
+                    pipeline_id = str(payload.get("pipeline_id") or "").strip() or None
+                if pipeline_id:
+                    state.pipeline_id = pipeline_id
+                if tool_name == "pipeline_build_wait":
+                    job_id = str(payload.get("job_id") or "").strip()
+                    if job_id:
+                        state.last_build_job_id = job_id
+                    artifact_id = str(payload.get("artifact_id") or "").strip()
+                    if artifact_id:
+                        state.last_build_artifact_id = artifact_id
+                _record_pipeline_event(state=state, tool_name=tool_name, args=args, observation=payload)
+
+            state.last_observation = _mask_tool_observation(payload if isinstance(payload, dict) else {"result": payload})
+            return state.last_observation
+
+        # ==================== Ontology Tools ====================
+        if tool_name.startswith("ontology_") and tool_name not in {
+            "ontology_register_object_type",
+            "ontology_query_instances",
+        }:
+            if "session_id" not in args:
+                args["session_id"] = state.ontology_session_id
+            if tool_name in {
+                "ontology_load", "ontology_list_classes", "ontology_get_class",
+                "ontology_search_classes", "ontology_create", "ontology_update",
+                "ontology_check_relationships", "ontology_check_circular_refs",
+                "ontology_suggest_mappings",
+            }:
+                if "db_name" not in args or not args["db_name"]:
+                    args["db_name"] = state.db_name
+                if "branch" not in args or not args["branch"]:
+                    args["branch"] = state.branch or "main"
+
+            payload = await _call_mcp_tool(mcp_manager, "ontology", tool_name, args)
+
+            # Auto-fallback: 409 Conflict → ontology_update
+            if tool_name == "ontology_create" and isinstance(payload, dict):
+                error_msg = str(payload.get("error") or "")
+                if "409" in error_msg or "Conflict" in error_msg:
+                    logger.info("ontology_create got 409 Conflict, auto-retrying with ontology_update")
+                    payload = await _call_mcp_tool(mcp_manager, "ontology", "ontology_update", args)
+                    if isinstance(payload, dict) and payload.get("status") == "success":
+                        logger.info("ontology_update succeeded after 409 fallback")
+
+            if tool_name == "ontology_preview" and isinstance(payload, dict):
+                ont = payload.get("ontology")
+                if isinstance(ont, dict):
+                    state.working_ontology = ont
+            if tool_name == "ontology_infer_schema_from_data" and isinstance(payload, dict):
+                state.schema_inference = payload
+            if tool_name == "ontology_suggest_mappings" and isinstance(payload, dict):
+                state.mapping_suggestions = payload
+
+            if tool_name in {"ontology_create", "ontology_update", "ontology_add_property",
+                             "ontology_add_relationship", "ontology_set_primary_key"}:
+                logger.info("ontology tool executed: %s status=%s", tool_name,
+                           payload.get("status") if isinstance(payload, dict) else "unknown")
+
+            state.last_observation = _mask_tool_observation(
+                payload if isinstance(payload, dict) else {"result": payload}
+            )
+            return state.last_observation
+
+        # ==================== Objectify Tools ====================
+        if tool_name.startswith("objectify_"):
+            payload = await _call_mcp_tool(mcp_manager, "pipeline", tool_name, args)
+            if tool_name in {"objectify_create_mapping_spec", "objectify_run"}:
+                logger.info("objectify tool executed: %s status=%s", tool_name,
+                           payload.get("status") if isinstance(payload, dict) else "unknown")
+            state.last_observation = _mask_tool_observation(
+                payload if isinstance(payload, dict) else {"result": payload}
+            )
+            return state.last_observation
+
+        # ==================== Dataset Lookup Tools ====================
+        if tool_name in {"dataset_get_by_name", "dataset_get_latest_version", "dataset_validate_columns", "dataset_list", "dataset_sample", "dataset_profile", "data_query"}:
+            payload = await _call_mcp_tool(mcp_manager, "pipeline", tool_name, args)
+            state.last_observation = _mask_tool_observation(
+                payload if isinstance(payload, dict) else {"result": payload}
+            )
+            return state.last_observation
+
+        # ==================== Ontology Query Tools ====================
+        if tool_name == "ontology_query_instances":
+            payload = await _call_mcp_tool(mcp_manager, "pipeline", tool_name, args)
+            state.last_observation = _mask_tool_observation(
+                payload if isinstance(payload, dict) else {"result": payload}
+            )
+            return state.last_observation
+
+        # ==================== Object Type Registration ====================
+        if tool_name == "ontology_register_object_type":
+            payload = await _call_mcp_tool(mcp_manager, "pipeline", tool_name, args)
+            if isinstance(payload, dict):
+                logger.info("ontology_register_object_type executed: status=%s class_id=%s",
+                           payload.get("status"), args.get("class_id"))
+            state.last_observation = _mask_tool_observation(
+                payload if isinstance(payload, dict) else {"result": payload}
+            )
+            return state.last_observation
+
+        # ==================== Debugging Tools ====================
+        if tool_name == "debug_get_errors":
+            include_warnings = args.get("include_warnings", True)
+            limit = int(args.get("limit") or 50)
+            errors_list = list(tool_errors)[-limit:] if tool_errors else []
+            warnings_list = list(tool_warnings)[-limit:] if include_warnings and tool_warnings else []
+            state.last_observation = {
+                "status": "success",
+                "errors": errors_list,
+                "warnings": warnings_list,
+                "error_count": len(tool_errors),
+                "warning_count": len(tool_warnings) if include_warnings else 0,
+            }
+            return state.last_observation
+
+        if tool_name == "debug_get_execution_log":
+            limit = int(args.get("limit") or 20)
+            step_filter = args.get("step")
+            log_entries: List[Dict[str, Any]] = []
+            for item in state.prompt_items:
+                try:
+                    parsed = json.loads(item)
+                    item_type = parsed.get("type")
+                    item_step = parsed.get("step")
+                    if item_type in {"tool_call", "tool_output", "tool_calls", "tool_outputs"}:
+                        if step_filter is None or item_step == step_filter:
+                            entry: Dict[str, Any] = {
+                                "type": item_type,
+                                "step": item_step,
+                            }
+                            if item_type in {"tool_call", "tool_calls"}:
+                                entry["tool"] = parsed.get("tool") or parsed.get("tools")
+                            if item_type in {"tool_output", "tool_outputs"}:
+                                obs = parsed.get("observation") or parsed.get("observations")
+                                if isinstance(obs, dict):
+                                    entry["status"] = obs.get("status")
+                                    entry["error"] = obs.get("error")
+                                elif isinstance(obs, list):
+                                    entry["count"] = len(obs)
+                            log_entries.append(entry)
+                except (json.JSONDecodeError, TypeError):
+                    continue
+            state.last_observation = {
+                "status": "success",
+                "log": log_entries[-limit:],
+                "total_entries": len(log_entries),
+                "current_step": step_idx + 1,
+            }
+            return state.last_observation
+
+        if tool_name == "debug_explain_failure":
+            diagnosis: List[Dict[str, str]] = []
+            for error in list(tool_errors)[-10:]:
+                error_lower = str(error).lower()
+                if "not found" in error_lower or "does not exist" in error_lower:
+                    diagnosis.append({
+                        "error": str(error),
+                        "cause": "Resource not found",
+                        "fix": "Check spelling and verify the resource exists",
+                    })
+                elif "type" in error_lower and ("mismatch" in error_lower or "incompatible" in error_lower):
+                    diagnosis.append({
+                        "error": str(error),
+                        "cause": "Type mismatch",
+                        "fix": "Add a cast operation to convert types",
+                    })
+                elif "join" in error_lower:
+                    diagnosis.append({
+                        "error": str(error),
+                        "cause": "Join key issue",
+                        "fix": "Verify join keys exist and have compatible types",
+                    })
+                elif "permission" in error_lower or "denied" in error_lower:
+                    diagnosis.append({
+                        "error": str(error),
+                        "cause": "Permission denied",
+                        "fix": "Check user permissions for the resource",
+                    })
+                elif "timeout" in error_lower:
+                    diagnosis.append({
+                        "error": str(error),
+                        "cause": "Operation timed out",
+                        "fix": "Reduce data size or increase timeout",
+                    })
+                else:
+                    diagnosis.append({
+                        "error": str(error),
+                        "cause": "Unknown",
+                        "fix": "Review error details and check logs",
+                    })
+            state.last_observation = {
+                "status": "success",
+                "diagnosis": diagnosis,
+                "total_errors": len(tool_errors),
+                "total_warnings": len(tool_warnings),
+                "suggestion": "Use debug_get_errors to see all errors, debug_get_execution_log to trace tool calls",
+            }
+            return state.last_observation
+
+        if tool_name == "debug_inspect_node":
+            plan_to_inspect = args.get("plan") or state.plan_obj
+            if not isinstance(plan_to_inspect, dict):
+                state.last_observation = {"error": "No plan available; call plan_new first or provide plan argument"}
+                return state.last_observation
+            payload = await _call_mcp_tool(mcp_manager, "pipeline", tool_name, {**args, "plan": plan_to_inspect})
+            state.last_observation = _mask_tool_observation(payload if isinstance(payload, dict) else {"result": payload})
+            return state.last_observation
+
+        if tool_name == "debug_dry_run":
+            plan_to_validate = args.get("plan") or state.plan_obj
+            if not isinstance(plan_to_validate, dict):
+                state.last_observation = {"error": "No plan available; call plan_new first or provide plan argument"}
+                return state.last_observation
+            payload = await _call_mcp_tool(mcp_manager, "pipeline", tool_name, {**args, "plan": plan_to_validate})
+            state.last_observation = _mask_tool_observation(payload if isinstance(payload, dict) else {"result": payload})
+            return state.last_observation
+
+        # ==================== FK Detection & Link Type Tools ====================
+        if tool_name in {"detect_foreign_keys", "create_link_type_from_fk"}:
+            if "db_name" not in args or not args.get("db_name"):
+                args["db_name"] = state.db_name
+            if "branch" not in args or not args.get("branch"):
+                args["branch"] = state.branch or "main"
+            if tool_name == "detect_foreign_keys" and "dataset_ids" in args:
+                raw_ids = args.pop("dataset_ids")
+                id_list = raw_ids if isinstance(raw_ids, list) else [raw_ids]
+                all_patterns: list = []
+                for did in id_list:
+                    per_args = {**args, "dataset_id": str(did).strip()}
+                    sub_payload = await _call_mcp_tool(mcp_manager, "pipeline", tool_name, per_args)
+                    if isinstance(sub_payload, dict) and sub_payload.get("status") == "success":
+                        all_patterns.extend(sub_payload.get("patterns") or [])
+                state.last_observation = {
+                    "status": "success",
+                    "db_name": args.get("db_name"),
+                    "patterns_found": len(all_patterns),
+                    "patterns": all_patterns,
+                    "datasets_analyzed": len(id_list),
+                }
+            else:
+                payload = await _call_mcp_tool(mcp_manager, "pipeline", tool_name, args)
+                state.last_observation = payload if isinstance(payload, dict) else {"result": payload}
+            return state.last_observation
+
+        # ==================== Default Plan Tools ====================
+        if not isinstance(state.plan_obj, dict):
+            state.last_observation = {"error": "plan is not initialized; call plan_new first"}
+            return state.last_observation
+
+        if tool_name == "preview_inspect" and not isinstance(args.get("preview"), dict):
+            last = state.last_observation if isinstance(state.last_observation, dict) else {}
+            preview = last.get("preview") if isinstance(last.get("preview"), dict) else None
+            if isinstance(preview, dict):
+                args["preview"] = preview
+            else:
+                state.last_observation = {"error": "preview_inspect requires preview; call plan_preview or pipeline_preview_wait first"}
+                return state.last_observation
+
+        if tool_name == "plan_preview":
+            requested = int(args.get("limit") or 50)
+            args["limit"] = max(1, min(requested, 200))
+
+        args.pop("plan", None)
+        payload = await _call_mcp_tool(mcp_manager, "pipeline", tool_name, {**args, "plan": state.plan_obj})
+        if isinstance(payload, dict) and isinstance(payload.get("plan"), dict):
+            state.plan_obj = payload["plan"]
+
+        if tool_name == "plan_preview" and isinstance(payload, dict) and isinstance(payload.get("preview"), dict):
+            preview = dict(payload.get("preview") or {})
+            rows = preview.get("rows")
+            if isinstance(rows, list):
+                preview["rows"] = rows[:AGENT_TRIM_PREVIEW_ROWS]
+            state.last_observation = _mask_tool_observation(
+                {
+                    "status": payload.get("status"),
+                    "preview": preview,
+                    "warnings": payload.get("warnings"),
+                    "plan_status": _plan_status(state.plan_obj),
+                }
+            )
+        else:
+            observation = dict(payload) if isinstance(payload, dict) else {"result": payload}
+            observation.pop("plan", None)
+            if isinstance(observation.get("evaluations"), list):
+                observation["evaluations"] = observation.get("evaluations")[:AGENT_TRIM_EVALUATIONS]
+            if isinstance(observation.get("warnings"), list):
+                observation["warnings"] = observation.get("warnings")[:AGENT_TRIM_WARNINGS]
+            if isinstance(observation.get("errors"), list):
+                observation["errors"] = observation.get("errors")[:AGENT_TRIM_ERRORS]
+            state.last_observation = _mask_tool_observation({**observation, "plan_status": _plan_status(state.plan_obj)})
+
+        return state.last_observation
+
+    except Exception as exc:
+        exc_type = type(exc).__name__
+        logger.warning("pipeline agent autonomous tool failed tool=%s err=%s type=%s", tool_name, exc, exc_type, exc_info=True)
+        state.last_observation = {
+            "error": str(exc),
+            "error_type": exc_type,
+            "tool": tool_name,
+            "recoverable": exc_type in {
+                "TimeoutError", "ConnectionError", "HTTPError",
+                "ClosedResourceError", "BrokenResourceError", "EndOfStream",
+            },
+        }
+        tool_errors.append(f"{tool_name} [{exc_type}]: {exc}")
+        return state.last_observation
+
+
+# ---------------------------------------------------------------------------
+# StreamEvent dataclass (used by both streaming and core loop)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class StreamEvent:
+    """SSE event container. ``event_type`` maps to the SSE ``event:`` field."""
+    event_type: str  # start, thinking, tool_start, tool_end, plan_update, preview_update, ontology_update, clarification, error, complete
+    data: Dict[str, Any]
+
+
+# ---------------------------------------------------------------------------
+# Unified core loop (async generator → StreamEvent)
+# ---------------------------------------------------------------------------
+
+_THINKING_MESSAGES = [
+    "요청을 분석하고 있습니다...",
+    "데이터 구조를 파악하고 있습니다...",
+    "최적의 변환 방법을 찾고 있습니다...",
+    "파이프라인 구조를 설계하고 있습니다...",
+    "노드 연결 관계를 검토하고 있습니다...",
+]
+
+
+async def _run_agent_core(
     *,
     goal: str,
-    data_scope: PipelinePlanDataScope,
+    data_scope: "PipelinePlanDataScope",
     answers: Optional[Dict[str, Any]],
     planner_hints: Optional[Dict[str, Any]],
     task_spec: Optional[Dict[str, Any]] = None,
+    resume_plan_id: Optional[str] = None,
     persist_plan: bool = True,
     actor: str,
     tenant_id: str,
@@ -1282,45 +2189,47 @@ async def run_pipeline_agent_mcp_autonomous(
     data_policies: Optional[Dict[str, Any]],
     selected_model: Optional[str],
     allowed_models: Optional[List[str]],
-    llm_gateway: LLMGateway,
-    redis_service: Optional[RedisService],
-    audit_store: Optional[AuditLogStore],
-    event_store: Optional[EventStore] = None,
-    dataset_registry: DatasetRegistry,
-    plan_registry: PipelinePlanRegistry,
-) -> Dict[str, Any]:
-    """
-    Returns a payload compatible with the existing UI expectations for `/agent/pipeline-runs`.
+    llm_gateway: "LLMGateway",
+    redis_service: Optional["RedisService"],
+    audit_store: Optional["AuditLogStore"],
+    event_store: Optional["EventStore"] = None,
+    dataset_registry: "DatasetRegistry",
+    plan_registry: "PipelinePlanRegistry",
+    streaming: bool = False,
+) -> "AsyncGenerator[StreamEvent, None]":
+    """Single autonomous loop that serves both streaming and non-streaming callers.
 
-    The payload is NOT an ApiResponse envelope; the router should wrap it.
+    When *streaming* is True, intermediate events (thinking, tool_start, tool_end,
+    plan_update, preview_update, ontology_update) are yielded.  Terminal events
+    (complete, clarification, error) are **always** yielded.
+
+    Non-streaming callers collect only the terminal event's ``.data`` dict.
     """
     run_id = str(uuid4())
-    plan_id: Optional[str] = None
+    plan_id: Optional[str] = resume_plan_id or None
 
+    # ── Early validation ──
     db_name = str(data_scope.db_name or "").strip()
     if not db_name:
-        return {
-            "run_id": run_id,
-            "status": "clarification_required",
-            "plan_id": plan_id,
-            "plan": None,
-            "preview": None,
-            "report": None,
-            "questions": [
-                {
-                    "id": "db_name",
-                    "question": "Which database (db_name) should I use?",
-                    "required": True,
-                    "type": "string",
-                }
-            ],
-            "validation_errors": ["data_scope.db_name is required"],
-            "validation_warnings": [],
-        }
+        yield StreamEvent(
+            event_type="error" if streaming else "complete",
+            data={
+                "run_id": run_id,
+                "status": "clarification_required",
+                "plan_id": plan_id,
+                "plan": None,
+                "preview": None,
+                "report": None,
+                "questions": [
+                    {"id": "db_name", "question": "Which database (db_name) should I use?", "required": True, "type": "string"}
+                ],
+                "validation_errors": ["data_scope.db_name is required"],
+                "validation_warnings": [],
+            },
+        )
+        return
 
     dataset_ids = [str(item).strip() for item in (data_scope.dataset_ids or []) if str(item).strip()]
-
-    # Check if this is an ontology-only task (no datasets needed)
     goal_lower = str(goal or "").lower()
     is_ontology_only_task = (
         not dataset_ids
@@ -1329,136 +2238,63 @@ async def run_pipeline_agent_mcp_autonomous(
             "property", "속성", "relationship", "관계",
         ))
     )
-
-    # Require dataset_ids only for pipeline tasks (not ontology-only)
     if not dataset_ids and not is_ontology_only_task:
-        return {
-            "run_id": run_id,
-            "status": "clarification_required",
-            "plan_id": plan_id,
-            "plan": None,
-            "preview": None,
-            "report": None,
-            "questions": [
-                {
-                    "id": "dataset_ids",
-                    "question": "Which dataset_ids should I use to satisfy the goal?",
-                    "required": True,
-                    "type": "string",
-                }
-            ],
-            "validation_errors": ["data_scope.dataset_ids is required"],
-            "validation_warnings": [],
-        }
+        yield StreamEvent(
+            event_type="error" if streaming else "complete",
+            data={
+                "run_id": run_id,
+                "status": "clarification_required",
+                "plan_id": plan_id,
+                "plan": None,
+                "preview": None,
+                "report": None,
+                "questions": [
+                    {"id": "dataset_ids", "question": "Which dataset_ids should I use to satisfy the goal?", "required": True, "type": "string"}
+                ],
+                "validation_errors": ["data_scope.dataset_ids is required"],
+                "validation_warnings": [],
+            },
+        )
+        return
 
-    # Lazy import: MCP is optional in some envs.
+    # ── MCP client ──
     try:
         try:
             from mcp_servers.mcp_client import get_mcp_manager  # type: ignore[import-not-found]
-        except Exception:  # pragma: no cover
+        except Exception:
             from backend.mcp_servers.mcp_client import get_mcp_manager  # type: ignore[import-not-found]
     except Exception as exc:
-        return {
-            "run_id": run_id,
-            "status": "clarification_required",
-            "plan_id": plan_id,
-            "plan": None,
-            "preview": None,
-            "report": None,
-            "questions": [],
-            "validation_errors": [f"MCP client unavailable: {exc}"],
-            "validation_warnings": [],
-        }
+        yield StreamEvent(
+            event_type="error" if streaming else "complete",
+            data={
+                "run_id": run_id,
+                "status": "clarification_required",
+                "plan_id": plan_id,
+                "plan": None,
+                "preview": None,
+                "report": None,
+                "questions": [],
+                "validation_errors": [f"MCP client unavailable: {exc}"],
+                "validation_warnings": [],
+            },
+        )
+        return
 
     mcp_manager = get_mcp_manager()
 
-    async def _call_pipeline_tool(tool: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
-        payload = await mcp_manager.call_tool("pipeline", tool, arguments)
-        if isinstance(payload, dict):
-            return payload
-        structured = getattr(payload, "structuredContent", None)
-        if isinstance(structured, dict):
-            return structured
-        structured = getattr(payload, "structured_content", None)
-        if isinstance(structured, dict):
-            return structured
-        data = getattr(payload, "data", None)
-        if isinstance(data, dict):
-            return data
-        is_error = bool(getattr(payload, "isError", False) or getattr(payload, "is_error", False))
-        content = getattr(payload, "content", None)
-        if isinstance(content, list) and content:
-            texts: List[str] = []
-            for part in content:
-                text = getattr(part, "text", None)
-                if text is None and isinstance(part, dict):
-                    text = part.get("text")
-                if isinstance(text, str) and text.strip():
-                    texts.append(text.strip())
-            if is_error:
-                return {"error": "\n".join(texts).strip() or f"MCP tool error: {tool}"}
-            parse_errors: List[str] = []
-            for text in texts:
-                try:
-                    parsed = json.loads(text)
-                except Exception as parse_exc:
-                    parse_errors.append(f"JSON parse error: {parse_exc}")
-                    continue
-                if isinstance(parsed, dict):
-                    return parsed
-            if parse_errors:
-                logger.warning("pipeline MCP tool %s returned non-JSON: %s", tool, parse_errors)
-            if texts:
-                return {"result": texts[0], "_parse_warnings": parse_errors if parse_errors else None}
-        raise RuntimeError(f"Unexpected MCP tool result type for {tool}: {type(payload)}")
+    if streaming:
+        yield StreamEvent(
+            event_type="start",
+            data={"run_id": run_id, "goal": goal, "db_name": db_name, "dataset_ids": dataset_ids},
+        )
 
-    async def _call_ontology_tool(tool: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
-        """Call an ontology MCP tool."""
-        payload = await mcp_manager.call_tool("ontology", tool, arguments)
-        if isinstance(payload, dict):
-            return payload
-        structured = getattr(payload, "structuredContent", None)
-        if isinstance(structured, dict):
-            return structured
-        structured = getattr(payload, "structured_content", None)
-        if isinstance(structured, dict):
-            return structured
-        data = getattr(payload, "data", None)
-        if isinstance(data, dict):
-            return data
-        is_error = bool(getattr(payload, "isError", False) or getattr(payload, "is_error", False))
-        content = getattr(payload, "content", None)
-        if isinstance(content, list) and content:
-            texts: List[str] = []
-            for part in content:
-                text = getattr(part, "text", None)
-                if text is None and isinstance(part, dict):
-                    text = part.get("text")
-                if isinstance(text, str) and text.strip():
-                    texts.append(text.strip())
-            if is_error:
-                return {"error": "\n".join(texts).strip() or f"MCP tool error: {tool}"}
-            parse_errors: List[str] = []
-            for text in texts:
-                try:
-                    parsed = json.loads(text)
-                except Exception as parse_exc:
-                    parse_errors.append(f"JSON parse error: {parse_exc}")
-                    continue
-                if isinstance(parsed, dict):
-                    return parsed
-            if parse_errors:
-                logger.warning("ontology MCP tool %s returned non-JSON: %s", tool, parse_errors)
-            if texts:
-                return {"result": texts[0], "_parse_warnings": parse_errors if parse_errors else None}
-        raise RuntimeError(f"Unexpected MCP tool result type for {tool}: {type(payload)}")
-
+    # ── State init (non-streaming baseline + streaming extras) ──
     principal_id = str(user_id or actor or "system").strip() or "system"
-    principal_type = "user"
+    principal_type = "user" if user_id else "system"
     ontology_session_id = f"ontology_{run_id}"
     state = _AgentState(
         db_name=db_name,
-        branch=str(data_scope.branch or "").strip() or None,
+        branch=str(data_scope.branch or "").strip() or "main",
         dataset_ids=dataset_ids,
         goal=str(goal or "").strip(),
         principal_id=principal_id,
@@ -1466,480 +2302,62 @@ async def run_pipeline_agent_mcp_autonomous(
         ontology_session_id=ontology_session_id,
     )
 
-    # Scale iteration budget by dataset count (multi-way joins take more tool calls).
+    # ── Resume from previous run (plan_id supplied by client) ──
+    if resume_plan_id and plan_registry:
+        try:
+            saved = await plan_registry.get_plan(plan_id=resume_plan_id, tenant_id=tenant_id)
+            if saved and isinstance(saved.plan, dict):
+                saved_plan = dict(saved.plan)
+                agent_ctx = saved_plan.pop("_agent_context", None)
+                state.plan_obj = saved_plan if saved_plan.get("definition_json") else None
+                if isinstance(agent_ctx, dict):
+                    state.knowledge_ledger = agent_ctx.get("knowledge_ledger") or {}
+                    state.null_report = agent_ctx.get("null_report")
+                    state.key_inference = agent_ctx.get("key_inference")
+                    state.type_inference = agent_ctx.get("type_inference")
+                    state.join_plan = agent_ctx.get("join_plan")
+                    if agent_ctx.get("ontology_session_id"):
+                        state.ontology_session_id = agent_ctx["ontology_session_id"]
+                    state.working_ontology = agent_ctx.get("working_ontology")
+                    state.schema_inference = agent_ctx.get("schema_inference")
+                    state.mapping_suggestions = agent_ctx.get("mapping_suggestions")
+                logger.info(
+                    "Resumed agent state from plan_id=%s (plan_obj=%s, knowledge_keys=%d)",
+                    resume_plan_id,
+                    "yes" if state.plan_obj else "no",
+                    len(state.knowledge_ledger),
+                )
+        except Exception as exc:
+            logger.warning("Failed to load plan_id=%s for resume: %s", resume_plan_id, exc)
+
+    # Dynamic step budget (non-streaming's formula)
     max_steps = min(60, 24 + max(0, len(state.dataset_ids) - 1) * 8)
+    max_tool_calls_per_step = 20
     llm_meta: Optional[LLMCallMeta] = None
     notes: List[str] = []
     tool_warnings: List[str] = []
     tool_errors: List[str] = []
     consecutive_llm_failures = 0
 
+    # Streaming dedup guards
+    _consecutive_dup_steps = 0
+    _MAX_CONSECUTIVE_DUP_STEPS = 3
+
     allowed_tools = list(_PIPELINE_AGENT_ALLOWED_TOOLS)
     system_prompt = _build_system_prompt(allowed_tools=allowed_tools)
-    max_tool_calls_per_step = 20
 
-    # Dynamic prompt limit based on model context window
+    # Dynamic prompt limit
     model_id = str(selected_model or getattr(llm_gateway, "model", "") or "").strip()
     model_config = get_model_context_config(model_id)
-    gateway_limit = int(getattr(llm_gateway, "max_prompt_chars", 20000) or 20000)
-    # Use the smaller of gateway limit and model's safe prompt chars, then apply 90% buffer
-    prompt_char_limit = int(min(gateway_limit, model_config.safe_prompt_chars) * 0.9)
+    gateway_limit = int(getattr(llm_gateway, "max_prompt_chars", 0) or 0)
+    if gateway_limit > 0:
+        prompt_char_limit = int(min(gateway_limit, model_config.safe_prompt_chars) * 0.9)
+    else:
+        system_chars = len(system_prompt)
+        prompt_char_limit = int((model_config.safe_prompt_chars - system_chars) * 0.85)
+    prompt_budget = PromptBudget(total_chars=prompt_char_limit)
 
-    async def _execute_tool_call(*, tool_name: str, args: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Execute a single MCP tool call and mutate agent state.
-
-        This is separated so the loop can execute a *batch* of tool calls per LLM step.
-        """
-        if tool_name not in allowed_tools:
-            state.last_observation = {"error": f"tool not allowed: {tool_name}"}
-            return state.last_observation
-
-        try:
-            args = _drop_none_values(dict(args or {}))
-
-            if tool_name == "plan_new":
-                # Treat plan_new as "start over" even if a plan already exists.
-                # Models often re-issue plan_new to restart planning. If we noop here,
-                # subsequent plan_add_* calls can collide on deterministic node_ids and
-                # permanently wedge the run. Resetting is deterministic and semantics-preserving.
-                had_plan = isinstance(state.plan_obj, dict)
-                had_pipeline = bool(state.pipeline_id)
-                had_analysis = any([
-                    state.null_report, state.key_inference, state.type_inference,
-                    state.join_plan, state.schema_inference, state.mapping_suggestions,
-                ])
-                scoped: Dict[str, Any] = {
-                    "goal": state.goal,
-                    "db_name": state.db_name,
-                    "dataset_ids": state.dataset_ids,
-                }
-                if state.branch:
-                    scoped["branch"] = state.branch
-                payload = await _call_pipeline_tool(
-                    tool_name,
-                    scoped,
-                )
-                plan = payload.get("plan") if isinstance(payload, dict) else None
-                state.plan_obj = plan if isinstance(plan, dict) else None
-
-                # Reset ALL related state when creating a new plan (not just pipeline state)
-                reset_warnings: List[str] = []
-                if had_plan:
-                    reset_warnings.append("Previous plan was discarded")
-                if had_pipeline:
-                    reset_warnings.append(f"Previous pipeline_id={state.pipeline_id} was discarded")
-                if had_analysis:
-                    reset_warnings.append("Previous analysis data (null_report, key_inference, etc.) was discarded")
-
-                # Reset pipeline state
-                state.pipeline_id = None
-                state.last_build_job_id = None
-                state.last_build_artifact_id = None
-                state.pipeline_progress = {}
-                state.pipeline_events = []
-                # Reset analysis state to avoid stale data mixing with new plan
-                state.null_report = None
-                state.key_inference = None
-                state.type_inference = None
-                state.join_plan = None
-                state.schema_inference = None
-                state.mapping_suggestions = None
-
-                observation = dict(payload) if isinstance(payload, dict) else {"result": payload}
-                observation.pop("plan", None)
-                # Dynamic tool suggestions based on context
-                suggested_tools = ["plan_add_input"]  # Always start with input
-                if state.dataset_ids and len(state.dataset_ids) > 1:
-                    suggested_tools.append("plan_add_join")  # Multiple datasets -> likely need join
-                if planner_hints and planner_hints.get("ontology_mode"):
-                    suggested_tools = ["ontology_new", "ontology_infer_schema_from_data"]
-                elif planner_hints and planner_hints.get("objectify_mode"):
-                    # User wants to map dataset to ontology instances
-                    suggested_tools = ["objectify_suggest_mapping", "objectify_create_mapping_spec", "objectify_run"]
-                else:
-                    suggested_tools.extend(["plan_add_transform", "plan_add_output"])
-                state.last_observation = _mask_tool_observation(
-                    {
-                        **observation,
-                        "plan_status": _plan_status(state.plan_obj),
-                        "plan_replaced": bool(had_plan),
-                        "reset_warnings": reset_warnings if reset_warnings else None,
-                        "next_suggested_tools": suggested_tools,
-                    }
-                )
-                return state.last_observation
-
-            if tool_name == "plan_reset":
-                if not isinstance(state.plan_obj, dict):
-                    state.last_observation = {"error": "plan is not initialized; call plan_new first"}
-                    return state.last_observation
-                payload = await _call_pipeline_tool(
-                    tool_name,
-                    {"plan": state.plan_obj},
-                )
-                plan = payload.get("plan") if isinstance(payload, dict) else None
-                state.plan_obj = plan if isinstance(plan, dict) else None
-                observation = dict(payload) if isinstance(payload, dict) else {"result": payload}
-                observation.pop("plan", None)
-                state.last_observation = _mask_tool_observation({**observation, "plan_status": _plan_status(state.plan_obj)})
-                return state.last_observation
-
-            if tool_name.startswith("pipeline_"):
-                # Pipeline execution tools (Spark worker via control plane). These can write/build/deploy,
-                # so the model should only call them when the user explicitly requested materialization.
-                if tool_name in {"pipeline_create_from_plan", "pipeline_update_from_plan"}:
-                    if not isinstance(state.plan_obj, dict):
-                        state.last_observation = {"error": "plan is not initialized; call plan_new first"}
-                        return state.last_observation
-                    args.pop("plan", None)
-                    payload = await _call_pipeline_tool(
-                        tool_name,
-                        {
-                            **args,
-                            "plan": state.plan_obj,
-                            "principal_id": state.principal_id,
-                            "principal_type": state.principal_type,
-                        },
-                    )
-                else:
-                    # These tools should not receive the full plan object.
-                    args.pop("plan", None)
-                    # Convenience: bind pipeline execution tools to the most recently-created pipeline/build
-                    # in this run when the model omits identifiers.
-                    pipeline_id_arg = str(args.get("pipeline_id") or "").strip()
-                    if not pipeline_id_arg and state.pipeline_id:
-                        args["pipeline_id"] = state.pipeline_id
-                    if tool_name == "pipeline_deploy_promote_build":
-                        build_job_id_arg = str(args.get("build_job_id") or "").strip()
-                        if not build_job_id_arg and state.last_build_job_id:
-                            args["build_job_id"] = state.last_build_job_id
-                        artifact_id_arg = str(args.get("artifact_id") or "").strip()
-                        if not artifact_id_arg and state.last_build_artifact_id:
-                            args["artifact_id"] = state.last_build_artifact_id
-                    payload = await _call_pipeline_tool(
-                        tool_name,
-                        {
-                            **args,
-                            "principal_id": state.principal_id,
-                            "principal_type": state.principal_type,
-                            # Helpful for audit/logging; endpoints don't require it for pipeline_id-based ops.
-                            "db_name": state.db_name,
-                        },
-                    )
-
-                # Capture pipeline_id if tool returned it, so subsequent steps can reference it without re-parsing.
-                if isinstance(payload, dict):
-                    pipeline_id = None
-                    if isinstance(payload.get("pipeline"), dict):
-                        pipeline_id = str((payload.get("pipeline") or {}).get("pipeline_id") or "").strip() or None
-                    if not pipeline_id:
-                        pipeline_id = str(payload.get("pipeline_id") or "").strip() or None
-                    if pipeline_id:
-                        state.pipeline_id = pipeline_id
-                    if tool_name == "pipeline_build_wait":
-                        job_id = str(payload.get("job_id") or "").strip()
-                        if job_id:
-                            state.last_build_job_id = job_id
-                        artifact_id = str(payload.get("artifact_id") or "").strip()
-                        if artifact_id:
-                            state.last_build_artifact_id = artifact_id
-                    _record_pipeline_event(state=state, tool_name=tool_name, args=args, observation=payload)
-
-                # Keep observations small; do not embed definition_json.
-                state.last_observation = _mask_tool_observation(payload if isinstance(payload, dict) else {"result": payload})
-                return state.last_observation
-
-            # ==================== Ontology Tools ====================
-            # Note: ontology_register_object_type and ontology_query_instances are handled
-            # by the Pipeline MCP Server, not the Ontology MCP Server. They're handled below.
-            if tool_name.startswith("ontology_") and tool_name not in {
-                "ontology_register_object_type",
-                "ontology_query_instances",
-            }:
-                # Always inject session_id for ontology tools
-                if "session_id" not in args:
-                    args["session_id"] = state.ontology_session_id
-
-                # For tools that need db_name/branch, inject if not provided
-                if tool_name in {
-                    "ontology_load", "ontology_list_classes", "ontology_get_class",
-                    "ontology_search_classes", "ontology_create", "ontology_update",
-                    "ontology_check_relationships", "ontology_check_circular_refs",
-                    "ontology_suggest_mappings",
-                }:
-                    if "db_name" not in args or not args["db_name"]:
-                        args["db_name"] = state.db_name
-                    if "branch" not in args or not args["branch"]:
-                        args["branch"] = state.branch or "main"
-
-                payload = await _call_ontology_tool(tool_name, args)
-
-                # Auto-fallback: If ontology_create fails with 409 Conflict, try ontology_update
-                if tool_name == "ontology_create" and isinstance(payload, dict):
-                    error_msg = str(payload.get("error") or "")
-                    if "409" in error_msg or "Conflict" in error_msg:
-                        logger.info("ontology_create got 409 Conflict, auto-retrying with ontology_update")
-                        # Retry with ontology_update using same args
-                        payload = await _call_ontology_tool("ontology_update", args)
-                        if isinstance(payload, dict) and payload.get("status") == "success":
-                            logger.info("ontology_update succeeded after 409 fallback")
-
-                # Track working ontology from preview
-                if tool_name == "ontology_preview" and isinstance(payload, dict):
-                    ont = payload.get("ontology")
-                    if isinstance(ont, dict):
-                        state.working_ontology = ont
-
-                # Track schema inference results
-                if tool_name == "ontology_infer_schema_from_data" and isinstance(payload, dict):
-                    state.schema_inference = payload
-
-                # Track mapping suggestions
-                if tool_name == "ontology_suggest_mappings" and isinstance(payload, dict):
-                    state.mapping_suggestions = payload
-
-                # Log ontology tool events for audit trail (similar to pipeline tools)
-                if tool_name in {"ontology_create", "ontology_update", "ontology_add_property",
-                                 "ontology_add_relationship", "ontology_set_primary_key"}:
-                    logger.info("ontology tool executed: %s status=%s", tool_name,
-                               payload.get("status") if isinstance(payload, dict) else "unknown")
-
-                state.last_observation = _mask_tool_observation(
-                    payload if isinstance(payload, dict) else {"result": payload}
-                )
-                return state.last_observation
-
-            # ==================== Objectify Tools (Dataset → Ontology Instances) ====================
-            if tool_name.startswith("objectify_"):
-                # Objectify tools are handled by the Pipeline MCP Server
-                payload = await _call_pipeline_tool(tool_name, args)
-
-                # Log objectify tool events for audit trail
-                if tool_name in {"objectify_create_mapping_spec", "objectify_run"}:
-                    logger.info("objectify tool executed: %s status=%s", tool_name,
-                               payload.get("status") if isinstance(payload, dict) else "unknown")
-
-                state.last_observation = _mask_tool_observation(
-                    payload if isinstance(payload, dict) else {"result": payload}
-                )
-                return state.last_observation
-
-            # ==================== Dataset Lookup Tools ====================
-            if tool_name in {"dataset_get_by_name", "dataset_get_latest_version", "dataset_validate_columns"}:
-                # Dataset lookup tools are handled by the Pipeline MCP Server
-                payload = await _call_pipeline_tool(tool_name, args)
-                state.last_observation = _mask_tool_observation(
-                    payload if isinstance(payload, dict) else {"result": payload}
-                )
-                return state.last_observation
-
-            # ==================== Ontology Query Tools ====================
-            if tool_name == "ontology_query_instances":
-                # Query ontology instances - handled by the Pipeline MCP Server
-                payload = await _call_pipeline_tool(tool_name, args)
-                state.last_observation = _mask_tool_observation(
-                    payload if isinstance(payload, dict) else {"result": payload}
-                )
-                return state.last_observation
-
-            # ==================== Object Type Registration ====================
-            if tool_name == "ontology_register_object_type":
-                # Register object_type resource for objectify - handled by Pipeline MCP Server
-                payload = await _call_pipeline_tool(tool_name, args)
-                if isinstance(payload, dict):
-                    logger.info("ontology_register_object_type executed: status=%s class_id=%s",
-                               payload.get("status"), args.get("class_id"))
-                state.last_observation = _mask_tool_observation(
-                    payload if isinstance(payload, dict) else {"result": payload}
-                )
-                return state.last_observation
-
-            # ==================== Debugging Tools ====================
-            if tool_name == "debug_get_errors":
-                include_warnings = args.get("include_warnings", True)
-                limit = int(args.get("limit") or 50)
-                errors_list = list(tool_errors)[-limit:] if tool_errors else []
-                warnings_list = list(tool_warnings)[-limit:] if include_warnings and tool_warnings else []
-                state.last_observation = {
-                    "status": "success",
-                    "errors": errors_list,
-                    "warnings": warnings_list,
-                    "error_count": len(tool_errors),
-                    "warning_count": len(tool_warnings) if include_warnings else 0,
-                }
-                return state.last_observation
-
-            if tool_name == "debug_get_execution_log":
-                limit = int(args.get("limit") or 20)
-                step_filter = args.get("step")
-                log_entries: List[Dict[str, Any]] = []
-                for item in state.prompt_items:
-                    try:
-                        parsed = json.loads(item)
-                        item_type = parsed.get("type")
-                        item_step = parsed.get("step")
-                        if item_type in {"tool_call", "tool_output", "tool_calls", "tool_outputs"}:
-                            if step_filter is None or item_step == step_filter:
-                                entry: Dict[str, Any] = {
-                                    "type": item_type,
-                                    "step": item_step,
-                                }
-                                if item_type in {"tool_call", "tool_calls"}:
-                                    entry["tool"] = parsed.get("tool") or parsed.get("tools")
-                                if item_type in {"tool_output", "tool_outputs"}:
-                                    # Include status but trim large payloads
-                                    obs = parsed.get("observation") or parsed.get("observations")
-                                    if isinstance(obs, dict):
-                                        entry["status"] = obs.get("status")
-                                        entry["error"] = obs.get("error")
-                                    elif isinstance(obs, list):
-                                        entry["count"] = len(obs)
-                                log_entries.append(entry)
-                    except (json.JSONDecodeError, TypeError):
-                        continue
-                state.last_observation = {
-                    "status": "success",
-                    "log": log_entries[-limit:],
-                    "total_entries": len(log_entries),
-                    "current_step": step_idx + 1,
-                }
-                return state.last_observation
-
-            if tool_name == "debug_explain_failure":
-                diagnosis: List[Dict[str, str]] = []
-                for error in list(tool_errors)[-10:]:
-                    error_lower = str(error).lower()
-                    if "not found" in error_lower or "does not exist" in error_lower:
-                        diagnosis.append({
-                            "error": str(error),
-                            "cause": "Resource not found",
-                            "fix": "Check spelling and verify the resource exists",
-                        })
-                    elif "type" in error_lower and ("mismatch" in error_lower or "incompatible" in error_lower):
-                        diagnosis.append({
-                            "error": str(error),
-                            "cause": "Type mismatch",
-                            "fix": "Add a cast operation to convert types",
-                        })
-                    elif "join" in error_lower:
-                        diagnosis.append({
-                            "error": str(error),
-                            "cause": "Join key issue",
-                            "fix": "Verify join keys exist and have compatible types",
-                        })
-                    elif "permission" in error_lower or "denied" in error_lower:
-                        diagnosis.append({
-                            "error": str(error),
-                            "cause": "Permission denied",
-                            "fix": "Check user permissions for the resource",
-                        })
-                    elif "timeout" in error_lower:
-                        diagnosis.append({
-                            "error": str(error),
-                            "cause": "Operation timed out",
-                            "fix": "Reduce data size or increase timeout",
-                        })
-                    else:
-                        diagnosis.append({
-                            "error": str(error),
-                            "cause": "Unknown",
-                            "fix": "Review error details and check logs",
-                        })
-                state.last_observation = {
-                    "status": "success",
-                    "diagnosis": diagnosis,
-                    "total_errors": len(tool_errors),
-                    "total_warnings": len(tool_warnings),
-                    "suggestion": "Use debug_get_errors to see all errors, debug_get_execution_log to trace tool calls",
-                }
-                return state.last_observation
-
-            if tool_name == "debug_inspect_node":
-                # Pass to MCP with current plan
-                plan_to_inspect = args.get("plan") or state.plan_obj
-                if not isinstance(plan_to_inspect, dict):
-                    state.last_observation = {"error": "No plan available; call plan_new first or provide plan argument"}
-                    return state.last_observation
-                payload = await _call_pipeline_tool(tool_name, {**args, "plan": plan_to_inspect})
-                state.last_observation = _mask_tool_observation(payload if isinstance(payload, dict) else {"result": payload})
-                return state.last_observation
-
-            if tool_name == "debug_dry_run":
-                # Pass to MCP with current plan
-                plan_to_validate = args.get("plan") or state.plan_obj
-                if not isinstance(plan_to_validate, dict):
-                    state.last_observation = {"error": "No plan available; call plan_new first or provide plan argument"}
-                    return state.last_observation
-                payload = await _call_pipeline_tool(tool_name, {**args, "plan": plan_to_validate})
-                state.last_observation = _mask_tool_observation(payload if isinstance(payload, dict) else {"result": payload})
-                return state.last_observation
-
-            # Plan tools require a plan.
-            if not isinstance(state.plan_obj, dict):
-                state.last_observation = {"error": "plan is not initialized; call plan_new first"}
-                return state.last_observation
-
-            if tool_name == "preview_inspect" and not isinstance(args.get("preview"), dict):
-                # Convenience: let the model inspect the most recent preview without threading it through.
-                last = state.last_observation if isinstance(state.last_observation, dict) else {}
-                preview = last.get("preview") if isinstance(last.get("preview"), dict) else None
-                if isinstance(preview, dict):
-                    args["preview"] = preview
-                else:
-                    state.last_observation = {"error": "preview_inspect requires preview; call plan_preview or pipeline_preview_wait first"}
-                    return state.last_observation
-
-            if tool_name == "plan_preview":
-                requested = int(args.get("limit") or 50)
-                args["limit"] = max(1, min(requested, 200))
-
-            # Always use the server-side plan. Never allow `plan` in args to override state.
-            args.pop("plan", None)
-            payload = await _call_pipeline_tool(tool_name, {**args, "plan": state.plan_obj})
-            if isinstance(payload, dict) and isinstance(payload.get("plan"), dict):
-                state.plan_obj = payload["plan"]
-
-            # Keep tool observation small; never echo the full plan back.
-            if tool_name == "plan_preview" and isinstance(payload, dict) and isinstance(payload.get("preview"), dict):
-                preview = dict(payload.get("preview") or {})
-                rows = preview.get("rows")
-                if isinstance(rows, list):
-                    preview["rows"] = rows[:AGENT_TRIM_PREVIEW_ROWS]
-                state.last_observation = _mask_tool_observation(
-                    {
-                        "status": payload.get("status"),
-                        "preview": preview,
-                        "warnings": payload.get("warnings"),
-                        "plan_status": _plan_status(state.plan_obj),
-                    }
-                )
-            else:
-                observation = dict(payload) if isinstance(payload, dict) else {"result": payload}
-                observation.pop("plan", None)
-                if isinstance(observation.get("evaluations"), list):
-                    observation["evaluations"] = observation.get("evaluations")[:AGENT_TRIM_EVALUATIONS]
-                if isinstance(observation.get("warnings"), list):
-                    observation["warnings"] = observation.get("warnings")[:AGENT_TRIM_WARNINGS]
-                if isinstance(observation.get("errors"), list):
-                    observation["errors"] = observation.get("errors")[:AGENT_TRIM_ERRORS]
-                state.last_observation = _mask_tool_observation({**observation, "plan_status": _plan_status(state.plan_obj)})
-
-            return state.last_observation
-
-        except Exception as exc:
-            exc_type = type(exc).__name__
-            logger.warning("pipeline agent autonomous tool failed tool=%s err=%s type=%s", tool_name, exc, exc_type, exc_info=True)
-            state.last_observation = {
-                "error": str(exc),
-                "error_type": exc_type,
-                "tool": tool_name,
-                "recoverable": exc_type in {"TimeoutError", "ConnectionError", "HTTPError"},
-            }
-            tool_errors.append(f"{tool_name} [{exc_type}]: {exc}")
-            return state.last_observation
-
-    # Initialize append-only prompt log with a stable header (enables prefix caching across iterations).
+    # ── Prompt log ──
     state.prompt_items = [
         stable_json_dumps(_build_prompt_header(state=state, answers=answers, planner_hints=planner_hints, task_spec=task_spec))
     ]
@@ -1948,7 +2366,9 @@ async def run_pipeline_agent_mcp_autonomous(
             stable_json_dumps({"type": "bootstrap_observation", "observation": _mask_tool_observation(state.last_observation)})
         )
 
+    # ── Main loop ──
     for step_idx in range(max_steps):
+        # Step state → prompt
         step_state: Dict[str, Any] = {
             "type": "state",
             "step": step_idx + 1,
@@ -1965,30 +2385,32 @@ async def run_pipeline_agent_mcp_autonomous(
         }
         state.prompt_items.append(stable_json_dumps(step_state))
         await _maybe_compact_prompt_items(
-            state=state,
-            answers=answers,
-            planner_hints=planner_hints,
-            task_spec=task_spec,
-            max_chars=prompt_char_limit,
-            run_id=run_id,
-            audit_store=audit_store,
-            event_store=event_store,
+            state=state, answers=answers, planner_hints=planner_hints,
+            task_spec=task_spec, max_chars=prompt_char_limit,
+            run_id=run_id, audit_store=audit_store, event_store=event_store,
         )
         user_prompt = _prompt_text(state.prompt_items)
 
+        # Quota enforcement
         if data_policies and redis_service:
             model_for_quota = str(selected_model or getattr(llm_gateway, "model", "") or "").strip()
             if model_for_quota:
                 await enforce_llm_quota(
-                    redis_service=redis_service,
-                    tenant_id=tenant_id,
-                    user_id=user_id,
-                    model_id=model_for_quota,
-                    system_prompt=system_prompt,
-                    user_prompt=user_prompt,
-                    data_policies=data_policies,
+                    redis_service=redis_service, tenant_id=tenant_id, user_id=user_id,
+                    model_id=model_for_quota, system_prompt=system_prompt,
+                    user_prompt=user_prompt, data_policies=data_policies,
                 )
 
+        if streaming:
+            yield StreamEvent(
+                event_type="thinking",
+                data={
+                    "run_id": run_id, "step": step_idx + 1, "max_steps": max_steps,
+                    "message": _THINKING_MESSAGES[step_idx % len(_THINKING_MESSAGES)],
+                },
+            )
+
+        # ── LLM call with 3× retry ──
         try:
             decision, llm_meta = await llm_gateway.complete_json(
                 task="PIPELINE_AGENT_AUTONOMOUS_STEP_V1",
@@ -2011,8 +2433,6 @@ async def run_pipeline_agent_mcp_autonomous(
             )
             consecutive_llm_failures = 0
         except LLMOutputValidationError as exc:
-            # Do not abort the run on a single malformed JSON response. Treat it as an observation and
-            # let the model try again with a smaller/cleaner response.
             consecutive_llm_failures += 1
             tool_errors.append(str(exc))
             state.last_observation = {
@@ -2021,81 +2441,108 @@ async def run_pipeline_agent_mcp_autonomous(
                 "hint": "Return ONLY valid JSON. Keep tool_calls <= 20 and avoid huge payloads.",
             }
             state.prompt_items.append(
-                stable_json_dumps(
-                    {
-                        "type": "llm_error",
-                        "step": step_idx + 1,
-                        "error_kind": "output_validation",
-                        "detail": str(exc)[:500],
-                    }
-                )
+                stable_json_dumps({"type": "llm_error", "step": step_idx + 1, "error_kind": "output_validation", "detail": str(exc)[:500]})
             )
             if consecutive_llm_failures >= 3:
                 break
             continue
         except LLMRequestError as exc:
-            # Transient upstream errors/timeouts: allow a couple of retries inside the loop so
-            # the UI doesn't get a hard failure for a single 5xx.
             consecutive_llm_failures += 1
             tool_errors.append(str(exc))
             state.last_observation = {"error": "llm_request_failed", "detail": str(exc)}
             state.prompt_items.append(
-                stable_json_dumps(
-                    {
-                        "type": "llm_error",
-                        "step": step_idx + 1,
-                        "error_kind": "request_error",
-                        "detail": str(exc)[:500],
-                    }
-                )
+                stable_json_dumps({"type": "llm_error", "step": step_idx + 1, "error_kind": "request_error", "detail": str(exc)[:500]})
             )
             if consecutive_llm_failures >= 3:
                 break
             continue
         except LLMUnavailableError as exc:
             tool_errors.append(str(exc))
+            if streaming:
+                yield StreamEvent(event_type="error", data={"error": f"LLM unavailable: {exc}", "run_id": run_id, "step": step_idx + 1})
             break
 
-        # Append the decision to the prompt log so the next iteration benefits from prefix caching.
+        # Append decision to prompt log
         state.prompt_items.append(
-            stable_json_dumps(
-                {
-                    "type": "decision",
-                    "step": step_idx + 1,
-                    "decision": decision.model_dump(mode="json"),
-                }
-            )
+            stable_json_dumps({"type": "decision", "step": step_idx + 1, "decision": decision.model_dump(mode="json")})
         )
-
         notes.extend([str(n) for n in (decision.notes or []) if str(n or "").strip()])
         tool_warnings.extend([str(w) for w in (decision.warnings or []) if str(w or "").strip()])
 
+        # ── ACTION: clarify ──
         if decision.action == "clarify":
             if _is_internal_budget_clarification(list(decision.questions or [])):
                 state.last_observation = {"error": "internal step budget cannot be changed; proceed using available tools"}
                 continue
-            return {
-                "run_id": run_id,
-                "status": "clarification_required",
-                "plan_id": plan_id,
-                "plan": None,
-                "preview": None,
-                "report": state.null_report,
-                "questions": [q.model_dump(mode="json") for q in (decision.questions or [])],
-                "validation_errors": tool_errors or ["planner requested clarification"],
-                "validation_warnings": tool_warnings,
-                "llm": (
-                    {
-                        "provider": llm_meta.provider,
-                        "model": llm_meta.model,
-                        "cache_hit": llm_meta.cache_hit,
-                        "latency_ms": llm_meta.latency_ms,
-                    }
-                    if llm_meta
-                    else None
-                ),
-            }
 
+            # ── Save DRAFT plan + agent context for session resume ──
+            if not plan_id:
+                plan_id = str(uuid4())
+            if persist_plan and plan_registry:
+                draft_plan: Dict[str, Any] = {}
+                if isinstance(state.plan_obj, dict):
+                    draft_plan = dict(state.plan_obj)
+                else:
+                    draft_plan = {
+                        "goal": state.goal,
+                        "data_scope": {"db_name": state.db_name, "branch": state.branch, "dataset_ids": state.dataset_ids},
+                    }
+                draft_plan["_agent_context"] = _build_agent_context_snapshot(state)
+                try:
+                    await plan_registry.upsert_plan(
+                        plan_id=plan_id,
+                        tenant_id=tenant_id,
+                        status="DRAFT",
+                        goal=state.goal,
+                        db_name=state.db_name,
+                        branch=state.branch,
+                        plan=draft_plan,
+                        created_by=actor,
+                    )
+                    logger.info("Saved DRAFT plan_id=%s for clarification resume", plan_id)
+                except Exception as exc:
+                    logger.warning("Failed to save DRAFT plan_id=%s: %s", plan_id, exc)
+
+            yield StreamEvent(
+                event_type="clarification",
+                data={
+                    "run_id": run_id,
+                    "status": "clarification_required",
+                    "plan_id": plan_id,
+                    "plan": state.plan_obj,
+                    "preview": None,
+                    "report": state.null_report,
+                    "questions": [q.model_dump(mode="json") for q in (decision.questions or [])],
+                    "validation_errors": tool_errors or ["planner requested clarification"],
+                    "validation_warnings": tool_warnings,
+                    "llm": _build_llm_meta_dict(llm_meta),
+                },
+            )
+            return
+
+        # ── ACTION: respond ──
+        if decision.action == "respond":
+            yield StreamEvent(
+                event_type="complete",
+                data={
+                    "run_id": run_id,
+                    "status": "success",
+                    "message": str(decision.message or ""),
+                    "reasoning": str(decision.reasoning or "") if decision.reasoning else None,
+                    "plan_id": plan_id,
+                    "plan": state.plan_obj if isinstance(state.plan_obj, dict) else None,
+                    "preview": None,
+                    "report": state.null_report,
+                    "questions": [],
+                    "validation_errors": [],
+                    "validation_warnings": list(tool_warnings),
+                    "planner": {"confidence": float(decision.confidence), "notes": notes},
+                    "llm": _build_llm_meta_dict(llm_meta),
+                },
+            )
+            return
+
+        # ── ACTION: finish ──
         if decision.action == "finish":
             if isinstance(state.plan_obj, dict):
                 try:
@@ -2120,57 +2567,42 @@ async def run_pipeline_agent_mcp_autonomous(
                     }
                     continue
 
-                # Refutation gate: only blocks on concrete counterexamples (witnesses).
-                # PASS means "not refuted", never "proven correct".
+                # Refutation gate
                 state.prompt_items.append(
-                    stable_json_dumps(
-                        {
-                            "type": "tool_call",
-                            "step": step_idx + 1,
-                            "tool": "plan_refute_claims",
-                            "args": {"sample_limit": 400},
-                        }
-                    )
+                    stable_json_dumps({"type": "tool_call", "step": step_idx + 1, "tool": "plan_refute_claims", "args": {"sample_limit": 400}})
                 )
-                refute_observation = await _execute_tool_call(tool_name="plan_refute_claims", args={"sample_limit": 400})
+                refute_observation = await _execute_tool_call(
+                    tool_name="plan_refute_claims", args={"sample_limit": 400},
+                    state=state, mcp_manager=mcp_manager, allowed_tools=allowed_tools,
+                    planner_hints=planner_hints, tool_errors=tool_errors,
+                    tool_warnings=tool_warnings, step_idx=step_idx,
+                )
                 state.prompt_items.append(
-                    stable_json_dumps(
-                        {
-                            "type": "tool_output",
-                            "step": step_idx + 1,
-                            "tool": "plan_refute_claims",
-                            "output": refute_observation,
-                        }
-                    )
+                    stable_json_dumps({"type": "tool_output", "step": step_idx + 1, "tool": "plan_refute_claims", "output": refute_observation})
                 )
                 if isinstance(refute_observation, dict):
                     refute_errors = refute_observation.get("errors")
                     if refute_observation.get("status") == "invalid" or (isinstance(refute_errors, list) and refute_errors):
-                        state.last_observation = refute_observation
-                        continue
+                        refute_error_msgs = refute_errors if isinstance(refute_errors, list) else []
+                        tool_warnings.extend([f"refutation: {str(e)}" for e in refute_error_msgs[:5]])
                     refute_warnings = refute_observation.get("warnings")
                     if isinstance(refute_warnings, list):
                         tool_warnings.extend([str(w) for w in refute_warnings if str(w or "").strip()])
 
-                # If the model attempted pipeline execution, do not allow finishing while
-                # Spark preview/build/deploy are pending or failed.
+                # Pipeline status check
                 pipeline_issue = _pipeline_has_unresolved_status(state)
                 if pipeline_issue:
-                    state.last_observation = {
-                        "error": "cannot finish: pipeline execution is not successful yet",
-                        "pipeline_issue": pipeline_issue,
-                        "pipeline_status": _summarize_pipeline_progress(state),
-                    }
-                    continue
+                    tool_warnings.append(
+                        f"pipeline status: {pipeline_issue.get('issue', 'unresolved')} "
+                        f"node={pipeline_issue.get('node_id', '?')} stage={pipeline_issue.get('stage', '?')}"
+                    )
 
-                # Persist the plan so the existing preview endpoint can be used from the UI.
+                # Persist plan
                 if not plan_id:
                     plan_id = str(uuid4())
                 if persist_plan:
                     await plan_registry.upsert_plan(
-                        plan_id=plan_id,
-                        tenant_id=tenant_id,
-                        status="COMPILED",
+                        plan_id=plan_id, tenant_id=tenant_id, status="COMPILED",
                         goal=str(validation.plan.goal or ""),
                         db_name=str(validation.plan.data_scope.db_name or ""),
                         branch=str(validation.plan.data_scope.branch or "") or None,
@@ -2178,102 +2610,115 @@ async def run_pipeline_agent_mcp_autonomous(
                         created_by=actor,
                     )
 
-                return {
-                    "run_id": run_id,
-                    "status": "success",
-                    "plan_id": plan_id,
-                    "plan": validation.plan.model_dump(mode="json"),
-                    # Preview is generated by the caller (router) to stay consistent with BFF preview semantics.
-                    "preview": None,
-                    "report": state.null_report,
-                    "pipeline_id": state.pipeline_id,
-                    "last_build_job_id": state.last_build_job_id,
-                    "last_build_artifact_id": state.last_build_artifact_id,
-                    "pipeline_status": _summarize_pipeline_progress(state),
-                    "questions": [],
-                    "validation_errors": [],
-                    "validation_warnings": list(tool_warnings) + list(validation.warnings or []),
-                    "preflight": validation.preflight,
-                    "planner": {"confidence": float(decision.confidence), "notes": notes},
-                    "llm": (
-                        {
-                            "provider": llm_meta.provider,
-                            "model": llm_meta.model,
-                            "cache_hit": llm_meta.cache_hit,
-                            "latency_ms": llm_meta.latency_ms,
-                        }
-                        if llm_meta
-                        else None
-                    ),
-                }
+                yield StreamEvent(
+                    event_type="complete",
+                    data={
+                        "run_id": run_id,
+                        "status": "success",
+                        "message": str(decision.message or "") or None,
+                        "reasoning": str(decision.reasoning or "") if decision.reasoning else None,
+                        "plan_id": plan_id,
+                        "plan": validation.plan.model_dump(mode="json"),
+                        "preview": None,
+                        "report": state.null_report,
+                        "pipeline_id": state.pipeline_id,
+                        "last_build_job_id": state.last_build_job_id,
+                        "last_build_artifact_id": state.last_build_artifact_id,
+                        "pipeline_status": _summarize_pipeline_progress(state),
+                        "questions": [],
+                        "validation_errors": [],
+                        "validation_warnings": list(tool_warnings) + list(validation.warnings or []),
+                        "preflight": validation.preflight,
+                        "planner": {"confidence": float(decision.confidence), "notes": notes},
+                        "llm": _build_llm_meta_dict(llm_meta),
+                    },
+                )
+                return
 
+            # Report-only finish
             if isinstance(state.null_report, dict):
-                return {
-                    "run_id": run_id,
-                    "status": "success",
-                    "plan_id": plan_id,
-                    "plan": None,
-                    "preview": None,
-                    "report": state.null_report,
-                    "questions": [],
-                    "validation_errors": [],
-                    "validation_warnings": list(tool_warnings),
-                    "planner": {"confidence": float(decision.confidence), "notes": notes},
-                    "llm": (
-                        {
-                            "provider": llm_meta.provider,
-                            "model": llm_meta.model,
-                            "cache_hit": llm_meta.cache_hit,
-                            "latency_ms": llm_meta.latency_ms,
-                        }
-                        if llm_meta
-                        else None
-                    ),
-                }
+                yield StreamEvent(
+                    event_type="complete",
+                    data={
+                        "run_id": run_id,
+                        "status": "success",
+                        "message": str(decision.message or "") or None,
+                        "reasoning": str(decision.reasoning or "") if decision.reasoning else None,
+                        "plan_id": plan_id,
+                        "plan": None,
+                        "preview": None,
+                        "report": state.null_report,
+                        "questions": [],
+                        "validation_errors": [],
+                        "validation_warnings": list(tool_warnings),
+                        "planner": {"confidence": float(decision.confidence), "notes": notes},
+                        "llm": _build_llm_meta_dict(llm_meta),
+                    },
+                )
+                return
 
-            # Ontology-only task: finish with ontology result if present
+            # Ontology-only finish
             if isinstance(state.working_ontology, dict) or isinstance(state.schema_inference, dict):
-                # Get final ontology preview if we have a working ontology
                 final_ontology = state.working_ontology
                 if not final_ontology and state.ontology_session_id:
-                    # Try to get preview
                     preview_result = await _execute_tool_call(
                         tool_name="ontology_preview",
                         args={"session_id": state.ontology_session_id},
+                        state=state, mcp_manager=mcp_manager, allowed_tools=allowed_tools,
+                        planner_hints=planner_hints, tool_errors=tool_errors,
+                        tool_warnings=tool_warnings, step_idx=step_idx,
                     )
                     if isinstance(preview_result, dict) and preview_result.get("status") == "success":
                         final_ontology = preview_result.get("ontology")
 
-                return {
-                    "run_id": run_id,
-                    "status": "success",
-                    "plan_id": None,
-                    "plan": None,
-                    "preview": None,
-                    "report": None,
-                    "ontology": final_ontology,
-                    "schema_inference": state.schema_inference,
-                    "mapping_suggestions": state.mapping_suggestions,
-                    "questions": [],
-                    "validation_errors": [],
-                    "validation_warnings": list(tool_warnings),
-                    "planner": {"confidence": float(decision.confidence), "notes": notes},
-                    "llm": (
-                        {
-                            "provider": llm_meta.provider,
-                            "model": llm_meta.model,
-                            "cache_hit": llm_meta.cache_hit,
-                            "latency_ms": llm_meta.latency_ms,
-                        }
-                        if llm_meta
-                        else None
-                    ),
-                }
+                yield StreamEvent(
+                    event_type="complete",
+                    data={
+                        "run_id": run_id,
+                        "status": "success",
+                        "message": str(decision.message or "") or "온톨로지 설계가 완료되었습니다.",
+                        "reasoning": str(decision.reasoning or "") if decision.reasoning else None,
+                        "plan_id": None,
+                        "plan": None,
+                        "preview": None,
+                        "report": None,
+                        "ontology": final_ontology,
+                        "schema_inference": state.schema_inference,
+                        "mapping_suggestions": state.mapping_suggestions,
+                        "questions": [],
+                        "validation_errors": [],
+                        "validation_warnings": list(tool_warnings),
+                        "planner": {"confidence": float(decision.confidence), "notes": notes},
+                        "llm": _build_llm_meta_dict(llm_meta),
+                    },
+                )
+                return
 
-            state.last_observation = {"error": "cannot finish: produce a report or a validated plan first"}
+            # Message-only finish
+            if str(decision.message or "").strip():
+                yield StreamEvent(
+                    event_type="complete",
+                    data={
+                        "run_id": run_id,
+                        "status": "success",
+                        "message": str(decision.message or ""),
+                        "reasoning": str(decision.reasoning or "") if decision.reasoning else None,
+                        "plan_id": plan_id,
+                        "plan": None,
+                        "preview": None,
+                        "report": None,
+                        "questions": [],
+                        "validation_errors": [],
+                        "validation_warnings": list(tool_warnings),
+                        "planner": {"confidence": float(decision.confidence), "notes": notes},
+                        "llm": _build_llm_meta_dict(llm_meta),
+                    },
+                )
+                return
+            state.last_observation = {"error": "cannot finish: produce a report, a validated plan, or a response message"}
             continue
 
-        # call_tool
+        # ── ACTION: call_tool ──
         tool_calls = list(decision.tool_calls or [])
         if not tool_calls:
             tool_calls = [AutonomousPipelineAgentToolCall(tool=str(decision.tool or ""), args=dict(decision.args or {}))]
@@ -2283,29 +2728,168 @@ async def run_pipeline_agent_mcp_autonomous(
         batch_last: Optional[Dict[str, Any]] = None
         batch_last_by_alias: Dict[str, Dict[str, Any]] = {}
         truncated_tool_calls = max(0, len(tool_calls) - max_tool_calls_per_step)
+        _step_all_dup = True
+
         for call in tool_calls[:max_tool_calls_per_step]:
             tool_name = str(call.tool or "").strip()
+            if not tool_name:
+                if not streaming:
+                    state.last_observation = {"error": "tool name missing"}
+                    stop_reason = "missing_tool"
+                    break
+                continue
+
             try:
                 args = _resolve_batch_placeholders(
-                    dict(call.args or {}),
-                    last=batch_last,
-                    last_by_alias=batch_last_by_alias,
+                    dict(call.args or {}), last=batch_last, last_by_alias=batch_last_by_alias,
                 )
             except Exception as exc:
                 state.last_observation = {"error": f"failed to resolve batch tool refs for {tool_name}: {exc}"}
                 stop_reason = "bad_batch_ref"
                 break
-            if not tool_name:
-                state.last_observation = {"error": "tool name missing"}
-                stop_reason = "missing_tool"
-                break
+
+            # ── Pre-execution dedup ──
+            _pre_dup = _deduplicate_tool_call(state, tool_name, args, step_idx)
+            if _pre_dup is not None:
+                state.prompt_items.append(
+                    stable_json_dumps({"type": "tool_output_ref", "step": step_idx + 1, "tool": tool_name,
+                                       "ref_step": _pre_dup, "note": "Duplicate call skipped"})
+                )
+                if streaming:
+                    yield StreamEvent(
+                        event_type="tool_end",
+                        data={
+                            "run_id": run_id, "step": step_idx + 1, "tool": tool_name,
+                            "success": True, "error": None,
+                            "observation": {"note": f"Duplicate of step {_pre_dup + 1}, skipped"},
+                        },
+                    )
+                continue
+            _step_all_dup = False
+
+            # ── Consecutive dup guard ──
+            if _consecutive_dup_steps >= _MAX_CONSECUTIVE_DUP_STEPS:
+                state.prompt_items.append(stable_json_dumps({
+                    "type": "system_hint",
+                    "message": (
+                        "⚠️ You have been repeating the same tool calls. All data has already been explored. "
+                        "You MUST now either: (1) action='clarify' to ask the user questions, "
+                        "or (2) action='call_tool' with a NEW tool you haven't called yet, "
+                        "or (3) action='finish' with a plan. Do NOT repeat dataset_sample/dataset_profile."
+                    ),
+                }))
+                _consecutive_dup_steps = 0
+
+            if streaming:
+                yield StreamEvent(
+                    event_type="tool_start",
+                    data={
+                        "run_id": run_id, "step": step_idx + 1, "max_steps": max_steps,
+                        "tool": tool_name,
+                        "args": {k: v for k, v in args.items() if k != "plan"},
+                        "reasoning": decision.notes[0] if decision.notes else None,
+                    },
+                )
 
             executed_tools.append(tool_name)
             state.prompt_items.append(stable_json_dumps({"type": "tool_call", "step": step_idx + 1, "tool": tool_name, "args": args}))
-            observation = await _execute_tool_call(tool_name=tool_name, args=args)
-            state.prompt_items.append(
-                stable_json_dumps({"type": "tool_output", "step": step_idx + 1, "tool": tool_name, "output": observation})
+
+            # Execute
+            observation = await _execute_tool_call(
+                tool_name=tool_name, args=args,
+                state=state, mcp_manager=mcp_manager, allowed_tools=allowed_tools,
+                planner_hints=planner_hints, tool_errors=tool_errors,
+                tool_warnings=tool_warnings, step_idx=step_idx,
             )
+
+            # Knowledge + summarize
+            if isinstance(observation, dict):
+                _extract_knowledge(tool_name, observation, state.knowledge_ledger)
+            summarized = _summarize_tool_output(tool_name, observation) if isinstance(observation, dict) else observation
+            state.prompt_items.append(
+                stable_json_dumps({"type": "tool_output", "step": step_idx + 1, "tool": tool_name, "output": summarized})
+            )
+
+            if streaming:
+                tool_error = observation.get("error") if isinstance(observation, dict) else None
+                yield StreamEvent(
+                    event_type="tool_end",
+                    data={
+                        "run_id": run_id, "step": step_idx + 1, "tool": tool_name,
+                        "success": not tool_error, "error": tool_error,
+                        "observation": _mask_tool_observation(observation) if isinstance(observation, dict) else observation,
+                    },
+                )
+
+                # plan_update event
+                if tool_name.startswith("plan_") and isinstance(state.plan_obj, dict) and not (isinstance(observation, dict) and observation.get("error")):
+                    definition = state.plan_obj.get("definition_json", {})
+                    nodes = definition.get("nodes", [])
+                    edges = definition.get("edges", [])
+                    yield StreamEvent(
+                        event_type="plan_update",
+                        data={
+                            "run_id": run_id, "step": step_idx + 1, "tool": tool_name,
+                            "plan": {
+                                "definition_json": {"nodes": nodes, "edges": edges},
+                                "outputs": state.plan_obj.get("outputs", []),
+                            },
+                            "node_count": len(nodes), "edge_count": len(edges),
+                        },
+                    )
+
+                # preview_update event
+                if tool_name == "plan_preview" and isinstance(observation, dict) and not observation.get("error"):
+                    preview_data = observation.get("preview") or observation.get("result") or {}
+                    node_id = args.get("node_id")
+                    if not node_id and isinstance(state.plan_obj, dict):
+                        definition = state.plan_obj.get("definition_json", {})
+                        nodes = definition.get("nodes", [])
+                        if isinstance(nodes, list) and nodes:
+                            last_node = nodes[-1] if isinstance(nodes[-1], dict) else None
+                            node_id = str((last_node or {}).get("id") or "").strip() or node_id
+                    preview_columns: list = []
+                    preview_rows: list = []
+                    if isinstance(preview_data, dict):
+                        raw_columns = preview_data.get("columns", [])
+                        if isinstance(raw_columns, list):
+                            preview_columns = [
+                                {"name": str(c.get("name") or c) if isinstance(c, dict) else str(c),
+                                 "type": str(c.get("type", "string")) if isinstance(c, dict) else "string"}
+                                for c in raw_columns
+                            ]
+                        raw_rows = preview_data.get("rows", preview_data.get("data", []))
+                        if isinstance(raw_rows, list):
+                            preview_rows = raw_rows[:100]
+                    yield StreamEvent(
+                        event_type="preview_update",
+                        data={
+                            "run_id": run_id, "step": step_idx + 1, "node_id": node_id,
+                            "preview_status": observation.get("status"),
+                            "preview_policy": observation.get("preview_policy") if isinstance(observation.get("preview_policy"), dict) else None,
+                            "hint": observation.get("hint"),
+                            "preview": {"columns": preview_columns, "rows": preview_rows, "row_count": len(preview_rows)},
+                        },
+                    )
+
+                # ontology_update event
+                if (tool_name.startswith("ontology_") or tool_name.startswith("objectify_")) and isinstance(observation, dict) and not observation.get("error"):
+                    ontology_event_data: Dict[str, Any] = {"run_id": run_id, "step": step_idx + 1, "tool": tool_name}
+                    if isinstance(state.working_ontology, dict):
+                        ontology_event_data["ontology"] = state.working_ontology
+                    if isinstance(state.schema_inference, dict):
+                        ontology_event_data["schema_inference"] = state.schema_inference
+                    if isinstance(state.mapping_suggestions, dict):
+                        ontology_event_data["mapping_suggestions"] = state.mapping_suggestions
+                    if tool_name in {"objectify_run", "objectify_wait"} and isinstance(observation, dict):
+                        ontology_event_data["objectify_status"] = {
+                            "job_id": observation.get("job_id"),
+                            "status": observation.get("status"),
+                            "instances_created": observation.get("instances_created"),
+                        }
+                    yield StreamEvent(event_type="ontology_update", data=ontology_event_data)
+
+            # ── Batch stop conditions (non-streaming's richer logic) ──
             if not isinstance(observation, dict):
                 stop_reason = "invalid_observation"
                 break
@@ -2314,61 +2898,23 @@ async def run_pipeline_agent_mcp_autonomous(
             errors = observation.get("errors")
             if observation.get("error"):
                 error_text = str(observation.get("error") or "").strip()
-                logger.info(
-                    "pipeline agent batch tool_error tool=%s step=%s observation=%s",
-                    tool_name,
-                    step_idx + 1,
-                    _mask_tool_observation(dict(observation)),
-                )
-                # Do NOT abort the entire batch on a single non-fatal tool error.
-                # This commonly happens when LLM mocks/models include an optional context tool
-                # alongside required plan mutations (plan_new/plan_add_*).
                 if error_text.startswith("tool not allowed:"):
                     continue
                 stop_reason = "tool_error"
                 break
             if observation.get("status") == "invalid":
-                preflight_blocking = None
-                preflight_obj = observation.get("preflight")
-                if isinstance(preflight_obj, dict):
-                    blocking = preflight_obj.get("blocking_errors")
-                    if isinstance(blocking, list) and blocking:
-                        # Log a small, PII-masked witness list to make invalid preflight debuggable.
-                        preflight_blocking = _mask_tool_observation({"blocking_errors": blocking[:5]})
-                logger.info(
-                    "pipeline agent batch stopping: invalid_status tool=%s step=%s errors=%s warnings=%s preflight_blocking=%s",
-                    tool_name,
-                    step_idx + 1,
-                    (observation.get("errors") if isinstance(observation.get("errors"), list) else None),
-                    (observation.get("warnings") if isinstance(observation.get("warnings"), list) else None),
-                    preflight_blocking,
-                )
                 stop_reason = "invalid_status"
                 break
             if tool_name.startswith("pipeline_"):
-                # Pipeline execution tools can be long-running and stateful (queued/running).
-                # If a pipeline tool doesn't report success, stop the batch so the model can react
-                # (wait/poll/repair) instead of blindly continuing with dependent actions.
                 status_value = str(observation.get("status") or "").strip().lower()
                 if status_value and status_value != "success":
-                    logger.info(
-                        "pipeline agent batch stopping: pipeline_status tool=%s step=%s status=%s",
-                        tool_name,
-                        step_idx + 1,
-                        status_value,
-                    )
                     stop_reason = f"pipeline_status_{status_value}"
                     break
             if isinstance(errors, list) and errors:
-                logger.info(
-                    "pipeline agent batch stopping: validation_errors tool=%s step=%s errors=%s",
-                    tool_name,
-                    step_idx + 1,
-                    errors[:20],
-                )
                 stop_reason = "validation_errors"
                 break
 
+        # Batch summary
         if executed_tools:
             augmented = dict(state.last_observation or {})
             augmented["executed_tools"] = executed_tools
@@ -2379,51 +2925,38 @@ async def run_pipeline_agent_mcp_autonomous(
                 augmented["batch_stopped"] = stop_reason
             state.last_observation = augmented
             state.prompt_items.append(
-                stable_json_dumps(
-                    {
-                        "type": "batch_summary",
-                        "step": step_idx + 1,
-                        "executed_tools": executed_tools,
-                        "stop_reason": stop_reason,
-                    }
-                )
+                stable_json_dumps({"type": "batch_summary", "step": step_idx + 1, "executed_tools": executed_tools, "stop_reason": stop_reason})
             )
+
+        # Dup step counter
+        if _step_all_dup:
+            _consecutive_dup_steps += 1
+        else:
+            _consecutive_dup_steps = 0
+
         continue
 
-    # Loop exhausted / LLM error. Return best-effort result.
+    # ── Loop exhausted / LLM error. Return best-effort result. ──
     if isinstance(state.plan_obj, dict):
         try:
             plan_model = PipelinePlan.model_validate(state.plan_obj)
         except Exception as exc:
-            return {
-                "run_id": run_id,
-                "status": "failed",
-                "plan_id": plan_id,
-                "plan": None,
-                "preview": None,
-                "report": state.null_report,
-                "questions": [],
-                "validation_errors": tool_errors or [str(exc)],
-                "validation_warnings": tool_warnings,
-                "llm": (
-                    {
-                        "provider": llm_meta.provider,
-                        "model": llm_meta.model,
-                        "cache_hit": llm_meta.cache_hit,
-                        "latency_ms": llm_meta.latency_ms,
-                    }
-                    if llm_meta
-                    else None
-                ),
-            }
+            yield StreamEvent(
+                event_type="complete",
+                data={
+                    "run_id": run_id, "status": "failed", "plan_id": plan_id,
+                    "plan": None, "preview": None, "report": state.null_report,
+                    "questions": [], "validation_errors": tool_errors or [str(exc)],
+                    "validation_warnings": tool_warnings,
+                    "llm": _build_llm_meta_dict(llm_meta),
+                },
+            )
+            return
 
         validation = await validate_pipeline_plan(
-            plan=plan_model,
-            dataset_registry=dataset_registry,
+            plan=plan_model, dataset_registry=dataset_registry,
             db_name=str(plan_model.data_scope.db_name or ""),
             branch=str(plan_model.data_scope.branch or "") or None,
-            # If we have a plan, prefer treating "valid + has output" as success even if the
-            # model didn't explicitly emit action=finish (loop exhaustion, etc).
             require_output=True,
         )
         pipeline_issue = _pipeline_has_unresolved_status(state)
@@ -2436,8 +2969,7 @@ async def run_pipeline_agent_mcp_autonomous(
             plan_id = str(uuid4())
         if persist_plan:
             await plan_registry.upsert_plan(
-                plan_id=plan_id,
-                tenant_id=tenant_id,
+                plan_id=plan_id, tenant_id=tenant_id,
                 status="DRAFT" if validation.errors else "COMPILED",
                 goal=str(validation.plan.goal or ""),
                 db_name=str(validation.plan.data_scope.db_name or ""),
@@ -2450,65 +2982,95 @@ async def run_pipeline_agent_mcp_autonomous(
             validation_errors_out = tool_errors[:1]
         if pipeline_issue and not validation_errors_out:
             validation_errors_out = [f"pipeline execution incomplete ({pipeline_issue})"]
-        return {
-            "run_id": run_id,
-            "status": final_status,
-            "plan_id": plan_id,
-            "plan": validation.plan.model_dump(mode="json"),
-            "preview": None,
-            "report": state.null_report,
-            "pipeline_id": state.pipeline_id,
-            "last_build_job_id": state.last_build_job_id,
-            "last_build_artifact_id": state.last_build_artifact_id,
-            "pipeline_status": _summarize_pipeline_progress(state),
-            "questions": [],
-            "validation_errors": validation_errors_out,
-            "validation_warnings": list(tool_warnings) + list(validation.warnings or []),
-            "preflight": validation.preflight,
+        yield StreamEvent(
+            event_type="complete",
+            data={
+                "run_id": run_id, "status": final_status, "plan_id": plan_id,
+                "plan": validation.plan.model_dump(mode="json"),
+                "preview": None, "report": state.null_report,
+                "pipeline_id": state.pipeline_id,
+                "last_build_job_id": state.last_build_job_id,
+                "last_build_artifact_id": state.last_build_artifact_id,
+                "pipeline_status": _summarize_pipeline_progress(state),
+                "questions": [], "validation_errors": validation_errors_out,
+                "validation_warnings": list(tool_warnings) + list(validation.warnings or []),
+                "preflight": validation.preflight,
+                "planner": {"confidence": None, "notes": notes or None},
+                "llm": _build_llm_meta_dict(llm_meta),
+            },
+        )
+        return
+
+    # Loop exhausted but ontology result exists
+    if isinstance(state.working_ontology, dict) or isinstance(state.schema_inference, dict):
+        yield StreamEvent(
+            event_type="complete",
+            data={
+                "run_id": run_id, "status": "partial", "plan_id": None,
+                "plan": None, "preview": None, "report": None,
+                "ontology": state.working_ontology,
+                "schema_inference": state.schema_inference,
+                "mapping_suggestions": state.mapping_suggestions,
+                "questions": [], "validation_errors": [],
+                "validation_warnings": tool_warnings,
+                "planner": {"confidence": None, "notes": notes or None},
+                "llm": _build_llm_meta_dict(llm_meta),
+            },
+        )
+        return
+
+    yield StreamEvent(
+        event_type="complete",
+        data={
+            "run_id": run_id, "status": "failed", "plan_id": plan_id,
+            "plan": None, "preview": None, "report": state.null_report,
+            "questions": [], "validation_errors": tool_errors or ["pipeline agent did not complete"],
+            "validation_warnings": tool_warnings,
             "planner": {"confidence": None, "notes": notes or None},
-            "llm": (
-                {
-                    "provider": llm_meta.provider,
-                    "model": llm_meta.model,
-                    "cache_hit": llm_meta.cache_hit,
-                    "latency_ms": llm_meta.latency_ms,
-                }
-                if llm_meta
-                else None
-            ),
-        }
-
-    return {
-        "run_id": run_id,
-        "status": "failed",
-        "plan_id": plan_id,
-        "plan": None,
-        "preview": None,
-        "report": state.null_report,
-        "questions": [],
-        "validation_errors": tool_errors or ["pipeline agent did not complete"],
-        "validation_warnings": tool_warnings,
-        "planner": {"confidence": None, "notes": notes or None},
-        "llm": (
-            {
-                "provider": llm_meta.provider,
-                "model": llm_meta.model,
-                "cache_hit": llm_meta.cache_hit,
-                "latency_ms": llm_meta.latency_ms,
-            }
-            if llm_meta
-            else None
-        ),
-    }
+            "llm": _build_llm_meta_dict(llm_meta),
+        },
+    )
 
 
-# ==================== SSE Streaming Version ====================
-
-@dataclass
-class StreamEvent:
-    """SSE 이벤트 데이터 구조"""
-    event_type: str  # tool_start, tool_end, plan_update, node_added, error, complete
-    data: Dict[str, Any]
+async def run_pipeline_agent_mcp_autonomous(
+    *,
+    goal: str,
+    data_scope: PipelinePlanDataScope,
+    answers: Optional[Dict[str, Any]],
+    planner_hints: Optional[Dict[str, Any]],
+    task_spec: Optional[Dict[str, Any]] = None,
+    resume_plan_id: Optional[str] = None,
+    persist_plan: bool = True,
+    actor: str,
+    tenant_id: str,
+    user_id: Optional[str],
+    data_policies: Optional[Dict[str, Any]],
+    selected_model: Optional[str],
+    allowed_models: Optional[List[str]],
+    llm_gateway: LLMGateway,
+    redis_service: Optional[RedisService],
+    audit_store: Optional[AuditLogStore],
+    event_store: Optional[EventStore] = None,
+    dataset_registry: DatasetRegistry,
+    plan_registry: PipelinePlanRegistry,
+) -> Dict[str, Any]:
+    """Non-streaming wrapper: collects the terminal event from the unified core loop."""
+    result: Dict[str, Any] = {"run_id": "", "status": "failed"}
+    async for event in _run_agent_core(
+        goal=goal, data_scope=data_scope, answers=answers,
+        planner_hints=planner_hints, task_spec=task_spec,
+        resume_plan_id=resume_plan_id,
+        persist_plan=persist_plan, actor=actor, tenant_id=tenant_id,
+        user_id=user_id, data_policies=data_policies,
+        selected_model=selected_model, allowed_models=allowed_models,
+        llm_gateway=llm_gateway, redis_service=redis_service,
+        audit_store=audit_store, event_store=event_store,
+        dataset_registry=dataset_registry, plan_registry=plan_registry,
+        streaming=False,
+    ):
+        if event.event_type in ("complete", "clarification", "error"):
+            result = event.data
+    return result
 
 
 async def run_pipeline_agent_streaming(
@@ -2518,6 +3080,7 @@ async def run_pipeline_agent_streaming(
     answers: Optional[Dict[str, Any]],
     planner_hints: Optional[Dict[str, Any]],
     task_spec: Optional[Dict[str, Any]] = None,
+    resume_plan_id: Optional[str] = None,
     persist_plan: bool = True,
     actor: str,
     tenant_id: str,
@@ -2532,519 +3095,17 @@ async def run_pipeline_agent_streaming(
     dataset_registry: DatasetRegistry,
     plan_registry: PipelinePlanRegistry,
 ):
-    """
-    SSE 스트리밍 버전의 Pipeline Agent.
-
-    도구 호출마다 이벤트를 yield하여 실시간 UI 업데이트를 가능하게 합니다.
-
-    Yields:
-        StreamEvent: 각 도구 호출/완료/플랜 업데이트 이벤트
-    """
-    run_id = str(uuid4())
-    plan_id: Optional[str] = None
-
-    db_name = str(data_scope.db_name or "").strip()
-    if not db_name:
-        yield StreamEvent(
-            event_type="error",
-            data={"error": "data_scope.db_name is required", "run_id": run_id}
-        )
-        return
-
-    dataset_ids = [str(item).strip() for item in (data_scope.dataset_ids or []) if str(item).strip()]
-
-    goal_lower = str(goal or "").lower()
-    is_ontology_only_task = (
-        not dataset_ids
-        and any(kw in goal_lower for kw in (
-            "ontology", "온톨로지", "클래스", "class", "스키마", "schema",
-            "property", "속성", "relationship", "관계",
-        ))
-    )
-
-    if not dataset_ids and not is_ontology_only_task:
-        yield StreamEvent(
-            event_type="error",
-            data={"error": "data_scope.dataset_ids is required", "run_id": run_id}
-        )
-        return
-
-    # MCP 클라이언트 가져오기
-    try:
-        try:
-            from mcp_servers.mcp_client import get_mcp_manager
-        except Exception:
-            from backend.mcp_servers.mcp_client import get_mcp_manager
-    except Exception as exc:
-        yield StreamEvent(
-            event_type="error",
-            data={"error": f"MCP client unavailable: {exc}", "run_id": run_id}
-        )
-        return
-
-    mcp_manager = get_mcp_manager()
-
-    # 시작 이벤트
-    yield StreamEvent(
-        event_type="start",
-        data={
-            "run_id": run_id,
-            "goal": goal,
-            "db_name": db_name,
-            "dataset_ids": dataset_ids,
-        }
-    )
-
-    # MCP 도구 호출 헬퍼
-    async def _call_pipeline_tool(tool: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
-        payload = await mcp_manager.call_tool("pipeline", tool, arguments)
-        if isinstance(payload, dict):
-            return payload
-        structured = getattr(payload, "structuredContent", None) or getattr(payload, "structured_content", None)
-        if isinstance(structured, dict):
-            return structured
-        data = getattr(payload, "data", None)
-        if isinstance(data, dict):
-            return data
-        is_error = bool(getattr(payload, "isError", False) or getattr(payload, "is_error", False))
-        content = getattr(payload, "content", None)
-        if isinstance(content, list) and content:
-            texts = []
-            for part in content:
-                text = getattr(part, "text", None) or (part.get("text") if isinstance(part, dict) else None)
-                if isinstance(text, str) and text.strip():
-                    texts.append(text.strip())
-            if is_error:
-                return {"error": "\n".join(texts).strip() or f"MCP tool error: {tool}"}
-            for text in texts:
-                try:
-                    parsed = json.loads(text)
-                    if isinstance(parsed, dict):
-                        return parsed
-                except Exception:
-                    continue
-            if texts:
-                return {"result": texts[0]}
-        raise RuntimeError(f"Unexpected MCP tool result type for {tool}: {type(payload)}")
-
-    # 상태 초기화
-    state = _AgentState(
-        goal=goal,
-        db_name=db_name,
-        branch=str(data_scope.branch or "") or "main",
-        dataset_ids=dataset_ids,
-        principal_id=user_id or actor,
-        principal_type="user" if user_id else "system",
-    )
-
-    # 모델 설정
-    max_steps = 30
-    max_tool_calls_per_step = 20
-
-    # 허용된 도구 목록: non-streaming agent와 동일하게 유지 (드리프트 방지)
-    allowed_tools = list(_PIPELINE_AGENT_ALLOWED_TOOLS)
-    system_prompt = _build_system_prompt(allowed_tools=allowed_tools)
-
-    # 메인 루프
-    for step_idx in range(max_steps):
-        # 생각 중 이벤트 - 사용자에게 진행 상황 표시
-        thinking_messages = [
-            "요청을 분석하고 있습니다...",
-            "데이터 구조를 파악하고 있습니다...",
-            "최적의 변환 방법을 찾고 있습니다...",
-            "파이프라인 구조를 설계하고 있습니다...",
-            "노드 연결 관계를 검토하고 있습니다...",
-        ]
-        thinking_msg = thinking_messages[step_idx % len(thinking_messages)]
-        yield StreamEvent(
-            event_type="thinking",
-            data={
-                "run_id": run_id,
-                "step": step_idx + 1,
-                "max_steps": max_steps,
-                "message": thinking_msg,
-            }
-        )
-
-        # 프롬프트 구성
-        user_prompt = _build_user_prompt(
-            state=state,
-            answers=answers,
-            planner_hints=planner_hints,
-            task_spec=task_spec,
-            target_chars=50000,
-        )
-
-        # LLM 호출 (JSON 스키마 검증 포함)
-        try:
-            decision, llm_meta = await llm_gateway.complete_json(
-                task="PIPELINE_AGENT_AUTONOMOUS_STEP_V1",
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
-                response_model=AutonomousPipelineAgentDecision,
-                model=selected_model,
-                allowed_models=allowed_models,
-                redis_service=redis_service,
-                audit_store=audit_store,
-                audit_partition_key=f"pipeline_agent_stream:{run_id}",
-                audit_actor=actor,
-                audit_resource_id=run_id,
-                audit_metadata={
-                    "kind": "pipeline_agent_streaming",
-                    "tenant_id": tenant_id,
-                    "user_id": user_id,
-                    "step": step_idx + 1,
-                },
-            )
-        except (LLMOutputValidationError, LLMRequestError, LLMUnavailableError) as exc:
-            yield StreamEvent(
-                event_type="error",
-                data={"error": f"LLM error: {exc}", "run_id": run_id, "step": step_idx + 1},
-            )
-            break
-
-        # clarify 액션
-        if decision.action == "clarify":
-            yield StreamEvent(
-                event_type="clarification",
-                data={
-                    "run_id": run_id,
-                    "questions": [q.model_dump() for q in decision.questions],
-                    "plan": state.plan_obj,
-                }
-            )
-            return
-
-        # finish 액션
-        if decision.action == "finish":
-            if isinstance(state.plan_obj, dict):
-                try:
-                    plan_model = PipelinePlan.model_validate(state.plan_obj)
-                    validation = await validate_pipeline_plan(
-                        plan=plan_model,
-                        dataset_registry=dataset_registry,
-                        db_name=db_name,
-                        branch=state.branch,
-                        require_output=True,
-                    )
-
-                    if not plan_id:
-                        plan_id = str(uuid4())
-
-                    if persist_plan:
-                        await plan_registry.upsert_plan(
-                            plan_id=plan_id,
-                            tenant_id=tenant_id,
-                            status="COMPILED" if not validation.errors else "DRAFT",
-                            goal=goal,
-                            db_name=db_name,
-                            branch=state.branch,
-                            plan=validation.plan.model_dump(mode="json"),
-                            created_by=actor,
-                        )
-
-                    yield StreamEvent(
-                        event_type="complete",
-                        data={
-                            "run_id": run_id,
-                            "status": "success" if not validation.errors else "partial",
-                            "plan_id": plan_id,
-                            "plan": validation.plan.model_dump(mode="json"),
-                            "validation_errors": list(validation.errors or []),
-                            "validation_warnings": list(validation.warnings or []),
-                        }
-                    )
-                    return
-                except Exception as exc:
-                    yield StreamEvent(
-                        event_type="error",
-                        data={"error": f"Plan validation failed: {exc}", "run_id": run_id}
-                    )
-                    return
-            else:
-                # 도구 실행 결과 또는 LLM notes가 있으면 정보 조회 응답으로 처리
-                if state.last_observation or decision.notes:
-                    # LLM이 notes에 요약 정보를 담은 경우 이를 메시지로 사용
-                    notes_text = "\n".join(decision.notes) if decision.notes else None
-
-                    # 에러 메시지 패턴 감지 - LLM이 에러 메시지를 notes에 넣은 경우 친절한 안내로 대체
-                    error_patterns = ["cannot finish", "no plan", "error", "failed", "unable to"]
-                    is_error_note = notes_text and any(
-                        pattern in notes_text.lower() for pattern in error_patterns
-                    )
-
-                    if is_error_note:
-                        # 에러 메시지 대신 친절한 안내 메시지 사용
-                        friendly_message = (
-                            "안녕하세요! 저는 파이프라인 생성을 도와드리는 에이전트입니다. 🤖\n\n"
-                            "다음과 같은 요청을 해주시면 도움을 드릴 수 있습니다:\n"
-                            "• \"고객별 주문 총액을 계산하는 파이프라인 만들어줘\"\n"
-                            "• \"주문 데이터와 고객 데이터를 조인해서 분석해줘\"\n"
-                            "• \"매출 분석 파이프라인 만들어줘\"\n"
-                            "• \"현재 데이터셋이 뭐가 있어?\""
-                        )
-                        yield StreamEvent(
-                            event_type="complete",
-                            data={
-                                "run_id": run_id,
-                                "status": "info",
-                                "message": friendly_message,
-                            }
-                        )
-                        return
-
-                    yield StreamEvent(
-                        event_type="complete",
-                        data={
-                            "run_id": run_id,
-                            "status": "info",
-                            "message": notes_text or "요청하신 정보입니다.",
-                            "observation": state.last_observation,
-                        }
-                    )
-                    return
-                # 일반 대화나 파이프라인과 무관한 요청에 대해 친절하게 안내
-                yield StreamEvent(
-                    event_type="complete",
-                    data={
-                        "run_id": run_id,
-                        "status": "no_action",
-                        "message": (
-                            "안녕하세요! 저는 파이프라인 생성을 도와드리는 에이전트입니다. 🤖\n\n"
-                            "다음과 같은 요청을 해주시면 도움을 드릴 수 있습니다:\n"
-                            "• \"고객별 주문 총액을 계산하는 파이프라인 만들어줘\"\n"
-                            "• \"주문 데이터와 고객 데이터를 조인해서 분석해줘\"\n"
-                            "• \"매출 분석 파이프라인 만들어줘\"\n"
-                            "• \"현재 데이터셋이 뭐가 있어?\""
-                        ),
-                    }
-                )
-                return
-
-        # call_tool 액션
-        tool_calls = list(decision.tool_calls or [])
-        if not tool_calls:
-            tool_calls = [AutonomousPipelineAgentToolCall(tool=str(decision.tool or ""), args=dict(decision.args or {}))]
-
-        for call in tool_calls[:max_tool_calls_per_step]:
-            tool_name = str(call.tool or "").strip()
-            if not tool_name:
-                continue
-
-            args = dict(call.args or {})
-
-            # 도구 시작 이벤트 - LLM reasoning 포함
-            yield StreamEvent(
-                event_type="tool_start",
-                data={
-                    "run_id": run_id,
-                    "step": step_idx + 1,
-                    "max_steps": max_steps,
-                    "tool": tool_name,
-                    "args": {k: v for k, v in args.items() if k != "plan"},  # plan 제외
-                    "reasoning": decision.notes[0] if decision.notes else None,  # LLM의 reasoning
-                }
-            )
-
-            # 도구 실행
-            try:
-                # Enterprise safety: enforce the same allowlist used by the non-streaming agent.
-                if tool_name not in allowed_tools:
-                    observation = {"error": f"tool not allowed: {tool_name}"}
-                # plan_new: LLM mocks often send empty args; fill required scope deterministically.
-                elif tool_name == "plan_new":
-                    scoped_args: Dict[str, Any] = {
-                        "goal": goal,
-                        "db_name": db_name,
-                        "dataset_ids": dataset_ids,
-                        "branch": state.branch,
-                    }
-                    payload = await _call_pipeline_tool(tool_name, scoped_args)
-                    plan = payload.get("plan") if isinstance(payload, dict) else None
-                    state.plan_obj = plan if isinstance(plan, dict) else None
-                    observation = dict(payload) if isinstance(payload, dict) else {"result": payload}
-                    observation.pop("plan", None)
-                # Any plan_* tool requires the current in-memory plan.
-                elif tool_name.startswith("plan_"):
-                    if not isinstance(state.plan_obj, dict):
-                        observation = {"error": "plan is not initialized; call plan_new first"}
-                    else:
-                        # If node_id is omitted for plan_preview, attach the preview to the last node by default
-                        # so the UI can show it when clicking that node.
-                        if tool_name == "plan_preview" and not args.get("node_id") and isinstance(state.plan_obj, dict):
-                            definition = state.plan_obj.get("definition_json", {})
-                            nodes = definition.get("nodes", [])
-                            if isinstance(nodes, list) and nodes:
-                                last_node = nodes[-1] if isinstance(nodes[-1], dict) else None
-                                fallback_node_id = str((last_node or {}).get("id") or "").strip()
-                                if fallback_node_id:
-                                    args["node_id"] = fallback_node_id
-
-                        args_with_plan = {**args, "plan": state.plan_obj}
-                        payload = await _call_pipeline_tool(tool_name, args_with_plan)
-
-                        # plan 업데이트
-                        if isinstance(payload, dict) and "plan" in payload:
-                            plan = payload.get("plan")
-                            if isinstance(plan, dict):
-                                state.plan_obj = plan
-
-                        observation = dict(payload) if isinstance(payload, dict) else {"result": payload}
-                        observation.pop("plan", None)
-                else:
-                    # 기타 도구
-                    payload = await _call_pipeline_tool(tool_name, args)
-                    observation = dict(payload) if isinstance(payload, dict) else {"result": payload}
-
-                state.last_observation = observation
-
-                # 도구 완료 이벤트
-                tool_error = observation.get("error") if isinstance(observation, dict) else None
-                yield StreamEvent(
-                    event_type="tool_end",
-                    data={
-                        "run_id": run_id,
-                        "step": step_idx + 1,
-                        "tool": tool_name,
-                        "success": not tool_error,
-                        "error": tool_error,  # 최상위 레벨에 error 추가
-                        "observation": _mask_tool_observation(observation),
-                    }
-                )
-
-                # plan 도구 후 plan_update 이벤트
-                if tool_name.startswith("plan_") and isinstance(state.plan_obj, dict) and not observation.get("error"):
-                    definition = state.plan_obj.get("definition_json", {})
-                    nodes = definition.get("nodes", [])
-                    edges = definition.get("edges", [])
-
-                    yield StreamEvent(
-                        event_type="plan_update",
-                        data={
-                            "run_id": run_id,
-                            "step": step_idx + 1,
-                            "tool": tool_name,
-                            "plan": {
-                                "definition_json": {
-                                    "nodes": nodes,
-                                    "edges": edges,
-                                },
-                                "outputs": state.plan_obj.get("outputs", []),
-                            },
-                            "node_count": len(nodes),
-                            "edge_count": len(edges),
-                        }
-                    )
-
-                # plan_preview 도구 후 preview_update 이벤트
-                if tool_name == "plan_preview" and isinstance(observation, dict) and not observation.get("error"):
-                    preview_status = observation.get("status")
-                    preview_policy = observation.get("preview_policy") if isinstance(observation.get("preview_policy"), dict) else None
-                    preview_hint = observation.get("hint")
-                    preview_data = observation.get("preview") or observation.get("result") or {}
-                    node_id = args.get("node_id")
-                    if not node_id and isinstance(state.plan_obj, dict):
-                        definition = state.plan_obj.get("definition_json", {})
-                        nodes = definition.get("nodes", [])
-                        if isinstance(nodes, list) and nodes:
-                            last_node = nodes[-1] if isinstance(nodes[-1], dict) else None
-                            fallback_node_id = str((last_node or {}).get("id") or "").strip()
-                            node_id = fallback_node_id or node_id
-
-                    # preview 데이터 구조 추출
-                    preview_columns = []
-                    preview_rows = []
-
-                    if isinstance(preview_data, dict):
-                        # columns 추출
-                        raw_columns = preview_data.get("columns", [])
-                        if isinstance(raw_columns, list):
-                            preview_columns = [
-                                {"name": str(c.get("name") or c) if isinstance(c, dict) else str(c), "type": str(c.get("type", "string")) if isinstance(c, dict) else "string"}
-                                for c in raw_columns
-                            ]
-
-                        # rows 추출
-                        raw_rows = preview_data.get("rows", preview_data.get("data", []))
-                        if isinstance(raw_rows, list):
-                            preview_rows = raw_rows[:100]  # 최대 100행
-
-                    yield StreamEvent(
-                        event_type="preview_update",
-                        data={
-                            "run_id": run_id,
-                            "step": step_idx + 1,
-                            "node_id": node_id,
-                            "preview_status": preview_status,
-                            "preview_policy": preview_policy,
-                            "hint": preview_hint,
-                            "preview": {
-                                "columns": preview_columns,
-                                "rows": preview_rows,
-                                "row_count": len(preview_rows),
-                            },
-                        }
-                    )
-
-                # NOTE: Do NOT abort the batch on a single tool error. The LLM may recover within the same
-                # step (batched tool calls) or in the next step. Errors are surfaced via tool_end events.
-
-            except Exception as exc:
-                yield StreamEvent(
-                    event_type="tool_end",
-                    data={
-                        "run_id": run_id,
-                        "step": step_idx + 1,
-                        "tool": tool_name,
-                        "success": False,
-                        "error": str(exc),
-                    }
-                )
-                break
-
-        # 프롬프트에 관찰 결과 추가
-        state.prompt_items.append(stable_json_dumps({
-            "type": "tool_output",
-            "step": step_idx + 1,
-            "output": state.last_observation,
-        }))
-
-    # 루프 종료 (최대 스텝 도달)
-    if isinstance(state.plan_obj, dict):
-        try:
-            plan_model = PipelinePlan.model_validate(state.plan_obj)
-            if not plan_id:
-                plan_id = str(uuid4())
-
-            yield StreamEvent(
-                event_type="complete",
-                data={
-                    "run_id": run_id,
-                    "status": "partial",
-                    "plan_id": plan_id,
-                    "plan": plan_model.model_dump(mode="json"),
-                    "message": "Max steps reached",
-                }
-            )
-        except Exception as exc:
-            yield StreamEvent(
-                event_type="error",
-                data={"error": f"Final plan validation failed: {exc}", "run_id": run_id}
-            )
-    else:
-        # plan이 없는 경우 친절한 안내 메시지로 응답
-        yield StreamEvent(
-            event_type="complete",
-            data={
-                "run_id": run_id,
-                "status": "no_action",
-                "message": (
-                    "요청을 처리하는 데 어려움이 있었습니다. 🤔\n\n"
-                    "다음과 같은 파이프라인 관련 요청을 해주시면 도움을 드릴 수 있습니다:\n"
-                    "• \"고객별 주문 총액을 계산하는 파이프라인 만들어줘\"\n"
-                    "• \"주문 데이터와 고객 데이터를 조인해서 분석해줘\"\n"
-                    "• \"매출 분석 파이프라인 만들어줘\"\n"
-                    "• \"현재 데이터셋이 뭐가 있어?\""
-                ),
-            }
-        )
+    """SSE streaming wrapper: yields all events from the unified core loop."""
+    async for event in _run_agent_core(
+        goal=goal, data_scope=data_scope, answers=answers,
+        planner_hints=planner_hints, task_spec=task_spec,
+        resume_plan_id=resume_plan_id,
+        persist_plan=persist_plan, actor=actor, tenant_id=tenant_id,
+        user_id=user_id, data_policies=data_policies,
+        selected_model=selected_model, allowed_models=allowed_models,
+        llm_gateway=llm_gateway, redis_service=redis_service,
+        audit_store=audit_store, event_store=event_store,
+        dataset_registry=dataset_registry, plan_registry=plan_registry,
+        streaming=True,
+    ):
+        yield event

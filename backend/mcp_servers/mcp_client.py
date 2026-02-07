@@ -13,12 +13,20 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import httpx
+from anyio import ClosedResourceError, BrokenResourceError, EndOfStream
 from mcp.client.session import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
 
 from shared.config.settings import get_settings
 
 logger = logging.getLogger(__name__)
+
+# Exception types that indicate the MCP subprocess transport is dead.
+# When caught, ``call_tool`` will automatically reconnect and retry.
+_CONNECTION_LOST_ERRORS = (
+    ClosedResourceError, BrokenResourceError, EndOfStream,
+    ConnectionError, OSError,
+)
 
 
 @dataclass
@@ -142,12 +150,21 @@ class MCPClientManager:
             return None
     
     async def disconnect_server(self, server_name: str):
-        """Disconnect from a specific MCP server"""
+        """Disconnect from a specific MCP server.
+
+        Tolerates errors during cleanup (e.g. if the subprocess already exited).
+        The stale client reference is removed *before* closing the stack so that
+        a subsequent ``connect_server`` always spawns a fresh subprocess.
+        """
         stack = self._sessions.pop(server_name, None)
+        self.clients.pop(server_name, None)          # purge stale client first
         if stack:
-            await stack.aclose()
-        if server_name in self.clients:
-            del self.clients[server_name]
+            try:
+                await stack.aclose()
+            except Exception:
+                logger.debug(
+                    "Ignoring cleanup error for %s", server_name, exc_info=True,
+                )
         logger.info("Disconnected from MCP server: %s", server_name)
 
     async def reconnect_server(self, server_name: str) -> Optional[ClientSession]:
@@ -165,37 +182,78 @@ class MCPClientManager:
         self,
         server_name: str,
         tool_name: str,
-        arguments: Dict[str, Any]
+        arguments: Dict[str, Any],
+        *,
+        _retries: int = 1,
     ) -> Any:
-        """
-        Call a tool on a specific MCP server
-        
-        Args:
-            server_name: Name of the server
-            tool_name: Name of the tool to call
-            arguments: Tool arguments
-            
-        Returns:
-            Tool execution result
+        """Call a tool on a specific MCP server.
+
+        If the call fails with a connection-loss error (``ClosedResourceError``,
+        ``BrokenResourceError``, etc.) the stale session is discarded, a fresh
+        subprocess is spawned via ``reconnect_server``, and the call is retried
+        up to *_retries* times (default 1 → two total attempts).
         """
         client = await self.connect_server(server_name)
         if not client:
             raise ConnectionError(f"Could not connect to {server_name}")
-            
-        try:
-            result = await client.call_tool(tool_name, arguments)
-            return result
-        except Exception as e:
-            logger.error(f"Error calling tool {tool_name} on {server_name}: {e}")
-            raise
+
+        last_err: Optional[Exception] = None
+        for attempt in range(_retries + 1):
+            try:
+                result = await client.call_tool(tool_name, arguments)
+                return result
+            except _CONNECTION_LOST_ERRORS as e:
+                last_err = e
+                if attempt < _retries:
+                    logger.warning(
+                        "MCP connection lost for %s (attempt %d/%d, %s). Reconnecting…",
+                        server_name, attempt + 1, _retries + 1, type(e).__name__,
+                    )
+                    try:
+                        client = await self.reconnect_server(server_name)
+                    except Exception as reconn_err:
+                        raise ConnectionError(
+                            f"MCP {server_name} reconnect failed: {reconn_err}"
+                        ) from e
+                    if not client:
+                        raise ConnectionError(
+                            f"MCP {server_name} reconnect returned None"
+                        ) from e
+                else:
+                    logger.error(
+                        "MCP connection lost for %s after %d retries (%s)",
+                        server_name, _retries, type(e).__name__,
+                    )
+            except Exception as e:
+                logger.error(f"Error calling tool {tool_name} on {server_name}: {e}")
+                raise
+
+        raise ConnectionError(
+            f"MCP server {server_name} connection lost after {_retries} retries"
+        ) from last_err
     
     async def list_tools(self, server_name: str) -> List[Dict[str, Any]]:
-        """List available tools from a server"""
+        """List available tools from a server.
+
+        Automatically reconnects once on connection-loss errors.
+        """
         client = await self.connect_server(server_name)
         if not client:
             raise ConnectionError(f"Could not connect to {server_name}")
-            
+
         try:
+            tools = await client.list_tools()
+            return tools
+        except _CONNECTION_LOST_ERRORS as e:
+            logger.warning(
+                "MCP connection lost listing tools from %s (%s). Reconnecting…",
+                server_name, type(e).__name__,
+            )
+            client = await self.reconnect_server(server_name)
+            if not client:
+                raise ConnectionError(
+                    f"Could not reconnect to {server_name} after connection loss"
+                ) from e
             tools = await client.list_tools()
             return tools
         except Exception as e:

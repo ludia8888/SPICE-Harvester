@@ -22,7 +22,7 @@ from shared.services.pipeline.pipeline_graph_utils import normalize_edges, norma
 from shared.services.pipeline.pipeline_task_spec_policy import clamp_task_spec, validate_plan_against_task_spec
 from shared.utils.canonical_json import sha256_canonical_json_prefixed
 
-from bff.routers import pipeline as pipeline_router
+from bff.routers import pipeline_ops_preflight as pipeline_router
 
 
 @dataclass(frozen=True)

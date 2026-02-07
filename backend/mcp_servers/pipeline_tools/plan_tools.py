@@ -796,7 +796,16 @@ async def _plan_preview(server: Any, arguments: Dict[str, Any]) -> Any:
         return {"status": "invalid", "errors": ["plan.data_scope.db_name is required"], "warnings": warnings}
 
     dataset_registry, _ = await server._ensure_registries()
-    executor = PipelineExecutor(dataset_registry)
+
+    # Inject StorageService so preview can read actual artifacts from S3/lakeFS
+    storage_service = None
+    try:
+        pipeline_registry = await server._ensure_pipeline_registry()
+        storage_service = await pipeline_registry.get_lakefs_storage()
+    except Exception as exc:
+        logger.debug("plan_preview: lakeFS storage unavailable, falling back to sample_json: %s", exc)
+
+    executor = PipelineExecutor(dataset_registry, storage_service=storage_service)
     limit = int(arguments.get("limit") or 50)
     node_id = str(arguments.get("node_id") or "").strip() or None
 
