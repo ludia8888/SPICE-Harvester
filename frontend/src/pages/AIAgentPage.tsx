@@ -177,6 +177,10 @@ export const AIAgentPage = () => {
         const planId = safeText(response['plan_id']).trim()
         const questionItems = Array.isArray(response['questions']) ? response['questions'] : []
         setPipelineAgentQuestions(questionItems)
+        // Persist plan_id in request so the next clarification answer resumes the session
+        if (planId) {
+          setPipelineAgentRequest({ ...pipelineAgentRequest, plan_id: planId })
+        }
         const reply = buildPipelineReply(response, status, runId, planId)
         resolveAssistantMessage(reply, pendingId)
       } catch (error) {
@@ -219,6 +223,10 @@ export const AIAgentPage = () => {
       const planId = safeText(response['plan_id']).trim()
       const questionItems = Array.isArray(response['questions']) ? response['questions'] : []
       setPipelineAgentQuestions(questionItems)
+      // Persist plan_id in request so clarification answers resume the session
+      if (planId) {
+        setPipelineAgentRequest({ ...requestPayload, plan_id: planId })
+      }
       const reply = buildPipelineReply(response, status, runId, planId)
       resolveAssistantMessage(reply, pendingId)
     } catch (error) {

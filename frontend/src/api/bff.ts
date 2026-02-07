@@ -1139,6 +1139,7 @@ export const aiIntent = async (payload: AIIntentRequest) => {
 export const runPipelineAgent = async (payload: {
   goal: string
   data_scope: Record<string, unknown>
+  plan_id?: string
   planner_hints?: Record<string, unknown>
   answers?: Record<string, unknown>
   apply_specs?: boolean
@@ -1244,6 +1245,7 @@ export const runPipelineAgentStreaming = (
   payload: {
     goal: string
     data_scope: Record<string, unknown>
+    plan_id?: string
     planner_hints?: Record<string, unknown>
     answers?: Record<string, unknown>
     apply_specs?: boolean

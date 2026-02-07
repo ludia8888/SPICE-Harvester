@@ -80,6 +80,7 @@ async def create_pipeline_run(
     payload = await run_pipeline_agent_mcp_autonomous(
         goal=str(body.goal or "").strip(),
         data_scope=data_scope,
+        resume_plan_id=str(body.plan_id).strip() if body.plan_id else None,
         answers=body.answers if isinstance(body.answers, dict) else None,
         planner_hints=body.planner_hints if isinstance(body.planner_hints, dict) else None,
         task_spec=body.task_spec if isinstance(body.task_spec, dict) else None,
@@ -179,6 +180,7 @@ async def stream_pipeline_run(
             async for event in run_pipeline_agent_streaming(
                 goal=str(body.goal or "").strip(),
                 data_scope=data_scope,
+                resume_plan_id=str(body.plan_id).strip() if body.plan_id else None,
                 answers=body.answers if isinstance(body.answers, dict) else None,
                 planner_hints=body.planner_hints if isinstance(body.planner_hints, dict) else None,
                 task_spec=body.task_spec if isinstance(body.task_spec, dict) else None,
