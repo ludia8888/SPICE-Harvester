@@ -328,9 +328,18 @@ def _extract_knowledge(tool_name: str, observation: Dict[str, Any], ledger: Dict
             ledger["available_datasets"] = datasets
 
     elif tool_name == "detect_foreign_keys":
-        fks = observation.get("foreign_keys")
+        fks = observation.get("patterns")  # MCP handler returns "patterns", not "foreign_keys"
         if isinstance(fks, list) and fks:
-            ledger["foreign_keys"] = fks
+            existing = ledger.get("foreign_keys") or []
+            # Deduplicate by (source_column, target_dataset_id) for multi-call accumulation
+            seen = {(p.get("source_column"), p.get("target_dataset_id"))
+                    for p in existing if isinstance(p, dict)}
+            for p in fks:
+                key = (p.get("source_column"), p.get("target_dataset_id"))
+                if key not in seen:
+                    existing.append(p)
+                    seen.add(key)
+            ledger["foreign_keys"] = existing
 
     elif tool_name == "ontology_infer_schema_from_data":
         # Keep inferred types and property suggestions
@@ -1098,6 +1107,13 @@ def _build_system_prompt(*, allowed_tools: List[str]) -> str:
         "  Required: `db_name`, `class_id`, `dataset_id`, `primary_key` (list), `title_key` (list).\n"
         "  Optional: `branch` (default: main).\n"
         "\n"
+        "### detect_foreign_keys (FK relationship detection)\n"
+        "  Required: `dataset_id` (string — SINGULAR, one dataset ID).\n"
+        "  Optional: `confidence_threshold` (number, default 0.6).\n"
+        "  This tool analyzes ONE source dataset and finds FK relationships to ALL other datasets in the DB.\n"
+        "  For full bidirectional coverage, call it ONCE PER DATASET using batched `tool_calls`.\n"
+        "  ❌ Do NOT use `dataset_ids` (plural/array) — the parameter is `dataset_id` (singular string).\n"
+        "\n"
         "## Spark SQL notes\n"
         "- Spark SQL *expressions* are allowed in filter/compute/select_expr/group_by_expr/window_expr tools.\n"
         "- `plan_preview` is a lightweight Python executor, NOT full Spark. For complex SQL, validate via `pipeline_preview_wait`.\n"
@@ -1111,7 +1127,10 @@ def _build_system_prompt(*, allowed_tools: List[str]) -> str:
         "3. Call `ontology_infer_schema_from_data` with the sample data:\n"
         "   - Extract `columns` (list of column names) and `data` (list of row arrays) from `dataset_sample` result.\n"
         "   - Do NOT pass `dataset_ids` — this tool requires raw data, not references.\n"
-        "4. Call `detect_foreign_keys` to discover FK relationships between datasets.\n"
+        "4. Call `detect_foreign_keys` ONCE PER DATASET with singular `dataset_id` (string, not array).\n"
+        "   - Each call analyzes one source dataset against all other datasets in the DB.\n"
+        "   - For N datasets, make N separate calls to get full bidirectional FK coverage.\n"
+        "   - Use batched `tool_calls` to issue all N calls in a single step.\n"
         "- These are mechanical steps — proceed autonomously.\n"
         "\n"
         "### Phase 2: Domain modeling (clarification required)\n"
@@ -2218,6 +2237,35 @@ async def run_pipeline_agent_mcp_autonomous(
                     return state.last_observation
                 payload = await _call_pipeline_tool(tool_name, {**args, "plan": plan_to_validate})
                 state.last_observation = _mask_tool_observation(payload if isinstance(payload, dict) else {"result": payload})
+                return state.last_observation
+
+            # ==================== FK Detection & Link Type Tools ====================
+            # Handle before plan guard — these tools don't require a plan.
+            if tool_name in {"detect_foreign_keys", "create_link_type_from_fk"}:
+                if "db_name" not in args or not args.get("db_name"):
+                    args["db_name"] = state.db_name
+                if "branch" not in args or not args.get("branch"):
+                    args["branch"] = state.branch or "main"
+                # Normalize dataset_ids (plural) → dataset_id (singular) with multi-call expansion
+                if tool_name == "detect_foreign_keys" and "dataset_ids" in args:
+                    raw_ids = args.pop("dataset_ids")
+                    id_list = raw_ids if isinstance(raw_ids, list) else [raw_ids]
+                    all_patterns: list = []
+                    for did in id_list:
+                        per_args = {**args, "dataset_id": str(did).strip()}
+                        sub_payload = await _call_pipeline_tool(tool_name, per_args)
+                        if isinstance(sub_payload, dict) and sub_payload.get("status") == "success":
+                            all_patterns.extend(sub_payload.get("patterns") or [])
+                    state.last_observation = {
+                        "status": "success",
+                        "db_name": args.get("db_name"),
+                        "patterns_found": len(all_patterns),
+                        "patterns": all_patterns,
+                        "datasets_analyzed": len(id_list),
+                    }
+                else:
+                    payload = await _call_pipeline_tool(tool_name, args)
+                    state.last_observation = payload if isinstance(payload, dict) else {"result": payload}
                 return state.last_observation
 
             # Plan tools require a plan.
@@ -3501,8 +3549,27 @@ async def run_pipeline_agent_streaming(
                         args["db_name"] = state.db_name
                     if "branch" not in args or not args.get("branch"):
                         args["branch"] = state.branch or "main"
-                    payload = await _call_pipeline_tool(tool_name, args)
-                    observation = dict(payload) if isinstance(payload, dict) else {"result": payload}
+
+                    # detect_foreign_keys: normalize dataset_ids (plural) → dataset_id (singular)
+                    if tool_name == "detect_foreign_keys" and "dataset_ids" in args:
+                        raw_ids = args.pop("dataset_ids")
+                        id_list = raw_ids if isinstance(raw_ids, list) else [raw_ids]
+                        all_patterns: list = []
+                        for did in id_list:
+                            per_args = {**args, "dataset_id": str(did).strip()}
+                            sub_payload = await _call_pipeline_tool(tool_name, per_args)
+                            if isinstance(sub_payload, dict) and sub_payload.get("status") == "success":
+                                all_patterns.extend(sub_payload.get("patterns") or [])
+                        observation = {
+                            "status": "success",
+                            "db_name": args.get("db_name"),
+                            "patterns_found": len(all_patterns),
+                            "patterns": all_patterns,
+                            "datasets_analyzed": len(id_list),
+                        }
+                    else:
+                        payload = await _call_pipeline_tool(tool_name, args)
+                        observation = dict(payload) if isinstance(payload, dict) else {"result": payload}
 
                 state.last_observation = observation
 

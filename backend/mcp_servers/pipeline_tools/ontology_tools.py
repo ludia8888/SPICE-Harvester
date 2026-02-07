@@ -230,12 +230,20 @@ async def _detect_foreign_keys(server: Any, arguments: Dict[str, Any]) -> Any:
         schema = dataset.schema_json or {}
         columns = schema.get("columns") or schema.get("fields") or []
 
-        datasets = await dataset_registry.list_datasets(db_name=db_name, branch=branch, limit=100)
+        datasets = await dataset_registry.list_datasets(db_name=db_name, branch=branch)
         target_candidates = []
         for ds in datasets:
-            if ds.dataset_id == dataset_id:
+            # list_datasets returns List[Dict], access via dict keys
+            ds_id = ds.get("dataset_id") or ds.get("id") or "" if isinstance(ds, dict) else getattr(ds, "dataset_id", "")
+            if str(ds_id) == dataset_id:
                 continue
-            ds_schema = ds.schema_json or {}
+            ds_schema = (ds.get("schema_json") if isinstance(ds, dict) else getattr(ds, "schema_json", None)) or {}
+            if isinstance(ds_schema, str):
+                import json as _json
+                try:
+                    ds_schema = _json.loads(ds_schema)
+                except Exception:
+                    ds_schema = {}
             ds_columns = ds_schema.get("columns") or ds_schema.get("fields") or []
             pk_cols = [
                 c.get("name")
@@ -245,11 +253,12 @@ async def _detect_foreign_keys(server: Any, arguments: Dict[str, Any]) -> Any:
             if not pk_cols and ds_columns:
                 first = ds_columns[0]
                 pk_cols = [first.get("name", "id")] if isinstance(first, dict) else ["id"]
+            ds_name = (ds.get("name") if isinstance(ds, dict) else getattr(ds, "name", None)) or str(ds_id)
             target_candidates.append(
                 TargetCandidate(
                     candidate_type="dataset",
-                    candidate_id=ds.dataset_id,
-                    candidate_name=ds.name or ds.dataset_id,
+                    candidate_id=str(ds_id),
+                    candidate_name=ds_name,
                     pk_columns=pk_cols,
                 )
             )
