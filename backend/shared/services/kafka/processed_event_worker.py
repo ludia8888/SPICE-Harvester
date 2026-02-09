@@ -680,6 +680,7 @@ class ProcessedEventKafkaWorker(Generic[PayloadT, ResultT], ABC):
         service_name: str,
         thread_name_prefix: str,
         max_poll_interval_ms: Optional[int] = None,
+        session_timeout_ms: Optional[int] = None,
         reset_partition_state: bool = False,
     ) -> None:
         create_kwargs: Dict[str, Any] = {
@@ -691,6 +692,8 @@ class ProcessedEventKafkaWorker(Generic[PayloadT, ResultT], ABC):
         }
         if max_poll_interval_ms is not None:
             create_kwargs["max_poll_interval_ms"] = int(max_poll_interval_ms)
+        if session_timeout_ms is not None:
+            create_kwargs["session_timeout_ms"] = int(session_timeout_ms)
 
         self.consumer = create_safe_consumer(**create_kwargs)
         self.consumer_ops = ExecutorKafkaConsumerOps(

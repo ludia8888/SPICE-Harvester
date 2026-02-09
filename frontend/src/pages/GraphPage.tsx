@@ -2424,14 +2424,18 @@ export const GraphPage = () => {
           }
 
           // 상태 텍스트 구성
+          const isCached = data.cached === true
           let statusText = `🤖 **[단계 ${step}/${maxSteps}]** ${toolLabel}`
+          if (isCached) {
+            statusText += ' ⚡'
+          }
           if (argsInfo) {
             statusText += `\n   📋 대상: \`${argsInfo}\``
           }
           if (reasoning) {
             statusText += `\n   💭 ${reasoning}`
           }
-          statusText += '\n   ⏳ 실행 중...'
+          statusText += isCached ? '\n   ⚡ 캐시 반환 (이전 세션에서 수집된 데이터)' : '\n   ⏳ 실행 중...'
 
           setAgentMessages((prev) => {
             const last = prev[prev.length - 1]
@@ -2448,6 +2452,7 @@ export const GraphPage = () => {
 
         // 도구 호출 완료
         onToolEnd: (data) => {
+          const isCached = data.cached === true
           // observation 안의 error도 확인
           const obs = data.observation as Record<string, unknown> | undefined
           const errorMsg = data.error || (obs?.error as string | undefined)
@@ -2463,6 +2468,24 @@ export const GraphPage = () => {
                 ...prev,
                 { id: `msg-${Date.now()}`, role: 'assistant' as const, text: `⚠️ ${data.tool}: ${errorMsg}` },
               ]
+            })
+          } else if (data.success) {
+            // 성공 시 마지막 도구 메시지의 상태 텍스트 업데이트
+            setAgentMessages((prev) => {
+              const last = prev[prev.length - 1]
+              if (last?.role === 'assistant' && last.text.startsWith('🤖')) {
+                const doneLabel = isCached
+                  ? '   ⚡ 캐시 완료 (MCP 호출 생략)'
+                  : '   ✅ 완료'
+                const updated = last.text
+                  .replace(/\n   ⏳ 실행 중\.\.\./, `\n${doneLabel}`)
+                  .replace(/\n   ⚡ 캐시 반환 \(이전 세션에서 수집된 데이터\)/, `\n${doneLabel}`)
+                return [
+                  ...prev.slice(0, -1),
+                  { ...last, text: updated },
+                ]
+              }
+              return prev
             })
           }
         },

@@ -22,6 +22,18 @@ _EMAIL_RE = re.compile(r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b")
 # Loose phone matcher (international/local); we mask long digit runs to reduce PII leakage.
 _LONG_DIGIT_RE = re.compile(r"\b\+?\d[\d\s().-]{7,}\d\b")
 _UUID_RE = re.compile(r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b")
+# Date/time patterns that should NOT be masked as phone numbers / PII numbers.
+# ISO-8601 datetime (2018-01-01T12:34:56, 2018-01-01 12:34:56.789+09:00, etc.)
+_DATETIME_RE = re.compile(
+    r"\b\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2})?(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?\b"
+)
+# ISO-8601 date only (2018-01-01)
+_DATE_RE = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
+# US/EU date formats (01/31/2018, 31.01.2018)
+_DATE_SLASH_RE = re.compile(r"\b\d{2}/\d{2}/\d{4}\b")
+_DATE_DOT_RE = re.compile(r"\b\d{2}\.\d{2}\.\d{4}\b")
+# Decimal numbers (123.45, -0.99) — not PII
+_DECIMAL_NUM_RE = re.compile(r"\b[+-]?\d+\.\d+\b")
 
 
 def sha256_hex(value: Union[str, bytes]) -> str:
@@ -57,8 +69,8 @@ def _mask_email(text: str) -> str:
 def _mask_long_digits(text: str) -> str:
     placeholders: dict[str, str] = {}
 
-    def _protect_uuid(match: re.Match[str]) -> str:
-        key = f"__UUID_{len(placeholders)}__"
+    def _protect(match: re.Match[str]) -> str:
+        key = f"__PH_{len(placeholders)}__"
         placeholders[key] = match.group(0)
         return key
 
@@ -70,7 +82,14 @@ def _mask_long_digits(text: str) -> str:
         digest = sha256_hex(digits)[:10]
         return f"<number:{digest}>"
 
-    protected = _UUID_RE.sub(_protect_uuid, text)
+    # Protect non-PII patterns that look like long digit sequences:
+    # UUIDs, ISO datetimes, dates, US/EU dates, and decimal numbers.
+    protected = _UUID_RE.sub(_protect, text)
+    protected = _DATETIME_RE.sub(_protect, protected)
+    protected = _DATE_RE.sub(_protect, protected)
+    protected = _DATE_SLASH_RE.sub(_protect, protected)
+    protected = _DATE_DOT_RE.sub(_protect, protected)
+    protected = _DECIMAL_NUM_RE.sub(_protect, protected)
     masked = _LONG_DIGIT_RE.sub(_repl, protected)
     for key, value in placeholders.items():
         masked = masked.replace(key, value)

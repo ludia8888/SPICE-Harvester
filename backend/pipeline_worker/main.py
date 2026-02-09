@@ -67,6 +67,7 @@ from shared.services.registries.pipeline_registry import PipelineRegistry
 from shared.services.pipeline.pipeline_control_plane_events import emit_pipeline_control_plane_event
 from shared.services.pipeline.pipeline_definition_validator import (
     PipelineDefinitionValidationPolicy,
+    normalize_transform_metadata,
     validate_pipeline_definition,
 )
 from shared.services.pipeline.pipeline_graph_utils import build_incoming, normalize_edges, normalize_nodes, topological_sort
@@ -936,7 +937,8 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
         preview_meta = definition.get("__preview_meta__") or {}
         tables: Dict[str, DataFrame] = {}
         nodes = normalize_nodes(definition.get("nodes"))
-        self._normalize_nodes_metadata(nodes)
+        for _node in nodes.values():
+            _node["metadata"] = normalize_transform_metadata(_node.get("metadata"))
         edges = normalize_edges(definition.get("edges"))
         order = topological_sort(nodes, edges, include_unordered=False)
         incoming = build_incoming(edges)

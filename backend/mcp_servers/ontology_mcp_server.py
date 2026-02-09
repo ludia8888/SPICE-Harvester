@@ -8,6 +8,7 @@ enabling an autonomous agent to create/modify ontology definitions through tool 
 
 from __future__ import annotations
 
+import json
 import logging
 import sys
 from pathlib import Path
@@ -519,7 +520,7 @@ class OntologyMCPServer:
                     "properties": list(data.get("properties") or []),
                     "relationships": list(data.get("relationships") or []),
                     "metadata": dict(data.get("metadata") or {}),
-                    "_seq": data.get("seq"),  # For optimistic locking
+                    "_seq": data.get("seq") or data.get("version"),  # For optimistic locking
                 }
                 self._working_ontologies[session_id] = ontology
 
@@ -557,8 +558,10 @@ class OntologyMCPServer:
 
         if "class_id" in args:
             ontology["id"] = _normalize_string(args["class_id"])
-        if "label" in args:
-            ontology["label"] = _normalize_string(args["label"])
+        # Accept both "label" and "display_name" (LLM alias)
+        label_val = args.get("label") or args.get("display_name")
+        if label_val:
+            ontology["label"] = _normalize_string(label_val)
         if "description" in args:
             ontology["description"] = _normalize_string(args["description"]) or None
         if "parent_class" in args:
@@ -588,9 +591,9 @@ class OntologyMCPServer:
     async def _tool_ontology_add_property(self, args: Dict[str, Any]) -> Dict[str, Any]:
         """Add a property to the ontology."""
         session_id = _normalize_string(args.get("session_id"))
-        name = _normalize_string(args.get("name"))
-        prop_type = _normalize_string(args.get("type"))
-        label = _normalize_string(args.get("label"))
+        name = _normalize_string(args.get("name") or args.get("property_id"))
+        prop_type = _normalize_string(args.get("type") or args.get("property_type"))
+        label = _normalize_string(args.get("label")) or name  # fallback: use name as label
 
         if not session_id or not name or not prop_type or not label:
             return _build_error_response("ontology_add_property", "session_id, name, type, and label are required")
@@ -1242,6 +1245,23 @@ class OntologyMCPServer:
         if not ontology:
             return _build_error_response("ontology_create", "No working ontology found")
 
+        # Ensure required fields have values
+        if not ontology.get("id"):
+            return _build_error_response("ontology_create", "class_id is empty. Call ontology_new(class_id=..., label=...) first.")
+        if not ontology.get("label"):
+            # Fallback: use class_id as label
+            ontology["label"] = ontology["id"]
+
+        # Auto-set title_key if none set (OMS linter ONT003 requires at least one)
+        properties = ontology.get("properties", [])
+        has_title_key = any(p.get("title_key") for p in properties)
+        if not has_title_key and properties:
+            # Use PK as title_key, or first property
+            pk_prop = next((p for p in properties if p.get("primary_key")), None)
+            target = pk_prop or properties[0]
+            target["title_key"] = True
+            logger.info("Auto-set title_key on property '%s' (ONT003 fallback)", target.get("name"))
+
         # Validate before save
         validation = await self._tool_ontology_validate({"session_id": session_id})
         if validation.get("status") == "invalid":
@@ -1264,6 +1284,11 @@ class OntologyMCPServer:
                 "relationships": ontology.get("relationships", []),
                 "metadata": ontology.get("metadata", {}),
             }
+            logger.info("ontology_create payload: id=%s label=%s props=%d rels=%d payload=%s",
+                        payload.get("id"), payload.get("label"),
+                        len(payload.get("properties", [])),
+                        len(payload.get("relationships", [])),
+                        json.dumps(payload, ensure_ascii=False, default=str)[:2000])
 
             async with OMSClient() as client:
                 result = await client.create_ontology(db_name, payload, branch=branch)
@@ -1292,9 +1317,20 @@ class OntologyMCPServer:
         if not ontology:
             return _build_error_response("ontology_update", "No working ontology found")
 
-        # Use stored seq if not provided
+        # Use stored seq if not provided, auto-fetch from OMS if missing
         if expected_seq is None:
             expected_seq = ontology.get("_seq")
+        if expected_seq is None:
+            try:
+                from bff.services.oms_client import OMSClient
+                async with OMSClient() as fetch_client:
+                    fetch_result = await fetch_client.get_ontology(db_name, class_id, branch=branch)
+                    fetch_data = fetch_result.get("data") if isinstance(fetch_result, dict) else None
+                    if isinstance(fetch_data, dict):
+                        expected_seq = fetch_data.get("seq") or fetch_data.get("version")
+                        logger.info("Auto-fetched expected_seq=%s for class=%s", expected_seq, class_id)
+            except Exception as fetch_exc:
+                logger.warning("Failed to auto-fetch seq for class=%s: %s", class_id, fetch_exc)
         if expected_seq is None:
             return _build_error_response(
                 "ontology_update",

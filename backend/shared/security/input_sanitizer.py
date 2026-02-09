@@ -465,6 +465,111 @@ class InputSanitizer:
 
         return sanitized
 
+    # ── Pipeline definition context ──────────────────────────────────────────
+    # Keys at the top-level payload whose *entire subtree* is a pipeline
+    # definition / ETL plan. Every string value inside these trees may
+    # legitimately contain Spark SQL (CAST, SUBSTRING, COALESCE, aggregates,
+    # window functions, etc.), so we sanitize them with the SQL-expression
+    # path (control-char strip only) instead of the description path (which
+    # would reject SQL keywords as injection).
+    #
+    # This is an enterprise-grade, defence-in-depth approach:
+    # - Structural limits (depth, key count, list size) still apply.
+    # - XSS patterns are still checked (no <script> etc. in SQL).
+    # - Path-traversal patterns are still checked.
+    # - Only SQL-injection keyword heuristics are skipped.
+    _PIPELINE_DEFINITION_KEYS = frozenset({
+        "definition_json",
+        "definitionjson",
+    })
+
+    def sanitize_pipeline_definition(
+        self,
+        value: Any,
+        *,
+        max_depth: int = 10,
+        current_depth: int = 0,
+    ) -> Any:
+        """
+        Recursively sanitize a pipeline definition subtree.
+
+        All string values are treated as potential Spark SQL expressions:
+        - SQL-injection keyword checks are SKIPPED (CAST, SUBSTRING, etc. are valid).
+        - XSS and path-traversal checks are KEPT.
+        - Control characters are stripped.
+        - Structural DoS limits (depth, key count, list size) are enforced.
+        - Dict keys are validated as field names (same as sanitize_dict).
+        """
+        if value is None:
+            return None
+
+        if isinstance(value, str):
+            if len(value) > 20000:
+                raise SecurityViolationError(
+                    f"Pipeline definition string too long: {len(value)} > 20000"
+                )
+            # XSS and path-traversal are still real threats in any user-supplied string.
+            if self.detect_xss(value):
+                raise SecurityViolationError("XSS pattern detected in pipeline definition")
+            if self.detect_path_traversal(value):
+                raise SecurityViolationError("Path traversal pattern detected in pipeline definition")
+            # Strip control characters; allow SQL keywords.
+            return re.sub(r"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]", "", value)
+
+        if isinstance(value, (int, float, bool)):
+            if isinstance(value, (int, float)) and abs(value) > 10**15:
+                raise SecurityViolationError(f"Number too large: {value}")
+            return value
+
+        if isinstance(value, dict):
+            if current_depth > max_depth:
+                raise SecurityViolationError(
+                    f"Pipeline definition nesting too deep: {current_depth} > {max_depth}"
+                )
+            if len(value) > self.max_dict_keys:
+                raise SecurityViolationError(
+                    f"Too many keys in pipeline definition dict: {len(value)} > {self.max_dict_keys}"
+                )
+            sanitized: Dict[str, Any] = {}
+            for k, v in value.items():
+                if isinstance(k, str):
+                    clean_k = self.sanitize_field_name(k)
+                else:
+                    clean_k = str(k)
+                # Identifier mappings (rename, spark_conf, options) use map-key sanitizer.
+                k_lower = k.lower() if isinstance(k, str) else ""
+                if isinstance(v, dict) and k_lower in {
+                    "rename", "spark_conf", "sparkconf",
+                    "options", "options_env", "optionsenv",
+                }:
+                    sanitized[clean_k] = self.sanitize_identifier_mapping(
+                        v, max_depth=max_depth, current_depth=current_depth + 1,
+                    )
+                else:
+                    sanitized[clean_k] = self.sanitize_pipeline_definition(
+                        v, max_depth=max_depth, current_depth=current_depth + 1,
+                    )
+            return sanitized
+
+        if isinstance(value, list):
+            if current_depth > max_depth:
+                raise SecurityViolationError(
+                    f"Pipeline definition list nesting too deep: {current_depth} > {max_depth}"
+                )
+            if len(value) > self.max_list_items:
+                raise SecurityViolationError(
+                    f"Too many items in pipeline definition list: {len(value)} > {self.max_list_items}"
+                )
+            return [
+                self.sanitize_pipeline_definition(
+                    item, max_depth=max_depth, current_depth=current_depth + 1,
+                )
+                for item in value
+            ]
+
+        # Unknown type: stringify and sanitize as SQL expression.
+        return self.sanitize_sql_expression(str(value))
+
     def sanitize_dict(
         self, data: Dict[str, Any], max_depth: int = 10, current_depth: int = 0
     ) -> Dict[str, Any]:
@@ -492,6 +597,22 @@ class InputSanitizer:
 
             # 값은 컨텍스트에 따라 처리
             key_lower = key.lower() if isinstance(key, str) else ""
+
+            # ── Pipeline definition subtree (enterprise-grade) ──
+            # The entire subtree under `definition_json` is a Spark ETL plan.
+            # All strings may contain legitimate SQL; route through the
+            # pipeline-definition sanitizer which skips SQL-injection
+            # heuristics while keeping XSS / path-traversal / structural
+            # checks.
+            if key_lower in self._PIPELINE_DEFINITION_KEYS:
+                clean_value = self.sanitize_pipeline_definition(
+                    value,
+                    max_depth=max_depth,
+                    current_depth=current_depth + 1,
+                )
+                sanitized[clean_key] = clean_value
+                continue
+
             sql_expr_keys = {
                 # Common Spark SQL expression fields
                 "expression",
@@ -502,6 +623,9 @@ class InputSanitizer:
                 "condition",
                 "where",
                 "having",
+                # Pipeline node metadata keys that contain SQL
+                "formula",
+                "agg",
             }
             sql_expr_list_keys = {
                 # Lists of Spark SQL expressions (select expr / agg expr / group-by expr)

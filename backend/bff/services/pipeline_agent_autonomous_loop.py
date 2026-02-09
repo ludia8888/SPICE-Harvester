@@ -280,6 +280,8 @@ def _build_agent_context_snapshot(state: _AgentState) -> Dict[str, Any]:
         ctx["schema_inference"] = state.schema_inference
     if state.mapping_suggestions:
         ctx["mapping_suggestions"] = state.mapping_suggestions
+    if state.tool_call_hashes:
+        ctx["tool_call_hashes"] = {str(k): v for k, v in state.tool_call_hashes.items()}
     return ctx
 
 
@@ -455,16 +457,85 @@ def _summarize_tool_output(tool_name: str, observation: Dict[str, Any]) -> Dict[
     return observation
 
 
+_DEDUP_EXEMPT_PREFIXES = ("ontology_", "objectify_")
+
+
 def _deduplicate_tool_call(
     state: _AgentState, tool_name: str, args: Dict[str, Any], step_idx: int,
 ) -> Optional[int]:
-    """Return the step index of a previous identical call, or None if unique."""
+    """Return the step index of a previous identical call, or None if unique.
+
+    Ontology and objectify tools are exempt from dedup because they mutate
+    session state and must be re-callable after resume.
+    """
+    if tool_name.startswith(_DEDUP_EXEMPT_PREFIXES):
+        return None
     key = f"{tool_name}:{stable_json_dumps(args)}"
     h = hash(key)
     existing = state.tool_call_hashes.get(h)
     if existing is not None:
         return existing
     state.tool_call_hashes[h] = step_idx
+    return None
+
+
+def _dedup_evict_on_failure(
+    state: _AgentState, tool_name: str, args: Dict[str, Any],
+) -> None:
+    """Remove a tool call from the dedup cache so the LLM can retry it.
+
+    Called when a tool call fails (returns an error observation).  Without this,
+    the LLM's subsequent retry with identical args would be treated as a
+    duplicate and silently skipped — making it impossible to recover from
+    transient failures (e.g. ``pipeline_create_from_plan`` failing because a
+    required field was missing, then succeeding after the LLM sets that field).
+    """
+    key = f"{tool_name}:{stable_json_dumps(args)}"
+    state.tool_call_hashes.pop(hash(key), None)
+
+
+# ── Knowledge-ledger cache (Layer 2 safety net for resume) ──
+
+_KNOWLEDGE_CACHE_MAP: Dict[str, tuple] = {
+    "dataset_sample":      ("dataset_schemas",   lambda a: str(a.get("dataset_id") or "").strip()),
+    "dataset_profile":     ("dataset_profiles",  lambda a: str(a.get("dataset_id") or "").strip()),
+    "detect_foreign_keys": ("foreign_keys",      lambda a: str(a.get("dataset_id") or "").strip()),
+    "dataset_list":        ("available_datasets", lambda a: "__all__"),
+}
+
+
+def _check_knowledge_cache(
+    ledger: Dict[str, Any], tool_name: str, args: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    """Return a synthetic cached observation if the knowledge ledger already has
+    the data this tool would produce.  Returns ``None`` on cache miss.
+
+    The caller must check ``args.get("force_refresh")`` **before** calling this.
+    """
+    entry = _KNOWLEDGE_CACHE_MAP.get(tool_name)
+    if not entry:
+        return None
+    section_key, key_fn = entry
+    lookup_key = key_fn(args)
+    if not lookup_key:
+        return None
+    section = ledger.get(section_key)
+    if section is None:
+        return None
+
+    if tool_name == "dataset_list":
+        if isinstance(section, list) and section:
+            return {"status": "success", "source": "cached", "datasets": section}
+        return None
+
+    if tool_name == "detect_foreign_keys":
+        if isinstance(section, list):
+            return {"status": "success", "source": "cached", "patterns": section}
+        return None
+
+    # dataset_sample / dataset_profile — dict keyed by dataset_id
+    if isinstance(section, dict) and lookup_key in section:
+        return {"status": "success", "source": "cached", "dataset_id": lookup_key, **section[lookup_key]}
     return None
 
 
@@ -992,6 +1063,16 @@ def _build_system_prompt(*, allowed_tools: List[str]) -> str:
         "- Tool args MUST NOT include raw `plan` objects; the server stores them.\n"
         "- Use deterministic `node_id` when adding nodes so later edits don't depend on auto-generated ids.\n"
         "\n"
+        "## Resumed session — use existing knowledge\n"
+        "When the prompt header contains `resumed_knowledge`, you are resuming a previous session.\n"
+        "The knowledge ledger already has data from prior tool calls. Do NOT re-fetch:\n"
+        "- `resumed_knowledge.dataset_schemas[dataset_id]` exists → skip `dataset_sample`\n"
+        "- `resumed_knowledge.dataset_profiles[dataset_id]` exists → skip `dataset_profile`\n"
+        "- `resumed_knowledge.foreign_keys` has patterns → skip `detect_foreign_keys`\n"
+        "- `resumed_knowledge.available_datasets` exists → skip `dataset_list`\n"
+        "Focus on answering clarification or building/editing the plan with existing knowledge.\n"
+        "Exception: pass `force_refresh: true` in args to bypass cache if data may have changed.\n"
+        "\n"
         "## Clarification framework — when to ask vs proceed\n"
         "\n"
         "Your users are DOMAIN EXPERTS, not engineers. They know their business deeply but may not\n"
@@ -1167,11 +1248,29 @@ def _build_system_prompt(*, allowed_tools: List[str]) -> str:
         "Present your inferred schema as a concrete proposal with options, then ask for confirmation.\n"
         "\n"
         "### Phase 3: Registration & mapping (autonomous after approval)\n"
-        "After user confirms the design:\n"
-        "1. `ontology_new` → `ontology_add_property` → `ontology_add_relationship` → `ontology_validate` → `ontology_create`\n"
-        "2. `ontology_register_object_type` for each class (REQUIRED before objectify)\n"
-        "3. `objectify_suggest_mapping` → review → `objectify_create_mapping_spec`\n"
-        "4. `objectify_run` → `objectify_wait` → `ontology_query_instances` to verify\n"
+        "After user confirms the design, create ONE class at a time:\n"
+        "For EACH class (e.g. Customer, Order, Payment):\n"
+        "  a) `ontology_new(class_id='Customer', label='Customer')` — creates empty class in memory\n"
+        "  b) `ontology_add_property(...)` for each column — add all properties\n"
+        "  c) `ontology_set_primary_key(primary_key=['customer_unique_id'])` — set PK\n"
+        "  d) `ontology_add_relationship(...)` — add relationships if any\n"
+        "  e) `ontology_validate()` — check consistency\n"
+        "  f) `ontology_create()` — persist to TerminusDB\n"
+        "  g) `ontology_register_object_type(class_id='Customer', dataset_id='...', primary_key=['customer_unique_id'], title_key=['customer_unique_id'])` — register for objectify\n"
+        "Repeat a-g for each class before moving to objectify.\n"
+        "\n"
+        "IMPORTANT tool signatures:\n"
+        "- `ontology_new(class_id='Customer', label='Customer')` — session_id is auto-injected.\n"
+        "- `ontology_add_property(name='customer_id', type='string', label='Customer ID')` — type: 'string'|'integer'|'float'|'boolean'|'datetime'|'date'. Optional: required (bool), primary_key (bool), title_key (bool).\n"
+        "- `ontology_set_primary_key(property_name='customer_id')` — sets ONE property as PK. For composite PK, call twice with clear_existing=false on the second call.\n"
+        "- `ontology_add_relationship(predicate='hasOrders', target='Order', label='Has Orders', cardinality='1:n')` — cardinality: '1:1'|'1:n'|'n:1'|'n:m'. All 4 args required.\n"
+        "- `ontology_create()` — db_name/branch auto-injected. Persists to TerminusDB.\n"
+        "- `ontology_register_object_type(class_id='Customer', dataset_id='...', primary_key=['customer_unique_id'], title_key=['customer_unique_id'])` — db_name auto-injected.\n"
+        "\n"
+        "After ALL classes are registered:\n"
+        "  h) `objectify_suggest_mapping(class_id='...', dataset_id='...')` → review suggestions\n"
+        "  i) `objectify_create_mapping_spec(...)` — persist mapping\n"
+        "  j) `objectify_run(...)` → `objectify_wait(...)` → `ontology_query_instances(...)` to verify\n"
         "\n"
         "### Phase 4: Link types (autonomous)\n"
         "- Use `create_link_type_from_fk` with FK patterns from Phase 1.\n"
@@ -1718,6 +1817,7 @@ async def _execute_tool_call(
 
     try:
         args = _drop_none_values(dict(args or {}))
+        args.pop("force_refresh", None)  # virtual param for cache bypass
 
         # ==================== plan_new ====================
         if tool_name == "plan_new":
@@ -1875,12 +1975,31 @@ async def _execute_tool_call(
 
             payload = await _call_mcp_tool(mcp_manager, "ontology", tool_name, args)
 
-            # Auto-fallback: 409 Conflict → ontology_update
+            # Auto-fallback: 409 Conflict → load seq → ontology_update
             if tool_name == "ontology_create" and isinstance(payload, dict):
                 error_msg = str(payload.get("error") or "")
                 if "409" in error_msg or "Conflict" in error_msg:
-                    logger.info("ontology_create got 409 Conflict, auto-retrying with ontology_update")
-                    payload = await _call_mcp_tool(mcp_manager, "ontology", "ontology_update", args)
+                    logger.info("ontology_create got 409 Conflict, loading seq then ontology_update")
+                    # Load current class to get expected_seq
+                    class_id = args.get("class_id") or (state.working_ontology or {}).get("id", "")
+                    load_args = {
+                        "session_id": args.get("session_id", state.ontology_session_id),
+                        "db_name": args.get("db_name", state.db_name),
+                        "class_id": class_id,
+                        "branch": args.get("branch", state.branch or "main"),
+                    }
+                    load_result = await _call_mcp_tool(mcp_manager, "ontology", "ontology_load", load_args)
+                    seq = None
+                    if isinstance(load_result, dict):
+                        seq = load_result.get("seq") or load_result.get("expected_seq")
+                        ont = load_result.get("ontology")
+                        if isinstance(ont, dict) and seq is None:
+                            seq = ont.get("_seq") or ont.get("seq")
+                    update_args = dict(args)
+                    if seq is not None:
+                        update_args["expected_seq"] = seq
+                        logger.info("409 fallback: loaded seq=%s for class=%s", seq, class_id)
+                    payload = await _call_mcp_tool(mcp_manager, "ontology", "ontology_update", update_args)
                     if isinstance(payload, dict) and payload.get("status") == "success":
                         logger.info("ontology_update succeeded after 409 fallback")
 
@@ -2321,6 +2440,9 @@ async def _run_agent_core(
                     state.working_ontology = agent_ctx.get("working_ontology")
                     state.schema_inference = agent_ctx.get("schema_inference")
                     state.mapping_suggestions = agent_ctx.get("mapping_suggestions")
+                    saved_hashes = agent_ctx.get("tool_call_hashes")
+                    if isinstance(saved_hashes, dict):
+                        state.tool_call_hashes = {int(k): v for k, v in saved_hashes.items()}
                 logger.info(
                     "Resumed agent state from plan_id=%s (plan_obj=%s, knowledge_keys=%d)",
                     resume_plan_id,
@@ -2543,6 +2665,14 @@ async def _run_agent_core(
             return
 
         # ── ACTION: finish ──
+        # If LLM says "finish" but also provides tool_calls, it actually
+        # wants to call tools first.  Override to call_tool so the tools
+        # execute before we terminate.
+        if decision.action == "finish" and decision.tool_calls:
+            logger.info("finish+tool_calls override → call_tool (step=%d tools=%s)",
+                        step_idx + 1, [tc.tool for tc in decision.tool_calls])
+            decision.action = "call_tool"
+
         if decision.action == "finish":
             if isinstance(state.plan_obj, dict):
                 try:
@@ -2765,6 +2895,47 @@ async def _run_agent_core(
                         },
                     )
                 continue
+
+            # ── Knowledge ledger cache (Layer 2 — resume safety net) ──
+            if not args.get("force_refresh") and state.knowledge_ledger:
+                cached_obs = _check_knowledge_cache(state.knowledge_ledger, tool_name, args)
+                if cached_obs is not None:
+                    state.prompt_items.append(
+                        stable_json_dumps({"type": "tool_call", "step": step_idx + 1, "tool": tool_name, "args": args})
+                    )
+                    state.prompt_items.append(
+                        stable_json_dumps({"type": "tool_output", "step": step_idx + 1, "tool": tool_name, "output": cached_obs})
+                    )
+                    state.last_observation = cached_obs
+                    executed_tools.append(tool_name)
+                    batch_last = cached_obs
+                    batch_last_by_alias[_tool_alias(tool_name)] = cached_obs
+                    if streaming:
+                        yield StreamEvent(
+                            event_type="tool_start",
+                            data={
+                                "run_id": run_id, "step": step_idx + 1, "max_steps": max_steps,
+                                "tool": tool_name,
+                                "args": {k: v for k, v in args.items() if k != "plan"},
+                                "reasoning": decision.notes[0] if decision.notes else None,
+                                "cached": True,
+                            },
+                        )
+                        yield StreamEvent(
+                            event_type="tool_end",
+                            data={
+                                "run_id": run_id, "step": step_idx + 1, "tool": tool_name,
+                                "success": True, "error": None,
+                                "observation": _mask_tool_observation(cached_obs),
+                                "cached": True,
+                            },
+                        )
+                    logger.info(
+                        "Knowledge cache hit: tool=%s dataset=%s step=%d",
+                        tool_name, args.get("dataset_id", "N/A"), step_idx + 1,
+                    )
+                    continue
+
             _step_all_dup = False
 
             # ── Consecutive dup guard ──
@@ -2801,6 +2972,11 @@ async def _run_agent_core(
                 planner_hints=planner_hints, tool_errors=tool_errors,
                 tool_warnings=tool_warnings, step_idx=step_idx,
             )
+
+            # ── Evict failed calls from dedup cache so LLM can retry ──
+            _tool_failed = isinstance(observation, dict) and observation.get("error")
+            if _tool_failed:
+                _dedup_evict_on_failure(state, tool_name, args)
 
             # Knowledge + summarize
             if isinstance(observation, dict):

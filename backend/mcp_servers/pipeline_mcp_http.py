@@ -104,6 +104,15 @@ def oms_api_base_url() -> str:
     return os.getenv("OMS_BASE_URL", "http://oms:8000").rstrip("/")
 
 
+def _oms_admin_token() -> str:
+    """Resolve OMS admin token from environment (same fallback as OMSClient)."""
+    for key in ("OMS_CLIENT_TOKEN", "OMS_ADMIN_TOKEN", "ADMIN_API_KEY", "ADMIN_TOKEN"):
+        val = (os.getenv(key) or "").strip()
+        if val:
+            return val
+    return ""
+
+
 async def oms_json(
     method: str,
     path: str,
@@ -115,7 +124,10 @@ async def oms_json(
     """Make an HTTP request to OMS API and return JSON response."""
     base = oms_api_base_url()
     url = f"{base}{path}"
-    headers = {"Content-Type": "application/json", "Accept": "application/json"}
+    headers: Dict[str, str] = {"Content-Type": "application/json", "Accept": "application/json"}
+    token = _oms_admin_token()
+    if token:
+        headers["X-Admin-Token"] = token
     return await http_json(
         method,
         url,

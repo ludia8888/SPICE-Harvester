@@ -8,7 +8,7 @@ from shared.errors.error_types import ErrorCategory, ErrorCode
 from shared.models.objectify_job import ObjectifyJob
 
 from mcp_servers.pipeline_mcp_errors import missing_required_params, tool_error
-from mcp_servers.pipeline_mcp_http import bff_json
+from mcp_servers.pipeline_mcp_http import bff_json, oms_json
 
 logger = logging.getLogger(__name__)
 
@@ -182,6 +182,28 @@ async def _objectify_create_mapping_spec(server: Any, arguments: Dict[str, Any])
         payload["dataset_id"] = dataset_id
         return payload
 
+    # Resolve target_field_types from ontology class properties
+    target_field_types: Dict[str, str] = {}
+    try:
+        ont_resp = await oms_json(
+            "GET",
+            f"/api/v1/database/{db_name}/ontology/{target_class_id}",
+            params={"branch": dataset_branch or "main"},
+        )
+        ont_data = ont_resp.get("data") if isinstance(ont_resp, dict) else None
+        if isinstance(ont_data, dict):
+            ont_props = ont_data.get("properties") or []
+            prop_type_map = {}
+            for p in ont_props:
+                if isinstance(p, dict) and p.get("name"):
+                    prop_type_map[p["name"]] = p.get("type") or "xsd:string"
+            for m in normalized_mappings:
+                tgt = m["target_field"]
+                if tgt in prop_type_map:
+                    target_field_types[tgt] = prop_type_map[tgt]
+    except Exception as tft_exc:
+        logger.warning("Failed to resolve target_field_types for %s: %s", target_class_id, tft_exc)
+
     mapping_spec = await objectify_registry.create_mapping_spec(
         dataset_id=dataset_id,
         dataset_branch=dataset_branch or dataset.branch,
@@ -189,6 +211,7 @@ async def _objectify_create_mapping_spec(server: Any, arguments: Dict[str, Any])
         schema_hash=schema_hash,
         target_class_id=target_class_id,
         mappings=normalized_mappings,
+        target_field_types=target_field_types or None,
         auto_sync=auto_sync,
         status="ACTIVE",
         options=options,

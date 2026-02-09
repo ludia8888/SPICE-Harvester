@@ -515,6 +515,8 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
             service_name="objectify-worker",
             thread_name_prefix="objectify-worker-kafka",
             reset_partition_state=True,
+            max_poll_interval_ms=600_000,   # 10min (default 5min) — bulk-create batches need time
+            session_timeout_ms=120_000,     # 2min (default 45s) — prevent heartbeat timeout during HTTP calls
         )
 
         self.dlq_producer = create_kafka_dlq_producer(
@@ -735,6 +737,17 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
             raise RuntimeError("ObjectifyRegistry not initialized")
 
         async def _fail_job(error: str, *, report: Optional[Dict[str, Any]] = None) -> None:
+            # Log detailed validation errors before they get overwritten by terminal failure handler
+            if report:
+                errs = report.get("errors")
+                if errs:
+                    logger.error(
+                        "Objectify validation errors (job_id=%s, first 5): %s",
+                        job.job_id, errs[:5],
+                    )
+                stats = report.get("stats")
+                if stats:
+                    logger.error("Objectify validation stats (job_id=%s): %s", job.job_id, stats)
             report_payload = self._build_error_report(error=error, report=report, job=job)
             if error.startswith("validation_failed"):
                 await self._record_gate_result(

@@ -202,6 +202,8 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
             topics=[AppConfig.INSTANCE_COMMANDS_TOPIC],
             service_name="instance-worker",
             thread_name_prefix="instance-worker-kafka",
+            max_poll_interval_ms=600_000,   # 10min (default 5min) — bulk-create can be slow
+            session_timeout_ms=120_000,     # 2min (default 45s)
         )
         logger.info(f"Using consumer group: {group_id}")
         
@@ -1093,6 +1095,9 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
         branch = validate_branch_name(command.get("branch") or "main")
         is_objectify = self._is_objectify_command(command)
         payload = command.get("payload", {}) or {}
+        command_meta = command.get("metadata")
+        if not isinstance(command_meta, dict):
+            command_meta = {}
         is_objectify = self._is_objectify_command(command)
 
         await self.set_command_status(command_id, "processing")
@@ -1274,6 +1279,9 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
         command_id = command.get("command_id")
         branch = validate_branch_name(command.get("branch") or "main")
         payload = command.get("payload", {}) or {}
+        command_meta = command.get("metadata")
+        if not isinstance(command_meta, dict):
+            command_meta = {}
 
         await self.set_command_status(command_id, "processing")
 
