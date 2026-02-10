@@ -13,7 +13,7 @@ def test_primary_key_required_when_generation_disabled():
 @pytest.mark.asyncio
 async def test_relationship_fallback_can_be_disabled():
     worker = StrictInstanceWorker()
-    worker.terminus_service = None
+    worker.oms_http = None
     payload = {"linked_to": "Target/abc123"}
 
     relationships = await worker.extract_relationships(

@@ -38,7 +38,6 @@ class AppConfig:
     ONTOLOGY_EVENTS_TOPIC = _SettingsValue("messaging.ontology_events_topic")
     ACTION_EVENTS_TOPIC = _SettingsValue("messaging.action_events_topic")
     PROJECTION_DLQ_TOPIC = _SettingsValue("messaging.projection_dlq_topic")
-    SEARCH_PROJECTION_DLQ_TOPIC = _SettingsValue("messaging.search_projection_dlq_topic")
     CONNECTOR_UPDATES_TOPIC = _SettingsValue("messaging.connector_updates_topic")
     CONNECTOR_UPDATES_DLQ_TOPIC = _SettingsValue("messaging.connector_updates_dlq_topic")
     PIPELINE_JOBS_TOPIC = _SettingsValue("messaging.pipeline_jobs_topic")
@@ -66,8 +65,7 @@ class AppConfig:
     ONTOLOGY_WORKER_GROUP = _SettingsValue("messaging.ontology_worker_group")
     ACTION_WORKER_GROUP = _SettingsValue("messaging.action_worker_group")
     OBJECTIFY_JOBS_GROUP = _SettingsValue("messaging.objectify_jobs_group")
-    SEARCH_PROJECTION_GROUP = _SettingsValue("messaging.search_projection_group")
-    
+
     # ======================
     # S3 Storage
     # ======================
@@ -323,7 +321,6 @@ class AppConfig:
             cls.ONTOLOGY_EVENTS_TOPIC,
             cls.ACTION_EVENTS_TOPIC,
             cls.PROJECTION_DLQ_TOPIC,
-            cls.SEARCH_PROJECTION_DLQ_TOPIC,
             cls.CONNECTOR_UPDATES_TOPIC,
             cls.CONNECTOR_UPDATES_DLQ_TOPIC,
             cls.PIPELINE_JOBS_TOPIC,

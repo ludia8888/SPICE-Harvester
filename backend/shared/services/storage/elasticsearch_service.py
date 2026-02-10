@@ -7,7 +7,7 @@ error handling, and common operations for search and indexing.
 
 import json
 import logging
-from typing import Optional, Dict, Any, List, Union
+from typing import Optional, Dict, Any, List, Tuple, Union
 from datetime import datetime
 from elasticsearch import AsyncElasticsearch
 # elasticsearch>=8.11.0 is now required in shared/pyproject.toml
@@ -646,3 +646,49 @@ def create_elasticsearch_service_legacy(
         password=password or settings.database.elasticsearch_password,
         request_timeout=settings.database.elasticsearch_request_timeout,
     )
+
+
+async def promote_alias_to_index(
+    *,
+    elasticsearch_service: ElasticsearchService,
+    base_index: str,
+    new_index: str,
+    allow_delete_base_index: bool = False,
+) -> Tuple[bool, Optional[str]]:
+    """Atomically promote *new_index* behind the *base_index* alias.
+
+    Blue-Green swap pattern:
+    - If *base_index* is already an alias → atomic swap (remove old targets, add new).
+    - If *base_index* is a concrete index and *allow_delete_base_index* → delete then create alias.
+    - Otherwise create the alias from scratch.
+
+    Returns ``(success, error_message)``.
+    """
+    try:
+        alias_exists = False
+        try:
+            alias_exists = await elasticsearch_service.client.indices.exists_alias(name=base_index)
+        except Exception:
+            alias_exists = False
+
+        if alias_exists:
+            current = await elasticsearch_service.client.indices.get_alias(name=base_index)
+            current_indices = list(current.keys())
+            actions: List[Dict[str, Any]] = [
+                {"remove": {"index": idx, "alias": base_index}} for idx in current_indices
+            ]
+            actions.append({"add": {"index": new_index, "alias": base_index}})
+            await elasticsearch_service.update_aliases(actions)
+            return True, None
+
+        base_exists = await elasticsearch_service.index_exists(base_index)
+        if base_exists and not allow_delete_base_index:
+            raise RuntimeError(
+                "Base index exists as a concrete index; set allow_delete_base_index=true to convert it to an alias"
+            )
+        if base_exists:
+            await elasticsearch_service.delete_index(base_index)
+        await elasticsearch_service.create_alias(index=new_index, alias=base_index)
+        return True, None
+    except Exception as exc:
+        return False, str(exc)

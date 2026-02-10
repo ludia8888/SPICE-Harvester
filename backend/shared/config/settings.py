@@ -1961,10 +1961,6 @@ class MessagingSettings(BaseSettings):
         default="projection_failures_dlq",
         description="Kafka DLQ topic for projection failures (PROJECTION_DLQ_TOPIC)",
     )
-    search_projection_dlq_topic: str = Field(
-        default="projection_failures_dlq",
-        description="Kafka DLQ topic for search projection failures (SEARCH_PROJECTION_DLQ_TOPIC)",
-    )
     connector_updates_topic: str = Field(
         default="connector-updates",
         description="Kafka topic for connector updates (CONNECTOR_UPDATES_TOPIC)",
@@ -2052,10 +2048,6 @@ class MessagingSettings(BaseSettings):
     objectify_jobs_group: str = Field(
         default="objectify-worker-group",
         description="Kafka consumer group for objectify jobs (OBJECTIFY_JOBS_GROUP)",
-    )
-    search_projection_group: str = Field(
-        default="search-projection-worker",
-        description="Kafka consumer group for search projection worker (SEARCH_PROJECTION_GROUP)",
     )
 
 class StorageSettings(BaseSettings):
@@ -3019,75 +3011,6 @@ class ConnectorTriggerSettings(BaseSettings):
         return _clamp_int(v, default=50, min_value=1, max_value=500)
 
 
-class SearchProjectionSettings(BaseSettings):
-    """Search projection worker settings."""
-
-    model_config = SettingsConfigDict(
-        env_prefix="SEARCH_PROJECTION_",
-        env_file=_ENV_FILE,
-        env_file_encoding="utf-8",
-        case_sensitive=False,
-        extra="ignore",
-    )
-
-    enabled: bool = Field(
-        default=False,
-        description="Enable search projection (ENABLE_SEARCH_PROJECTION)",
-    )
-    handler: str = Field(
-        default="search_projection_worker",
-        description="Handler label (SEARCH_PROJECTION_HANDLER)",
-    )
-    index_name: str = Field(
-        default="objects",
-        description="Search index name (SEARCH_INDEX)",
-    )
-    max_retries: int = Field(
-        default=5,
-        description="Max retries (SEARCH_PROJECTION_MAX_RETRIES)",
-    )
-    backoff_base_seconds: int = Field(
-        default=2,
-        description="Backoff base seconds (SEARCH_PROJECTION_BACKOFF_BASE_SECONDS)",
-    )
-    backoff_max_seconds: int = Field(
-        default=60,
-        description="Backoff max seconds (SEARCH_PROJECTION_BACKOFF_MAX_SECONDS)",
-    )
-
-    @field_validator("enabled", mode="before")
-    @classmethod
-    def fallback_enabled(cls, v):  # noqa: ANN001
-        legacy = _parse_boolish(os.getenv("ENABLE_SEARCH_PROJECTION"))
-        return legacy if legacy is not None else v
-
-    @field_validator("index_name", mode="before")
-    @classmethod
-    def fallback_index_name(cls, v):  # noqa: ANN001
-        legacy = (os.getenv("SEARCH_INDEX") or "").strip()
-        return legacy or v
-
-    @field_validator("handler", mode="before")
-    @classmethod
-    def strip_handler(cls, v):  # noqa: ANN001
-        return str(v or "").strip() or "search_projection_worker"
-
-    @field_validator("max_retries", mode="before")
-    @classmethod
-    def clamp_max_retries(cls, v):  # noqa: ANN001
-        return _clamp_int(v, default=5, min_value=1, max_value=100)
-
-    @field_validator("backoff_base_seconds", mode="before")
-    @classmethod
-    def clamp_backoff_base_seconds(cls, v):  # noqa: ANN001
-        return _clamp_int(v, default=2, min_value=0, max_value=300)
-
-    @field_validator("backoff_max_seconds", mode="before")
-    @classmethod
-    def clamp_backoff_max_seconds(cls, v):  # noqa: ANN001
-        return _clamp_int(v, default=60, min_value=1, max_value=3600)
-
-
 class ObjectifySettings(BaseSettings):
     """Objectify worker settings."""
 
@@ -4041,7 +3964,6 @@ class WorkersSettings(BaseSettings):
     action_outbox: ActionOutboxSettings = Field(default_factory=ActionOutboxSettings)
     connector_sync: ConnectorSyncSettings = Field(default_factory=ConnectorSyncSettings)
     connector_trigger: ConnectorTriggerSettings = Field(default_factory=ConnectorTriggerSettings)
-    search_projection: SearchProjectionSettings = Field(default_factory=SearchProjectionSettings)
     objectify: ObjectifySettings = Field(default_factory=ObjectifySettings)
     dataset_ingest_outbox: DatasetIngestOutboxSettings = Field(default_factory=DatasetIngestOutboxSettings)
     ingest_reconciler: IngestReconcilerSettings = Field(default_factory=IngestReconcilerSettings)

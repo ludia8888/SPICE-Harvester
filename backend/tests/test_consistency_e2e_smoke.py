@@ -127,7 +127,6 @@ class TestSafeKafkaConsumerConfiguration:
             "objectify_worker.main",
             "pipeline_worker.main",
             "action_worker.main",
-            "search_projection_worker.main",
             "connector_sync_worker.main",
             "ontology_worker.main",
             "instance_worker.main",
@@ -383,10 +382,6 @@ class TestKafkaConnectivity:
             str(settings.pipeline.jobs_group or "").strip() or "pipeline-worker-group",
             str(getattr(settings.workers.connector_sync, "group", "") or "").strip() or "connector-sync-worker-group",
         }
-
-        # Optional components
-        if bool(settings.workers.search_projection.enabled):
-            expected.add(str(AppConfig.SEARCH_PROJECTION_GROUP or "").strip() or "search-projection-worker")
 
         admin = _kafka_admin()
         deadline = time.monotonic() + 30.0
@@ -1295,11 +1290,6 @@ class TestWorkerModuleImports:
         """Action worker should be importable."""
         from action_worker.main import ActionWorker
         assert ActionWorker is not None
-
-    def test_search_projection_worker_import(self) -> None:
-        """Search projection worker should be importable."""
-        from search_projection_worker.main import SearchProjectionWorker
-        assert SearchProjectionWorker is not None
 
     def test_connector_sync_worker_import(self) -> None:
         """Connector sync worker should be importable."""

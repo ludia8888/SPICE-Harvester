@@ -54,5 +54,7 @@ def test_primary_key_and_objectify_helpers() -> None:
 
 
 def test_retryable_error_detection() -> None:
-    assert StrictInstanceWorker._is_retryable_error(Exception("references_untyped_object")) is True
+    assert StrictInstanceWorker._is_retryable_error(Exception("ConnectionError: node unreachable")) is True
+    assert StrictInstanceWorker._is_retryable_error(Exception("timeout waiting for response")) is True
+    assert StrictInstanceWorker._is_retryable_error(Exception("409 conflict on version")) is True
     assert StrictInstanceWorker._is_retryable_error(Exception("invalid payload")) is False

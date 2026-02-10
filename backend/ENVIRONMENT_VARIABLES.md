@@ -244,7 +244,6 @@ ONTOLOGY_EVENTS_TOPIC=ontology_events
 ACTION_EVENTS_TOPIC=action_events
 
 PROJECTION_DLQ_TOPIC=projection_failures_dlq
-SEARCH_PROJECTION_DLQ_TOPIC=projection_failures_dlq
 
 PIPELINE_JOBS_TOPIC=pipeline-jobs
 PIPELINE_JOBS_DLQ_TOPIC=pipeline-jobs-dlq

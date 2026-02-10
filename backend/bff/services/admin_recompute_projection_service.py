@@ -27,7 +27,7 @@ from shared.dependencies.providers import BackgroundTaskManagerDep
 from shared.models.background_task import TaskStatus
 from shared.security.input_sanitizer import validate_branch_name, validate_db_name
 from shared.services.registries.lineage_store import LineageStore
-from shared.services.storage.elasticsearch_service import ElasticsearchService
+from shared.services.storage.elasticsearch_service import ElasticsearchService, promote_alias_to_index
 from shared.services.storage.event_store import EventStore
 from shared.services.storage.redis_service import RedisService
 from shared.utils.ontology_version import split_ref_commit
@@ -447,32 +447,13 @@ async def _promote_alias_to_index(
     new_index: str,
     allow_delete_base_index: bool,
 ) -> Tuple[bool, Optional[str]]:
-    try:
-        alias_exists = False
-        try:
-            alias_exists = await elasticsearch_service.client.indices.exists_alias(name=base_index)
-        except Exception:
-            alias_exists = False
-
-        if alias_exists:
-            current = await elasticsearch_service.client.indices.get_alias(name=base_index)
-            current_indices = list(current.keys())
-            actions = [{"remove": {"index": idx, "alias": base_index}} for idx in current_indices]
-            actions.append({"add": {"index": new_index, "alias": base_index}})
-            await elasticsearch_service.update_aliases(actions)
-            return True, None
-
-        base_exists = await elasticsearch_service.index_exists(base_index)
-        if base_exists and not allow_delete_base_index:
-            raise RuntimeError(
-                "Base index exists as a concrete index; set allow_delete_base_index=true to convert it to an alias"
-            )
-        if base_exists:
-            await elasticsearch_service.delete_index(base_index)
-        await elasticsearch_service.create_alias(index=new_index, alias=base_index)
-        return True, None
-    except Exception as exc:
-        return False, str(exc)
+    """Thin wrapper around shared.promote_alias_to_index for backward compatibility."""
+    return await promote_alias_to_index(
+        elasticsearch_service=elasticsearch_service,
+        base_index=base_index,
+        new_index=new_index,
+        allow_delete_base_index=allow_delete_base_index,
+    )
 
 
 async def recompute_projection_task(  # noqa: PLR0915
