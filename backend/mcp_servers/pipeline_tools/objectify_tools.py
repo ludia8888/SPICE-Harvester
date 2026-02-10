@@ -569,6 +569,59 @@ async def _get_objectify_watermark(server: Any, arguments: Dict[str, Any]) -> An
         )
 
 
+async def _reconcile_relationships(server: Any, arguments: Dict[str, Any]) -> Any:
+    """Auto-populate relationships on ES instances by detecting FK references."""
+    db_name = str(arguments.get("db_name") or "").strip()
+    branch = str(arguments.get("branch") or "main").strip()
+
+    if not db_name:
+        return missing_required_params("reconcile_relationships", ["db_name"], arguments)
+
+    try:
+        resp = await bff_json(
+            "POST",
+            f"/objectify/databases/{db_name}/reconcile-relationships",
+            db_name=db_name,
+            principal_id=None,
+            principal_type=None,
+            params={"branch": branch},
+            timeout_seconds=60.0,
+        )
+
+        if isinstance(resp, dict) and resp.get("error"):
+            return tool_error(
+                f"reconcile_relationships failed: {resp.get('message', resp.get('error'))}",
+                status_code=resp.get("http_status", 500),
+                code=ErrorCode.INTERNAL_ERROR,
+                category=ErrorCategory.INTERNAL,
+                context={"db_name": db_name, "branch": branch},
+            )
+
+        return {
+            "status": resp.get("status", "ok"),
+            "db_name": db_name,
+            "branch": branch,
+            "relationships_processed": resp.get("relationships_processed", 0),
+            "total_instances_updated": resp.get("total_instances_updated", 0),
+            "details": resp.get("details", []),
+            "message": (
+                f"Reconciled {resp.get('relationships_processed', 0)} relationship(s), "
+                f"updated {resp.get('total_instances_updated', 0)} instance(s)."
+            ),
+        }
+
+    except Exception as exc:
+        logger.warning("reconcile_relationships failed: %s", exc)
+        return tool_error(
+            "reconcile_relationships failed",
+            detail=str(exc)[:300],
+            code=ErrorCode.INTERNAL_ERROR,
+            category=ErrorCategory.INTERNAL,
+            status_code=500,
+            context={"db_name": db_name, "branch": branch},
+        )
+
+
 OBJECTIFY_TOOL_HANDLERS: Dict[str, ToolHandler] = {
     "objectify_suggest_mapping": _objectify_suggest_mapping,
     "objectify_create_mapping_spec": _objectify_create_mapping_spec,
@@ -578,6 +631,7 @@ OBJECTIFY_TOOL_HANDLERS: Dict[str, ToolHandler] = {
     "objectify_wait": _objectify_wait,
     "trigger_incremental_objectify": _trigger_incremental_objectify,
     "get_objectify_watermark": _get_objectify_watermark,
+    "reconcile_relationships": _reconcile_relationships,
 }
 
 

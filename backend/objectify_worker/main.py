@@ -1766,6 +1766,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                     objectify_pk_fields=pk_targets,
                     objectify_instance_id_field=instance_id_field,
                     instance_relationships=batch_rels if batch_rels else None,
+                    target_field_types=target_field_types,
                 )
                 if write_result.command_ids:
                     command_ids.extend([str(v) for v in write_result.command_ids if str(v).strip()])

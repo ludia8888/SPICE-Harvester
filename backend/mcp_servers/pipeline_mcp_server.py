@@ -1293,6 +1293,22 @@ class PipelineMCPServer:
                     },
                 },
                 {
+                    "name": "reconcile_relationships",
+                    "description": (
+                        "Auto-populate relationships on ES instances by detecting FK references between ontology classes. "
+                        "Call this AFTER objectify completes for all classes to link instances via foreign keys "
+                        "(e.g. Order.customer_id → Customer). Returns per-relationship stats."
+                    ),
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "db_name": {"type": "string", "description": "Database name"},
+                            "branch": {"type": "string", "default": "main", "description": "Ontology branch"},
+                        },
+                        "required": ["db_name"],
+                    },
+                },
+                {
                     "name": "check_schema_drift",
                     "description": "Check if dataset schema has drifted from mapping spec expectations. Detects column additions, removals, type changes.",
                     "inputSchema": {

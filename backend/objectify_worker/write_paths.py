@@ -43,6 +43,7 @@ class ObjectifyWritePath(Protocol):
         objectify_pk_fields: Optional[List[str]],
         objectify_instance_id_field: Optional[str],
         instance_relationships: Optional[Dict[str, Dict[str, Any]]] = None,
+        target_field_types: Optional[Dict[str, str]] = None,
     ) -> ObjectifyWriteBatchResult:
         ...
 
@@ -135,6 +136,7 @@ class DatasetPrimaryIndexWritePath:
         objectify_pk_fields: Optional[List[str]],
         objectify_instance_id_field: Optional[str],
         instance_relationships: Optional[Dict[str, Dict[str, Any]]] = None,
+        target_field_types: Optional[Dict[str, str]] = None,
     ) -> ObjectifyWriteBatchResult:
         if not instances:
             return ObjectifyWriteBatchResult(command_ids=[], indexed_instance_ids=[])
@@ -171,6 +173,7 @@ class DatasetPrimaryIndexWritePath:
                         now_iso=now,
                         event_sequence=batch_sequence,
                         relationships=rels_lookup.get(instance_id),
+                        target_field_types=target_field_types,
                     ),
                 }
             )
@@ -323,6 +326,7 @@ class DatasetPrimaryIndexWritePath:
         now_iso: str,
         event_sequence: int,
         relationships: Optional[Dict[str, Any]] = None,
+        target_field_types: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
         payload = dict(instance)
         payload.setdefault("instance_id", instance_id)
@@ -341,8 +345,23 @@ class DatasetPrimaryIndexWritePath:
         event_id = deterministic_uuid5_str(f"objectify:{job.job_id}:{instance_id}:{event_sequence}")
 
         properties = payload.get("properties")
-        if not isinstance(properties, list):
+        if not isinstance(properties, list) or not properties:
+            # Auto-build properties nested array from flat instance fields
+            # so ES nested queries (filtering) work on indexed data.
             properties = []
+            _skip = {"instance_id", "class_id", "db_name", "branch", "properties"}
+            _field_types = target_field_types or {}
+            for key, value in payload.items():
+                if key in _skip or value is None:
+                    continue
+                str_value = str(value).strip()
+                if not str_value:
+                    continue
+                prop: Dict[str, Any] = {"name": key, "value": str_value}
+                ftype = _field_types.get(key)
+                if ftype:
+                    prop["type"] = ftype
+                properties.append(prop)
 
         backing_dataset: Dict[str, Any] = {
             "dataset_id": job.dataset_id,

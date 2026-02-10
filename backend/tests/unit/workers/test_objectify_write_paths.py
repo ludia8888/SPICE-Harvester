@@ -111,6 +111,112 @@ async def test_dataset_primary_write_path_indexes_instances_directly() -> None:
 
 
 @pytest.mark.asyncio
+async def test_build_document_populates_properties_from_flat_instance() -> None:
+    """Properties nested array should be auto-built from flat instance fields."""
+    job = _build_job()
+    doc = DatasetPrimaryIndexWritePath._build_document(
+        job=job,
+        instance={
+            "instance_id": "order-1",
+            "order_id": "order-1",
+            "status": "NEW",
+            "amount": "150.0",
+        },
+        instance_id="order-1",
+        branch="main",
+        ontology_version={"ref": "branch:main", "commit": "abc"},
+        now_iso="2026-01-01T00:00:00+00:00",
+        event_sequence=1000,
+        target_field_types={"order_id": "string", "status": "string", "amount": "decimal"},
+    )
+
+    props = doc["properties"]
+    assert isinstance(props, list)
+    assert len(props) >= 3  # order_id, status, amount
+
+    props_by_name = {p["name"]: p for p in props}
+    assert "order_id" in props_by_name
+    assert props_by_name["order_id"]["value"] == "order-1"
+    assert props_by_name["order_id"]["type"] == "string"
+    assert props_by_name["status"]["value"] == "NEW"
+    assert props_by_name["amount"]["type"] == "decimal"
+
+    # Skipped keys should not appear
+    assert "instance_id" not in props_by_name
+    assert "class_id" not in props_by_name
+    assert "db_name" not in props_by_name
+    assert "branch" not in props_by_name
+
+
+@pytest.mark.asyncio
+async def test_build_document_preserves_existing_properties() -> None:
+    """If properties list is already populated, it should not be overwritten."""
+    job = _build_job()
+    existing_props = [{"name": "custom", "value": "val1"}]
+    doc = DatasetPrimaryIndexWritePath._build_document(
+        job=job,
+        instance={
+            "instance_id": "order-1",
+            "properties": existing_props,
+            "status": "NEW",
+        },
+        instance_id="order-1",
+        branch="main",
+        ontology_version=None,
+        now_iso="2026-01-01T00:00:00+00:00",
+        event_sequence=1000,
+    )
+
+    assert doc["properties"] == existing_props
+
+
+@pytest.mark.asyncio
+async def test_build_document_skips_none_values() -> None:
+    """Properties with None values should not be included."""
+    job = _build_job()
+    doc = DatasetPrimaryIndexWritePath._build_document(
+        job=job,
+        instance={"instance_id": "order-1", "status": "NEW", "notes": None},
+        instance_id="order-1",
+        branch="main",
+        ontology_version=None,
+        now_iso="2026-01-01T00:00:00+00:00",
+        event_sequence=1000,
+    )
+
+    props_by_name = {p["name"]: p for p in doc["properties"]}
+    assert "notes" not in props_by_name
+    assert "status" in props_by_name
+
+
+@pytest.mark.asyncio
+async def test_write_instances_passes_target_field_types() -> None:
+    """write_instances() should forward target_field_types to _build_document()."""
+    job = _build_job()
+    fake_es = _FakeElasticsearchService()
+    writer = DatasetPrimaryIndexWritePath(
+        elasticsearch_service=fake_es,  # type: ignore[arg-type]
+        chunk_size=100,
+        refresh=False,
+    )
+
+    await writer.write_instances(
+        job=job,
+        instances=[{"instance_id": "order-1", "price": "99.5"}],
+        ontology_version=None,
+        objectify_pk_fields=["order_id"],
+        objectify_instance_id_field="order_id",
+        target_field_types={"price": "decimal"},
+    )
+
+    docs = fake_es.bulk_calls[0]["documents"]
+    props = docs[0]["properties"]
+    price_prop = [p for p in props if p["name"] == "price"]
+    assert len(price_prop) == 1
+    assert price_prop[0]["type"] == "decimal"
+
+
+@pytest.mark.asyncio
 async def test_dataset_primary_finalize_prunes_stale_docs_on_full() -> None:
     job = _build_job()
     fake_es = _FakeElasticsearchService()

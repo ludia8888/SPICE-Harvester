@@ -694,39 +694,24 @@ async def find_relationship_paths(
 
 async def graph_service_health(*, graph_service: GraphFederationServiceES) -> Dict[str, Any]:
     """
-    Check health of graph federation service.
+    Check health of graph federation service (ES-only, no TerminusDB).
 
     Returns a best-effort diagnostic payload (does not raise on failure).
     """
     try:
-        terminus_healthy = await graph_service.terminus.ping()
-
-        import aiohttp
-
-        es_healthy = False
-        async with aiohttp.ClientSession() as session:
-            try:
-                async with session.get(
-                    f"{graph_service.es_url}/_cluster/health",
-                    auth=graph_service.es_auth,
-                ) as resp:
-                    if resp.status == 200:
-                        es_health = await resp.json()
-                        es_healthy = es_health.get("status") in ["green", "yellow"]
-            except Exception as exc:
-                logger.error("ES health check failed: %s", exc)
-
+        await graph_service._ensure_connected()
+        health = await graph_service._es.get_cluster_health()
+        es_status = health.get("status", "unknown")
+        es_healthy = es_status in ("green", "yellow")
         return {
-            "status": "healthy" if (terminus_healthy and es_healthy) else "degraded",
+            "status": "healthy" if es_healthy else "degraded",
             "services": {
-                "terminusdb": "healthy" if terminus_healthy else "unhealthy",
-                "elasticsearch": "healthy" if es_healthy else "unhealthy",
+                "elasticsearch": es_status,
             },
             "message": "Graph federation service operational"
-            if (terminus_healthy and es_healthy)
-            else "Some services are degraded",
+            if es_healthy
+            else "Elasticsearch cluster degraded",
         }
-
     except Exception as exc:
         logger.error("Health check failed: %s", exc)
         return {"status": "unhealthy", "error": str(exc)}

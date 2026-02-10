@@ -637,6 +637,8 @@ _PIPELINE_AGENT_ALLOWED_TOOLS: tuple[str, ...] = (
     # FK detection and link type creation
     "detect_foreign_keys",
     "create_link_type_from_fk",
+    # Relationship reconciliation (auto-populate FK-based relationships after objectify)
+    "reconcile_relationships",
     # Incremental objectify
     "trigger_incremental_objectify",
     "get_objectify_watermark",
@@ -1271,6 +1273,11 @@ def _build_system_prompt(*, allowed_tools: List[str]) -> str:
         "  h) `objectify_suggest_mapping(class_id='...', dataset_id='...')` → review suggestions\n"
         "  i) `objectify_create_mapping_spec(...)` — persist mapping\n"
         "  j) `objectify_run(...)` → `objectify_wait(...)` → `ontology_query_instances(...)` to verify\n"
+        "\n"
+        "After ALL classes are objectified:\n"
+        "  k) `reconcile_relationships(db_name='...')` — auto-populate FK-based relationships on ES instances.\n"
+        "     This detects foreign keys (e.g. Order.customer_id → Customer) and writes relationship refs.\n"
+        "     MUST be called after all objectify jobs complete so all instances exist in ES.\n"
         "\n"
         "### Phase 4: Link types (autonomous)\n"
         "- Use `create_link_type_from_fk` with FK patterns from Phase 1.\n"
