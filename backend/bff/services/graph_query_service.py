@@ -22,7 +22,7 @@ from shared.models.graph_query import (
     SimpleGraphQueryRequest,
 )
 from shared.security.input_sanitizer import validate_branch_name, validate_db_name
-from shared.services.core.graph_federation_service_woql import GraphFederationServiceWOQL
+from shared.services.core.graph_federation_service_es import GraphFederationServiceES
 from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.services.registries.lineage_store import LineageStore
 from shared.utils.access_policy import apply_access_policy
@@ -203,7 +203,7 @@ async def execute_graph_query(
     query: GraphQueryRequest,
     request: Request,
     lineage_store: LineageStore,
-    graph_service: GraphFederationServiceWOQL,
+    graph_service: GraphFederationServiceES,
     dataset_registry: DatasetRegistry,
     base_branch: str = "main",
     overlay_branch: Optional[str] = None,
@@ -464,7 +464,7 @@ async def execute_simple_graph_query(
     db_name: str,
     query: SimpleGraphQueryRequest,
     request: Request,
-    graph_service: GraphFederationServiceWOQL,
+    graph_service: GraphFederationServiceES,
     dataset_registry: DatasetRegistry,
     base_branch: str = "main",
     overlay_branch: Optional[str] = None,
@@ -549,7 +549,7 @@ async def execute_multi_hop_query(
     db_name: str,
     query: Dict[str, Any],
     request: Request,
-    graph_service: GraphFederationServiceWOQL,
+    graph_service: GraphFederationServiceES,
     dataset_registry: DatasetRegistry,
     base_branch: str = "main",
     overlay_branch: Optional[str] = None,
@@ -658,7 +658,7 @@ async def find_relationship_paths(
     source_class: str,
     target_class: str,
     max_depth: int,
-    graph_service: GraphFederationServiceWOQL,
+    graph_service: GraphFederationServiceES,
     branch: str,
 ) -> Dict[str, Any]:
     try:
@@ -692,7 +692,7 @@ async def find_relationship_paths(
         ) from exc
 
 
-async def graph_service_health(*, graph_service: GraphFederationServiceWOQL) -> Dict[str, Any]:
+async def graph_service_health(*, graph_service: GraphFederationServiceES) -> Dict[str, Any]:
     """
     Check health of graph federation service.
 
