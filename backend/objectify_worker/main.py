@@ -3495,7 +3495,9 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                 suffix = deterministic_uuid5_hex_prefix(f"objectify:{seed}", length=12)
                 candidate = f"{class_id.lower()}_{suffix}"
                 inst[expected_key] = candidate
-            instance_ids.append(str(candidate))
+            str_candidate = str(candidate)
+            inst["instance_id"] = str_candidate
+            instance_ids.append(str_candidate)
         return instances, instance_ids
 
     async def _record_lineage_header(

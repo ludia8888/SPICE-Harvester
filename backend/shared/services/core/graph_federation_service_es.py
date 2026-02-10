@@ -50,6 +50,14 @@ class GraphFederationServiceES:
     ):
         self._es = es_service
         self._oms_base_url = oms_base_url
+        self._connected = False
+
+    async def _ensure_connected(self) -> None:
+        """Lazily connect the ES client on first use."""
+        if not self._connected:
+            if self._es._client is None:
+                await self._es.connect()
+            self._connected = True
 
     # ------------------------------------------------------------------
     # Public: multi-hop query (same signature as WOQL version)
@@ -77,6 +85,7 @@ class GraphFederationServiceES:
         include_audit: bool = False,
     ) -> Dict[str, Any]:
         """Execute multi-hop graph query entirely within Elasticsearch."""
+        await self._ensure_connected()
         base_branch = validate_branch_name(base_branch or "main")
         index_name = get_instances_index_name(db_name, branch=base_branch)
 
@@ -215,6 +224,7 @@ class GraphFederationServiceES:
         include_audit: bool = False,
     ) -> Dict[str, Any]:
         """Single-class ES search — no hops."""
+        await self._ensure_connected()
         base_branch = validate_branch_name(base_branch or "main")
         index_name = get_instances_index_name(db_name, branch=base_branch)
 
@@ -250,6 +260,7 @@ class GraphFederationServiceES:
         max_depth: int = 3,
     ) -> List[List[Dict[str, str]]]:
         """Discover relationship paths between two classes by sampling ES docs."""
+        await self._ensure_connected()
         branch = validate_branch_name(branch or "main")
         index_name = get_instances_index_name(db_name, branch=branch)
 

@@ -251,6 +251,15 @@ def install_error_handlers(
             if code == ErrorCode.JSON_DECODE_ERROR
             else validation_status
         )
+        # Sanitize errors to ensure JSON-serialisable (Pydantic ctx may contain raw Exceptions)
+        raw_errors = exc.errors()
+        safe_errors = []
+        for err in raw_errors:
+            safe_err = dict(err)
+            ctx = safe_err.get("ctx")
+            if isinstance(ctx, dict):
+                safe_err["ctx"] = {k: str(v) if isinstance(v, Exception) else v for k, v in ctx.items()}
+            safe_errors.append(safe_err)
         return _build_response(
             request,
             service_name=service_name,
@@ -259,7 +268,7 @@ def install_error_handlers(
             status_code=status_code,
             message=message,
             detail=str(exc),
-            errors=exc.errors(),
+            errors=safe_errors,
         )
 
     @app.exception_handler(json.JSONDecodeError)
