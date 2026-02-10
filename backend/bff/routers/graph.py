@@ -22,7 +22,7 @@ from bff.services.graph_query_service import (
 from shared.dependencies.providers import LineageStoreDep
 from shared.models.graph_query import GraphHop, GraphQueryRequest, GraphQueryResponse, SimpleGraphQueryRequest
 from shared.security.input_sanitizer import validate_db_name
-from shared.services.core.graph_federation_service_woql import GraphFederationServiceWOQL
+from shared.services.core.graph_federation_service_es import GraphFederationServiceES
 from shared.services.registries.dataset_registry import DatasetRegistry
 
 logger = logging.getLogger(__name__)
@@ -36,7 +36,7 @@ async def execute_graph_query(
     query: GraphQueryRequest,
     request: Request,
     lineage_store: LineageStoreDep,
-    graph_service: GraphFederationServiceWOQL = Depends(get_graph_federation_service),
+    graph_service: GraphFederationServiceES = Depends(get_graph_federation_service),
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
     base_branch: str = Query("main", description="Base branch (Terminus) (default: main)"),
     overlay_branch: Optional[str] = Query(default=None, description="ES overlay branch (writeback)"),
@@ -60,7 +60,7 @@ async def execute_simple_graph_query(
     db_name: str,
     query: SimpleGraphQueryRequest,
     request: Request,
-    graph_service: GraphFederationServiceWOQL = Depends(get_graph_federation_service),
+    graph_service: GraphFederationServiceES = Depends(get_graph_federation_service),
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
     base_branch: str = Query("main", description="Base branch (Terminus) (default: main)"),
     overlay_branch: Optional[str] = Query(default=None, description="ES overlay branch (writeback)"),
@@ -83,7 +83,7 @@ async def execute_multi_hop_query(
     db_name: str,
     query: Dict[str, Any],
     request: Request,
-    graph_service: GraphFederationServiceWOQL = Depends(get_graph_federation_service),
+    graph_service: GraphFederationServiceES = Depends(get_graph_federation_service),
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
     base_branch: str = Query("main", description="Base branch (Terminus) (default: main)"),
     overlay_branch: Optional[str] = Query(default=None, description="ES overlay branch (writeback)"),
@@ -107,7 +107,7 @@ async def find_relationship_paths(
     source_class: str,
     target_class: str,
     max_depth: int = 5,
-    graph_service: GraphFederationServiceWOQL = Depends(get_graph_federation_service),
+    graph_service: GraphFederationServiceES = Depends(get_graph_federation_service),
     branch: str = Query("main", description="Target branch (default: main)"),
 ):
     return await find_relationship_paths_service(
@@ -121,7 +121,7 @@ async def find_relationship_paths(
 
 
 @router.get("/graph-query/health")
-async def graph_service_health(graph_service: GraphFederationServiceWOQL = Depends(get_graph_federation_service)):
+async def graph_service_health(graph_service: GraphFederationServiceES = Depends(get_graph_federation_service)):
     return await graph_service_health_service(graph_service=graph_service)
 
 
@@ -151,7 +151,7 @@ class ProjectionQueryRequest(BaseModel):
 async def register_projection(
     db_name: str,
     request: ProjectionRegistrationRequest,
-    graph_service: GraphFederationServiceWOQL = Depends(get_graph_federation_service),
+    graph_service: GraphFederationServiceES = Depends(get_graph_federation_service),
 ):
     try:
         db_name = validate_db_name(db_name)
@@ -179,7 +179,7 @@ async def register_projection(
 async def query_projection(
     db_name: str,
     request: ProjectionQueryRequest,
-    graph_service: GraphFederationServiceWOQL = Depends(get_graph_federation_service),
+    graph_service: GraphFederationServiceES = Depends(get_graph_federation_service),
 ):
     try:
         db_name = validate_db_name(db_name)
@@ -206,7 +206,7 @@ async def query_projection(
 )
 async def list_projections(
     db_name: str,
-    graph_service: GraphFederationServiceWOQL = Depends(get_graph_federation_service),
+    graph_service: GraphFederationServiceES = Depends(get_graph_federation_service),
 ):
     try:
         db_name = validate_db_name(db_name)

@@ -28,7 +28,6 @@ from shared.models.events import (
 from shared.services.storage.redis_service import RedisService, create_redis_service
 from shared.services.storage.elasticsearch_service import ElasticsearchService, create_elasticsearch_service
 from shared.services.storage.lakefs_storage_service import LakeFSStorageService, create_lakefs_storage_service
-from shared.services.core.projection_manager import ProjectionManager
 from shared.services.registries.processed_event_registry import (
     ProcessedEventRegistry,
 )
@@ -81,7 +80,7 @@ class ProjectionWorker(StrictHeartbeatEventEnvelopeKafkaWorker[None]):
         self.producer: Optional[Producer] = None
         self.redis_service: Optional[RedisService] = None
         self.elasticsearch_service: Optional[ElasticsearchService] = None
-        self.projection_manager: Optional[ProjectionManager] = None
+        self.projection_manager = None  # removed (ProjectionManager dead code)
         self.tracing_service = None
         self.metrics_collector = None
         self.consumer_ops = None
@@ -420,21 +419,8 @@ class ProjectionWorker(StrictHeartbeatEventEnvelopeKafkaWorker[None]):
         self.tracing = self.tracing_service
         self.metrics = self.metrics_collector
         
-        # 🎯 Initialize ProjectionManager for materialized views
-        try:
-            # ProjectionManager는 GraphFederationServiceWOQL이 필요하므로
-            # 실제 프로덕션에서는 별도로 초기화하도록 설계됨
-            # 여기서는 스켈레톤만 준비
-            logger.info("🎯 ProjectionManager ready for initialization when graph service is available")
-            # TODO: Initialize ProjectionManager when GraphFederationServiceWOQL is available
-            # self.projection_manager = ProjectionManager(
-            #     graph_service=graph_service,
-            #     es_service=self.elasticsearch_service,
-            #     redis_service=self.redis_service
-            # )
-        except Exception as e:
-            logger.warning(f"ProjectionManager initialization skipped: {e}")
-        
+        # NOTE: ProjectionManager removed (dead code) — 2026-02-10
+
     async def _setup_indices(self):
         """매핑 파일 로드 (인덱스는 DB별로 동적 생성)"""
         try:

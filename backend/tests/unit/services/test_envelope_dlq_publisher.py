@@ -80,19 +80,19 @@ async def test_build_envelope_dlq_event_applies_standard_metadata() -> None:
 async def test_publish_envelope_dlq_uses_producer_ops_and_flushes() -> None:
     envelope = EventEnvelope(
         event_id="evt-2",
-        event_type="SEARCH_PROJECTION_FAILED",
-        aggregate_type="instance",
-        aggregate_id="instance-123",
+        event_type="PROJECTION_FAILED",
+        aggregate_type="ontology",
+        aggregate_id="ontology-123",
         data={"name": "demo"},
-        metadata={"kind": "search_projection_dlq"},
+        metadata={"kind": "projection_dlq"},
     )
     spec = EnvelopeDlqSpec(
-        dlq_topic="search-projection-dlq",
-        service_name="search-projection-worker",
-        kind="search_projection_dlq",
-        failed_event_type="SEARCH_PROJECTION_FAILED",
-        span_name="search_projection.dlq_produce",
-        metric_event_name="SEARCH_PROJECTION_DLQ",
+        dlq_topic="projection-dlq",
+        service_name="projection-worker",
+        kind="projection_dlq",
+        failed_event_type="PROJECTION_FAILED",
+        span_name="projection.dlq_produce",
+        metric_event_name="PROJECTION_DLQ",
         flush_timeout_seconds=0.25,
     )
     producer_ops = _CaptureProducerOps()
@@ -105,17 +105,17 @@ async def test_publish_envelope_dlq_uses_producer_ops_and_flushes() -> None:
         envelope=envelope,
         tracing=tracing,
         metrics=metrics,
-        key=b"instance-123",
+        key=b"ontology-123",
     )
 
     assert len(producer_ops.produce_calls) == 1
     call = producer_ops.produce_calls[0]
-    assert call["topic"] == "search-projection-dlq"
-    assert call["key"] == b"instance-123"
+    assert call["topic"] == "projection-dlq"
+    assert call["key"] == b"ontology-123"
     assert producer_ops.flush_calls == [0.25]
-    assert metrics.calls == [("SEARCH_PROJECTION_DLQ", "published")]
+    assert metrics.calls == [("PROJECTION_DLQ", "published")]
 
     payload = json.loads(call["value"].decode("utf-8"))
     assert payload["event_id"] == "evt-2"
-    assert payload["event_type"] == "SEARCH_PROJECTION_FAILED"
-    assert payload["aggregate_id"] == "instance-123"
+    assert payload["event_type"] == "PROJECTION_FAILED"
+    assert payload["aggregate_id"] == "ontology-123"
