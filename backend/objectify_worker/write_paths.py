@@ -42,6 +42,7 @@ class ObjectifyWritePath(Protocol):
         ontology_version: Optional[Dict[str, str]],
         objectify_pk_fields: Optional[List[str]],
         objectify_instance_id_field: Optional[str],
+        instance_relationships: Optional[Dict[str, Dict[str, Any]]] = None,
     ) -> ObjectifyWriteBatchResult:
         ...
 
@@ -95,6 +96,19 @@ class DatasetPrimaryIndexWritePath:
             "action_log_id": {"type": "keyword"},
             "conflict_status": {"type": "keyword"},
             "base_token": {"type": "object", "enabled": True},
+            "relationships": {"type": "object", "enabled": True},
+            "backing_dataset": {
+                "type": "object",
+                "properties": {
+                    "dataset_id": {"type": "keyword"},
+                    "dataset_version_id": {"type": "keyword"},
+                    "artifact_id": {"type": "keyword"},
+                    "mapping_spec_id": {"type": "keyword"},
+                    "mapping_spec_version": {"type": "long"},
+                    "objectify_job_id": {"type": "keyword"},
+                    "indexed_at": {"type": "date"},
+                },
+            },
         }
     }
 
@@ -120,6 +134,7 @@ class DatasetPrimaryIndexWritePath:
         ontology_version: Optional[Dict[str, str]],
         objectify_pk_fields: Optional[List[str]],
         objectify_instance_id_field: Optional[str],
+        instance_relationships: Optional[Dict[str, Dict[str, Any]]] = None,
     ) -> ObjectifyWriteBatchResult:
         if not instances:
             return ObjectifyWriteBatchResult(command_ids=[], indexed_instance_ids=[])
@@ -131,6 +146,7 @@ class DatasetPrimaryIndexWritePath:
 
         docs: List[Dict[str, Any]] = []
         indexed_instance_ids: List[str] = []
+        rels_lookup = instance_relationships or {}
 
         for inst in instances:
             if not isinstance(inst, dict):
@@ -154,6 +170,7 @@ class DatasetPrimaryIndexWritePath:
                         ontology_version=ontology_version,
                         now_iso=now,
                         event_sequence=batch_sequence,
+                        relationships=rels_lookup.get(instance_id),
                     ),
                 }
             )
@@ -305,6 +322,7 @@ class DatasetPrimaryIndexWritePath:
         ontology_version: Optional[Dict[str, str]],
         now_iso: str,
         event_sequence: int,
+        relationships: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         payload = dict(instance)
         payload.setdefault("instance_id", instance_id)
@@ -326,12 +344,24 @@ class DatasetPrimaryIndexWritePath:
         if not isinstance(properties, list):
             properties = []
 
+        backing_dataset: Dict[str, Any] = {
+            "dataset_id": job.dataset_id,
+            "dataset_version_id": job.dataset_version_id,
+            "artifact_id": job.artifact_id,
+            "mapping_spec_id": job.mapping_spec_id,
+            "mapping_spec_version": int(job.mapping_spec_version),
+            "objectify_job_id": job.job_id,
+            "indexed_at": now_iso,
+        }
+
         return {
             "instance_id": instance_id,
             "class_id": job.target_class_id,
             "class_label": job.target_class_id,
             "properties": properties,
             "data": payload,
+            "relationships": relationships or {},
+            "backing_dataset": backing_dataset,
             "lifecycle_id": lifecycle_id,
             "event_id": event_id,
             "event_sequence": int(event_sequence),

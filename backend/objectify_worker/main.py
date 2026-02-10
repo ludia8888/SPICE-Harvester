@@ -63,6 +63,9 @@ from shared.services.pipeline.objectify_delta_utils import (
     create_delta_computer_for_mapping_spec,
 )
 from shared.utils.app_logger import configure_logging
+from shared.services.core.relationship_extractor import (
+    extract_relationships as _extract_instance_relationships_raw,
+)
 from objectify_worker.write_paths import (
     DatasetPrimaryIndexWritePath,
     ObjectifyWritePath,
@@ -70,6 +73,21 @@ from objectify_worker.write_paths import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _extract_instance_relationships(
+    instance: Dict[str, Any],
+    *,
+    rel_map: Dict[str, Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Thin wrapper: extract relationships for a single instance using pre-parsed rel_map."""
+    try:
+        return _extract_instance_relationships_raw(
+            instance, rel_map=rel_map, allow_pattern_fallback=True,
+        )
+    except Exception as exc:
+        logger.debug("Relationship extraction failed for instance: %s", exc)
+        return {}
 
 
 class ObjectifyNonRetryableError(RuntimeError):
@@ -216,6 +234,64 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
             )
         except Exception as exc:
             logger.warning("Failed to record objectify gate result: %s", exc)
+
+    async def _emit_objectify_completed_event(
+        self,
+        *,
+        job: ObjectifyJob,
+        total_rows: int,
+        prepared_instances: int,
+        indexed_instances: int,
+        execution_mode: str,
+        ontology_version: Optional[Dict[str, str]] = None,
+    ) -> None:
+        """Emit OBJECTIFY_COMPLETED event via pipeline control-plane."""
+        try:
+            from shared.services.pipeline.pipeline_control_plane_events import (
+                emit_pipeline_control_plane_event,
+            )
+
+            pipeline_id = str(
+                (job.options or {}).get("pipeline_id")
+                or (job.options or {}).get("run_id")
+                or job.job_id
+            ).strip()
+
+            await emit_pipeline_control_plane_event(
+                event_type="OBJECTIFY_COMPLETED",
+                pipeline_id=pipeline_id,
+                event_id=job.job_id,
+                data={
+                    "job_id": job.job_id,
+                    "db_name": job.db_name,
+                    "target_class_id": job.target_class_id,
+                    "dataset_id": job.dataset_id,
+                    "dataset_version_id": job.dataset_version_id,
+                    "mapping_spec_id": job.mapping_spec_id,
+                    "mapping_spec_version": job.mapping_spec_version,
+                    "execution_mode": execution_mode,
+                    "total_rows": total_rows,
+                    "prepared_instances": prepared_instances,
+                    "indexed_instances": indexed_instances,
+                    "ontology_version": ontology_version or {},
+                    "write_path_mode": WRITE_PATH_MODE_DATASET_PRIMARY_INDEX,
+                    "branch": job.ontology_branch or job.dataset_branch or "main",
+                },
+                kind="objectify_control_plane",
+            )
+            logger.info(
+                "Emitted OBJECTIFY_COMPLETED event for job %s (class=%s, indexed=%d)",
+                job.job_id,
+                job.target_class_id,
+                indexed_instances,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Failed to emit OBJECTIFY_COMPLETED event for job %s: %s",
+                job.job_id,
+                exc,
+                exc_info=True,
+            )
 
     async def _update_object_type_active_version(
         self,
@@ -1673,12 +1749,23 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
 
             for idx in range(0, len(instances), batch_size):
                 instance_batch = instances[idx : idx + batch_size]
+                batch_rels: Dict[str, Dict[str, Any]] = {}
+                if rel_map:
+                    for inst in instance_batch:
+                        if not isinstance(inst, dict):
+                            continue
+                        iid = str(inst.get("instance_id") or "").strip()
+                        if iid:
+                            batch_rels[iid] = _extract_instance_relationships(
+                                inst, rel_map=rel_map,
+                            )
                 write_result = await self.instance_write_path.write_instances(
                     job=job,
                     instances=instance_batch,
                     ontology_version=ontology_version,
                     objectify_pk_fields=pk_targets,
                     objectify_instance_id_field=instance_id_field,
+                    instance_relationships=batch_rels if batch_rels else None,
                 )
                 if write_result.command_ids:
                     command_ids.extend([str(v) for v in write_result.command_ids if str(v).strip()])
@@ -1760,6 +1847,16 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                 job=job,
                 new_watermark=latest_watermark,
             )
+
+        # Emit OBJECTIFY_COMPLETED control-plane event for downstream consumers
+        await self._emit_objectify_completed_event(
+            job=job,
+            total_rows=total_rows,
+            prepared_instances=prepared_instances,
+            indexed_instances=len(indexed_instance_ids),
+            execution_mode=execution_mode,
+            ontology_version=ontology_version,
+        )
 
     async def _bulk_update_instances(
         self,

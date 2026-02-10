@@ -1060,8 +1060,12 @@ services:
       - spice_network
     restart: unless-stopped
 
-  # Search Projection Worker (optional instance indexing)
+  # Search Projection Worker — DEPRECATED (dataset-primary indexing supersedes this)
+  # objectify_worker now writes directly to ES; this worker is no longer needed.
+  # Kept behind 'legacy' profile for rollback safety. Remove in Phase 3.
   search-projection-worker:
+    profiles:
+      - legacy
     build:
       context: .
       dockerfile: ./search_projection_worker/Dockerfile
@@ -1089,7 +1093,6 @@ services:
       - elasticsearch
     networks:
       - spice_network
-    # When disabled (default), the worker exits cleanly; don't restart-loop.
     restart: on-failure
 
 volumes:
