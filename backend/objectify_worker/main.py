@@ -34,6 +34,7 @@ from shared.services.kafka.retry_classifier import (
 from shared.services.kafka.safe_consumer import SafeKafkaConsumer
 
 from shared.config.app_config import AppConfig
+from shared.config.search_config import get_instances_index_name
 from shared.config.settings import get_settings
 from shared.models.objectify_job import ObjectifyJob
 from shared.observability.metrics import get_metrics_collector
@@ -59,9 +60,11 @@ from shared.security.auth_utils import get_expected_token
 from shared.validators import get_validator
 from shared.validators.constraint_validator import ConstraintValidator
 from shared.services.pipeline.objectify_delta_utils import (
+    DeltaResult,
     ObjectifyDeltaComputer,
     create_delta_computer_for_mapping_spec,
 )
+from shared.services.storage.lakefs_client import LakeFSClient, LakeFSConfig
 from shared.utils.app_logger import configure_logging
 from shared.services.core.relationship_extractor import (
     extract_relationships as _extract_instance_relationships_raw,
@@ -73,6 +76,96 @@ from objectify_worker.write_paths import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Well-known watermark column names in priority order
+_WATERMARK_CANDIDATES = (
+    "updated_at", "modified_at", "last_modified", "last_updated",
+    "created_at", "timestamp", "event_time", "ingested_at",
+)
+
+
+def _auto_detect_watermark_column(
+    *,
+    columns: Optional[List[str]],
+    options: Optional[Dict[str, Any]] = None,
+) -> Optional[str]:
+    """Auto-detect a watermark column from dataset schema or options.
+
+    Checks well-known temporal column names in priority order.
+    """
+    # Try from explicit column list (e.g. dataset schema)
+    if columns:
+        lower_map = {c.lower(): c for c in columns}
+        for candidate in _WATERMARK_CANDIDATES:
+            if candidate in lower_map:
+                return lower_map[candidate]
+
+    # Try from options hint
+    if options and isinstance(options, dict):
+        hint = options.get("watermark_column_hint")
+        if hint and isinstance(hint, str):
+            return hint.strip() or None
+
+    return None
+
+
+async def _compute_lakefs_delta(
+    *,
+    job: ObjectifyJob,
+    delta_computer: ObjectifyDeltaComputer,
+    storage: Any,
+) -> Optional[DeltaResult]:
+    """Compute row-level delta between two LakeFS commits using the diff API.
+
+    Returns a DeltaResult, or None if the diff could not be computed.
+    """
+    base_commit = job.base_commit_id
+    if not base_commit:
+        return None
+
+    # Determine target commit (current dataset version)
+    target_commit = job.dataset_version_id or "main"
+    # Determine repository (dataset_id is typically the lakeFS repository)
+    repository = job.dataset_id
+
+    try:
+        lakefs_config = LakeFSConfig.from_env()
+        lakefs_client = LakeFSClient(lakefs_config)
+
+        # The artifact_key typically has format "s3://repo/branch/path"
+        prefix = ""
+        if job.artifact_key:
+            parts = job.artifact_key.replace("s3://", "").split("/", 2)
+            if len(parts) >= 3:
+                prefix = parts[2]
+
+        async def _read_file_rows(repo: str, ref: str, path: str) -> List[Dict[str, Any]]:
+            """Read rows from a file at a given LakeFS ref via S3 gateway."""
+            import csv
+            import io
+            bucket = repo
+            key = f"{ref}/{path}" if not path.startswith(ref) else path
+            try:
+                raw = await storage.load_bytes(bucket, key)
+                text = raw.decode("utf-8", errors="replace")
+                reader = csv.DictReader(io.StringIO(text))
+                return list(reader)
+            except Exception as exc:
+                logger.warning("Failed to read %s/%s at ref %s: %s", repo, path, ref, exc)
+                return []
+
+        result = await delta_computer.compute_delta_from_lakefs_diff(
+            lakefs_client=lakefs_client,
+            repository=repository,
+            base_ref=base_commit,
+            target_ref=target_commit,
+            path=prefix,
+            file_reader=_read_file_rows,
+        )
+        return result
+    except Exception as exc:
+        logger.error("LakeFS delta computation failed: %s", exc, exc_info=True)
+        return None
 
 
 def _extract_instance_relationships(
@@ -1600,8 +1693,41 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
         previous_watermark = job.previous_watermark
         latest_watermark: Optional[str] = None
         delta_computer: Optional[ObjectifyDeltaComputer] = None
+        lakefs_delta_result: Optional[DeltaResult] = None
 
-        if execution_mode in ("incremental", "delta") and watermark_column:
+        # Auto-detect watermark column when incremental mode is set but no column specified
+        if execution_mode in ("incremental",) and not watermark_column:
+            watermark_column = _auto_detect_watermark_column(columns=None, options=options)
+            if not watermark_column:
+                logger.info(
+                    "Incremental mode requested but no watermark column detected; falling back to full mode"
+                )
+                execution_mode = "full"
+
+        # LakeFS delta mode: compute diff between commits
+        if execution_mode == "delta" and job.base_commit_id:
+            delta_computer = create_delta_computer_for_mapping_spec(
+                vars(mapping_spec) if hasattr(mapping_spec, "__dict__") else dict(mapping_spec or {})
+            )
+            lakefs_delta_result = await _compute_lakefs_delta(
+                job=job,
+                delta_computer=delta_computer,
+                storage=self.storage,
+            )
+            if lakefs_delta_result and lakefs_delta_result.has_changes:
+                logger.info(
+                    "LakeFS delta computed: added=%d, modified=%d, deleted=%d",
+                    lakefs_delta_result.stats.get("added_count", 0),
+                    lakefs_delta_result.stats.get("modified_count", 0),
+                    lakefs_delta_result.stats.get("deleted_count", 0),
+                )
+            elif lakefs_delta_result and not lakefs_delta_result.has_changes:
+                logger.info("LakeFS delta: no changes detected between commits")
+            else:
+                logger.warning("LakeFS delta computation failed; falling back to full mode")
+                execution_mode = "full"
+                lakefs_delta_result = None
+        elif execution_mode in ("incremental", "delta") and watermark_column:
             delta_computer = create_delta_computer_for_mapping_spec(
                 vars(mapping_spec) if hasattr(mapping_spec, "__dict__") else dict(mapping_spec or {})
             )
@@ -1610,12 +1736,92 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                 execution_mode, watermark_column, previous_watermark,
             )
 
+        # --- LakeFS delta mode: process delta rows directly, skip dataset iteration ---
+        if lakefs_delta_result and lakefs_delta_result.has_changes:
+            delta_rows_all = lakefs_delta_result.added_rows + lakefs_delta_result.modified_rows
+            if delta_rows_all:
+                # Convert list-of-dicts to (columns, rows_as_lists) format
+                _delta_cols = list(delta_rows_all[0].keys()) if delta_rows_all else []
+                _delta_rows_as_lists = [[row.get(c) for c in _delta_cols] for row in delta_rows_all]
+                total_rows_seen = len(_delta_rows_as_lists)
+
+                batch = self._build_instances_with_validation(
+                    columns=_delta_cols,
+                    rows=_delta_rows_as_lists,
+                    row_offset=0,
+                    mappings=property_mappings,
+                    relationship_mappings=relationship_mappings,
+                    relationship_meta=rel_map,
+                    target_field_types=target_field_types,
+                    mapping_sources=mapping_sources,
+                    sources_by_target=sources_by_target,
+                    pk_targets=pk_targets,
+                    pk_target_map=pk_target_map,
+                    instance_id_field=instance_id_field,
+                    job=job,
+                    options=options,
+                    allow_partial=allow_partial,
+                    seen_row_keys=seen_row_keys,
+                )
+                instances = batch.get("instances") or []
+                instance_ids = batch.get("instance_ids") or []
+
+                if instances:
+                    for idx in range(0, len(instances), batch_size):
+                        instance_batch = instances[idx : idx + batch_size]
+                        batch_rels: Dict[str, Dict[str, Any]] = {}
+                        if rel_map:
+                            for inst in instance_batch:
+                                if not isinstance(inst, dict):
+                                    continue
+                                iid = str(inst.get("instance_id") or "").strip()
+                                if iid:
+                                    batch_rels[iid] = _extract_instance_relationships(inst, rel_map=rel_map)
+                        write_result = await self.instance_write_path.write_instances(
+                            job=job,
+                            instances=instance_batch,
+                            ontology_version=ontology_version,
+                            objectify_pk_fields=pk_targets,
+                            objectify_instance_id_field=instance_id_field,
+                            instance_relationships=batch_rels if batch_rels else None,
+                            target_field_types=target_field_types,
+                        )
+                        if write_result.command_ids:
+                            command_ids.extend([str(v) for v in write_result.command_ids if str(v).strip()])
+                        if write_result.indexed_instance_ids:
+                            indexed_instance_ids.update(str(v).strip() for v in write_result.indexed_instance_ids if str(v).strip())
+
+                    prepared_instances += len(instances)
+                    if len(instance_ids_sample) < 10:
+                        instance_ids_sample.extend(instance_ids[: max(0, 10 - len(instance_ids_sample))])
+
+            # Handle deletions from delta
+            if lakefs_delta_result.deleted_keys:
+                branch = job.ontology_branch or job.dataset_branch or "main"
+                index_name = get_instances_index_name(job.db_name, branch=branch)
+                for deleted_key in lakefs_delta_result.deleted_keys:
+                    try:
+                        await self.instance_write_path._es.delete_document(
+                            index=index_name, doc_id=deleted_key, refresh=False,
+                        )
+                    except Exception:
+                        logger.debug("Delete failed for stale delta key: %s", deleted_key)
+                logger.info("Deleted %d stale instances from LakeFS delta", len(lakefs_delta_result.deleted_keys))
+
+        else:
+            # --- Standard iteration (full or watermark-incremental mode) ---
+            pass
+
         async for columns, rows, row_offset in self._iter_dataset_batches(
             job=job,
             options=options,
             row_batch_size=row_batch_size,
             max_rows=max_rows if not delta_computer else None,  # Filter manually in incremental mode
         ):
+            # Skip dataset iteration when LakeFS delta was already processed
+            if lakefs_delta_result and lakefs_delta_result.has_changes:
+                break
+
             if not rows:
                 continue
 

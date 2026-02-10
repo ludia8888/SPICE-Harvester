@@ -350,24 +350,63 @@ class ActionLogRegistry(PostgresSchemaRegistry):
         *,
         limit: int = 100,
         statuses: Optional[List[ActionLogStatus]] = None,
+        skip_locked: bool = True,
     ) -> List[ActionLogRecord]:
+        """
+        List action log records that need outbox processing.
+
+        When ``skip_locked=True`` (default), each candidate row is guarded by a
+        Postgres session-level advisory lock (``pg_try_advisory_lock``) derived
+        from its ``action_log_id`` UUID.  Rows already claimed by another outbox
+        worker instance are silently skipped, preventing duplicate processing
+        across concurrent workers.  The advisory lock is released automatically
+        when the connection is returned to the pool.
+        """
         if not self._pool:
             await self.connect()
         statuses = statuses or [ActionLogStatus.COMMIT_WRITTEN, ActionLogStatus.EVENT_EMITTED]
         status_values = [s.value for s in statuses]
-        async with self._pool.acquire() as conn:
-            rows = await conn.fetch(
-                f"""
-                SELECT *
-                FROM {self._schema}.ontology_action_logs
-                WHERE status = ANY($1::text[])
-                ORDER BY updated_at ASC
-                LIMIT $2
-                """,
-                status_values,
-                max(1, int(limit)),
-            )
+        if skip_locked:
+            # Use advisory lock: hash UUID to two int4 values for pg_try_advisory_lock
+            async with self._pool.acquire() as conn:
+                rows = await conn.fetch(
+                    f"""
+                    SELECT *
+                    FROM {self._schema}.ontology_action_logs
+                    WHERE status = ANY($1::text[])
+                      AND pg_try_advisory_lock(
+                          hashtext('outbox:' || action_log_id::text)
+                      )
+                    ORDER BY updated_at ASC
+                    LIMIT $2
+                    """,
+                    status_values,
+                    max(1, int(limit)),
+                )
+        else:
+            async with self._pool.acquire() as conn:
+                rows = await conn.fetch(
+                    f"""
+                    SELECT *
+                    FROM {self._schema}.ontology_action_logs
+                    WHERE status = ANY($1::text[])
+                    ORDER BY updated_at ASC
+                    LIMIT $2
+                    """,
+                    status_values,
+                    max(1, int(limit)),
+                )
         return [rec for rec in (_row_to_record(row) for row in rows) if rec is not None]
+
+    async def release_outbox_lock(self, *, action_log_id: str) -> None:
+        """Release the advisory lock for a given action_log_id after processing."""
+        if not self._pool:
+            return
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                "SELECT pg_advisory_unlock(hashtext('outbox:' || $1::text))",
+                str(action_log_id),
+            )
 
     async def mark_commit_written(
         self,

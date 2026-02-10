@@ -384,6 +384,10 @@ class ActionOutboxWorker:
                                 event_id=str(log.action_log_id),
                                 error=str(e),
                             )
+                finally:
+                    # Release advisory lock so other workers can pick this row next cycle
+                    with suppress(Exception):
+                        await self.action_logs.release_outbox_lock(action_log_id=str(log.action_log_id))
 
             await asyncio.sleep(poll_seconds)
 

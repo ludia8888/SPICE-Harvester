@@ -23,8 +23,11 @@ from shared.models.graph_query import (
 )
 from shared.security.input_sanitizer import validate_branch_name, validate_db_name
 from shared.services.core.graph_federation_service_es import GraphFederationServiceES
+from shared.services.core.writeback_merge_service import WritebackMergeService
 from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.services.registries.lineage_store import LineageStore
+from shared.services.storage.lakefs_storage_service import create_lakefs_storage_service
+from shared.services.storage.storage_service import create_storage_service
 from shared.utils.access_policy import apply_access_policy
 
 logger = logging.getLogger(__name__)
@@ -108,6 +111,83 @@ def _raise_overlay_degraded(*, ctx: GraphBranchContext) -> None:
             "es_base_branch": ctx.es_base_branch,
         },
     )
+
+
+async def _merge_fallback_for_degraded(
+    *,
+    db_name: str,
+    ctx: GraphBranchContext,
+    documents: List[Dict[str, Any]],
+) -> Tuple[List[Dict[str, Any]], bool]:
+    """
+    Server-side merge fallback when ES overlay index is unavailable (DEGRADED).
+
+    Instead of returning a 503 error, we take the base-only query results and
+    apply pending writeback edits via WritebackMergeService.  This ensures
+    users still see a best-effort merged view even when the overlay ES index is down.
+
+    Returns (merged_documents, writeback_edits_present).
+    """
+    settings = get_settings()
+    base_storage = create_storage_service(settings)
+    lakefs_storage = create_lakefs_storage_service(settings)
+    if not base_storage or not lakefs_storage:
+        logger.warning("Cannot perform merge fallback: storage services unavailable")
+        return documents, False
+
+    merger = WritebackMergeService(base_storage=base_storage, lakefs_storage=lakefs_storage)
+    writeback_repo = AppConfig.ONTOLOGY_WRITEBACK_REPO
+    writeback_branch = ctx.es_overlay_branch or AppConfig.get_ontology_writeback_branch(db_name)
+    base_branch = ctx.es_base_branch or "main"
+
+    merged_docs: List[Dict[str, Any]] = []
+    edits_found = False
+
+    for doc in documents:
+        if not isinstance(doc, dict):
+            merged_docs.append(doc)
+            continue
+
+        class_id = str(doc.get("class_id") or doc.get("type") or "").strip()
+        instance_id = str(doc.get("instance_id") or doc.get("id") or "").strip()
+        if not class_id or not instance_id:
+            merged_docs.append(doc)
+            continue
+
+        try:
+            merged = await merger.merge_instance(
+                db_name=db_name,
+                base_branch=base_branch,
+                overlay_branch=writeback_branch,
+                class_id=class_id,
+                instance_id=instance_id,
+                writeback_repo=writeback_repo,
+                writeback_branch=writeback_branch,
+            )
+            if merged.overlay_tombstone:
+                # Instance was deleted via writeback — exclude from results
+                continue
+            if merged.writeback_edits_present:
+                edits_found = True
+                merged_doc = dict(doc)
+                merged_data = merged.document.get("data")
+                if isinstance(merged_data, dict):
+                    merged_doc["data"] = merged_data
+                merged_docs.append(merged_doc)
+            else:
+                merged_docs.append(doc)
+        except FileNotFoundError:
+            merged_docs.append(doc)
+        except Exception as exc:
+            logger.warning(
+                "Merge fallback failed for %s/%s: %s; returning base doc",
+                class_id,
+                instance_id,
+                exc,
+            )
+            merged_docs.append(doc)
+
+    return merged_docs, edits_found
 
 
 async def _load_access_policies(
@@ -232,6 +312,7 @@ async def execute_graph_query(
 
         logger.info("📊 Graph query on %s: %s -> %s", db_name, query.start_class, hops_tuples)
 
+        degraded_fallback = False
         try:
             result = await graph_service.multi_hop_query(
                 db_name=db_name,
@@ -253,9 +334,33 @@ async def execute_graph_query(
                 include_audit=query.include_audit,
             )
         except Exception as exc:
-            if ctx.overlay_required:
+            if not ctx.overlay_required:
+                raise exc
+            # Retry without strict overlay — base-only query + server-side merge fallback
+            logger.warning("Overlay query failed; retrying with base-only + merge fallback: %s", exc)
+            try:
+                result = await graph_service.multi_hop_query(
+                    db_name=db_name,
+                    base_branch=ctx.es_base_branch,
+                    overlay_branch=None,
+                    terminus_branch=ctx.terminus_branch,
+                    strict_overlay=False,
+                    start_class=query.start_class,
+                    hops=hops_tuples,
+                    filters=query.filters,
+                    limit=query.limit,
+                    offset=query.offset,
+                    max_nodes=query.max_nodes,
+                    max_edges=query.max_edges,
+                    include_paths=query.include_paths,
+                    max_paths=query.max_paths,
+                    no_cycles=query.no_cycles,
+                    include_documents=query.include_documents,
+                    include_audit=query.include_audit,
+                )
+                degraded_fallback = True
+            except Exception:
                 _raise_overlay_degraded(ctx=ctx)
-            raise exc
 
         raw_nodes = list(result.get("nodes", []) or [])
         policies = await _load_access_policies(
@@ -264,6 +369,25 @@ async def execute_graph_query(
             class_ids=[str(node.get("type") or "") for node in raw_nodes],
         )
         filtered_nodes, allowed_ids = _apply_access_policies_to_nodes(raw_nodes, policies=policies)
+
+        # Apply server-side merge fallback for DEGRADED overlay
+        effective_overlay_status = ctx.overlay_status
+        writeback_edits_present: Optional[bool] = None
+        if degraded_fallback and query.include_documents:
+            try:
+                merged_nodes, edits_found = await _merge_fallback_for_degraded(
+                    db_name=db_name, ctx=ctx, documents=filtered_nodes,
+                )
+                filtered_nodes = merged_nodes
+                writeback_edits_present = edits_found
+                effective_overlay_status = "DEGRADED"
+                # Rebuild allowed_ids after merge (tombstoned nodes removed)
+                allowed_ids = {str(n.get("id")) for n in filtered_nodes if isinstance(n, dict)}
+                logger.info("DEGRADED merge fallback applied: %d nodes, edits_present=%s", len(filtered_nodes), edits_found)
+            except Exception as merge_exc:
+                logger.warning("DEGRADED merge fallback failed; returning base-only: %s", merge_exc)
+                effective_overlay_status = "DEGRADED"
+
         raw_edges = list(result.get("edges", []) or [])
         if allowed_ids:
             raw_edges = [
@@ -405,10 +529,14 @@ async def execute_graph_query(
             "avg_index_age_seconds": (sum(index_ages) / len(index_ages)) if index_ages else None,
         }
 
+        response_warnings = list(result.get("warnings") or [])
+        if degraded_fallback:
+            response_warnings.append("overlay_degraded: ES overlay unavailable; results merged server-side from lakeFS writeback queue")
+
         response = GraphQueryResponse(
             base_branch=ctx.terminus_branch,
             overlay_branch=ctx.es_overlay_branch,
-            overlay_status=ctx.overlay_status,
+            overlay_status=effective_overlay_status,
             writeback_enabled=ctx.writeback_enabled,
             nodes=nodes,
             edges=edges,
@@ -436,7 +564,7 @@ async def execute_graph_query(
                 "include_audit": query.include_audit,
             },
             count=len(nodes),
-            warnings=list(result.get("warnings") or []),
+            warnings=response_warnings,
             page=result.get("page"),
         )
 
@@ -487,6 +615,7 @@ async def execute_simple_graph_query(
 
         logger.info("📊 Simple graph query on %s: %s", db_name, query.class_name)
 
+        degraded_fallback = False
         try:
             result = await graph_service.simple_graph_query(
                 db_name=db_name,
@@ -498,9 +627,23 @@ async def execute_simple_graph_query(
                 filters=query.filters,
             )
         except Exception as exc:
-            if ctx.overlay_required:
+            if not ctx.overlay_required:
+                raise exc
+            # Retry without strict overlay — base-only query + server-side merge fallback
+            logger.warning("Simple query overlay failed; retrying with base-only + merge fallback: %s", exc)
+            try:
+                result = await graph_service.simple_graph_query(
+                    db_name=db_name,
+                    base_branch=ctx.es_base_branch,
+                    overlay_branch=None,
+                    terminus_branch=ctx.terminus_branch,
+                    strict_overlay=False,
+                    class_name=query.class_name,
+                    filters=query.filters,
+                )
+                degraded_fallback = True
+            except Exception:
                 _raise_overlay_degraded(ctx=ctx)
-            raise exc
 
         policy = await dataset_registry.get_access_policy(
             db_name=db_name,
@@ -516,15 +659,36 @@ async def execute_simple_graph_query(
             )
             result["count"] = len(result["documents"])
 
+        # Apply server-side merge fallback for DEGRADED overlay
+        effective_overlay_status = ctx.overlay_status
+        writeback_edits_present: Optional[bool] = None
+        if degraded_fallback:
+            try:
+                merged_docs, edits_found = await _merge_fallback_for_degraded(
+                    db_name=db_name, ctx=ctx, documents=result.get("documents") or [],
+                )
+                result["documents"] = merged_docs
+                result["count"] = len(merged_docs)
+                writeback_edits_present = edits_found
+                effective_overlay_status = "DEGRADED"
+                logger.info("DEGRADED merge fallback (simple): %d docs, edits_present=%s", len(merged_docs), edits_found)
+            except Exception as merge_exc:
+                logger.warning("DEGRADED merge fallback failed (simple); returning base-only: %s", merge_exc)
+                effective_overlay_status = "DEGRADED"
+
         result["base_branch"] = ctx.terminus_branch
         result["overlay_branch"] = ctx.es_overlay_branch
-        result["overlay_status"] = ctx.overlay_status
+        result["overlay_status"] = effective_overlay_status
         result["writeback_enabled"] = ctx.writeback_enabled
-        result["writeback_edits_present"] = None
+        result["writeback_edits_present"] = writeback_edits_present
         result["terminus_branch"] = ctx.terminus_branch
         result["es_base_branch"] = ctx.es_base_branch
         result["es_overlay_branch"] = ctx.es_overlay_branch
         result["branch_virtualization_active"] = ctx.branch_virtualization_active
+        if degraded_fallback:
+            warnings = list(result.get("warnings") or [])
+            warnings.append("overlay_degraded: ES overlay unavailable; results merged server-side from lakeFS writeback queue")
+            result["warnings"] = warnings
 
         return result
 
@@ -585,6 +749,7 @@ async def execute_multi_hop_query(
 
         logger.info("🚀 Multi-hop query: %s -> %s", start_class, hops)
 
+        degraded_fallback = False
         try:
             result = await graph_service.multi_hop_query(
                 db_name=db_name,
@@ -600,9 +765,27 @@ async def execute_multi_hop_query(
                 include_audit=include_audit,
             )
         except Exception as exc:
-            if ctx.overlay_required and include_documents:
+            if not (ctx.overlay_required and include_documents):
+                raise exc
+            # Retry without strict overlay — base-only query + server-side merge fallback
+            logger.warning("Multi-hop overlay failed; retrying with base-only + merge fallback: %s", exc)
+            try:
+                result = await graph_service.multi_hop_query(
+                    db_name=db_name,
+                    base_branch=ctx.es_base_branch,
+                    overlay_branch=None,
+                    terminus_branch=ctx.terminus_branch,
+                    strict_overlay=False,
+                    start_class=start_class,
+                    hops=hops or [],
+                    filters=filters,
+                    limit=limit,
+                    include_documents=include_documents,
+                    include_audit=include_audit,
+                )
+                degraded_fallback = True
+            except Exception:
                 _raise_overlay_degraded(ctx=ctx)
-            raise exc
 
         raw_nodes = list(result.get("nodes", []) or [])
         policies = await _load_access_policies(
@@ -611,6 +794,25 @@ async def execute_multi_hop_query(
             class_ids=[str(node.get("type") or "") for node in raw_nodes],
         )
         filtered_nodes, allowed_ids = _apply_access_policies_to_nodes(raw_nodes, policies=policies)
+
+        # Apply server-side merge fallback for DEGRADED overlay
+        effective_overlay_status = ctx.overlay_status
+        writeback_edits_present: Optional[bool] = None
+        if degraded_fallback and include_documents:
+            try:
+                merged_nodes, edits_found = await _merge_fallback_for_degraded(
+                    db_name=db_name, ctx=ctx, documents=filtered_nodes,
+                )
+                filtered_nodes = merged_nodes
+                writeback_edits_present = edits_found
+                effective_overlay_status = "DEGRADED"
+                # Rebuild allowed_ids after merge (tombstoned nodes removed)
+                allowed_ids = {str(n.get("id")) for n in filtered_nodes if isinstance(n, dict)}
+                logger.info("DEGRADED merge fallback (multi-hop legacy): %d nodes, edits_present=%s", len(filtered_nodes), edits_found)
+            except Exception as merge_exc:
+                logger.warning("DEGRADED merge fallback failed (multi-hop legacy); returning base-only: %s", merge_exc)
+                effective_overlay_status = "DEGRADED"
+
         raw_edges = list(result.get("edges", []) or [])
         if allowed_ids:
             raw_edges = [
@@ -626,13 +828,17 @@ async def execute_multi_hop_query(
         result["count"] = len(filtered_nodes)
         result["base_branch"] = ctx.terminus_branch
         result["overlay_branch"] = ctx.es_overlay_branch
-        result["overlay_status"] = ctx.overlay_status
+        result["overlay_status"] = effective_overlay_status
         result["writeback_enabled"] = ctx.writeback_enabled
-        result["writeback_edits_present"] = None
+        result["writeback_edits_present"] = writeback_edits_present
         result["terminus_branch"] = ctx.terminus_branch
         result["es_base_branch"] = ctx.es_base_branch
         result["es_overlay_branch"] = ctx.es_overlay_branch
         result["branch_virtualization_active"] = ctx.branch_virtualization_active
+        if degraded_fallback:
+            warnings = list(result.get("warnings") or [])
+            warnings.append("overlay_degraded: ES overlay unavailable; results merged server-side from lakeFS writeback queue")
+            result["warnings"] = warnings
 
         return {"status": "success", "data": result}
 

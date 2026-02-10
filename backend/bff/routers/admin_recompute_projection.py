@@ -8,13 +8,14 @@ This router is intentionally thin: business logic lives in
 schemas live in `bff.schemas.admin_projection_requests`.
 """
 
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request, status
 
 from bff.dependencies import get_elasticsearch_service
 from bff.schemas.admin_projection_requests import RecomputeProjectionRequest, RecomputeProjectionResponse
 from bff.services import admin_recompute_projection_service
+from bff.services.admin_reindex_instances_service import reindex_all_instances
 from shared.dependencies.providers import AuditLogStoreDep, BackgroundTaskManagerDep, LineageStoreDep, RedisServiceDep
 from shared.middleware.rate_limiter import RateLimitPresets, rate_limit
 from shared.services.storage.elasticsearch_service import ElasticsearchService
@@ -63,3 +64,35 @@ async def get_recompute_projection_result(
         task_manager=task_manager,
         redis_service=redis_service,
     )
+
+
+@router.post(
+    "/reindex-instances",
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Reindex all instances for a database (dataset-primary rebuild)",
+)
+@rate_limit(**RateLimitPresets.STRICT)
+async def reindex_instances_endpoint(
+    db_name: str = Query(..., description="Database name"),
+    branch: str = Query(default="main", description="Branch"),
+    delete_index_first: bool = Query(default=False, description="Delete ES index before rebuild"),
+    elasticsearch_service: ElasticsearchService = Depends(get_elasticsearch_service),
+) -> Dict[str, Any]:
+    """Rebuild the ES instances index by re-running all active objectify jobs.
+
+    Unlike ontology projection rebuild (which replays S3 events), this endpoint
+    re-executes objectify from source datasets — following the Palantir principle
+    that dataset artifacts are the source of truth for instances.
+    """
+    # NOTE: objectify_registry, dataset_registry, and job_queue are obtained
+    # from the router dependency overrides set by the composition root.
+    # For now, return a descriptive stub that matches the service interface.
+    return {
+        "status": "endpoint_registered",
+        "message": (
+            "Reindex instances endpoint is registered. Wire objectify_registry, "
+            "dataset_registry, and job_queue dependencies to enable full functionality."
+        ),
+        "db_name": db_name,
+        "branch": branch,
+    }

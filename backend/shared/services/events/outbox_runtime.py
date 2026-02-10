@@ -55,17 +55,45 @@ async def run_outbox_poll_loop(
     stop_event: Optional[asyncio.Event],
     warning_logger: Callable[[str, Any], None],
     failure_message: str,
+    adaptive: bool = True,
+    min_poll_interval: float = 0.5,
+    max_poll_interval: float = 5.0,
 ) -> None:
+    """Run outbox poll loop with optional adaptive polling.
+
+    When ``adaptive`` is True (default), the poll interval adjusts dynamically:
+    - After processing messages: immediately re-poll (``min_poll_interval``)
+    - After empty poll: gradually increase interval toward ``max_poll_interval``
+    This reduces latency from ~5s to <1s when events are flowing.
+    """
     stop_event = stop_event or asyncio.Event()
+    current_interval = float(poll_interval_seconds)
     try:
         while not stop_event.is_set():
+            had_work = False
             try:
-                await publisher.flush_once()
+                result = await publisher.flush_once()
                 await publisher.maybe_purge()
+                # Detect if work was done (flush_once may return count or None)
+                if result and (isinstance(result, int) and result > 0):
+                    had_work = True
+                elif result and isinstance(result, dict) and result.get("published", 0) > 0:
+                    had_work = True
             except Exception as exc:
                 warning_logger(failure_message, exc)
+
+            # Adaptive poll interval
+            if adaptive:
+                if had_work:
+                    current_interval = min_poll_interval
+                else:
+                    # Gradual backoff: multiply by 1.5, cap at max
+                    current_interval = min(current_interval * 1.5, max_poll_interval)
+            else:
+                current_interval = float(poll_interval_seconds)
+
             try:
-                await asyncio.wait_for(stop_event.wait(), timeout=poll_interval_seconds)
+                await asyncio.wait_for(stop_event.wait(), timeout=current_interval)
             except asyncio.TimeoutError:
                 continue
     finally:
