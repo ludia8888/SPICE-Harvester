@@ -407,6 +407,14 @@ class _ObjectifyDagOrchestrator:
             raw = data.get("status")
         return str(raw or "").strip().upper()
 
+    @staticmethod
+    def _is_dataset_primary_mode(report: Dict[str, Any]) -> bool:
+        write_path_mode = str(report.get("write_path_mode") or "").strip().lower()
+        if not write_path_mode:
+            # Dataset-primary is the only supported write path now.
+            return True
+        return write_path_mode == "dataset_primary_index"
+
     async def _wait_for_objectify_submitted(
         self,
         job_id: str,
@@ -431,6 +439,10 @@ class _ObjectifyDagOrchestrator:
                 if not normalized and getattr(record, "command_id", None):
                     normalized = [str(record.command_id).strip()]
                 if not normalized:
+                    if status_value == "COMPLETED":
+                        if self._is_dataset_primary_mode(report):
+                            # Dataset-primary mode can complete in-worker without downstream command fan-out.
+                            return []
                     raise RuntimeError(
                         f"Objectify job submitted without command_ids (job_id={job_id} status={status_value})"
                     )

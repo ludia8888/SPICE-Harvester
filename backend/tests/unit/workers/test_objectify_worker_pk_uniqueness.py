@@ -45,12 +45,21 @@ class _StubDatasetRegistry:
         return None
 
 
+class _FailIfWritePathCalled:
+    async def write_instances(self, **kwargs):  # noqa: ANN003
+        raise AssertionError("write_instances should not run when PK scan fails")
+
+    async def finalize_job(self, **kwargs):  # noqa: ANN003
+        raise AssertionError("finalize_job should not run when PK scan fails")
+
+
 class _PKDuplicateWorker(ObjectifyWorker):
     def __init__(self, *, rows, mapping_spec, dataset, version):
         super().__init__()
         self._rows = rows
         self.objectify_registry = _StubObjectifyRegistry(mapping_spec=mapping_spec)
         self.dataset_registry = _StubDatasetRegistry(dataset=dataset, version=version)
+        self.instance_write_path = _FailIfWritePathCalled()
 
     async def _iter_dataset_batches(self, **kwargs):  # noqa: ANN003
         yield ["account_id"], self._rows, 0

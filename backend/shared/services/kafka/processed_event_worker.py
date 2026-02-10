@@ -174,18 +174,33 @@ class ProcessedEventKafkaWorker(Generic[PayloadT, ResultT], ABC):
         self,
         *,
         msg: Any,
-        payload: PayloadT,
-        raw_payload: Optional[str],
+        payload: Optional[PayloadT] = None,
+        raw_payload: Optional[str] = None,
         error: str,
         attempt_count: int,
+        stage: str = "process_command",
+        payload_text: Optional[str] = None,
+        payload_obj: Optional[Dict[str, Any]] = None,
+        kafka_headers: Optional[Any] = None,
+        fallback_metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Publish a DLQ record for a terminal failure."""
-        await self._send_default_command_payload_dlq(
+        publisher = getattr(self, "_publish_to_dlq", None)
+        if not callable(publisher):
+            raise RuntimeError("DLQ publisher is not configured for command payload")
+        await self._send_command_payload_dlq_record(
             msg=msg,
             error=error,
             attempt_count=int(attempt_count),
             payload=payload,
             raw_payload=raw_payload,
+            stage=str(stage or "process_command"),
+            default_stage="process_command",
+            payload_text=payload_text,
+            payload_obj=payload_obj,
+            kafka_headers=kafka_headers,
+            fallback_metadata=fallback_metadata,
+            publisher=publisher,
         )
 
     # --- Optional overrides ---

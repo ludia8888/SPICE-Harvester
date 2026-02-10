@@ -60,6 +60,23 @@ def _versioning_kwargs(seq: Optional[int]) -> Dict[str, Any]:
     return {"version": int(seq), "version_type": "external_gte"}
 
 
+def _validate_recompute_projection_mode(*, projection: str) -> None:
+    if str(projection).strip().lower() != "instances":
+        return
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail={
+            "error": "REQUEST_VALIDATION_FAILED",
+            "message": (
+                "Instances projection recompute from event replay is unsupported in dataset-primary mode. "
+                "Run objectify full reindex from dataset artifacts instead."
+            ),
+            "projection": "instances",
+            "write_path_mode": "dataset_primary_index",
+        },
+    )
+
+
 @dataclass(frozen=True)
 class IndexDecision:
     action: Literal["index", "delete", "skip"]
@@ -288,6 +305,8 @@ async def start_recompute_projection(
     lineage_store: Optional[LineageStore],
     elasticsearch_service: ElasticsearchService,
 ) -> RecomputeProjectionResponse:
+    _validate_recompute_projection_mode(projection=str(request.projection))
+
     task_id = str(uuid4())
     requested_by = getattr(http_request.state, "admin_actor", None)
     request_ip = getattr(getattr(http_request, "client", None), "host", None)
@@ -471,6 +490,11 @@ async def recompute_projection_task(  # noqa: PLR0915
     db_name = validate_db_name(request.db_name)
     branch = validate_branch_name(request.branch or "main")
     projection = str(request.projection)
+    if projection == "instances":
+        raise RuntimeError(
+            "Instances projection recompute from event replay is unsupported in dataset-primary mode. "
+            "Run objectify full reindex from dataset artifacts instead."
+        )
     strategy = _strategy_for_projection(projection)
     from_dt = _normalize_dt(request.from_ts)
     to_dt = _normalize_dt(request.to_ts) if request.to_ts else datetime.now(timezone.utc)
@@ -656,4 +680,3 @@ async def recompute_projection_task(  # noqa: PLR0915
         metadata=result,
         occurred_at=completed_at,
     )
-

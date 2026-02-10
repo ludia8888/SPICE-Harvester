@@ -523,8 +523,8 @@ async def _data_query(server: Any, arguments: Dict[str, Any]) -> Any:
     if _FORBIDDEN_SQL_PATTERN.search(sql):
         return tool_error(
             "Only SELECT queries are allowed. DDL/DML statements are blocked.",
-            code=ErrorCode.VALIDATION_ERROR,
-            category=ErrorCategory.VALIDATION,
+            code=ErrorCode.REQUEST_VALIDATION_FAILED,
+            category=ErrorCategory.INPUT,
             status_code=400,
             context={"sql": sql[:200]},
         )
@@ -543,19 +543,23 @@ async def _data_query(server: Any, arguments: Dict[str, Any]) -> Any:
 
     rows = await _load_sample_rows(server, dataset_id, limit=5000)
     if not rows:
-        return {
-            "status": "error",
-            "error": "No data available for query. Upload data first.",
-            "dataset_id": dataset_id,
-        }
+        return tool_error(
+            "No data available for query. Upload data first.",
+            code=ErrorCode.CONFLICT,
+            category=ErrorCategory.CONFLICT,
+            status_code=409,
+            context={"dataset_id": dataset_id},
+        )
 
     try:
         import duckdb
     except ImportError:
-        return {
-            "status": "error",
-            "error": "DuckDB is not installed. Install with: pip install duckdb",
-        }
+        return tool_error(
+            "DuckDB is not installed. Install with: pip install duckdb",
+            code=ErrorCode.UPSTREAM_UNAVAILABLE,
+            category=ErrorCategory.UPSTREAM,
+            status_code=503,
+        )
 
     conn: Optional[Any] = None
     try:
@@ -579,12 +583,13 @@ async def _data_query(server: Any, arguments: Dict[str, Any]) -> Any:
             "note": f"Query executed on {len(rows)} sample rows (not full dataset)",
         }
     except Exception as exc:
-        return {
-            "status": "error",
-            "error": f"SQL query failed: {exc}",
-            "sql": sql[:500],
-            "dataset_id": dataset_id,
-        }
+        return tool_error(
+            f"SQL query failed: {exc}",
+            code=ErrorCode.REQUEST_VALIDATION_FAILED,
+            category=ErrorCategory.INPUT,
+            status_code=400,
+            context={"sql": sql[:500], "dataset_id": dataset_id},
+        )
     finally:
         if conn:
             try:

@@ -13,7 +13,6 @@ import json
 import logging
 import queue as queue_module
 import threading
-import time
 from datetime import datetime, timezone
 from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
 
@@ -42,6 +41,7 @@ from shared.observability.tracing import get_tracing_service
 from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.services.registries.objectify_registry import ObjectifyRegistry
 from shared.services.registries.pipeline_registry import PipelineRegistry
+from shared.services.storage.elasticsearch_service import ElasticsearchService, create_elasticsearch_service
 from shared.services.storage.lakefs_storage_service import create_lakefs_storage_service
 from shared.services.registries.lineage_store import LineageStore
 from shared.services.registries.processed_event_registry import ProcessedEventRegistry
@@ -60,10 +60,14 @@ from shared.validators import get_validator
 from shared.validators.constraint_validator import ConstraintValidator
 from shared.services.pipeline.objectify_delta_utils import (
     ObjectifyDeltaComputer,
-    DeltaResult,
     create_delta_computer_for_mapping_spec,
 )
 from shared.utils.app_logger import configure_logging
+from objectify_worker.write_paths import (
+    DatasetPrimaryIndexWritePath,
+    ObjectifyWritePath,
+    WRITE_PATH_MODE_DATASET_PRIMARY_INDEX,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -126,6 +130,8 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
         self.lineage_store: Optional[LineageStore] = None
         self.storage = None
         self.http: Optional[httpx.AsyncClient] = None
+        self.elasticsearch_service: Optional[ElasticsearchService] = None
+        self.instance_write_path: Optional[ObjectifyWritePath] = None
 
         self.batch_size_default = int(cfg.batch_size)
         self.row_batch_size_default = int(cfg.row_batch_size)
@@ -137,6 +143,9 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
         self.backoff_base = int(cfg.backoff_base_seconds)
         self.backoff_max = int(cfg.backoff_max_seconds)
         self.ontology_pk_validation_mode = str(cfg.ontology_pk_validation_mode or "warn").strip().lower() or "warn"
+        self.dataset_primary_index_chunk_size = int(cfg.dataset_primary_index_chunk_size)
+        self.dataset_primary_refresh = bool(cfg.dataset_primary_refresh)
+        self.dataset_primary_prune_stale_on_full = bool(cfg.dataset_primary_prune_stale_on_full)
         self.tracing = get_tracing_service(self.service_name)
         self.metrics = get_metrics_collector(self.service_name)
         self._init_partition_state()
@@ -509,6 +518,22 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
             headers["X-Admin-Token"] = token
         self.http = httpx.AsyncClient(base_url=settings.services.oms_base_url, timeout=60.0, headers=headers)
 
+        self.elasticsearch_service = create_elasticsearch_service(settings)
+        await self.elasticsearch_service.connect()
+        self.instance_write_path = DatasetPrimaryIndexWritePath(
+            elasticsearch_service=self.elasticsearch_service,
+            chunk_size=self.dataset_primary_index_chunk_size,
+            refresh=self.dataset_primary_refresh,
+            prune_stale_on_full=self.dataset_primary_prune_stale_on_full,
+        )
+        logger.info(
+            "Objectify write path mode: %s (chunk_size=%s, refresh=%s, prune_stale_on_full=%s)",
+            WRITE_PATH_MODE_DATASET_PRIMARY_INDEX,
+            self.dataset_primary_index_chunk_size,
+            self.dataset_primary_refresh,
+            self.dataset_primary_prune_stale_on_full,
+        )
+
         self._initialize_safe_consumer_runtime(
             group_id=self.group_id,
             topics=[self.topic],
@@ -529,6 +554,10 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
         if self.http:
             await self.http.aclose()
             self.http = None
+        if self.elasticsearch_service:
+            await self.elasticsearch_service.disconnect()
+            self.elasticsearch_service = None
+        self.instance_write_path = None
         if self.lineage_store:
             await self.lineage_store.close()
             self.lineage_store = None
@@ -735,6 +764,8 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
     async def _process_job(self, job: ObjectifyJob) -> None:
         if not self.objectify_registry or not self.dataset_registry:
             raise RuntimeError("ObjectifyRegistry not initialized")
+        if not self.instance_write_path:
+            raise RuntimeError("Objectify write path not initialized")
 
         async def _fail_job(error: str, *, report: Optional[Dict[str, Any]] = None) -> None:
             # Log detailed validation errors before they get overwritten by terminal failure handler
@@ -835,6 +866,21 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
         if isinstance(job.options, dict):
             options.update(job.options)
         link_index_mode = str(options.get("mode") or options.get("job_type") or "").strip().lower() == "link_index"
+        if link_index_mode:
+            await _fail_job(
+                "validation_failed",
+                report={
+                    "errors": [
+                        {
+                            "code": "MAPPING_SPEC_UNSUPPORTED_TYPE",
+                            "message": (
+                                "Link-index mode is no longer supported in objectify worker. "
+                                "Use relationship-aware ingestion or dedicated link indexing pipeline."
+                            ),
+                        }
+                    ]
+                },
+            )
 
         max_rows = job.max_rows if job.max_rows is not None else options.get("max_rows")
         if max_rows is None:
@@ -1463,6 +1509,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                 )
 
         command_ids: List[str] = []
+        indexed_instance_ids: set[str] = set()
         prepared_instances = 0
         instance_ids_sample: List[str] = []
         error_rows: List[int] = []
@@ -1625,17 +1672,18 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
             )
 
             for idx in range(0, len(instances), batch_size):
-                batch = instances[idx : idx + batch_size]
-                resp = await self._bulk_create_instances(
-                    job,
-                    batch,
+                instance_batch = instances[idx : idx + batch_size]
+                write_result = await self.instance_write_path.write_instances(
+                    job=job,
+                    instances=instance_batch,
                     ontology_version=ontology_version,
                     objectify_pk_fields=pk_targets,
                     objectify_instance_id_field=instance_id_field,
                 )
-                command_id = resp.get("command_id") if isinstance(resp, dict) else None
-                if command_id:
-                    command_ids.append(str(command_id))
+                if write_result.command_ids:
+                    command_ids.extend([str(v) for v in write_result.command_ids if str(v).strip()])
+                if write_result.indexed_instance_ids:
+                    indexed_instance_ids.update(str(v).strip() for v in write_result.indexed_instance_ids if str(v).strip())
 
             prepared_instances += len(instances)
             if len(instance_ids_sample) < 10:
@@ -1665,9 +1713,15 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                 },
             )
 
+        write_path_report = await self.instance_write_path.finalize_job(
+            job=job,
+            execution_mode=execution_mode,
+            indexed_instance_ids=indexed_instance_ids,
+        )
+        terminal_status = "COMPLETED"
         await self.objectify_registry.update_objectify_job_status(
             job_id=job.job_id,
-            status="SUBMITTED",
+            status=terminal_status,
             command_id=command_ids[0] if command_ids else None,
             report={
                 "total_rows": total_rows,
@@ -1678,6 +1732,9 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                 "error_row_indices": (error_rows or validation_error_rows)[:200],
                 "command_ids": command_ids,
                 "instance_ids_sample": instance_ids_sample[:10],
+                "indexed_instances": len(indexed_instance_ids),
+                "write_path_mode": WRITE_PATH_MODE_DATASET_PRIMARY_INDEX,
+                "write_path": write_path_report,
                 "ontology_version": ontology_version or {},
             },
             completed_at=datetime.now(timezone.utc),
@@ -1689,6 +1746,8 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                 "total_rows": total_rows,
                 "prepared_instances": prepared_instances,
                 "command_ids": command_ids,
+                "indexed_instances": len(indexed_instance_ids),
+                "write_path_mode": WRITE_PATH_MODE_DATASET_PRIMARY_INDEX,
                 "warning_count": len(warnings),
                 "error_count": len(errors or validation_errors or []),
             },
@@ -1701,47 +1760,6 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                 job=job,
                 new_watermark=latest_watermark,
             )
-
-    async def _bulk_create_instances(
-        self,
-        job: ObjectifyJob,
-        instances: List[Dict[str, Any]],
-        *,
-        ontology_version: Optional[Dict[str, str]] = None,
-        objectify_pk_fields: Optional[List[str]] = None,
-        objectify_instance_id_field: Optional[str] = None,
-    ) -> Dict[str, Any]:
-        if not self.http:
-            raise RuntimeError("OMS client not initialized")
-        branch = job.ontology_branch or job.dataset_branch or "main"
-        metadata = {
-            "objectify_job_id": job.job_id,
-            "mapping_spec_id": job.mapping_spec_id,
-            "mapping_spec_version": job.mapping_spec_version,
-            "dataset_id": job.dataset_id,
-            "dataset_version_id": job.dataset_version_id,
-            "artifact_id": job.artifact_id,
-            "artifact_output_name": job.artifact_output_name,
-            "options": job.options,
-        }
-        if objectify_pk_fields:
-            metadata["objectify_pk_fields"] = [str(v).strip() for v in objectify_pk_fields if str(v).strip()]
-        if objectify_instance_id_field:
-            metadata["objectify_instance_id_field"] = str(objectify_instance_id_field).strip()
-        if ontology_version:
-            metadata["ontology"] = ontology_version
-        resp = await self.http.post(
-            f"/api/v1/instances/{job.db_name}/async/{job.target_class_id}/bulk-create",
-            params={"branch": branch},
-            json={
-                "instances": instances,
-                "metadata": metadata,
-            },
-        )
-        resp.raise_for_status()
-        if not resp.text:
-            return {}
-        return resp.json()
 
     async def _bulk_update_instances(
         self,

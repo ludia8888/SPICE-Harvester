@@ -2,7 +2,14 @@ from __future__ import annotations
 
 import pytest
 
-from shared.config.settings import AgentRuntimeSettings, ClientSettings, DatabaseSettings, PipelineSettings, StorageSettings
+from shared.config.settings import (
+    AgentRuntimeSettings,
+    ClientSettings,
+    DatabaseSettings,
+    ObjectifySettings,
+    PipelineSettings,
+    StorageSettings,
+)
 
 
 def _disable_env_file(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -92,3 +99,17 @@ def test_local_port_host_aliases(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("MINIO_ENDPOINT_URL", raising=False)
     monkeypatch.setenv("MINIO_PORT_HOST", "9002")
     assert StorageSettings().minio_endpoint_url == "http://127.0.0.1:9002"
+
+
+def test_objectify_dataset_primary_chunk_size_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+    _disable_env_file(monkeypatch)
+    monkeypatch.delenv("OBJECTIFY_DATASET_PRIMARY_INDEX_CHUNK_SIZE", raising=False)
+    settings = ObjectifySettings()
+    assert settings.dataset_primary_index_chunk_size == 500
+
+
+def test_objectify_dataset_primary_chunk_size_clamps_lower_bound(monkeypatch: pytest.MonkeyPatch) -> None:
+    _disable_env_file(monkeypatch)
+    monkeypatch.setenv("OBJECTIFY_DATASET_PRIMARY_INDEX_CHUNK_SIZE", "0")
+    settings = ObjectifySettings()
+    assert settings.dataset_primary_index_chunk_size == 1

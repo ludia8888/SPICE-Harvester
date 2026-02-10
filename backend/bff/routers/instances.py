@@ -10,14 +10,13 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
-from bff.dependencies import BFFDependencyProvider, get_elasticsearch_service, get_oms_client
+from bff.dependencies import BFFDependencyProvider, get_elasticsearch_service
 from bff.routers.registry_deps import get_dataset_registry
 from bff.services.instances_service import (
     get_class_sample_values as get_class_sample_values_service,
     get_instance_detail as get_instance_detail_service,
     list_class_instances as list_class_instances_service,
 )
-from bff.services.oms_client import OMSClient
 from shared.dependencies import get_container
 from shared.services.registries.action_log_registry import ActionLogRegistry
 from shared.services.registries.dataset_registry import DatasetRegistry
@@ -55,7 +54,6 @@ async def get_class_instances(
     action_type_id: Optional[str] = Query(default=None),
     submitted_by: Optional[str] = Query(default=None),
     elasticsearch_service: ElasticsearchService = Depends(get_elasticsearch_service),
-    oms_client: OMSClient = Depends(get_oms_client),
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
     action_logs: Optional[ActionLogRegistry] = Depends(_maybe_get_action_log_registry),
 ) -> Dict[str, Any]:
@@ -74,7 +72,6 @@ async def get_class_instances(
             action_type_id=action_type_id,
             submitted_by=submitted_by,
             elasticsearch_service=elasticsearch_service,
-            oms_client=oms_client,
             dataset_registry=dataset_registry,
             action_logs=action_logs,
         )
@@ -93,8 +90,10 @@ async def get_class_sample_values(
     db_name: str,
     class_id: str,
     property_name: Optional[str] = None,
+    base_branch: str = Query(default="main", description="Base branch (ES base index)"),
+    branch: Optional[str] = Query(default=None, description="Deprecated alias for base_branch"),
     limit: int = Query(default=200, le=500),
-    oms_client: OMSClient = Depends(get_oms_client),
+    elasticsearch_service: ElasticsearchService = Depends(get_elasticsearch_service),
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
 ) -> Dict[str, Any]:
     try:
@@ -102,8 +101,10 @@ async def get_class_sample_values(
             db_name=db_name,
             class_id=class_id,
             property_name=property_name,
+            base_branch=base_branch,
+            branch=branch,
             limit=limit,
-            oms_client=oms_client,
+            elasticsearch_service=elasticsearch_service,
             dataset_registry=dataset_registry,
         )
     except HTTPException:
@@ -126,7 +127,6 @@ async def get_instance(
     overlay_branch: Optional[str] = Query(default=None, description="ES overlay branch (writeback)"),
     branch: Optional[str] = Query(default=None, description="Deprecated alias for base_branch"),
     elasticsearch_service: ElasticsearchService = Depends(get_elasticsearch_service),
-    oms_client: OMSClient = Depends(get_oms_client),
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
     action_logs: Optional[ActionLogRegistry] = Depends(_maybe_get_action_log_registry),
 ) -> Dict[str, Any]:
@@ -140,7 +140,6 @@ async def get_instance(
             overlay_branch=overlay_branch,
             branch=branch,
             elasticsearch_service=elasticsearch_service,
-            oms_client=oms_client,
             dataset_registry=dataset_registry,
             action_logs=action_logs,
         )

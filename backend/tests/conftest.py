@@ -1,12 +1,27 @@
 from __future__ import annotations
 
 import os
+import sys
+from pathlib import Path
 
 from shared.utils.repo_dotenv import load_repo_dotenv
 
 
 def _load_repo_dotenv() -> dict[str, str]:
     return load_repo_dotenv()
+
+
+def _ensure_repo_root_on_sys_path() -> None:
+    """
+    Ensure tests can import using either:
+    - `mcp_servers.*` (backend-root PYTHONPATH style)
+    - `backend.mcp_servers.*` (repo-root package style)
+    """
+
+    repo_root = Path(__file__).resolve().parents[2]
+    repo_root_str = str(repo_root)
+    if repo_root_str not in sys.path:
+        sys.path.insert(0, repo_root_str)
 
 
 def _env_or_dotenv(dotenv: dict[str, str], key: str, default: str) -> str:
@@ -24,6 +39,8 @@ def pytest_configure() -> None:
 
     if os.path.exists("/.dockerenv"):
         return
+
+    _ensure_repo_root_on_sys_path()
 
     docker_env = (os.getenv("DOCKER_CONTAINER") or "").strip().lower()
     if docker_env in {"1", "true", "yes", "on"}:

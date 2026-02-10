@@ -3146,6 +3146,21 @@ class ObjectifySettings(BaseSettings):
             "(fields + order). Modes: off|warn|fail (OBJECTIFY_ONTOLOGY_PK_VALIDATION_MODE)."
         ),
     )
+    dataset_primary_index_chunk_size: int = Field(
+        default=500,
+        description="Chunk size for dataset-primary ES bulk indexing (OBJECTIFY_DATASET_PRIMARY_INDEX_CHUNK_SIZE).",
+    )
+    dataset_primary_refresh: bool = Field(
+        default=False,
+        description="Refresh ES index after dataset-primary writes (OBJECTIFY_DATASET_PRIMARY_REFRESH).",
+    )
+    dataset_primary_prune_stale_on_full: bool = Field(
+        default=True,
+        description=(
+            "When execution_mode=full, delete stale class instances not present in current dataset snapshot "
+            "(OBJECTIFY_DATASET_PRIMARY_PRUNE_STALE_ON_FULL)."
+        ),
+    )
 
     @field_validator("worker_handler", mode="before")
     @classmethod
@@ -3212,6 +3227,11 @@ class ObjectifySettings(BaseSettings):
         if raw in {"fail", "error", "strict"}:
             return "fail"
         raise ValueError("ontology_pk_validation_mode must be one of: off, warn, fail")
+
+    @field_validator("dataset_primary_index_chunk_size", mode="before")
+    @classmethod
+    def clamp_dataset_primary_index_chunk_size(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=500, min_value=1, max_value=10_000)
 
     @property
     def bulk_update_batch_size_effective(self) -> int:

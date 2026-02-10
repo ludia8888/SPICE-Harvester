@@ -13,11 +13,10 @@ from uuid import UUID
 from fastapi import HTTPException, status
 from elasticsearch.exceptions import ConnectionError as ESConnectionError, NotFoundError, RequestError
 
-from bff.services.oms_client import OMSClient
 from bff.utils.action_log_serialization import ACTION_LOG_CLASS_ID, serialize_action_log_record
 from shared.config.app_config import AppConfig
-from shared.config.search_config import get_instances_index_name
 from shared.config.settings import get_settings
+from shared.config.search_config import get_instances_index_name
 from shared.security.database_access import DOMAIN_MODEL_ROLES, enforce_database_role
 from shared.security.input_sanitizer import (
     sanitize_es_query,
@@ -51,6 +50,31 @@ def _is_action_log_class_id(class_id: str) -> bool:
 
 def _action_log_as_instance(record: ActionLogRecord) -> Dict[str, Any]:
     return serialize_action_log_record(record)
+
+
+def _projection_unavailable_detail(
+    *,
+    message: str,
+    base_branch: str,
+    overlay_branch: Optional[str],
+    writeback_enabled: bool,
+    class_id: Optional[str] = None,
+    instance_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    detail: Dict[str, Any] = {
+        "error": "overlay_degraded",
+        "message": message,
+        "base_branch": base_branch,
+        "overlay_branch": overlay_branch,
+        "overlay_status": "DEGRADED",
+        "writeback_enabled": writeback_enabled,
+        "writeback_edits_present": None,
+    }
+    if class_id:
+        detail["class_id"] = class_id
+    if instance_id:
+        detail["instance_id"] = instance_id
+    return detail
 
 
 async def _apply_access_policy_to_instances(
@@ -222,7 +246,6 @@ async def list_class_instances(
     action_type_id: Optional[str],
     submitted_by: Optional[str],
     elasticsearch_service: ElasticsearchService,
-    oms_client: OMSClient,
     dataset_registry: DatasetRegistry,
     action_logs: Optional[ActionLogRegistry],
 ) -> Dict[str, Any]:
@@ -314,16 +337,16 @@ async def list_class_instances(
             sort=[{"event_timestamp": {"order": "desc"}}],
         )
     except (ESConnectionError, ConnectionRefusedError, TimeoutError) as exc:
-        logger.warning("Elasticsearch connection failed, falling back to TerminusDB: %s", exc)
+        logger.warning("Elasticsearch connection failed while listing instances: %s", exc)
         es_error = "connection"
     except NotFoundError as exc:
-        logger.warning("Elasticsearch index not found (base index). Falling back to TerminusDB: %s", exc)
+        logger.warning("Elasticsearch index not found while listing instances: %s", exc)
         es_error = "not_found"
     except RequestError as exc:
-        logger.error("Elasticsearch query error: %s", exc)
+        logger.error("Elasticsearch query error while listing instances: %s", exc)
         es_error = "query"
     except Exception as exc:
-        logger.error("Unexpected Elasticsearch error, falling back to TerminusDB: %s", exc)
+        logger.error("Unexpected Elasticsearch error while listing instances: %s", exc)
         es_error = "unknown"
 
     if overlay_index_name and not es_error:
@@ -351,16 +374,13 @@ async def list_class_instances(
     if overlay.overlay_required and overlay_status == "DEGRADED":
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={
-                "error": "overlay_degraded",
-                "message": "Overlay index unavailable; cannot serve authoritative view.",
-                "class_id": class_id,
-                "base_branch": resolved_base_branch,
-                "overlay_branch": overlay.resolved_overlay_branch,
-                "overlay_status": "DEGRADED",
-                "writeback_enabled": overlay.writeback_enabled,
-                "writeback_edits_present": None,
-            },
+            detail=_projection_unavailable_detail(
+                message="Overlay index unavailable; cannot serve authoritative view.",
+                class_id=class_id,
+                base_branch=resolved_base_branch,
+                overlay_branch=overlay.resolved_overlay_branch,
+                writeback_enabled=overlay.writeback_enabled,
+            ),
         )
 
     if es_result and not es_error:
@@ -395,108 +415,24 @@ async def list_class_instances(
         if overlay.overlay_required:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail={
-                    "error": "overlay_degraded",
-                    "message": "Overlay index unavailable; cannot serve authoritative view.",
-                    "class_id": class_id,
-                    "base_branch": resolved_base_branch,
-                    "overlay_branch": overlay.resolved_overlay_branch,
-                    "overlay_status": "DEGRADED",
-                    "writeback_enabled": overlay.writeback_enabled,
-                    "writeback_edits_present": None,
-                },
-            )
-
-        logger.info(
-            "Elasticsearch unavailable (%s), using TerminusDB fallback for class %s instances",
-            es_error,
-            class_id,
-        )
-
-        try:
-            result = await oms_client.get_class_instances(
-                db_name=db_name,
-                class_id=class_id,
-                limit=limit,
-                offset=offset,
-                search=search,
-            )
-
-            if isinstance(result, list):
-                instances, _ = await _apply_access_policy_to_instances(
-                    dataset_registry=dataset_registry,
-                    db_name=db_name,
+                detail=_projection_unavailable_detail(
+                    message="Overlay index unavailable; cannot serve authoritative view.",
                     class_id=class_id,
-                    instances=[inst for inst in result if isinstance(inst, dict)],
-                )
-                return {
-                    "class_id": class_id,
-                    "total": len(instances),
-                    "limit": limit,
-                    "offset": offset,
-                    "search": search,
-                    "instances": instances,
-                }
-
-            if isinstance(result, dict):
-                if result.get("status") == "success":
-                    instances = result.get("instances", [])
-                    if not isinstance(instances, list):
-                        instances = []
-                    instances, access_filtered = await _apply_access_policy_to_instances(
-                        dataset_registry=dataset_registry,
-                        db_name=db_name,
-                        class_id=class_id,
-                        instances=[inst for inst in instances if isinstance(inst, dict)],
-                    )
-                    total = len(instances) if access_filtered else result.get("total", 0)
-                    return {
-                        "class_id": class_id,
-                        "total": total,
-                        "limit": limit,
-                        "offset": offset,
-                        "search": search,
-                        "instances": instances,
-                    }
-
-                instances = result.get("instances")
-                if isinstance(instances, list):
-                    instances, access_filtered = await _apply_access_policy_to_instances(
-                        dataset_registry=dataset_registry,
-                        db_name=db_name,
-                        class_id=class_id,
-                        instances=[inst for inst in instances if isinstance(inst, dict)],
-                    )
-                    total = len(instances) if access_filtered else result.get("total")
-                    return {
-                        "class_id": class_id,
-                        "total": int(total) if isinstance(total, int) else len(instances),
-                        "limit": limit,
-                        "offset": offset,
-                        "search": search,
-                        "instances": instances,
-                    }
-
-            logger.error("OMS Instance API returned error: %s", result)
-            return {
-                "class_id": class_id,
-                "total": 0,
-                "limit": limit,
-                "offset": offset,
-                "search": search,
-                "instances": [],
-            }
-
-        except Exception as exc:
-            logger.error("Failed to query instances from OMS: %s", exc)
-            return {
-                "class_id": class_id,
-                "total": 0,
-                "limit": limit,
-                "offset": offset,
-                "search": search,
-                "instances": [],
-            }
+                    base_branch=resolved_base_branch,
+                    overlay_branch=overlay.resolved_overlay_branch,
+                    writeback_enabled=overlay.writeback_enabled,
+                ),
+            )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=_projection_unavailable_detail(
+                message="Base projection unavailable; cannot serve authoritative view.",
+                class_id=class_id,
+                base_branch=resolved_base_branch,
+                overlay_branch=overlay.resolved_overlay_branch,
+                writeback_enabled=overlay.writeback_enabled,
+            ),
+        )
 
     return {
         "class_id": class_id,
@@ -513,17 +449,51 @@ async def get_class_sample_values(
     db_name: str,
     class_id: str,
     property_name: Optional[str],
+    base_branch: str,
+    branch: Optional[str],
     limit: int,
-    oms_client: OMSClient,
+    elasticsearch_service: ElasticsearchService,
     dataset_registry: DatasetRegistry,
 ) -> Dict[str, Any]:
     db_name = validate_db_name(db_name)
     class_id = validate_class_id(class_id)
+    resolved_base_branch = validate_branch_name(branch or base_branch or "main")
 
-    payload = await oms_client.get_class_instances(db_name, class_id, limit=limit, offset=0)
-    instances = payload.get("instances", []) if isinstance(payload, dict) else []
-    if not isinstance(instances, list):
-        instances = []
+    instances: List[Dict[str, Any]]
+    index_name = get_instances_index_name(db_name, branch=resolved_base_branch)
+    try:
+        es_result = await elasticsearch_service.search(
+            index=index_name,
+            query={"bool": {"must": [{"term": {"class_id": class_id}}]}},
+            size=limit,
+            from_=0,
+            sort=[{"event_timestamp": {"order": "desc"}}],
+        )
+    except (ESConnectionError, ConnectionRefusedError, TimeoutError, NotFoundError, RequestError) as exc:
+        logger.warning("Elasticsearch unavailable while loading sample values for class %s: %s", class_id, exc)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=_projection_unavailable_detail(
+                message="Base projection unavailable; cannot serve authoritative view.",
+                class_id=class_id,
+                base_branch=resolved_base_branch,
+                overlay_branch=None,
+                writeback_enabled=False,
+            ),
+        ) from exc
+    except Exception as exc:
+        logger.error("Unexpected Elasticsearch error while loading sample values for class %s: %s", class_id, exc)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=_projection_unavailable_detail(
+                message="Base projection unavailable; cannot serve authoritative view.",
+                class_id=class_id,
+                base_branch=resolved_base_branch,
+                overlay_branch=None,
+                writeback_enabled=False,
+            ),
+        ) from exc
+    _total, instances = _normalize_es_search_result(es_result)
     instances, _ = await _apply_access_policy_to_instances(
         dataset_registry=dataset_registry,
         db_name=db_name,
@@ -660,7 +630,6 @@ async def get_instance_detail(
     overlay_branch: Optional[str],
     branch: Optional[str],
     elasticsearch_service: ElasticsearchService,
-    oms_client: OMSClient,
     dataset_registry: DatasetRegistry,
     action_logs: Optional[ActionLogRegistry],
 ) -> Dict[str, Any]:
@@ -840,20 +809,19 @@ async def get_instance_detail(
             except Exception:
                 raise HTTPException(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail={
-                        "error": "overlay_degraded",
-                        "message": "Base projection missing; cannot serve authoritative view for writeback-enabled types.",
-                        "base_branch": resolved_base_branch,
-                        "overlay_branch": overlay.resolved_overlay_branch,
-                        "overlay_status": "DEGRADED",
-                        "writeback_enabled": overlay.writeback_enabled,
-                        "writeback_edits_present": None,
-                    },
+                    detail=_projection_unavailable_detail(
+                        message="Base projection missing; cannot serve authoritative view for writeback-enabled types.",
+                        class_id=class_id,
+                        instance_id=instance_id,
+                        base_branch=resolved_base_branch,
+                        overlay_branch=overlay.resolved_overlay_branch,
+                        writeback_enabled=overlay.writeback_enabled,
+                    ),
                 )
 
-        logger.info(
-            "Instance %s not in Elasticsearch index, querying TerminusDB directly for latest state",
-            instance_id,
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"인스턴스 '{instance_id}'를 찾을 수 없습니다",
         )
 
     except HTTPException:
@@ -880,17 +848,68 @@ async def get_instance_detail(
             except Exception:
                 raise HTTPException(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail={
-                        "error": "overlay_degraded",
-                        "message": "Overlay index unavailable; cannot serve authoritative view.",
-                        "base_branch": resolved_base_branch,
-                        "overlay_branch": overlay.resolved_overlay_branch,
-                        "overlay_status": "DEGRADED",
-                        "writeback_enabled": overlay.writeback_enabled,
-                        "writeback_edits_present": None,
-                    },
+                    detail=_projection_unavailable_detail(
+                        message="Overlay index unavailable; cannot serve authoritative view.",
+                        class_id=class_id,
+                        instance_id=instance_id,
+                        base_branch=resolved_base_branch,
+                        overlay_branch=overlay.resolved_overlay_branch,
+                        writeback_enabled=overlay.writeback_enabled,
+                    ),
                 ) from exc
-        logger.warning("Elasticsearch connection error: %s. Falling back to TerminusDB.", exc)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=_projection_unavailable_detail(
+                message="Base projection unavailable; cannot serve authoritative view.",
+                class_id=class_id,
+                instance_id=instance_id,
+                base_branch=resolved_base_branch,
+                overlay_branch=overlay.resolved_overlay_branch,
+                writeback_enabled=overlay.writeback_enabled,
+            ),
+        ) from exc
+    except NotFoundError as exc:
+        if overlay.overlay_required:
+            try:
+                return await _server_merge_fallback(
+                    db_name=db_name,
+                    class_id=class_id,
+                    instance_id=instance_id,
+                    resolved_base_branch=resolved_base_branch,
+                    resolved_overlay_branch=overlay.resolved_overlay_branch,
+                    writeback_enabled=overlay.writeback_enabled,
+                    dataset_registry=dataset_registry,
+                )
+            except FileNotFoundError:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"인스턴스 '{instance_id}'를 찾을 수 없습니다",
+                ) from exc
+            except HTTPException:
+                raise
+            except Exception:
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail=_projection_unavailable_detail(
+                        message="Overlay index unavailable; cannot serve authoritative view.",
+                        class_id=class_id,
+                        instance_id=instance_id,
+                        base_branch=resolved_base_branch,
+                        overlay_branch=overlay.resolved_overlay_branch,
+                        writeback_enabled=overlay.writeback_enabled,
+                    ),
+                ) from exc
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=_projection_unavailable_detail(
+                message="Base projection unavailable; cannot serve authoritative view.",
+                class_id=class_id,
+                instance_id=instance_id,
+                base_branch=resolved_base_branch,
+                overlay_branch=overlay.resolved_overlay_branch,
+                writeback_enabled=overlay.writeback_enabled,
+            ),
+        ) from exc
     except RequestError as exc:
         if overlay.overlay_required:
             try:
@@ -913,17 +932,26 @@ async def get_instance_detail(
             except Exception:
                 raise HTTPException(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail={
-                        "error": "overlay_degraded",
-                        "message": "Overlay index unavailable; cannot serve authoritative view.",
-                        "base_branch": resolved_base_branch,
-                        "overlay_branch": overlay.resolved_overlay_branch,
-                        "overlay_status": "DEGRADED",
-                        "writeback_enabled": overlay.writeback_enabled,
-                        "writeback_edits_present": None,
-                    },
+                    detail=_projection_unavailable_detail(
+                        message="Overlay index unavailable; cannot serve authoritative view.",
+                        class_id=class_id,
+                        instance_id=instance_id,
+                        base_branch=resolved_base_branch,
+                        overlay_branch=overlay.resolved_overlay_branch,
+                        writeback_enabled=overlay.writeback_enabled,
+                    ),
                 ) from exc
-        logger.warning("Elasticsearch request error: %s. Falling back to TerminusDB.", exc)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=_projection_unavailable_detail(
+                message="Base projection unavailable; cannot serve authoritative view.",
+                class_id=class_id,
+                instance_id=instance_id,
+                base_branch=resolved_base_branch,
+                overlay_branch=overlay.resolved_overlay_branch,
+                writeback_enabled=overlay.writeback_enabled,
+            ),
+        ) from exc
     except Exception as exc:
         if overlay.overlay_required:
             try:
@@ -946,44 +974,23 @@ async def get_instance_detail(
             except Exception:
                 raise HTTPException(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail={
-                        "error": "overlay_degraded",
-                        "message": "Overlay index unavailable; cannot serve authoritative view.",
-                        "base_branch": resolved_base_branch,
-                        "overlay_branch": overlay.resolved_overlay_branch,
-                        "overlay_status": "DEGRADED",
-                        "writeback_enabled": overlay.writeback_enabled,
-                        "writeback_edits_present": None,
-                    },
+                    detail=_projection_unavailable_detail(
+                        message="Overlay index unavailable; cannot serve authoritative view.",
+                        class_id=class_id,
+                        instance_id=instance_id,
+                        base_branch=resolved_base_branch,
+                        overlay_branch=overlay.resolved_overlay_branch,
+                        writeback_enabled=overlay.writeback_enabled,
+                    ),
                 ) from exc
-        logger.error("Unexpected Elasticsearch error: %s. Falling back to TerminusDB.", exc)
-
-    try:
-        result = await oms_client.get_instance(
-            db_name=db_name,
-            instance_id=instance_id,
-            class_id=class_id,
-        )
-
-        if result and result.get("status") == "success":
-            instance_data = result.get("data", {})
-            if instance_data:
-                filtered, _ = await _apply_access_policy_to_instances(
-                    dataset_registry=dataset_registry,
-                    db_name=db_name,
-                    class_id=class_id,
-                    instances=[instance_data],
-                )
-                if not filtered:
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail=f"인스턴스 '{instance_id}'를 찾을 수 없습니다",
-                    )
-                return {"status": "success", "data": filtered[0]}
-    except Exception as exc:
-        logger.error("Failed to get instance from OMS: %s", exc)
-
-    raise HTTPException(
-        status_code=status.HTTP_404_NOT_FOUND,
-        detail=f"인스턴스 '{instance_id}'를 찾을 수 없습니다",
-    )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=_projection_unavailable_detail(
+                message="Base projection unavailable; cannot serve authoritative view.",
+                class_id=class_id,
+                instance_id=instance_id,
+                base_branch=resolved_base_branch,
+                overlay_branch=overlay.resolved_overlay_branch,
+                writeback_enabled=overlay.writeback_enabled,
+            ),
+        ) from exc
