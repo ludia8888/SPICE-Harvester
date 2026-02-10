@@ -1,17 +1,16 @@
 """
-STRICT Lightweight Instance Worker
-경량 그래프 원칙을 100% 준수하는 구현
+Instance Worker — Direct ES Write (Phase 2: TerminusDB-free)
 
 Kafka message contract:
 - Commands arrive as EventEnvelope JSON (metadata.kind == "command")
 - Domain events are appended to the S3/MinIO Event Store and relayed to Kafka
 
-LIGHTWEIGHT GRAPH RULES:
-1. Graph stores ONLY: @id, @type, primary_key + relationships
-2. NO domain fields in graph (no name, price, description, etc.)
-3. ALL domain data goes to ES and S3 only
-4. Relationships are @id → @id references only
-5. ES stores terminus_id for Federation lookup
+Write path:
+1. S3: Durable command log (source of truth for audit)
+2. Elasticsearch: Direct instance index/update/delete (ephemeral, rebuildable)
+3. Event Store: Domain events (INSTANCE_CREATED/UPDATED/DELETED)
+
+Ontology schema resolved via OMS HTTP API (no TerminusDB dependency).
 """
 
 import asyncio
@@ -68,10 +67,11 @@ from shared.utils.deterministic_ids import deterministic_uuid5_hex_prefix, deter
 from shared.utils.blank_utils import strip_to_none
 from shared.utils.spice_event_ids import spice_event_id
 
-# ULTRA CRITICAL: Import TerminusDB service
-from oms.services.async_terminus import AsyncTerminusService
 from oms.services.event_store import EventStore
-from shared.models.config import ConnectionConfig
+from shared.services.storage.elasticsearch_service import ElasticsearchService, create_elasticsearch_service
+from shared.config.search_config import get_instances_index_name, get_default_index_settings
+from shared.services.core.relationship_extractor import extract_relationships as shared_extract_relationships
+from objectify_worker.write_paths import DatasetPrimaryIndexWritePath
 
 _LOG_LEVEL = get_settings().observability.log_level
 configure_logging(_LOG_LEVEL)
@@ -133,7 +133,9 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
         self.redis_client = None
         self.command_status_service: Optional[CommandStatusTracker] = None
         self.s3_client = None
-        self.terminus_service = None
+        self.elasticsearch_service: Optional[ElasticsearchService] = None
+        self.oms_http: Optional[httpx.AsyncClient] = None
+        self._created_es_indices: set = set()
         self.instance_bucket = AppConfig.INSTANCE_BUCKET
 
         # Durable idempotency (Postgres)
@@ -257,15 +259,22 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
                     )
                     raise
         
-        # TerminusDB
-        connection_info = ConnectionConfig(
-            server_url=settings.database.terminus_url.rstrip("/"),
-            user=settings.database.terminus_user,
-            account=settings.database.terminus_account,
-            key=settings.database.terminus_password,
+        # Elasticsearch (direct instance writes — Phase 2)
+        self.elasticsearch_service = create_elasticsearch_service(settings)
+        await self.elasticsearch_service.connect()
+        logger.info("Elasticsearch connected for direct instance writes")
+
+        # OMS HTTP client (ontology schema resolution)
+        oms_url = settings.services.oms_base_url
+        oms_headers: Dict[str, str] = {}
+        oms_token = get_expected_token(BFF_TOKEN_ENV_KEYS)
+        if oms_token:
+            oms_headers["X-Admin-Token"] = oms_token
+        self.oms_http = httpx.AsyncClient(
+            base_url=oms_url,
+            timeout=60.0,
+            headers=oms_headers,
         )
-        self.terminus_service = AsyncTerminusService(connection_info)
-        await self.terminus_service.connect()
 
         stores = await initialize_worker_stores(
             enable_lineage=self.enable_lineage,
@@ -316,6 +325,133 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
         logger.info("✅ Event Store connected (domain events will be appended to S3/MinIO)")
         
         logger.info("✅ STRICT Instance Worker initialized")
+
+    async def _ensure_instances_index(self, *, db_name: str, branch: str) -> str:
+        """Ensure the ES instances index exists (create if needed, update mapping if exists)."""
+        index_name = get_instances_index_name(db_name, branch=branch)
+        if index_name in self._created_es_indices:
+            try:
+                if await self.elasticsearch_service.index_exists(index_name):
+                    return index_name
+            except Exception:
+                pass
+            self._created_es_indices.discard(index_name)
+
+        if not await self.elasticsearch_service.index_exists(index_name):
+            await self.elasticsearch_service.create_index(
+                index=index_name,
+                mappings=DatasetPrimaryIndexWritePath._INSTANCE_MAPPING,
+                settings=get_default_index_settings(),
+            )
+            logger.info("Created instances index: %s", index_name)
+        else:
+            await self.elasticsearch_service.update_mapping(
+                index=index_name,
+                properties=DatasetPrimaryIndexWritePath._INSTANCE_MAPPING["properties"],
+            )
+
+        self._created_es_indices.add(index_name)
+        return index_name
+
+    async def _fetch_class_schema_via_oms(
+        self, db_name: str, class_id: str, branch: str = "main"
+    ) -> Optional[Dict[str, Any]]:
+        """Fetch ontology schema from OMS HTTP API (replaces TerminusDB get_ontology)."""
+        if not self.oms_http:
+            return None
+        try:
+            resp = await self.oms_http.get(
+                f"/api/v1/database/{db_name}/ontology/{class_id}",
+                params={"branch": branch},
+            )
+            if resp.status_code == 200:
+                return resp.json()
+            logger.debug("OMS ontology fetch returned %d for %s/%s", resp.status_code, db_name, class_id)
+            return None
+        except Exception as e:
+            logger.debug("OMS ontology fetch failed for %s/%s: %s", db_name, class_id, e)
+            return None
+
+    async def _resolve_ontology_version_via_oms(
+        self, *, db_name: str, branch: str
+    ) -> Dict[str, str]:
+        """Resolve ontology version from OMS HTTP API (replaces TerminusDB version_control)."""
+        from shared.utils.ontology_version import build_ontology_version
+        if not self.oms_http:
+            return build_ontology_version(branch=branch, commit=None)
+        try:
+            resp = await self.oms_http.get(
+                f"/api/v1/version/{db_name}/head",
+                params={"branch": branch},
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                commit = data.get("commit") or data.get("head")
+                return build_ontology_version(branch=branch, commit=str(commit) if commit else None)
+        except Exception as exc:
+            logger.debug("OMS version resolve failed (db=%s, branch=%s): %s", db_name, branch, exc)
+        return build_ontology_version(branch=branch, commit=None)
+
+    @staticmethod
+    def _build_es_document(
+        *,
+        db_name: str,
+        branch: str,
+        class_id: str,
+        instance_id: str,
+        payload: Dict[str, Any],
+        ontology_version: Optional[Dict[str, str]],
+        event_sequence: int,
+        relationships: Optional[Dict[str, Any]] = None,
+        now_iso: str,
+        created_at_override: Optional[str] = None,
+        command_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Build ES document in canonical format matching objectify_worker write_paths._build_document."""
+        from typing import Mapping
+
+        lifecycle_seed = f"{db_name}:{class_id}:{instance_id}"
+        lifecycle_id = f"lc-{deterministic_uuid5_hex_prefix(lifecycle_seed, length=12)}"
+        event_id = deterministic_uuid5_str(
+            f"instance_crud:{command_id or 'nocmd'}:{instance_id}:{event_sequence}"
+        )
+
+        data_payload = dict(payload)
+        data_payload.setdefault("instance_id", instance_id)
+        data_payload.setdefault("class_id", class_id)
+        data_payload.setdefault("db_name", db_name)
+        data_payload.setdefault("branch", branch)
+
+        properties = data_payload.get("properties")
+        if not isinstance(properties, list):
+            properties = []
+
+        ontology_ref = None
+        ontology_commit = None
+        if isinstance(ontology_version, Mapping):
+            ontology_ref = ontology_version.get("ref")
+            ontology_commit = ontology_version.get("commit")
+
+        return {
+            "instance_id": instance_id,
+            "class_id": class_id,
+            "class_label": class_id,
+            "properties": properties,
+            "data": data_payload,
+            "relationships": relationships or {},
+            "backing_dataset": None,
+            "lifecycle_id": lifecycle_id,
+            "event_id": event_id,
+            "event_sequence": int(event_sequence),
+            "event_timestamp": now_iso,
+            "version": int(event_sequence),
+            "db_name": db_name,
+            "branch": branch,
+            "ontology_ref": str(ontology_ref).strip() if ontology_ref else None,
+            "ontology_commit": str(ontology_commit).strip() if ontology_commit else None,
+            "created_at": created_at_override or now_iso,
+            "updated_at": now_iso,
+        }
 
     async def _s3_call(self, func, *args, **kwargs):
         return await asyncio.to_thread(func, *args, **kwargs)
@@ -369,8 +505,8 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
         merge in any missing fields from the authoritative resolver.
         """
 
-        ontology_version = await resolve_ontology_version(
-            self.terminus_service, db_name=db_name, branch=branch, logger=logger
+        ontology_version = await self._resolve_ontology_version_via_oms(
+            db_name=db_name, branch=branch,
         )
         command_meta = command.get("metadata")
         if not isinstance(command_meta, dict):
@@ -441,260 +577,40 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
         strict_schema: bool = False,
     ) -> Dict[str, Union[str, List[str]]]:
         """
-        Extract ONLY relationship fields from payload
-        Returns: {field_name: "<TargetClass>/<instance_id>" | ["<TargetClass>/<instance_id>", ...]}
+        Extract ONLY relationship fields from payload via shared library.
+        Ontology schema fetched from OMS HTTP API (replaces TerminusDB get_ontology).
         """
-        relationships: Dict[str, Union[str, List[str]]] = {}
-        known_relationship_fields: Set[str] = set()
+        branch = validate_branch_name(branch)
+        ontology_data = await self._fetch_class_schema_via_oms(db_name, class_id, branch)
 
-        def _normalize_ref(ref: Any) -> str:
-            if not isinstance(ref, str):
-                raise ValueError(f"Relationship ref must be a string, got {type(ref).__name__}")
+        relationships = shared_extract_relationships(
+            payload,
+            ontology_data=ontology_data,
+            allow_pattern_fallback=allow_pattern_fallback,
+        )
 
-            candidate = ref.strip()
-            if "/" not in candidate:
-                raise ValueError(
-                    f"Invalid relationship ref '{ref}'. Expected '<TargetClass>/<instance_id>'"
-                )
+        if strict_schema and ontology_data:
+            known_fields: Set[str] = set(relationships.keys())
+            # Identify known relationship fields from ontology
+            if isinstance(ontology_data, dict):
+                for rel in ontology_data.get("relationships") or []:
+                    if isinstance(rel, dict):
+                        name = rel.get("predicate") or rel.get("name")
+                        if name:
+                            known_fields.add(str(name))
 
-            target_class, target_instance_id = candidate.split("/", 1)
-            validate_class_id(target_class)
-            validate_instance_id(target_instance_id)
-            return f"{target_class}/{target_instance_id}"
-
-        def _expects_many(cardinality: Optional[Any]) -> Optional[bool]:
-            if cardinality is None:
-                return None
-            try:
-                card = str(cardinality).strip()
-            except Exception:
-                return None
-            if not card:
-                return None
-            return card.endswith(":n") or card.endswith(":m")
-
-        try:
-            branch = validate_branch_name(branch)
-            # Get ontology to identify relationship fields + cardinality
-            ontology = await self.terminus_service.get_ontology(db_name, class_id, branch=branch)
-            
-            if ontology:
-                # OntologyResponse (pydantic) shape
-                rel_list = getattr(ontology, "relationships", None)
-                if isinstance(rel_list, list):
-                    for rel in rel_list:
-                        field_name = None
-                        if isinstance(rel, dict):
-                            field_name = rel.get("predicate") or rel.get("name")
-                            cardinality = rel.get("cardinality")
-                        else:
-                            field_name = getattr(rel, "predicate", None) or getattr(rel, "name", None)
-                            cardinality = getattr(rel, "cardinality", None)
-
-                        if field_name:
-                            known_relationship_fields.add(str(field_name))
-                        if not field_name or field_name not in payload:
-                            continue
-
-                        value = payload[field_name]
-                        wants_many = _expects_many(cardinality)
-
-                        if wants_many is True:
-                            items = value if isinstance(value, list) else [value]
-                            normalized: List[str] = []
-                            for item in items:
-                                normalized.append(_normalize_ref(item))
-                            # Deduplicate while preserving order (Set semantics)
-                            seen: Set[str] = set()
-                            unique = [v for v in normalized if not (v in seen or seen.add(v))]
-                            relationships[str(field_name)] = unique
-                            logger.info(f"  📎 Found relationship (many): {field_name} → {unique}")
-                        else:
-                            if isinstance(value, list):
-                                if len(value) == 0:
-                                    continue
-                                if len(value) != 1:
-                                    raise ValueError(
-                                        f"Relationship '{field_name}' expects a single ref (cardinality={cardinality}), "
-                                        f"got {len(value)} items"
-                                    )
-                                value = value[0]
-
-                            normalized = _normalize_ref(value)
-                            relationships[str(field_name)] = normalized
-                            logger.info(f"  📎 Found relationship: {field_name} → {normalized}")
-
-                # Dict (OMS-like) shape
-                elif isinstance(ontology, dict):
-                    # Check for relationships in OMS format (has 'relationships' key)
-                    if "relationships" in ontology and isinstance(ontology.get("relationships"), list):
-                        for rel in ontology["relationships"]:
-                            if not isinstance(rel, dict):
-                                continue
-                            field_name = rel.get("predicate") or rel.get("name")
-                            if field_name:
-                                known_relationship_fields.add(str(field_name))
-                            if not field_name or field_name not in payload:
-                                continue
-                            cardinality = rel.get("cardinality")
-                            value = payload[field_name]
-                            wants_many = _expects_many(cardinality)
-
-                            if wants_many is True:
-                                items = value if isinstance(value, list) else [value]
-                                normalized: List[str] = []
-                                for item in items:
-                                    normalized.append(_normalize_ref(item))
-                                seen: Set[str] = set()
-                                unique = [v for v in normalized if not (v in seen or seen.add(v))]
-                                relationships[str(field_name)] = unique
-                                logger.info(f"  📎 Found relationship (many): {field_name} → {unique}")
-                            else:
-                                if isinstance(value, list):
-                                    if len(value) == 0:
-                                        continue
-                                    if len(value) != 1:
-                                        raise ValueError(
-                                            f"Relationship '{field_name}' expects a single ref (cardinality={cardinality}), "
-                                            f"got {len(value)} items"
-                                        )
-                                    value = value[0]
-
-                                normalized = _normalize_ref(value)
-                                relationships[str(field_name)] = normalized
-                                logger.info(f"  📎 Found relationship: {field_name} → {normalized}")
-
-                    # TerminusDB schema format (relationships as properties with @class)
-                    else:
-                        for key, value_def in ontology.items():
-                            if isinstance(value_def, dict) and "@class" in value_def:
-                                known_relationship_fields.add(str(key))
-                            if isinstance(value_def, dict) and "@class" in value_def and key in payload:
-                                value = payload[key]
-                                wants_many = True if str(value_def.get("@type") or "").strip() == "Set" else None
-
-                                if wants_many is True:
-                                    items = value if isinstance(value, list) else [value]
-                                    normalized: List[str] = []
-                                    for item in items:
-                                        normalized.append(_normalize_ref(item))
-                                    seen: Set[str] = set()
-                                    unique = [v for v in normalized if not (v in seen or seen.add(v))]
-                                    relationships[str(key)] = unique
-                                    logger.info(f"  📎 Found relationship (many): {key} → {unique}")
-                                else:
-                                    if isinstance(value, list):
-                                        if len(value) == 0:
-                                            continue
-                                        if len(value) != 1:
-                                            raise ValueError(
-                                                f"Relationship '{key}' expects a single ref, got {len(value)} items"
-                                            )
-                                        value = value[0]
-
-                                    normalized = _normalize_ref(value)
-                                    relationships[str(key)] = normalized
-                                    logger.info(f"  📎 Found relationship: {key} → {normalized}")
-                            
-        except Exception as e:
-            logger.warning(f"Could not get ontology for relationship extraction: {e}")
-            
-        if strict_schema:
             unknown_fields: List[str] = []
-
-            def _looks_like_ref(value: Any) -> bool:
-                if isinstance(value, str):
-                    return "/" in value
-                if isinstance(value, list) and value:
-                    return all(isinstance(item, str) and "/" in item for item in value)
-                return False
-
             for key, value in payload.items():
-                if key in known_relationship_fields or key in relationships:
+                if key in known_fields:
                     continue
-                if _looks_like_ref(value):
+                if isinstance(value, str) and "/" in value:
+                    unknown_fields.append(str(key))
+                elif isinstance(value, list) and value and all(isinstance(i, str) and "/" in i for i in value):
                     unknown_fields.append(str(key))
             if unknown_fields:
                 raise ValueError(f"Unknown relationship fields: {sorted(set(unknown_fields))}")
 
-        if not allow_pattern_fallback:
-            return relationships
-
-        # FALLBACK: Always check for common relationship patterns
-        # This ensures relationships work even without schema
-        for key, value in payload.items():
-            if key in relationships:
-                continue
-
-            # Looks like an @id reference (string)
-            if isinstance(value, str) and "/" in value:
-                if any(pattern in key for pattern in ["_by", "_to", "_ref", "contains", "linked"]):
-                    relationships[key] = _normalize_ref(value)
-                    logger.info(f"  📎 Found relationship pattern: {key} → {relationships[key]}")
-                continue
-
-            # Looks like an @id reference (list)
-            if isinstance(value, list) and value:
-                if any(pattern in key for pattern in ["_by", "_to", "_ref", "contains", "linked"]):
-                    normalized: List[str] = [_normalize_ref(item) for item in value]
-                    seen: Set[str] = set()
-                    unique = [v for v in normalized if not (v in seen or seen.add(v))]
-                    relationships[key] = unique
-                    logger.info(f"  📎 Found relationship pattern (many): {key} → {unique}")
-                        
         return relationships
-
-    async def extract_required_properties(
-        self, db_name: str, class_id: str, *, branch: str = "main"
-    ) -> List[str]:
-        """
-        Extract required property names from the class schema.
-
-        We store a lightweight node in TerminusDB for graph traversal, but TerminusDB
-        enforces schema-required fields. Include required scalar fields so inserts
-        do not fail schema checks.
-        """
-        branch = validate_branch_name(branch)
-        try:
-            ontology = await self.terminus_service.get_ontology(db_name, class_id, branch=branch)
-        except Exception as e:
-            # Without schema we cannot safely satisfy required-field constraints.
-            # Treat as retryable by failing fast (outer loop will apply backoff/retry).
-            raise RuntimeError(
-                f"Ontology fetch failed for required-field extraction ({db_name}:{branch}:{class_id}): {e}"
-            ) from e
-
-        if not ontology:
-            # Covers: temporary Terminus unavailability, schema not yet applied, or missing class.
-            # Failing fast prevents us from writing a schema-invalid document that then becomes a
-            # non-retryable 400 and wedges the command permanently.
-            raise RuntimeError(f"Ontology unavailable for required-field extraction ({db_name}:{branch}:{class_id})")
-
-        required: List[str] = []
-
-        # OntologyResponse (pydantic) shape
-        props = getattr(ontology, "properties", None)
-        if isinstance(props, list):
-            for prop in props:
-                name = getattr(prop, "name", None) or (prop.get("name") if isinstance(prop, dict) else None)
-                is_required = (
-                    bool(getattr(prop, "required", False))
-                    if not isinstance(prop, dict)
-                    else bool(prop.get("required"))
-                )
-                if name and is_required:
-                    required.append(str(name))
-            return required
-
-        # Dict (OMS-like) shape
-        if isinstance(ontology, dict):
-            for prop in ontology.get("properties") or []:
-                if not isinstance(prop, dict):
-                    continue
-                if prop.get("required") and prop.get("name"):
-                    required.append(str(prop["name"]))
-
-        return required
 
     async def _apply_create_instance_side_effects(
         self,
@@ -718,8 +634,8 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
         """
         if not self.s3_client:
             raise RuntimeError("S3 client not initialized")
-        if not self.terminus_service:
-            raise RuntimeError("Terminus service not initialized")
+        if not self.elasticsearch_service:
+            raise RuntimeError("Elasticsearch service not initialized")
 
         # 1) Save FULL data to S3 (instance command log bucket)
         s3_path = f"{db_name}/{branch}/{class_id}/{instance_id}/{command_id}.json"
@@ -784,7 +700,7 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
             },
         )
 
-        # 2) Extract ONLY relationships for graph
+        # 2) Extract relationships and index to Elasticsearch
         relationships = await self.extract_relationships(
             db_name,
             class_id,
@@ -794,74 +710,45 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
             strict_schema=self.strict_relationship_schema,
         )
 
-        # 3) Store lightweight node in TerminusDB for graph traversal
-        primary_key_value = instance_id
-        terminus_id = f"{class_id}/{primary_key_value}"
+        # 3) Index instance document to Elasticsearch (replaces TerminusDB graph write)
+        now_iso = datetime.now(timezone.utc).isoformat()
+        event_sequence = int(datetime.now(timezone.utc).timestamp() * 1000)
+        index_name = await self._ensure_instances_index(db_name=db_name, branch=branch)
 
-        graph_node = {
-            "@id": terminus_id,
-            "@type": class_id,
-        }
-
-        # Do NOT blindly inject `{class}_id` into graph documents: user-defined schemas may use
-        # a different primary-key field (e.g., `call_id`) or even a non-`*_id` field (e.g., `phone`).
-        # Injecting unknown properties causes Terminus schema check failures.
-        primary_key_field = f"{class_id.lower()}_id"
-        if primary_key_field in payload:
-            current = payload.get(primary_key_field)
-            if current is None or (isinstance(current, str) and not current.strip()):
-                graph_node[primary_key_field] = primary_key_value
-            else:
-                graph_node[primary_key_field] = current
-        else:
-            for key, value in payload.items():
-                if not key.endswith("_id") or value is None:
-                    continue
-                value_str = str(value).strip()
-                if not value_str:
-                    continue
-                graph_node[key] = value
-                break
-
-        for rel_field, rel_target in relationships.items():
-            # Relationship fields must be *references* (not embedded documents).
-            # TerminusDB link properties accept the "<Class>/<id>" string form; using
-            # {"@id": "..."} can be interpreted as an inline doc and trigger schema
-            # validation on the target type.
-            if isinstance(rel_target, str):
-                graph_node[rel_field] = rel_target
-            elif isinstance(rel_target, list):
-                graph_node[rel_field] = [item for item in rel_target if isinstance(item, str) and item.strip()]
-            else:
-                graph_node[rel_field] = rel_target
-
-        for field in await self.extract_required_properties(db_name, class_id, branch=branch):
-            if field in graph_node:
-                continue
-            if field in payload:
-                graph_node[field] = payload[field]
+        es_doc = self._build_es_document(
+            db_name=db_name,
+            branch=branch,
+            class_id=class_id,
+            instance_id=instance_id,
+            payload=payload,
+            ontology_version=ontology_version,
+            event_sequence=event_sequence,
+            relationships=relationships,
+            now_iso=now_iso,
+            command_id=str(command_id),
+        )
 
         try:
-            maybe_crash("instance_worker:before_terminus", logger=logger)
-            await self.terminus_service.create_instance(
-                db_name,
-                class_id,
-                graph_node,
-                branch=branch,
+            maybe_crash("instance_worker:before_es_index", logger=logger)
+            await self.elasticsearch_service.index_document(
+                index=index_name,
+                document=es_doc,
+                doc_id=instance_id,
             )
-            maybe_crash("instance_worker:after_terminus", logger=logger)
+            maybe_crash("instance_worker:after_es_index", logger=logger)
 
             await self.observability.record_link(
                 from_node_id=LineageStore.node_event(str(command_id)),
-                to_node_id=LineageStore.node_artifact("terminus", db_name, branch, terminus_id),
-                edge_type="event_wrote_terminus_document",
+                to_node_id=LineageStore.node_artifact("elasticsearch", db_name, branch, instance_id),
+                edge_type="event_wrote_es_document",
                 occurred_at=datetime.now(timezone.utc),
                 db_name=db_name,
-                to_label=f"terminus:{db_name}:{branch}:{terminus_id}",
+                to_label=f"es:{db_name}:{branch}:{instance_id}",
                 edge_metadata={
                     "db_name": db_name,
                     "branch": branch,
-                    "terminus_id": terminus_id,
+                    "index_name": index_name,
+                    "instance_id": instance_id,
                     "class_id": class_id,
                     "ontology": ontology_version,
                 },
@@ -869,58 +756,40 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
             await self.observability.audit_log(
                 partition_key=f"db:{db_name}",
                 actor="instance_worker",
-                action="INSTANCE_TERMINUS_WRITE",
+                action="INSTANCE_ES_WRITE",
                 status="success",
-                resource_type="terminus_document",
-                resource_id=f"terminus:{db_name}:{branch}:{terminus_id}",
+                resource_type="elasticsearch_document",
+                resource_id=f"es:{index_name}/{instance_id}",
                 event_id=str(command_id),
                 command_id=str(command_id),
                 metadata={
                     "class_id": class_id,
                     "branch": branch,
                     "instance_id": instance_id,
-                    "terminus_id": terminus_id,
+                    "index_name": index_name,
                     "ontology": ontology_version,
                 },
             )
         except Exception as e:
-            existing = None
-            try:
-                existing = await self.terminus_service.document_service.get_document(
-                    db_name, terminus_id, graph_type="instance", branch=branch
-                )
-            except Exception:
-                existing = None
-
-            if existing:
-                logger.info(f"✅ TerminusDB node already exists (idempotent create): {terminus_id}")
-                await self.terminus_service.update_instance(
-                    db_name,
-                    class_id,
-                    terminus_id,
-                    graph_node,
-                    branch=branch,
-                )
-            else:
-                await self.observability.audit_log(
-                    partition_key=f"db:{db_name}",
-                    actor="instance_worker",
-                    action="INSTANCE_TERMINUS_WRITE",
-                    status="failure",
-                    resource_type="terminus_document",
-                    resource_id=f"terminus:{db_name}:{branch}:{terminus_id}",
-                    event_id=str(command_id),
-                    command_id=str(command_id),
-                    metadata={
-                        "class_id": class_id,
-                        "branch": branch,
-                        "instance_id": instance_id,
-                        "terminus_id": terminus_id,
-                        "ontology": ontology_version,
-                    },
-                    error=str(e),
-                )
-                raise
+            await self.observability.audit_log(
+                partition_key=f"db:{db_name}",
+                actor="instance_worker",
+                action="INSTANCE_ES_WRITE",
+                status="failure",
+                resource_type="elasticsearch_document",
+                resource_id=f"es:{index_name}/{instance_id}",
+                event_id=str(command_id),
+                command_id=str(command_id),
+                metadata={
+                    "class_id": class_id,
+                    "branch": branch,
+                    "instance_id": instance_id,
+                    "index_name": index_name,
+                    "ontology": ontology_version,
+                },
+                error=str(e),
+            )
+            raise
 
         # 4) Store/publish domain event (Event Sourcing: S3/MinIO -> EventPublisher -> Kafka)
         event_payload = {
@@ -963,7 +832,7 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
 
         return {
             "instance_id": instance_id,
-            "terminus_id": terminus_id,
+            "es_index": index_name,
             "s3_path": s3_path,
             "aggregate_id": aggregate_id,
             "domain_event_id": domain_event_id,
@@ -1674,7 +1543,7 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
                     error=str(e),
                 )
 
-        # Update lightweight node (relationships + required scalar fields)
+        # Update instance in Elasticsearch (replaces TerminusDB graph write)
         relationships = await self.extract_relationships(
             db_name,
             class_id,
@@ -1683,37 +1552,57 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
             allow_pattern_fallback=not is_objectify,
             strict_schema=self.strict_relationship_schema,
         )
-        terminus_id = f"{class_id}/{instance_id}"
-        graph_node: Dict[str, Any] = {
-            "@id": terminus_id,
-            "@type": class_id,
-            primary_key_field: merged_payload.get(primary_key_field, instance_id),
-        }
-        for rel_field, rel_target in relationships.items():
-            graph_node[rel_field] = rel_target
-        for field in await self.extract_required_properties(db_name, class_id, branch=branch):
-            if field in graph_node:
-                continue
-            if field in merged_payload:
-                graph_node[field] = merged_payload[field]
+
+        now_iso = datetime.now(timezone.utc).isoformat()
+        event_sequence = int(datetime.now(timezone.utc).timestamp() * 1000)
+        index_name = await self._ensure_instances_index(db_name=db_name, branch=branch)
+
+        # Preserve created_at from existing document
+        created_at_override = None
+        try:
+            existing_doc = await self.elasticsearch_service.get_document(index=index_name, doc_id=instance_id)
+            if existing_doc and isinstance(existing_doc, dict):
+                source = existing_doc.get("_source") or existing_doc
+                created_at_override = source.get("created_at")
+        except Exception:
+            pass
+
+        es_doc = self._build_es_document(
+            db_name=db_name,
+            branch=branch,
+            class_id=class_id,
+            instance_id=instance_id,
+            payload=merged_payload,
+            ontology_version=ontology_version,
+            event_sequence=event_sequence,
+            relationships=relationships,
+            now_iso=now_iso,
+            created_at_override=created_at_override,
+            command_id=str(command_id) if command_id else None,
+        )
 
         try:
-            maybe_crash("instance_worker:before_terminus", logger=logger)
-            await self.terminus_service.update_instance(db_name, class_id, terminus_id, graph_node, branch=branch)
-            maybe_crash("instance_worker:after_terminus", logger=logger)
-            logger.info("  ✅ Updated lightweight node in TerminusDB")
+            maybe_crash("instance_worker:before_es_index", logger=logger)
+            await self.elasticsearch_service.index_document(
+                index=index_name,
+                document=es_doc,
+                doc_id=instance_id,
+            )
+            maybe_crash("instance_worker:after_es_index", logger=logger)
+            logger.info("  Updated instance in Elasticsearch: %s", instance_id)
             if command_id:
                 await self.observability.record_link(
                     from_node_id=LineageStore.node_event(str(command_id)),
-                    to_node_id=LineageStore.node_artifact("terminus", db_name, branch, terminus_id),
-                    edge_type="event_wrote_terminus_document",
+                    to_node_id=LineageStore.node_artifact("elasticsearch", db_name, branch, instance_id),
+                    edge_type="event_wrote_es_document",
                     occurred_at=datetime.now(timezone.utc),
                     db_name=db_name,
-                    to_label=f"terminus:{db_name}:{branch}:{terminus_id}",
+                    to_label=f"es:{db_name}:{branch}:{instance_id}",
                     edge_metadata={
                         "db_name": db_name,
                         "branch": branch,
-                        "terminus_id": terminus_id,
+                        "index_name": index_name,
+                        "instance_id": instance_id,
                         "class_id": class_id,
                         "ontology": ontology_version,
                     },
@@ -1721,45 +1610,42 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
                 await self.observability.audit_log(
                     partition_key=f"db:{db_name}",
                     actor="instance_worker",
-                    action="INSTANCE_TERMINUS_WRITE",
+                    action="INSTANCE_ES_WRITE",
                     status="success",
-                    resource_type="terminus_document",
-                    resource_id=f"terminus:{db_name}:{branch}:{terminus_id}",
+                    resource_type="elasticsearch_document",
+                    resource_id=f"es:{index_name}/{instance_id}",
                     event_id=str(command_id),
                     command_id=str(command_id),
                     metadata={
                         "class_id": class_id,
                         "branch": branch,
                         "instance_id": instance_id,
-                        "terminus_id": terminus_id,
+                        "index_name": index_name,
                         "ontology": ontology_version,
                     },
                 )
         except Exception as e:
-            logger.warning(f"  ⚠️ Could not update TerminusDB node: {e}")
+            logger.warning("Could not update ES document: %s", e)
             if command_id:
                 await self.observability.audit_log(
                     partition_key=f"db:{db_name}",
                     actor="instance_worker",
-                    action="INSTANCE_TERMINUS_WRITE",
+                    action="INSTANCE_ES_WRITE",
                     status="failure",
-                    resource_type="terminus_document",
-                    resource_id=f"terminus:{db_name}:{branch}:{terminus_id}",
+                    resource_type="elasticsearch_document",
+                    resource_id=f"es:{index_name}/{instance_id}",
                     event_id=str(command_id),
                     command_id=str(command_id),
                     metadata={
                         "class_id": class_id,
                         "branch": branch,
                         "instance_id": instance_id,
-                        "terminus_id": terminus_id,
+                        "index_name": index_name,
                         "ontology": ontology_version,
                     },
                     error=str(e),
                 )
-            # TerminusDB is the graph authority; retry until it is updated.
             raise
-
-        # Elasticsearch indexing is handled by projection_worker (single writer) for schema consistency.
 
         # Publish domain event (SSoT: Event Store)
         domain_event_id = (
@@ -1866,42 +1752,43 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
                 f"expected={expected_aggregate_id}"
             )
 
-        terminus_id = f"{class_id}/{instance_id}"
-        terminus_deleted = False
-        terminus_already_missing = False
-        terminus_error: Optional[str] = None
+        # Delete instance from Elasticsearch (replaces TerminusDB graph delete)
+        index_name = await self._ensure_instances_index(db_name=db_name, branch=branch)
+        es_deleted = False
+        es_already_missing = False
+        es_error: Optional[str] = None
         try:
-            maybe_crash("instance_worker:before_terminus", logger=logger)
-            await self.terminus_service.delete_instance(db_name, class_id, terminus_id, branch=branch)
-            maybe_crash("instance_worker:after_terminus", logger=logger)
-            logger.info("  ✅ Deleted lightweight node from TerminusDB")
-            terminus_deleted = True
+            maybe_crash("instance_worker:before_es_delete", logger=logger)
+            await self.elasticsearch_service.delete_document(index=index_name, doc_id=instance_id)
+            maybe_crash("instance_worker:after_es_delete", logger=logger)
+            logger.info("  Deleted instance from Elasticsearch: %s", instance_id)
+            es_deleted = True
         except Exception as e:
             msg = str(e).lower()
-            if "not found" in msg or "404" in msg:
-                logger.info("  ✅ TerminusDB node already deleted (idempotent)")
-                terminus_deleted = True
-                terminus_already_missing = True
+            if "not found" in msg or "404" in msg or "notfounderror" in msg:
+                logger.info("  ES document already deleted (idempotent): %s", instance_id)
+                es_deleted = True
+                es_already_missing = True
             else:
-                logger.warning(f"  ⚠️ Could not delete TerminusDB node: {e}")
-                terminus_error = str(e)
+                logger.warning("Could not delete ES document: %s", e)
+                es_error = str(e)
 
-        if not terminus_deleted:
-            # TerminusDB is the graph authority; never succeed the command if delete could not be applied.
-            raise RuntimeError(f"Failed to delete TerminusDB node {terminus_id}: {terminus_error or 'unknown'}")
+        if not es_deleted:
+            raise RuntimeError(f"Failed to delete ES document {instance_id}: {es_error or 'unknown'}")
 
-        if command_id and terminus_deleted:
+        if command_id and es_deleted:
             await self.observability.record_link(
                 from_node_id=LineageStore.node_event(str(command_id)),
-                to_node_id=LineageStore.node_artifact("terminus", db_name, branch, terminus_id),
-                edge_type="event_deleted_terminus_document",
+                to_node_id=LineageStore.node_artifact("elasticsearch", db_name, branch, instance_id),
+                edge_type="event_deleted_es_document",
                 occurred_at=datetime.now(timezone.utc),
                 db_name=db_name,
-                to_label=f"terminus:{db_name}:{branch}:{terminus_id}",
+                to_label=f"es:{db_name}:{branch}:{instance_id}",
                 edge_metadata={
                     "db_name": db_name,
                     "branch": branch,
-                    "terminus_id": terminus_id,
+                    "index_name": index_name,
+                    "instance_id": instance_id,
                     "class_id": class_id,
                     "ontology": ontology_version,
                 },
@@ -1911,24 +1798,22 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
             await self.observability.audit_log(
                 partition_key=f"db:{db_name}",
                 actor="instance_worker",
-                action="INSTANCE_TERMINUS_DELETE",
-                status="success" if terminus_deleted else "failure",
-                resource_type="terminus_document",
-                resource_id=f"terminus:{db_name}:{branch}:{terminus_id}",
+                action="INSTANCE_ES_DELETE",
+                status="success" if es_deleted else "failure",
+                resource_type="elasticsearch_document",
+                resource_id=f"es:{index_name}/{instance_id}",
                 event_id=str(command_id),
                 command_id=str(command_id),
                 metadata={
                     "class_id": class_id,
                     "branch": branch,
                     "instance_id": instance_id,
-                    "terminus_id": terminus_id,
-                    "already_missing": terminus_already_missing,
+                    "index_name": index_name,
+                    "already_missing": es_already_missing,
                     "ontology": ontology_version,
                 },
-                error=None if terminus_deleted else (terminus_error or "delete_failed"),
+                error=None if es_deleted else (es_error or "delete_failed"),
             )
-
-        # Elasticsearch deletion is handled by projection_worker (single writer) for schema consistency.
 
         # Tombstone snapshot (best-effort)
         s3_path = f"{db_name}/{branch}/{class_id}/{instance_id}/{command_id}.json"
@@ -2338,14 +2223,12 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
     @staticmethod
     def _is_retryable_error_impl(exc: Exception) -> bool:
         msg = str(exc).lower()
-        # TerminusDB schema failures can be transient under at-least-once + cross-aggregate reordering.
-        # Example: Product references Customer that hasn't been created yet.
-        if "references_untyped_object" in msg or "no_unique_type_for_document" in msg:
+        # ES transient failures (connection reset, timeout, 429 too-many-requests).
+        if "connectionerror" in msg or "timeout" in msg or "429" in msg:
             return True
-        # Default: Terminus 400s are treated as non-retryable unless we explicitly
-        # recognize them as transient above.
-        if "api error: 400" in msg:
-            return False
+        # ES 409 version conflict can be transient under concurrent upserts.
+        if "409" in msg and "conflict" in msg:
+            return True
         return classify_retryable_with_profile(exc, INSTANCE_COMMAND_RETRY_PROFILE)
 
     async def _publish_to_dlq(
@@ -2643,8 +2526,10 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
         self.dlq_producer = None
         if self.redis_client:
             await self.redis_client.close()
-        if self.terminus_service:
-            await self.terminus_service.close()
+        if self.elasticsearch_service:
+            await self.elasticsearch_service.close()
+        if self.oms_http:
+            await self.oms_http.aclose()
         if self.processed_event_registry:
             await self.processed_event_registry.close()
         if self.dataset_registry:

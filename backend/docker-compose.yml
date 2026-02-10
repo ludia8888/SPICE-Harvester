@@ -1060,41 +1060,6 @@ services:
       - spice_network
     restart: unless-stopped
 
-  # Search Projection Worker — DEPRECATED (dataset-primary indexing supersedes this)
-  # objectify_worker now writes directly to ES; this worker is no longer needed.
-  # Kept behind 'legacy' profile for rollback safety. Remove in Phase 3.
-  search-projection-worker:
-    profiles:
-      - legacy
-    build:
-      context: .
-      dockerfile: ./search_projection_worker/Dockerfile
-    container_name: spice_search_projection_worker
-    environment:
-      - KAFKA_HOST=kafka
-      - KAFKA_PORT=29092
-      - ELASTICSEARCH_HOST=elasticsearch
-      - ELASTICSEARCH_PORT=9200
-      - ELASTICSEARCH_USERNAME=${ELASTICSEARCH_USERNAME:-}
-      - ELASTICSEARCH_PASSWORD=${ELASTICSEARCH_PASSWORD:-}
-      - ENABLE_SEARCH_PROJECTION=${ENABLE_SEARCH_PROJECTION:-false}
-      - SEARCH_INDEX=${SEARCH_INDEX:-objects}
-      - INSTANCE_EVENTS_TOPIC=${INSTANCE_EVENTS_TOPIC:-instance_events}
-      - SEARCH_PROJECTION_DLQ_TOPIC=${SEARCH_PROJECTION_DLQ_TOPIC:-projection_failures_dlq}
-      - SEARCH_PROJECTION_MAX_RETRIES=${SEARCH_PROJECTION_MAX_RETRIES:-5}
-      - SEARCH_PROJECTION_BACKOFF_BASE_SECONDS=${SEARCH_PROJECTION_BACKOFF_BASE_SECONDS:-2}
-      - SEARCH_PROJECTION_BACKOFF_MAX_SECONDS=${SEARCH_PROJECTION_BACKOFF_MAX_SECONDS:-60}
-      - PROCESSED_EVENT_LEASE_TIMEOUT_SECONDS=${PROCESSED_EVENT_LEASE_TIMEOUT_SECONDS:-900}
-      - PROCESSED_EVENT_HEARTBEAT_INTERVAL_SECONDS=${PROCESSED_EVENT_HEARTBEAT_INTERVAL_SECONDS:-30}
-      - LOG_LEVEL=INFO
-      - DOCKER_CONTAINER=true
-    depends_on:
-      - kafka
-      - elasticsearch
-    networks:
-      - spice_network
-    restart: on-failure
-
 volumes:
   postgres_data:
   redis_data:
