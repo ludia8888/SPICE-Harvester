@@ -34,7 +34,7 @@ def derive_lifecycle_id(instance_state: Any) -> str:
             if not isinstance(item, dict):
                 continue
             command_type = str(item.get("command_type") or "").strip()
-            if command_type == "CREATE_INSTANCE":
+            if command_type in ("CREATE_INSTANCE", "BULK_CREATE_INSTANCES"):
                 command_id = item.get("command_id")
                 if command_id is None:
                     continue

@@ -155,7 +155,7 @@ class EventReplayService:
         """
         command_type = event.get('command_type')
         
-        if command_type == 'CREATE_INSTANCE':
+        if command_type in ('CREATE_INSTANCE', 'BULK_CREATE_INSTANCES'):
             # Create event - initialize state
             state['version'] = 1
             state['created_at'] = event.get('created_at', event.get('timestamp'))

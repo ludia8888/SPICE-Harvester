@@ -760,7 +760,10 @@ class StorageService:
                 })
                 
                 # Command 유형에 따라 상태 업데이트
-                if command_type == CommandType.CREATE_INSTANCE.value:
+                if command_type in (
+                    CommandType.CREATE_INSTANCE.value,
+                    CommandType.BULK_CREATE_INSTANCES.value,
+                ):
                     # 인스턴스 생성
                     instance_state = {
                         'instance_id': instance_id,
