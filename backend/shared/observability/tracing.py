@@ -13,7 +13,7 @@ This implementation:
 from __future__ import annotations
 
 import os
-from contextlib import contextmanager, nullcontext
+from contextlib import contextmanager
 from functools import wraps
 from typing import Any, Dict, Optional
 
@@ -407,7 +407,7 @@ class TracingService:
     @contextmanager
     def span(self, name: str, kind=None, attributes: Optional[Dict[str, Any]] = None):
         if not HAS_OPENTELEMETRY or not self.tracer:
-            yield from nullcontext()
+            yield None
             return
 
         # IMPORTANT: Do not pass `kind=None` explicitly. Some OpenTelemetry SDK versions
