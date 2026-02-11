@@ -90,7 +90,7 @@ from shared.utils.writeback_paths import (
     writeback_patchset_metadata_key,
 )
 from shared.utils.writeback_lifecycle import derive_lifecycle_id
-from shared.utils.action_writeback import action_applied_event_id, is_noop_changes, safe_str
+from shared.utils.action_writeback import action_applied_event_id as generate_action_applied_event_id, is_noop_changes, safe_str
 from shared.utils.app_logger import configure_logging
 from shared.utils.time_utils import utcnow
 
@@ -1480,7 +1480,7 @@ class ActionWorker(StrictHeartbeatKafkaWorker[_ActionCommandPayload, None]):
         else:
             overlay_branch = safe_str(command.get("overlay_branch") or branch) or branch
             evt = ActionAppliedEvent(
-                event_id=action_applied_event_id(action_log_id),
+                event_id=generate_action_applied_event_id(action_log_id),
                 db_name=db_name,
                 action_log_id=action_log_id,
                 patchset_commit_id=patchset_commit_id,
