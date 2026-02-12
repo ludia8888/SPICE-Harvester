@@ -23,6 +23,11 @@ from shared.services.events.objectify_job_queue import ObjectifyJobQueue
 from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.services.registries.objectify_registry import ObjectifyRegistry
 from shared.services.registries.pipeline_registry import PipelineRegistry
+from shared.services.registries.backing_source_adapter import (
+    BackingSourceMappingSpec,
+    get_mapping_from_oms,
+    is_oms_mapping_spec,
+)
 from shared.utils.objectify_outputs import match_output_name
 from shared.utils.schema_hash import compute_schema_hash_from_sample
 from shared.utils.s3_uri import parse_s3_uri
@@ -39,6 +44,7 @@ async def run_objectify(
     objectify_registry: ObjectifyRegistry,
     job_queue: ObjectifyJobQueue,
     pipeline_registry: PipelineRegistry,
+    oms_client: Any = None,
 ) -> Dict[str, Any]:
     try:
         dataset = await dataset_registry.get_dataset(dataset_id=dataset_id)
@@ -121,26 +127,53 @@ async def run_objectify(
                     detail="Dataset schema_hash could not be determined for objectify",
                 )
 
-        if body.mapping_spec_id:
-            mapping_spec = await objectify_registry.get_mapping_spec(mapping_spec_id=body.mapping_spec_id)
-        else:
-            mapping_spec = await objectify_registry.get_active_mapping_spec(
-                dataset_id=dataset_id,
-                dataset_branch=dataset.branch,
-                artifact_output_name=resolved_output_name,
-                schema_hash=resolved_schema_hash,
-            )
+        # ── Mapping resolution: OMS backing_source (by target_class_id) or PostgreSQL ──
+        mapping_spec = None
+        oms_mode = False
+        target_class_id = str(body.target_class_id or "").strip() or None
+
+        if target_class_id and not body.mapping_spec_id and oms_client is not None:
+            try:
+                oms_spec = await get_mapping_from_oms(
+                    oms_client.client,
+                    oms_base_url=oms_client.base_url,
+                    db_name=dataset.db_name,
+                    target_class_id=target_class_id,
+                    branch=dataset.branch or "main",
+                    admin_token=oms_client._get_auth_token(),
+                )
+                if oms_spec:
+                    mapping_spec = oms_spec
+                    oms_mode = True
+            except Exception as oms_exc:
+                logger.warning(
+                    "OMS backing_source lookup failed for %s (falling back to PG): %s",
+                    target_class_id,
+                    oms_exc,
+                )
+
+        if not mapping_spec:
+            if body.mapping_spec_id:
+                mapping_spec = await objectify_registry.get_mapping_spec(mapping_spec_id=body.mapping_spec_id)
+            else:
+                mapping_spec = await objectify_registry.get_active_mapping_spec(
+                    dataset_id=dataset_id,
+                    dataset_branch=dataset.branch,
+                    artifact_output_name=resolved_output_name,
+                    schema_hash=resolved_schema_hash,
+                )
         if not mapping_spec:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Active mapping spec not found for output/schema",
             )
-        if mapping_spec.dataset_id != dataset_id:
+        if not oms_mode and mapping_spec.dataset_id != dataset_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Mapping spec does not match dataset")
-        if resolved_output_name and mapping_spec.artifact_output_name and mapping_spec.artifact_output_name != resolved_output_name:
+        if not oms_mode and resolved_output_name and mapping_spec.artifact_output_name and mapping_spec.artifact_output_name != resolved_output_name:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Mapping spec output does not match input")
         if (
-            resolved_schema_hash
+            not oms_mode
+            and resolved_schema_hash
             and mapping_spec.schema_hash
             and mapping_spec.schema_hash != resolved_schema_hash
             and not mapping_spec.backing_datasource_version_id
@@ -181,10 +214,12 @@ async def run_objectify(
             resolved_output_name = dataset.name
             resolved_schema_hash = backing_version.schema_hash
 
+        is_oms = is_oms_mapping_spec(mapping_spec.mapping_spec_id) if mapping_spec.mapping_spec_id else oms_mode
+        dedupe_spec_id = mapping_spec.target_class_id if is_oms else mapping_spec.mapping_spec_id
         dedupe_key = objectify_registry.build_dedupe_key(
             dataset_id=dataset_id,
             dataset_branch=dataset.branch,
-            mapping_spec_id=mapping_spec.mapping_spec_id,
+            mapping_spec_id=dedupe_spec_id,
             mapping_spec_version=mapping_spec.version,
             dataset_version_id=(version.version_id if version else None),
             artifact_id=artifact_id,
@@ -203,6 +238,7 @@ async def run_objectify(
                     "artifact_output_name": resolved_output_name,
                     "artifact_key": artifact_key,
                     "status": existing.status,
+                    "oms_mode": is_oms,
                 },
             ).to_dict()
 
@@ -210,6 +246,10 @@ async def run_objectify(
         options = dict(mapping_spec.options or {})
         override_options = body.options if isinstance(body.options, dict) else {}
         options.update(override_options)
+
+        # OMS-sourced: mapping_spec_id=None (can't store "oms:..." in PG uuid column)
+        pg_spec_id = None if is_oms else mapping_spec.mapping_spec_id
+        pg_spec_version = None if is_oms else mapping_spec.version
 
         job = ObjectifyJob(
             job_id=job_id,
@@ -221,8 +261,8 @@ async def run_objectify(
             dedupe_key=dedupe_key,
             dataset_branch=dataset.branch,
             artifact_key=artifact_key,
-            mapping_spec_id=mapping_spec.mapping_spec_id,
-            mapping_spec_version=mapping_spec.version,
+            mapping_spec_id=pg_spec_id,
+            mapping_spec_version=pg_spec_version,
             target_class_id=mapping_spec.target_class_id,
             ontology_branch=options.get("ontology_branch"),
             max_rows=body.max_rows or options.get("max_rows"),
@@ -244,6 +284,7 @@ async def run_objectify(
                 "artifact_output_name": resolved_output_name,
                 "artifact_key": artifact_key,
                 "status": "QUEUED",
+                "oms_mode": is_oms,
             },
         ).to_dict()
     except HTTPException:

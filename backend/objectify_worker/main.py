@@ -1004,27 +1004,68 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
         if resolved_output_name and not job.artifact_output_name:
             job.artifact_output_name = resolved_output_name
 
-        mapping_spec = await self.objectify_registry.get_mapping_spec(mapping_spec_id=job.mapping_spec_id)
-        if not mapping_spec:
-            await _fail_job(f"mapping_spec_not_found:{job.mapping_spec_id}")
-        if mapping_spec.dataset_id != job.dataset_id:
-            await _fail_job("mapping_spec_dataset_mismatch")
-        if int(mapping_spec.version) != int(job.mapping_spec_version):
-            await _fail_job(
-                f"mapping_spec_version_mismatch(job={job.mapping_spec_version} spec={mapping_spec.version})"
+        # ── Mapping spec resolution: OMS backing_source (if no PG mapping_spec_id) or PostgreSQL ──
+        mapping_spec = None
+        oms_backed = False
+        if not job.mapping_spec_id:
+            # OMS mode: resolve from object_type backing_source
+            oms_backed = True
+            try:
+                ot_contract = await self._fetch_object_type_contract(job)
+            except Exception as oms_fetch_exc:
+                logger.error(
+                    "OMS object_type fetch failed (job_id=%s class_id=%s): %s",
+                    job.job_id, job.target_class_id, oms_fetch_exc,
+                )
+                raise  # Let retry logic handle (retryable for network/5xx)
+            if not ot_contract:
+                await _fail_job(f"oms_object_type_not_found:{job.target_class_id}")
+            # OMS wraps response in {"data": {...}} — unwrap if needed
+            ot_resource = ot_contract.get("data") if isinstance(ot_contract.get("data"), dict) else ot_contract
+            ot_spec = (ot_resource.get("spec") if isinstance(ot_resource, dict) else {}) or {}
+            backing = ot_spec.get("backing_source") or {}
+            prop_mappings = backing.get("property_mappings")
+            if not prop_mappings or not isinstance(prop_mappings, list):
+                await _fail_job(f"oms_backing_source_no_property_mappings:{job.target_class_id}")
+            from shared.services.registries.backing_source_adapter import BackingSourceMappingSpec
+            mapping_spec = BackingSourceMappingSpec(
+                mapping_spec_id=f"oms:{job.target_class_id}",
+                dataset_id=job.dataset_id,
+                dataset_branch=job.dataset_branch,
+                artifact_output_name=job.artifact_output_name,
+                schema_hash=backing.get("schema_hash"),
+                target_class_id=job.target_class_id,
+                mappings=[
+                    {"source_field": str(m.get("source_field", "")), "target_field": str(m.get("target_field", ""))}
+                    for m in prop_mappings if isinstance(m, dict)
+                ],
+                target_field_types=backing.get("target_field_types") or {},
+                auto_sync=backing.get("auto_sync", True),
+                version=int(backing.get("mapping_version") or 1),
+                status=str(ot_spec.get("status") or "ACTIVE"),
             )
-        if mapping_spec.backing_datasource_version_id:
-            if job.artifact_id:
-                await _fail_job("backing_datasource_version_conflict")
-            backing_version = await self.dataset_registry.get_backing_datasource_version(
-                version_id=mapping_spec.backing_datasource_version_id
-            )
-            if not backing_version:
-                await _fail_job("backing_datasource_version_missing")
-            if not job.dataset_version_id:
-                await _fail_job("backing_datasource_version_required")
-            if backing_version.dataset_version_id != job.dataset_version_id:
-                await _fail_job("backing_datasource_version_mismatch")
+        else:
+            mapping_spec = await self.objectify_registry.get_mapping_spec(mapping_spec_id=job.mapping_spec_id)
+            if not mapping_spec:
+                await _fail_job(f"mapping_spec_not_found:{job.mapping_spec_id}")
+            if mapping_spec.dataset_id != job.dataset_id:
+                await _fail_job("mapping_spec_dataset_mismatch")
+            if job.mapping_spec_version is not None and int(mapping_spec.version) != int(job.mapping_spec_version):
+                await _fail_job(
+                    f"mapping_spec_version_mismatch(job={job.mapping_spec_version} spec={mapping_spec.version})"
+                )
+            if mapping_spec.backing_datasource_version_id:
+                if job.artifact_id:
+                    await _fail_job("backing_datasource_version_conflict")
+                backing_version = await self.dataset_registry.get_backing_datasource_version(
+                    version_id=mapping_spec.backing_datasource_version_id
+                )
+                if not backing_version:
+                    await _fail_job("backing_datasource_version_missing")
+                if not job.dataset_version_id:
+                    await _fail_job("backing_datasource_version_required")
+                if backing_version.dataset_version_id != job.dataset_version_id:
+                    await _fail_job("backing_datasource_version_mismatch")
 
         await self.objectify_registry.update_objectify_job_status(
             job_id=job.job_id,

@@ -1137,12 +1137,16 @@ class PipelineMCPServer:
                 },
                 {
                     "name": "objectify_run",
-                    "description": "Execute objectify transformation to convert dataset rows into ontology instances. Requires an active mapping spec.",
+                    "description": "Execute objectify transformation to convert dataset rows into ontology instances. Can use OMS backing_source (via target_class_id) or PostgreSQL mapping spec.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
                             "dataset_id": {"type": "string", "description": "Dataset ID"},
-                            "mapping_spec_id": {"type": "string", "description": "Mapping spec ID (optional if dataset has active mapping)"},
+                            "target_class_id": {
+                                "type": "string",
+                                "description": "Ontology class ID — resolves property_mappings from OMS backing_source (preferred over mapping_spec_id)",
+                            },
+                            "mapping_spec_id": {"type": "string", "description": "PostgreSQL mapping spec ID (fallback if target_class_id not provided)"},
                             "dataset_version_id": {"type": "string", "description": "Specific dataset version (optional, uses latest)"},
                             "db_name": {"type": "string", "description": "Database name"},
                             "max_rows": {"type": "integer", "description": "Max rows to process"},
@@ -1195,6 +1199,26 @@ class PipelineMCPServer:
                                 "description": "Title key field(s) - displayed as instance title (e.g., ['customer_id'])",
                             },
                             "branch": {"type": "string", "description": "Branch (default: main)"},
+                            "property_mappings": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "source_field": {"type": "string", "description": "Source column name from dataset"},
+                                        "target_field": {"type": "string", "description": "Target property name on object type"},
+                                    },
+                                    "required": ["source_field", "target_field"],
+                                },
+                                "description": "Column-to-property mappings (Foundry-style). When provided, stored in OMS backing_source — no separate create_mapping_spec needed.",
+                            },
+                            "target_field_types": {
+                                "type": "object",
+                                "description": "Optional XSD type hints for target properties (e.g., {'price': 'xsd:decimal'})",
+                            },
+                            "auto_sync": {
+                                "type": "boolean",
+                                "description": "Auto-trigger objectify on pipeline build (default: true)",
+                            },
                         },
                         "required": ["db_name", "class_id", "dataset_id", "primary_key", "title_key"],
                     },

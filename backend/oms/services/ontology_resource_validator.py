@@ -398,6 +398,61 @@ def _collect_required_field_issues(resource_type: str, spec: Dict[str, Any]) -> 
                         message="object_type backing_source requires schema_hash",
                         missing_fields=["backing_source.schema_hash"],
                     )
+            # ── property_mappings validation (Foundry-style backing_source) ──
+            prop_mappings = backing_source.get("property_mappings")
+            if prop_mappings is not None:
+                if not isinstance(prop_mappings, list):
+                    _append_spec_issue(
+                        issues,
+                        message="backing_source.property_mappings must be a list",
+                        invalid_fields=["backing_source.property_mappings"],
+                    )
+                else:
+                    for idx, mapping in enumerate(prop_mappings):
+                        if not isinstance(mapping, dict):
+                            _append_spec_issue(
+                                issues,
+                                message=f"backing_source.property_mappings[{idx}] must be a dict",
+                                invalid_fields=[f"backing_source.property_mappings[{idx}]"],
+                            )
+                            continue
+                        if not str(mapping.get("source_field") or "").strip():
+                            _append_spec_issue(
+                                issues,
+                                message=f"backing_source.property_mappings[{idx}] requires source_field",
+                                missing_fields=[f"backing_source.property_mappings[{idx}].source_field"],
+                            )
+                        if not str(mapping.get("target_field") or "").strip():
+                            _append_spec_issue(
+                                issues,
+                                message=f"backing_source.property_mappings[{idx}] requires target_field",
+                                missing_fields=[f"backing_source.property_mappings[{idx}].target_field"],
+                            )
+
+            target_field_types = backing_source.get("target_field_types")
+            if target_field_types is not None and not isinstance(target_field_types, dict):
+                _append_spec_issue(
+                    issues,
+                    message="backing_source.target_field_types must be a dict",
+                    invalid_fields=["backing_source.target_field_types"],
+                )
+
+            auto_sync = backing_source.get("auto_sync")
+            if auto_sync is not None and not isinstance(auto_sync, bool):
+                _append_spec_issue(
+                    issues,
+                    message="backing_source.auto_sync must be a boolean",
+                    invalid_fields=["backing_source.auto_sync"],
+                )
+
+            mapping_version = backing_source.get("mapping_version")
+            if mapping_version is not None and not isinstance(mapping_version, int):
+                _append_spec_issue(
+                    issues,
+                    message="backing_source.mapping_version must be an integer",
+                    invalid_fields=["backing_source.mapping_version"],
+                )
+
             status_value = str(spec.get("status") or "ACTIVE").strip().upper()
             # Skip version_id requirement when dataset_id is provided (will be resolved by objectify)
             if status_value == "ACTIVE" and not has_dataset_id:

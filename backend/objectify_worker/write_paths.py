@@ -368,7 +368,7 @@ class DatasetPrimaryIndexWritePath:
             "dataset_version_id": job.dataset_version_id,
             "artifact_id": job.artifact_id,
             "mapping_spec_id": job.mapping_spec_id,
-            "mapping_spec_version": int(job.mapping_spec_version),
+            "mapping_spec_version": int(job.mapping_spec_version) if job.mapping_spec_version is not None else 0,
             "objectify_job_id": job.job_id,
             "indexed_at": now_iso,
         }
@@ -385,7 +385,7 @@ class DatasetPrimaryIndexWritePath:
             "event_id": event_id,
             "event_sequence": int(event_sequence),
             "event_timestamp": now_iso,
-            "version": int(job.mapping_spec_version),
+            "version": int(job.mapping_spec_version) if job.mapping_spec_version is not None else 0,
             "db_name": job.db_name,
             "branch": branch,
             "ontology_ref": str(ontology_ref).strip() if ontology_ref else None,

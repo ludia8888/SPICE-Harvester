@@ -99,6 +99,7 @@ from shared.services.pipeline.pipeline_transform_spec import (
     resolve_join_spec,
 )
 from shared.services.registries.objectify_registry import ObjectifyRegistry
+from shared.services.registries.backing_source_adapter import MappingSpecResolver, is_oms_mapping_spec
 from shared.services.events.objectify_job_queue import ObjectifyJobQueue
 from shared.models.objectify_job import ObjectifyJob
 from shared.services.registries.processed_event_registry import ProcessedEventRegistry
@@ -187,6 +188,7 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
         self.dataset_registry: Optional[DatasetRegistry] = None
         self.pipeline_registry: Optional[PipelineRegistry] = None
         self.objectify_registry: Optional[ObjectifyRegistry] = None
+        self.mapping_resolver: Optional[MappingSpecResolver] = None
         self.objectify_job_queue: Optional[ObjectifyJobQueue] = None
         self.processed: Optional[ProcessedEventRegistry] = None
         self.lineage: Optional[LineageStore] = None
@@ -290,6 +292,21 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
             self.objectify_registry = None
         if self.objectify_registry:
             self.objectify_job_queue = ObjectifyJobQueue(objectify_registry=self.objectify_registry)
+
+        # MappingSpecResolver: OMS-first, PostgreSQL-fallback
+        if self.http:
+            oms_base = os.getenv("OMS_BASE_URL", "http://oms:8000").rstrip("/")
+            oms_token = ""
+            for key in ("OMS_CLIENT_TOKEN", "OMS_ADMIN_TOKEN", "ADMIN_API_KEY", "ADMIN_TOKEN"):
+                oms_token = (os.getenv(key) or "").strip()
+                if oms_token:
+                    break
+            self.mapping_resolver = MappingSpecResolver(
+                http_client=self.http,
+                oms_base_url=oms_base,
+                admin_token=oms_token or None,
+                objectify_registry=self.objectify_registry,
+            )
 
         self.processed = await create_processed_event_registry(
             lease_timeout_seconds=int(self.processed_event_lease_timeout_seconds),
@@ -2491,12 +2508,30 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
         schema_hash = compute_schema_hash(version.sample_json.get("columns")) if isinstance(getattr(version, "sample_json", None), dict) else None
         if not schema_hash and isinstance(getattr(dataset, "schema_json", None), dict):
             schema_hash = compute_schema_hash(dataset.schema_json.get("columns") or [])
-        mapping_spec = await self.objectify_registry.get_active_mapping_spec(
-            dataset_id=dataset.dataset_id,
-            dataset_branch=dataset.branch,
-            artifact_output_name=resolved_output_name,
-            schema_hash=schema_hash,
-        )
+
+        # OMS-first resolution via MappingSpecResolver, fallback to PostgreSQL
+        mapping_spec = None
+        if self.mapping_resolver:
+            try:
+                mapping_spec = await self.mapping_resolver.resolve(
+                    db_name=dataset.db_name,
+                    dataset_id=dataset.dataset_id,
+                    branch=dataset.branch,
+                    schema_hash=schema_hash,
+                    artifact_output_name=resolved_output_name,
+                )
+            except Exception as resolver_exc:
+                logger.warning(
+                    "MappingSpecResolver failed (dataset=%s), falling back to PostgreSQL: %s",
+                    dataset.dataset_id, resolver_exc,
+                )
+        if not mapping_spec:
+            mapping_spec = await self.objectify_registry.get_active_mapping_spec(
+                dataset_id=dataset.dataset_id,
+                dataset_branch=dataset.branch,
+                artifact_output_name=resolved_output_name,
+                schema_hash=schema_hash,
+            )
         if not mapping_spec or not mapping_spec.auto_sync:
             if self.dataset_registry and schema_hash:
                 try:
@@ -2552,10 +2587,13 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                 except Exception as exc:
                     logger.warning("Failed to record schema gate: %s", exc)
             return None
+        # For OMS-sourced specs, use class_id as dedupe key component (not uuid mapping_spec_id)
+        oms_sourced = is_oms_mapping_spec(mapping_spec.mapping_spec_id) if mapping_spec.mapping_spec_id else False
+        dedupe_spec_id = mapping_spec.target_class_id if oms_sourced else mapping_spec.mapping_spec_id
         dedupe_key = self.objectify_registry.build_dedupe_key(
             dataset_id=dataset.dataset_id,
             dataset_branch=dataset.branch,
-            mapping_spec_id=mapping_spec.mapping_spec_id,
+            mapping_spec_id=dedupe_spec_id,
             mapping_spec_version=mapping_spec.version,
             dataset_version_id=version.version_id,
             artifact_id=None,
@@ -2566,6 +2604,9 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
             return existing.job_id
         job_id = str(uuid4())
         options = dict(mapping_spec.options or {})
+        # OMS-sourced specs: don't store "oms:..." in PostgreSQL uuid column
+        pg_mapping_spec_id = None if oms_sourced else mapping_spec.mapping_spec_id
+        pg_mapping_spec_version = None if oms_sourced else mapping_spec.version
         job = ObjectifyJob(
             job_id=job_id,
             db_name=dataset.db_name,
@@ -2575,8 +2616,8 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
             dedupe_key=dedupe_key,
             dataset_branch=dataset.branch,
             artifact_key=version.artifact_key or "",
-            mapping_spec_id=mapping_spec.mapping_spec_id,
-            mapping_spec_version=mapping_spec.version,
+            mapping_spec_id=pg_mapping_spec_id,
+            mapping_spec_version=pg_mapping_spec_version,
             target_class_id=mapping_spec.target_class_id,
             ontology_branch=options.get("ontology_branch"),
             max_rows=options.get("max_rows"),

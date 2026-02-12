@@ -26,8 +26,8 @@ class ObjectifyJob(BaseModel):
         default=None,
         description="s3:// artifact key for the dataset version or artifact output",
     )
-    mapping_spec_id: str = Field(..., description="Mapping spec id")
-    mapping_spec_version: int = Field(..., description="Mapping spec version")
+    mapping_spec_id: Optional[str] = Field(default=None, description="Mapping spec id (None when using OMS backing_source)")
+    mapping_spec_version: Optional[int] = Field(default=None, description="Mapping spec version")
     target_class_id: str = Field(..., description="Ontology class id")
     ontology_branch: Optional[str] = Field(default=None, description="Ontology branch")
     max_rows: Optional[int] = Field(default=None, description="Optional row cap")
@@ -62,4 +62,7 @@ class ObjectifyJob(BaseModel):
             raise ValueError("Exactly one of dataset_version_id or artifact_id is required")
         if has_artifact and not self.artifact_output_name:
             raise ValueError("artifact_output_name is required when artifact_id is set")
+        # When no PostgreSQL mapping_spec_id, target_class_id is required for OMS resolution
+        if not self.mapping_spec_id and not self.target_class_id:
+            raise ValueError("target_class_id is required when mapping_spec_id is not provided (OMS mode)")
         return self

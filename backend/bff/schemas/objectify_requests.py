@@ -36,6 +36,11 @@ class CreateMappingSpecRequest(BaseModel):
 
 class TriggerObjectifyRequest(BaseModel):
     mapping_spec_id: Optional[str] = Field(default=None)
+    target_class_id: Optional[str] = Field(
+        default=None,
+        description="OMS ontology class id. When provided without mapping_spec_id, "
+        "resolves property_mappings from OMS backing_source (Foundry-style).",
+    )
     dataset_version_id: Optional[str] = Field(default=None)
     artifact_id: Optional[str] = Field(default=None)
     artifact_output_name: Optional[str] = Field(default=None)

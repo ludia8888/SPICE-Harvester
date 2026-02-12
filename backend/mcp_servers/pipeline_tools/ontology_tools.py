@@ -22,6 +22,11 @@ async def _ontology_register_object_type(_server: Any, arguments: Dict[str, Any]
     title_key = arguments.get("title_key") or []
     branch = str(arguments.get("branch") or "main").strip()
 
+    # Foundry-style integrated backing_source fields
+    property_mappings = arguments.get("property_mappings")  # list of {source_field, target_field}
+    target_field_types = arguments.get("target_field_types")  # dict {field: xsd_type}
+    auto_sync = arguments.get("auto_sync")  # bool (default True)
+
     if not db_name or not class_id or not dataset_id:
         return missing_required_params(
             "ontology_register_object_type",
@@ -66,6 +71,26 @@ async def _ontology_register_object_type(_server: Any, arguments: Dict[str, Any]
                 category=ErrorCategory.RESOURCE,
             )
 
+        # Build backing_source with optional Foundry-style property mappings
+        backing_source_spec: Dict[str, Any] = {"dataset_id": dataset_id}
+        if property_mappings and isinstance(property_mappings, list):
+            normalized = [
+                {"source_field": str(m.get("source_field", "")).strip(),
+                 "target_field": str(m.get("target_field", "")).strip()}
+                for m in property_mappings
+                if isinstance(m, dict) and str(m.get("source_field", "")).strip()
+                and str(m.get("target_field", "")).strip()
+            ]
+            if normalized:
+                backing_source_spec["property_mappings"] = normalized
+                backing_source_spec["mapping_version"] = 1
+                if target_field_types and isinstance(target_field_types, dict):
+                    backing_source_spec["target_field_types"] = target_field_types
+                if auto_sync is not None:
+                    backing_source_spec["auto_sync"] = bool(auto_sync)
+                else:
+                    backing_source_spec["auto_sync"] = True
+
         object_type_payload: Dict[str, Any] = {
             "id": class_id,
             "label": class_id,
@@ -73,7 +98,7 @@ async def _ontology_register_object_type(_server: Any, arguments: Dict[str, Any]
             "spec": {
                 "status": "ACTIVE",
                 "pk_spec": {"primary_key": pk_list, "title_key": title_list},
-                "backing_source": {"dataset_id": dataset_id},
+                "backing_source": backing_source_spec,
             },
         }
 
@@ -85,12 +110,25 @@ async def _ontology_register_object_type(_server: Any, arguments: Dict[str, Any]
             timeout_seconds=30.0,
         )
 
-        if resp.get("error") and "409" in str(resp.get("error")):
+        if resp.get("error") and (resp.get("status_code") == 409 or "409" in str(resp.get("error")) or "already exists" in str(resp.get("error")).lower()):
             logger.info("object_type exists, updating with PUT db=%s class=%s", db_name, class_id)
+            # Re-fetch head commit after 409 (the resource creation may have advanced the commit)
+            head_resp2 = await oms_json(
+                "GET",
+                f"/api/v1/version/{db_name}/head",
+                params={"branch": branch},
+            )
+            head_data2 = head_resp2.get("data") if isinstance(head_resp2.get("data"), dict) else {}
+            head_commit2 = (
+                head_data2.get("head_commit_id")
+                or head_data2.get("commit")
+                or head_data2.get("head_commit")
+                or head_commit
+            )
             resp = await oms_json(
                 "PUT",
                 f"/api/v1/database/{db_name}/ontology/resources/object_type/{class_id}",
-                params={"branch": branch, "expected_head_commit": head_commit},
+                params={"branch": branch, "expected_head_commit": head_commit2},
                 json_body=object_type_payload,
                 timeout_seconds=30.0,
             )
@@ -107,7 +145,8 @@ async def _ontology_register_object_type(_server: Any, arguments: Dict[str, Any]
             payload["class_id"] = class_id
             return payload
 
-        return {
+        has_mappings = "property_mappings" in backing_source_spec
+        result: Dict[str, Any] = {
             "status": "success",
             "message": f"Object type '{class_id}' registered successfully",
             "db_name": db_name,
@@ -115,8 +154,19 @@ async def _ontology_register_object_type(_server: Any, arguments: Dict[str, Any]
             "dataset_id": dataset_id,
             "primary_key": pk_list,
             "title_key": title_list,
-            "hint": "You can now run objectify_run to create instances",
+            "has_property_mappings": has_mappings,
         }
+        if has_mappings:
+            result["hint"] = (
+                "Property mappings are stored in OMS backing_source. "
+                "You can now run objectify_run directly with target_class_id — no separate create_mapping_spec needed."
+            )
+        else:
+            result["hint"] = (
+                "You can now run objectify_create_mapping_spec to define column-to-property mappings, "
+                "then objectify_run to create instances."
+            )
+        return result
 
     except Exception as exc:
         logger.error("ontology_register_object_type failed: %s", exc)

@@ -67,8 +67,8 @@ class OntologyMappingSpecRecord:
 @dataclass(frozen=True)
 class ObjectifyJobRecord:
     job_id: str
-    mapping_spec_id: str
-    mapping_spec_version: int
+    mapping_spec_id: Optional[str]
+    mapping_spec_version: Optional[int]
     dedupe_key: Optional[str]
     dataset_id: str
     dataset_version_id: Optional[str]
@@ -172,8 +172,8 @@ class ObjectifyRegistry(PostgresSchemaRegistry):
             f"""
             CREATE TABLE IF NOT EXISTS {self._schema}.objectify_jobs (
                 job_id UUID PRIMARY KEY,
-                mapping_spec_id UUID NOT NULL,
-                mapping_spec_version INTEGER NOT NULL,
+                mapping_spec_id UUID,
+                mapping_spec_version INTEGER,
                 dedupe_key TEXT,
                 dataset_id UUID NOT NULL,
                 dataset_version_id UUID,
@@ -187,10 +187,7 @@ class ObjectifyRegistry(PostgresSchemaRegistry):
                 report JSONB NOT NULL DEFAULT '{{}}'::jsonb,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                completed_at TIMESTAMPTZ,
-                FOREIGN KEY (mapping_spec_id)
-                    REFERENCES {self._schema}.ontology_mapping_specs(mapping_spec_id)
-                    ON DELETE CASCADE
+                completed_at TIMESTAMPTZ
             )
             """
         )
@@ -333,8 +330,8 @@ class ObjectifyRegistry(PostgresSchemaRegistry):
         occ_version = int(row.get("version", 1) or 1)
         return ObjectifyJobRecord(
             job_id=str(row["job_id"]),
-            mapping_spec_id=str(row["mapping_spec_id"]),
-            mapping_spec_version=int(row["mapping_spec_version"]),
+            mapping_spec_id=str(row["mapping_spec_id"]) if row["mapping_spec_id"] is not None else None,
+            mapping_spec_version=int(row["mapping_spec_version"]) if row["mapping_spec_version"] is not None else None,
             dedupe_key=row.get("dedupe_key"),
             dataset_id=str(row["dataset_id"]),
             dataset_version_id=str(row["dataset_version_id"]) if row.get("dataset_version_id") else None,
@@ -357,15 +354,15 @@ class ObjectifyRegistry(PostgresSchemaRegistry):
         *,
         dataset_id: str,
         dataset_branch: str,
-        mapping_spec_id: str,
-        mapping_spec_version: int,
+        mapping_spec_id: Optional[str],
+        mapping_spec_version: Optional[int],
         dataset_version_id: Optional[str],
         artifact_id: Optional[str],
         artifact_output_name: Optional[str],
     ) -> str:
         parts: List[str] = [
-            f"spec:{mapping_spec_id}",
-            f"version:{int(mapping_spec_version)}",
+            f"spec:{mapping_spec_id or 'oms'}",
+            f"version:{int(mapping_spec_version) if mapping_spec_version is not None else 0}",
             f"dataset:{dataset_id}",
             f"branch:{dataset_branch or 'main'}",
         ]
@@ -686,8 +683,8 @@ class ObjectifyRegistry(PostgresSchemaRegistry):
         self,
         *,
         job_id: str,
-        mapping_spec_id: str,
-        mapping_spec_version: int,
+        mapping_spec_id: Optional[str] = None,
+        mapping_spec_version: Optional[int] = None,
         dataset_id: str,
         dataset_version_id: Optional[str] = None,
         artifact_id: Optional[str] = None,
@@ -727,7 +724,7 @@ class ObjectifyRegistry(PostgresSchemaRegistry):
                         INSERT INTO {self._schema}.objectify_jobs (
                             job_id, mapping_spec_id, mapping_spec_version, dedupe_key, dataset_id, dataset_version_id,
                             artifact_id, artifact_output_name, dataset_branch, target_class_id, status
-                        ) VALUES ($1::uuid, $2::uuid, $3, $4, $5::uuid, $6::uuid, $7::uuid, $8, $9, $10, $11)
+                        ) VALUES ($1::uuid, $2, $3, $4, $5::uuid, $6::uuid, $7::uuid, $8, $9, $10, $11)
                         RETURNING job_id, mapping_spec_id, mapping_spec_version, dedupe_key, dataset_id, dataset_version_id,
                                   artifact_id, artifact_output_name,
                                   dataset_branch, target_class_id, status, command_id, error, report,
@@ -735,7 +732,7 @@ class ObjectifyRegistry(PostgresSchemaRegistry):
                         """,
                         job_id,
                         mapping_spec_id,
-                        int(mapping_spec_version),
+                        int(mapping_spec_version) if mapping_spec_version is not None else None,
                         dedupe_key,
                         dataset_id,
                         dataset_version_id,
@@ -1313,11 +1310,14 @@ class ObjectifyRegistry(PostgresSchemaRegistry):
     async def get_watermark(
         self,
         *,
-        mapping_spec_id: str,
+        mapping_spec_id: Optional[str] = None,
+        target_class_id: Optional[str] = None,
         dataset_branch: str = "main",
     ) -> Optional[Dict[str, Any]]:
         """
-        Get the watermark state for a mapping spec.
+        Get the watermark state for a mapping spec or target class.
+
+        For OMS-backed specs, use target_class_id instead of mapping_spec_id.
 
         Returns:
             Watermark state dict or None if not found
@@ -1325,17 +1325,30 @@ class ObjectifyRegistry(PostgresSchemaRegistry):
         if not self._pool:
             raise RuntimeError("ObjectifyRegistry not connected")
         async with self._pool.acquire() as conn:
-            row = await conn.fetchrow(
-                """
-                SELECT watermark_id, mapping_spec_id, dataset_branch,
-                       watermark_column, watermark_value, dataset_version_id,
-                       lakefs_commit_id, rows_processed, created_at, updated_at
-                FROM objectify_watermarks
-                WHERE mapping_spec_id = $1::uuid AND dataset_branch = $2
-                """,
-                mapping_spec_id,
-                dataset_branch,
-            )
+            if target_class_id and not mapping_spec_id:
+                row = await conn.fetchrow(
+                    """
+                    SELECT watermark_id, mapping_spec_id, target_class_id, dataset_branch,
+                           watermark_column, watermark_value, dataset_version_id,
+                           lakefs_commit_id, rows_processed, created_at, updated_at
+                    FROM objectify_watermarks
+                    WHERE target_class_id = $1 AND dataset_branch = $2
+                    """,
+                    target_class_id,
+                    dataset_branch,
+                )
+            else:
+                row = await conn.fetchrow(
+                    """
+                    SELECT watermark_id, mapping_spec_id, target_class_id, dataset_branch,
+                           watermark_column, watermark_value, dataset_version_id,
+                           lakefs_commit_id, rows_processed, created_at, updated_at
+                    FROM objectify_watermarks
+                    WHERE mapping_spec_id = $1::uuid AND dataset_branch = $2
+                    """,
+                    mapping_spec_id,
+                    dataset_branch,
+                )
             if not row:
                 return None
             return {

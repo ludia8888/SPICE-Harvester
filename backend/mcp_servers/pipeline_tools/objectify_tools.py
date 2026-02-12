@@ -217,6 +217,50 @@ async def _objectify_create_mapping_spec(server: Any, arguments: Dict[str, Any])
         options=options,
     )
 
+    # ── OMS dual-write: sync property_mappings into backing_source ──
+    oms_synced = False
+    try:
+        branch = dataset_branch or dataset.branch or "main"
+        head_resp = await oms_json(
+            "GET",
+            f"/api/v1/version/{db_name}/head",
+            params={"branch": branch},
+        )
+        head_data = head_resp.get("data") if isinstance(head_resp.get("data"), dict) else {}
+        head_commit = (
+            head_data.get("head_commit_id")
+            or head_data.get("commit")
+            or head_data.get("head_commit")
+            or ""
+        )
+        if head_commit:
+            ot_resp = await oms_json(
+                "GET",
+                f"/api/v1/database/{db_name}/ontology/resources/object_type/{target_class_id}",
+                params={"branch": branch},
+            )
+            ot_data = ot_resp.get("data") if isinstance(ot_resp.get("data"), dict) else ot_resp
+            ot_spec = (ot_data.get("spec") if isinstance(ot_data, dict) else {}) or {}
+            backing = (ot_spec.get("backing_source") if isinstance(ot_spec, dict) else {}) or {}
+            if backing:
+                backing["property_mappings"] = normalized_mappings
+                if target_field_types:
+                    backing["target_field_types"] = target_field_types
+                backing["auto_sync"] = auto_sync
+                backing["mapping_version"] = mapping_spec.version if hasattr(mapping_spec, "version") else 1
+                ot_spec["backing_source"] = backing
+                ot_data["spec"] = ot_spec
+                await oms_json(
+                    "PUT",
+                    f"/api/v1/database/{db_name}/ontology/resources/object_type/{target_class_id}",
+                    params={"branch": branch, "expected_head_commit": head_commit},
+                    json_body=ot_data,
+                    timeout_seconds=30.0,
+                )
+                oms_synced = True
+    except Exception as oms_exc:
+        logger.warning("OMS dual-write for mapping_spec failed (non-fatal): %s", oms_exc)
+
     return {
         "status": "success",
         "mapping_spec_id": mapping_spec.mapping_spec_id,
@@ -225,6 +269,7 @@ async def _objectify_create_mapping_spec(server: Any, arguments: Dict[str, Any])
         "mappings_count": len(normalized_mappings),
         "auto_sync": auto_sync,
         "schema_hash": schema_hash,
+        "oms_synced": oms_synced,
         "message": "Mapping spec created. Use objectify_run to execute transformation.",
     }
 
@@ -260,6 +305,7 @@ async def _objectify_list_mapping_specs(server: Any, arguments: Dict[str, Any]) 
 async def _objectify_run(server: Any, arguments: Dict[str, Any]) -> Any:
     dataset_id = str(arguments.get("dataset_id") or "").strip()
     mapping_spec_id = str(arguments.get("mapping_spec_id") or "").strip() or None
+    target_class_id = str(arguments.get("target_class_id") or "").strip() or None
     dataset_version_id = str(arguments.get("dataset_version_id") or "").strip() or None
     db_name = str(arguments.get("db_name") or "").strip()
     max_rows = arguments.get("max_rows")
@@ -280,14 +326,51 @@ async def _objectify_run(server: Any, arguments: Dict[str, Any]) -> Any:
             category=ErrorCategory.RESOURCE,
         )
 
+    # ── Mapping resolution: OMS backing_source (by target_class_id) or PostgreSQL ──
     mapping_spec = None
-    if mapping_spec_id:
-        mapping_spec = await objectify_registry.get_mapping_spec(mapping_spec_id=mapping_spec_id)
-    else:
-        specs = await objectify_registry.list_mapping_specs(dataset_id=dataset_id, limit=10)
-        active_specs = [s for s in specs if s.status == "ACTIVE" and s.auto_sync]
-        if active_specs:
-            mapping_spec = await objectify_registry.get_mapping_spec(mapping_spec_id=active_specs[0].mapping_spec_id)
+    oms_mode = False
+
+    if target_class_id and not mapping_spec_id:
+        # Try OMS backing_source first
+        try:
+            ot_resp = await oms_json(
+                "GET",
+                f"/api/v1/database/{db_name}/ontology/resources/object_type/{target_class_id}",
+                params={"branch": dataset.branch or "main"},
+            )
+            ot_data = ot_resp.get("data") if isinstance(ot_resp.get("data"), dict) else ot_resp
+            ot_spec = (ot_data.get("spec") if isinstance(ot_data, dict) else {}) or {}
+            backing = ot_spec.get("backing_source") or {}
+            prop_mappings = backing.get("property_mappings")
+            if prop_mappings and isinstance(prop_mappings, list):
+                from shared.services.registries.backing_source_adapter import BackingSourceMappingSpec
+                mapping_spec = BackingSourceMappingSpec(
+                    mapping_spec_id=f"oms:{target_class_id}",
+                    dataset_id=dataset_id,
+                    dataset_branch=dataset.branch or "main",
+                    artifact_output_name=dataset.name,
+                    schema_hash=backing.get("schema_hash"),
+                    target_class_id=target_class_id,
+                    mappings=[
+                        {"source_field": str(m.get("source_field", "")), "target_field": str(m.get("target_field", ""))}
+                        for m in prop_mappings if isinstance(m, dict)
+                    ],
+                    target_field_types=backing.get("target_field_types") or {},
+                    auto_sync=backing.get("auto_sync", True),
+                    version=int(backing.get("mapping_version") or 1),
+                )
+                oms_mode = True
+        except Exception as oms_exc:
+            logger.warning("OMS backing_source lookup failed for %s (falling back to PG): %s", target_class_id, oms_exc)
+
+    if not mapping_spec:
+        if mapping_spec_id:
+            mapping_spec = await objectify_registry.get_mapping_spec(mapping_spec_id=mapping_spec_id)
+        else:
+            specs = await objectify_registry.list_mapping_specs(dataset_id=dataset_id, limit=10)
+            active_specs = [s for s in specs if s.status == "ACTIVE" and s.auto_sync]
+            if active_specs:
+                mapping_spec = await objectify_registry.get_mapping_spec(mapping_spec_id=active_specs[0].mapping_spec_id)
 
     if not mapping_spec:
         payload = tool_error(
@@ -296,9 +379,12 @@ async def _objectify_run(server: Any, arguments: Dict[str, Any]) -> Any:
             code=ErrorCode.RESOURCE_NOT_FOUND,
             category=ErrorCategory.RESOURCE,
             external_code="MAPPING_SPEC_NOT_FOUND",
-            context={"dataset_id": dataset_id},
+            context={"dataset_id": dataset_id, "target_class_id": target_class_id},
         )
-        payload["hint"] = "Use objectify_create_mapping_spec to create a mapping first"
+        payload["hint"] = (
+            "Use ontology_register_object_type with property_mappings to define mappings in OMS, "
+            "or objectify_create_mapping_spec for PostgreSQL-based mappings."
+        )
         return payload
 
     if dataset_version_id:
@@ -317,12 +403,15 @@ async def _objectify_run(server: Any, arguments: Dict[str, Any]) -> Any:
         )
 
     from uuid import uuid4
+    from shared.services.registries.backing_source_adapter import is_oms_mapping_spec
 
     job_id = str(uuid4())
+    is_oms = is_oms_mapping_spec(mapping_spec.mapping_spec_id) if mapping_spec.mapping_spec_id else oms_mode
+    dedupe_spec_id = mapping_spec.target_class_id if is_oms else mapping_spec.mapping_spec_id
     dedupe_key = objectify_registry.build_dedupe_key(
         dataset_id=dataset_id,
         dataset_branch=dataset.branch,
-        mapping_spec_id=mapping_spec.mapping_spec_id,
+        mapping_spec_id=dedupe_spec_id,
         mapping_spec_version=mapping_spec.version,
         dataset_version_id=version.version_id,
         artifact_id=None,
@@ -344,6 +433,9 @@ async def _objectify_run(server: Any, arguments: Dict[str, Any]) -> Any:
     if batch_size is not None:
         options["batch_size"] = int(batch_size)
 
+    # OMS-sourced: mapping_spec_id=None (can't store "oms:..." in PG uuid column)
+    pg_spec_id = None if is_oms else mapping_spec.mapping_spec_id
+    pg_spec_version = None if is_oms else mapping_spec.version
     job = ObjectifyJob(
         job_id=job_id,
         db_name=db_name,
@@ -353,8 +445,8 @@ async def _objectify_run(server: Any, arguments: Dict[str, Any]) -> Any:
         dedupe_key=dedupe_key,
         dataset_branch=dataset.branch,
         artifact_key=version.artifact_key or "",
-        mapping_spec_id=mapping_spec.mapping_spec_id,
-        mapping_spec_version=mapping_spec.version,
+        mapping_spec_id=pg_spec_id,
+        mapping_spec_version=pg_spec_version,
         target_class_id=mapping_spec.target_class_id,
         ontology_branch=options.get("ontology_branch"),
         max_rows=options.get("max_rows"),
@@ -372,6 +464,7 @@ async def _objectify_run(server: Any, arguments: Dict[str, Any]) -> Any:
         "dataset_version_id": version.version_id,
         "mapping_spec_id": mapping_spec.mapping_spec_id,
         "target_class_id": mapping_spec.target_class_id,
+        "oms_mode": is_oms,
         "message": "Objectify job enqueued. Use objectify_get_status to check progress.",
     }
 
