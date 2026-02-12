@@ -159,13 +159,27 @@ class EventPublisher:
         # Kafka 토픽 생성 확인
         await self.ensure_kafka_topics()
 
-        # Reset checkpoint to avoid stale index keys after broker/storage restarts
+        # Preserve existing checkpoint across restarts to avoid missing events.
+        # Only initialize a fresh checkpoint when none exists in S3.
         try:
-            checkpoint = self._initial_checkpoint()
-            await self._save_checkpoint(checkpoint)
-            logger.info("Reset event publisher checkpoint on startup")
+            existing_checkpoint = await self._load_checkpoint()
+            if existing_checkpoint and existing_checkpoint.get("last_timestamp_ms"):
+                logger.info(
+                    "Preserving existing checkpoint (last_timestamp_ms=%s, last_index_key=%s)",
+                    existing_checkpoint.get("last_timestamp_ms"),
+                    existing_checkpoint.get("last_index_key"),
+                )
+            else:
+                checkpoint = self._initial_checkpoint()
+                await self._save_checkpoint(checkpoint)
+                logger.info("No existing checkpoint found; initialized to default (now - 5min)")
         except Exception as e:
-            logger.warning(f"Failed to reset publisher checkpoint: {e}")
+            logger.warning(f"Failed to check publisher checkpoint, resetting to default: {e}")
+            try:
+                checkpoint = self._initial_checkpoint()
+                await self._save_checkpoint(checkpoint)
+            except Exception:
+                pass
 
         # Ensure bucket exists
         async with self.session.client(

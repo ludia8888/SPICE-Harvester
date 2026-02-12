@@ -145,6 +145,10 @@ class ActionSimulateRequest(BaseModel):
         default=None,
         description="Optional scenario list (policy comparisons). If omitted, server simulates the effective policy only.",
     )
+    use_branch_head: bool = Field(
+        default=False,
+        description="Use branch HEAD instead of deployed commit for action type resolution (dev/test only)",
+    )
     include_effects: bool = Field(default=True, description="If true, compute downstream lakeFS/ES overlay effects")
     assumptions: Optional[ActionSimulateAssumptions] = Field(
         default=None,
@@ -462,19 +466,42 @@ async def simulate_action_async(
 
         resolved_base_branch = str(request.base_branch or "").strip() or "main"
 
-        deployments = OntologyDeploymentRegistryV2()
-        latest = await deployments.get_latest_deployed_commit(db_name=db_name, target_branch=resolved_base_branch)
-        if not latest or not latest.get("ontology_commit_id"):
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={
-                    "error": "no_deployed_ontology",
-                    "message": "No deployed ontology commit found; deploy ontology before simulating actions.",
-                    "db_name": db_name,
-                    "target_branch": resolved_base_branch,
-                },
-            )
-        ontology_commit_id = str(latest["ontology_commit_id"])
+        if request.use_branch_head:
+            # Dev/test mode: use branch HEAD commit for action type resolution
+            # (allows simulating action types that have not been deployed yet).
+            from shared.utils.commit_utils import coerce_commit_id
+            branches = await terminus.version_control_service.list_branches(db_name)
+            head_commit = None
+            for item in branches or []:
+                if isinstance(item, dict) and item.get("name") == resolved_base_branch:
+                    head_commit = coerce_commit_id(item.get("head"))
+                    break
+            if not head_commit:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={
+                        "error": "branch_head_not_found",
+                        "message": f"Branch HEAD not found for '{resolved_base_branch}'",
+                        "db_name": db_name,
+                        "target_branch": resolved_base_branch,
+                    },
+                )
+            ontology_commit_id = str(head_commit)
+            logger.info("Simulate using branch HEAD: %s (dev mode)", ontology_commit_id)
+        else:
+            deployments = OntologyDeploymentRegistryV2()
+            latest = await deployments.get_latest_deployed_commit(db_name=db_name, target_branch=resolved_base_branch)
+            if not latest or not latest.get("ontology_commit_id"):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={
+                        "error": "no_deployed_ontology",
+                        "message": "No deployed ontology commit found; deploy ontology before simulating actions.",
+                        "db_name": db_name,
+                        "target_branch": resolved_base_branch,
+                    },
+                )
+            ontology_commit_id = str(latest["ontology_commit_id"])
 
         resources = OntologyResourceService(terminus)
         action_resource = await resources.get_resource(

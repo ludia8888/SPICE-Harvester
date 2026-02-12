@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
@@ -19,6 +20,32 @@ class ActionImplementationError(ValueError):
 
 _ALLOWED_IMPLEMENTATION_TYPES = {"template_v1", "function_v1"}
 _ALLOWED_REF_ROOTS = {"input", "user", "target"}
+
+# Mustache/Handlebars syntax detection — these are NOT supported by the $ref engine.
+_MUSTACHE_PATTERN = re.compile(r"\{\{.*?\}\}")
+
+
+def _detect_mustache_syntax(value: Any, *, label: str) -> None:
+    """Reject mustache/handlebars syntax in template values.
+
+    SPICE uses ``{"$ref": "input.field_name"}`` for dynamic value resolution.
+    Mustache-style ``{{input.field_name}}`` is silently treated as a literal string
+    by ``_resolve_value()``, leading to incorrect data being persisted.
+    """
+    if isinstance(value, str) and _MUSTACHE_PATTERN.search(value):
+        raise ActionImplementationError(
+            f"{label} contains mustache syntax '{value}'. "
+            f'Use {{"$ref": "input.field_name"}} instead.'
+        )
+    if isinstance(value, list):
+        for i, item in enumerate(value):
+            _detect_mustache_syntax(item, label=f"{label}[{i}]")
+    if isinstance(value, dict):
+        # Skip $ref / $now objects — they are valid template directives.
+        if len(value) == 1 and ("$ref" in value or "$now" in value):
+            return
+        for k, v in value.items():
+            _detect_mustache_syntax(v, label=f"{label}.{k}")
 
 
 def _is_non_empty_str(value: Any) -> bool:
@@ -137,6 +164,11 @@ def _resolve_value(
             k: _resolve_value(v, input_payload=input_payload, user=user, target=target, now=now)
             for k, v in value.items()
         }
+    # Defense: reject mustache syntax that would otherwise pass through as a literal string.
+    if isinstance(value, str) and _MUSTACHE_PATTERN.search(value):
+        raise ActionImplementationError(
+            f"Unresolved mustache syntax in value: '{value}'. Use $ref objects instead."
+        )
     return value
 
 
@@ -216,6 +248,7 @@ def _normalize_set_ops(value: Any, *, label: str) -> Dict[str, Any]:
     out: Dict[str, Any] = {}
     for k, v in value.items():
         key = _require_public_identifier(k, label=f"{label}.{k}")
+        _detect_mustache_syntax(v, label=f"{label}.{k}")
         out[key] = v
     return out
 

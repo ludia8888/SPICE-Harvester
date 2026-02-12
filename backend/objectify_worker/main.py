@@ -44,6 +44,7 @@ from shared.services.registries.objectify_registry import ObjectifyRegistry
 from shared.services.registries.pipeline_registry import PipelineRegistry
 from shared.services.storage.elasticsearch_service import ElasticsearchService, create_elasticsearch_service
 from shared.services.storage.lakefs_storage_service import create_lakefs_storage_service
+from shared.services.storage.storage_service import create_storage_service
 from shared.services.registries.lineage_store import LineageStore
 from shared.services.registries.processed_event_registry import ProcessedEventRegistry
 from shared.services.registries.processed_event_registry_factory import create_processed_event_registry
@@ -240,6 +241,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
         self.processed: Optional[ProcessedEventRegistry] = None
         self.lineage_store: Optional[LineageStore] = None
         self.storage = None
+        self.instance_storage = None  # MinIO/S3 StorageService for instance-events
         self.http: Optional[httpx.AsyncClient] = None
         self.elasticsearch_service: Optional[ElasticsearchService] = None
         self.instance_write_path: Optional[ObjectifyWritePath] = None
@@ -689,8 +691,15 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
 
         self.elasticsearch_service = create_elasticsearch_service(settings)
         await self.elasticsearch_service.connect()
+        self.instance_storage = create_storage_service(settings)
+        if self.instance_storage:
+            logger.info("instance-events StorageService initialized (bucket=%s)", settings.storage.instance_bucket)
+        else:
+            logger.warning("instance-events StorageService unavailable; S3 command files will not be written")
         self.instance_write_path = DatasetPrimaryIndexWritePath(
             elasticsearch_service=self.elasticsearch_service,
+            storage_service=self.instance_storage,
+            instance_bucket=settings.storage.instance_bucket,
             chunk_size=self.dataset_primary_index_chunk_size,
             refresh=self.dataset_primary_refresh,
             prune_stale_on_full=self.dataset_primary_prune_stale_on_full,

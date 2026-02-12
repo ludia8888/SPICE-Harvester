@@ -93,6 +93,7 @@ class OntologyDeployRequest(BaseModel):
 class OntologyApproveRequest(BaseModel):
     merge_message: Optional[str] = Field(None, description="Merge message override")
     author: str = Field("system", description="Approval author")
+    force: bool = Field(False, description="Skip health gate check (admin override)")
 
 
 async def _get_pr_service() -> PullRequestService:
@@ -843,7 +844,7 @@ async def approve_ontology_proposal(
                     },
                 )
 
-        if _require_health_gate(target_branch):
+        if _require_health_gate(target_branch) and not request.force:
             health = await _compute_ontology_health(
                 db_name=db_name,
                 branch=source_branch,
@@ -863,6 +864,11 @@ async def approve_ontology_proposal(
                         "errors": errors,
                     },
                 )
+        elif request.force and _require_health_gate(target_branch):
+            logger.warning(
+                "Health gate bypassed (force=true) for proposal %s by %s",
+                proposal_id, request.author,
+            )
 
         result = await pr_service.merge_pull_request(
             pr_id=proposal_id,

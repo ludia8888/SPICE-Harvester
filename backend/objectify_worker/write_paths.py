@@ -3,6 +3,7 @@ Objectify write path strategies.
 
 Encapsulates how objectified instances are persisted:
 - Dataset-primary indexing (direct ES bulk index)
+- instance-events S3 command files (for action writeback base state)
 """
 
 from __future__ import annotations
@@ -10,12 +11,15 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Protocol
+from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Mapping, Optional, Protocol
 
 from shared.config.search_config import get_default_index_settings, get_instances_index_name
 from shared.models.objectify_job import ObjectifyJob
 from shared.services.storage.elasticsearch_service import ElasticsearchService
 from shared.utils.deterministic_ids import deterministic_uuid5_hex_prefix, deterministic_uuid5_str
+
+if TYPE_CHECKING:
+    from shared.services.storage.storage_service import StorageService
 
 logger = logging.getLogger(__name__)
 
@@ -117,11 +121,15 @@ class DatasetPrimaryIndexWritePath:
         self,
         *,
         elasticsearch_service: ElasticsearchService,
+        storage_service: Optional["StorageService"] = None,
+        instance_bucket: str = "instance-events",
         chunk_size: int = 500,
         refresh: bool = False,
         prune_stale_on_full: bool = True,
     ) -> None:
         self._es = elasticsearch_service
+        self._storage = storage_service
+        self._instance_bucket = instance_bucket
         self._chunk_size = max(1, int(chunk_size))
         self._refresh = bool(refresh)
         self._prune_stale_on_full = bool(prune_stale_on_full)
@@ -189,7 +197,91 @@ class DatasetPrimaryIndexWritePath:
             if failed > 0:
                 raise RuntimeError(f"dataset_primary_bulk_index_failed:{failed}")
 
+        # Write BULK_CREATE_INSTANCES command files to instance-events S3 bucket.
+        # These files are consumed by action_worker to reconstruct base instance state
+        # via list_command_files() → replay_instance_state().
+        if self._storage and indexed_instance_ids:
+            await self._write_instance_commands_to_s3(
+                job=job,
+                instances=instances,
+                indexed_instance_ids=indexed_instance_ids,
+                branch=branch,
+                now_iso=now,
+                batch_sequence=batch_sequence,
+            )
+
         return ObjectifyWriteBatchResult(command_ids=[], indexed_instance_ids=indexed_instance_ids)
+
+    async def _write_instance_commands_to_s3(
+        self,
+        *,
+        job: ObjectifyJob,
+        instances: List[Dict[str, Any]],
+        indexed_instance_ids: List[str],
+        branch: str,
+        now_iso: str,
+        batch_sequence: int,
+    ) -> None:
+        """Write BULK_CREATE_INSTANCES command files to instance-events S3 for action writeback."""
+        assert self._storage is not None  # caller checks
+        timestamp = now_iso.replace(":", "").replace("-", "").replace("+", "")
+        instance_map: Dict[str, Dict[str, Any]] = {}
+        for inst in instances:
+            if not isinstance(inst, dict):
+                continue
+            iid = str(inst.get("instance_id") or "").strip()
+            if iid:
+                instance_map[iid] = inst
+
+        written = 0
+        failed_count = 0
+        for instance_id in indexed_instance_ids:
+            inst_data = instance_map.get(instance_id, {})
+            command_id = deterministic_uuid5_str(f"objectify:{job.job_id}:{instance_id}:{batch_sequence}")
+
+            # Build flat payload excluding internal metadata keys
+            payload: Dict[str, Any] = {}
+            _skip = {"instance_id", "class_id", "db_name", "branch", "properties", "_metadata"}
+            for k, v in inst_data.items():
+                if k not in _skip:
+                    payload[k] = v
+
+            command_file: Dict[str, Any] = {
+                "command_type": "BULK_CREATE_INSTANCES",
+                "command_id": command_id,
+                "instance_id": instance_id,
+                "class_id": job.target_class_id,
+                "db_name": job.db_name,
+                "branch": branch,
+                "payload": payload,
+                "created_at": now_iso,
+                "created_by": f"objectify:{job.job_id}",
+            }
+
+            s3_key = (
+                f"{job.db_name}/{branch}/{job.target_class_id}/{instance_id}/"
+                f"{timestamp}_{command_id}_BULK_CREATE_INSTANCES.json"
+            )
+            try:
+                await self._storage.save_json(
+                    self._instance_bucket,
+                    s3_key,
+                    command_file,
+                )
+                written += 1
+            except Exception as exc:
+                failed_count += 1
+                if failed_count <= 3:
+                    logger.warning(
+                        "Failed to write instance command to S3 (instance=%s): %s",
+                        instance_id, exc,
+                    )
+
+        if written:
+            logger.info(
+                "Wrote %d instance command files to s3://%s (class=%s, job=%s, failed=%d)",
+                written, self._instance_bucket, job.target_class_id, job.job_id, failed_count,
+            )
 
     async def finalize_job(
         self,
