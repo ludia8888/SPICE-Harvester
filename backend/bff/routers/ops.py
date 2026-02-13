@@ -1,4 +1,5 @@
 from __future__ import annotations
+from shared.observability.tracing import trace_endpoint
 
 import logging
 from typing import Any, Dict
@@ -16,6 +17,7 @@ router = APIRouter(prefix="/ops", tags=["Ops"])
 
 
 @router.get("/status", response_model=Dict[str, Any])
+@trace_endpoint("bff.ops.ops_status")
 async def ops_status(
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
     objectify_registry: ObjectifyRegistry = Depends(get_objectify_registry),

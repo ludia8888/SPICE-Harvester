@@ -36,7 +36,7 @@ from shared.dependencies.providers import (
 )
 from shared.config.settings import ApplicationSettings
 from shared.errors.error_envelope import build_error_envelope
-from shared.errors.error_types import ErrorCategory, ErrorCode
+from shared.errors.error_types import ErrorCategory, ErrorCode, classified_http_exception
 from shared.observability.request_context import get_correlation_id, get_request_id
 from shared.utils.label_mapper import LabelMapper
 from shared.utils.jsonld import JSONToJSONLDConverter
@@ -77,9 +77,10 @@ class BFFDependencyProvider:
         try:
             return await container.get(OMSClient)
         except Exception as e:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=f"OMS client not available: {str(e)}",
+            raise classified_http_exception(
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                f"OMS client not available: {str(e)}",
+                code=ErrorCode.UPSTREAM_UNAVAILABLE,
             )
     
     @staticmethod
@@ -100,9 +101,10 @@ class BFFDependencyProvider:
         try:
             return await container.get(ActionLogRegistry)
         except Exception as e:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=f"ActionLogRegistry not available: {str(e)}",
+            raise classified_http_exception(
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                f"ActionLogRegistry not available: {str(e)}",
+                code=ErrorCode.UPSTREAM_UNAVAILABLE,
             ) from e
 
 
@@ -199,7 +201,7 @@ class TerminusService:
                     detail = detail_json.get("detail") or detail_json
             except Exception:
                 pass
-            raise HTTPException(status_code=e.response.status_code, detail=detail) from e
+            raise classified_http_exception(e.response.status_code, str(detail), code=ErrorCode.UPSTREAM_ERROR) from e
         except Exception:
             # Re-raise other exceptions
             raise
@@ -442,7 +444,7 @@ class TerminusService:
                     payload = response.json()
                 except Exception:
                     payload = {"detail": response.text}
-                raise HTTPException(status_code=response.status_code, detail=payload)
+                raise classified_http_exception(response.status_code, str(payload), code=ErrorCode.UPSTREAM_ERROR)
             return response.json()
         except (httpx.HTTPError, httpx.TimeoutException, ValueError) as e:
             raise RuntimeError(f"고급 온톨로지 생성 실패 ({db_name}): {e}")

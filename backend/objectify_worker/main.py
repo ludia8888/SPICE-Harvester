@@ -70,6 +70,7 @@ from shared.utils.app_logger import configure_logging
 from shared.services.core.relationship_extractor import (
     extract_relationships as _extract_instance_relationships_raw,
 )
+from objectify_worker.validation_codes import ObjectifyValidationCode as VC
 from objectify_worker.write_paths import (
     DatasetPrimaryIndexWritePath,
     ObjectifyWritePath,
@@ -1091,7 +1092,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                 report={
                     "errors": [
                         {
-                            "code": "MAPPING_SPEC_UNSUPPORTED_TYPE",
+                            "code": VC.MAPPING_SPEC_UNSUPPORTED_TYPE.value,
                             "message": (
                                 "Link-index mode is no longer supported in objectify worker. "
                                 "Use relationship-aware ingestion or dedicated link indexing pipeline."
@@ -1136,7 +1137,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
         ontology_payload = await self._fetch_class_schema(job)
         prop_map, rel_map = self._extract_ontology_fields(ontology_payload)
         if not prop_map:
-            await _fail_job("validation_failed", report={"errors": [{"code": "ONTOLOGY_SCHEMA_MISSING"}]})
+            await _fail_job("validation_failed", report={"errors": [{"code": VC.ONTOLOGY_SCHEMA_MISSING.value}]})
 
         unknown_targets = [t for t in mapping_targets if t not in prop_map and t not in rel_map]
         if unknown_targets:
@@ -1145,7 +1146,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                 report={
                     "errors": [
                         {
-                            "code": "MAPPING_SPEC_TARGET_UNKNOWN",
+                            "code": VC.MAPPING_SPEC_TARGET_UNKNOWN.value,
                             "targets": unknown_targets,
                             "message": "Mapping targets missing from ontology schema",
                         }
@@ -1170,7 +1171,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                     report={
                         "errors": [
                             {
-                                "code": "MAPPING_SPEC_RELATIONSHIP_CARDINALITY_UNSUPPORTED",
+                                "code": VC.MAPPING_SPEC_RELATIONSHIP_CARDINALITY_UNSUPPORTED.value,
                                 "targets": unsupported_relationships,
                                 "message": "Relationship cardinality requires join-table mapping",
                             }
@@ -1183,7 +1184,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                 report={
                     "errors": [
                         {
-                            "code": "MAPPING_SPEC_RELATIONSHIP_REQUIRED",
+                            "code": VC.MAPPING_SPEC_RELATIONSHIP_REQUIRED.value,
                             "message": "link_index requires relationship targets",
                         }
                     ]
@@ -1225,7 +1226,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                 report={
                     "errors": [
                         {
-                            "code": "VALUE_TYPE_NOT_FOUND",
+                            "code": VC.VALUE_TYPE_NOT_FOUND.value,
                             "value_type_refs": sorted(missing_value_types),
                             "message": "Referenced value types are missing",
                         }
@@ -1311,7 +1312,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                 report={
                     "errors": [
                         {
-                            "code": "OBJECT_TYPE_CONTRACT_MISSING",
+                            "code": VC.OBJECT_TYPE_CONTRACT_MISSING.value,
                             "message": "Object type contract is required for objectify",
                         }
                     ]
@@ -1324,7 +1325,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                 report={
                     "errors": [
                         {
-                            "code": "OBJECT_TYPE_INACTIVE",
+                            "code": VC.OBJECT_TYPE_INACTIVE.value,
                             "status": status_value,
                             "message": "Object type contract is not active",
                         }
@@ -1348,7 +1349,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                 report={
                     "errors": [
                         {
-                            "code": "OBJECT_TYPE_PRIMARY_KEY_MISSING",
+                            "code": VC.OBJECT_TYPE_PRIMARY_KEY_MISSING.value,
                             "message": "Object type pk_spec.primary_key is required",
                         }
                     ]
@@ -1360,7 +1361,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                 report={
                     "errors": [
                         {
-                            "code": "OBJECT_TYPE_TITLE_KEY_MISSING",
+                            "code": VC.OBJECT_TYPE_TITLE_KEY_MISSING.value,
                             "message": "Object type pk_spec.title_key is required",
                         }
                     ]
@@ -1381,7 +1382,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                 report={
                     "errors": [
                         {
-                            "code": "OBJECT_TYPE_KEY_FIELDS_MISSING",
+                            "code": VC.OBJECT_TYPE_KEY_FIELDS_MISSING.value,
                             "fields": missing_contract_fields,
                             "message": "Object type key spec fields missing from ontology schema",
                         }
@@ -1397,7 +1398,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                 report={
                     "errors": [
                         {
-                            "code": "MAPPING_SPEC_UNSUPPORTED_TYPE",
+                            "code": VC.MAPPING_SPEC_UNSUPPORTED_TYPE.value,
                             "targets": unsupported_mapped,
                             "message": "Mapping targets include unsupported property types",
                         }
@@ -1445,7 +1446,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
         ontology_pk_targets = _extract_ontology_pk_targets(ontology_payload)
         if ontology_pk_targets and ontology_pk_targets != object_type_pk_targets:
             issue = {
-                "code": "ONTOLOGY_OBJECT_TYPE_PRIMARY_KEY_MISMATCH",
+                "code": VC.ONTOLOGY_OBJECT_TYPE_PRIMARY_KEY_MISMATCH.value,
                 "expected": object_type_pk_targets,
                 "observed": ontology_pk_targets,
                 "message": "Ontology primaryKey does not match object_type pk_spec (fields+order)",
@@ -1470,7 +1471,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
             if set(requested_pk_targets) == set(object_type_pk_targets):
                 warnings.append(
                     {
-                        "code": "OBJECTIFY_PRIMARY_KEY_ORDER_OVERRIDE_IGNORED",
+                        "code": VC.OBJECTIFY_PRIMARY_KEY_ORDER_OVERRIDE_IGNORED.value,
                         "expected": object_type_pk_targets,
                         "observed": requested_pk_targets,
                         "message": "Ignoring primary key order override; using object_type pk_spec order",
@@ -1479,7 +1480,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
             else:
                 warnings.append(
                     {
-                        "code": "OBJECTIFY_PRIMARY_KEY_OVERRIDE_IGNORED",
+                        "code": VC.OBJECTIFY_PRIMARY_KEY_OVERRIDE_IGNORED.value,
                         "expected": object_type_pk_targets,
                         "observed": requested_pk_targets,
                         "message": "Ignoring primary key override; using object_type pk_spec",
@@ -1503,7 +1504,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                         report={
                             "errors": [
                                 {
-                                    "code": "KEY_SPEC_PRIMARY_KEY_MISSING",
+                                    "code": VC.KEY_SPEC_PRIMARY_KEY_MISSING.value,
                                     "sources": missing_pk_sources,
                                     "message": "Key spec primary key columns are not mapped",
                                 }
@@ -1523,7 +1524,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                         report={
                             "errors": [
                                 {
-                                    "code": "KEY_SPEC_PRIMARY_KEY_TARGET_MISMATCH",
+                                    "code": VC.KEY_SPEC_PRIMARY_KEY_TARGET_MISMATCH.value,
                                     "targets": invalid_pk_targets,
                                     "message": "Key spec primary key sources must map to ontology primary keys",
                                 }
@@ -1548,7 +1549,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                 report={
                     "errors": [
                         {
-                            "code": "MAPPING_SPEC_REQUIRED_MISSING",
+                            "code": VC.MAPPING_SPEC_REQUIRED_MISSING.value,
                             "targets": missing_required,
                             "message": "Required ontology fields are not mapped",
                         }
@@ -1562,7 +1563,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                 report={
                     "errors": [
                         {
-                            "code": "MAPPING_SPEC_TITLE_KEY_MISSING",
+                            "code": VC.MAPPING_SPEC_TITLE_KEY_MISSING.value,
                             "targets": missing_title_targets,
                             "message": "Title key targets are not mapped",
                         }
@@ -1577,7 +1578,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                 report={
                     "errors": [
                         {
-                            "code": "MAPPING_SPEC_UNIQUE_KEY_MISSING",
+                            "code": VC.MAPPING_SPEC_UNIQUE_KEY_MISSING.value,
                             "targets": missing_unique_targets,
                             "message": "Unique key targets are not mapped",
                         }
@@ -1590,7 +1591,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                 report={
                     "errors": [
                         {
-                            "code": "MAPPING_SPEC_PRIMARY_KEY_MISSING",
+                            "code": VC.MAPPING_SPEC_PRIMARY_KEY_MISSING.value,
                             "message": "primary_key_targets is required when no primary key is defined on target class",
                         }
                     ]
@@ -1603,7 +1604,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                 report={
                     "errors": [
                         {
-                            "code": "MAPPING_SPEC_PRIMARY_KEY_MISSING",
+                            "code": VC.MAPPING_SPEC_PRIMARY_KEY_MISSING.value,
                             "targets": missing_pk_targets,
                             "message": "Primary key targets are not mapped",
                         }
@@ -1639,7 +1640,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                     report={
                         "errors": [
                             {
-                                "code": "MAPPING_SPEC_TARGET_TYPE_MISMATCH",
+                                "code": VC.MAPPING_SPEC_TARGET_TYPE_MISMATCH.value,
                                 "mismatches": mismatches,
                                 "message": "Mapping spec target types do not match ontology",
                             }
@@ -1975,7 +1976,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                     report={
                         "errors": [
                             {
-                                "code": "PRIMARY_KEY_MISSING",
+                                "code": VC.PRIMARY_KEY_MISSING.value,
                                 "message": "Row key cannot be derived from primary key values",
                             }
                         ]
@@ -2751,7 +2752,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                 "instance_row_indices": [],
                 "errors": [
                     {
-                        "code": "SOURCE_FIELD_MISSING",
+                        "code": VC.SOURCE_FIELD_MISSING.value,
                         "missing_sources": missing_sources,
                         "message": "Mapping source fields missing from dataset schema",
                     }
@@ -2819,7 +2820,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                                 "row_index": int(row_offset) + int(row_idx),
                                 "source_field": source_name,
                                 "target_field": target_name,
-                                "code": "RELATIONSHIP_TARGET_MISSING",
+                                "code": VC.RELATIONSHIP_TARGET_MISSING.value,
                                 "message": "Relationship target class missing from ontology",
                             }
                         )
@@ -2834,7 +2835,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                                 "source_field": source_name,
                                 "target_field": target_name,
                                 "raw_value": raw,
-                                "code": "RELATIONSHIP_REF_INVALID",
+                                "code": VC.RELATIONSHIP_REF_INVALID.value,
                                 "message": str(exc),
                             }
                         )
@@ -2871,7 +2872,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                         present = True
                         break
                 if not present:
-                    code = "PRIMARY_KEY_MISSING" if target in pk_targets else "REQUIRED_FIELD_MISSING"
+                    code = VC.PRIMARY_KEY_MISSING.value if target in pk_targets else "REQUIRED_FIELD_MISSING"
                     errors.append(
                         {
                             "row_index": absolute_idx,
@@ -2897,7 +2898,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                         {
                             "row_index": absolute_idx,
                             "target_field": field,
-                            "code": "VALUE_CONSTRAINT_FAILED",
+                            "code": VC.VALUE_CONSTRAINT_FAILED.value,
                             "message": message,
                         }
                     )
@@ -2923,7 +2924,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                     errors.append(
                         {
                             "row_index": absolute_idx,
-                            "code": "PRIMARY_KEY_MISSING",
+                            "code": VC.PRIMARY_KEY_MISSING.value,
                             "message": "Row key cannot be derived from primary key values",
                         }
                     )
@@ -2933,7 +2934,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                     errors.append(
                         {
                             "row_index": absolute_idx,
-                            "code": "PRIMARY_KEY_DUPLICATE",
+                            "code": VC.PRIMARY_KEY_DUPLICATE.value,
                             "row_key": row_key,
                             "message": "Duplicate primary key detected in job batch",
                         }
@@ -3007,7 +3008,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
 
         if not relationship_mappings:
             await _fail_link(
-                [{"code": "RELATIONSHIP_MAPPING_MISSING", "message": "No relationship mappings provided"}],
+                [{"code": VC.RELATIONSHIP_MAPPING_MISSING.value, "message": "No relationship mappings provided"}],
                 {"input_rows": 0},
             )
 
@@ -3018,14 +3019,14 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
         object_type_spec = object_type_data.get("spec") if isinstance(object_type_data.get("spec"), dict) else {}
         if not object_type_spec:
             await _fail_link(
-                [{"code": "OBJECT_TYPE_CONTRACT_MISSING", "message": "Object type contract is required"}],
+                [{"code": VC.OBJECT_TYPE_CONTRACT_MISSING.value, "message": "Object type contract is required"}],
                 {"input_rows": 0},
             )
 
         status_value = str(object_type_spec.get("status") or "ACTIVE").strip().upper()
         if status_value != "ACTIVE":
             await _fail_link(
-                [{"code": "OBJECT_TYPE_INACTIVE", "status": status_value}],
+                [{"code": VC.OBJECT_TYPE_INACTIVE.value, "status": status_value}],
                 {"input_rows": 0},
             )
 
@@ -3033,7 +3034,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
         pk_targets = [str(v).strip() for v in object_type_key_spec.get("primary_key") or [] if str(v).strip()]
         if not pk_targets:
             await _fail_link(
-                [{"code": "OBJECT_TYPE_PRIMARY_KEY_MISSING", "message": "pk_spec.primary_key is required"}],
+                [{"code": VC.OBJECT_TYPE_PRIMARY_KEY_MISSING.value, "message": "pk_spec.primary_key is required"}],
                 {"input_rows": 0},
             )
 
@@ -3046,7 +3047,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                 await _fail_link(
                     [
                         {
-                            "code": "PRIMARY_KEY_MAPPING_INVALID",
+                            "code": VC.PRIMARY_KEY_MAPPING_INVALID.value,
                             "target": target,
                             "sources": unique_sources,
                         }
@@ -3108,7 +3109,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                 except Exception as exc:
                     target_fetch_errors.append(
                         {
-                            "code": "RELATIONSHIP_TARGET_LOOKUP_FAILED",
+                            "code": VC.RELATIONSHIP_TARGET_LOOKUP_FAILED.value,
                             "target_class": target_class,
                             "error": str(exc),
                         }
@@ -3140,7 +3141,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
             missing_sources = sorted({s for s in mapping_sources if s and s not in col_index})
             if missing_sources:
                 await _fail_link(
-                    [{"code": "SOURCE_FIELD_MISSING", "missing_sources": missing_sources}],
+                    [{"code": VC.SOURCE_FIELD_MISSING.value, "missing_sources": missing_sources}],
                     {"input_rows": total_rows},
                 )
             for idx, row in enumerate(rows):
@@ -3159,7 +3160,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                     errors.append(
                         {
                             "row_index": absolute_idx,
-                            "code": "PRIMARY_KEY_MISSING",
+                            "code": VC.PRIMARY_KEY_MISSING.value,
                             "message": "Primary key value is missing",
                         }
                     )
@@ -3178,7 +3179,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                     errors.append(
                         {
                             "row_index": absolute_idx,
-                            "code": "ROW_KEY_MISSING",
+                            "code": VC.ROW_KEY_MISSING.value,
                             "message": "Row key could not be derived",
                         }
                     )
@@ -3189,7 +3190,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                     errors.append(
                         {
                             "row_index": absolute_idx,
-                            "code": "DUPLICATE_ROW_KEY",
+                            "code": VC.DUPLICATE_ROW_KEY.value,
                             "row_key": row_key,
                         }
                     )
@@ -3215,7 +3216,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                         errors.append(
                             {
                                 "row_index": absolute_idx,
-                                "code": "RELATIONSHIP_TARGET_MISSING",
+                                "code": VC.RELATIONSHIP_TARGET_MISSING.value,
                                 "target_field": target_field,
                             }
                         )
@@ -3228,7 +3229,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                             errors.append(
                                 {
                                     "row_index": absolute_idx,
-                                    "code": "RELATIONSHIP_VALUE_MISSING",
+                                    "code": VC.RELATIONSHIP_VALUE_MISSING.value,
                                     "target_field": target_field,
                                 }
                             )
@@ -3242,7 +3243,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                             errors.append(
                                 {
                                     "row_index": absolute_idx,
-                                    "code": "RELATIONSHIP_VALUE_INVALID",
+                                    "code": VC.RELATIONSHIP_VALUE_INVALID.value,
                                     "target_field": target_field,
                                     "error": str(exc),
                                 }
@@ -3268,7 +3269,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                                 errors.append(
                                     {
                                         "row_index": absolute_idx,
-                                        "code": "RELATIONSHIP_TARGET_MISSING",
+                                        "code": VC.RELATIONSHIP_TARGET_MISSING.value,
                                         "target_field": target_field,
                                         "target_class": target_class,
                                         "target_id": ref_id,
@@ -3302,7 +3303,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
             if dedupe_policy == "FAIL":
                 errors.append(
                     {
-                        "code": "RELATIONSHIP_DUPLICATE",
+                        "code": VC.RELATIONSHIP_DUPLICATE.value,
                         "message": "Duplicate relationship pairs detected",
                         "duplicate_count": duplicate_count,
                     }
@@ -3311,7 +3312,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
             elif dedupe_policy == "WARN":
                 dedupe_warnings.append(
                     {
-                        "code": "RELATIONSHIP_DUPLICATE",
+                        "code": VC.RELATIONSHIP_DUPLICATE.value,
                         "message": "Duplicate relationship pairs deduped",
                         "duplicate_count": duplicate_count,
                     }
@@ -3320,7 +3321,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
         if missing_target_count and dangling_policy != "FAIL":
             dangling_warnings.append(
                 {
-                    "code": "RELATIONSHIP_TARGET_MISSING",
+                    "code": VC.RELATIONSHIP_TARGET_MISSING.value,
                     "missing_count": missing_target_count,
                     "samples": dangling_target_samples[:10],
                 }
@@ -3328,7 +3329,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
         if target_fetch_errors and dangling_policy != "FAIL":
             dangling_warnings.append(
                 {
-                    "code": "RELATIONSHIP_TARGET_LOOKUP_FAILED",
+                    "code": VC.RELATIONSHIP_TARGET_LOOKUP_FAILED.value,
                     "errors": target_fetch_errors[:5],
                 }
             )
@@ -3352,7 +3353,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                     )
                 except Exception as exc:
                     edits = []
-                    link_edit_errors.append({"code": "LINK_EDIT_FETCH_FAILED", "error": str(exc)})
+                    link_edit_errors.append({"code": VC.LINK_EDIT_FETCH_FAILED.value, "error": str(exc)})
                 for edit in edits:
                     predicate = str(edit.predicate or "").strip()
                     rel_meta = relationship_meta.get(predicate) or {}
@@ -3360,7 +3361,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                     if not predicate or not target_class:
                         link_edit_errors.append(
                             {
-                                "code": "LINK_EDIT_PREDICATE_UNKNOWN",
+                                "code": VC.LINK_EDIT_PREDICATE_UNKNOWN.value,
                                 "predicate": predicate,
                             }
                         )
@@ -3370,7 +3371,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                     except Exception as exc:
                         link_edit_errors.append(
                             {
-                                "code": "LINK_EDIT_TARGET_INVALID",
+                                "code": VC.LINK_EDIT_TARGET_INVALID.value,
                                 "predicate": predicate,
                                 "error": str(exc),
                             }
@@ -3382,7 +3383,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                         if ref_id not in target_ids:
                             link_edit_errors.append(
                                 {
-                                    "code": "LINK_EDIT_TARGET_MISSING",
+                                    "code": VC.LINK_EDIT_TARGET_MISSING.value,
                                     "predicate": predicate,
                                     "target_class": target_class,
                                     "target_id": ref_id,
@@ -3403,7 +3404,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                         link_edits_applied += 1
                     else:
                         link_edit_errors.append(
-                            {"code": "LINK_EDIT_TYPE_INVALID", "edit_type": edit.edit_type}
+                            {"code": VC.LINK_EDIT_TYPE_INVALID.value, "edit_type": edit.edit_type}
                         )
 
         if link_edits_applied or link_edit_errors:
@@ -3440,7 +3441,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                 await _fail_link(
                     [
                         {
-                            "code": "FULL_SYNC_FAILED",
+                            "code": VC.FULL_SYNC_FAILED.value,
                             "message": "Unable to enumerate instances for full sync",
                             "error": str(exc),
                         }
@@ -3461,7 +3462,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                     if len(refs) > 1:
                         errors.append(
                             {
-                                "code": "RELATIONSHIP_CARDINALITY_VIOLATION",
+                                "code": VC.RELATIONSHIP_CARDINALITY_VIOLATION.value,
                                 "instance_id": instance_id,
                                 "field": field,
                                 "count": len(refs),
@@ -3479,7 +3480,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
 
         if not updates:
             await _fail_link(
-                [{"code": "NO_RELATIONSHIPS_INDEXED", "message": "No link updates produced"}],
+                [{"code": VC.NO_RELATIONSHIPS_INDEXED.value, "message": "No link updates produced"}],
                 stats,
             )
 
@@ -3696,7 +3697,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                         errors.append(
                             {
                                 "row_index": absolute_idx,
-                                "code": "UNIQUE_KEY_DUPLICATE",
+                                "code": VC.UNIQUE_KEY_DUPLICATE.value,
                                 "key_fields": keys,
                                 "key_value": key_value,
                                 "message": "Duplicate unique key detected",

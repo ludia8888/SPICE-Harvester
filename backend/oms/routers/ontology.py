@@ -49,12 +49,13 @@ from oms.services.ontology_interface_contract import (
 )
 from oms.services.ontology_resources import OntologyResourceService
 from oms.services.property_to_relationship_converter import PropertyToRelationshipConverter
+from oms.validation_codes import OntologyValidationCode as OVC
 from shared.utils.jsonld import JSONToJSONLDConverter
 from shared.utils.label_mapper import LabelMapper
 from shared.models.common import BaseResponse
 from shared.models.requests import ApiResponse
 from shared.errors.error_envelope import build_error_envelope
-from shared.errors.error_types import ErrorCategory, ErrorCode
+from shared.errors.error_types import ErrorCategory, ErrorCode, classified_http_exception
 
 # shared 모델 import
 from shared.models.ontology import (
@@ -75,6 +76,7 @@ from shared.security.input_sanitizer import (
     validate_class_id,
     validate_db_name,
 )
+from shared.observability.tracing import trace_endpoint
 
 
 # Rate limiting import
@@ -100,9 +102,10 @@ def _require_proposal_for_branch(branch: str) -> bool:
 
 def _reject_direct_write_if_required(branch: str) -> None:
     if _require_proposal_for_branch(branch):
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=protected_branch_write_message(),
+        raise classified_http_exception(
+            status.HTTP_409_CONFLICT,
+            protected_branch_write_message(),
+            code=ErrorCode.CONFLICT,
         )
 
 
@@ -340,7 +343,7 @@ async def _validate_value_type_refs(
         if not resource:
             issues.append(
                 {
-                    "code": "VALUE_TYPE_NOT_FOUND",
+                    "code": OVC.VALUE_TYPE_NOT_FOUND.value,
                     "field": prop.name,
                     "value_type_ref": value_type_ref,
                     "message": f"Value type '{value_type_ref}' not found",
@@ -355,7 +358,7 @@ async def _validate_value_type_refs(
             if normalize_ontology_base_type(prop_type) != normalize_ontology_base_type(base_type):
                 issues.append(
                     {
-                        "code": "VALUE_TYPE_BASE_MISMATCH",
+                        "code": OVC.VALUE_TYPE_BASE_MISMATCH.value,
                         "field": prop.name,
                         "value_type_ref": value_type_ref,
                         "expected_base_type": base_type,
@@ -463,9 +466,10 @@ async def _ensure_database_exists(db_name: str, terminus: AsyncTerminusService):
 
     exists = await terminus.database_exists(validated_db_name)
     if not exists:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"데이터베이스 '{validated_db_name}'을(를) 찾을 수 없습니다",
+        raise classified_http_exception(
+            status.HTTP_404_NOT_FOUND,
+            f"데이터베이스 '{validated_db_name}'을(를) 찾을 수 없습니다",
+            code=ErrorCode.RESOURCE_NOT_FOUND,
         )
 
 
@@ -484,6 +488,7 @@ router = APIRouter(prefix="/database/{db_name}/ontology", tags=["Ontology Manage
     },
 )
 @rate_limit(**RateLimitPresets.WRITE)
+@trace_endpoint("oms.ontology.create")
 async def create_ontology(
     ontology_request: OntologyCreateRequest,  # Request body first (no default)
     request: Request,
@@ -503,9 +508,10 @@ async def create_ontology(
         # 데이터베이스 존재 확인 (dependency 제거로 인해 수동 처리)
         db_name = validate_db_name(db_name)
         if not await terminus.database_exists(db_name):
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"데이터베이스 '{db_name}'을(를) 찾을 수 없습니다"
+            raise classified_http_exception(
+                status.HTTP_404_NOT_FOUND,
+                f"데이터베이스 '{db_name}'을(를) 찾을 수 없습니다",
+                code=ErrorCode.RESOURCE_NOT_FOUND,
             )
         
         # 요청 데이터를 dict로 변환
@@ -518,8 +524,9 @@ async def create_ontology(
 
         # 기본 데이터 타입 검증
         if not ontology_data.get("id"):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail="Ontology ID is required"
+            raise classified_http_exception(
+                status.HTTP_400_BAD_REQUEST, "Ontology ID is required",
+                code=ErrorCode.REQUEST_VALIDATION_FAILED,
             )
 
         raw_label = ontology_data.get("label", ontology_data.get("rdfs:label", ontology_data.get("id")))
@@ -687,9 +694,10 @@ async def create_ontology(
             ontology_data = _PROPERTY_CONVERTER.process_class_data(ontology_data)
         except Exception as e:
             logger.error("Property→relationship conversion failed: %s", e)
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Failed to convert properties to relationships: {e}",
+            raise classified_http_exception(
+                status.HTTP_400_BAD_REQUEST,
+                f"Failed to convert properties to relationships: {e}",
+                code=ErrorCode.ONTOLOGY_RELATIONSHIP_ERROR,
             )
 
         relationship_payload = {
@@ -771,16 +779,18 @@ async def create_ontology(
                 ).to_dict(),
             )
 
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="ENABLE_EVENT_SOURCING=false is no longer supported for ontology writes.",
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            "ENABLE_EVENT_SOURCING=false is no longer supported for ontology writes.",
+            code=ErrorCode.INTERNAL_ERROR,
         )
 
     except SecurityViolationError as e:
         logger.warning(f"Security violation in create_ontology: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="입력 데이터에 보안 위반이 감지되었습니다",
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            "입력 데이터에 보안 위반이 감지되었습니다",
+            code=ErrorCode.INPUT_SANITIZATION_FAILED,
         )
     except HTTPException:
         raise
@@ -793,26 +803,30 @@ async def create_ontology(
         
         # 에러 타입에 따른 적절한 HTTP 상태 코드 반환
         if isinstance(e, DuplicateOntologyError) or "DocumentIdAlreadyExists" in str(e):
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=f"온톨로지 '{ontology_data.get('id')}'이(가) 이미 존재합니다"
+            raise classified_http_exception(
+                status.HTTP_409_CONFLICT,
+                f"온톨로지 '{ontology_data.get('id')}'이(가) 이미 존재합니다",
+                code=ErrorCode.ONTOLOGY_DUPLICATE,
             )
         elif isinstance(e, OntologyValidationError):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"온톨로지 검증 실패: {str(e)}"
+            raise classified_http_exception(
+                status.HTTP_400_BAD_REQUEST,
+                f"온톨로지 검증 실패: {str(e)}",
+                code=ErrorCode.ONTOLOGY_VALIDATION_FAILED,
             )
         elif isinstance(e, OntologyNotFoundError):
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=str(e)
+            raise classified_http_exception(
+                status.HTTP_404_NOT_FOUND,
+                str(e),
+                code=ErrorCode.ONTOLOGY_NOT_FOUND,
             )
         else:
             # 그 외의 경우에만 500 반환
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+            raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(e), code=ErrorCode.INTERNAL_ERROR)
 
 
 @router.post("/validate")
+@trace_endpoint("oms.ontology.validate_create")
 async def validate_ontology_create(
     ontology_request: OntologyCreateRequest,
     request: Request,
@@ -827,9 +841,10 @@ async def validate_ontology_create(
         lang = get_accept_language(request)
 
         if not await terminus.database_exists(db_name):
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"데이터베이스 '{db_name}'을(를) 찾을 수 없습니다",
+            raise classified_http_exception(
+                status.HTTP_404_NOT_FOUND,
+                f"데이터베이스 '{db_name}'을(를) 찾을 수 없습니다",
+                code=ErrorCode.RESOURCE_NOT_FOUND,
             )
 
         payload = ontology_request.model_dump()
@@ -904,18 +919,20 @@ async def validate_ontology_create(
         ).to_dict()
     except SecurityViolationError as e:
         logger.warning(f"Security violation in validate_ontology_create: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="입력 데이터에 보안 위반이 감지되었습니다",
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            "입력 데이터에 보안 위반이 감지되었습니다",
+            code=ErrorCode.INPUT_SANITIZATION_FAILED,
         )
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to validate ontology create: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(e), code=ErrorCode.INTERNAL_ERROR)
 
 
 @router.post("/{class_id}/validate")
+@trace_endpoint("oms.ontology.validate_update")
 async def validate_ontology_update(
     ontology_data: OntologyUpdateRequest,
     request: Request,
@@ -931,9 +948,10 @@ async def validate_ontology_update(
 
         existing = await terminus.get_ontology(db_name, class_id, branch=branch)
         if not existing:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"온톨로지 '{class_id}'를 찾을 수 없습니다",
+            raise classified_http_exception(
+                status.HTTP_404_NOT_FOUND,
+                f"온톨로지 '{class_id}'를 찾을 수 없습니다",
+                code=ErrorCode.ONTOLOGY_NOT_FOUND,
             )
 
         patch = sanitize_input(ontology_data.model_dump(mode="json", exclude_unset=True))
@@ -1021,18 +1039,20 @@ async def validate_ontology_update(
         ).to_dict()
     except SecurityViolationError as e:
         logger.warning(f"Security violation in validate_ontology_update: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="입력 데이터에 보안 위반이 감지되었습니다",
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            "입력 데이터에 보안 위반이 감지되었습니다",
+            code=ErrorCode.INPUT_SANITIZATION_FAILED,
         )
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to validate ontology update: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(e), code=ErrorCode.INTERNAL_ERROR)
 
 
 @router.get("")
+@trace_endpoint("oms.ontology.list")
 async def list_ontologies(
     db_name: str = Depends(ensure_database_exists),
     branch: str = Query("main", description="Target branch (default: main)"),
@@ -1048,12 +1068,14 @@ async def list_ontologies(
 
         # 페이징 파라미터 검증
         if limit is not None and (limit < 1 or limit > 1000):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail="limit은 1-1000 범위여야 합니다"
+            raise classified_http_exception(
+                status.HTTP_400_BAD_REQUEST, "limit은 1-1000 범위여야 합니다",
+                code=ErrorCode.REQUEST_VALIDATION_FAILED,
             )
         if offset < 0:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail="offset은 0 이상이어야 합니다"
+            raise classified_http_exception(
+                status.HTTP_400_BAD_REQUEST, "offset은 0 이상이어야 합니다",
+                code=ErrorCode.REQUEST_VALIDATION_FAILED,
             )
 
         # TerminusDB에서 조회 (branch-aware)
@@ -1098,18 +1120,20 @@ async def list_ontologies(
 
     except SecurityViolationError as e:
         logger.warning(f"Security violation in list_ontologies: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="입력 데이터에 보안 위반이 감지되었습니다",
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            "입력 데이터에 보안 위반이 감지되었습니다",
+            code=ErrorCode.INPUT_SANITIZATION_FAILED,
         )
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to list ontologies: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(e), code=ErrorCode.INTERNAL_ERROR)
 
 
 @router.get("/analyze-network")
+@trace_endpoint("oms.ontology.analyze_network")
 async def analyze_relationship_network(
     db_name: str = Depends(ensure_database_exists),
     terminus: AsyncTerminusService = TerminusServiceDep,
@@ -1131,16 +1155,18 @@ async def analyze_relationship_network(
 
     except SecurityViolationError as e:
         logger.warning(f"Security violation in analyze_relationship_network: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="입력 데이터에 보안 위반이 감지되었습니다",
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            "입력 데이터에 보안 위반이 감지되었습니다",
+            code=ErrorCode.INPUT_SANITIZATION_FAILED,
         )
     except Exception as e:
         logger.error(f"Failed to analyze relationship network: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(e), code=ErrorCode.INTERNAL_ERROR)
 
 
 @router.get("/{class_id}")
+@trace_endpoint("oms.ontology.get")
 async def get_ontology(
     db_name: str = Depends(ensure_database_exists),
     class_id: str = Depends(ValidatedClassId),
@@ -1157,15 +1183,17 @@ async def get_ontology(
         ontology = await terminus.get_ontology(db_name, class_id, branch=branch)
 
         if not ontology:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"온톨로지 '{class_id}'를 찾을 수 없습니다",
+            raise classified_http_exception(
+                status.HTTP_404_NOT_FOUND,
+                f"온톨로지 '{class_id}'를 찾을 수 없습니다",
+                code=ErrorCode.ONTOLOGY_NOT_FOUND,
             )
 
         if _is_internal_ontology(ontology) and not _admin_authorized(request):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Internal ontology schema requires admin access",
+            raise classified_http_exception(
+                status.HTTP_403_FORBIDDEN,
+                "Internal ontology schema requires admin access",
+                code=ErrorCode.PERMISSION_DENIED,
             )
 
         # JSON-LD를 일반 JSON으로 변환
@@ -1191,9 +1219,10 @@ async def get_ontology(
 
     except SecurityViolationError as e:
         logger.warning(f"Security violation in get_ontology: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="입력 데이터에 보안 위반이 감지되었습니다",
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            "입력 데이터에 보안 위반이 감지되었습니다",
+            code=ErrorCode.INPUT_SANITIZATION_FAILED,
         )
     except HTTPException:
         raise
@@ -1206,13 +1235,14 @@ async def get_ontology(
             or "does not exist" in error_msg
             or "documentnotfound" in error_msg
         ):
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"온톨로지 '{class_id}'를 찾을 수 없습니다",
+            raise classified_http_exception(
+                status.HTTP_404_NOT_FOUND,
+                f"온톨로지 '{class_id}'를 찾을 수 없습니다",
+                code=ErrorCode.ONTOLOGY_NOT_FOUND,
             )
 
         logger.error(f"Failed to get ontology: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(e), code=ErrorCode.INTERNAL_ERROR)
 
 
 @router.put(
@@ -1226,6 +1256,7 @@ async def get_ontology(
         status.HTTP_409_CONFLICT: {"description": "OCC conflict"},
     },
 )
+@trace_endpoint("oms.ontology.update")
 async def update_ontology(
     ontology_data: OntologyUpdateRequest,
     request: Request,
@@ -1251,9 +1282,10 @@ async def update_ontology(
         existing = await terminus.get_ontology(db_name, class_id, branch=branch)
 
         if not existing:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"온톨로지 '{class_id}'를 찾을 수 없습니다",
+            raise classified_http_exception(
+                status.HTTP_404_NOT_FOUND,
+                f"온톨로지 '{class_id}'를 찾을 수 없습니다",
+                code=ErrorCode.ONTOLOGY_NOT_FOUND,
             )
 
         # Preserve EN/KR localized fields (string or language map) end-to-end.
@@ -1372,9 +1404,10 @@ async def update_ontology(
                 converted = _PROPERTY_CONVERTER.process_class_data(conversion_payload)
             except Exception as e:
                 logger.error("Property→relationship conversion failed: %s", e)
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Failed to convert properties to relationships: {e}",
+                raise classified_http_exception(
+                    status.HTTP_400_BAD_REQUEST,
+                    f"Failed to convert properties to relationships: {e}",
+                    code=ErrorCode.ONTOLOGY_RELATIONSHIP_ERROR,
                 )
             converted_properties_raw = converted.get("properties") or []
             converted_relationships = converted.get("relationships") or []
@@ -1468,14 +1501,16 @@ async def update_ontology(
         high_risk = any((issue.rule_id or "").startswith("ONT9") for issue in diff.warnings or [])
         if protected_branch and high_risk:
             if not _extract_change_reason(request):
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=protected_branch_write_message(),
+                raise classified_http_exception(
+                    status.HTTP_400_BAD_REQUEST,
+                    protected_branch_write_message(),
+                    code=ErrorCode.REQUEST_VALIDATION_FAILED,
                 )
             if not _admin_authorized(request):
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail=protected_branch_write_message(),
+                raise classified_http_exception(
+                    status.HTTP_403_FORBIDDEN,
+                    protected_branch_write_message(),
+                    code=ErrorCode.PERMISSION_DENIED,
                 )
 
         if enable_event_sourcing:
@@ -1538,25 +1573,28 @@ async def update_ontology(
                 ).to_dict(),
             )
 
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="ENABLE_EVENT_SOURCING=false is no longer supported for ontology writes.",
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            "ENABLE_EVENT_SOURCING=false is no longer supported for ontology writes.",
+            code=ErrorCode.INTERNAL_ERROR,
         )
 
     except SecurityViolationError as e:
         logger.warning(f"Security violation in update_ontology: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="입력 데이터에 보안 위반이 감지되었습니다",
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            "입력 데이터에 보안 위반이 감지되었습니다",
+            code=ErrorCode.INPUT_SANITIZATION_FAILED,
         )
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to update ontology: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(e), code=ErrorCode.INTERNAL_ERROR)
 
 
 @router.delete("/{class_id}", response_model=BaseResponse)
+@trace_endpoint("oms.ontology.delete")
 async def delete_ontology(
     request: Request,
     db_name: str = Depends(ensure_database_exists),
@@ -1576,14 +1614,16 @@ async def delete_ontology(
         protected_branch = _is_protected_branch(branch)
         if protected_branch:
             if not _extract_change_reason(request):
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=protected_branch_write_message(),
+                raise classified_http_exception(
+                    status.HTTP_400_BAD_REQUEST,
+                    protected_branch_write_message(),
+                    code=ErrorCode.REQUEST_VALIDATION_FAILED,
                 )
             if not _admin_authorized(request):
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail=protected_branch_write_message(),
+                raise classified_http_exception(
+                    status.HTTP_403_FORBIDDEN,
+                    protected_branch_write_message(),
+                    code=ErrorCode.PERMISSION_DENIED,
                 )
 
         # Best-effort command-side validation:
@@ -1593,9 +1633,10 @@ async def delete_ontology(
         if branch == "main":
             existing = await terminus.get_ontology(db_name, class_id, branch=branch)
             if not existing:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"온톨로지 '{class_id}'를 찾을 수 없습니다",
+                raise classified_http_exception(
+                    status.HTTP_404_NOT_FOUND,
+                    f"온톨로지 '{class_id}'를 찾을 수 없습니다",
+                    code=ErrorCode.ONTOLOGY_NOT_FOUND,
                 )
 
         if enable_event_sourcing:
@@ -1651,25 +1692,28 @@ async def delete_ontology(
                 ).to_dict(),
             )
 
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="ENABLE_EVENT_SOURCING=false is no longer supported for ontology writes.",
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            "ENABLE_EVENT_SOURCING=false is no longer supported for ontology writes.",
+            code=ErrorCode.INTERNAL_ERROR,
         )
 
     except SecurityViolationError as e:
         logger.warning(f"Security violation in delete_ontology: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="입력 데이터에 보안 위반이 감지되었습니다",
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            "입력 데이터에 보안 위반이 감지되었습니다",
+            code=ErrorCode.INPUT_SANITIZATION_FAILED,
         )
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to delete ontology: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(e), code=ErrorCode.INTERNAL_ERROR)
 
 
 @router.post("/query", response_model=QueryResponse)
+@trace_endpoint("oms.ontology.query")
 async def query_ontologies(
     query: QueryRequestInternal,
     db_name: str = Depends(ValidatedDatabaseName),
@@ -1699,12 +1743,14 @@ async def query_ontologies(
             offset = 0
             
         if limit < 1 or limit > 1000:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail="limit은 1-1000 범위여야 합니다"
+            raise classified_http_exception(
+                status.HTTP_400_BAD_REQUEST, "limit은 1-1000 범위여야 합니다",
+                code=ErrorCode.REQUEST_VALIDATION_FAILED,
             )
         if offset < 0:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail="offset은 0 이상이어야 합니다"
+            raise classified_http_exception(
+                status.HTTP_400_BAD_REQUEST, "offset은 0 이상이어야 합니다",
+                code=ErrorCode.REQUEST_VALIDATION_FAILED,
             )
 
         # 데이터베이스 존재 여부 확인
@@ -1743,15 +1789,16 @@ async def query_ontologies(
 
     except SecurityViolationError as e:
         logger.warning(f"Security violation in query_ontologies: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="입력 데이터에 보안 위반이 감지되었습니다",
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            "입력 데이터에 보안 위반이 감지되었습니다",
+            code=ErrorCode.INPUT_SANITIZATION_FAILED,
         )
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to execute query: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(e), code=ErrorCode.INTERNAL_ERROR)
 
 
 # 🔥 THINK ULTRA! Enhanced Relationship Management Endpoints
@@ -1769,6 +1816,7 @@ async def query_ontologies(
     },
 )
 @rate_limit(**RateLimitPresets.WRITE)
+@trace_endpoint("oms.ontology.create_advanced")
 async def create_ontology_with_advanced_relationships(
     ontology_request: OntologyCreateRequest,
     request: Request,
@@ -1792,12 +1840,11 @@ async def create_ontology_with_advanced_relationships(
     """
     try:
         if auto_generate_inverse:
-            raise HTTPException(
-                status_code=status.HTTP_501_NOT_IMPLEMENTED,
-                detail=(
-                    "auto_generate_inverse is not implemented yet. TerminusDB schema documents discard "
-                    "per-property custom metadata, so inverse metadata needs a dedicated projection store."
-                ),
+            raise classified_http_exception(
+                status.HTTP_501_NOT_IMPLEMENTED,
+                "auto_generate_inverse is not implemented yet. TerminusDB schema documents discard "
+                "per-property custom metadata, so inverse metadata needs a dedicated projection store.",
+                code=ErrorCode.FEATURE_NOT_IMPLEMENTED,
             )
         enable_event_sourcing = bool(get_settings().event_sourcing.enable_event_sourcing)
         branch = validate_branch_name(branch)
@@ -1806,9 +1853,10 @@ async def create_ontology_with_advanced_relationships(
 
         db_name = validate_db_name(db_name)
         if not await terminus.database_exists(db_name):
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"데이터베이스 '{db_name}'을(를) 찾을 수 없습니다"
+            raise classified_http_exception(
+                status.HTTP_404_NOT_FOUND,
+                f"데이터베이스 '{db_name}'을(를) 찾을 수 없습니다",
+                code=ErrorCode.RESOURCE_NOT_FOUND,
             )
 
         ontology_data = ontology_request.model_dump(mode="json")
@@ -1817,7 +1865,7 @@ async def create_ontology_with_advanced_relationships(
             ontology_data["id"] = validate_class_id(class_id)
 
         if not ontology_data.get("id"):
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Ontology ID is required")
+            raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "Ontology ID is required", code=ErrorCode.REQUEST_VALIDATION_FAILED)
 
         raw_label = ontology_data.get("label", ontology_data.get("rdfs:label", ontology_data.get("id")))
         raw_description = ontology_data.get("description", ontology_data.get("rdfs:comment"))
@@ -1936,9 +1984,10 @@ async def create_ontology_with_advanced_relationships(
             ontology_data = _PROPERTY_CONVERTER.process_class_data(ontology_data)
         except Exception as e:
             logger.error("Property→relationship conversion failed: %s", e)
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Failed to convert properties to relationships: {e}",
+            raise classified_http_exception(
+                status.HTTP_400_BAD_REQUEST,
+                f"Failed to convert properties to relationships: {e}",
+                code=ErrorCode.ONTOLOGY_RELATIONSHIP_ERROR,
             )
 
         relationship_response = await _validate_relationships_gate(
@@ -2017,16 +2066,18 @@ async def create_ontology_with_advanced_relationships(
                 ).to_dict(),
             )
 
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="ENABLE_EVENT_SOURCING=false is no longer supported for ontology writes.",
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            "ENABLE_EVENT_SOURCING=false is no longer supported for ontology writes.",
+            code=ErrorCode.INTERNAL_ERROR,
         )
 
     except SecurityViolationError as e:
         logger.warning(f"Security violation in create_ontology_with_advanced_relationships: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="입력 데이터에 보안 위반이 감지되었습니다",
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            "입력 데이터에 보안 위반이 감지되었습니다",
+            code=ErrorCode.INPUT_SANITIZATION_FAILED,
         )
     except HTTPException:
         raise
@@ -2035,10 +2086,11 @@ async def create_ontology_with_advanced_relationships(
 
         logger.error(f"Failed to create ontology with advanced relationships: {e}")
         logger.error(f"Traceback: {traceback.format_exc()}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(e), code=ErrorCode.INTERNAL_ERROR)
 
 
 @router.post("/validate-relationships")
+@trace_endpoint("oms.ontology.validate_relationships")
 async def validate_ontology_relationships(
     request: OntologyCreateRequest,
     db_name: str = Path(..., description="Database name"),
@@ -2075,16 +2127,18 @@ async def validate_ontology_relationships(
 
     except SecurityViolationError as e:
         logger.warning(f"Security violation in validate_ontology_relationships: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="입력 데이터에 보안 위반이 감지되었습니다",
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            "입력 데이터에 보안 위반이 감지되었습니다",
+            code=ErrorCode.INPUT_SANITIZATION_FAILED,
         )
     except Exception as e:
         logger.error(f"Failed to validate relationships: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(e), code=ErrorCode.INTERNAL_ERROR)
 
 
 @router.post("/detect-circular-references")
+@trace_endpoint("oms.ontology.detect_circular_references")
 async def detect_circular_references(
     db_name: str = Path(..., description="Database name"),
     new_ontology: Optional[OntologyCreateRequest] = None,
@@ -2123,16 +2177,18 @@ async def detect_circular_references(
 
     except SecurityViolationError as e:
         logger.warning(f"Security violation in detect_circular_references: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="입력 데이터에 보안 위반이 감지되었습니다",
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            "입력 데이터에 보안 위반이 감지되었습니다",
+            code=ErrorCode.INPUT_SANITIZATION_FAILED,
         )
     except Exception as e:
         logger.error(f"Failed to detect circular references: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(e), code=ErrorCode.INTERNAL_ERROR)
 
 
 @router.get("/relationship-paths/{start_entity}")
+@trace_endpoint("oms.ontology.find_relationship_paths")
 async def find_relationship_paths(
     start_entity: str,
     db_name: str = Path(..., description="Database name"),
@@ -2155,8 +2211,9 @@ async def find_relationship_paths(
 
         # 파라미터 검증
         if max_depth < 1 or max_depth > 10:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail="max_depth는 1-10 범위여야 합니다"
+            raise classified_http_exception(
+                status.HTTP_400_BAD_REQUEST, "max_depth는 1-10 범위여야 합니다",
+                code=ErrorCode.REQUEST_VALIDATION_FAILED,
             )
 
         # 데이터베이스 존재 여부 확인
@@ -2179,19 +2236,21 @@ async def find_relationship_paths(
 
     except SecurityViolationError as e:
         logger.warning(f"Security violation in find_relationship_paths: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="입력 데이터에 보안 위반이 감지되었습니다",
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            "입력 데이터에 보안 위반이 감지되었습니다",
+            code=ErrorCode.INPUT_SANITIZATION_FAILED,
         )
     except Exception as e:
         import traceback
 
         logger.error(f"Failed to find relationship paths: {e}")
         logger.error(f"Traceback: {traceback.format_exc()}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(e), code=ErrorCode.INTERNAL_ERROR)
 
 
 @router.get("/reachable-entities/{start_entity}")
+@trace_endpoint("oms.ontology.get_reachable_entities")
 async def get_reachable_entities(
     start_entity: str,
     db_name: str = Path(..., description="Database name"),
@@ -2210,8 +2269,9 @@ async def get_reachable_entities(
 
         # 파라미터 검증
         if max_depth < 1 or max_depth > 5:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail="max_depth는 1-5 범위여야 합니다"
+            raise classified_http_exception(
+                status.HTTP_400_BAD_REQUEST, "max_depth는 1-5 범위여야 합니다",
+                code=ErrorCode.REQUEST_VALIDATION_FAILED,
             )
 
         # 데이터베이스 존재 여부 확인
@@ -2230,10 +2290,11 @@ async def get_reachable_entities(
 
     except SecurityViolationError as e:
         logger.warning(f"Security violation in get_reachable_entities: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="입력 데이터에 보안 위반이 감지되었습니다",
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            "입력 데이터에 보안 위반이 감지되었습니다",
+            code=ErrorCode.INPUT_SANITIZATION_FAILED,
         )
     except Exception as e:
         logger.error(f"Failed to get reachable entities: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(e), code=ErrorCode.INTERNAL_ERROR)

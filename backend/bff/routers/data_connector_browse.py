@@ -7,7 +7,8 @@ Composed by `bff.routers.data_connector` via router composition (Composite patte
 import logging
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Request, status
+from shared.errors.error_types import ErrorCode, classified_http_exception
 
 from bff.routers.data_connector_deps import get_connector_registry, get_google_sheets_service
 from bff.routers.data_connector_ops import _build_google_oauth_client, _resolve_google_connection
@@ -44,7 +45,7 @@ async def list_google_sheets_spreadsheets(
         connection_id=connection_id,
     )
     if not access_token:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Connection access token missing")
+        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "Connection access token missing", code=ErrorCode.REQUEST_VALIDATION_FAILED)
 
     spreadsheets = await google_sheets_service.list_spreadsheets(access_token=access_token, query=query, page_size=limit)
     return ApiResponse.success(message="Spreadsheets retrieved", data={"spreadsheets": spreadsheets}).to_dict()
@@ -71,7 +72,7 @@ async def list_google_sheets_worksheets(
         connection_id=connection_id,
     )
     if not access_token:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Connection access token missing")
+        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "Connection access token missing", code=ErrorCode.REQUEST_VALIDATION_FAILED)
 
     metadata = await google_sheets_service.get_sheet_metadata(sheet_id, access_token=access_token)
     worksheets = []

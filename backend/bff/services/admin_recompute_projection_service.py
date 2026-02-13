@@ -15,6 +15,7 @@ from typing import Any, Dict, Iterable, Literal, Optional, Protocol, Tuple
 from uuid import uuid4
 
 from fastapi import BackgroundTasks, HTTPException, Request, status
+from shared.errors.error_types import ErrorCode, classified_http_exception
 
 from bff.routers.admin_task_monitor import monitor_admin_task
 from bff.schemas.admin_projection_requests import RecomputeProjectionRequest, RecomputeProjectionResponse
@@ -31,6 +32,7 @@ from shared.services.storage.elasticsearch_service import ElasticsearchService, 
 from shared.services.storage.event_store import EventStore
 from shared.services.storage.redis_service import RedisService
 from shared.utils.ontology_version import split_ref_commit
+from shared.observability.tracing import trace_external_call, trace_db_operation
 
 logger = logging.getLogger(__name__)
 
@@ -63,14 +65,13 @@ def _versioning_kwargs(seq: Optional[int]) -> Dict[str, Any]:
 def _validate_recompute_projection_mode(*, projection: str) -> None:
     if str(projection).strip().lower() != "instances":
         return
-    raise HTTPException(
-        status_code=status.HTTP_400_BAD_REQUEST,
-        detail={
+    raise classified_http_exception(
+        status.HTTP_400_BAD_REQUEST,
+        "Instances projection recompute from event replay is unsupported in dataset-primary mode. "
+        "Run objectify full reindex from dataset artifacts instead.",
+        code=ErrorCode.REQUEST_VALIDATION_FAILED,
+        extra={
             "error": "REQUEST_VALIDATION_FAILED",
-            "message": (
-                "Instances projection recompute from event replay is unsupported in dataset-primary mode. "
-                "Run objectify full reindex from dataset artifacts instead."
-            ),
             "projection": "instances",
             "write_path_mode": "dataset_primary_index",
         },
@@ -294,6 +295,7 @@ def _strategy_for_projection(projection: str) -> ProjectionStrategy:
     raise ValueError(f"Unsupported projection: {projection}")
 
 
+@trace_db_operation("bff.admin_recompute.start_recompute_projection")
 async def start_recompute_projection(
     *,
     http_request: Request,
@@ -343,6 +345,7 @@ async def start_recompute_projection(
     )
 
 
+@trace_db_operation("bff.admin_recompute.get_recompute_projection_result")
 async def get_recompute_projection_result(
     *,
     task_id: str,
@@ -351,12 +354,9 @@ async def get_recompute_projection_result(
 ) -> Dict[str, Any]:
     task = await task_manager.get_task_status(task_id)
     if not task:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Task {task_id} not found")
+        raise classified_http_exception(404, f"Task {task_id} not found", code=ErrorCode.RESOURCE_NOT_FOUND)
     if not task.is_complete:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Task {task_id} is not complete. Current status: {task.status.value}",
-        )
+        raise classified_http_exception(400, f"Task {task_id} is not complete. Current status: {task.status.value}", code=ErrorCode.REQUEST_VALIDATION_FAILED)
     if task.status == TaskStatus.FAILED:
         return {
             "task_id": task_id,
@@ -368,10 +368,7 @@ async def get_recompute_projection_result(
     result_key = f"recompute_result:{task_id}"
     result = await redis_service.get_json(result_key)
     if not result:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Result for task {task_id} not found or expired",
-        )
+        raise classified_http_exception(404, f"Result for task {task_id} not found or expired", code=ErrorCode.RESOURCE_NOT_FOUND)
     return result
 
 
@@ -456,6 +453,7 @@ async def _promote_alias_to_index(
     )
 
 
+@trace_external_call("bff.admin_recompute.recompute_projection_task")
 async def recompute_projection_task(  # noqa: PLR0915
     task_id: str,
     request: RecomputeProjectionRequest,

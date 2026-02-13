@@ -45,6 +45,7 @@ from oms.utils.terminus_schema_types import (
 
 # Import constraint and default value extraction
 from oms.utils.constraint_extractor import ConstraintExtractor
+from shared.observability.tracing import trace_external_call
 
 # Import modular TerminusDB services
 from .terminus import (
@@ -160,6 +161,7 @@ class AsyncTerminusService:
         # 메타데이터 스키마 캐시로 성능 최적화
         self._metadata_schema_cache: set = set()  # 이미 생성된 DB의 메타데이터 스키마
 
+    @trace_external_call("oms.terminus.check_connection")
     async def check_connection(self) -> bool:
         """연결 상태 확인"""
         try:
@@ -209,6 +211,7 @@ class AsyncTerminusService:
     # ==========================================
     
     @async_terminus_retry(max_retries=3)
+    @trace_external_call("oms.terminus.create_database")
     async def create_database(self, db_name: str, description: str = "") -> bool:
         """데이터베이스 생성"""
         result = await self.database_service.create_database(db_name, description)
@@ -221,15 +224,18 @@ class AsyncTerminusService:
         return False
 
     @async_terminus_retry(max_retries=3)
+    @trace_external_call("oms.terminus.database_exists")
     async def database_exists(self, db_name: str) -> bool:
         """데이터베이스 존재 여부 확인"""
         return await self.database_service.database_exists(db_name)
 
+    @trace_external_call("oms.terminus.list_databases")
     async def list_databases(self) -> List[Dict[str, Any]]:
         """사용 가능한 데이터베이스 목록 조회"""
         return await self.database_service.list_databases()
 
     @async_terminus_retry(max_retries=3)
+    @trace_external_call("oms.terminus.delete_database")
     async def delete_database(self, db_name: str) -> bool:
         """데이터베이스 삭제"""
         return await self.database_service.delete_database(db_name)
@@ -238,12 +244,14 @@ class AsyncTerminusService:
     # Query Execution - Facade Methods
     # ==========================================
     
+    @trace_external_call("oms.terminus.execute_query")
     async def execute_query(
         self, db_name: str, query_dict: Dict[str, Any], *, branch: str = "main"
     ) -> Dict[str, Any]:
         """Query execution (query-spec or raw WOQL passthrough)."""
         return await self.query_service.execute_query(db_name, query_dict, branch=branch)
 
+    @trace_external_call("oms.terminus.execute_sparql")
     async def execute_sparql(
         self, 
         db_name: str, 
@@ -258,6 +266,7 @@ class AsyncTerminusService:
     # Instance Operations - Facade Methods
     # ==========================================
     
+    @trace_external_call("oms.terminus.get_class_instances_optimized")
     async def get_class_instances_optimized(
         self, 
         db_name: str, 
@@ -282,6 +291,7 @@ class AsyncTerminusService:
             search=search,
         )
 
+    @trace_external_call("oms.terminus.get_instance_optimized")
     async def get_instance_optimized(
         self, 
         db_name: str, 
@@ -297,6 +307,7 @@ class AsyncTerminusService:
             class_id=class_id,
         )
 
+    @trace_external_call("oms.terminus.count_class_instances")
     async def count_class_instances(
         self, 
         db_name: str, 
@@ -316,6 +327,7 @@ class AsyncTerminusService:
     # Ontology Operations - Facade Methods
     # ==========================================
     
+    @trace_external_call("oms.terminus.get_ontology")
     async def get_ontology(
         self, 
         db_name: str, 
@@ -334,6 +346,7 @@ class AsyncTerminusService:
             return await self.ontology_service.list_ontologies(db_name, branch=branch, limit=1000, offset=0)
         return await self.ontology_service.get_ontology(db_name, class_id, branch=branch)
 
+    @trace_external_call("oms.terminus.create_ontology")
     async def create_ontology(
         self, db_name: str, ontology_data: OntologyBase, *, branch: str = "main"
     ) -> OntologyResponse:
@@ -347,6 +360,7 @@ class AsyncTerminusService:
             logger.error(f"Failed to create ontology '{ontology_data.id}': {e}")
             raise
 
+    @trace_external_call("oms.terminus.create_ontology_with_advanced_relationships")
     async def create_ontology_with_advanced_relationships(
         self,
         db_name: str,
@@ -418,6 +432,7 @@ class AsyncTerminusService:
             logger.error(f"Failed to create ontology with advanced relationships '{ontology_data.id}': {e}")
             raise
 
+    @trace_external_call("oms.terminus.update_ontology")
     async def update_ontology(
         self, 
         db_name: str, 
@@ -429,10 +444,12 @@ class AsyncTerminusService:
         """온톨로지 업데이트 - Atomic 버전"""
         return await self.ontology_service.update_ontology(db_name, class_id, ontology_data, branch=branch)
 
+    @trace_external_call("oms.terminus.delete_ontology")
     async def delete_ontology(self, db_name: str, class_id: str, *, branch: str = "main") -> bool:
         """온톨로지 삭제"""
         return await self.ontology_service.delete_ontology(db_name, class_id, branch=branch)
 
+    @trace_external_call("oms.terminus.list_ontology_classes")
     async def list_ontology_classes(self, db_name: str) -> List[OntologyResponse]:
         """데이터베이스의 모든 온톨로지 목록 조회"""
         # Use default limit and offset values
@@ -446,11 +463,13 @@ class AsyncTerminusService:
     def _is_protected_branch_name(branch_name: str) -> bool:
         return str(branch_name) in {"main", "master", "production"}
     
+    @trace_external_call("oms.terminus.create_branch")
     async def create_branch(self, db_name: str, branch_name: str, from_branch: str = "main") -> bool:
         """브랜치 생성"""
         await self.version_control_service.create_branch(db_name, branch_name, from_branch)
         return True
 
+    @trace_external_call("oms.terminus.list_branches")
     async def list_branches(self, db_name: str) -> List[str]:
         """브랜치 목록 조회"""
         branches = await self.version_control_service.list_branches(db_name)
@@ -458,6 +477,7 @@ class AsyncTerminusService:
             return [b.get("name") for b in branches if isinstance(b, dict) and b.get("name")]
         return [str(b) for b in branches] if isinstance(branches, list) else []
 
+    @trace_external_call("oms.terminus.get_branch_info")
     async def get_branch_info(self, db_name: str, branch_name: str) -> Dict[str, Any]:
         branches = await self.list_branches(db_name)
         if branch_name not in branches:
@@ -473,10 +493,12 @@ class AsyncTerminusService:
         """현재 브랜치 (best-effort, 기본값: main)"""
         return self._current_branch_by_db.get(db_name, "main")
 
+    @trace_external_call("oms.terminus.delete_branch")
     async def delete_branch(self, db_name: str, branch_name: str) -> bool:
         """브랜치 삭제"""
         return await self.version_control_service.delete_branch(db_name, branch_name)
 
+    @trace_external_call("oms.terminus.checkout_branch")
     async def checkout_branch(self, db_name: str, branch_name: str) -> bool:
         """브랜치 체크아웃"""
         ok = await self.version_control_service.checkout_branch(db_name, branch_name)
@@ -491,6 +513,7 @@ class AsyncTerminusService:
         # commit checkout is stateless; accept for compatibility
         return True
 
+    @trace_external_call("oms.terminus.merge_branches")
     async def merge_branches(
         self, 
         db_name: str, 
@@ -508,6 +531,7 @@ class AsyncTerminusService:
             message=message,
         )
 
+    @trace_external_call("oms.terminus.commit")
     async def commit(
         self, 
         db_name: str, 
@@ -518,6 +542,7 @@ class AsyncTerminusService:
         """커밋 생성"""
         return await self.version_control_service.commit(db_name, message, author, branch)
 
+    @trace_external_call("oms.terminus.get_commit_history")
     async def get_commit_history(
         self, 
         db_name: str, 
@@ -528,10 +553,12 @@ class AsyncTerminusService:
         """커밋 히스토리 조회"""
         return await self.version_control_service.get_commit_history(db_name, branch, limit, offset)
 
+    @trace_external_call("oms.terminus.diff")
     async def diff(self, db_name: str, from_ref: str, to_ref: str) -> Any:
         """차이점 조회"""
         return await self.version_control_service.diff(db_name, from_ref, to_ref)
 
+    @trace_external_call("oms.terminus.merge")
     async def merge(
         self,
         db_name: str,
@@ -548,6 +575,7 @@ class AsyncTerminusService:
             strategy=strategy,
         )
 
+    @trace_external_call("oms.terminus.rebase")
     async def rebase(
         self, 
         db_name: str, 
@@ -559,6 +587,7 @@ class AsyncTerminusService:
         """Router 호환 rebase API (branch -> onto)."""
         return await self.version_control_service.rebase(db_name, branch=branch, onto=onto, message=message)
 
+    @trace_external_call("oms.terminus.rollback")
     async def rollback(self, db_name: str, target: str) -> Dict[str, Any]:
         """Router 호환 rollback API (reset current branch to target)."""
         branch = await self.get_current_branch(db_name)
@@ -574,6 +603,7 @@ class AsyncTerminusService:
     # Document Operations - Facade Methods
     # ==========================================
     
+    @trace_external_call("oms.terminus.create_instance")
     async def create_instance(
         self, 
         db_name: str, 
@@ -585,6 +615,7 @@ class AsyncTerminusService:
         """인스턴스 생성"""
         return await self.document_service.create_instance(db_name, class_id, instance_data, branch=branch)
 
+    @trace_external_call("oms.terminus.update_instance")
     async def update_instance(
         self, 
         db_name: str, 
@@ -599,6 +630,7 @@ class AsyncTerminusService:
             db_name, class_id, instance_id, update_data, branch=branch
         )
 
+    @trace_external_call("oms.terminus.delete_instance")
     async def delete_instance(
         self, 
         db_name: str, 
@@ -614,6 +646,7 @@ class AsyncTerminusService:
     # Relationship Management - Direct Methods
     # ==========================================
     
+    @trace_external_call("oms.terminus.validate_relationships")
     async def validate_relationships(
         self,
         db_name: str,
@@ -691,6 +724,7 @@ class AsyncTerminusService:
             "analysis_timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
+    @trace_external_call("oms.terminus.detect_circular_references")
     async def detect_circular_references(
         self,
         db_name: str,
@@ -763,6 +797,7 @@ class AsyncTerminusService:
             "analysis_timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
+    @trace_external_call("oms.terminus.find_relationship_paths")
     async def find_relationship_paths(
         self,
         *,
@@ -840,6 +875,7 @@ class AsyncTerminusService:
             "analysis_timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
+    @trace_external_call("oms.terminus.analyze_relationship_network")
     async def analyze_relationship_network(
         self,
         db_name: str,
@@ -953,6 +989,7 @@ class AsyncTerminusService:
         else:
             self._ontology_cache.clear()
 
+    @trace_external_call("oms.terminus.ping")
     async def ping(self) -> bool:
         """서버 연결 상태 확인"""
         try:

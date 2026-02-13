@@ -39,6 +39,7 @@ from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.services.registries.pipeline_plan_registry import PipelinePlanRegistry
 from shared.services.registries.pipeline_registry import PipelineRegistry
 from shared.services.storage.storage_service import StorageService
+from shared.observability.tracing import trace_external_call
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +82,7 @@ async def _validate_or_warn(
     return validation, None
 
 
+@trace_external_call("bff.pipeline_plan_preview.preview_plan")
 async def preview_plan(
     *,
     plan_id: str,
@@ -199,6 +201,7 @@ async def preview_plan(
     return ApiResponse.success(message="Pipeline preview ready", data=data)
 
 
+@trace_external_call("bff.pipeline_plan_preview.inspect_plan_preview")
 async def inspect_plan_preview(
     *,
     plan_id: str,
@@ -264,6 +267,7 @@ async def inspect_plan_preview(
     )
 
 
+@trace_external_call("bff.pipeline_plan_preview.evaluate_joins")
 async def evaluate_joins(
     *,
     plan_id: str,

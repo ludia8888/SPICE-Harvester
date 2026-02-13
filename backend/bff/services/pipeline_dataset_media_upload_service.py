@@ -10,6 +10,8 @@ from uuid import uuid4
 
 from fastapi import HTTPException, status
 
+from shared.errors.error_types import ErrorCode, classified_http_exception
+
 import bff.routers.pipeline_datasets_ops as ops
 from bff.services.dataset_ingest_commit_service import (
     ensure_lakefs_commit_artifact,
@@ -23,10 +25,12 @@ from bff.services.pipeline_dataset_upload_context import _prepare_dataset_upload
 from shared.models.requests import ApiResponse
 from shared.utils.path_utils import safe_path_segment
 from shared.utils.s3_uri import build_s3_uri
+from shared.observability.tracing import trace_external_call
 
 logger = logging.getLogger(__name__)
 
 
+@trace_external_call("bff.pipeline_dataset_media_upload.upload_media_dataset")
 async def upload_media_dataset(
     *,
     db_name: str,
@@ -61,10 +65,10 @@ async def upload_media_dataset(
 
         resolved_name = (dataset_name or "").strip()
         if not resolved_name:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="dataset_name is required")
+            raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "dataset_name is required", code=ErrorCode.REQUEST_VALIDATION_FAILED)
 
         if not files:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="files are required")
+            raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "files are required", code=ErrorCode.REQUEST_VALIDATION_FAILED)
 
         uploaded: list[dict[str, Any]] = []
         for file in files:
@@ -75,7 +79,7 @@ async def upload_media_dataset(
                 filename = f"upload-{uuid4().hex}"
             content = await file.read()
             if not content:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Empty file: {filename}")
+                raise classified_http_exception(status.HTTP_400_BAD_REQUEST, f"Empty file: {filename}", code=ErrorCode.REQUEST_VALIDATION_FAILED)
             content_hash = hashlib.sha256(content).hexdigest()
             uploaded.append(
                 {
@@ -89,7 +93,7 @@ async def upload_media_dataset(
             )
 
         if not uploaded:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No valid files uploaded")
+            raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "No valid files uploaded", code=ErrorCode.REQUEST_VALIDATION_FAILED)
 
         schema_columns = [
             {"name": "s3_uri", "type": "xsd:string"},
@@ -323,7 +327,7 @@ async def upload_media_dataset(
                 outbox_entries=outbox_entries,
             )
         except ValueError as exc:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+            raise classified_http_exception(status.HTTP_400_BAD_REQUEST, str(exc), code=ErrorCode.REQUEST_VALIDATION_FAILED) from exc
 
         objectify_job_id = await ops._maybe_enqueue_objectify_job(
             dataset=dataset,
@@ -363,4 +367,4 @@ async def upload_media_dataset(
             stage="media",
         )
         logger.error("Failed to upload media dataset: %s", exc)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc), code=ErrorCode.INTERNAL_ERROR) from exc

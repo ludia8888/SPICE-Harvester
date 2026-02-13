@@ -9,8 +9,10 @@ from uuid import UUID
 
 from fastapi import HTTPException, status
 
+from shared.errors.error_types import ErrorCode, classified_http_exception
 from shared.models.requests import ApiResponse
 from shared.security.input_sanitizer import validate_db_name
+from shared.observability.tracing import trace_db_operation
 
 logger = logging.getLogger(__name__)
 
@@ -19,9 +21,10 @@ def _parse_uuid_or_404(value: str, *, detail: str) -> str:
     try:
         return str(UUID(str(value)))
     except Exception as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=detail) from exc
+        raise classified_http_exception(status.HTTP_404_NOT_FOUND, detail, code=ErrorCode.RESOURCE_NOT_FOUND) from exc
 
 
+@trace_db_operation("bff.pipeline_udf.create_udf")
 async def create_udf(
     *,
     db_name: str,
@@ -54,9 +57,10 @@ async def create_udf(
         raise
     except Exception as exc:
         logger.error("Failed to create UDF: %s", exc)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc), code=ErrorCode.INTERNAL_ERROR) from exc
 
 
+@trace_db_operation("bff.pipeline_udf.list_udfs")
 async def list_udfs(
     *,
     db_name: str,
@@ -86,9 +90,10 @@ async def list_udfs(
         raise
     except Exception as exc:
         logger.error("Failed to list UDFs: %s", exc)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc), code=ErrorCode.INTERNAL_ERROR) from exc
 
 
+@trace_db_operation("bff.pipeline_udf.get_udf")
 async def get_udf(
     *,
     udf_id: str,
@@ -98,7 +103,7 @@ async def get_udf(
         udf_id = _parse_uuid_or_404(udf_id, detail="UDF not found")
         udf = await pipeline_registry.get_udf(udf_id=udf_id)
         if not udf:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="UDF not found")
+            raise classified_http_exception(status.HTTP_404_NOT_FOUND, "UDF not found", code=ErrorCode.RESOURCE_NOT_FOUND)
 
         latest_version = await pipeline_registry.get_udf_latest_version(udf_id=udf_id)
         return ApiResponse.success(
@@ -118,9 +123,10 @@ async def get_udf(
         raise
     except Exception as exc:
         logger.error("Failed to get UDF: %s", exc)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc), code=ErrorCode.INTERNAL_ERROR) from exc
 
 
+@trace_db_operation("bff.pipeline_udf.create_udf_version")
 async def create_udf_version(
     *,
     udf_id: str,
@@ -131,7 +137,7 @@ async def create_udf_version(
         udf_id = _parse_uuid_or_404(udf_id, detail="UDF not found")
         udf = await pipeline_registry.get_udf(udf_id=udf_id)
         if not udf:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="UDF not found")
+            raise classified_http_exception(status.HTTP_404_NOT_FOUND, "UDF not found", code=ErrorCode.RESOURCE_NOT_FOUND)
 
         version = await pipeline_registry.create_udf_version(
             udf_id=udf_id,
@@ -151,9 +157,10 @@ async def create_udf_version(
         raise
     except Exception as exc:
         logger.error("Failed to create UDF version: %s", exc)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc), code=ErrorCode.INTERNAL_ERROR) from exc
 
 
+@trace_db_operation("bff.pipeline_udf.get_udf_version")
 async def get_udf_version(
     *,
     udf_id: str,
@@ -164,7 +171,7 @@ async def get_udf_version(
         udf_id = _parse_uuid_or_404(udf_id, detail="UDF version not found")
         udf_version = await pipeline_registry.get_udf_version(udf_id=udf_id, version=version)
         if not udf_version:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="UDF version not found")
+            raise classified_http_exception(status.HTTP_404_NOT_FOUND, "UDF version not found", code=ErrorCode.RESOURCE_NOT_FOUND)
 
         return ApiResponse.success(
             message="UDF version retrieved",
@@ -180,5 +187,5 @@ async def get_udf_version(
         raise
     except Exception as exc:
         logger.error("Failed to get UDF version: %s", exc)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc), code=ErrorCode.INTERNAL_ERROR) from exc
 

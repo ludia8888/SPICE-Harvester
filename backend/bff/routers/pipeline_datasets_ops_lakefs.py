@@ -13,6 +13,8 @@ from uuid import uuid4
 
 from fastapi import HTTPException, status
 
+from shared.errors.error_types import ErrorCode, classified_http_exception
+
 from shared.config.settings import get_settings
 from shared.services.storage.lakefs_client import LakeFSClient, LakeFSConflictError, LakeFSError
 from shared.services.storage.redis_service import create_redis_service_legacy
@@ -51,9 +53,10 @@ async def _acquire_lakefs_commit_lock(
             return redis_service, lock_key, token
         if time.monotonic() - start >= timeout_seconds:
             await redis_service.disconnect()
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Dataset branch is busy; retry after the current upload completes",
+            raise classified_http_exception(
+                status.HTTP_409_CONFLICT,
+                "Dataset branch is busy; retry after the current upload completes",
+                code=ErrorCode.CONFLICT,
             )
         await asyncio.sleep(retry_seconds)
 
@@ -149,11 +152,11 @@ async def _ensure_lakefs_branch_exists(
 def _extract_lakefs_ref_from_artifact_key(artifact_key: str) -> str:
     parsed = parse_s3_uri(artifact_key)
     if not parsed:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="artifact_key must be an s3:// URI")
+        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "artifact_key must be an s3:// URI", code=ErrorCode.REQUEST_VALIDATION_FAILED)
     _, key = parsed
     parts = [part for part in str(key).split("/") if part]
     if len(parts) < 2:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="artifact_key must include lakeFS ref prefix")
+        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "artifact_key must include lakeFS ref prefix", code=ErrorCode.REQUEST_VALIDATION_FAILED)
     return parts[0]
 
 

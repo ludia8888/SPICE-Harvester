@@ -6,6 +6,7 @@ Business logic lives in `bff.services.ontology_crud_service` (Facade).
 """
 
 from __future__ import annotations
+from shared.observability.tracing import trace_endpoint
 
 from typing import Optional
 
@@ -38,6 +39,7 @@ router = APIRouter(tags=["Ontology Management"])
         status.HTTP_409_CONFLICT: {"description": "Conflict (already exists / OCC)"},
     },
 )
+@trace_endpoint("bff.ontology.create_ontology")
 async def create_ontology(
     db_name: str,
     ontology: OntologyCreateRequestBFF,
@@ -55,6 +57,7 @@ async def create_ontology(
 
 
 @router.get("/ontology/list")
+@trace_endpoint("bff.ontology.list_ontologies")
 async def list_ontologies(
     db_name: str,
     request: Request,
@@ -78,6 +81,7 @@ async def list_ontologies(
 
 
 @router.get("/ontology/{class_label}", response_model=OntologyResponse)
+@trace_endpoint("bff.ontology.get_ontology")
 async def get_ontology(
     db_name: str,
     class_label: str,
@@ -97,6 +101,7 @@ async def get_ontology(
 
 
 @router.post("/ontology/validate", response_model=ApiResponse)
+@trace_endpoint("bff.ontology.validate_ontology_create_bff")
 async def validate_ontology_create_bff(
     db_name: str,
     ontology: OntologyCreateRequestBFF,
@@ -114,6 +119,7 @@ async def validate_ontology_create_bff(
 
 
 @router.post("/ontology/{class_label}/validate", response_model=ApiResponse)
+@trace_endpoint("bff.ontology.validate_ontology_update_bff")
 async def validate_ontology_update_bff(
     db_name: str,
     class_label: str,
@@ -144,6 +150,7 @@ async def validate_ontology_update_bff(
         status.HTTP_409_CONFLICT: {"description": "OCC conflict"},
     },
 )
+@trace_endpoint("bff.ontology.update_ontology")
 async def update_ontology(
     db_name: str,
     class_label: str,
@@ -176,6 +183,7 @@ async def update_ontology(
         status.HTTP_409_CONFLICT: {"description": "OCC conflict"},
     },
 )
+@trace_endpoint("bff.ontology.delete_ontology")
 async def delete_ontology(
     db_name: str,
     class_label: str,
@@ -197,6 +205,7 @@ async def delete_ontology(
 
 
 @router.get("/ontology/{class_id}/schema")
+@trace_endpoint("bff.ontology.get_ontology_schema")
 async def get_ontology_schema(
     db_name: str,
     class_id: str,

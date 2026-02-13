@@ -13,6 +13,8 @@ from typing import Tuple
 
 from fastapi import HTTPException, Request, status
 
+from shared.errors.error_types import ErrorCode, classified_http_exception
+
 from shared.config.settings import get_settings
 from shared.security.auth_utils import extract_presented_token, get_expected_token
 
@@ -38,14 +40,15 @@ async def require_admin(request: Request) -> None:
 
     expected = get_expected_token(_ADMIN_TOKEN_ENV_KEYS)
     if not expected:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Admin endpoints are disabled (set BFF_ADMIN_TOKEN to enable)",
+        raise classified_http_exception(
+            status.HTTP_403_FORBIDDEN,
+            "Admin endpoints are disabled (set BFF_ADMIN_TOKEN to enable)",
+            code=ErrorCode.PERMISSION_DENIED,
         )
 
     presented = extract_presented_token(request.headers)
     if not presented or not hmac.compare_digest(presented, expected):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin authorization failed")
+        raise classified_http_exception(status.HTTP_403_FORBIDDEN, "Admin authorization failed", code=ErrorCode.PERMISSION_DENIED)
 
     actor = (request.headers.get("X-Admin-Actor") or "admin").strip() or "admin"
     request.state.admin_actor = actor

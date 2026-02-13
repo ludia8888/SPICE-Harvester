@@ -13,6 +13,8 @@ from uuid import UUID
 from fastapi import HTTPException, status
 from elasticsearch.exceptions import ConnectionError as ESConnectionError, NotFoundError, RequestError
 
+from shared.errors.error_types import ErrorCode, ErrorCategory, classified_http_exception
+
 from bff.utils.action_log_serialization import ACTION_LOG_CLASS_ID, serialize_action_log_record
 from shared.config.app_config import AppConfig
 from shared.config.settings import get_settings
@@ -33,6 +35,7 @@ from shared.services.storage.lakefs_storage_service import create_lakefs_storage
 from shared.services.storage.storage_service import create_storage_service
 from shared.utils.access_policy import apply_access_policy
 from shared.utils.writeback_lifecycle import derive_lifecycle_id, overlay_doc_id
+from shared.observability.tracing import trace_external_call
 
 logger = logging.getLogger(__name__)
 
@@ -168,9 +171,10 @@ def _sanitize_search_query(search: Optional[str]) -> Optional[str]:
     if not search:
         return None
     if len(search) > 100:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Search query too long (max 100 characters)",
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            "Search query too long (max 100 characters)",
+            code=ErrorCode.REQUEST_VALIDATION_FAILED,
         )
     try:
         from shared.security.input_sanitizer import input_sanitizer
@@ -179,9 +183,10 @@ def _sanitize_search_query(search: Optional[str]) -> Optional[str]:
         return sanitize_es_query(validated_search)
     except Exception as exc:
         logger.warning("Search query security violation: %s", exc)
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid search query format",
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            "Invalid search query format",
+            code=ErrorCode.REQUEST_VALIDATION_FAILED,
         ) from exc
 
 
@@ -231,6 +236,7 @@ def _merge_overlay_instances(
     return merged
 
 
+@trace_external_call("bff.instances.list_class_instances")
 async def list_class_instances(
     *,
     db_name: str,
@@ -261,18 +267,20 @@ async def list_class_instances(
                 required_roles=DOMAIN_MODEL_ROLES,
             )
         except ValueError as exc:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+            raise classified_http_exception(status.HTTP_403_FORBIDDEN, str(exc), code=ErrorCode.PERMISSION_DENIED) from exc
 
         if search:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="search is not supported for ActionLog instances",
+            raise classified_http_exception(
+                status.HTTP_400_BAD_REQUEST,
+                "search is not supported for ActionLog instances",
+                code=ErrorCode.REQUEST_VALIDATION_FAILED,
             )
 
         if not action_logs:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="ActionLogRegistry not available",
+            raise classified_http_exception(
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                "ActionLogRegistry not available",
+                code=ErrorCode.UPSTREAM_UNAVAILABLE,
             )
 
         records = await action_logs.list_logs(
@@ -372,9 +380,11 @@ async def list_class_instances(
             overlay_status = "DEGRADED"
 
     if overlay.overlay_required and overlay_status == "DEGRADED":
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=_projection_unavailable_detail(
+        raise classified_http_exception(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "Overlay index unavailable; cannot serve authoritative view.",
+            code=ErrorCode.UPSTREAM_UNAVAILABLE,
+            extra=_projection_unavailable_detail(
                 message="Overlay index unavailable; cannot serve authoritative view.",
                 class_id=class_id,
                 base_branch=resolved_base_branch,
@@ -413,9 +423,11 @@ async def list_class_instances(
 
     if es_error:
         if overlay.overlay_required:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=_projection_unavailable_detail(
+            raise classified_http_exception(
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                "Overlay index unavailable; cannot serve authoritative view.",
+                code=ErrorCode.UPSTREAM_UNAVAILABLE,
+                extra=_projection_unavailable_detail(
                     message="Overlay index unavailable; cannot serve authoritative view.",
                     class_id=class_id,
                     base_branch=resolved_base_branch,
@@ -423,9 +435,11 @@ async def list_class_instances(
                     writeback_enabled=overlay.writeback_enabled,
                 ),
             )
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=_projection_unavailable_detail(
+        raise classified_http_exception(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "Base projection unavailable; cannot serve authoritative view.",
+            code=ErrorCode.UPSTREAM_UNAVAILABLE,
+            extra=_projection_unavailable_detail(
                 message="Base projection unavailable; cannot serve authoritative view.",
                 class_id=class_id,
                 base_branch=resolved_base_branch,
@@ -444,6 +458,7 @@ async def list_class_instances(
     }
 
 
+@trace_external_call("bff.instances.get_class_sample_values")
 async def get_class_sample_values(
     *,
     db_name: str,
@@ -471,9 +486,11 @@ async def get_class_sample_values(
         )
     except (ESConnectionError, ConnectionRefusedError, TimeoutError, NotFoundError, RequestError) as exc:
         logger.warning("Elasticsearch unavailable while loading sample values for class %s: %s", class_id, exc)
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=_projection_unavailable_detail(
+        raise classified_http_exception(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "Base projection unavailable; cannot serve authoritative view.",
+            code=ErrorCode.UPSTREAM_UNAVAILABLE,
+            extra=_projection_unavailable_detail(
                 message="Base projection unavailable; cannot serve authoritative view.",
                 class_id=class_id,
                 base_branch=resolved_base_branch,
@@ -483,9 +500,11 @@ async def get_class_sample_values(
         ) from exc
     except Exception as exc:
         logger.error("Unexpected Elasticsearch error while loading sample values for class %s: %s", class_id, exc)
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=_projection_unavailable_detail(
+        raise classified_http_exception(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "Base projection unavailable; cannot serve authoritative view.",
+            code=ErrorCode.UPSTREAM_UNAVAILABLE,
+            extra=_projection_unavailable_detail(
                 message="Base projection unavailable; cannot serve authoritative view.",
                 class_id=class_id,
                 base_branch=resolved_base_branch,
@@ -590,17 +609,18 @@ async def _server_merge_fallback(
         instances=[merged.document],
     )
     if not filtered:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"인스턴스 '{instance_id}'를 찾을 수 없습니다",
+        raise classified_http_exception(
+            status.HTTP_404_NOT_FOUND,
+            f"인스턴스 '{instance_id}'를 찾을 수 없습니다",
+            code=ErrorCode.RESOURCE_NOT_FOUND,
         )
 
     if merged.overlay_tombstone:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={
-                "code": "RESOURCE_NOT_FOUND",
-                "message": f"인스턴스 '{instance_id}'를 찾을 수 없습니다",
+        raise classified_http_exception(
+            status.HTTP_404_NOT_FOUND,
+            f"인스턴스 '{instance_id}'를 찾을 수 없습니다",
+            code=ErrorCode.RESOURCE_NOT_FOUND,
+            extra={
                 "base_branch": resolved_base_branch,
                 "overlay_branch": resolved_overlay_branch,
                 "overlay_status": "DEGRADED",
@@ -620,6 +640,7 @@ async def _server_merge_fallback(
     }
 
 
+@trace_external_call("bff.instances.get_instance_detail")
 async def get_instance_detail(
     *,
     db_name: str,
@@ -646,25 +667,27 @@ async def get_instance_detail(
                 required_roles=DOMAIN_MODEL_ROLES,
             )
         except ValueError as exc:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+            raise classified_http_exception(status.HTTP_403_FORBIDDEN, str(exc), code=ErrorCode.PERMISSION_DENIED) from exc
 
         try:
             action_log_uuid = UUID(str(instance_id))
         except Exception as exc:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid ActionLog UUID",
+            raise classified_http_exception(
+                status.HTTP_400_BAD_REQUEST,
+                "Invalid ActionLog UUID",
+                code=ErrorCode.REQUEST_VALIDATION_FAILED,
             ) from exc
 
         if not action_logs:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="ActionLogRegistry not available",
+            raise classified_http_exception(
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                "ActionLogRegistry not available",
+                code=ErrorCode.UPSTREAM_UNAVAILABLE,
             )
 
         record = await action_logs.get_log(action_log_id=str(action_log_uuid))
         if not record or record.db_name != db_name:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="ActionLog not found")
+            raise classified_http_exception(status.HTTP_404_NOT_FOUND, "ActionLog not found", code=ErrorCode.RESOURCE_NOT_FOUND)
 
         return {"status": "success", "data": _action_log_as_instance(record)}
 
@@ -728,11 +751,11 @@ async def get_instance_detail(
                         overlay_doc = None
 
                 if isinstance(overlay_doc, dict) and overlay_doc.get("overlay_tombstone") is True:
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail={
-                            "code": "RESOURCE_NOT_FOUND",
-                            "message": f"인스턴스 '{instance_id}'를 찾을 수 없습니다",
+                    raise classified_http_exception(
+                        status.HTTP_404_NOT_FOUND,
+                        f"인스턴스 '{instance_id}'를 찾을 수 없습니다",
+                        code=ErrorCode.RESOURCE_NOT_FOUND,
+                        extra={
                             "base_branch": resolved_base_branch,
                             "overlay_branch": overlay.resolved_overlay_branch,
                             "overlay_status": overlay_status,
@@ -766,9 +789,10 @@ async def get_instance_detail(
                 instances=[base_doc],
             )
             if not filtered:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"인스턴스 '{instance_id}'를 찾을 수 없습니다",
+                raise classified_http_exception(
+                    status.HTTP_404_NOT_FOUND,
+                    f"인스턴스 '{instance_id}'를 찾을 수 없습니다",
+                    code=ErrorCode.RESOURCE_NOT_FOUND,
                 )
             return {
                 "status": "success",
@@ -792,11 +816,11 @@ async def get_instance_detail(
                     dataset_registry=dataset_registry,
                 )
             except FileNotFoundError:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail={
-                        "code": "RESOURCE_NOT_FOUND",
-                        "message": f"인스턴스 '{instance_id}'를 찾을 수 없습니다",
+                raise classified_http_exception(
+                    status.HTTP_404_NOT_FOUND,
+                    f"인스턴스 '{instance_id}'를 찾을 수 없습니다",
+                    code=ErrorCode.RESOURCE_NOT_FOUND,
+                    extra={
                         "base_branch": resolved_base_branch,
                         "overlay_branch": overlay.resolved_overlay_branch,
                         "overlay_status": "DEGRADED",
@@ -807,9 +831,11 @@ async def get_instance_detail(
             except HTTPException:
                 raise
             except Exception:
-                raise HTTPException(
-                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail=_projection_unavailable_detail(
+                raise classified_http_exception(
+                    status.HTTP_503_SERVICE_UNAVAILABLE,
+                    "Base projection missing; cannot serve authoritative view for writeback-enabled types.",
+                    code=ErrorCode.UPSTREAM_UNAVAILABLE,
+                    extra=_projection_unavailable_detail(
                         message="Base projection missing; cannot serve authoritative view for writeback-enabled types.",
                         class_id=class_id,
                         instance_id=instance_id,
@@ -819,9 +845,10 @@ async def get_instance_detail(
                     ),
                 )
 
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"인스턴스 '{instance_id}'를 찾을 수 없습니다",
+        raise classified_http_exception(
+            status.HTTP_404_NOT_FOUND,
+            f"인스턴스 '{instance_id}'를 찾을 수 없습니다",
+            code=ErrorCode.RESOURCE_NOT_FOUND,
         )
 
     except HTTPException:
@@ -839,16 +866,19 @@ async def get_instance_detail(
                     dataset_registry=dataset_registry,
                 )
             except FileNotFoundError:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"인스턴스 '{instance_id}'를 찾을 수 없습니다",
+                raise classified_http_exception(
+                    status.HTTP_404_NOT_FOUND,
+                    f"인스턴스 '{instance_id}'를 찾을 수 없습니다",
+                    code=ErrorCode.RESOURCE_NOT_FOUND,
                 ) from exc
             except HTTPException:
                 raise
             except Exception:
-                raise HTTPException(
-                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail=_projection_unavailable_detail(
+                raise classified_http_exception(
+                    status.HTTP_503_SERVICE_UNAVAILABLE,
+                    "Overlay index unavailable; cannot serve authoritative view.",
+                    code=ErrorCode.UPSTREAM_UNAVAILABLE,
+                    extra=_projection_unavailable_detail(
                         message="Overlay index unavailable; cannot serve authoritative view.",
                         class_id=class_id,
                         instance_id=instance_id,
@@ -857,9 +887,11 @@ async def get_instance_detail(
                         writeback_enabled=overlay.writeback_enabled,
                     ),
                 ) from exc
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=_projection_unavailable_detail(
+        raise classified_http_exception(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "Base projection unavailable; cannot serve authoritative view.",
+            code=ErrorCode.UPSTREAM_UNAVAILABLE,
+            extra=_projection_unavailable_detail(
                 message="Base projection unavailable; cannot serve authoritative view.",
                 class_id=class_id,
                 instance_id=instance_id,
@@ -881,16 +913,19 @@ async def get_instance_detail(
                     dataset_registry=dataset_registry,
                 )
             except FileNotFoundError:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"인스턴스 '{instance_id}'를 찾을 수 없습니다",
+                raise classified_http_exception(
+                    status.HTTP_404_NOT_FOUND,
+                    f"인스턴스 '{instance_id}'를 찾을 수 없습니다",
+                    code=ErrorCode.RESOURCE_NOT_FOUND,
                 ) from exc
             except HTTPException:
                 raise
             except Exception:
-                raise HTTPException(
-                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail=_projection_unavailable_detail(
+                raise classified_http_exception(
+                    status.HTTP_503_SERVICE_UNAVAILABLE,
+                    "Overlay index unavailable; cannot serve authoritative view.",
+                    code=ErrorCode.UPSTREAM_UNAVAILABLE,
+                    extra=_projection_unavailable_detail(
                         message="Overlay index unavailable; cannot serve authoritative view.",
                         class_id=class_id,
                         instance_id=instance_id,
@@ -899,9 +934,11 @@ async def get_instance_detail(
                         writeback_enabled=overlay.writeback_enabled,
                     ),
                 ) from exc
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=_projection_unavailable_detail(
+        raise classified_http_exception(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "Base projection unavailable; cannot serve authoritative view.",
+            code=ErrorCode.UPSTREAM_UNAVAILABLE,
+            extra=_projection_unavailable_detail(
                 message="Base projection unavailable; cannot serve authoritative view.",
                 class_id=class_id,
                 instance_id=instance_id,
@@ -923,16 +960,19 @@ async def get_instance_detail(
                     dataset_registry=dataset_registry,
                 )
             except FileNotFoundError:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"인스턴스 '{instance_id}'를 찾을 수 없습니다",
+                raise classified_http_exception(
+                    status.HTTP_404_NOT_FOUND,
+                    f"인스턴스 '{instance_id}'를 찾을 수 없습니다",
+                    code=ErrorCode.RESOURCE_NOT_FOUND,
                 ) from exc
             except HTTPException:
                 raise
             except Exception:
-                raise HTTPException(
-                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail=_projection_unavailable_detail(
+                raise classified_http_exception(
+                    status.HTTP_503_SERVICE_UNAVAILABLE,
+                    "Overlay index unavailable; cannot serve authoritative view.",
+                    code=ErrorCode.UPSTREAM_UNAVAILABLE,
+                    extra=_projection_unavailable_detail(
                         message="Overlay index unavailable; cannot serve authoritative view.",
                         class_id=class_id,
                         instance_id=instance_id,
@@ -941,9 +981,11 @@ async def get_instance_detail(
                         writeback_enabled=overlay.writeback_enabled,
                     ),
                 ) from exc
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=_projection_unavailable_detail(
+        raise classified_http_exception(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "Base projection unavailable; cannot serve authoritative view.",
+            code=ErrorCode.UPSTREAM_UNAVAILABLE,
+            extra=_projection_unavailable_detail(
                 message="Base projection unavailable; cannot serve authoritative view.",
                 class_id=class_id,
                 instance_id=instance_id,
@@ -965,16 +1007,19 @@ async def get_instance_detail(
                     dataset_registry=dataset_registry,
                 )
             except FileNotFoundError:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"인스턴스 '{instance_id}'를 찾을 수 없습니다",
+                raise classified_http_exception(
+                    status.HTTP_404_NOT_FOUND,
+                    f"인스턴스 '{instance_id}'를 찾을 수 없습니다",
+                    code=ErrorCode.RESOURCE_NOT_FOUND,
                 ) from exc
             except HTTPException:
                 raise
             except Exception:
-                raise HTTPException(
-                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail=_projection_unavailable_detail(
+                raise classified_http_exception(
+                    status.HTTP_503_SERVICE_UNAVAILABLE,
+                    "Overlay index unavailable; cannot serve authoritative view.",
+                    code=ErrorCode.UPSTREAM_UNAVAILABLE,
+                    extra=_projection_unavailable_detail(
                         message="Overlay index unavailable; cannot serve authoritative view.",
                         class_id=class_id,
                         instance_id=instance_id,
@@ -983,9 +1028,11 @@ async def get_instance_detail(
                         writeback_enabled=overlay.writeback_enabled,
                     ),
                 ) from exc
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=_projection_unavailable_detail(
+        raise classified_http_exception(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "Base projection unavailable; cannot serve authoritative view.",
+            code=ErrorCode.UPSTREAM_UNAVAILABLE,
+            extra=_projection_unavailable_detail(
                 message="Base projection unavailable; cannot serve authoritative view.",
                 class_id=class_id,
                 instance_id=instance_id,

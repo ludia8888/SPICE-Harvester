@@ -8,6 +8,7 @@ Composed by `bff.routers.ontology` via router composition (Composite pattern).
 """
 
 from __future__ import annotations
+from shared.observability.tracing import trace_endpoint
 
 from typing import Optional
 
@@ -22,6 +23,7 @@ router = APIRouter(tags=["Ontology Management"])
 
 
 @router.post("/import-from-google-sheets/dry-run")
+@trace_endpoint("bff.ontology.dry_run_import_from_google_sheets")
 async def dry_run_import_from_google_sheets(
     db_name: str,
     request: ImportFromGoogleSheetsRequest,
@@ -30,6 +32,7 @@ async def dry_run_import_from_google_sheets(
 
 
 @router.post("/import-from-google-sheets/commit")
+@trace_endpoint("bff.ontology.commit_import_from_google_sheets")
 async def commit_import_from_google_sheets(
     db_name: str,
     request: ImportFromGoogleSheetsRequest,
@@ -43,6 +46,7 @@ async def commit_import_from_google_sheets(
 
 
 @router.post("/import-from-excel/dry-run")
+@trace_endpoint("bff.ontology.dry_run_import_from_excel")
 async def dry_run_import_from_excel(
     db_name: str,
     file: UploadFile = File(...),
@@ -84,6 +88,7 @@ async def dry_run_import_from_excel(
 
 
 @router.post("/import-from-excel/commit")
+@trace_endpoint("bff.ontology.commit_import_from_excel")
 async def commit_import_from_excel(
     db_name: str,
     file: UploadFile = File(...),

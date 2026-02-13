@@ -7,6 +7,7 @@ This module defines HTTP routes only. Business logic lives in
 """
 
 from typing import Optional
+from shared.observability.tracing import trace_endpoint
 
 from fastapi import APIRouter, Depends, Query, Request, status
 
@@ -26,6 +27,7 @@ router = APIRouter(tags=["Ontology Link Types"])
 
 
 @router.post("/link-types", status_code=status.HTTP_201_CREATED, response_model=ApiResponse)
+@trace_endpoint("bff.link_types.create_link_type")
 async def create_link_type(
     db_name: str,
     body: LinkTypeRequest,
@@ -55,6 +57,7 @@ async def create_link_type(
 
 
 @router.put("/link-types/{link_type_id}", response_model=ApiResponse)
+@trace_endpoint("bff.link_types.update_link_type")
 async def update_link_type(
     db_name: str,
     link_type_id: str,
@@ -86,6 +89,7 @@ async def update_link_type(
 
 
 @router.post("/link-types/{link_type_id}/reindex", response_model=ApiResponse)
+@trace_endpoint("bff.link_types.reindex_link_type")
 async def reindex_link_type(
     db_name: str,
     link_type_id: str,

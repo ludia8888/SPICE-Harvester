@@ -9,7 +9,8 @@ import logging
 from typing import Any, Dict, Optional, Tuple
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
-from fastapi import HTTPException, status
+from fastapi import status
+from shared.errors.error_types import ErrorCode, classified_http_exception
 
 from data_connector.google_sheets.auth import GoogleOAuth2Client
 from shared.services.registries.connector_registry import ConnectorRegistry
@@ -42,14 +43,14 @@ async def _resolve_google_connection(
 ) -> Tuple[Any, Optional[str]]:
     connection_id = (connection_id or "").strip()
     if not connection_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="connection_id is required")
+        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "connection_id is required", code=ErrorCode.REQUEST_VALIDATION_FAILED)
 
     source = await connector_registry.get_source(
         source_type="google_sheets_connection",
         source_id=connection_id,
     )
     if not source or not source.enabled:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Connection not found")
+        raise classified_http_exception(status.HTTP_404_NOT_FOUND, "Connection not found", code=ErrorCode.RESOURCE_NOT_FOUND)
 
     config = source.config_json or {}
     token = config.get("access_token")

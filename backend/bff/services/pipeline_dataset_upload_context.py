@@ -12,7 +12,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
-from fastapi import HTTPException, Request, status
+from fastapi import Request
+from shared.errors.error_types import ErrorCode, classified_http_exception
 
 from bff.services.http_idempotency import require_idempotency_key
 from shared.security.auth_utils import enforce_db_scope
@@ -39,14 +40,14 @@ async def _prepare_dataset_upload_context(
     pipeline_registry: PipelineRegistry,
 ) -> _DatasetUploadContext:
     if request is None:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Request context is required")
+        raise classified_http_exception(400, "Request context is required", code=ErrorCode.REQUEST_VALIDATION_FAILED)
     idempotency_key = require_idempotency_key(request)
 
     db_name = validate_db_name(db_name)
     try:
         enforce_db_scope(request.headers, db_name=db_name)
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+        raise classified_http_exception(403, str(exc), code=ErrorCode.PERMISSION_DENIED) from exc
 
     actor_user_id = (request.headers.get("X-User-ID") or "").strip() or None
     lakefs_storage_service = await pipeline_registry.get_lakefs_storage(user_id=actor_user_id)

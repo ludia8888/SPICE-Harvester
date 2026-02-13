@@ -11,9 +11,10 @@ import logging
 from typing import Any, Optional
 
 import httpx
-from fastapi import HTTPException, status
+from shared.errors.error_types import ErrorCode, classified_http_exception
 
 from bff.services.oms_client import OMSClient
+from shared.observability.tracing import trace_external_call
 
 
 def _normalize_ref(value: Any) -> Optional[str]:
@@ -34,6 +35,7 @@ def _extract_head_commit_id(head_payload: Any) -> Optional[str]:
     )
 
 
+@trace_external_call("bff.ontology_occ_guard.fetch_branch_head_commit_id")
 async def fetch_branch_head_commit_id(
     *,
     oms_client: OMSClient,
@@ -44,6 +46,7 @@ async def fetch_branch_head_commit_id(
     return _extract_head_commit_id(head_payload)
 
 
+@trace_external_call("bff.ontology_occ_guard.resolve_expected_head_commit")
 async def resolve_expected_head_commit(
     *,
     oms_client: OMSClient,
@@ -66,9 +69,10 @@ async def resolve_expected_head_commit(
         return resolved_head
     if allow_none:
         return None
-    raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=unresolved_detail)
+    raise classified_http_exception(409, unresolved_detail, code=ErrorCode.CONFLICT)
 
 
+@trace_external_call("bff.ontology_occ_guard.resolve_branch_head_commit_with_bootstrap")
 async def resolve_branch_head_commit_with_bootstrap(
     *,
     oms_client: OMSClient,

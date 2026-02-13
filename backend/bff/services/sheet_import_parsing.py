@@ -8,20 +8,21 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, List, Optional, Tuple
 
-from fastapi import HTTPException, UploadFile, status
+from fastapi import UploadFile, status
+
+from shared.errors.error_types import ErrorCode, classified_http_exception
+from shared.observability.tracing import trace_external_call
 
 
+@trace_external_call("bff.sheet_import.read_excel_upload")
 async def read_excel_upload(file: UploadFile) -> Tuple[str, bytes]:
     filename = file.filename or "upload.xlsx"
     if not filename.lower().endswith((".xlsx", ".xlsm")):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Only .xlsx/.xlsm files are supported",
-        )
+        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "Only .xlsx/.xlsm files are supported", code=ErrorCode.REQUEST_VALIDATION_FAILED)
 
     content = await file.read()
     if not content:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty file")
+        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "Empty file", code=ErrorCode.REQUEST_VALIDATION_FAILED)
     return filename, content
 
 
@@ -36,10 +37,7 @@ def parse_table_bbox(
     if not any(v is not None for v in bbox_parts):
         return None
     if any(v is None for v in bbox_parts):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="table_top/table_left/table_bottom/table_right must be provided together",
-        )
+        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "table_top/table_left/table_bottom/table_right must be provided together", code=ErrorCode.REQUEST_VALIDATION_FAILED)
     return {
         "top": int(table_top),
         "left": int(table_left),
@@ -58,11 +56,11 @@ def parse_json_array(
 ) -> List[Any]:
     if value is None:
         if required_message is not None:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=required_message)
+            raise classified_http_exception(status.HTTP_400_BAD_REQUEST, required_message, code=ErrorCode.REQUEST_VALIDATION_FAILED)
         return []
     if treat_blank_as_missing and value.strip() == "":
         if required_message is not None:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=required_message)
+            raise classified_http_exception(status.HTTP_400_BAD_REQUEST, required_message, code=ErrorCode.REQUEST_VALIDATION_FAILED)
         return []
     try:
         raw = json.loads(value)
@@ -70,10 +68,7 @@ def parse_json_array(
             raise ValueError(type_error_message or f"{field_name} must be a JSON array")
         return raw
     except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid {field_name}: {exc}",
-        ) from exc
+        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, f"Invalid {field_name}: {exc}", code=ErrorCode.REQUEST_VALIDATION_FAILED) from exc
 
 
 def parse_json_object(
@@ -95,10 +90,7 @@ def parse_json_object(
             raise ValueError(type_error_message or f"{field_name} must be an object")
         return raw
     except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid {field_name}: {exc}",
-        ) from exc
+        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, f"Invalid {field_name}: {exc}", code=ErrorCode.REQUEST_VALIDATION_FAILED) from exc
 
 
 def parse_target_schema_json(value: Optional[str]) -> List[Dict[str, Any]]:

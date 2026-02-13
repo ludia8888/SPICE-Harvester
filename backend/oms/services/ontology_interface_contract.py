@@ -7,6 +7,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Tuple
 
 from oms.services.ontology_health_issue_registry import build_object_type_ref
+from oms.validation_codes import OntologyValidationCode as OVC
 
 
 def extract_interface_refs(metadata: Dict[str, Any]) -> List[str]:
@@ -62,7 +63,7 @@ def collect_interface_contract_issues(
         if not interface_resource:
             issues.append(
                 {
-                    "code": "IFACE_NOT_FOUND",
+                    "code": OVC.IFACE_NOT_FOUND.value,
                     "severity": "ERROR",
                     "resource_ref": resource_ref,
                     "details": {"interface_ref": raw_ref, "interface_id": interface_id},
@@ -87,7 +88,7 @@ def collect_interface_contract_issues(
             if not actual:
                 issues.append(
                     {
-                        "code": "IFACE_MISSING_PROPERTY",
+                        "code": OVC.IFACE_MISSING_PROPERTY.value,
                         "severity": "ERROR",
                         "resource_ref": resource_ref,
                         "details": {"missing_fields": [name], "interface_id": interface_id},
@@ -111,7 +112,7 @@ def collect_interface_contract_issues(
                 ):
                     issues.append(
                         {
-                            "code": "IFACE_PROPERTY_TYPE_MISMATCH",
+                            "code": OVC.IFACE_PROPERTY_TYPE_MISMATCH.value,
                             "severity": "ERROR",
                             "resource_ref": resource_ref,
                             "details": {
@@ -133,7 +134,7 @@ def collect_interface_contract_issues(
             if not actual:
                 issues.append(
                     {
-                        "code": "IFACE_MISSING_RELATIONSHIP",
+                        "code": OVC.IFACE_MISSING_RELATIONSHIP.value,
                         "severity": "ERROR",
                         "resource_ref": resource_ref,
                         "details": {"missing_relationships": [predicate], "interface_id": interface_id},
@@ -157,7 +158,7 @@ def collect_interface_contract_issues(
                 ):
                     issues.append(
                         {
-                            "code": "IFACE_REL_TARGET_MISMATCH",
+                            "code": OVC.IFACE_REL_TARGET_MISMATCH.value,
                             "severity": "ERROR",
                             "resource_ref": resource_ref,
                             "details": {

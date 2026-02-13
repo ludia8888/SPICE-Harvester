@@ -45,6 +45,7 @@ from shared.utils.writeback_governance import extract_backing_dataset_id, polici
 from shared.utils.writeback_lifecycle import DEFAULT_LIFECYCLE_ID, derive_lifecycle_id, overlay_doc_id
 from shared.utils.writeback_paths import queue_entry_prefix, queue_entry_key, ref_key, writeback_patchset_key
 from shared.utils.action_writeback import is_noop_changes, safe_str
+from shared.observability.tracing import trace_external_call
 from shared.utils.writeback_patch_apply import apply_changes_to_payload
 from shared.utils.time_utils import utcnow
 
@@ -340,6 +341,7 @@ def _coerce_overlay_branch(*, db_name: str, writeback_target: Dict[str, Any], ov
     return AppConfig.get_ontology_writeback_branch(db_name)
 
 
+@trace_external_call("oms.action_simulation.enforce_action_permission")
 async def enforce_action_permission(
     *,
     db_name: str,
@@ -628,6 +630,7 @@ async def _check_writeback_dataset_acl_alignment(
             )
 
 
+@trace_external_call("oms.action_simulation.preflight_action_writeback")
 async def preflight_action_writeback(
     *,
     terminus: AsyncTerminusService,
@@ -1174,6 +1177,7 @@ def build_patchset_for_scenario(
     return patchset, targets, conflicts, sorted(policies_used)
 
 
+@trace_external_call("oms.action_simulation.simulate_effects_for_patchset")
 async def simulate_effects_for_patchset(
     *,
     base_storage: StorageService,

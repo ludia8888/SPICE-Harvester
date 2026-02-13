@@ -4,6 +4,7 @@ Composed by `bff.routers.ontology` via router composition (Composite pattern).
 """
 
 from __future__ import annotations
+from shared.observability.tracing import trace_endpoint
 
 import logging
 from datetime import datetime, timezone
@@ -11,6 +12,8 @@ from typing import Any, Dict
 
 import httpx
 from fastapi import APIRouter, HTTPException, status
+
+from shared.errors.error_types import ErrorCode, classified_http_exception
 
 from bff.dependencies import LabelMapper, LabelMapperDep, OMSClientDep
 from bff.services.oms_client import OMSClient
@@ -21,6 +24,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Ontology Management"])
 
 @router.post("/ontology/{class_id}/mapping-metadata")
+@trace_endpoint("bff.ontology.save_mapping_metadata")
 async def save_mapping_metadata(
     db_name: str,
     class_id: str,
@@ -138,7 +142,7 @@ async def save_mapping_metadata(
                         detail = detail_json.get("detail") or detail_json
                 except Exception:
                     pass
-                raise HTTPException(status_code=status_code, detail=detail) from e
+                raise classified_http_exception(status_code, str(detail), code=ErrorCode.UPSTREAM_ERROR) from e
         
         logger.info(f"Saved mapping metadata for class {class_id}: {new_mapping_entry['mappings_count']} mappings from {new_mapping_entry['source_file']}")
         
@@ -157,7 +161,8 @@ async def save_mapping_metadata(
         raise
     except Exception as e:
         logger.error(f"Failed to save mapping metadata: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"매핑 메타데이터 저장 실패: {str(e)}"
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            f"매핑 메타데이터 저장 실패: {str(e)}",
+            code=ErrorCode.INTERNAL_ERROR,
         )

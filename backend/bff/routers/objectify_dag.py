@@ -6,6 +6,7 @@ Business logic lives in `bff.services.objectify_dag_service` (Facade).
 """
 
 from __future__ import annotations
+from shared.observability.tracing import trace_endpoint
 
 from typing import Any, Dict
 
@@ -24,6 +25,7 @@ router = APIRouter(tags=["Objectify"])
 
 
 @router.post("/databases/{db_name}/run-dag", response_model=Dict[str, Any])
+@trace_endpoint("bff.objectify.run_objectify_dag")
 async def run_objectify_dag(
     db_name: str,
     body: RunObjectifyDAGRequest,

@@ -5,8 +5,11 @@
 
 import logging
 from typing import Any, Dict
+from shared.observability.tracing import trace_endpoint
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+
+from shared.errors.error_types import ErrorCode, classified_http_exception
 
 from bff.dependencies import LabelMapper, TerminusService, get_label_mapper, get_terminus_service
 from bff.routers.registry_deps import get_dataset_registry
@@ -26,6 +29,7 @@ router = APIRouter(prefix="/databases/{db_name}", tags=["Query"])
 
 
 @router.post("/query", response_model=QueryResponse)
+@trace_endpoint("bff.query.execute_query")
 async def execute_query(
     db_name: str,
     query: QueryInput,
@@ -94,15 +98,17 @@ async def execute_query(
 
     except ValueError as e:
         # 레이블을 찾을 수 없는 경우
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, str(e), code=ErrorCode.REQUEST_VALIDATION_FAILED)
     except Exception as e:
         logger.error(f"Failed to execute query: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"쿼리 실행 실패: {str(e)}"
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR, f"쿼리 실행 실패: {str(e)}",
+            code=ErrorCode.INTERNAL_ERROR,
         )
 
 
 @router.post("/query/raw")
+@trace_endpoint("bff.query.execute_raw_query")
 async def execute_raw_query(
     db_name: str,
     query: Dict[str, Any],
@@ -124,9 +130,10 @@ async def execute_raw_query(
         query_type = query.get("type", "").lower()
 
         if query_type not in allowed_query_types:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"허용되지 않은 쿼리 타입: {query_type}. 허용된 타입: {allowed_query_types}",
+            raise classified_http_exception(
+                status.HTTP_403_FORBIDDEN,
+                f"허용되지 않은 쿼리 타입: {query_type}. 허용된 타입: {allowed_query_types}",
+                code=ErrorCode.PERMISSION_DENIED,
             )
 
         # 쿼리 파라미터 정화
@@ -154,13 +161,15 @@ async def execute_raw_query(
         raise
     except Exception as e:
         logger.error(f"Failed to execute raw query: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"원시 쿼리 실행 실패: {str(e)}",
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            f"원시 쿼리 실행 실패: {str(e)}",
+            code=ErrorCode.INTERNAL_ERROR,
         )
 
 
 @router.get("/query/builder")
+@trace_endpoint("bff.query.query_builder_info")
 async def query_builder_info():
     """
     쿼리 빌더 정보

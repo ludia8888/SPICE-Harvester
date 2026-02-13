@@ -12,11 +12,14 @@ from uuid import uuid4
 
 from fastapi import HTTPException, status
 
+from shared.errors.error_types import ErrorCode, classified_http_exception
 from shared.models.requests import ApiResponse
+from shared.observability.tracing import trace_db_operation
 
 logger = logging.getLogger(__name__)
 
 
+@trace_db_operation("bff.schema_changes.list_schema_changes")
 async def list_schema_changes(
     *,
     pool: Any,
@@ -95,9 +98,10 @@ async def list_schema_changes(
                 data={"items": [], "count": 0},
             ).to_dict()
         logger.exception("Failed to list schema changes")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc), code=ErrorCode.INTERNAL_ERROR) from exc
 
 
+@trace_db_operation("bff.schema_changes.acknowledge_drift")
 async def acknowledge_drift(
     *,
     pool: Any,
@@ -116,7 +120,7 @@ async def acknowledge_drift(
             result = await conn.fetchrow(query, drift_id, acknowledged_by)
 
         if not result:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Drift {drift_id} not found")
+            raise classified_http_exception(status.HTTP_404_NOT_FOUND, f"Drift {drift_id} not found", code=ErrorCode.RESOURCE_NOT_FOUND)
 
         return ApiResponse.success(
             message="Drift acknowledged",
@@ -127,9 +131,10 @@ async def acknowledge_drift(
         raise
     except Exception as exc:
         logger.exception("Failed to acknowledge drift")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc), code=ErrorCode.INTERNAL_ERROR) from exc
 
 
+@trace_db_operation("bff.schema_changes.list_subscriptions")
 async def list_subscriptions(
     *,
     pool: Any,
@@ -191,9 +196,10 @@ async def list_subscriptions(
                 data={"items": [], "count": 0},
             ).to_dict()
         logger.exception("Failed to list subscriptions")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc), code=ErrorCode.INTERNAL_ERROR) from exc
 
 
+@trace_db_operation("bff.schema_changes.create_subscription")
 async def create_subscription(
     *,
     pool: Any,
@@ -250,9 +256,10 @@ async def create_subscription(
 
     except Exception as exc:
         logger.exception("Failed to create subscription")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc), code=ErrorCode.INTERNAL_ERROR) from exc
 
 
+@trace_db_operation("bff.schema_changes.delete_subscription")
 async def delete_subscription(
     *,
     pool: Any,
@@ -271,10 +278,7 @@ async def delete_subscription(
             result = await conn.fetchrow(query, subscription_id, user_id)
 
         if not result:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Subscription {subscription_id} not found",
-            )
+            raise classified_http_exception(status.HTTP_404_NOT_FOUND, f"Subscription {subscription_id} not found", code=ErrorCode.RESOURCE_NOT_FOUND)
 
         return ApiResponse.success(
             message="Subscription deleted",
@@ -285,9 +289,10 @@ async def delete_subscription(
         raise
     except Exception as exc:
         logger.exception("Failed to delete subscription")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc), code=ErrorCode.INTERNAL_ERROR) from exc
 
 
+@trace_db_operation("bff.schema_changes.check_mapping_compatibility")
 async def check_mapping_compatibility(
     *,
     mapping_spec_id: str,
@@ -300,19 +305,13 @@ async def check_mapping_compatibility(
     try:
         mapping_spec = await objectify_registry.get_mapping_spec(mapping_spec_id=mapping_spec_id)
         if not mapping_spec:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Mapping spec {mapping_spec_id} not found",
-            )
+            raise classified_http_exception(status.HTTP_404_NOT_FOUND, f"Mapping spec {mapping_spec_id} not found", code=ErrorCode.RESOURCE_NOT_FOUND)
 
         dataset_id = mapping_spec.dataset_id
         if dataset_version_id:
             version = await dataset_registry.get_version(version_id=dataset_version_id)
             if not version:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Dataset version {dataset_version_id} not found",
-                )
+                raise classified_http_exception(status.HTTP_404_NOT_FOUND, f"Dataset version {dataset_version_id} not found", code=ErrorCode.RESOURCE_NOT_FOUND)
             sample = version.sample_json or {}
             if isinstance(sample, dict) and isinstance(sample.get("columns"), list):
                 current_schema = sample.get("columns") or []
@@ -331,10 +330,7 @@ async def check_mapping_compatibility(
             else:
                 dataset = await dataset_registry.get_dataset(dataset_id=str(dataset_id))
                 if not dataset:
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail=f"Dataset {dataset_id} not found",
-                    )
+                    raise classified_http_exception(status.HTTP_404_NOT_FOUND, f"Dataset {dataset_id} not found", code=ErrorCode.RESOURCE_NOT_FOUND)
                 schema_json = dataset.schema_json or {}
                 current_schema = schema_json.get("columns") or schema_json.get("fields") or []
 
@@ -401,9 +397,10 @@ async def check_mapping_compatibility(
         raise
     except Exception as exc:
         logger.exception("Failed to check mapping compatibility")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc), code=ErrorCode.INTERNAL_ERROR) from exc
 
 
+@trace_db_operation("bff.schema_changes.get_schema_change_stats")
 async def get_schema_change_stats(
     *,
     pool: Any,
@@ -473,5 +470,5 @@ async def get_schema_change_stats(
                 },
             ).to_dict()
         logger.exception("Failed to get schema change stats")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc), code=ErrorCode.INTERNAL_ERROR) from exc
 

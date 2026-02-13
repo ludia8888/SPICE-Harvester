@@ -4,7 +4,9 @@ import asyncio
 import logging
 from typing import Any, Awaitable, Callable, Dict, Optional
 
+from shared.errors.legacy_codes import LegacyErrorCode
 from shared.models.pipeline_plan import PipelinePlan
+from shared.observability.tracing import trace_external_call
 from shared.services.pipeline.pipeline_preview_inspector import inspect_preview
 from shared.utils.llm_safety import mask_pii
 
@@ -205,6 +207,7 @@ def _build_output(selected_run: Dict[str, Any], job_id: str, reused_existing: bo
     return result
 
 
+@trace_external_call("mcp.preview_inspect")
 async def _preview_inspect(_server: Any, arguments: Dict[str, Any]) -> Any:
     preview = arguments.get("preview") or {}
     if not isinstance(preview, dict):
@@ -213,6 +216,7 @@ async def _preview_inspect(_server: Any, arguments: Dict[str, Any]) -> Any:
     return {"status": "success", "inspector": mask_pii(inspection)}
 
 
+@trace_external_call("mcp.pipeline_create_from_plan")
 async def _pipeline_create_from_plan(_server: Any, arguments: Dict[str, Any]) -> Any:
     plan_obj = arguments.get("plan") or {}
     try:
@@ -337,6 +341,7 @@ async def _pipeline_create_from_plan(_server: Any, arguments: Dict[str, Any]) ->
     }
 
 
+@trace_external_call("mcp.pipeline_update_from_plan")
 async def _pipeline_update_from_plan(_server: Any, arguments: Dict[str, Any]) -> Any:
     pipeline_id = str(arguments.get("pipeline_id") or "").strip()
     if not pipeline_id:
@@ -381,6 +386,7 @@ async def _pipeline_update_from_plan(_server: Any, arguments: Dict[str, Any]) ->
     }
 
 
+@trace_external_call("mcp.pipeline_preview_wait")
 async def _pipeline_preview_wait(server: Any, arguments: Dict[str, Any]) -> Any:
     pipeline_id = str(arguments.get("pipeline_id") or "").strip()
     if not pipeline_id:
@@ -397,6 +403,7 @@ async def _pipeline_preview_wait(server: Any, arguments: Dict[str, Any]) -> Any:
     )
 
 
+@trace_external_call("mcp.pipeline_build_wait")
 async def _pipeline_build_wait(server: Any, arguments: Dict[str, Any]) -> Any:
     pipeline_id = str(arguments.get("pipeline_id") or "").strip()
     if not pipeline_id:
@@ -413,6 +420,7 @@ async def _pipeline_build_wait(server: Any, arguments: Dict[str, Any]) -> Any:
     )
 
 
+@trace_external_call("mcp.pipeline_deploy_promote_build")
 async def _pipeline_deploy_promote_build(server: Any, arguments: Dict[str, Any]) -> Any:
     pipeline_id = str(arguments.get("pipeline_id") or "").strip()
     if not pipeline_id:
@@ -517,7 +525,7 @@ async def _pipeline_deploy_promote_build(server: Any, arguments: Dict[str, Any])
                     "errors": detail.get("errors"),
                     "message": detail.get("message") or "Build is not successful yet",
                 }
-            if isinstance(detail, dict) and str(detail.get("code") or "").strip() == "REPLAY_REQUIRED":
+            if isinstance(detail, dict) and str(detail.get("code") or "").strip() == LegacyErrorCode.REPLAY_REQUIRED.value:
                 return {
                     "status": "replay_required",
                     "pipeline_id": pipeline_id,
@@ -525,7 +533,7 @@ async def _pipeline_deploy_promote_build(server: Any, arguments: Dict[str, Any])
                     "node_id": node_id,
                     "db_name": db_name,
                     "dataset_name": dataset_name,
-                    "code": "REPLAY_REQUIRED",
+                    "code": LegacyErrorCode.REPLAY_REQUIRED.value,
                     "message": detail.get("message") or resp.get("error") or "Replay is required to deploy",
                     "detail": detail,
                     "hint": "Retry with replay_on_deploy=true OR deploy to a new dataset_name.",
@@ -534,7 +542,7 @@ async def _pipeline_deploy_promote_build(server: Any, arguments: Dict[str, Any])
                 return {
                     "status": "conflict",
                     "pipeline_id": pipeline_id,
-                    "code": "DEFINITION_MISMATCH",
+                    "code": LegacyErrorCode.DEFINITION_MISMATCH.value,
                     "message": detail,
                     "hint": "Pass definition_json (exact build snapshot) or pipeline_spec_commit_id from the build output.",
                 }
@@ -579,4 +587,3 @@ PIPELINE_TOOL_HANDLERS: Dict[str, ToolHandler] = {
 
 def build_pipeline_tool_handlers() -> Dict[str, ToolHandler]:
     return dict(PIPELINE_TOOL_HANDLERS)
-

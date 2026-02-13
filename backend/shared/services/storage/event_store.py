@@ -27,6 +27,7 @@ from botocore.exceptions import ClientError
 from shared.config.settings import get_settings
 from shared.models.event_envelope import EventEnvelope
 from shared.observability.context_propagation import enrich_metadata_with_current_trace
+from shared.observability.tracing import trace_storage_operation
 from shared.services.events.aggregate_sequence_allocator import AggregateSequenceAllocator
 from shared.utils.ontology_version import extract_ontology_version
 from shared.services.storage.s3_client_config import build_s3_client_config
@@ -110,6 +111,7 @@ class EventStore:
             "config": client_config,
         }
         
+    @trace_storage_operation("event_store.connect", system="s3")
     async def connect(self):
         """Initialize S3/MinIO connection"""
         if getattr(self, "_connected", False):
@@ -435,6 +437,7 @@ class EventStore:
             seed_last_sequence=int(seed),
         )
     
+    @trace_storage_operation("event_store.append_event", system="s3")
     async def append_event(self, event: EventEnvelope) -> str:
         """
         Append an immutable event to S3/MinIO.
@@ -716,6 +719,7 @@ class EventStore:
         raw = await obj["Body"].read()
         return EventEnvelope.model_validate_json(raw)
 
+    @trace_storage_operation("event_store.get_event_object_key", system="s3")
     async def get_event_object_key(self, *, event_id: str) -> Optional[str]:
         """
         Resolve an event_id to its S3 object key using the by-event-id index.
@@ -728,6 +732,7 @@ class EventStore:
         async with self.session.client(**self._s3_client_kwargs()) as s3:
             return await self._get_existing_key_by_event_id(s3, str(event_id))
 
+    @trace_storage_operation("event_store.read_event_by_key", system="s3")
     async def read_event_by_key(self, *, key: str) -> EventEnvelope:
         """Read an event envelope from S3/MinIO by object key."""
         if not self.session:
@@ -736,6 +741,7 @@ class EventStore:
         async with self.session.client(**self._s3_client_kwargs()) as s3:
             return await self._read_event_object(s3, key)
     
+    @trace_storage_operation("event_store.get_events", system="s3")
     async def get_events(
         self, 
         aggregate_type: str, 
@@ -850,6 +856,7 @@ class EventStore:
             return f"cmd:{command_id}:{event.event_type}:{event.aggregate_type}:{event.aggregate_id}"
         return f"id:{event.event_id}"
     
+    @trace_storage_operation("event_store.replay_events", system="s3")
     async def replay_events(
         self,
         from_timestamp: datetime,
@@ -942,6 +949,7 @@ class EventStore:
             logger.error(f"Failed to replay events from S3/MinIO: {e}")
             raise
     
+    @trace_storage_operation("event_store.get_aggregate_version", system="s3")
     async def get_aggregate_version(
         self,
         aggregate_type: str,
@@ -1083,6 +1091,7 @@ class EventStore:
             ContentType="application/json",
         )
     
+    @trace_storage_operation("event_store.get_snapshot", system="s3")
     async def get_snapshot(
         self,
         aggregate_type: str,
@@ -1111,6 +1120,7 @@ class EventStore:
         except ClientError:
             return None
     
+    @trace_storage_operation("event_store.save_snapshot", system="s3")
     async def save_snapshot(
         self,
         aggregate_type: str,

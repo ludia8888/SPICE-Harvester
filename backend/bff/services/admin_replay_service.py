@@ -11,7 +11,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional, Sequence
 from uuid import uuid4
 
-from fastapi import BackgroundTasks, HTTPException, status
+from fastapi import BackgroundTasks
+from shared.errors.error_types import ErrorCode, classified_http_exception
 
 from bff.routers.admin_task_monitor import monitor_admin_task
 from bff.schemas.admin_replay_requests import ReplayInstanceStateRequest, ReplayInstanceStateResponse
@@ -23,10 +24,12 @@ from shared.services.core.background_task_manager import BackgroundTaskManager
 from shared.services.registries.lineage_store import LineageStore
 from shared.services.storage.redis_service import RedisService
 from shared.services.storage.storage_service import StorageService
+from shared.observability.tracing import trace_external_call, trace_db_operation
 
 logger = logging.getLogger(__name__)
 
 
+@trace_db_operation("bff.admin_replay.start_replay_instance_state")
 async def start_replay_instance_state(
     *,
     request: ReplayInstanceStateRequest,
@@ -63,6 +66,7 @@ async def start_replay_instance_state(
     )
 
 
+@trace_db_operation("bff.admin_replay.get_replay_result")
 async def get_replay_result(*, task_id: str, task_manager: BackgroundTaskManager, redis_service: RedisService) -> Dict[str, Any]:
     task = await _require_completed_task(task_id=task_id, task_manager=task_manager)
 
@@ -87,6 +91,7 @@ async def get_replay_result(*, task_id: str, task_manager: BackgroundTaskManager
     }
 
 
+@trace_db_operation("bff.admin_replay.get_replay_trace")
 async def get_replay_trace(
     *,
     task_id: str,
@@ -182,6 +187,7 @@ async def get_replay_trace(
     }
 
 
+@trace_db_operation("bff.admin_replay.cleanup_old_replay_results")
 async def cleanup_old_replay_results(*, older_than_hours: int, redis_service: RedisService) -> Dict[str, Any]:
     try:
         cutoff = datetime.now(timezone.utc) - timedelta(hours=int(older_than_hours))
@@ -223,12 +229,10 @@ async def cleanup_old_replay_results(*, older_than_hours: int, redis_service: Re
         }
     except Exception as exc:
         logger.error("Failed to cleanup old replay results: %s", exc, exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Cleanup failed: {str(exc)}",
-        ) from exc
+        raise classified_http_exception(500, f"Cleanup failed: {str(exc)}", code=ErrorCode.INTERNAL_ERROR) from exc
 
 
+@trace_external_call("bff.admin_replay.replay_instance_state_task")
 async def replay_instance_state_task(
     task_id: str,
     request: ReplayInstanceStateRequest,
@@ -285,13 +289,10 @@ async def _require_completed_task(*, task_id: str, task_manager: BackgroundTaskM
     task = await task_manager.get_task_status(task_id)
 
     if not task:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Task {task_id} not found")
+        raise classified_http_exception(404, f"Task {task_id} not found", code=ErrorCode.RESOURCE_NOT_FOUND)
 
     if not task.is_complete:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Task {task_id} is not complete. Current status: {task.status.value}",
-        )
+        raise classified_http_exception(400, f"Task {task_id} is not complete. Current status: {task.status.value}", code=ErrorCode.REQUEST_VALIDATION_FAILED)
 
     return task
 
@@ -301,16 +302,10 @@ async def _get_replay_payload(*, task_id: str, redis_service: RedisService) -> D
     payload = await redis_service.get_json(result_key)
 
     if not payload:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Result for task {task_id} not found or expired",
-        )
+        raise classified_http_exception(404, f"Result for task {task_id} not found or expired", code=ErrorCode.RESOURCE_NOT_FOUND)
 
     if not isinstance(payload, dict):
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Invalid replay result payload for task {task_id}",
-        )
+        raise classified_http_exception(500, f"Invalid replay result payload for task {task_id}", code=ErrorCode.INTERNAL_ERROR)
 
     return payload
 
@@ -338,10 +333,7 @@ def _select_command(*, command_history: Sequence[Dict[str, Any]], command_id: Op
         for entry in command_history:
             if str(entry.get("command_id") or "") == command_id:
                 return entry
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"command_id '{command_id}' not found in replay history",
-        )
+        raise classified_http_exception(404, f"command_id '{command_id}' not found in replay history", code=ErrorCode.RESOURCE_NOT_FOUND)
 
     return command_history[-1]
 

@@ -13,6 +13,8 @@ from uuid import uuid4
 
 from fastapi import HTTPException, Request, status
 
+from shared.errors.error_types import ErrorCode, ErrorCategory, classified_http_exception
+
 from bff.routers.objectify_deps import _require_db_role
 from bff.schemas.objectify_requests import TriggerObjectifyRequest
 from shared.models.objectify_job import ObjectifyJob
@@ -31,10 +33,12 @@ from shared.services.registries.backing_source_adapter import (
 from shared.utils.objectify_outputs import match_output_name
 from shared.utils.schema_hash import compute_schema_hash_from_sample
 from shared.utils.s3_uri import parse_s3_uri
+from shared.observability.tracing import trace_external_call
 
 logger = logging.getLogger(__name__)
 
 
+@trace_external_call("bff.objectify_run.run_objectify")
 async def run_objectify(
     *,
     dataset_id: str,
@@ -49,20 +53,21 @@ async def run_objectify(
     try:
         dataset = await dataset_registry.get_dataset(dataset_id=dataset_id)
         if not dataset:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found")
+            raise classified_http_exception(status.HTTP_404_NOT_FOUND, "Dataset not found", code=ErrorCode.RESOURCE_NOT_FOUND)
 
         try:
             enforce_db_scope(request.headers, db_name=dataset.db_name)
         except ValueError as exc:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+            raise classified_http_exception(status.HTTP_403_FORBIDDEN, str(exc), code=ErrorCode.PERMISSION_DENIED) from exc
         await _require_db_role(request, db_name=dataset.db_name, roles=DATA_ENGINEER_ROLES)
 
         artifact_id = str(body.artifact_id or "").strip() or None
         artifact_output_name = str(body.artifact_output_name or "").strip() or None
         if artifact_id and body.dataset_version_id:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="dataset_version_id and artifact_id are mutually exclusive",
+            raise classified_http_exception(
+                status.HTTP_400_BAD_REQUEST,
+                "dataset_version_id and artifact_id are mutually exclusive",
+                code=ErrorCode.REQUEST_VALIDATION_FAILED,
             )
 
         version = None
@@ -73,14 +78,14 @@ async def run_objectify(
         if artifact_id:
             artifact = await pipeline_registry.get_artifact(artifact_id=artifact_id)
             if not artifact:
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pipeline artifact not found")
+                raise classified_http_exception(status.HTTP_404_NOT_FOUND, "Pipeline artifact not found", code=ErrorCode.RESOURCE_NOT_FOUND)
             if str(artifact.status or "").upper() != "SUCCESS":
-                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Artifact is not successful")
+                raise classified_http_exception(status.HTTP_409_CONFLICT, "Artifact is not successful", code=ErrorCode.CONFLICT)
             if str(artifact.mode or "").lower() != "build":
-                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Artifact is not a build artifact")
+                raise classified_http_exception(status.HTTP_409_CONFLICT, "Artifact is not a build artifact", code=ErrorCode.CONFLICT)
             outputs = artifact.outputs or []
             if not outputs:
-                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Artifact has no outputs")
+                raise classified_http_exception(status.HTTP_409_CONFLICT, "Artifact has no outputs", code=ErrorCode.CONFLICT)
             if not artifact_output_name:
                 if len(outputs) == 1:
                     output = outputs[0]
@@ -89,42 +94,43 @@ async def run_objectify(
                         or None
                     )
                 if not artifact_output_name:
-                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="artifact_output_name is required")
+                    raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "artifact_output_name is required", code=ErrorCode.REQUEST_VALIDATION_FAILED)
             matches = [out for out in outputs if match_output_name(out, artifact_output_name)]
             if not matches:
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artifact output not found")
+                raise classified_http_exception(status.HTTP_404_NOT_FOUND, "Artifact output not found", code=ErrorCode.RESOURCE_NOT_FOUND)
             if len(matches) > 1:
-                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Artifact output is ambiguous")
+                raise classified_http_exception(status.HTTP_409_CONFLICT, "Artifact output is ambiguous", code=ErrorCode.CONFLICT)
             selected = matches[0]
             artifact_key = str(selected.get("artifact_commit_key") or selected.get("artifact_key") or "").strip() or None
             if not artifact_key:
-                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Artifact output is missing artifact_key")
+                raise classified_http_exception(status.HTTP_409_CONFLICT, "Artifact output is missing artifact_key", code=ErrorCode.CONFLICT)
             if not parse_s3_uri(artifact_key):
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Artifact output is not an s3:// URI")
+                raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "Artifact output is not an s3:// URI", code=ErrorCode.REQUEST_VALIDATION_FAILED)
             resolved_output_name = artifact_output_name
             resolved_schema_hash = str(selected.get("schema_hash") or "").strip() or None
             if not resolved_schema_hash:
-                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Artifact output is missing schema_hash")
+                raise classified_http_exception(status.HTTP_409_CONFLICT, "Artifact output is missing schema_hash", code=ErrorCode.CONFLICT)
         else:
             if body.dataset_version_id:
                 version = await dataset_registry.get_version(version_id=body.dataset_version_id)
             else:
                 version = await dataset_registry.get_latest_version(dataset_id=dataset_id)
             if not version:
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset version not found")
+                raise classified_http_exception(status.HTTP_404_NOT_FOUND, "Dataset version not found", code=ErrorCode.RESOURCE_NOT_FOUND)
             if version.dataset_id != dataset_id:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Dataset version mismatch")
+                raise classified_http_exception(status.HTTP_409_CONFLICT, "Dataset version mismatch", code=ErrorCode.OBJECTIFY_CONTRACT_ERROR)
             if not version.artifact_key:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Dataset version is missing artifact_key")
+                raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "Dataset version is missing artifact_key", code=ErrorCode.REQUEST_VALIDATION_FAILED)
             artifact_key = version.artifact_key
             resolved_output_name = dataset.name
             resolved_schema_hash = compute_schema_hash_from_sample(version.sample_json)
             if not resolved_schema_hash:
                 resolved_schema_hash = compute_schema_hash_from_sample(dataset.schema_json)
             if not resolved_schema_hash:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail="Dataset schema_hash could not be determined for objectify",
+                raise classified_http_exception(
+                    status.HTTP_409_CONFLICT,
+                    "Dataset schema_hash could not be determined for objectify",
+                    code=ErrorCode.CONFLICT,
                 )
 
         # ── Mapping resolution: OMS backing_source (by target_class_id) or PostgreSQL ──
@@ -163,14 +169,15 @@ async def run_objectify(
                     schema_hash=resolved_schema_hash,
                 )
         if not mapping_spec:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Active mapping spec not found for output/schema",
+            raise classified_http_exception(
+                status.HTTP_409_CONFLICT,
+                "Active mapping spec not found for output/schema",
+                code=ErrorCode.OBJECTIFY_CONTRACT_ERROR,
             )
         if not oms_mode and mapping_spec.dataset_id != dataset_id:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Mapping spec does not match dataset")
+            raise classified_http_exception(status.HTTP_409_CONFLICT, "Mapping spec does not match dataset", code=ErrorCode.OBJECTIFY_CONTRACT_ERROR)
         if not oms_mode and resolved_output_name and mapping_spec.artifact_output_name and mapping_spec.artifact_output_name != resolved_output_name:
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Mapping spec output does not match input")
+            raise classified_http_exception(status.HTTP_409_CONFLICT, "Mapping spec output does not match input", code=ErrorCode.OBJECTIFY_CONTRACT_ERROR)
         if (
             not oms_mode
             and resolved_schema_hash
@@ -178,37 +185,42 @@ async def run_objectify(
             and mapping_spec.schema_hash != resolved_schema_hash
             and not mapping_spec.backing_datasource_version_id
         ):
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Mapping spec schema_hash mismatch")
+            raise classified_http_exception(status.HTTP_409_CONFLICT, "Mapping spec schema_hash mismatch", code=ErrorCode.OBJECTIFY_CONTRACT_ERROR)
 
         if mapping_spec.backing_datasource_version_id:
             if artifact_id:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail="Mapping spec backing datasource version cannot be used with artifact inputs",
+                raise classified_http_exception(
+                    status.HTTP_409_CONFLICT,
+                    "Mapping spec backing datasource version cannot be used with artifact inputs",
+                    code=ErrorCode.CONFLICT,
                 )
             backing_version = await dataset_registry.get_backing_datasource_version(
                 version_id=mapping_spec.backing_datasource_version_id
             )
             if not backing_version:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail="Mapping spec backing datasource version not found",
+                raise classified_http_exception(
+                    status.HTTP_404_NOT_FOUND,
+                    "Mapping spec backing datasource version not found",
+                    code=ErrorCode.RESOURCE_NOT_FOUND,
                 )
             version = await dataset_registry.get_version(version_id=backing_version.dataset_version_id)
             if not version or version.dataset_id != dataset_id:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Backing datasource version dataset not found",
+                raise classified_http_exception(
+                    status.HTTP_404_NOT_FOUND,
+                    "Backing datasource version dataset not found",
+                    code=ErrorCode.RESOURCE_NOT_FOUND,
                 )
             if body.dataset_version_id and str(body.dataset_version_id) != version.version_id:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail="Dataset version does not match mapping spec backing datasource version",
+                raise classified_http_exception(
+                    status.HTTP_409_CONFLICT,
+                    "Dataset version does not match mapping spec backing datasource version",
+                    code=ErrorCode.OBJECTIFY_CONTRACT_ERROR,
                 )
             if not version.artifact_key:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Backing datasource version is missing artifact_key",
+                raise classified_http_exception(
+                    status.HTTP_400_BAD_REQUEST,
+                    "Backing datasource version is missing artifact_key",
+                    code=ErrorCode.REQUEST_VALIDATION_FAILED,
                 )
             artifact_key = version.artifact_key
             resolved_output_name = dataset.name
@@ -291,4 +303,4 @@ async def run_objectify(
         raise
     except Exception as exc:
         logger.error("Failed to enqueue objectify job: %s", exc)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc), code=ErrorCode.INTERNAL_ERROR) from exc

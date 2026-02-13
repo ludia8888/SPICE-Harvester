@@ -12,6 +12,7 @@ from typing import Any, Dict, Optional, Sequence
 from fastapi import HTTPException, Request, status
 from fastapi.responses import JSONResponse
 
+from shared.errors.error_types import ErrorCode, ErrorCategory, classified_http_exception
 from bff.routers.ontology_ops import _transform_properties_for_oms
 from bff.services.ontology_class_id_service import resolve_or_generate_class_id
 from bff.services.ontology_label_mapper_service import register_ontology_label_mappings
@@ -27,6 +28,7 @@ from shared.security.input_sanitizer import (
 )
 from shared.utils.label_mapper import LabelMapper
 from shared.utils.language import get_accept_language
+from shared.observability.tracing import trace_external_call
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +51,7 @@ async def _resolve_class_id(*, db_name: str, class_label: str, lang: str, mapper
     return mapped or class_label
 
 
+@trace_external_call("bff.ontology_crud.create_ontology")
 async def create_ontology(
     *,
     db_name: str,
@@ -103,6 +106,7 @@ async def create_ontology(
         raise_oms_boundary_exception(exc=exc, action="온톨로지 생성", logger=logger)
 
 
+@trace_external_call("bff.ontology_crud.list_ontologies")
 async def list_ontologies(
     *,
     db_name: str,
@@ -126,9 +130,10 @@ async def list_ontologies(
 
         allowed_class_types = {"sys:Class", "owl:Class", "rdfs:Class"}
         if class_type not in allowed_class_types:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid class_type. Allowed values: {', '.join(allowed_class_types)}",
+            raise classified_http_exception(
+                status.HTTP_400_BAD_REQUEST,
+                f"Invalid class_type. Allowed values: {', '.join(allowed_class_types)}",
+                code=ErrorCode.ONTOLOGY_VALIDATION_FAILED,
             )
 
         ontologies = await terminus.list_classes(db_name, branch=branch)
@@ -165,6 +170,7 @@ async def list_ontologies(
         )
 
 
+@trace_external_call("bff.ontology_crud.get_ontology")
 async def get_ontology(
     *,
     db_name: str,
@@ -188,9 +194,10 @@ async def get_ontology(
         class_id = await _resolve_class_id(db_name=db_name, class_label=class_label, lang=lang, mapper=mapper)
         result = await terminus.get_class(db_name, class_id, branch=branch)
         if not result:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"온톨로지 '{class_label}'을(를) 찾을 수 없습니다",
+            raise classified_http_exception(
+                status.HTTP_404_NOT_FOUND,
+                f"온톨로지 '{class_label}'을(를) 찾을 수 없습니다",
+                code=ErrorCode.ONTOLOGY_NOT_FOUND,
             )
 
         ontology_data = result if isinstance(result, dict) else {}
@@ -221,6 +228,7 @@ async def get_ontology(
         raise_oms_boundary_exception(exc=exc, action="온톨로지 조회", logger=logger)
 
 
+@trace_external_call("bff.ontology_crud.validate_ontology_create")
 async def validate_ontology_create(
     *,
     db_name: str,
@@ -238,6 +246,7 @@ async def validate_ontology_create(
         raise_oms_boundary_exception(exc=exc, action="온톨로지 생성 검증", logger=logger)
 
 
+@trace_external_call("bff.ontology_crud.validate_ontology_update")
 async def validate_ontology_update(
     *,
     db_name: str,
@@ -262,6 +271,7 @@ async def validate_ontology_update(
         raise_oms_boundary_exception(exc=exc, action="온톨로지 업데이트 검증", logger=logger)
 
 
+@trace_external_call("bff.ontology_crud.update_ontology")
 async def update_ontology(
     *,
     db_name: str,
@@ -316,6 +326,7 @@ async def update_ontology(
         raise_oms_boundary_exception(exc=exc, action="온톨로지 수정", logger=logger)
 
 
+@trace_external_call("bff.ontology_crud.delete_ontology")
 async def delete_ontology(
     *,
     db_name: str,
@@ -365,6 +376,7 @@ async def delete_ontology(
         raise_oms_boundary_exception(exc=exc, action="온톨로지 삭제", logger=logger)
 
 
+@trace_external_call("bff.ontology_crud.get_ontology_schema")
 async def get_ontology_schema(
     *,
     db_name: str,
@@ -389,17 +401,19 @@ async def get_ontology_schema(
 
         allowed_formats = {"json", "jsonld", "owl"}
         if format not in allowed_formats:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid format. Allowed values: {', '.join(allowed_formats)}",
+            raise classified_http_exception(
+                status.HTTP_400_BAD_REQUEST,
+                f"Invalid format. Allowed values: {', '.join(allowed_formats)}",
+                code=ErrorCode.ONTOLOGY_VALIDATION_FAILED,
             )
 
         actual_id = await _resolve_class_id(db_name=db_name, class_label=class_id, lang=lang, mapper=mapper)
         ontology = await terminus.get_class(db_name, actual_id, branch=branch)
         if not ontology:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"온톨로지 '{class_id}'을(를) 찾을 수 없습니다",
+            raise classified_http_exception(
+                status.HTTP_404_NOT_FOUND,
+                f"온톨로지 '{class_id}'을(를) 찾을 수 없습니다",
+                code=ErrorCode.ONTOLOGY_NOT_FOUND,
             )
 
         if format == "jsonld":

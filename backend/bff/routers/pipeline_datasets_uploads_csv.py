@@ -23,6 +23,7 @@ from bff.routers.pipeline_deps import get_dataset_registry, get_objectify_regist
 from bff.services.pipeline_dataset_upload_context import _prepare_dataset_upload_context
 from bff.services.pipeline_tabular_upload_facade import finalize_tabular_upload
 from shared.config.settings import get_settings
+from shared.errors.error_types import ErrorCode, classified_http_exception
 from shared.dependencies.providers import LineageStoreDep
 from shared.models.requests import ApiResponse
 from shared.observability.tracing import trace_endpoint
@@ -66,15 +67,15 @@ async def upload_csv_dataset(
 
         filename = file.filename or "upload.csv"
         if not filename.lower().endswith(".csv"):
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only .csv files are supported")
+            raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "Only .csv files are supported", code=ErrorCode.REQUEST_VALIDATION_FAILED)
 
         sample_bytes = await asyncio.to_thread(file.file.read, 65536)
         if not sample_bytes:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty file")
+            raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "Empty file", code=ErrorCode.REQUEST_VALIDATION_FAILED)
 
         resolved_name = (dataset_name or "").strip() or _default_dataset_name(filename)
         if not resolved_name:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="dataset_name is required")
+            raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "dataset_name is required", code=ErrorCode.REQUEST_VALIDATION_FAILED)
 
         sample_text = sample_bytes.decode("utf-8", errors="replace")
         resolved_delimiter = delimiter or _detect_csv_delimiter(sample_text)
@@ -85,7 +86,7 @@ async def upload_csv_dataset(
             has_header=has_header,
         )
         if not columns:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No columns detected")
+            raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "No columns detected", code=ErrorCode.REQUEST_VALIDATION_FAILED)
 
         inferred_schema: list[Dict[str, Any]] = []
         analysis_payload: Optional[Dict[str, Any]] = None
@@ -177,4 +178,4 @@ async def upload_csv_dataset(
         raise
     except Exception as exc:
         logger.exception("Failed to upload csv dataset")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc), code=ErrorCode.INTERNAL_ERROR)

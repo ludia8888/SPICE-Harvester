@@ -16,6 +16,7 @@ from oms.services.ontology_deploy_outbox_store import (
     OntologyDeployOutboxTableSpec,
 )
 from oms.services.ontology_deployment_registry_base import BaseOntologyDeploymentRegistry
+from shared.observability.tracing import trace_db_operation
 from shared.utils.json_utils import json_default, maybe_decode_json
 
 logger = logging.getLogger(__name__)
@@ -102,6 +103,7 @@ class OntologyDeploymentRegistryV2(BaseOntologyDeploymentRegistry):
             occurred_at=occurred_at,
         )
 
+    @trace_db_operation("oms.deployment_registry_v2.record_deployment")
     async def record_deployment(
         self,
         *,
@@ -193,6 +195,7 @@ class OntologyDeploymentRegistryV2(BaseOntologyDeploymentRegistry):
         decoded = maybe_decode_json(payload)
         return decoded if isinstance(decoded, dict) else {}
 
+    @trace_db_operation("oms.deployment_registry_v2.get_latest_deployed_commit")
     async def get_latest_deployed_commit(
         self,
         *,

@@ -6,8 +6,11 @@ Thin router: delegates graph query logic to `bff.services.graph_query_service`.
 
 import logging
 from typing import Any, Dict, List, Optional
+from shared.observability.tracing import trace_endpoint
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+
+from shared.errors.error_types import ErrorCode, classified_http_exception
 from pydantic import BaseModel
 
 from bff.routers.registry_deps import get_dataset_registry
@@ -31,6 +34,7 @@ router = APIRouter(prefix="/api/v1", tags=["Graph"])
 
 
 @router.post("/graph-query/{db_name}", response_model=GraphQueryResponse)
+@trace_endpoint("bff.graph.execute_graph_query")
 async def execute_graph_query(
     db_name: str,
     query: GraphQueryRequest,
@@ -56,6 +60,7 @@ async def execute_graph_query(
 
 
 @router.post("/graph-query/{db_name}/simple", response_model=Dict[str, Any])
+@trace_endpoint("bff.graph.execute_simple_graph_query")
 async def execute_simple_graph_query(
     db_name: str,
     query: SimpleGraphQueryRequest,
@@ -79,6 +84,7 @@ async def execute_simple_graph_query(
 
 
 @router.post("/graph-query/{db_name}/multi-hop", response_model=Dict[str, Any])
+@trace_endpoint("bff.graph.execute_multi_hop_query")
 async def execute_multi_hop_query(
     db_name: str,
     query: Dict[str, Any],
@@ -102,6 +108,7 @@ async def execute_multi_hop_query(
 
 
 @router.get("/graph-query/{db_name}/paths")
+@trace_endpoint("bff.graph.find_relationship_paths")
 async def find_relationship_paths(
     db_name: str,
     source_class: str,
@@ -121,6 +128,7 @@ async def find_relationship_paths(
 
 
 @router.get("/graph-query/health")
+@trace_endpoint("bff.graph.graph_service_health")
 async def graph_service_health(graph_service: GraphFederationServiceES = Depends(get_graph_federation_service)):
     return await graph_service_health_service(graph_service=graph_service)
 
@@ -148,6 +156,7 @@ class ProjectionQueryRequest(BaseModel):
     tags=["Projections (WIP)"],
     include_in_schema=False,
 )
+@trace_endpoint("bff.graph.register_projection")
 async def register_projection(
     db_name: str,
     request: ProjectionRegistrationRequest,
@@ -164,9 +173,10 @@ async def register_projection(
         }
     except Exception as e:
         logger.error("Projection registration failed: %s", e)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Registration failed: {str(e)}",
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            f"Registration failed: {str(e)}",
+            code=ErrorCode.INTERNAL_ERROR,
         ) from e
 
 
@@ -176,6 +186,7 @@ async def register_projection(
     tags=["Projections (WIP)"],
     include_in_schema=False,
 )
+@trace_endpoint("bff.graph.query_projection")
 async def query_projection(
     db_name: str,
     request: ProjectionQueryRequest,
@@ -192,9 +203,10 @@ async def query_projection(
         }
     except Exception as e:
         logger.error("Projection query failed: %s", e)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Query failed: {str(e)}",
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            f"Query failed: {str(e)}",
+            code=ErrorCode.INTERNAL_ERROR,
         ) from e
 
 
@@ -204,6 +216,7 @@ async def query_projection(
     tags=["Projections (WIP)"],
     include_in_schema=False,
 )
+@trace_endpoint("bff.graph.list_projections")
 async def list_projections(
     db_name: str,
     graph_service: GraphFederationServiceES = Depends(get_graph_federation_service),
@@ -214,7 +227,8 @@ async def list_projections(
         return {"projections": [], "count": 0}
     except Exception as e:
         logger.error("Failed to list projections: %s", e)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"List failed: {str(e)}",
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            f"List failed: {str(e)}",
+            code=ErrorCode.INTERNAL_ERROR,
         ) from e

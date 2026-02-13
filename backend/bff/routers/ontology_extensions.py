@@ -9,6 +9,7 @@ Routers are kept thin: OMS orchestration + error handling lives in
 """
 
 from typing import Optional
+from shared.observability.tracing import trace_endpoint
 
 from fastapi import APIRouter, Query, status
 
@@ -136,6 +137,7 @@ for _resource_type in (
 
 
 @router.get("/branches")
+@trace_endpoint("bff.ontology.list_ontology_branches")
 async def list_ontology_branches(
     db_name: str,
     oms_client: OMSClient = OMSClientDep,
@@ -144,6 +146,7 @@ async def list_ontology_branches(
 
 
 @router.post("/branches", status_code=status.HTTP_201_CREATED)
+@trace_endpoint("bff.ontology.create_ontology_branch")
 async def create_ontology_branch(
     db_name: str,
     request: BranchCreateRequest,
@@ -153,6 +156,7 @@ async def create_ontology_branch(
 
 
 @router.get("/proposals")
+@trace_endpoint("bff.ontology.list_ontology_proposals")
 async def list_ontology_proposals(
     db_name: str,
     status_filter: Optional[str] = Query(None, alias="status"),
@@ -168,6 +172,7 @@ async def list_ontology_proposals(
 
 
 @router.post("/proposals", status_code=status.HTTP_201_CREATED)
+@trace_endpoint("bff.ontology.create_ontology_proposal")
 async def create_ontology_proposal(
     db_name: str,
     request: OntologyProposalRequest,
@@ -181,6 +186,7 @@ async def create_ontology_proposal(
 
 
 @router.post("/proposals/{proposal_id}/approve")
+@trace_endpoint("bff.ontology.approve_ontology_proposal")
 async def approve_ontology_proposal(
     db_name: str,
     proposal_id: str,
@@ -196,6 +202,7 @@ async def approve_ontology_proposal(
 
 
 @router.post("/deploy")
+@trace_endpoint("bff.ontology.deploy_ontology")
 async def deploy_ontology(
     db_name: str,
     request: OntologyDeployRequest,
@@ -209,6 +216,7 @@ async def deploy_ontology(
 
 
 @router.get("/health")
+@trace_endpoint("bff.ontology.ontology_health")
 async def ontology_health(
     db_name: str,
     branch: str = Query("main", description="Target branch"),

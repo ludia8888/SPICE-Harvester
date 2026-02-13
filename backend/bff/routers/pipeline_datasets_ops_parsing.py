@@ -10,7 +10,8 @@ import hashlib
 import io
 from typing import Any, Dict, Optional
 
-from fastapi import HTTPException, status
+from fastapi import status
+from shared.errors.error_types import ErrorCode, classified_http_exception
 
 
 def _default_dataset_name(filename: str) -> str:
@@ -26,23 +27,25 @@ def _convert_xls_to_xlsx_bytes(xls_bytes: bytes) -> bytes:
     try:
         import xlrd  # type: ignore
     except ImportError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_501_NOT_IMPLEMENTED,
-            detail="XLS support requires the 'xlrd' package.",
+        raise classified_http_exception(
+            status.HTTP_501_NOT_IMPLEMENTED,
+            "XLS support requires the 'xlrd' package.",
+            code=ErrorCode.FEATURE_NOT_IMPLEMENTED,
         ) from exc
 
     try:
         from openpyxl import Workbook  # type: ignore
     except ImportError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_501_NOT_IMPLEMENTED,
-            detail="XLS support requires the 'openpyxl' package.",
+        raise classified_http_exception(
+            status.HTTP_501_NOT_IMPLEMENTED,
+            "XLS support requires the 'openpyxl' package.",
+            code=ErrorCode.FEATURE_NOT_IMPLEMENTED,
         ) from exc
 
     try:
         book = xlrd.open_workbook(file_contents=xls_bytes)
     except Exception as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Failed to read .xls file: {exc}") from exc
+        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, f"Failed to read .xls file: {exc}", code=ErrorCode.REQUEST_VALIDATION_FAILED) from exc
 
     workbook = Workbook()
     if workbook.worksheets:
@@ -78,9 +81,10 @@ def _normalize_table_bbox(
     if all(part is None for part in parts):
         return None
     if any(part is None for part in parts):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="table_top/table_left/table_bottom/table_right must be provided together",
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            "table_top/table_left/table_bottom/table_right must be provided together",
+            code=ErrorCode.REQUEST_VALIDATION_FAILED,
         )
     return {
         "top": int(table_top),

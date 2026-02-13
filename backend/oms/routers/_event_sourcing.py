@@ -17,6 +17,8 @@ from typing import Any, Dict, Optional
 
 from fastapi import HTTPException, status
 
+from shared.errors.error_types import ErrorCode, classified_http_exception
+
 from shared.models.commands import CommandStatus
 from shared.models.event_envelope import EventEnvelope
 from shared.services.events.aggregate_sequence_allocator import OptimisticConcurrencyError
@@ -59,9 +61,11 @@ async def append_event_sourcing_command(
     try:
         await event_store.append_event(envelope)
     except OptimisticConcurrencyError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={
+        raise classified_http_exception(
+            status.HTTP_409_CONFLICT,
+            "Optimistic concurrency conflict",
+            code=ErrorCode.CONFLICT,
+            extra={
                 "error": "optimistic_concurrency_conflict",
                 "aggregate_id": exc.aggregate_id,
                 "expected_seq": exc.expected_last_sequence,
@@ -83,4 +87,3 @@ async def append_event_sourcing_command(
             )
 
     return envelope
-

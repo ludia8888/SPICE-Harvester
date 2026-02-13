@@ -1,9 +1,12 @@
 from __future__ import annotations
+from shared.observability.tracing import trace_endpoint
 
 import logging
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+
+from shared.errors.error_types import ErrorCode, classified_http_exception
 from pydantic import BaseModel, Field
 
 from bff.routers.context7 import get_context7_client
@@ -25,7 +28,7 @@ def _enforce_bundle_access(*, tenant_policy: Any, bundle_id: str) -> None:
     allowed = data_policies.get("allowed_document_bundle_ids") or []
     allowed_ids = {str(v).strip() for v in (allowed or []) if str(v).strip()}
     if allowed_ids and str(bundle_id).strip() not in allowed_ids:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Permission denied")
+        raise classified_http_exception(status.HTTP_403_FORBIDDEN, "Permission denied", code=ErrorCode.PERMISSION_DENIED)
 
 
 class DocumentBundleSearchRequest(BaseModel):
@@ -35,6 +38,7 @@ class DocumentBundleSearchRequest(BaseModel):
 
 
 @router.post("/{bundle_id}/search", response_model=ApiResponse)
+@trace_endpoint("bff.document_bundles.search_document_bundle")
 async def search_document_bundle(
     bundle_id: str,
     body: DocumentBundleSearchRequest,
@@ -49,7 +53,7 @@ async def search_document_bundle(
     payload = sanitize_input(body.model_dump(exclude_none=True))
     query = str(payload.get("query") or "").strip()
     if not query:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="query is required")
+        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "query is required", code=ErrorCode.REQUEST_VALIDATION_FAILED)
 
     try:
         limit = int(payload.get("limit") or 10)
@@ -67,7 +71,7 @@ async def search_document_bundle(
         raise
     except Exception as exc:
         logger.exception("Document bundle search failed")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc), code=ErrorCode.INTERNAL_ERROR) from exc
 
     results: list[dict[str, Any]] = []
     for idx, item in enumerate(raw_results or []):

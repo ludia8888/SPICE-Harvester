@@ -10,6 +10,8 @@ from typing import Any, Dict, Optional
 
 from fastapi import HTTPException, status
 
+from shared.errors.error_types import ErrorCode, classified_http_exception
+
 from shared.config.settings import get_settings
 
 logger = logging.getLogger(__name__)
@@ -210,12 +212,12 @@ def _select_sample_row(
         return None
     if file_index is not None:
         if file_index < 0 or file_index >= len(candidates):
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File index out of range")
+            raise classified_http_exception(status.HTTP_404_NOT_FOUND, "File index out of range", code=ErrorCode.RESOURCE_NOT_FOUND)
         return candidates[file_index]
     if filename:
         for row in candidates:
             if str(row.get("filename") or "") == filename:
                 return row
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found in dataset")
+        raise classified_http_exception(status.HTTP_404_NOT_FOUND, "File not found in dataset", code=ErrorCode.RESOURCE_NOT_FOUND)
     return candidates[0]
 

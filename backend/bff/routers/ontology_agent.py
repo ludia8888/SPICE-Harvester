@@ -9,8 +9,11 @@ For combined pipeline + ontology tasks, use /api/v1/agent/pipeline-runs directly
 
 import logging
 from typing import Any, Dict, Optional
+from shared.observability.tracing import trace_endpoint
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+
+from shared.errors.error_types import ErrorCode, classified_http_exception
 from pydantic import BaseModel, Field
 
 from shared.models.requests import ApiResponse
@@ -86,6 +89,7 @@ def _get_actor(request: Request) -> str:
     - "Customer와 Order 사이에 hasOrders 관계 만들어줘"
     """,
 )
+@trace_endpoint("bff.ontology.run_ontology_agent")
 async def run_ontology_agent(
     request: Request,
     body: OntologyAgentRunRequest,
@@ -103,9 +107,10 @@ async def run_ontology_agent(
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"Database access denied: {exc}",
+        raise classified_http_exception(
+            status.HTTP_403_FORBIDDEN,
+            f"Database access denied: {exc}",
+            code=ErrorCode.PERMISSION_DENIED,
         )
 
     # Get services
@@ -209,7 +214,8 @@ async def run_ontology_agent(
 
     except Exception as exc:
         logger.exception("Ontology agent failed: %s", exc)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Ontology agent error: {exc}",
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            f"Ontology agent error: {exc}",
+            code=ErrorCode.INTERNAL_ERROR,
         )

@@ -4,6 +4,7 @@ import logging
 from typing import Any, Awaitable, Dict, List, Callable, Optional
 
 from shared.errors.error_types import ErrorCategory, ErrorCode
+from shared.observability.tracing import trace_external_call
 from shared.utils.llm_safety import mask_pii
 
 from mcp_servers.pipeline_mcp_errors import missing_required_params, tool_error
@@ -14,6 +15,7 @@ logger = logging.getLogger(__name__)
 ToolHandler = Callable[[Any, Dict[str, Any]], Awaitable[Any]]
 
 
+@trace_external_call("mcp.ontology_register_object_type")
 async def _ontology_register_object_type(_server: Any, arguments: Dict[str, Any]) -> Any:
     db_name = str(arguments.get("db_name") or "").strip()
     class_id = str(arguments.get("class_id") or "").strip()
@@ -182,6 +184,7 @@ async def _ontology_register_object_type(_server: Any, arguments: Dict[str, Any]
         return payload
 
 
+@trace_external_call("mcp.ontology_query_instances")
 async def _ontology_query_instances(_server: Any, arguments: Dict[str, Any]) -> Any:
     db_name = str(arguments.get("db_name") or "").strip()
     class_id = str(arguments.get("class_id") or "").strip()
@@ -250,6 +253,7 @@ async def _ontology_query_instances(_server: Any, arguments: Dict[str, Any]) -> 
         return payload
 
 
+@trace_external_call("mcp.detect_foreign_keys")
 async def _detect_foreign_keys(server: Any, arguments: Dict[str, Any]) -> Any:
     db_name = str(arguments.get("db_name") or "").strip()
     dataset_id = str(arguments.get("dataset_id") or "").strip()
@@ -349,6 +353,7 @@ async def _detect_foreign_keys(server: Any, arguments: Dict[str, Any]) -> Any:
         )
 
 
+@trace_external_call("mcp.create_link_type_from_fk")
 async def _create_link_type_from_fk(_server: Any, arguments: Dict[str, Any]) -> Any:
     db_name = str(arguments.get("db_name") or "").strip()
     fk_pattern = arguments.get("fk_pattern") or {}

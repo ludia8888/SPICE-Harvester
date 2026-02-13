@@ -38,6 +38,7 @@ from shared.services.agent.llm_quota import enforce_llm_quota
 from shared.services.registries.pipeline_plan_registry import PipelinePlanRegistry
 from shared.services.storage.redis_service import RedisService
 from shared.services.storage.event_store import EventStore
+from shared.observability.tracing import trace_external_call
 from shared.utils.llm_safety import mask_pii, stable_json_dumps
 from shared.config.model_context_limits import PromptBudget, get_model_context_config
 
@@ -3217,6 +3218,7 @@ async def _run_agent_core(
     )
 
 
+@trace_external_call("bff.pipeline_agent.run_pipeline_agent_mcp_autonomous")
 async def run_pipeline_agent_mcp_autonomous(
     *,
     goal: str,
@@ -3258,6 +3260,7 @@ async def run_pipeline_agent_mcp_autonomous(
     return result
 
 
+@trace_external_call("bff.pipeline_agent.run_pipeline_agent_streaming")
 async def run_pipeline_agent_streaming(
     *,
     goal: str,

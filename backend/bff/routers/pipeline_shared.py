@@ -13,6 +13,8 @@ from uuid import UUID
 
 from fastapi import HTTPException, Request, status
 
+from shared.errors.error_types import ErrorCode, classified_http_exception
+
 from bff.services.http_idempotency import get_idempotency_key as _get_idempotency_key
 from bff.services.http_idempotency import require_idempotency_key as _require_idempotency_key_impl
 from shared.dependencies.providers import AuditLogStoreDep
@@ -101,12 +103,12 @@ async def _ensure_pipeline_permission(
     try:
         UUID(str(pipeline_id))
     except ValueError:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pipeline not found")
+        raise classified_http_exception(status.HTTP_404_NOT_FOUND, "Pipeline not found", code=ErrorCode.RESOURCE_NOT_FOUND)
     has_any = await pipeline_registry.has_any_permissions(pipeline_id=pipeline_id)
     if not has_any:
         pipeline = await pipeline_registry.get_pipeline(pipeline_id=pipeline_id)
         if not pipeline:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pipeline not found")
+            raise classified_http_exception(status.HTTP_404_NOT_FOUND, "Pipeline not found", code=ErrorCode.RESOURCE_NOT_FOUND)
         await pipeline_registry.grant_permission(
             pipeline_id=pipeline_id,
             principal_type=principal_type,
@@ -121,7 +123,7 @@ async def _ensure_pipeline_permission(
         required_role=required_role,
     )
     if not allowed:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Permission denied")
+        raise classified_http_exception(status.HTTP_403_FORBIDDEN, "Permission denied", code=ErrorCode.PERMISSION_DENIED)
     return principal_type, principal_id
 
 
@@ -159,8 +161,9 @@ def _require_pipeline_idempotency_key(request: Optional[Request], *, operation: 
     """Require idempotency key for pipeline mutation operations."""
     key = _get_idempotency_key(request)
     if not key:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Idempotency-Key header is required for {operation} operations",
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            f"Idempotency-Key header is required for {operation} operations",
+            code=ErrorCode.REQUEST_VALIDATION_FAILED,
         )
     return key

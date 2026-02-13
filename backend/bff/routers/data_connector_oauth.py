@@ -8,7 +8,8 @@ import logging
 from typing import Any, Dict
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Request, status
+from shared.errors.error_types import ErrorCode, classified_http_exception
 from fastapi.responses import RedirectResponse
 
 from bff.routers.data_connector_deps import get_connector_registry
@@ -42,9 +43,9 @@ async def start_google_sheets_oauth(
 ) -> Dict[str, Any]:
     oauth_client = _build_google_oauth_client()
     if not _connector_oauth_enabled(oauth_client):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Google OAuth is not configured")
+        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "Google OAuth is not configured", code=ErrorCode.REQUEST_VALIDATION_FAILED)
     if not oauth_client.redirect_uri:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Google OAuth redirect URI is missing")
+        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "Google OAuth redirect URI is missing", code=ErrorCode.REQUEST_VALIDATION_FAILED)
 
     sanitized = sanitize_input(payload or {})
     state = uuid4().hex
@@ -81,11 +82,11 @@ async def google_sheets_oauth_callback(
 ) -> RedirectResponse:
     oauth_client = _build_google_oauth_client()
     if not _connector_oauth_enabled(oauth_client):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Google OAuth is not configured")
+        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "Google OAuth is not configured", code=ErrorCode.REQUEST_VALIDATION_FAILED)
 
     state_payload = _OAUTH_STATE_CACHE.pop(state, None)
     if state_payload is None:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid OAuth state")
+        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "Invalid OAuth state", code=ErrorCode.REQUEST_VALIDATION_FAILED)
 
     token_data = await oauth_client.exchange_code_for_token(code)
     expires_at = token_data.get("expires_at")

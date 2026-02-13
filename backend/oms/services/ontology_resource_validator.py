@@ -10,6 +10,8 @@ from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 from oms.services.async_terminus import AsyncTerminusService
 from oms.services.ontology_resources import OntologyResourceService, normalize_resource_type
+from oms.validation_codes import OntologyValidationCode as OVC
+from shared.observability.tracing import trace_external_call
 from shared.utils.action_input_schema import ActionInputSchemaError, normalize_input_schema
 from shared.utils.action_template_engine import ActionImplementationError, validate_template_v1_definition
 from shared.utils.key_spec import normalize_key_spec
@@ -154,6 +156,7 @@ def check_required_fields(resource_type: str, spec: Dict[str, Any]) -> List[Dict
     return _collect_required_field_issues(normalized_type, spec)
 
 
+@trace_external_call("oms.resource_validator.find_missing_references")
 async def find_missing_references(
     *,
     db_name: str,
@@ -919,7 +922,7 @@ def _append_spec_issue(
 ) -> None:
     issues.append(
         {
-            "code": "RESOURCE_SPEC_INVALID",
+            "code": OVC.RESOURCE_SPEC_INVALID.value,
             "message": message,
             "details": {
                 "missing_fields": missing_fields or [],
@@ -971,6 +974,7 @@ async def _reference_exists(
     return False
 
 
+@trace_external_call("oms.resource_validator.validate_resource")
 async def validate_resource(
     *,
     db_name: str,

@@ -6,6 +6,7 @@ This module defines HTTP routes only. Business logic lives in
 """
 
 from __future__ import annotations
+from shared.observability.tracing import trace_endpoint
 
 from typing import Any, Dict, List, Optional
 
@@ -25,6 +26,7 @@ router = APIRouter(prefix="/databases/{db_name}/actions", tags=["Actions"])
     "/{action_type_id}/submit",
     status_code=status.HTTP_202_ACCEPTED,
 )
+@trace_endpoint("bff.actions.submit_action")
 async def submit_action(
     db_name: str,
     action_type_id: str,
@@ -50,6 +52,7 @@ async def submit_action(
     "/{action_type_id}/simulate",
     status_code=status.HTTP_200_OK,
 )
+@trace_endpoint("bff.actions.simulate_action")
 async def simulate_action(
     db_name: str,
     action_type_id: str,
@@ -73,6 +76,7 @@ async def simulate_action(
 
 
 @router.get("/logs/{action_log_id}")
+@trace_endpoint("bff.actions.get_action_log")
 async def get_action_log(
     db_name: str,
     action_log_id: str,
@@ -89,6 +93,7 @@ async def get_action_log(
 
 
 @router.get("/logs")
+@trace_endpoint("bff.actions.list_action_logs")
 async def list_action_logs(
     db_name: str,
     http_request: Request,
@@ -113,6 +118,7 @@ async def list_action_logs(
 
 
 @router.get("/simulations")
+@trace_endpoint("bff.actions.list_action_simulations")
 async def list_action_simulations(
     db_name: str,
     http_request: Request,
@@ -131,6 +137,7 @@ async def list_action_simulations(
 
 
 @router.get("/simulations/{simulation_id}")
+@trace_endpoint("bff.actions.get_action_simulation")
 async def get_action_simulation(
     db_name: str,
     simulation_id: str,
@@ -149,6 +156,7 @@ async def get_action_simulation(
 
 
 @router.get("/simulations/{simulation_id}/versions")
+@trace_endpoint("bff.actions.list_action_simulation_versions")
 async def list_action_simulation_versions(
     db_name: str,
     simulation_id: str,
@@ -167,6 +175,7 @@ async def list_action_simulation_versions(
 
 
 @router.get("/simulations/{simulation_id}/versions/{version}")
+@trace_endpoint("bff.actions.get_action_simulation_version")
 async def get_action_simulation_version(
     db_name: str,
     simulation_id: str,

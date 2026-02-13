@@ -5,11 +5,30 @@ from typing import Any, Callable, Dict, Optional, Union
 
 import httpx
 from fastapi import HTTPException, status
+from shared.errors.error_types import ErrorCode, classified_http_exception
 
 from bff.utils.httpx_exceptions import raise_httpx_as_http_exception
 from shared.security.input_sanitizer import SecurityViolationError
 
 HttpStatusDetail = Union[str, Callable[[httpx.HTTPStatusError], Any]]
+
+
+def _code_for_status(status_code: int) -> ErrorCode:
+    if status_code in {400, 422}:
+        return ErrorCode.REQUEST_VALIDATION_FAILED
+    if status_code == 401:
+        return ErrorCode.AUTH_REQUIRED
+    if status_code == 403:
+        return ErrorCode.PERMISSION_DENIED
+    if status_code == 404:
+        return ErrorCode.RESOURCE_NOT_FOUND
+    if status_code == 409:
+        return ErrorCode.CONFLICT
+    if status_code in {502, 503, 504}:
+        return ErrorCode.UPSTREAM_UNAVAILABLE
+    if status_code >= 500:
+        return ErrorCode.INTERNAL_ERROR
+    return ErrorCode.UPSTREAM_ERROR
 
 
 def raise_oms_boundary_exception(
@@ -25,17 +44,14 @@ def raise_oms_boundary_exception(
         resolver = (custom_http_status_details or {}).get(status_code)
         if resolver is not None:
             detail = resolver(exc) if callable(resolver) else resolver
-            raise HTTPException(status_code=status_code, detail=detail) from exc
+            raise classified_http_exception(status_code, str(detail), code=_code_for_status(status_code)) from exc
         raise_httpx_as_http_exception(exc)
 
     if isinstance(exc, (SecurityViolationError, ValueError)):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        raise classified_http_exception(400, str(exc), code=ErrorCode.REQUEST_VALIDATION_FAILED) from exc
 
     if isinstance(exc, HTTPException):
         raise exc
 
     logger.error("Failed to %s: %s", action, exc)
-    raise HTTPException(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        detail=f"{action} 실패: {str(exc)}",
-    ) from exc
+    raise classified_http_exception(500, f"{action} 실패: {str(exc)}", code=ErrorCode.INTERNAL_ERROR) from exc

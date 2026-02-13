@@ -6,8 +6,10 @@ import bff.routers.pipeline_datasets_ops as ops
 from bff.services.pipeline_dataset_upload_context import _DatasetUploadContext, _build_dataset_upload_response
 from bff.services.pipeline_dataset_upload_service import TabularDatasetUploadInput, upload_tabular_dataset
 from shared.models.requests import ApiResponse
+from shared.observability.tracing import trace_external_call
 
 
+@trace_external_call("bff.pipeline_tabular_upload.finalize_tabular_upload")
 async def finalize_tabular_upload(
     *,
     ctx: _DatasetUploadContext,

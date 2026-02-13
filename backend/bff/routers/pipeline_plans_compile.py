@@ -1,4 +1,5 @@
 from __future__ import annotations
+from shared.observability.tracing import trace_endpoint
 
 import logging
 
@@ -11,6 +12,7 @@ from bff.schemas.pipeline_plans_requests import PipelinePlanCompileRequest
 from bff.services.pipeline_plan_autonomous_compiler import compile_pipeline_plan_mcp_autonomous
 from bff.services.pipeline_plan_models import PipelinePlanCompileResult
 from shared.config.settings import get_settings
+from shared.errors.error_types import ErrorCode, classified_http_exception
 from shared.dependencies.providers import AuditLogStoreDep, LLMGatewayDep, RedisServiceDep
 from shared.models.responses import ApiResponse
 from shared.security.auth_utils import enforce_db_scope
@@ -25,6 +27,7 @@ router = APIRouter(tags=["Pipeline Plans"])
 
 
 @router.post("/compile", response_model=ApiResponse)
+@trace_endpoint("bff.pipeline_plans.compile_plan")
 async def compile_plan(
     body: PipelinePlanCompileRequest,
     request: Request,
@@ -35,7 +38,7 @@ async def compile_plan(
     plan_registry: PipelinePlanRegistry = Depends(get_pipeline_plan_registry),
 ) -> ApiResponse:
     if not bool(get_settings().pipeline_plan.llm_enabled):
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Pipeline planner is disabled")
+        raise classified_http_exception(status.HTTP_503_SERVICE_UNAVAILABLE, "Pipeline planner is disabled", code=ErrorCode.UPSTREAM_UNAVAILABLE)
 
     raw_payload = body.model_dump(exclude_none=True)
     raw_answers = raw_payload.pop("answers", None)
@@ -46,7 +49,7 @@ async def compile_plan(
     planner_hints = payload.get("planner_hints") if isinstance(payload.get("planner_hints"), dict) else None
     task_spec = payload.get("task_spec") if isinstance(payload.get("task_spec"), dict) else None
     if not data_scope or not data_scope.db_name:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="data_scope.db_name is required")
+        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "data_scope.db_name is required", code=ErrorCode.REQUEST_VALIDATION_FAILED)
 
     tenant_id = _resolve_tenant_id(request)
     actor = _resolve_actor(request)
@@ -59,7 +62,7 @@ async def compile_plan(
     try:
         enforce_db_scope(request.headers, db_name=db_name)
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+        raise classified_http_exception(status.HTTP_403_FORBIDDEN, str(exc), code=ErrorCode.PERMISSION_DENIED) from exc
 
     try:
         result: PipelinePlanCompileResult = await compile_pipeline_plan_mcp_autonomous(
@@ -81,7 +84,7 @@ async def compile_plan(
             plan_registry=plan_registry,
         )
     except LLMQuotaExceededError as exc:
-        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=str(exc)) from exc
+        raise classified_http_exception(status.HTTP_429_TOO_MANY_REQUESTS, str(exc), code=ErrorCode.RATE_LIMITED) from exc
     except Exception as exc:
         logger.error("Pipeline plan compile failed: %s", exc)
         raise

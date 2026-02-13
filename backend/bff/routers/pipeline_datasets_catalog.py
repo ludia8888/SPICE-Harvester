@@ -16,6 +16,7 @@ from bff.routers.pipeline_datasets_ops import (
 )
 
 from bff.routers.pipeline_deps import get_dataset_registry, get_pipeline_registry
+from shared.errors.error_types import ErrorCode, classified_http_exception
 from shared.models.requests import ApiResponse
 from shared.observability.tracing import trace_endpoint
 from shared.security.auth_utils import enforce_db_scope
@@ -46,7 +47,7 @@ async def list_datasets(
         raise
     except Exception as e:
         logger.error(f"Failed to list datasets: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(e), code=ErrorCode.INTERNAL_ERROR)
 
 
 @router.get("/datasets/{dataset_id}/raw-file", response_model=ApiResponse)
@@ -62,15 +63,15 @@ async def get_dataset_raw_file(
     try:
         dataset = await dataset_registry.get_dataset(dataset_id=dataset_id)
         if not dataset:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found")
+            raise classified_http_exception(status.HTTP_404_NOT_FOUND, "Dataset not found", code=ErrorCode.RESOURCE_NOT_FOUND)
         try:
             enforce_db_scope(request.headers, db_name=dataset.db_name)
         except ValueError as exc:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc))
+            raise classified_http_exception(status.HTTP_403_FORBIDDEN, str(exc), code=ErrorCode.PERMISSION_DENIED)
 
         version = await dataset_registry.get_latest_version(dataset_id=dataset_id)
         if not version or not version.artifact_key:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset version not found")
+            raise classified_http_exception(status.HTTP_404_NOT_FOUND, "Dataset version not found", code=ErrorCode.RESOURCE_NOT_FOUND)
 
         actor_user_id = (request.headers.get("X-User-ID") or "").strip() if request else ""
         lakefs_storage_service = await pipeline_registry.get_lakefs_storage(user_id=actor_user_id or None)
@@ -91,26 +92,28 @@ async def get_dataset_raw_file(
 
         if not target_uri:
             if str(dataset.source_type or "").lower() == "media":
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail="Media dataset requires a file selection",
+                raise classified_http_exception(
+                    status.HTTP_409_CONFLICT,
+                    "Media dataset requires a file selection",
+                    code=ErrorCode.CONFLICT,
                 )
             target_uri = str(version.artifact_key or "").strip()
 
         parsed_target = parse_s3_uri(target_uri)
         if not parsed_target:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="artifact_key must be an s3:// URI")
+            raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "artifact_key must be an s3:// URI", code=ErrorCode.REQUEST_VALIDATION_FAILED)
         bucket, key = parsed_target
         if row and row.get("s3_uri"):
             parsed_prefix = parse_s3_uri(str(version.artifact_key or "").strip())
             if not parsed_prefix:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="artifact_key must be an s3:// URI")
+                raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "artifact_key must be an s3:// URI", code=ErrorCode.REQUEST_VALIDATION_FAILED)
             prefix_bucket, prefix_key = parsed_prefix
             normalized_prefix = prefix_key.rstrip("/")
             if bucket != prefix_bucket or not key.startswith(f"{normalized_prefix}/"):
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Requested file is outside dataset artifact prefix",
+                raise classified_http_exception(
+                    status.HTTP_400_BAD_REQUEST,
+                    "Requested file is outside dataset artifact prefix",
+                    code=ErrorCode.REQUEST_VALIDATION_FAILED,
                 )
 
         filename = str(row.get("filename") or "").strip() if row else ""
@@ -150,4 +153,4 @@ async def get_dataset_raw_file(
         raise
     except Exception as e:
         logger.error(f"Failed to load dataset raw file: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(e), code=ErrorCode.INTERNAL_ERROR)

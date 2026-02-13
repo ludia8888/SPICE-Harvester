@@ -11,7 +11,8 @@ import io
 import logging
 from typing import Any, Dict, Optional
 
-from fastapi import HTTPException, Request, status
+from fastapi import HTTPException, Request
+from shared.errors.error_types import ErrorCode, classified_http_exception
 
 import bff.routers.pipeline_datasets_ops as dataset_ops
 from bff.routers.data_connector_ops import _build_google_oauth_client, _resolve_google_connection
@@ -27,10 +28,12 @@ from shared.services.registries.pipeline_registry import PipelineRegistry
 from shared.services.storage.event_store import event_store
 from shared.utils.event_utils import build_command_event
 from shared.utils.s3_uri import build_s3_uri
+from shared.observability.tracing import trace_external_call
 
 logger = logging.getLogger(__name__)
 
 
+@trace_external_call("bff.data_connector_pipelining.start_pipelining_google_sheet")
 async def start_pipelining_google_sheet(
     *,
     sheet_id: str,
@@ -58,18 +61,18 @@ async def start_pipelining_google_sheet(
 
         source = await connector_registry.get_source(source_type="google_sheets", source_id=sheet_id)
         if not source or not source.enabled:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sheet is not registered")
+            raise classified_http_exception(404, "Sheet is not registered", code=ErrorCode.RESOURCE_NOT_FOUND)
 
         mapping = await connector_registry.get_mapping(source_type="google_sheets", source_id=sheet_id)
         if not db_name and mapping and mapping.target_db_name:
             db_name = str(mapping.target_db_name)
         if not db_name:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="db_name is required")
+            raise classified_http_exception(400, "db_name is required", code=ErrorCode.REQUEST_VALIDATION_FAILED)
         db_name = validate_db_name(db_name)
 
         sheet_url = (source.config_json or {}).get("sheet_url")
         if not sheet_url:
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Registered sheet missing URL")
+            raise classified_http_exception(500, "Registered sheet missing URL", code=ErrorCode.CONNECTOR_ERROR)
         config = source.config_json or {}
         default_ws = config.get("worksheet_name")
         access_token = config.get("access_token")
@@ -275,4 +278,4 @@ async def start_pipelining_google_sheet(
         raise
     except Exception as e:
         logger.error("Failed to start pipelining: %s", e)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
+        raise classified_http_exception(500, str(e), code=ErrorCode.CONNECTOR_ERROR) from e

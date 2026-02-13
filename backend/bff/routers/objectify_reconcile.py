@@ -16,6 +16,7 @@ from bff.dependencies import get_elasticsearch_service, get_oms_client
 from bff.routers.registry_deps import get_objectify_registry
 from bff.services import relationship_reconciler_service
 from bff.services.oms_client import OMSClient
+from shared.observability.tracing import trace_endpoint
 from shared.services.registries.objectify_registry import ObjectifyRegistry
 from shared.services.storage.elasticsearch_service import ElasticsearchService
 
@@ -32,6 +33,7 @@ router = APIRouter()
         "populate `relationships` fields based on detected foreign-key references."
     ),
 )
+@trace_endpoint("bff.objectify.reconcile_relationships")
 async def reconcile_relationships(
     db_name: str,
     branch: str = Query("main", description="Ontology branch"),

@@ -6,6 +6,7 @@ Lightweight health endpoints for operational dashboards. Composed by
 """
 
 from __future__ import annotations
+from shared.observability.tracing import trace_endpoint
 
 from datetime import datetime, timezone
 from typing import Any, Dict
@@ -18,6 +19,7 @@ router = APIRouter(tags=["Admin Operations"])
 
 
 @router.get("/system-health")
+@trace_endpoint("bff.admin.get_system_health")
 async def get_system_health(
     task_manager: BackgroundTaskManagerDep,
     redis_service: RedisServiceDep,

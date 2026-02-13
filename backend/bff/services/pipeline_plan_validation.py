@@ -23,6 +23,7 @@ from shared.services.pipeline.pipeline_task_spec_policy import clamp_task_spec, 
 from shared.utils.canonical_json import sha256_canonical_json_prefixed
 
 from bff.routers import pipeline_ops_preflight as pipeline_router
+from shared.observability.tracing import trace_db_operation
 
 
 @dataclass(frozen=True)
@@ -39,6 +40,7 @@ def _is_acyclic(nodes: Dict[str, Dict[str, Any]], edges: List[Dict[str, Any]]) -
     return len(order) == len(nodes)
 
 
+@trace_db_operation("bff.pipeline_plan_validation.validate_pipeline_plan")
 async def validate_pipeline_plan(
     *,
     plan: PipelinePlan,

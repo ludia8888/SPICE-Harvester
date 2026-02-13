@@ -5,6 +5,7 @@ Composed by `bff.routers.pipeline_plans`.
 """
 
 from __future__ import annotations
+from shared.observability.tracing import trace_endpoint
 
 from fastapi import APIRouter, Depends, Request
 
@@ -25,6 +26,7 @@ router = APIRouter(tags=["Pipeline Plans"])
 
 
 @router.post("/{plan_id}/preview", response_model=ApiResponse)
+@trace_endpoint("bff.pipeline_plans.preview_plan")
 async def preview_plan(
     plan_id: str,
     body: PipelinePlanPreviewRequest,
@@ -44,6 +46,7 @@ async def preview_plan(
 
 
 @router.post("/{plan_id}/inspect-preview", response_model=ApiResponse)
+@trace_endpoint("bff.pipeline_plans.inspect_plan_preview")
 async def inspect_plan_preview(
     plan_id: str,
     body: PipelinePlanInspectPreviewRequest,
@@ -63,6 +66,7 @@ async def inspect_plan_preview(
 
 
 @router.post("/{plan_id}/evaluate-joins", response_model=ApiResponse)
+@trace_endpoint("bff.pipeline_plans.evaluate_joins")
 async def evaluate_joins(
     plan_id: str,
     body: PipelinePlanEvaluateJoinsRequest,

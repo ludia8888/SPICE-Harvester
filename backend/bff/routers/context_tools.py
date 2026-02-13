@@ -1,9 +1,12 @@
 from __future__ import annotations
+from shared.observability.tracing import trace_endpoint
 
 import logging
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+
+from shared.errors.error_types import ErrorCode, classified_http_exception
 from pydantic import BaseModel, Field
 
 from bff.dependencies import OMSClientDep
@@ -32,7 +35,7 @@ def _policy_set(value: Any) -> set[str]:
 
 def _enforce_policy_value(*, allowed: set[str], value: str) -> None:
     if allowed and value not in allowed:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Permission denied")
+        raise classified_http_exception(status.HTTP_403_FORBIDDEN, "Permission denied", code=ErrorCode.PERMISSION_DENIED)
 
 
 class OntologySnapshotRequest(BaseModel):
@@ -63,6 +66,7 @@ def _filter_dataset_ids(
 
 
 @router.post("/datasets/describe", response_model=ApiResponse)
+@trace_endpoint("bff.context_tools.describe_datasets")
 async def describe_datasets(
     body: DatasetDescribeRequest,
     request: Request,
@@ -122,6 +126,7 @@ async def describe_datasets(
 
 
 @router.post("/ontology/snapshot", response_model=ApiResponse)
+@trace_endpoint("bff.context_tools.snapshot_ontology")
 async def snapshot_ontology(
     body: OntologySnapshotRequest,
     request: Request,
@@ -138,7 +143,7 @@ async def snapshot_ontology(
     branch = str(payload.get("branch") or "main").strip() or "main"
     ontology_id = str(payload.get("ontology_id") or "").strip()
     if not ontology_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="ontology_id is required")
+        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "ontology_id is required", code=ErrorCode.REQUEST_VALIDATION_FAILED)
 
     allowed_db_names = _policy_set(data_policies.get("allowed_db_names"))
     _enforce_policy_value(allowed=allowed_db_names, value=db_name)
@@ -156,7 +161,7 @@ async def snapshot_ontology(
         raise
     except Exception as exc:
         logger.exception("Ontology snapshot failed")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc), code=ErrorCode.INTERNAL_ERROR) from exc
 
     # OMS responses vary by endpoint; keep compatibility.
     ontology = payload_obj.get("data", payload_obj) if isinstance(payload_obj, dict) else payload_obj

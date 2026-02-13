@@ -23,6 +23,7 @@ except ImportError:
     HAS_BOTO3 = False
 
 from shared.models.commands import CommandType
+from shared.observability.tracing import trace_storage_operation
 from shared.services.storage.s3_client_config import build_s3_client_config
 
 
@@ -87,6 +88,7 @@ class StorageService:
 
         self.client = boto3.client("s3", **client_kwargs)
         
+    @trace_storage_operation("s3.create_bucket")
     async def create_bucket(self, bucket_name: str) -> bool:
         """
         버킷 생성
@@ -108,6 +110,7 @@ class StorageService:
 
         return await asyncio.to_thread(_create)
             
+    @trace_storage_operation("s3.bucket_exists")
     async def bucket_exists(self, bucket_name: str) -> bool:
         """
         버킷 존재 여부 확인
@@ -127,6 +130,7 @@ class StorageService:
 
         return await asyncio.to_thread(_exists)
             
+    @trace_storage_operation("s3.save_json")
     async def save_json(
         self,
         bucket: str,
@@ -174,6 +178,7 @@ class StorageService:
         
         return checksum
 
+    @trace_storage_operation("s3.save_bytes")
     async def save_bytes(
         self,
         bucket: str,
@@ -221,6 +226,7 @@ class StorageService:
         
         return checksum
 
+    @trace_storage_operation("s3.save_fileobj")
     async def save_fileobj(
         self,
         bucket: str,
@@ -277,6 +283,7 @@ class StorageService:
 
         return checksum
         
+    @trace_storage_operation("s3.load_json")
     async def load_json(self, bucket: str, key: str) -> Dict[str, Any]:
         """
         S3에서 JSON 데이터 로드
@@ -298,6 +305,7 @@ class StorageService:
                 raise FileNotFoundError(f"Object not found: {bucket}/{key}")
             raise
 
+    @trace_storage_operation("s3.load_bytes")
     async def load_bytes(self, bucket: str, key: str) -> bytes:
         """
         S3에서 Raw bytes 로드
@@ -317,6 +325,7 @@ class StorageService:
                 raise FileNotFoundError(f"Object not found: {bucket}/{key}")
             raise
 
+    @trace_storage_operation("s3.load_bytes_lines")
     async def load_bytes_lines(
         self,
         bucket: str,
@@ -369,6 +378,7 @@ class StorageService:
                 raise FileNotFoundError(f"Object not found: {bucket}/{key}")
             raise
             
+    @trace_storage_operation("s3.verify_checksum")
     async def verify_checksum(
         self,
         bucket: str,
@@ -394,6 +404,7 @@ class StorageService:
         except ClientError:
             return False
             
+    @trace_storage_operation("s3.delete_object")
     async def delete_object(self, bucket: str, key: str) -> bool:
         """
         S3 객체 삭제
@@ -411,6 +422,7 @@ class StorageService:
         except ClientError:
             return False
 
+    @trace_storage_operation("s3.delete_prefix")
     async def delete_prefix(
         self,
         bucket: str,
@@ -453,6 +465,7 @@ class StorageService:
 
         return deleted
             
+    @trace_storage_operation("s3.list_objects")
     async def list_objects(
         self,
         bucket: str,
@@ -481,6 +494,7 @@ class StorageService:
         except ClientError:
             return []
 
+    @trace_storage_operation("s3.list_objects_paginated")
     async def list_objects_paginated(
         self,
         bucket: str,
@@ -502,6 +516,7 @@ class StorageService:
         except ClientError:
             return [], None
 
+    @trace_storage_operation("s3.iter_objects")
     async def iter_objects(
         self,
         bucket: str,
@@ -525,6 +540,7 @@ class StorageService:
             if not token:
                 break
             
+    @trace_storage_operation("s3.get_object_metadata")
     async def get_object_metadata(
         self,
         bucket: str,
@@ -574,6 +590,7 @@ class StorageService:
         """
         return f"{db_name}/{class_id}/{instance_id}/{command_id}.json"
         
+    @trace_storage_operation("s3.get_all_commands_for_instance")
     async def get_all_commands_for_instance(
         self,
         bucket: str,
@@ -637,6 +654,7 @@ class StorageService:
                 raise FileNotFoundError(f"Bucket not found: {bucket}")
             raise
 
+    @trace_storage_operation("s3.list_command_files")
     async def list_command_files(
         self,
         *,
@@ -677,6 +695,7 @@ class StorageService:
         objects.sort(key=lambda obj: obj.get("LastModified") or datetime.fromtimestamp(0, tz=timezone.utc))
         return [str(obj.get("Key") or "") for obj in objects if str(obj.get("Key") or "").strip()]
             
+    @trace_storage_operation("s3.replay_instance_state")
     async def replay_instance_state(
         self,
         bucket: str,

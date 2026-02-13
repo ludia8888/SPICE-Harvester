@@ -20,7 +20,7 @@ Key improvements:
 import asyncio
 import logging
 from contextlib import asynccontextmanager
-from typing import Optional
+from typing import Dict, Optional
 
 # Third party imports
 from fastapi import FastAPI, Request, status
@@ -433,6 +433,61 @@ app = create_fastapi_service(
     validation_error_status=status.HTTP_400_BAD_REQUEST,
 )
 install_oms_auth_middleware(app)
+
+# ── OMS domain exception → enterprise error envelope mapping ──
+from oms.exceptions import (  # noqa: E402
+    OmsBaseException,
+    OntologyNotFoundError,
+    DuplicateOntologyError,
+    OntologyValidationError,
+    DatabaseNotFoundError,
+    DatabaseError as OmsDatabaseError,
+    AtomicUpdateError,
+    RelationshipError,
+    CircularReferenceError,
+)
+
+_OMS_EXCEPTION_MAP: Dict = {
+    OntologyNotFoundError: (status.HTTP_404_NOT_FOUND, ErrorCode.ONTOLOGY_NOT_FOUND),
+    DuplicateOntologyError: (status.HTTP_409_CONFLICT, ErrorCode.ONTOLOGY_DUPLICATE),
+    OntologyValidationError: (status.HTTP_422_UNPROCESSABLE_ENTITY, ErrorCode.ONTOLOGY_VALIDATION_FAILED),
+    DatabaseNotFoundError: (status.HTTP_404_NOT_FOUND, ErrorCode.RESOURCE_NOT_FOUND),
+    OmsDatabaseError: (status.HTTP_500_INTERNAL_SERVER_ERROR, ErrorCode.DB_ERROR),
+    AtomicUpdateError: (status.HTTP_409_CONFLICT, ErrorCode.ONTOLOGY_ATOMIC_UPDATE_FAILED),
+    CircularReferenceError: (status.HTTP_400_BAD_REQUEST, ErrorCode.ONTOLOGY_CIRCULAR_REFERENCE),
+    RelationshipError: (status.HTTP_400_BAD_REQUEST, ErrorCode.ONTOLOGY_RELATIONSHIP_ERROR),
+}
+
+@app.exception_handler(OmsBaseException)
+async def _oms_domain_exception_handler(request: Request, exc: OmsBaseException):
+    """Map OMS domain exceptions to enterprise error envelope responses."""
+    from shared.observability.request_context import get_request_id, get_correlation_id
+
+    for exc_type, (http_status, error_code) in _OMS_EXCEPTION_MAP.items():
+        if isinstance(exc, exc_type):
+            break
+    else:
+        http_status = status.HTTP_500_INTERNAL_SERVER_ERROR
+        error_code = ErrorCode.INTERNAL_ERROR
+
+    envelope = build_error_envelope(
+        service_name="oms",
+        message=str(exc),
+        detail=getattr(exc, "message", str(exc)),
+        code=error_code,
+        category=None,
+        status_code=http_status,
+        errors=None,
+        context=getattr(exc, "details", None) or None,
+        external_code=None,
+        objectify_error=None,
+        enterprise=None,
+        origin={"service": "oms", "method": request.method, "path": str(request.url.path), "endpoint": None},
+        request_id=get_request_id(),
+        correlation_id=get_correlation_id(),
+        trace_id=None,
+    )
+    return JSONResponse(status_code=http_status, content=envelope)
 
 
 # Modern dependency injection functions

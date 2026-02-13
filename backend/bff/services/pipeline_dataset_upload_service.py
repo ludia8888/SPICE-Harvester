@@ -12,7 +12,8 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
-from fastapi import HTTPException, status
+from fastapi import HTTPException
+from shared.errors.error_types import ErrorCode, classified_http_exception
 
 import bff.routers.pipeline_datasets_ops as ops
 from bff.services.dataset_ingest_commit_service import (
@@ -23,6 +24,7 @@ from bff.services.dataset_ingest_idempotency import resolve_existing_version_or_
 from bff.services.dataset_ingest_outbox_builder import DatasetIngestOutboxBuilder
 from bff.services.dataset_ingest_outbox_flusher import maybe_flush_dataset_ingest_outbox_inline
 from bff.services.dataset_ingest_failures import mark_ingest_failed
+from shared.observability.tracing import trace_external_call
 
 logger = logging.getLogger(__name__)
 
@@ -101,6 +103,7 @@ async def _save_artifact(
     )
 
 
+@trace_external_call("bff.pipeline_dataset_upload.upload_tabular_dataset")
 async def upload_tabular_dataset(
     *,
     inputs: TabularDatasetUploadInput,
@@ -291,7 +294,7 @@ async def upload_tabular_dataset(
                 outbox_entries=outbox_entries,
             )
         except ValueError as exc:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+            raise classified_http_exception(400, str(exc), code=ErrorCode.REQUEST_VALIDATION_FAILED) from exc
 
         objectify_job_id = await ops._maybe_enqueue_objectify_job(
             dataset=dataset,

@@ -13,6 +13,8 @@ from uuid import uuid4
 
 from fastapi import HTTPException, status
 
+from shared.errors.error_types import ErrorCode, classified_http_exception
+
 from shared.config.settings import get_settings
 from shared.services.storage.redis_service import create_redis_service_legacy
 from shared.utils.path_utils import safe_lakefs_ref
@@ -49,9 +51,10 @@ async def _acquire_pipeline_publish_lock(
             return redis_service, lock_key, token
         if time.monotonic() - start >= timeout_seconds:
             await redis_service.disconnect()
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Pipeline branch is busy; retry after the current publish completes",
+            raise classified_http_exception(
+                status.HTTP_409_CONFLICT,
+                "Pipeline branch is busy; retry after the current publish completes",
+                code=ErrorCode.CONFLICT,
             )
         await asyncio.sleep(retry_seconds)
 

@@ -8,6 +8,7 @@ Provides REST endpoints for:
 """
 
 from __future__ import annotations
+from shared.observability.tracing import trace_endpoint
 
 import logging
 from datetime import datetime
@@ -36,6 +37,7 @@ router = APIRouter(prefix="/schema-changes", tags=["Schema Changes"])
 
 
 @router.get("/history")
+@trace_endpoint("bff.schema_changes.list_schema_changes")
 async def list_schema_changes(
     db_name: str = Query(..., description="Database name"),
     subject_type: Optional[str] = Query(None, description="Filter by subject type (dataset, mapping_spec)"),
@@ -65,6 +67,7 @@ async def list_schema_changes(
 
 
 @router.put("/drifts/{drift_id}/acknowledge")
+@trace_endpoint("bff.schema_changes.acknowledge_drift")
 async def acknowledge_drift(
     drift_id: str,
     request: AcknowledgeRequest,
@@ -84,6 +87,7 @@ async def acknowledge_drift(
 
 
 @router.get("/subscriptions")
+@trace_endpoint("bff.schema_changes.list_subscriptions")
 async def list_subscriptions(
     request: Request,
     db_name: Optional[str] = Query(None, description="Filter by database name"),
@@ -107,6 +111,7 @@ async def list_subscriptions(
 
 
 @router.post("/subscriptions")
+@trace_endpoint("bff.schema_changes.create_subscription")
 async def create_subscription(
     request: Request,
     body: SubscriptionCreateRequest,
@@ -132,6 +137,7 @@ async def create_subscription(
 
 
 @router.delete("/subscriptions/{subscription_id}")
+@trace_endpoint("bff.schema_changes.delete_subscription")
 async def delete_subscription(
     request: Request,
     subscription_id: str,
@@ -151,6 +157,7 @@ async def delete_subscription(
 
 
 @router.get("/mappings/{mapping_spec_id}/compatibility")
+@trace_endpoint("bff.schema_changes.check_mapping_compatibility")
 async def check_mapping_compatibility(
     mapping_spec_id: str,
     db_name: str = Query(..., description="Database name"),
@@ -175,6 +182,7 @@ async def check_mapping_compatibility(
 
 
 @router.get("/stats")
+@trace_endpoint("bff.schema_changes.get_schema_change_stats")
 async def get_schema_change_stats(
     db_name: str = Query(..., description="Database name"),
     days: int = Query(30, ge=1, le=365, description="Number of days to analyze"),

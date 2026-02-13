@@ -13,6 +13,8 @@ from typing import Any, Dict, List, Optional, Protocol, Sequence
 import httpx
 from fastapi import HTTPException, UploadFile, status
 
+from shared.errors.error_types import ErrorCode, classified_http_exception
+
 from bff.routers.ontology_ops import _extract_target_field_types_from_import_schema
 from bff.schemas.ontology_requests import ImportFieldMapping, ImportFromGoogleSheetsRequest, ImportTargetField
 from bff.services.oms_client import OMSClient
@@ -20,6 +22,7 @@ from bff.services.sheet_import_parsing import parse_json_array, parse_json_objec
 from bff.services.sheet_import_service import FieldMapping, SheetImportService
 from bff.utils.httpx_exceptions import raise_httpx_as_http_exception
 from shared.security.input_sanitizer import SecurityViolationError, validate_class_id, validate_db_name
+from shared.observability.tracing import trace_external_call
 
 logger = logging.getLogger(__name__)
 
@@ -170,10 +173,7 @@ class _ImportProcessorTemplate:
 
         table = (result.get("table") or {}) if isinstance(result, dict) else {}
         if table.get("mode") == "property":
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Property-form tables are not supported for record import yet",
-            )
+            raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "Property-form tables are not supported for record import yet", code=ErrorCode.REQUEST_VALIDATION_FAILED)
 
         preview = (result.get("preview") or {}) if isinstance(result, dict) else {}
         structure = result.get("structure") if isinstance(result, dict) else None
@@ -272,10 +272,11 @@ class _CommitImportProcessor(_ImportProcessorTemplate):
 
         errors = prepared.build.get("errors") or []
         if errors and not allow_partial:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail={
-                    "message": "Import validation failed. Fix errors or set allow_partial=true to skip bad rows.",
+            raise classified_http_exception(
+                status.HTTP_400_BAD_REQUEST,
+                "Import validation failed. Fix errors or set allow_partial=true to skip bad rows.",
+                code=ErrorCode.REQUEST_VALIDATION_FAILED,
+                extra={
                     "stats": prepared.build.get("stats") or {},
                     "errors": errors[:200],
                 },
@@ -294,10 +295,7 @@ class _CommitImportProcessor(_ImportProcessorTemplate):
             instances = filtered_instances
 
         if not instances:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="No valid instances to import",
-            )
+            raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "No valid instances to import", code=ErrorCode.REQUEST_VALIDATION_FAILED)
 
         batch_size = max(1, min(int(batch_size or 500), 5000))
         prepared_batches = [
@@ -371,6 +369,7 @@ class _CommitImportProcessor(_ImportProcessorTemplate):
         }
 
 
+@trace_external_call("bff.ontology_imports.dry_run_import_from_google_sheets")
 async def dry_run_import_from_google_sheets(*, db_name: str, body: ImportFromGoogleSheetsRequest) -> Dict[str, Any]:
     """
     Google Sheets → (구조 분석 + 테이블 선택) → 매핑 적용 → 타입 변환/검증 (dry-run)
@@ -381,10 +380,7 @@ async def dry_run_import_from_google_sheets(*, db_name: str, body: ImportFromGoo
 
         target_class_id = validate_class_id(body.target_class_id)
         if not body.target_schema:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="target_schema is required for import (field types)",
-            )
+            raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "target_schema is required for import (field types)", code=ErrorCode.REQUEST_VALIDATION_FAILED)
 
         source = _GoogleSheetsSource(
             sheet_url=body.sheet_url,
@@ -411,17 +407,15 @@ async def dry_run_import_from_google_sheets(*, db_name: str, body: ImportFromGoo
     except httpx.HTTPStatusError as exc:
         raise_httpx_as_http_exception(exc)
     except (SecurityViolationError, ValueError) as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, str(exc), code=ErrorCode.REQUEST_VALIDATION_FAILED) from exc
     except HTTPException:
         raise
     except Exception as exc:
         logger.error("Google Sheets dry-run import failed: %s", exc)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Google Sheets dry-run import 실패: {str(exc)}",
-        ) from exc
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, f"Google Sheets dry-run import 실패: {str(exc)}", code=ErrorCode.INTERNAL_ERROR) from exc
 
 
+@trace_external_call("bff.ontology_imports.commit_import_from_google_sheets")
 async def commit_import_from_google_sheets(
     *,
     db_name: str,
@@ -435,10 +429,7 @@ async def commit_import_from_google_sheets(
         db_name = validate_db_name(db_name)
         target_class_id = validate_class_id(body.target_class_id)
         if not body.target_schema:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="target_schema is required for import (field types)",
-            )
+            raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "target_schema is required for import (field types)", code=ErrorCode.REQUEST_VALIDATION_FAILED)
 
         source = _GoogleSheetsSource(
             sheet_url=body.sheet_url,
@@ -471,17 +462,15 @@ async def commit_import_from_google_sheets(
     except httpx.HTTPStatusError as exc:
         raise_httpx_as_http_exception(exc)
     except (SecurityViolationError, ValueError) as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, str(exc), code=ErrorCode.REQUEST_VALIDATION_FAILED) from exc
     except HTTPException:
         raise
     except Exception as exc:
         logger.error("Google Sheets import commit failed: %s", exc)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Google Sheets import 실패: {str(exc)}",
-        ) from exc
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, f"Google Sheets import 실패: {str(exc)}", code=ErrorCode.INTERNAL_ERROR) from exc
 
 
+@trace_external_call("bff.ontology_imports.dry_run_import_from_excel")
 async def dry_run_import_from_excel(
     *,
     db_name: str,
@@ -566,17 +555,15 @@ async def dry_run_import_from_excel(
     except httpx.HTTPStatusError as exc:
         raise_httpx_as_http_exception(exc)
     except (SecurityViolationError, ValueError) as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, str(exc), code=ErrorCode.REQUEST_VALIDATION_FAILED) from exc
     except HTTPException:
         raise
     except Exception as exc:
         logger.error("Excel dry-run import failed: %s", exc)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Excel dry-run import 실패: {str(exc)}",
-        ) from exc
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, f"Excel dry-run import 실패: {str(exc)}", code=ErrorCode.INTERNAL_ERROR) from exc
 
 
+@trace_external_call("bff.ontology_imports.commit_import_from_excel")
 async def commit_import_from_excel(
     *,
     db_name: str,
@@ -670,13 +657,9 @@ async def commit_import_from_excel(
     except httpx.HTTPStatusError as exc:
         raise_httpx_as_http_exception(exc)
     except (SecurityViolationError, ValueError) as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, str(exc), code=ErrorCode.REQUEST_VALIDATION_FAILED) from exc
     except HTTPException:
         raise
     except Exception as exc:
         logger.error("Excel import commit failed: %s", exc)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Excel import 실패: {str(exc)}",
-        ) from exc
-
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, f"Excel import 실패: {str(exc)}", code=ErrorCode.INTERNAL_ERROR) from exc

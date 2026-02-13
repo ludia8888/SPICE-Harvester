@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from fastapi import Depends, HTTPException, Request, status
 
+from shared.errors.error_types import ErrorCode, classified_http_exception
+
 from bff.routers.role_deps import enforce_required_database_role
 from bff.routers.registry_deps import get_dataset_registry, get_objectify_registry, get_pipeline_registry
 from shared.security.database_access import enforce_database_role as _enforce_database_role
@@ -31,4 +33,4 @@ async def _require_db_role(request: Request, *, db_name: str, roles) -> None:  #
     try:
         await enforce_database_role(headers=request.headers, db_name=db_name, required_roles=roles)
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+        raise classified_http_exception(status.HTTP_403_FORBIDDEN, str(exc), code=ErrorCode.PERMISSION_DENIED) from exc

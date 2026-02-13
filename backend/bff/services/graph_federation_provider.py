@@ -13,6 +13,7 @@ from shared.services.storage.elasticsearch_service import (
     ElasticsearchService,
     create_elasticsearch_service,
 )
+from shared.observability.tracing import trace_external_call
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,7 @@ async def _get_from_container(container: ServiceContainer) -> GraphFederationSer
     return await container.get(GraphFederationServiceES)
 
 
+@trace_external_call("bff.graph_federation.get_graph_federation_service")
 async def get_graph_federation_service() -> GraphFederationServiceES:
     """
     FastAPI dependency to get a GraphFederationServiceES instance.

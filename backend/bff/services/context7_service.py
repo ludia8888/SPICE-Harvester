@@ -10,10 +10,12 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Dict, TypeVar
 
-from fastapi import HTTPException, status
+from fastapi import HTTPException
+from shared.errors.error_types import ErrorCode, classified_http_exception
 
 from bff.schemas.context7_requests import EntityLinkRequest, KnowledgeRequest, OntologyAnalysisRequest, SearchRequest
 from bff.services.oms_client import OMSClient
+from shared.observability.tracing import trace_external_call
 
 logger = logging.getLogger(__name__)
 
@@ -27,9 +29,10 @@ async def _call_context7(*, action: str, func: Callable[[], Awaitable[T]]) -> T:
         raise
     except Exception as exc:
         logger.error("%s failed: %s", action, exc)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+        raise classified_http_exception(500, str(exc), code=ErrorCode.INTERNAL_ERROR) from exc
 
 
+@trace_external_call("bff.context7.search_context7")
 async def search_context7(*, request: SearchRequest, client: Any) -> Dict[str, Any]:
     results = await _call_context7(
         action="Context7 search",
@@ -38,11 +41,13 @@ async def search_context7(*, request: SearchRequest, client: Any) -> Dict[str, A
     return {"query": request.query, "count": len(results), "results": results}
 
 
+@trace_external_call("bff.context7.get_entity_context")
 async def get_entity_context(*, entity_id: str, client: Any) -> Dict[str, Any]:
     context = await _call_context7(action="Context7 get_context", func=lambda: client.get_context(entity_id))
     return {"entity_id": entity_id, "context": context}
 
 
+@trace_external_call("bff.context7.add_knowledge")
 async def add_knowledge(*, request: KnowledgeRequest, client: Any) -> Dict[str, Any]:
     metadata = request.metadata or {}
     if request.tags:
@@ -56,6 +61,7 @@ async def add_knowledge(*, request: KnowledgeRequest, client: Any) -> Dict[str, 
     return {"success": True, "knowledge_id": knowledge_id, "result": result}
 
 
+@trace_external_call("bff.context7.create_entity_link")
 async def create_entity_link(*, request: EntityLinkRequest, client: Any) -> Dict[str, Any]:
     result = await _call_context7(
         action="Context7 link_entities",
@@ -73,6 +79,7 @@ async def create_entity_link(*, request: EntityLinkRequest, client: Any) -> Dict
     }
 
 
+@trace_external_call("bff.context7.analyze_ontology")
 async def analyze_ontology(*, request: OntologyAnalysisRequest, client: Any, oms_client: OMSClient) -> Dict[str, Any]:
     payload = await _call_context7(
         action="OMS get ontology for analysis",
@@ -101,6 +108,7 @@ async def analyze_ontology(*, request: OntologyAnalysisRequest, client: Any, oms
     }
 
 
+@trace_external_call("bff.context7.get_ontology_suggestions")
 async def get_ontology_suggestions(*, db_name: str, class_id: str, client: Any) -> Dict[str, Any]:
     query = f"ontology improvements for {class_id} in {db_name}"
     suggestions = await _call_context7(action="Context7 suggestions search", func=lambda: client.search(query, limit=5))
@@ -112,6 +120,7 @@ async def get_ontology_suggestions(*, db_name: str, class_id: str, client: Any) 
     }
 
 
+@trace_external_call("bff.context7.check_context7_health")
 async def check_context7_health(*, client: Any) -> Dict[str, Any]:
     _ = client
     try:

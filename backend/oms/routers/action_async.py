@@ -21,7 +21,7 @@ from oms.services.ontology_deployment_registry_v2 import OntologyDeploymentRegis
 from oms.services.ontology_resources import OntologyResourceService
 from shared.config.app_config import AppConfig
 from shared.config.settings import get_settings
-from shared.errors.error_types import ErrorCode
+from shared.errors.error_types import ErrorCategory, ErrorCode, classified_http_exception
 from shared.models.commands import ActionCommand
 from shared.models.event_envelope import EventEnvelope
 from shared.observability.context_propagation import enrich_metadata_with_current_trace
@@ -53,6 +53,7 @@ from shared.utils.writeback_conflicts import (
 )
 from shared.utils.access_policy import apply_access_policy
 from shared.utils.writeback_lifecycle import derive_lifecycle_id
+from shared.observability.tracing import trace_endpoint
 
 from oms.services.action_simulation_service import (
     ActionSimulationRejected,
@@ -177,6 +178,7 @@ def _resolve_writeback_target(
     response_model=ActionSubmitResponse,
     status_code=status.HTTP_202_ACCEPTED,
 )
+@trace_endpoint("oms.action.submit")
 async def submit_action_async(
     db_name: str = Depends(ensure_database_exists),
     action_type_id: str = Path(..., description="Action type identifier"),
@@ -197,7 +199,11 @@ async def submit_action_async(
     try:
         action_type_id = str(action_type_id or "").strip()
         if not action_type_id:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="action_type_id is required")
+            raise classified_http_exception(
+                status.HTTP_400_BAD_REQUEST,
+                "action_type_id is required",
+                code=ErrorCode.REQUEST_VALIDATION_FAILED,
+            )
 
         # Prefer body base_branch; allow query alias for back-compat with existing patterns.
         resolved_base_branch = str(request.base_branch or "").strip() or "main"
@@ -208,14 +214,10 @@ async def submit_action_async(
         deployments = OntologyDeploymentRegistryV2()
         latest = await deployments.get_latest_deployed_commit(db_name=db_name, target_branch=resolved_base_branch)
         if not latest or not latest.get("ontology_commit_id"):
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={
-                    "error": "no_deployed_ontology",
-                    "message": "No deployed ontology commit found; deploy ontology before executing actions.",
-                    "db_name": db_name,
-                    "target_branch": resolved_base_branch,
-                },
+            raise classified_http_exception(
+                status.HTTP_409_CONFLICT,
+                "No deployed ontology commit found; deploy ontology before executing actions.",
+                code=ErrorCode.CONFLICT,
             )
         ontology_commit_id = str(latest["ontology_commit_id"])
 
@@ -228,9 +230,10 @@ async def submit_action_async(
             resource_id=action_type_id,
         )
         if not action_resource:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail={"error": "action_type_not_found", "action_type_id": action_type_id},
+            raise classified_http_exception(
+                status.HTTP_404_NOT_FOUND,
+                f"action_type_not_found: {action_type_id}",
+                code=ErrorCode.ACTION_TYPE_NOT_FOUND,
             )
         spec = action_resource.get("spec") if isinstance(action_resource, dict) else None
         if not isinstance(spec, dict):
@@ -244,12 +247,10 @@ async def submit_action_async(
 
         raw_writeback_target = spec.get("writeback_target")
         if not isinstance(raw_writeback_target, dict) or not raw_writeback_target:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={
-                    "error": "action_type_missing_writeback_target",
-                    "action_type_id": action_type_id,
-                },
+            raise classified_http_exception(
+                status.HTTP_409_CONFLICT,
+                f"action_type_missing_writeback_target: {action_type_id}",
+                code=ErrorCode.CONFLICT,
             )
         writeback_target = _resolve_writeback_target(db_name=db_name, raw_target=raw_writeback_target)
 
@@ -262,22 +263,16 @@ async def submit_action_async(
         try:
             validated_input = validate_action_input(input_schema=spec.get("input_schema"), payload=sanitized_input)
         except ActionInputValidationError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail={
-                    "error": "action_input_invalid",
-                    "action_type_id": action_type_id,
-                    "message": str(exc),
-                },
+            raise classified_http_exception(
+                status.HTTP_400_BAD_REQUEST,
+                f"action_input_invalid for {action_type_id}: {exc}",
+                code=ErrorCode.ACTION_INPUT_INVALID,
             ) from exc
         except ActionInputSchemaError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={
-                    "error": "action_type_input_schema_invalid",
-                    "action_type_id": action_type_id,
-                    "message": str(exc),
-                },
+            raise classified_http_exception(
+                status.HTTP_409_CONFLICT,
+                f"action_type_input_schema_invalid for {action_type_id}: {exc}",
+                code=ErrorCode.ACTION_TEMPLATE_ERROR,
             ) from exc
 
         audited_log_input = audit_action_log_input(validated_input, audit_policy=spec.get("audit_policy"))
@@ -289,13 +284,10 @@ async def submit_action_async(
         try:
             compiled_shape = compile_template_v1_change_shape(implementation, input_payload=validated_input)
         except ActionImplementationError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={
-                    "error": "action_type_implementation_invalid",
-                    "action_type_id": action_type_id,
-                    "message": str(exc),
-                },
+            raise classified_http_exception(
+                status.HTTP_409_CONFLICT,
+                f"action_type_implementation_invalid for {action_type_id}: {exc}",
+                code=ErrorCode.ACTION_TEMPLATE_ERROR,
             ) from exc
 
         if compiled_shape:
@@ -342,12 +334,10 @@ async def submit_action_async(
         submitted_by = str((request.metadata or {}).get("user_id") or "").strip()
         submitted_by_type = str((request.metadata or {}).get("user_type") or "user").strip().lower() or "user"
         if not submitted_by:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail={
-                    "error": "submitted_by_required",
-                    "message": "request.metadata.user_id is required for action submissions",
-                },
+            raise classified_http_exception(
+                status.HTTP_400_BAD_REQUEST,
+                "request.metadata.user_id is required for action submissions",
+                code=ErrorCode.REQUEST_VALIDATION_FAILED,
             )
         if submitted_by != "system":
             role = await get_database_access_role(
@@ -356,10 +346,18 @@ async def submit_action_async(
                 principal_id=submitted_by,
             )
             if role not in DOMAIN_MODEL_ROLES:
-                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Permission denied")
+                raise classified_http_exception(
+                    status.HTTP_403_FORBIDDEN,
+                    "Permission denied",
+                    code=ErrorCode.PERMISSION_DENIED,
+                )
             tags = build_principal_tags(principal_type=submitted_by_type, principal_id=submitted_by, role=role)
             if not policy_allows(policy=spec.get("permission_policy"), principal_tags=tags):
-                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Permission denied")
+                raise classified_http_exception(
+                    status.HTTP_403_FORBIDDEN,
+                    "Permission denied",
+                    code=ErrorCode.PERMISSION_DENIED,
+                )
         log_metadata = dict(request.metadata or {})
         # Durable trace correlation: persist W3C context on the ActionLog (ontology object)
         # so outbox/reconciler workers can attach original traces even when running later.
@@ -427,13 +425,18 @@ async def submit_action_async(
         )
 
     except SecurityViolationError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            str(e),
+            code=ErrorCode.INPUT_SANITIZATION_FAILED,
+        ) from e
 
 
 @router.post(
     "/{action_type_id}/simulate",
     status_code=status.HTTP_200_OK,
 )
+@trace_endpoint("oms.action.simulate")
 async def simulate_action_async(
     db_name: str = Depends(ensure_database_exists),
     action_type_id: str = Path(..., description="Action type identifier"),
@@ -462,7 +465,11 @@ async def simulate_action_async(
     try:
         action_type_id = str(action_type_id or "").strip()
         if not action_type_id:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="action_type_id is required")
+            raise classified_http_exception(
+                status.HTTP_400_BAD_REQUEST,
+                "action_type_id is required",
+                code=ErrorCode.REQUEST_VALIDATION_FAILED,
+            )
 
         resolved_base_branch = str(request.base_branch or "").strip() or "main"
 
@@ -477,14 +484,10 @@ async def simulate_action_async(
                     head_commit = coerce_commit_id(item.get("head"))
                     break
             if not head_commit:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail={
-                        "error": "branch_head_not_found",
-                        "message": f"Branch HEAD not found for '{resolved_base_branch}'",
-                        "db_name": db_name,
-                        "target_branch": resolved_base_branch,
-                    },
+                raise classified_http_exception(
+                    status.HTTP_409_CONFLICT,
+                    f"Branch HEAD not found for '{resolved_base_branch}'",
+                    code=ErrorCode.CONFLICT,
                 )
             ontology_commit_id = str(head_commit)
             logger.info("Simulate using branch HEAD: %s (dev mode)", ontology_commit_id)
@@ -492,14 +495,10 @@ async def simulate_action_async(
             deployments = OntologyDeploymentRegistryV2()
             latest = await deployments.get_latest_deployed_commit(db_name=db_name, target_branch=resolved_base_branch)
             if not latest or not latest.get("ontology_commit_id"):
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail={
-                        "error": "no_deployed_ontology",
-                        "message": "No deployed ontology commit found; deploy ontology before simulating actions.",
-                        "db_name": db_name,
-                        "target_branch": resolved_base_branch,
-                    },
+                raise classified_http_exception(
+                    status.HTTP_409_CONFLICT,
+                    "No deployed ontology commit found; deploy ontology before simulating actions.",
+                    code=ErrorCode.CONFLICT,
                 )
             ontology_commit_id = str(latest["ontology_commit_id"])
 
@@ -511,9 +510,10 @@ async def simulate_action_async(
             resource_id=action_type_id,
         )
         if not action_resource:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail={"error": "action_type_not_found", "action_type_id": action_type_id},
+            raise classified_http_exception(
+                status.HTTP_404_NOT_FOUND,
+                f"action_type_not_found: {action_type_id}",
+                code=ErrorCode.ACTION_TYPE_NOT_FOUND,
             )
         spec = action_resource.get("spec") if isinstance(action_resource, dict) else None
         if not isinstance(spec, dict):
@@ -541,14 +541,23 @@ async def simulate_action_async(
             try:
                 simulation_id = str(UUID(simulation_id))
             except Exception as exc:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="simulation_id must be a UUID") from exc
+                raise classified_http_exception(
+                    status.HTTP_400_BAD_REQUEST,
+                    "simulation_id must be a UUID",
+                    code=ErrorCode.REQUEST_VALIDATION_FAILED,
+                ) from exc
             existing = await simulation_registry.get_simulation(simulation_id=simulation_id)
             if not existing:
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="ActionSimulation not found")
+                raise classified_http_exception(
+                    status.HTTP_404_NOT_FOUND,
+                    "ActionSimulation not found",
+                    code=ErrorCode.RESOURCE_NOT_FOUND,
+                )
             if existing.db_name != db_name or existing.action_type_id != action_type_id:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail="simulation_id does not match db_name/action_type_id",
+                raise classified_http_exception(
+                    status.HTTP_409_CONFLICT,
+                    "simulation_id does not match db_name/action_type_id",
+                    code=ErrorCode.CONFLICT,
                 )
         else:
             simulation_id = str(uuid4())
@@ -566,10 +575,18 @@ async def simulate_action_async(
         settings = get_settings()
         base_storage = create_storage_service(settings)
         if not base_storage:
-            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="StorageService unavailable")
+            raise classified_http_exception(
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                "StorageService unavailable",
+                code=ErrorCode.STORAGE_UNAVAILABLE,
+            )
         lakefs_storage = create_lakefs_storage_service(settings)
         if not lakefs_storage:
-            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="LakeFSStorageService unavailable")
+            raise classified_http_exception(
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                "LakeFSStorageService unavailable",
+                code=ErrorCode.STORAGE_UNAVAILABLE,
+            )
 
         if AppConfig.WRITEBACK_ENFORCE_GOVERNANCE:
             dataset_registry = DatasetRegistry()
@@ -578,7 +595,11 @@ async def simulate_action_async(
         try:
             sanitized_input = sanitize_input(request.input)
         except SecurityViolationError as exc:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+            raise classified_http_exception(
+                status.HTTP_400_BAD_REQUEST,
+                str(exc),
+                code=ErrorCode.INPUT_SANITIZATION_FAILED,
+            ) from exc
 
         preflight = await preflight_action_writeback(
             terminus=terminus,
@@ -887,7 +908,11 @@ async def simulate_action_async(
                 )
             except Exception:
                 pass
-        raise HTTPException(status_code=exc.status_code, detail=exc.payload) from exc
+        raise classified_http_exception(
+            exc.status_code,
+            str(exc.payload),
+            code=ErrorCode.ACTION_CONFLICT_POLICY_FAILED,
+        ) from exc
     except HTTPException as exc:
         if simulation_registry and simulation_id and version is not None:
             try:

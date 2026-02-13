@@ -10,7 +10,8 @@ import logging
 from typing import Any, Awaitable, Callable, Dict, Optional, TypeVar
 
 import httpx
-from fastapi import HTTPException, status
+from fastapi import HTTPException
+from shared.errors.error_types import ErrorCode, classified_http_exception
 
 from bff.schemas.ontology_extensions_requests import (
     OntologyApproveRequest,
@@ -23,6 +24,7 @@ from bff.services.ontology_occ_guard_service import resolve_expected_head_commit
 from bff.utils.httpx_exceptions import raise_httpx_as_http_exception
 from shared.models.requests import BranchCreateRequest
 from shared.security.input_sanitizer import SecurityViolationError, sanitize_input, validate_db_name
+from shared.observability.tracing import trace_external_call
 
 logger = logging.getLogger(__name__)
 
@@ -38,15 +40,16 @@ async def _call_oms(*, action: str, func: Callable[[], Awaitable[T]]) -> T:
         raise
     except SecurityViolationError as exc:
         logger.warning("Security violation in %s: %s", action, exc)
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=_SECURITY_VIOLATION_DETAIL) from exc
+        raise classified_http_exception(400, _SECURITY_VIOLATION_DETAIL, code=ErrorCode.REQUEST_VALIDATION_FAILED) from exc
     except httpx.HTTPStatusError as exc:
         raise_httpx_as_http_exception(exc)
         raise
     except Exception as exc:
         logger.error("Failed to %s: %s", action, exc)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+        raise classified_http_exception(500, str(exc), code=ErrorCode.INTERNAL_ERROR) from exc
 
 
+@trace_external_call("bff.ontology_extensions.list_resources")
 async def list_resources(
     *,
     oms_client: OMSClient,
@@ -68,6 +71,7 @@ async def list_resources(
     )
 
 
+@trace_external_call("bff.ontology_extensions.create_resource")
 async def create_resource(
     *,
     oms_client: OMSClient,
@@ -99,6 +103,7 @@ async def create_resource(
     )
 
 
+@trace_external_call("bff.ontology_extensions.update_resource")
 async def update_resource(
     *,
     oms_client: OMSClient,
@@ -132,6 +137,7 @@ async def update_resource(
     )
 
 
+@trace_external_call("bff.ontology_extensions.get_resource")
 async def get_resource(
     *,
     oms_client: OMSClient,
@@ -151,6 +157,7 @@ async def get_resource(
     )
 
 
+@trace_external_call("bff.ontology_extensions.delete_resource")
 async def delete_resource(
     *,
     oms_client: OMSClient,
@@ -182,6 +189,7 @@ async def delete_resource(
     )
 
 
+@trace_external_call("bff.ontology_extensions.list_ontology_branches")
 async def list_ontology_branches(*, oms_client: OMSClient, db_name: str) -> Dict[str, Any]:
     return await _call_oms(
         action="list ontology branches",
@@ -189,6 +197,7 @@ async def list_ontology_branches(*, oms_client: OMSClient, db_name: str) -> Dict
     )
 
 
+@trace_external_call("bff.ontology_extensions.create_ontology_branch")
 async def create_ontology_branch(*, oms_client: OMSClient, db_name: str, request: BranchCreateRequest) -> Dict[str, Any]:
     return await _call_oms(
         action="create ontology branch",
@@ -199,6 +208,7 @@ async def create_ontology_branch(*, oms_client: OMSClient, db_name: str, request
     )
 
 
+@trace_external_call("bff.ontology_extensions.list_ontology_proposals")
 async def list_ontology_proposals(
     *,
     oms_client: OMSClient,
@@ -216,6 +226,7 @@ async def list_ontology_proposals(
     )
 
 
+@trace_external_call("bff.ontology_extensions.create_ontology_proposal")
 async def create_ontology_proposal(
     *,
     oms_client: OMSClient,
@@ -231,6 +242,7 @@ async def create_ontology_proposal(
     )
 
 
+@trace_external_call("bff.ontology_extensions.approve_ontology_proposal")
 async def approve_ontology_proposal(
     *,
     oms_client: OMSClient,
@@ -248,6 +260,7 @@ async def approve_ontology_proposal(
     )
 
 
+@trace_external_call("bff.ontology_extensions.deploy_ontology")
 async def deploy_ontology(
     *,
     oms_client: OMSClient,
@@ -263,6 +276,7 @@ async def deploy_ontology(
     )
 
 
+@trace_external_call("bff.ontology_extensions.ontology_health")
 async def ontology_health(*, oms_client: OMSClient, db_name: str, branch: str) -> Dict[str, Any]:
     return await _call_oms(
         action="fetch ontology health",

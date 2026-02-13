@@ -15,6 +15,7 @@ import httpx
 from fastapi import HTTPException, Request, status
 
 from bff.schemas.link_types_requests import LinkTypeRequest, LinkTypeUpdateRequest
+from shared.errors.error_types import ErrorCode, classified_http_exception
 from bff.services.link_types_mapping_service import (
     build_mapping_request,
     extract_ontology_properties,
@@ -35,6 +36,7 @@ from shared.security.database_access import DATA_ENGINEER_ROLES, DOMAIN_MODEL_RO
 from shared.security.input_sanitizer import SecurityViolationError
 from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.services.registries.objectify_registry import ObjectifyRegistry
+from shared.observability.tracing import trace_external_call
 
 logger = logging.getLogger(__name__)
 
@@ -56,17 +58,14 @@ async def _require_role(
 def _require_non_empty(value: Any, *, detail: str) -> str:
     text = str(value or "").strip()
     if not text:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
+        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, detail, code=ErrorCode.REQUEST_VALIDATION_FAILED)
     return text
 
 
 def _extract_mapping_payload(mapping_response: Dict[str, Any]) -> Dict[str, Any]:
     mapping_payload = mapping_response.get("data", {}).get("mapping_spec")
     if not isinstance(mapping_payload, dict):
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to create mapping spec",
-        )
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, "Failed to create mapping spec", code=ErrorCode.INTERNAL_ERROR)
     return mapping_payload
 
 
@@ -90,6 +89,7 @@ async def _enqueue_link_index_job(
     )
 
 
+@trace_external_call("bff.link_types_write.create_link_type")
 async def create_link_type(
     *,
     db_name: str,
@@ -120,14 +120,14 @@ async def create_link_type(
         spec_type = normalize_spec_type(str(spec_payload.get("type") or ""))
         normalized_type = "join_table" if spec_type == "object_backed" else spec_type
         if normalized_type not in {"foreign_key", "join_table"}:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="relationship_spec.type is required")
+            raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "relationship_spec.type is required", code=ErrorCode.REQUEST_VALIDATION_FAILED)
 
         try:
             source_ontology = await oms_client.get_ontology(db_name, source_class, branch=branch)
             target_ontology = await oms_client.get_ontology(db_name, target_class, branch=branch)
         except httpx.HTTPStatusError as exc:
             if exc.response is not None and exc.response.status_code == status.HTTP_404_NOT_FOUND:
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ontology class not found") from exc
+                raise classified_http_exception(status.HTTP_404_NOT_FOUND, "Ontology class not found", code=ErrorCode.ONTOLOGY_NOT_FOUND) from exc
             raise_httpx_as_http_exception(exc)
             raise  # pragma: no cover
 
@@ -135,9 +135,10 @@ async def create_link_type(
         source_rels = extract_ontology_relationships(source_ontology)
         target_props = extract_ontology_properties(target_ontology)
         if predicate not in source_rels:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={"code": "LINK_TYPE_PREDICATE_MISSING", "predicate": predicate},
+            raise classified_http_exception(
+                status.HTTP_409_CONFLICT,
+                f"relationship predicate not found: {predicate}",
+                code=ErrorCode.CONFLICT,
             )
 
         _, source_contract = await resolve_object_type_contract(
@@ -283,14 +284,15 @@ async def create_link_type(
     except httpx.HTTPStatusError as exc:
         raise_httpx_as_http_exception(exc)
     except (SecurityViolationError, ValueError) as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, str(exc), code=ErrorCode.REQUEST_VALIDATION_FAILED) from exc
     except HTTPException:
         raise
     except Exception as exc:
         logger.error("Failed to create link type: %s", exc)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc), code=ErrorCode.INTERNAL_ERROR) from exc
 
 
+@trace_external_call("bff.link_types_write.update_link_type")
 async def update_link_type(
     *,
     db_name: str,
@@ -314,7 +316,7 @@ async def update_link_type(
 
         existing = await dataset_registry.get_relationship_spec(link_type_id=link_type_id)
         if not existing:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Relationship spec not found")
+            raise classified_http_exception(status.HTTP_404_NOT_FOUND, "Relationship spec not found", code=ErrorCode.RESOURCE_NOT_FOUND)
 
         payload = sanitized_payload(body.model_dump(exclude_unset=True))
         relationship_spec_payload = (
@@ -330,7 +332,7 @@ async def update_link_type(
             )
         except httpx.HTTPStatusError as exc:
             if exc.response is not None and exc.response.status_code == status.HTTP_404_NOT_FOUND:
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Link type not found") from exc
+                raise classified_http_exception(status.HTTP_404_NOT_FOUND, "Link type not found", code=ErrorCode.RESOURCE_NOT_FOUND) from exc
             raise_httpx_as_http_exception(exc)
             raise  # pragma: no cover
         link_resource = link_resource_payload.get("data") if isinstance(link_resource_payload, dict) else link_resource_payload
@@ -349,7 +351,7 @@ async def update_link_type(
                 target_ontology = await oms_client.get_ontology(db_name, existing.target_object_type, branch=branch)
             except httpx.HTTPStatusError as exc:
                 if exc.response is not None and exc.response.status_code == status.HTTP_404_NOT_FOUND:
-                    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ontology class not found") from exc
+                    raise classified_http_exception(status.HTTP_404_NOT_FOUND, "Ontology class not found", code=ErrorCode.ONTOLOGY_NOT_FOUND) from exc
                 raise_httpx_as_http_exception(exc)
                 raise  # pragma: no cover
 
@@ -420,7 +422,7 @@ async def update_link_type(
             mapping_spec_version=mapping_spec_version,
         )
         if not updated:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Relationship spec not found")
+            raise classified_http_exception(status.HTTP_404_NOT_FOUND, "Relationship spec not found", code=ErrorCode.RESOURCE_NOT_FOUND)
 
         resource_payload = await oms_client.get_ontology_resource(
             db_name,
@@ -430,7 +432,7 @@ async def update_link_type(
         )
         resource = resource_payload.get("data") if isinstance(resource_payload, dict) else resource_payload
         if not isinstance(resource, dict):
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Link type not found")
+            raise classified_http_exception(status.HTTP_404_NOT_FOUND, "Link type not found", code=ErrorCode.RESOURCE_NOT_FOUND)
 
         spec = resource.get("spec") if isinstance(resource.get("spec"), dict) else {}
         if not isinstance(spec, dict):
@@ -501,14 +503,15 @@ async def update_link_type(
     except httpx.HTTPStatusError as exc:
         raise_httpx_as_http_exception(exc)
     except (SecurityViolationError, ValueError) as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, str(exc), code=ErrorCode.REQUEST_VALIDATION_FAILED) from exc
     except HTTPException:
         raise
     except Exception as exc:
         logger.error("Failed to update link type: %s", exc)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc), code=ErrorCode.INTERNAL_ERROR) from exc
 
 
+@trace_external_call("bff.link_types_write.reindex_link_type")
 async def reindex_link_type(
     *,
     db_name: str,
@@ -527,7 +530,7 @@ async def reindex_link_type(
 
         record = await dataset_registry.get_relationship_spec(link_type_id=link_type_id)
         if not record:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Relationship spec not found")
+            raise classified_http_exception(status.HTTP_404_NOT_FOUND, "Relationship spec not found", code=ErrorCode.RESOURCE_NOT_FOUND)
 
         job_id = await _enqueue_link_index_job(
             enqueue_job=enqueue_job,
@@ -539,13 +542,13 @@ async def reindex_link_type(
             dataset_version_id=dataset_version_id,
         )
         if not job_id:
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Unable to enqueue link index job")
+            raise classified_http_exception(status.HTTP_409_CONFLICT, "Unable to enqueue link index job", code=ErrorCode.CONFLICT)
         return ApiResponse.success(message="Link indexing enqueued", data={"job_id": job_id})
 
     except (SecurityViolationError, ValueError) as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, str(exc), code=ErrorCode.REQUEST_VALIDATION_FAILED) from exc
     except HTTPException:
         raise
     except Exception as exc:
         logger.error("Failed to reindex link type: %s", exc)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc), code=ErrorCode.INTERNAL_ERROR) from exc

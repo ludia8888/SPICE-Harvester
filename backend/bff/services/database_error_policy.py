@@ -5,10 +5,29 @@ from dataclasses import dataclass
 from typing import Any, Iterable
 
 from fastapi import HTTPException
+from shared.errors.error_types import ErrorCode, classified_http_exception
 
 from shared.security.input_sanitizer import SecurityViolationError
 
 _NO_FALLBACK_RETURN = object()
+
+
+def _code_for_status(status_code: int) -> ErrorCode:
+    if status_code == 400 or status_code == 422:
+        return ErrorCode.REQUEST_VALIDATION_FAILED
+    if status_code == 401:
+        return ErrorCode.AUTH_REQUIRED
+    if status_code == 403:
+        return ErrorCode.PERMISSION_DENIED
+    if status_code == 404:
+        return ErrorCode.RESOURCE_NOT_FOUND
+    if status_code == 409:
+        return ErrorCode.CONFLICT
+    if status_code == 429:
+        return ErrorCode.RATE_LIMITED
+    if status_code >= 500:
+        return ErrorCode.INTERNAL_ERROR
+    return ErrorCode.INTERNAL_ERROR
 
 
 @dataclass(frozen=True)
@@ -34,7 +53,7 @@ def apply_message_error_policies(
     if isinstance(exc, HTTPException):
         raise exc
     if isinstance(exc, (SecurityViolationError, ValueError)):
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise classified_http_exception(400, str(exc), code=ErrorCode.REQUEST_VALIDATION_FAILED) from exc
 
     logger.error(log_message, exc)
     normalized_message = str(exc).lower()
@@ -43,6 +62,14 @@ def apply_message_error_policies(
             continue
         if policy.fallback_return is not _NO_FALLBACK_RETURN:
             return policy.fallback_return
-        raise HTTPException(status_code=policy.status_code, detail=policy.detail) from exc
+        raise classified_http_exception(
+            policy.status_code,
+            policy.detail,
+            code=_code_for_status(policy.status_code),
+        ) from exc
 
-    raise HTTPException(status_code=default_status_code, detail=default_detail) from exc
+    raise classified_http_exception(
+        default_status_code,
+        default_detail,
+        code=_code_for_status(default_status_code),
+    ) from exc

@@ -18,6 +18,8 @@ from shared.security.input_sanitizer import (
     validate_class_id,
     validate_instance_id,
 )
+from shared.errors.error_types import ErrorCode, classified_http_exception
+from shared.observability.tracing import trace_endpoint
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +27,7 @@ router = APIRouter(prefix="/instance/{db_name}", tags=["Instance Management"])
 
 
 @router.get("/class/{class_id}/instances")
+@trace_endpoint("oms.instance.get_class_instances")
 async def get_class_instances(
     es: ElasticsearchServiceDep,
     db_name: str = Depends(ValidatedDatabaseName),
@@ -46,18 +49,20 @@ async def get_class_instances(
         validated_search = None
         if search:
             if len(search) > 100:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Search query too long (max 100 characters)"
+                raise classified_http_exception(
+                    status.HTTP_400_BAD_REQUEST,
+                    "Search query too long (max 100 characters)",
+                    code=ErrorCode.REQUEST_VALIDATION_FAILED,
                 )
             try:
                 from shared.security.input_sanitizer import input_sanitizer
                 validated_search = input_sanitizer.sanitize_string(search, max_length=100)
             except Exception as security_error:
                 logger.warning(f"Search query security violation in OMS: {security_error}")
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Invalid search query format"
+                raise classified_http_exception(
+                    status.HTTP_400_BAD_REQUEST,
+                    "Invalid search query format",
+                    code=ErrorCode.REQUEST_VALIDATION_FAILED,
                 )
 
         index_name = get_instances_index_name(db_name, branch=branch)
@@ -101,21 +106,24 @@ async def get_class_instances(
 
     except SecurityViolationError as e:
         logger.warning(f"Security violation in get_class_instances: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="입력 데이터에 보안 위반이 감지되었습니다"
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            "입력 데이터에 보안 위반이 감지되었습니다",
+            code=ErrorCode.INPUT_SANITIZATION_FAILED,
         )
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to get class instances: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"인스턴스 목록 조회 실패: {str(e)}"
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            f"인스턴스 목록 조회 실패: {str(e)}",
+            code=ErrorCode.INTERNAL_ERROR,
         )
 
 
 @router.get("/instance/{instance_id}")
+@trace_endpoint("oms.instance.get")
 async def get_instance(
     es: ElasticsearchServiceDep,
     db_name: str = Depends(ValidatedDatabaseName),
@@ -138,15 +146,17 @@ async def get_instance(
         instance = await es.get_document(index=index_name, doc_id=instance_id)
 
         if not instance:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"인스턴스 '{instance_id}'를 찾을 수 없습니다"
+            raise classified_http_exception(
+                status.HTTP_404_NOT_FOUND,
+                f"인스턴스 '{instance_id}'를 찾을 수 없습니다",
+                code=ErrorCode.RESOURCE_NOT_FOUND,
             )
 
         if class_id and instance.get("class_id") != class_id:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"인스턴스 '{instance_id}'가 클래스 '{class_id}'에 속하지 않습니다"
+            raise classified_http_exception(
+                status.HTTP_404_NOT_FOUND,
+                f"인스턴스 '{instance_id}'가 클래스 '{class_id}'에 속하지 않습니다",
+                code=ErrorCode.RESOURCE_NOT_FOUND,
             )
 
         return {
@@ -157,21 +167,24 @@ async def get_instance(
 
     except SecurityViolationError as e:
         logger.warning(f"Security violation in get_instance: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="입력 데이터에 보안 위반이 감지되었습니다"
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            "입력 데이터에 보안 위반이 감지되었습니다",
+            code=ErrorCode.INPUT_SANITIZATION_FAILED,
         )
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to get instance {instance_id}: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"인스턴스 조회 실패: {str(e)}"
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            f"인스턴스 조회 실패: {str(e)}",
+            code=ErrorCode.INTERNAL_ERROR,
         )
 
 
 @router.get("/class/{class_id}/count")
+@trace_endpoint("oms.instance.get_class_count")
 async def get_class_instance_count(
     es: ElasticsearchServiceDep,
     db_name: str = Depends(ValidatedDatabaseName),
@@ -199,26 +212,30 @@ async def get_class_instance_count(
 
     except SecurityViolationError as e:
         logger.warning(f"Security violation in get_class_instance_count: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="입력 데이터에 보안 위반이 감지되었습니다"
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            "입력 데이터에 보안 위반이 감지되었습니다",
+            code=ErrorCode.INPUT_SANITIZATION_FAILED,
         )
     except Exception as e:
         logger.error(f"Failed to count instances: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"인스턴스 개수 조회 실패: {str(e)}"
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            f"인스턴스 개수 조회 실패: {str(e)}",
+            code=ErrorCode.INTERNAL_ERROR,
         )
 
 
 @router.post("/sparql")
+@trace_endpoint("oms.instance.sparql")
 async def execute_sparql_query(
     db_name: str = Depends(ValidatedDatabaseName),
 ) -> Dict[str, Any]:
     """
     SPARQL 엔드포인트 — deprecated (TerminusDB 제거됨).
     """
-    raise HTTPException(
-        status_code=status.HTTP_410_GONE,
-        detail="SPARQL endpoint is deprecated. Use instance search endpoints instead."
+    raise classified_http_exception(
+        status.HTTP_410_GONE,
+        "SPARQL endpoint is deprecated. Use instance search endpoints instead.",
+        code=ErrorCode.RESOURCE_GONE,
     )

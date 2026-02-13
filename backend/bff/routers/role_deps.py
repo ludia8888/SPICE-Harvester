@@ -12,6 +12,8 @@ from typing import Any
 
 from fastapi import HTTPException, Request, status
 
+from shared.errors.error_types import ErrorCode, classified_http_exception
+
 from shared.security.database_access import enforce_database_role
 
 
@@ -19,7 +21,7 @@ async def enforce_required_database_role(request: Request, *, db_name: str, role
     try:
         await enforce_database_role(headers=request.headers, db_name=db_name, required_roles=roles)
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+        raise classified_http_exception(status.HTTP_403_FORBIDDEN, str(exc), code=ErrorCode.PERMISSION_DENIED) from exc
 
 
 def require_database_role(roles: Any) -> Callable[[Request, str], Any]:  # noqa: ANN401

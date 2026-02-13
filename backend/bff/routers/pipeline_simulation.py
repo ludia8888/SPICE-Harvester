@@ -9,6 +9,8 @@ from typing import Any, Dict
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
+from shared.errors.error_types import ErrorCode, classified_http_exception
+
 from bff.routers.pipeline_deps import get_dataset_registry
 from bff.routers.pipeline_ops import (
     _augment_definition_with_canonical_contract,
@@ -39,15 +41,15 @@ async def simulate_pipeline_definition(
         sanitized = sanitize_input(payload)
         db_name = validate_db_name(str(sanitized.get("db_name") or ""))
         if request is None:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="request context is required")
+            raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "request context is required", code=ErrorCode.REQUEST_VALIDATION_FAILED)
         try:
             enforce_db_scope(request.headers, db_name=db_name)
         except ValueError as exc:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+            raise classified_http_exception(status.HTTP_403_FORBIDDEN, str(exc), code=ErrorCode.PERMISSION_DENIED) from exc
 
         definition_json = sanitized.get("definition_json") if isinstance(sanitized.get("definition_json"), dict) else None
         if not isinstance(definition_json, dict) or not definition_json:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="definition_json is required")
+            raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "definition_json is required", code=ErrorCode.REQUEST_VALIDATION_FAILED)
 
         node_id = str(sanitized.get("node_id") or "").strip() or None
         branch = str(sanitized.get("branch") or "main").strip() or "main"
@@ -142,5 +144,5 @@ async def simulate_pipeline_definition(
         raise
     except Exception as e:
         logger.error(f"Failed to simulate pipeline definition: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(e), code=ErrorCode.INTERNAL_ERROR)
 

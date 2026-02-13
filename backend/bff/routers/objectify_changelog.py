@@ -7,10 +7,12 @@ tracking similar to Palantir Foundry's Changelog Datasets.
 """
 
 from __future__ import annotations
+from shared.observability.tracing import trace_endpoint
 
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Query, status
+from shared.errors.error_types import ErrorCode, classified_http_exception
 
 router = APIRouter(tags=["Objectify Changelog"])
 
@@ -25,6 +27,7 @@ def _get_changelog_store():
     summary="List objectify changelogs",
     response_model=Dict[str, Any],
 )
+@trace_endpoint("bff.objectify.list_changelogs")
 async def list_changelogs(
     db_name: str = Query(..., description="Database name"),
     branch: str = Query(default="main", description="Branch"),
@@ -36,9 +39,10 @@ async def list_changelogs(
     try:
         store = _get_changelog_store()
     except NotImplementedError:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Changelog store not configured",
+        raise classified_http_exception(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "Changelog store not configured",
+            code=ErrorCode.UPSTREAM_UNAVAILABLE,
         )
 
     changelogs = await store.list_changelogs(
@@ -61,6 +65,7 @@ async def list_changelogs(
     summary="Get objectify changelog detail",
     response_model=Dict[str, Any],
 )
+@trace_endpoint("bff.objectify.get_changelog")
 async def get_changelog(
     changelog_id: str,
 ) -> Dict[str, Any]:
@@ -68,15 +73,17 @@ async def get_changelog(
     try:
         store = _get_changelog_store()
     except NotImplementedError:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Changelog store not configured",
+        raise classified_http_exception(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "Changelog store not configured",
+            code=ErrorCode.UPSTREAM_UNAVAILABLE,
         )
 
     entry = await store.get_changelog(changelog_id=changelog_id)
     if not entry:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Changelog {changelog_id} not found",
+        raise classified_http_exception(
+            status.HTTP_404_NOT_FOUND,
+            f"Changelog {changelog_id} not found",
+            code=ErrorCode.RESOURCE_NOT_FOUND,
         )
     return {"data": entry}

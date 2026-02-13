@@ -14,6 +14,7 @@ from bff.routers.pipeline_datasets_ops import (
 )
 
 from bff.routers.pipeline_deps import get_dataset_registry
+from shared.errors.error_types import ErrorCode, classified_http_exception
 from bff.schemas.pipeline_datasets import FunnelAnalysisApiResponse
 from shared.models.requests import ApiResponse
 from shared.observability.tracing import trace_endpoint
@@ -35,11 +36,11 @@ async def get_dataset_ingest_request(
     try:
         ingest_request = await dataset_registry.get_ingest_request(ingest_request_id=ingest_request_id)
         if not ingest_request:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ingest request not found")
+            raise classified_http_exception(status.HTTP_404_NOT_FOUND, "Ingest request not found", code=ErrorCode.RESOURCE_NOT_FOUND)
         try:
             enforce_db_scope(request.headers, db_name=ingest_request.db_name)
         except ValueError as exc:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc))
+            raise classified_http_exception(status.HTTP_403_FORBIDDEN, str(exc), code=ErrorCode.PERMISSION_DENIED)
         dataset = await dataset_registry.get_dataset(dataset_id=ingest_request.dataset_id)
         funnel_analysis = await _compute_funnel_analysis_from_sample(ingest_request.sample_json)
         return ApiResponse.success(
@@ -54,7 +55,7 @@ async def get_dataset_ingest_request(
         raise
     except Exception as e:
         logger.error(f"Failed to get ingest request: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(e), code=ErrorCode.INTERNAL_ERROR)
 
 
 @router.post("/datasets/ingest-requests/{ingest_request_id}/schema/approve", response_model=ApiResponse)
@@ -68,11 +69,11 @@ async def approve_dataset_schema(
     try:
         ingest_request = await dataset_registry.get_ingest_request(ingest_request_id=ingest_request_id)
         if not ingest_request:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ingest request not found")
+            raise classified_http_exception(status.HTTP_404_NOT_FOUND, "Ingest request not found", code=ErrorCode.RESOURCE_NOT_FOUND)
         try:
             enforce_db_scope(request.headers, db_name=ingest_request.db_name)
         except ValueError as exc:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc))
+            raise classified_http_exception(status.HTTP_403_FORBIDDEN, str(exc), code=ErrorCode.PERMISSION_DENIED)
         sanitized = sanitize_input(payload or {})
         schema_json = sanitized.get("schema_json")
         actor_user_id = (request.headers.get("X-User-ID") or "").strip() if request else ""
@@ -87,9 +88,9 @@ async def approve_dataset_schema(
             data={"dataset": dataset.__dict__, "ingest_request": updated_request.__dict__},
         ).to_dict()
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, str(exc), code=ErrorCode.REQUEST_VALIDATION_FAILED)
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to approve dataset schema: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(e), code=ErrorCode.INTERNAL_ERROR)

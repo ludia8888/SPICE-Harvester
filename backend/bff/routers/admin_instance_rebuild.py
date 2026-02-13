@@ -5,6 +5,7 @@ Composed by ``bff.routers.admin``.
 """
 
 from __future__ import annotations
+from shared.observability.tracing import trace_endpoint
 
 import logging
 from typing import Any, Dict
@@ -30,6 +31,7 @@ router = APIRouter(tags=["Admin Operations"])
     "/databases/{db_name}/rebuild-index",
     status_code=status.HTTP_202_ACCEPTED,
 )
+@trace_endpoint("bff.admin.rebuild_instance_index_endpoint")
 async def rebuild_instance_index_endpoint(
     db_name: str,
     background_tasks: BackgroundTasks,
@@ -101,6 +103,7 @@ async def rebuild_instance_index_endpoint(
 
 
 @router.get("/databases/{db_name}/rebuild-index/{task_id}/status")
+@trace_endpoint("bff.admin.get_rebuild_status")
 async def get_rebuild_status(
     db_name: str,
     task_id: str,

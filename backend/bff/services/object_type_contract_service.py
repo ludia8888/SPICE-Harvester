@@ -30,6 +30,9 @@ from shared.services.registries.objectify_registry import ObjectifyRegistry
 from shared.utils.key_spec import normalize_key_spec
 from shared.utils.schema_columns import extract_schema_columns
 from shared.utils.schema_hash import compute_schema_hash
+from shared.errors.error_types import ErrorCode, classified_http_exception
+from shared.errors.legacy_codes import LegacyErrorCode
+from shared.observability.tracing import trace_external_call
 
 logger = logging.getLogger(__name__)
 
@@ -76,33 +79,35 @@ async def _resolve_backing(
             version_id=backing_datasource_version_id
         )
         if not backing_version:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Backing datasource version not found")
+            raise classified_http_exception(status.HTTP_404_NOT_FOUND, "Backing datasource version not found", code=ErrorCode.RESOURCE_NOT_FOUND)
         backing = await dataset_registry.get_backing_datasource(backing_id=backing_version.backing_id)
         if not backing:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Backing datasource not found")
+            raise classified_http_exception(status.HTTP_404_NOT_FOUND, "Backing datasource not found", code=ErrorCode.RESOURCE_NOT_FOUND)
         dataset = await dataset_registry.get_dataset(dataset_id=backing.dataset_id)
         if not dataset:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found")
+            raise classified_http_exception(status.HTTP_404_NOT_FOUND, "Dataset not found", code=ErrorCode.RESOURCE_NOT_FOUND)
     elif backing_datasource_id:
         backing = await dataset_registry.get_backing_datasource(backing_id=backing_datasource_id)
         if not backing:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Backing datasource not found")
+            raise classified_http_exception(status.HTTP_404_NOT_FOUND, "Backing datasource not found", code=ErrorCode.RESOURCE_NOT_FOUND)
         dataset = await dataset_registry.get_dataset(dataset_id=backing.dataset_id)
     elif backing_dataset_id:
         dataset = await dataset_registry.get_dataset(dataset_id=backing_dataset_id)
     else:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="backing_dataset_id or backing_datasource_id or backing_datasource_version_id is required",
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            "backing_dataset_id or backing_datasource_id or backing_datasource_version_id is required",
+            code=ErrorCode.REQUEST_VALIDATION_FAILED,
         )
 
     if not dataset:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found")
+        raise classified_http_exception(status.HTTP_404_NOT_FOUND, "Dataset not found", code=ErrorCode.RESOURCE_NOT_FOUND)
     enforce_db_scope(request.headers, db_name=dataset.db_name)
     if dataset.db_name != db_name:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Backing dataset does not belong to requested database",
+        raise classified_http_exception(
+            status.HTTP_409_CONFLICT,
+            "Backing dataset does not belong to requested database",
+            code=ErrorCode.CONFLICT,
         )
 
     if not backing:
@@ -115,25 +120,27 @@ async def _resolve_backing(
     if dataset_version_id:
         version = await dataset_registry.get_version(version_id=dataset_version_id)
         if not version or version.dataset_id != dataset.dataset_id:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset version not found")
+            raise classified_http_exception(status.HTTP_404_NOT_FOUND, "Dataset version not found", code=ErrorCode.RESOURCE_NOT_FOUND)
     if not version:
         version = await dataset_registry.get_latest_version(dataset_id=dataset.dataset_id)
     if not version:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Dataset version is required")
+        raise classified_http_exception(status.HTTP_409_CONFLICT, "Dataset version is required", code=ErrorCode.CONFLICT)
 
     if backing_version and backing_version.dataset_version_id != version.version_id:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Backing datasource version does not match dataset version",
+        raise classified_http_exception(
+            status.HTTP_409_CONFLICT,
+            "Backing datasource version does not match dataset version",
+            code=ErrorCode.CONFLICT,
         )
 
     resolved_schema_hash = schema_hash or (backing_version.schema_hash if backing_version else None)
     if not resolved_schema_hash:
         resolved_schema_hash = _schema_hash_from_version(version.sample_json, dataset.schema_json)
     if not resolved_schema_hash:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="schema_hash is required for backing datasource",
+        raise classified_http_exception(
+            status.HTTP_409_CONFLICT,
+            "schema_hash is required for backing datasource",
+            code=ErrorCode.CONFLICT,
         )
 
     if not backing_version:
@@ -165,18 +172,22 @@ def _extract_ontology_property_names(payload: Any) -> set[str]:
 def _normalize_and_validate_pk_spec(raw_pk_spec: Any, *, ontology_property_names: set[str]) -> Dict[str, Any]:
     pk_spec = normalize_key_spec(raw_pk_spec or {}, columns=sorted(ontology_property_names))
     if not pk_spec.get("primary_key"):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="pk_spec.primary_key is required")
+        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "pk_spec.primary_key is required", code=ErrorCode.REQUEST_VALIDATION_FAILED)
     if not pk_spec.get("title_key"):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="pk_spec.title_key is required")
+        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "pk_spec.title_key is required", code=ErrorCode.REQUEST_VALIDATION_FAILED)
     missing_keys = sorted(set(pk_spec.get("primary_key", []) + pk_spec.get("title_key", [])) - ontology_property_names)
     if missing_keys:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"code": "OBJECT_TYPE_KEY_FIELDS_MISSING", "fields": missing_keys},
+        raise classified_http_exception(
+            status.HTTP_409_CONFLICT,
+            "Object type key fields are missing from ontology properties",
+            code=ErrorCode.OBJECTIFY_CONTRACT_ERROR,
+            external_code=LegacyErrorCode.OBJECT_TYPE_KEY_FIELDS_MISSING,
+            extra={"fields": missing_keys},
         )
     return pk_spec
 
 
+@trace_external_call("bff.object_type_contract.create_object_type_contract")
 async def create_object_type_contract(
     *,
     db_name: str,
@@ -192,11 +203,11 @@ async def create_object_type_contract(
         payload = sanitize_input(body.model_dump(exclude_unset=True))
         class_id = str(payload.get("class_id") or "").strip()
         if not class_id:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="class_id is required")
+            raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "class_id is required", code=ErrorCode.REQUEST_VALIDATION_FAILED)
 
         ontology_payload = await oms_client.get_ontology(db_name, class_id, branch=branch)
         if not ontology_payload:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ontology class not found")
+            raise classified_http_exception(status.HTTP_404_NOT_FOUND, "Ontology class not found", code=ErrorCode.ONTOLOGY_NOT_FOUND)
 
         dataset, backing, backing_version, version, resolved_schema_hash = await _resolve_backing(
             db_name=db_name,
@@ -218,16 +229,18 @@ async def create_object_type_contract(
         if mapping_spec_id:
             mapping_spec = await objectify_registry.get_mapping_spec(mapping_spec_id=mapping_spec_id)
             if not mapping_spec:
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mapping spec not found")
+                raise classified_http_exception(status.HTTP_404_NOT_FOUND, "Mapping spec not found", code=ErrorCode.RESOURCE_NOT_FOUND)
             if mapping_spec.target_class_id != class_id:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail="Mapping spec target_class_id mismatch",
+                raise classified_http_exception(
+                    status.HTTP_409_CONFLICT,
+                    "Mapping spec target_class_id mismatch",
+                    code=ErrorCode.OBJECTIFY_CONTRACT_ERROR,
                 )
             if mapping_spec.dataset_id != dataset.dataset_id:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail="Mapping spec dataset mismatch",
+                raise classified_http_exception(
+                    status.HTTP_409_CONFLICT,
+                    "Mapping spec dataset mismatch",
+                    code=ErrorCode.OBJECTIFY_CONTRACT_ERROR,
                 )
             mapping_spec_version = mapping_spec_version or mapping_spec.version
             mapping_spec_payload = {
@@ -295,9 +308,12 @@ async def create_object_type_contract(
             )
             mappings = [{"source_field": m.source_field, "target_field": m.target_field} for m in suggestion.mappings]
             if not mappings:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail={"code": "OBJECT_TYPE_AUTO_MAPPING_EMPTY", "class_id": class_id},
+                raise classified_http_exception(
+                    status.HTTP_409_CONFLICT,
+                    "Auto-generated mapping is empty",
+                    code=ErrorCode.OBJECTIFY_CONTRACT_ERROR,
+                    external_code=LegacyErrorCode.OBJECT_TYPE_AUTO_MAPPING_EMPTY,
+                    extra={"class_id": class_id},
                 )
             auto_body = CreateMappingSpecRequest(
                 dataset_id=dataset.dataset_id,
@@ -354,14 +370,15 @@ async def create_object_type_contract(
             detail: Any = exc.response.json()
         except Exception:
             detail = exc.response.text
-        raise HTTPException(status_code=exc.response.status_code, detail=detail) from exc
+        raise classified_http_exception(exc.response.status_code, str(detail), code=ErrorCode.UPSTREAM_ERROR) from exc
     except HTTPException:
         raise
     except Exception as exc:
         logger.error("Failed to create object type contract: %s", exc)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc), code=ErrorCode.INTERNAL_ERROR)
 
 
+@trace_external_call("bff.object_type_contract.get_object_type_contract")
 async def get_object_type_contract(
     *,
     db_name: str,
@@ -375,7 +392,7 @@ async def get_object_type_contract(
     try:
         class_id = str(class_id or "").strip()
         if not class_id:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="class_id is required")
+            raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "class_id is required", code=ErrorCode.REQUEST_VALIDATION_FAILED)
         response = await oms_client.get_ontology_resource(
             db_name,
             resource_type="object_type",
@@ -431,12 +448,12 @@ async def get_object_type_contract(
             detail: Any = exc.response.json()
         except Exception:
             detail = exc.response.text
-        raise HTTPException(status_code=exc.response.status_code, detail=detail) from exc
+        raise classified_http_exception(exc.response.status_code, str(detail), code=ErrorCode.UPSTREAM_ERROR) from exc
     except HTTPException:
         raise
     except Exception as exc:
         logger.error("Failed to get object type contract: %s", exc)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc), code=ErrorCode.INTERNAL_ERROR)
 
 
 def _normalize_field_list(raw_value: Any) -> List[str]:
@@ -466,6 +483,7 @@ def _normalize_field_moves(raw_value: Any) -> Dict[str, str]:
     return moves
 
 
+@trace_external_call("bff.object_type_contract.update_object_type_contract")
 async def update_object_type_contract(
     *,
     db_name: str,
@@ -481,7 +499,7 @@ async def update_object_type_contract(
     try:
         class_id = str(class_id or "").strip()
         if not class_id:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="class_id is required")
+            raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "class_id is required", code=ErrorCode.REQUEST_VALIDATION_FAILED)
 
         existing_response = await oms_client.get_ontology_resource(
             db_name,
@@ -543,11 +561,12 @@ async def update_object_type_contract(
             if mapping_spec_id:
                 mapping_spec = await objectify_registry.get_mapping_spec(mapping_spec_id=mapping_spec_id)
                 if not mapping_spec:
-                    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mapping spec not found")
+                    raise classified_http_exception(status.HTTP_404_NOT_FOUND, "Mapping spec not found", code=ErrorCode.RESOURCE_NOT_FOUND)
                 if mapping_spec.target_class_id != class_id:
-                    raise HTTPException(
-                        status_code=status.HTTP_409_CONFLICT,
-                        detail="Mapping spec target_class_id mismatch",
+                    raise classified_http_exception(
+                        status.HTTP_409_CONFLICT,
+                        "Mapping spec target_class_id mismatch",
+                        code=ErrorCode.OBJECTIFY_CONTRACT_ERROR,
                     )
                 mapping_spec_payload = {
                     "mapping_spec_id": mapping_spec.mapping_spec_id,
@@ -632,38 +651,50 @@ async def update_object_type_contract(
                             version_id=backing_version.dataset_version_id
                         )
             if not mapping_spec_id_value:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail={"code": "OBJECT_TYPE_MAPPING_SPEC_REQUIRED", "class_id": class_id},
+                raise classified_http_exception(
+                    status.HTTP_409_CONFLICT,
+                    "Mapping spec is required for object type migration",
+                    code=ErrorCode.OBJECTIFY_CONTRACT_ERROR,
+                    external_code=LegacyErrorCode.OBJECT_TYPE_MAPPING_SPEC_REQUIRED,
+                    extra={"class_id": class_id},
                 )
             mapping_spec_record = await objectify_registry.get_mapping_spec(
                 mapping_spec_id=mapping_spec_id_value
             )
             if not mapping_spec_record:
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mapping spec not found")
+                raise classified_http_exception(status.HTTP_404_NOT_FOUND, "Mapping spec not found", code=ErrorCode.RESOURCE_NOT_FOUND)
             if mapping_spec_record.target_class_id != class_id:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail="Mapping spec target_class_id mismatch",
+                raise classified_http_exception(
+                    status.HTTP_409_CONFLICT,
+                    "Mapping spec target_class_id mismatch",
+                    code=ErrorCode.OBJECTIFY_CONTRACT_ERROR,
                 )
             if not dataset or not version:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail={"code": "OBJECT_TYPE_BACKING_VERSION_REQUIRED", "class_id": class_id},
+                raise classified_http_exception(
+                    status.HTTP_409_CONFLICT,
+                    "Object type backing version is required",
+                    code=ErrorCode.OBJECTIFY_CONTRACT_ERROR,
+                    external_code=LegacyErrorCode.OBJECT_TYPE_BACKING_VERSION_REQUIRED,
+                    extra={"class_id": class_id},
                 )
             if mapping_spec_record.dataset_id != dataset.dataset_id:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail={
-                        "code": "MAPPING_SPEC_DATASET_MISMATCH",
+                raise classified_http_exception(
+                    status.HTTP_409_CONFLICT,
+                    "Mapping spec dataset does not match object type backing dataset",
+                    code=ErrorCode.OBJECTIFY_CONTRACT_ERROR,
+                    external_code=LegacyErrorCode.MAPPING_SPEC_DATASET_MISMATCH,
+                    extra={
                         "mapping_spec_id": mapping_spec_record.mapping_spec_id,
                         "dataset_id": dataset.dataset_id,
                     },
                 )
             if not getattr(version, "artifact_key", None):
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail={"code": "OBJECT_TYPE_BACKING_ARTIFACT_REQUIRED", "class_id": class_id},
+                raise classified_http_exception(
+                    status.HTTP_409_CONFLICT,
+                    "Object type backing artifact is required",
+                    code=ErrorCode.OBJECTIFY_CONTRACT_ERROR,
+                    external_code=LegacyErrorCode.OBJECT_TYPE_BACKING_ARTIFACT_REQUIRED,
+                    extra={"class_id": class_id},
                 )
 
         edit_field_moves = _normalize_field_moves(
@@ -718,13 +749,12 @@ async def update_object_type_contract(
                         "message": "PK 변경 시 편집 이력 초기화 필요",
                     },
                 )
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail={
-                        "code": "OBJECT_TYPE_EDIT_RESET_REQUIRED",
-                        "edit_count": edit_count,
-                        "message": "PK 변경 전 편집 이력 초기화가 필요합니다.",
-                    },
+                raise classified_http_exception(
+                    status.HTTP_409_CONFLICT,
+                    "PK 변경 전 편집 이력 초기화가 필요합니다.",
+                    code=ErrorCode.CONFLICT,
+                    external_code=LegacyErrorCode.OBJECT_TYPE_EDIT_RESET_REQUIRED,
+                    extra={"edit_count": edit_count},
                 )
         if (backing_changed or pk_changed) and not migration_approved:
             await dataset_registry.record_gate_result(
@@ -738,13 +768,12 @@ async def update_object_type_contract(
                     "message": "Migration approval required to change backing source or keys",
                 },
             )
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={
-                    "code": "OBJECT_TYPE_MIGRATION_REQUIRED",
-                    "backing_changed": backing_changed,
-                    "pk_changed": pk_changed,
-                },
+            raise classified_http_exception(
+                status.HTTP_409_CONFLICT,
+                "Migration approval required to change backing source or keys",
+                code=ErrorCode.CONFLICT,
+                external_code=LegacyErrorCode.OBJECT_TYPE_MIGRATION_REQUIRED,
+                extra={"backing_changed": backing_changed, "pk_changed": pk_changed},
             )
 
         edit_actions: Dict[str, Any] = {}
@@ -915,9 +944,9 @@ async def update_object_type_contract(
             detail: Any = exc.response.json()
         except Exception:
             detail = exc.response.text
-        raise HTTPException(status_code=exc.response.status_code, detail=detail) from exc
+        raise classified_http_exception(exc.response.status_code, str(detail), code=ErrorCode.UPSTREAM_ERROR) from exc
     except HTTPException:
         raise
     except Exception as exc:
         logger.error("Failed to update object type contract: %s", exc)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc), code=ErrorCode.INTERNAL_ERROR)

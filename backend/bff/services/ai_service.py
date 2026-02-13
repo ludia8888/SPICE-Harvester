@@ -17,6 +17,8 @@ from uuid import UUID, uuid4
 
 from fastapi import HTTPException, Request, status
 
+from shared.errors.error_types import ErrorCategory, ErrorCode, classified_http_exception
+
 from bff.dependencies import LabelMapper, TerminusService
 from bff.services.oms_client import OMSClient
 from shared.dependencies.providers import AuditLogStoreDep, LLMGatewayDep, LineageStoreDep, RedisServiceDep
@@ -75,7 +77,11 @@ def _ensure_session_owner(*, record: Any, user_id: str) -> None:
         return
     created_by = str(getattr(record, "created_by", "") or "").strip()
     if created_by and created_by != str(user_id or "").strip():
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent session not found")
+        raise classified_http_exception(
+            status.HTTP_404_NOT_FOUND,
+            "Agent session not found",
+            code=ErrorCode.RESOURCE_NOT_FOUND,
+        )
 
 
 async def _load_session_context(
@@ -268,7 +274,11 @@ async def ai_intent(
     payload = sanitize_input(body.model_dump(exclude_none=True))
     question = str(payload.get("question") or "").strip()
     if not question:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="question is required")
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            "question is required",
+            code=ErrorCode.REQUEST_VALIDATION_FAILED,
+        )
 
     lang_hint = str(body.language or get_accept_language(request) or "en").strip()
     lang = normalize_language(lang_hint)
@@ -352,7 +362,17 @@ async def ai_intent(
             status_code = status.HTTP_502_BAD_GATEWAY
         else:
             status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
-        raise HTTPException(status_code=status_code, detail=f"LLM intent routing failed: {exc}") from exc
+        if isinstance(exc, LLMUnavailableError):
+            error_code = ErrorCode.UPSTREAM_UNAVAILABLE
+        elif isinstance(exc, (LLMRequestError, LLMOutputValidationError)):
+            error_code = ErrorCode.UPSTREAM_ERROR
+        else:
+            error_code = ErrorCode.INTERNAL_ERROR
+        raise classified_http_exception(
+            status_code,
+            f"LLM intent routing failed: {exc}",
+            code=error_code,
+        ) from exc
 
     draft = AIIntentDraft.model_validate(response.model_dump(mode="json"))
     _log_ai_event(
@@ -422,9 +442,10 @@ async def ai_intent(
             )
         except (LLMUnavailableError, LLMRequestError, LLMOutputValidationError, Exception) as exc:
             logger.exception("ai_intent.llm_repair_error intent_id=%s", intent_id)
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=f"LLM intent repair failed: {exc}",
+            raise classified_http_exception(
+                status.HTTP_502_BAD_GATEWAY,
+                f"LLM intent repair failed: {exc}",
+                code=ErrorCode.UPSTREAM_ERROR,
             ) from exc
         draft = AIIntentDraft.model_validate(response.model_dump(mode="json"))
         intent = draft.intent or AIIntentType.unknown
@@ -437,14 +458,16 @@ async def ai_intent(
         reply = (draft.reply or "").strip() or None
         missing_fields = [str(item).strip() for item in (draft.missing_fields or []) if str(item).strip()]
         if requires_clarification and not clarifying_question:
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail="LLM intent response missing clarifying_question",
+            raise classified_http_exception(
+                status.HTTP_502_BAD_GATEWAY,
+                "LLM intent response missing clarifying_question",
+                code=ErrorCode.UPSTREAM_ERROR,
             )
         if route == AIIntentRoute.chat and not reply and not requires_clarification:
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail="LLM intent response missing reply",
+            raise classified_http_exception(
+                status.HTTP_502_BAD_GATEWAY,
+                "LLM intent response missing reply",
+                code=ErrorCode.UPSTREAM_ERROR,
             )
 
     result = AIIntentResponse(
@@ -1129,13 +1152,25 @@ async def translate_query_plan(
         )
     except LLMUnavailableError as e:
         logger.exception("query_plan.llm_unavailable task_id=%s", task_id)
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(e))
+        raise classified_http_exception(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            str(e),
+            code=ErrorCode.UPSTREAM_UNAVAILABLE,
+        )
     except (LLMOutputValidationError, LLMRequestError) as e:
         logger.exception("query_plan.llm_error task_id=%s", task_id)
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e))
+        raise classified_http_exception(
+            status.HTTP_502_BAD_GATEWAY,
+            str(e),
+            code=ErrorCode.UPSTREAM_ERROR,
+        )
     except Exception as e:
         logger.exception("query_plan.unexpected_error task_id=%s", task_id)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            str(e),
+            code=ErrorCode.INTERNAL_ERROR,
+        )
 
     plan = _validate_and_cap_plan(plan_raw, limit_cap=limit_cap)
     _log_ai_event(
@@ -1273,13 +1308,25 @@ async def ai_query(
         )
     except LLMUnavailableError as e:
         logger.exception("query.plan_unavailable request_id=%s", request_id)
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(e))
+        raise classified_http_exception(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            str(e),
+            code=ErrorCode.UPSTREAM_UNAVAILABLE,
+        )
     except (LLMOutputValidationError, LLMRequestError) as e:
         logger.exception("query.plan_error request_id=%s", request_id)
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e))
+        raise classified_http_exception(
+            status.HTTP_502_BAD_GATEWAY,
+            str(e),
+            code=ErrorCode.UPSTREAM_ERROR,
+        )
     except Exception as e:
         logger.exception("query.plan_unexpected request_id=%s", request_id)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            str(e),
+            code=ErrorCode.INTERNAL_ERROR,
+        )
 
     plan = _validate_and_cap_plan(plan_raw, limit_cap=limit_cap)
     if plan.tool == AIQueryTool.unsupported and dataset_inventory:
@@ -1347,9 +1394,10 @@ async def ai_query(
     )
 
     if body.mode.value != "auto" and plan.tool.value != body.mode.value:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Requested mode='{body.mode.value}' but planner selected tool='{plan.tool.value}'",
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            f"Requested mode='{body.mode.value}' but planner selected tool='{plan.tool.value}'",
+            code=ErrorCode.REQUEST_VALIDATION_FAILED,
         )
 
     warnings: List[str] = []
@@ -1411,9 +1459,10 @@ async def ai_query(
         except Exception as e:
             warnings.append(f"label_query execution failed: {e}")
             logger.exception("query.label_query_error request_id=%s", request_id)
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Query execution failed: {e}",
+            raise classified_http_exception(
+                status.HTTP_500_INTERNAL_SERVER_ERROR,
+                f"Query execution failed: {e}",
+                code=ErrorCode.INTERNAL_ERROR,
             )
 
     elif plan.tool == AIQueryTool.graph_query and plan.graph_query:
@@ -1439,9 +1488,10 @@ async def ai_query(
         except Exception as e:
             warnings.append(f"graph_query execution failed: {e}")
             logger.exception("query.graph_query_error request_id=%s", request_id)
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Graph query execution failed: {e}",
+            raise classified_http_exception(
+                status.HTTP_500_INTERNAL_SERVER_ERROR,
+                f"Graph query execution failed: {e}",
+                code=ErrorCode.INTERNAL_ERROR,
             )
     elif plan.tool == AIQueryTool.dataset_list:
         dataset_query = plan.dataset_query or DatasetListQuery(limit=limit_cap)
@@ -1452,9 +1502,10 @@ async def ai_query(
             datasets = await dataset_registry.list_datasets(db_name=validated_db, branch=branch)
         except Exception as e:
             logger.exception("query.dataset_list_error request_id=%s", request_id)
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Dataset list failed: {e}",
+            raise classified_http_exception(
+                status.HTTP_500_INTERNAL_SERVER_ERROR,
+                f"Dataset list failed: {e}",
+                code=ErrorCode.INTERNAL_ERROR,
             ) from e
 
         filtered: List[Dict[str, Any]] = []
@@ -1482,9 +1533,10 @@ async def ai_query(
         }
         grounding = _ground_dataset_list_result(limited, total_count=len(filtered), max_items=query_limit)
     else:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid plan shape (missing query payload)",
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            "Invalid plan shape (missing query payload)",
+            code=ErrorCode.REQUEST_VALIDATION_FAILED,
         )
 
     # Answer summarization (LLM) — grounded on masked + truncated payload
@@ -1535,9 +1587,10 @@ async def ai_query(
                 "error_type": type(exc).__name__,
             },
         )
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"LLM answer generation unavailable: {exc}",
+        raise classified_http_exception(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            f"LLM answer generation unavailable: {exc}",
+            code=ErrorCode.UPSTREAM_UNAVAILABLE,
         ) from exc
     except (LLMRequestError, LLMOutputValidationError) as exc:
         logger.exception("query.answer_error request_id=%s", request_id)
@@ -1549,9 +1602,10 @@ async def ai_query(
                 "error_type": type(exc).__name__,
             },
         )
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"LLM answer generation failed: {exc}",
+        raise classified_http_exception(
+            status.HTTP_502_BAD_GATEWAY,
+            f"LLM answer generation failed: {exc}",
+            code=ErrorCode.UPSTREAM_ERROR,
         ) from exc
     except Exception as exc:
         logger.exception("query.answer_error request_id=%s", request_id)
@@ -1563,9 +1617,10 @@ async def ai_query(
                 "error_type": type(exc).__name__,
             },
         )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"AI answer generation failed: {exc}",
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            f"AI answer generation failed: {exc}",
+            code=ErrorCode.INTERNAL_ERROR,
         ) from exc
 
     _log_ai_event(

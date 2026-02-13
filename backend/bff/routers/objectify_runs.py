@@ -6,6 +6,7 @@ Business logic lives in `bff.services.objectify_run_service` (Facade).
 """
 
 from __future__ import annotations
+from shared.observability.tracing import trace_endpoint
 
 from typing import Any, Dict
 
@@ -30,6 +31,7 @@ router = APIRouter(tags=["Objectify"])
 
 
 @router.post("/datasets/{dataset_id}/run", response_model=Dict[str, Any])
+@trace_endpoint("bff.objectify.run_objectify")
 async def run_objectify(
     dataset_id: str,
     body: TriggerObjectifyRequest,

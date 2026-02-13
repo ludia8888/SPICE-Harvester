@@ -11,6 +11,7 @@ Security model:
 """
 
 from __future__ import annotations
+from shared.observability.tracing import trace_endpoint
 
 import contextlib
 from datetime import datetime, timezone
@@ -18,6 +19,8 @@ from typing import Optional
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+
+from shared.errors.error_types import ErrorCode, classified_http_exception
 from pydantic import BaseModel, Field
 
 from bff.routers.registry_deps import get_agent_session_registry
@@ -48,6 +51,7 @@ _CI_STATUSES = {"queued", "in_progress", "success", "failure", "cancelled", "ski
 
 
 @router.post("/ci-results", response_model=ApiResponse, status_code=status.HTTP_201_CREATED)
+@trace_endpoint("bff.ci_webhooks.ingest_ci_result")
 async def ingest_ci_result(
     body: AgentSessionCIResultIngestRequest,
     request: Request,
@@ -59,11 +63,11 @@ async def ingest_ci_result(
     try:
         session_id = str(UUID(str(payload.get("session_id") or "")))
     except Exception as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="session_id must be a UUID") from exc
+        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "session_id must be a UUID", code=ErrorCode.REQUEST_VALIDATION_FAILED) from exc
 
     record = await sessions.get_session(session_id=session_id, tenant_id=tenant_id)
     if not record:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent session not found")
+        raise classified_http_exception(status.HTTP_404_NOT_FOUND, "Agent session not found", code=ErrorCode.RESOURCE_NOT_FOUND)
 
     status_value = str(payload.get("status") or "").strip().lower() or "unknown"
     if status_value not in _CI_STATUSES:

@@ -1,4 +1,5 @@
 from __future__ import annotations
+from shared.observability.tracing import trace_endpoint
 
 from fastapi import APIRouter, Depends, Request
 
@@ -11,6 +12,7 @@ router = APIRouter(tags=["Pipeline Plans"])
 
 
 @router.get("/{plan_id}", response_model=ApiResponse)
+@trace_endpoint("bff.pipeline_plans.get_plan")
 async def get_plan(
     plan_id: str,
     request: Request,

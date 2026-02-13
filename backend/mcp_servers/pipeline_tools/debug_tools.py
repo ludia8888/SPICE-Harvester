@@ -3,12 +3,14 @@ from __future__ import annotations
 from typing import Any, Awaitable, Callable, Dict, List
 
 from shared.errors.error_types import ErrorCategory, ErrorCode
+from shared.observability.tracing import trace_external_call
 
 from mcp_servers.pipeline_mcp_errors import tool_error
 
 ToolHandler = Callable[[Any, Dict[str, Any]], Awaitable[Any]]
 
 
+@trace_external_call("mcp.debug_inspect_node")
 async def _debug_inspect_node(_server: Any, arguments: Dict[str, Any]) -> Any:
     plan = arguments.get("plan") or {}
     node_id = str(arguments.get("node_id") or "").strip()
@@ -53,6 +55,7 @@ async def _debug_inspect_node(_server: Any, arguments: Dict[str, Any]) -> Any:
     return result
 
 
+@trace_external_call("mcp.debug_dry_run")
 async def _debug_dry_run(_server: Any, arguments: Dict[str, Any]) -> Any:
     plan = arguments.get("plan") or {}
     check_joins = arguments.get("check_joins", True)

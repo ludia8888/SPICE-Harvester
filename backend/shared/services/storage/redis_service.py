@@ -14,6 +14,7 @@ import redis.asyncio as redis
 from redis.asyncio.connection import ConnectionPool
 from redis.exceptions import RedisError
 
+from shared.observability.tracing import trace_storage_operation
 from shared.services.storage.connectivity import AsyncClientPingMixin
 
 logger = logging.getLogger(__name__)
@@ -67,6 +68,7 @@ class RedisService(AsyncClientPingMixin):
         self._client: Optional[redis.Redis] = None
         self._pubsub: Optional[redis.client.PubSub] = None
         
+    @trace_storage_operation("redis.connect", system="redis")
     async def connect(self) -> None:
         """Initialize Redis connection."""
         try:
@@ -77,10 +79,12 @@ class RedisService(AsyncClientPingMixin):
             logger.error(f"Failed to connect to Redis: {e}")
             raise
             
+    @trace_storage_operation("redis.initialize", system="redis")
     async def initialize(self) -> None:
         """ServiceContainer-compatible initialization method."""
         await self.connect()
             
+    @trace_storage_operation("redis.disconnect", system="redis")
     async def disconnect(self) -> None:
         """Close Redis connection and pool."""
         try:
@@ -108,6 +112,7 @@ class RedisService(AsyncClientPingMixin):
         
     # Command Status Operations
     
+    @trace_storage_operation("redis.set_command_status", system="redis")
     async def set_command_status(
         self,
         command_id: str,
@@ -141,6 +146,7 @@ class RedisService(AsyncClientPingMixin):
         # Publish status update for real-time notifications
         await self.publish_command_update(command_id, value)
         
+    @trace_storage_operation("redis.get_command_status", system="redis")
     async def get_command_status(self, command_id: str) -> Optional[Dict[str, Any]]:
         """
         Get command status and data.
@@ -159,6 +165,7 @@ class RedisService(AsyncClientPingMixin):
             return json.loads(data)
         return None
         
+    @trace_storage_operation("redis.update_command_progress", system="redis")
     async def update_command_progress(
         self,
         command_id: str,
@@ -185,6 +192,7 @@ class RedisService(AsyncClientPingMixin):
                 status_data["data"]
             )
             
+    @trace_storage_operation("redis.set_command_result", system="redis")
     async def set_command_result(
         self,
         command_id: str,
@@ -207,6 +215,7 @@ class RedisService(AsyncClientPingMixin):
         else:
             await self.client.set(key, payload)
         
+    @trace_storage_operation("redis.get_command_result", system="redis")
     async def get_command_result(self, command_id: str) -> Optional[Dict[str, Any]]:
         """
         Get command execution result.
@@ -227,6 +236,7 @@ class RedisService(AsyncClientPingMixin):
         
     # Pub/Sub Operations for Real-time Updates
     
+    @trace_storage_operation("redis.publish_command_update", system="redis")
     async def publish_command_update(
         self,
         command_id: str,
@@ -242,6 +252,7 @@ class RedisService(AsyncClientPingMixin):
         channel = f"command_updates:{command_id}"
         await self.client.publish(channel, json.dumps(data))
         
+    @trace_storage_operation("redis.subscribe_command_updates", system="redis")
     async def subscribe_command_updates(
         self,
         command_id: str,
@@ -339,6 +350,7 @@ class RedisService(AsyncClientPingMixin):
             
     # General Operations
     
+    @trace_storage_operation("redis.set_json", system="redis")
     async def set_json(
         self,
         key: str,
@@ -351,6 +363,7 @@ class RedisService(AsyncClientPingMixin):
         else:
             await self.client.set(key, json.dumps(value))
             
+    @trace_storage_operation("redis.get_json", system="redis")
     async def get_json(self, key: str) -> Optional[Dict[str, Any]]:
         """Get JSON value."""
         data = await self.client.get(key)
@@ -358,32 +371,39 @@ class RedisService(AsyncClientPingMixin):
             return json.loads(data)
         return None
         
+    @trace_storage_operation("redis.set", system="redis")
     async def set(self, key: str, value: str, ttl: Optional[int] = None) -> bool:
         """Set key-value pair with optional TTL."""
         if ttl:
             return await self.client.setex(key, ttl, value)
         return await self.client.set(key, value)
     
+    @trace_storage_operation("redis.get", system="redis")
     async def get(self, key: str) -> Optional[str]:
         """Get value for key."""
         return await self.client.get(key)
     
+    @trace_storage_operation("redis.delete", system="redis")
     async def delete(self, key: str) -> bool:
         """Delete key."""
         return await self.client.delete(key) > 0
         
+    @trace_storage_operation("redis.exists", system="redis")
     async def exists(self, key: str) -> bool:
         """Check if key exists."""
         return await self.client.exists(key) > 0
         
+    @trace_storage_operation("redis.expire", system="redis")
     async def expire(self, key: str, seconds: int) -> bool:
         """Set expiration on key."""
         return await self.client.expire(key, seconds)
         
+    @trace_storage_operation("redis.keys", system="redis")
     async def keys(self, pattern: str) -> List[str]:
         """Get keys matching pattern."""
         return await self.client.keys(pattern)
         
+    @trace_storage_operation("redis.cleanup_listeners", system="redis")
     async def cleanup_listeners(self) -> None:
         """Clean up all active pub/sub listeners."""
         if hasattr(self, '_listener_tasks'):
@@ -402,6 +422,7 @@ class RedisService(AsyncClientPingMixin):
             await self._pubsub.close()
             self._pubsub = None
             
+    @trace_storage_operation("redis.scan_keys", system="redis")
     async def scan_keys(self, pattern: str, count: int = 100) -> List[str]:
         """
         Scan keys matching pattern without blocking.

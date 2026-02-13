@@ -7,6 +7,7 @@ This module defines HTTP routes only. Business logic lives in
 """
 
 from __future__ import annotations
+from shared.observability.tracing import trace_endpoint
 
 from typing import Optional
 
@@ -30,6 +31,7 @@ router = APIRouter(tags=["Ontology Management"])
         status.HTTP_409_CONFLICT: {"description": "Conflict (already exists / OCC)"},
     },
 )
+@trace_endpoint("bff.ontology.create_ontology_with_relationship_validation")
 async def create_ontology_with_relationship_validation(
     db_name: str,
     ontology: OntologyCreateRequestBFF,
@@ -55,6 +57,7 @@ async def create_ontology_with_relationship_validation(
 
 
 @router.post("/validate-relationships")
+@trace_endpoint("bff.ontology.validate_ontology_relationships_bff")
 async def validate_ontology_relationships_bff(
     db_name: str,
     ontology: OntologyCreateRequestBFF,
@@ -74,6 +77,7 @@ async def validate_ontology_relationships_bff(
 
 
 @router.post("/check-circular-references")
+@trace_endpoint("bff.ontology.check_circular_references_bff")
 async def check_circular_references_bff(
     db_name: str,
     request: Request,
@@ -93,6 +97,7 @@ async def check_circular_references_bff(
 
 
 @router.get("/relationship-network/analyze")
+@trace_endpoint("bff.ontology.analyze_relationship_network_bff")
 async def analyze_relationship_network_bff(
     db_name: str,
     request: Request,
@@ -108,6 +113,7 @@ async def analyze_relationship_network_bff(
 
 
 @router.get("/relationship-paths")
+@trace_endpoint("bff.ontology.find_relationship_paths_bff")
 async def find_relationship_paths_bff(
     request: Request,
     db_name: str,

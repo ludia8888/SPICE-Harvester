@@ -19,6 +19,7 @@ from typing import Any, Callable, Optional, TypeVar
 
 from confluent_kafka import TopicPartition
 
+from shared.observability.tracing import trace_kafka_operation
 from shared.utils.executor_utils import call_in_executor
 
 T = TypeVar("T")
@@ -67,21 +68,27 @@ class InlineKafkaConsumerOps(KafkaConsumerOps):
 
     consumer: Any
 
+    @trace_kafka_operation("kafka.poll")
     async def poll(self, *, timeout: float) -> Any:  # noqa: ANN401
         return self.consumer.poll(timeout)
 
+    @trace_kafka_operation("kafka.commit_sync")
     async def commit_sync(self, msg: Any) -> None:  # noqa: ANN401
         self.consumer.commit_sync(msg)
 
+    @trace_kafka_operation("kafka.seek")
     async def seek(self, tp: TopicPartition) -> None:
         self.consumer.seek(tp)
 
+    @trace_kafka_operation("kafka.pause")
     async def pause(self, partitions: list[TopicPartition]) -> None:
         self.consumer.pause(partitions)
 
+    @trace_kafka_operation("kafka.resume")
     async def resume(self, partitions: list[TopicPartition]) -> None:
         self.consumer.resume(partitions)
 
+    @trace_kafka_operation("kafka.consumer_close")
     async def close(self) -> None:
         self.consumer.close()
 
@@ -111,21 +118,27 @@ class ExecutorKafkaConsumerOps(KafkaConsumerOps):
             thread_name_prefix=str(thread_name_prefix or "kafka-consumer"),
         )
 
+    @trace_kafka_operation("kafka.poll")
     async def poll(self, *, timeout: float) -> Any:  # noqa: ANN401
         return await call_in_executor(self._executor, self._consumer.poll, timeout)
 
+    @trace_kafka_operation("kafka.commit_sync")
     async def commit_sync(self, msg: Any) -> None:  # noqa: ANN401
         await call_in_executor(self._executor, self._consumer.commit_sync, msg)
 
+    @trace_kafka_operation("kafka.seek")
     async def seek(self, tp: TopicPartition) -> None:
         await call_in_executor(self._executor, self._consumer.seek, tp)
 
+    @trace_kafka_operation("kafka.pause")
     async def pause(self, partitions: list[TopicPartition]) -> None:
         await call_in_executor(self._executor, self._consumer.pause, partitions)
 
+    @trace_kafka_operation("kafka.resume")
     async def resume(self, partitions: list[TopicPartition]) -> None:
         await call_in_executor(self._executor, self._consumer.resume, partitions)
 
+    @trace_kafka_operation("kafka.consumer_close")
     async def close(self) -> None:
         try:
             await call_in_executor(self._executor, self._consumer.close)

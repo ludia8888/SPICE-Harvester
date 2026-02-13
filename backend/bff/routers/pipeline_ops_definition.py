@@ -12,6 +12,8 @@ from typing import Any, Dict, Optional
 
 from fastapi import HTTPException, status
 
+from shared.errors.error_types import ErrorCode, classified_http_exception
+
 
 def _stable_definition_hash(definition_json: Dict[str, Any]) -> str:
     try:
@@ -39,11 +41,12 @@ def _resolve_definition_commit_id(
 def _normalize_location(location: str) -> str:
     cleaned = (location or "").strip()
     if not cleaned:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="location is required")
+        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "location is required", code=ErrorCode.REQUEST_VALIDATION_FAILED)
     if "personal" in cleaned.lower():
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="personal locations are not allowed",
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            "personal locations are not allowed",
+            code=ErrorCode.REQUEST_VALIDATION_FAILED,
         )
     return cleaned
 

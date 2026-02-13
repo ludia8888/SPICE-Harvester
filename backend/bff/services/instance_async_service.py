@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 from fastapi import HTTPException, Request, status
+from shared.errors.error_types import ErrorCode, classified_http_exception
 
 from bff.services.oms_client import OMSClient
 from bff.utils.httpx_exceptions import raise_httpx_as_http_exception
@@ -26,6 +27,7 @@ from shared.security.input_sanitizer import (
 )
 from shared.utils.label_mapper import LabelMapper
 from shared.utils.language import get_accept_language
+from shared.observability.tracing import trace_external_call
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +48,7 @@ def _fallback_langs(primary: str) -> List[str]:
     return out
 
 
+@trace_external_call("bff.instance_async.resolve_class_id")
 async def resolve_class_id(
     *,
     db_name: str,
@@ -60,6 +63,7 @@ async def resolve_class_id(
     return validate_class_id(class_label)
 
 
+@trace_external_call("bff.instance_async.convert_labels_to_ids")
 async def convert_labels_to_ids(
     data: Dict[str, Any],
     db_name: str,
@@ -97,9 +101,11 @@ async def convert_labels_to_ids(
             unknown_labels.append(label)
 
     if unknown_labels:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            "Unknown label keys",
+            code=ErrorCode.REQUEST_VALIDATION_FAILED,
+            extra={
                 "error": "unknown_label_keys",
                 "class_id": class_id,
                 "labels": unknown_labels,
@@ -119,14 +125,15 @@ async def _handle_command_errors(fn, *args, op_message: str, **kwargs):  # noqa:
         raise_httpx_as_http_exception(exc)
         raise  # pragma: no cover
     except httpx.HTTPError as exc:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="OMS 요청 실패") from exc
+        raise classified_http_exception(502, "OMS 요청 실패", code=ErrorCode.UPSTREAM_ERROR) from exc
     except (SecurityViolationError, ValueError) as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        raise classified_http_exception(400, str(exc), code=ErrorCode.REQUEST_VALIDATION_FAILED) from exc
     except Exception as exc:
         logger.error("%s: %s", op_message, exc, exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"{op_message}: {str(exc)}") from exc
+        raise classified_http_exception(500, f"{op_message}: {str(exc)}", code=ErrorCode.INTERNAL_ERROR) from exc
 
 
+@trace_external_call("bff.instance_async.create_instance_async")
 async def create_instance_async(
     *,
     db_name: str,
@@ -179,6 +186,7 @@ async def create_instance_async(
     return await _handle_command_errors(_impl, op_message="인스턴스 생성 명령 실패")
 
 
+@trace_external_call("bff.instance_async.update_instance_async")
 async def update_instance_async(
     *,
     db_name: str,
@@ -234,6 +242,7 @@ async def update_instance_async(
     return await _handle_command_errors(_impl, op_message="인스턴스 수정 명령 실패")
 
 
+@trace_external_call("bff.instance_async.delete_instance_async")
 async def delete_instance_async(
     *,
     db_name: str,
@@ -269,6 +278,7 @@ async def delete_instance_async(
     return await _handle_command_errors(_impl, op_message="인스턴스 삭제 명령 실패")
 
 
+@trace_external_call("bff.instance_async.bulk_create_instances_async")
 async def bulk_create_instances_async(
     *,
     db_name: str,
@@ -322,4 +332,3 @@ async def bulk_create_instances_async(
         return CommandResult(**response)
 
     return await _handle_command_errors(_impl, op_message="대량 인스턴스 생성 명령 실패")
-

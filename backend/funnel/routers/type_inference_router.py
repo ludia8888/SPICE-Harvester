@@ -5,11 +5,12 @@
 
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, UploadFile, status
 
 from funnel.services.data_processor import FunnelDataProcessor
 from funnel.services.structure_analysis import FunnelStructureAnalyzer
 from shared.services.core.sheet_grid_parser import SheetGridParseOptions, SheetGridParser
+from shared.errors.error_types import ErrorCode, classified_http_exception
 from shared.models.sheet_grid import GoogleSheetStructureAnalysisRequest, SheetGrid
 from shared.models.structure_patch import SheetStructurePatch
 from shared.models.structure_analysis import (
@@ -59,9 +60,10 @@ async def analyze_dataset(
 
     except Exception as e:
         logger.error(f"Dataset analysis failed: {str(e)}")
-        raise HTTPException(
+        raise classified_http_exception(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Dataset analysis failed: {str(e)}",
+            code=ErrorCode.INTERNAL_ERROR,
         )
 
 
@@ -107,9 +109,10 @@ async def analyze_sheet_structure(
         return analysis
     except Exception as e:
         logger.error(f"Sheet structure analysis failed: {str(e)}")
-        raise HTTPException(
+        raise classified_http_exception(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Sheet structure analysis failed: {str(e)}",
+            code=ErrorCode.INTERNAL_ERROR,
         )
 
 
@@ -132,21 +135,30 @@ async def analyze_excel_structure(
 
     filename = file.filename or ""
     if not filename.lower().endswith((".xlsx", ".xlsm")):
-        raise HTTPException(
+        raise classified_http_exception(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Only .xlsx/.xlsm files are supported",
+            code=ErrorCode.REQUEST_VALIDATION_FAILED,
         )
 
     content = await file.read()
     if not content:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty file")
+        raise classified_http_exception(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Empty file",
+            code=ErrorCode.REQUEST_VALIDATION_FAILED,
+        )
 
     try:
         opts = json.loads(options_json) if options_json else {}
         if not isinstance(opts, dict):
             raise ValueError("options_json must be an object")
     except Exception as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid options_json: {e}")
+        raise classified_http_exception(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid options_json: {e}",
+            code=ErrorCode.REQUEST_VALIDATION_FAILED,
+        )
 
     try:
         sheet_grid = await asyncio.to_thread(
@@ -161,9 +173,17 @@ async def analyze_excel_structure(
         )
     except RuntimeError as e:
         # openpyxl missing or similar optional dependency issue
-        raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail=str(e))
+        raise classified_http_exception(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail=str(e),
+            code=ErrorCode.FEATURE_NOT_IMPLEMENTED,
+        )
     except Exception as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Failed to parse Excel: {e}")
+        raise classified_http_exception(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Failed to parse Excel: {e}",
+            code=ErrorCode.REQUEST_VALIDATION_FAILED,
+        )
 
     try:
         analysis = await asyncio.to_thread(
@@ -176,9 +196,10 @@ async def analyze_excel_structure(
             options=opts,
         )
     except Exception as e:
-        raise HTTPException(
+        raise classified_http_exception(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Sheet structure analysis failed: {str(e)}",
+            code=ErrorCode.INTERNAL_ERROR,
         )
 
     if bool(opts.get("apply_patches", True)):
@@ -240,14 +261,16 @@ async def analyze_google_sheets_structure(
             resp.raise_for_status()
             sheet_grid = SheetGrid(**resp.json())
     except httpx.HTTPStatusError as e:
-        raise HTTPException(
+        raise classified_http_exception(
             status_code=e.response.status_code,
             detail=f"Failed to fetch Google Sheets grid: {e.response.text}",
+            code=ErrorCode.UPSTREAM_ERROR,
         )
     except Exception as e:
-        raise HTTPException(
+        raise classified_http_exception(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to fetch Google Sheets grid: {str(e)}",
+            code=ErrorCode.INTERNAL_ERROR,
         )
 
     try:
@@ -261,9 +284,10 @@ async def analyze_google_sheets_structure(
             options=request.options,
         )
     except Exception as e:
-        raise HTTPException(
+        raise classified_http_exception(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Sheet structure analysis failed: {str(e)}",
+            code=ErrorCode.INTERNAL_ERROR,
         )
 
     if bool((request.options or {}).get("apply_patches", True)):
@@ -297,7 +321,11 @@ async def analyze_google_sheets_structure(
 async def upsert_structure_patch(patch: SheetStructurePatch) -> SheetStructurePatch:
     """Store/update a structure-analysis patch for a given sheet_signature."""
     if not patch.ops:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Patch ops must not be empty")
+        raise classified_http_exception(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Patch ops must not be empty",
+            code=ErrorCode.REQUEST_VALIDATION_FAILED,
+        )
     return upsert_patch(patch)
 
 
@@ -305,7 +333,11 @@ async def upsert_structure_patch(patch: SheetStructurePatch) -> SheetStructurePa
 async def get_structure_patch(sheet_signature: str) -> SheetStructurePatch:
     patch = get_patch(sheet_signature)
     if patch is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Patch not found")
+        raise classified_http_exception(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Patch not found",
+            code=ErrorCode.RESOURCE_NOT_FOUND,
+        )
     return patch
 
 
@@ -351,9 +383,10 @@ async def preview_google_sheets_with_inference(
 
     except Exception as e:
         logger.error(f"Google Sheets preview failed: {str(e)}")
-        raise HTTPException(
+        raise classified_http_exception(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Google Sheets preview failed: {str(e)}",
+            code=ErrorCode.INTERNAL_ERROR,
         )
 
 
@@ -381,9 +414,10 @@ async def suggest_schema(
 
     except Exception as e:
         logger.error(f"Schema suggestion failed: {str(e)}")
-        raise HTTPException(
+        raise classified_http_exception(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Schema suggestion failed: {str(e)}",
+            code=ErrorCode.INTERNAL_ERROR,
         )
 
 

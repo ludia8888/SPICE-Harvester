@@ -7,7 +7,9 @@ each worker define its own marker sets and type-based fast paths.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable, Tuple
+from typing import FrozenSet, Iterable, Optional, Tuple
+
+from shared.errors.error_types import ErrorCode
 
 
 @dataclass(frozen=True)
@@ -168,6 +170,75 @@ SEARCH_PROJECTION_RETRY_PROFILE = create_retry_policy_profile(
 )
 
 
+# ── ErrorCode-based retry classification ──
+# These sets provide O(1) lookup and are the preferred path for classifying
+# retryability.  String-marker profiles above remain as a backward-compatible
+# fallback for errors that do not carry a structured ErrorCode.
+
+_NON_RETRYABLE_ERROR_CODES: FrozenSet[ErrorCode] = frozenset({
+    # Input / validation
+    ErrorCode.REQUEST_VALIDATION_FAILED,
+    ErrorCode.INPUT_SANITIZATION_FAILED,
+    ErrorCode.JSON_DECODE_ERROR,
+    ErrorCode.PAYLOAD_TOO_LARGE,
+    # Auth / permission
+    ErrorCode.PERMISSION_DENIED,
+    ErrorCode.AUTH_REQUIRED,
+    ErrorCode.AUTH_INVALID,
+    ErrorCode.AUTH_EXPIRED,
+    ErrorCode.LAKEFS_AUTH_ERROR,
+    # Resource
+    ErrorCode.RESOURCE_NOT_FOUND,
+    ErrorCode.RESOURCE_ALREADY_EXISTS,
+    # Domain validation
+    ErrorCode.ONTOLOGY_VALIDATION_FAILED,
+    ErrorCode.ONTOLOGY_RELATIONSHIP_ERROR,
+    ErrorCode.ONTOLOGY_CIRCULAR_REFERENCE,
+    ErrorCode.PIPELINE_VALIDATION_FAILED,
+    ErrorCode.ACTION_INPUT_INVALID,
+    ErrorCode.ACTION_TEMPLATE_ERROR,
+    ErrorCode.OBJECTIFY_MAPPING_ERROR,
+    ErrorCode.OBJECTIFY_CONTRACT_ERROR,
+    # Conflict (usually deterministic)
+    ErrorCode.CONFLICT,
+    ErrorCode.DB_CONSTRAINT_VIOLATION,
+    ErrorCode.LAKEFS_CONFLICT,
+    ErrorCode.ONTOLOGY_DUPLICATE,
+    ErrorCode.ACTION_CONFLICT_POLICY_FAILED,
+})
+
+_RETRYABLE_ERROR_CODES: FrozenSet[ErrorCode] = frozenset({
+    # Timeout / unavailable
+    ErrorCode.UPSTREAM_TIMEOUT,
+    ErrorCode.UPSTREAM_UNAVAILABLE,
+    ErrorCode.DB_TIMEOUT,
+    ErrorCode.DB_UNAVAILABLE,
+    ErrorCode.ES_UNAVAILABLE,
+    ErrorCode.STORAGE_UNAVAILABLE,
+    ErrorCode.OMS_UNAVAILABLE,
+    ErrorCode.TERMINUS_UNAVAILABLE,
+    ErrorCode.RATE_LIMITED,
+    # Transient infra
+    ErrorCode.KAFKA_PRODUCE_FAILED,
+    ErrorCode.KAFKA_CONSUME_FAILED,
+})
+
+
+def classify_retryable_by_error_code(code: Optional[ErrorCode]) -> Optional[bool]:
+    """Classify retryability based on a structured ErrorCode.
+
+    Returns ``True`` (retryable), ``False`` (non-retryable) or ``None``
+    (unknown – caller should fall back to marker-based classification).
+    """
+    if code is None:
+        return None
+    if code in _NON_RETRYABLE_ERROR_CODES:
+        return False
+    if code in _RETRYABLE_ERROR_CODES:
+        return True
+    return None  # unknown – let marker-based fallback decide
+
+
 __all__: Tuple[str, ...] = (
     "RetryPolicyProfile",
     "normalize_error_message",
@@ -175,6 +246,7 @@ __all__: Tuple[str, ...] = (
     "classify_retryable_by_markers",
     "create_retry_policy_profile",
     "classify_retryable_with_profile",
+    "classify_retryable_by_error_code",
     "ACTION_COMMAND_RETRY_PROFILE",
     "INSTANCE_COMMAND_RETRY_PROFILE",
     "OBJECTIFY_JOB_RETRY_PROFILE",

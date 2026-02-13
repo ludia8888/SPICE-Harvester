@@ -5,11 +5,13 @@ Exposes first-class, queryable lineage graphs to the frontend via BFF.
 """
 
 from __future__ import annotations
+from shared.observability.tracing import trace_endpoint
 
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional, Tuple
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Query, status
+from shared.errors.error_types import ErrorCode, classified_http_exception
 
 from shared.dependencies.providers import LineageStoreDep
 from shared.dependencies.providers import AuditLogStoreDep
@@ -100,6 +102,7 @@ def _suggest_remediation_actions(*, artifacts: list[Dict[str, Any]]) -> list[Dic
 
 
 @router.get("/graph")
+@trace_endpoint("bff.lineage.get_lineage_graph")
 async def get_lineage_graph(
     root: str = Query(..., description="Root node id or event id (e.g. event:<uuid> or <uuid>)"),
     db_name: Optional[str] = Query(None, description="Optional database scope (recommended)"),
@@ -126,12 +129,13 @@ async def get_lineage_graph(
             data={"graph": graph.model_dump(mode="json")},
         ).to_dict()
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, str(e), code=ErrorCode.REQUEST_VALIDATION_FAILED) from e
     except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(e), code=ErrorCode.INTERNAL_ERROR) from e
 
 
 @router.get("/impact")
+@trace_endpoint("bff.lineage.get_lineage_impact")
 async def get_lineage_impact(
     root: str = Query(..., description="Root node id or event id"),
     db_name: Optional[str] = Query(None, description="Optional database scope (recommended)"),
@@ -187,12 +191,13 @@ async def get_lineage_impact(
             },
         ).to_dict()
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, str(e), code=ErrorCode.REQUEST_VALIDATION_FAILED) from e
     except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(e), code=ErrorCode.INTERNAL_ERROR) from e
 
 
 @router.get("/metrics")
+@trace_endpoint("bff.lineage.get_lineage_metrics")
 async def get_lineage_metrics(
     db_name: Optional[str] = Query(None, description="Database scope (recommended)"),
     window_minutes: int = Query(60, ge=1, le=24 * 60, description="Time window for missing ratio estimate"),
@@ -244,4 +249,4 @@ async def get_lineage_metrics(
             },
         ).to_dict()
     except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(e), code=ErrorCode.INTERNAL_ERROR) from e

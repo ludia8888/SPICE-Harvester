@@ -21,6 +21,8 @@ from shared.security.input_sanitizer import (
     validate_db_name,
 )
 from shared.utils.branch_utils import protected_branch_write_message
+from shared.errors.error_types import ErrorCode, ErrorCategory, classified_http_exception
+from shared.observability.tracing import trace_endpoint
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +30,7 @@ router = APIRouter(prefix="/branch/{db_name}", tags=["Branch Management"])
 
 
 @router.get("/list")
+@trace_endpoint("oms.branch.list")
 async def list_branches(
     db_name: str, terminus: AsyncTerminusService = TerminusServiceDep
 ):
@@ -58,19 +61,22 @@ async def list_branches(
 
     except SecurityViolationError as e:
         logger.warning(f"Security violation in list_branches: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="입력 데이터에 보안 위반이 감지되었습니다",
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            "입력 데이터에 보안 위반이 감지되었습니다",
+            code=ErrorCode.INPUT_SANITIZATION_FAILED,
         )
     except Exception as e:
         logger.error(f"Failed to list branches: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"브랜치 목록 조회 실패: {str(e)}",
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            f"브랜치 목록 조회 실패: {str(e)}",
+            code=ErrorCode.INTERNAL_ERROR,
         )
 
 
 @router.post("/create")
+@trace_endpoint("oms.branch.create")
 async def create_branch(
     db_name: str,
     request: BranchCreateRequest,
@@ -93,8 +99,9 @@ async def create_branch(
         # 브랜치 이름 유효성 검증
         branch_name = sanitized_data.get("branch_name")
         if not branch_name:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail="브랜치 이름은 필수입니다"
+            raise classified_http_exception(
+                status.HTTP_400_BAD_REQUEST, "브랜치 이름은 필수입니다",
+                code=ErrorCode.REQUEST_VALIDATION_FAILED,
             )
 
         # 브랜치 이름 보안 검증
@@ -134,9 +141,10 @@ async def create_branch(
 
     except SecurityViolationError as e:
         logger.warning(f"Security violation in create_branch: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="입력 데이터에 보안 위반이 감지되었습니다",
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            "입력 데이터에 보안 위반이 감지되었습니다",
+            code=ErrorCode.INPUT_SANITIZATION_FAILED,
         )
     except HTTPException:
         raise
@@ -144,16 +152,19 @@ async def create_branch(
         logger.error(f"Failed to create branch: {e}")
 
         if "already exists" in str(e).lower():
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT, detail=f"브랜치가 이미 존재합니다"
+            raise classified_http_exception(
+                status.HTTP_409_CONFLICT, f"브랜치가 이미 존재합니다",
+                code=ErrorCode.RESOURCE_ALREADY_EXISTS,
             )
 
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"브랜치 생성 실패: {str(e)}"
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR, f"브랜치 생성 실패: {str(e)}",
+            code=ErrorCode.INTERNAL_ERROR,
         )
 
 
 @router.delete("/branch/{branch_name:path}")
+@trace_endpoint("oms.branch.delete")
 async def delete_branch(
     db_name: str,
     branch_name: str,
@@ -175,17 +186,19 @@ async def delete_branch(
         # 보호된 브랜치 확인
         protected_branches = ["main", "master", "production"]
         if branch_name in protected_branches and not force:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=protected_branch_write_message(),
+            raise classified_http_exception(
+                status.HTTP_403_FORBIDDEN,
+                protected_branch_write_message(),
+                code=ErrorCode.PERMISSION_DENIED,
             )
 
         # 현재 브랜치 확인
         current_branch = await terminus.get_current_branch(db_name)
         if branch_name == current_branch:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="현재 체크아웃된 브랜치는 삭제할 수 없습니다",
+            raise classified_http_exception(
+                status.HTTP_400_BAD_REQUEST,
+                "현재 체크아웃된 브랜치는 삭제할 수 없습니다",
+                code=ErrorCode.REQUEST_VALIDATION_FAILED,
             )
 
         # 브랜치 삭제
@@ -213,9 +226,10 @@ async def delete_branch(
 
     except SecurityViolationError as e:
         logger.warning(f"Security violation in delete_branch: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="입력 데이터에 보안 위반이 감지되었습니다",
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            "입력 데이터에 보안 위반이 감지되었습니다",
+            code=ErrorCode.INPUT_SANITIZATION_FAILED,
         )
     except HTTPException:
         raise
@@ -223,17 +237,20 @@ async def delete_branch(
         logger.error(f"Failed to delete branch: {e}")
 
         if "not found" in str(e).lower():
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"브랜치 '{branch_name}'을(를) 찾을 수 없습니다",
+            raise classified_http_exception(
+                status.HTTP_404_NOT_FOUND,
+                f"브랜치 '{branch_name}'을(를) 찾을 수 없습니다",
+                code=ErrorCode.RESOURCE_NOT_FOUND,
             )
 
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"브랜치 삭제 실패: {str(e)}"
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR, f"브랜치 삭제 실패: {str(e)}",
+            code=ErrorCode.INTERNAL_ERROR,
         )
 
 
 @router.post("/checkout")
+@trace_endpoint("oms.branch.checkout")
 async def checkout(
     db_name: str,
     request: CheckoutRequest,
@@ -257,9 +274,10 @@ async def checkout(
         # 타겟 타입 검증
         allowed_types = ["branch", "commit"]
         if target_type not in allowed_types:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"잘못된 타겟 타입입니다. 허용된 값: {allowed_types}",
+            raise classified_http_exception(
+                status.HTTP_400_BAD_REQUEST,
+                f"잘못된 타겟 타입입니다. 허용된 값: {allowed_types}",
+                code=ErrorCode.REQUEST_VALIDATION_FAILED,
             )
 
         # 브랜치인 경우 이름 검증
@@ -269,8 +287,9 @@ async def checkout(
             # 커밋 ID인 경우 기본 정화
             target = sanitize_input(target)
             if len(target) > 100:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST, detail="커밋 ID가 너무 깁니다"
+                raise classified_http_exception(
+                    status.HTTP_400_BAD_REQUEST, "커밋 ID가 너무 깁니다",
+                    code=ErrorCode.REQUEST_VALIDATION_FAILED,
                 )
 
         # 체크아웃 실행
@@ -290,9 +309,10 @@ async def checkout(
 
     except SecurityViolationError as e:
         logger.warning(f"Security violation in checkout: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="입력 데이터에 보안 위반이 감지되었습니다",
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            "입력 데이터에 보안 위반이 감지되었습니다",
+            code=ErrorCode.INPUT_SANITIZATION_FAILED,
         )
     except HTTPException:
         raise
@@ -300,16 +320,19 @@ async def checkout(
         logger.error(f"Failed to checkout: {e}")
 
         if "not found" in str(e).lower():
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="브랜치 또는 커밋을 찾을 수 없습니다"
+            raise classified_http_exception(
+                status.HTTP_404_NOT_FOUND, "브랜치 또는 커밋을 찾을 수 없습니다",
+                code=ErrorCode.RESOURCE_NOT_FOUND,
             )
 
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"체크아웃 실패: {str(e)}"
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR, f"체크아웃 실패: {str(e)}",
+            code=ErrorCode.INTERNAL_ERROR,
         )
 
 
 @router.get("/branch/{branch_name:path}/info")
+@trace_endpoint("oms.branch.get_info")
 async def get_branch_info(
     db_name: str, branch_name: str, terminus: AsyncTerminusService = TerminusServiceDep
 ):
@@ -334,22 +357,25 @@ async def get_branch_info(
 
     except SecurityViolationError as e:
         logger.warning(f"Security violation in get_branch_info: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="입력 데이터에 보안 위반이 감지되었습니다",
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            "입력 데이터에 보안 위반이 감지되었습니다",
+            code=ErrorCode.INPUT_SANITIZATION_FAILED,
         )
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to get branch info: {e}")
         if "branch not found" in str(e).lower():
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"브랜치 '{branch_name}'을(를) 찾을 수 없습니다",
+            raise classified_http_exception(
+                status.HTTP_404_NOT_FOUND,
+                f"브랜치 '{branch_name}'을(를) 찾을 수 없습니다",
+                code=ErrorCode.RESOURCE_NOT_FOUND,
             ) from e
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"브랜치 정보 조회 실패: {str(e)}",
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            f"브랜치 정보 조회 실패: {str(e)}",
+            code=ErrorCode.INTERNAL_ERROR,
         )
 
 
@@ -363,6 +389,7 @@ class CommitRequest(BaseModel):
 
 
 @router.post("/commit")
+@trace_endpoint("oms.branch.commit")
 async def commit_changes(
     db_name: str,
     request: CommitRequest,
@@ -386,17 +413,19 @@ async def commit_changes(
         
         # 메시지 길이 제한
         if len(message) > 500:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="커밋 메시지가 너무 깁니다 (500자 이하)",
+            raise classified_http_exception(
+                status.HTTP_400_BAD_REQUEST,
+                "커밋 메시지가 너무 깁니다 (500자 이하)",
+                code=ErrorCode.REQUEST_VALIDATION_FAILED,
             )
         
         # 현재 브랜치 확인
         current_branch = await terminus.get_current_branch(db_name)
         if not current_branch:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="현재 브랜치를 찾을 수 없습니다",
+            raise classified_http_exception(
+                status.HTTP_404_NOT_FOUND,
+                "현재 브랜치를 찾을 수 없습니다",
+                code=ErrorCode.RESOURCE_NOT_FOUND,
             )
         
         # 변경사항이 있는지 확인 (선택적)
@@ -429,15 +458,17 @@ async def commit_changes(
         
     except SecurityViolationError as e:
         logger.warning(f"Security violation in commit_changes: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="입력 데이터에 보안 위반이 감지되었습니다",
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            "입력 데이터에 보안 위반이 감지되었습니다",
+            code=ErrorCode.INPUT_SANITIZATION_FAILED,
         )
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to commit changes: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"커밋 실패: {str(e)}",
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            f"커밋 실패: {str(e)}",
+            code=ErrorCode.INTERNAL_ERROR,
         )

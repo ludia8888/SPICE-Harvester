@@ -5,12 +5,13 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Query, Request
 
 from agent.models import AgentRunRequest, AgentToolCall
 from agent.services.agent_run_loop import AgentState, run_agent_steps
 from agent.services.agent_runtime import AgentRuntime
 from shared.config.settings import get_settings
+from shared.errors.error_types import ErrorCode, classified_http_exception
 from shared.services.registries.agent_registry import AgentRegistry
 from shared.models.responses import ApiResponse
 from shared.security.principal_utils import actor_label, resolve_principal_from_headers
@@ -234,10 +235,10 @@ async def _execute_agent_run(
 @router.post("/runs")
 async def create_agent_run(request: Request, body: AgentRunRequest) -> Dict[str, Any]:
     if not body.steps:
-        raise HTTPException(status_code=400, detail="steps are required")
+        raise classified_http_exception(400, "steps are required", code=ErrorCode.REQUEST_VALIDATION_FAILED)
     max_steps = get_settings().agent.run_max_steps
     if len(body.steps) > max_steps:
-        raise HTTPException(status_code=400, detail="steps exceed AGENT_RUN_MAX_STEPS")
+        raise classified_http_exception(400, "steps exceed AGENT_RUN_MAX_STEPS", code=ErrorCode.REQUEST_VALIDATION_FAILED)
 
     principal_type, principal_id = _resolve_principal(request)
     actor = _actor_label(principal_type, principal_id)
@@ -332,7 +333,7 @@ async def get_agent_run(
     event_store = request.app.state.event_store  # type: ignore[attr-defined]
     events = await event_store.get_events("AgentRun", run_id)
     if not events:
-        raise HTTPException(status_code=404, detail="run not found")
+        raise classified_http_exception(404, "run not found", code=ErrorCode.RESOURCE_NOT_FOUND)
 
     steps_total = 0
     steps_completed = 0
@@ -425,7 +426,7 @@ async def list_agent_run_events(
     event_store = request.app.state.event_store  # type: ignore[attr-defined]
     events = await event_store.get_events("AgentRun", run_id)
     if not events:
-        raise HTTPException(status_code=404, detail="run not found")
+        raise classified_http_exception(404, "run not found", code=ErrorCode.RESOURCE_NOT_FOUND)
     sliced = events[offset : offset + limit]
     response = ApiResponse.success(
         "Agent run events fetched",

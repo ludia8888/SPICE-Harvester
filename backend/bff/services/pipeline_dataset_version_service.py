@@ -9,6 +9,8 @@ from uuid import uuid4
 
 from fastapi import HTTPException, Request, status
 
+from shared.errors.error_types import ErrorCode, classified_http_exception
+
 import bff.routers.pipeline_datasets_ops as ops
 from bff.services.dataset_ingest_commit_service import (
     ensure_lakefs_commit_artifact,
@@ -23,10 +25,12 @@ from shared.security.auth_utils import enforce_db_scope
 from shared.security.input_sanitizer import sanitize_input
 from shared.utils.path_utils import safe_lakefs_ref
 from shared.utils.s3_uri import build_s3_uri
+from shared.observability.tracing import trace_external_call
 
 logger = logging.getLogger(__name__)
 
 
+@trace_external_call("bff.pipeline_dataset_version.create_dataset_version")
 async def create_dataset_version(
     *,
     dataset_id: str,
@@ -57,7 +61,7 @@ async def create_dataset_version(
             try:
                 row_count = int(sanitized.get("row_count"))
             except Exception as exc:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="row_count must be integer") from exc
+                raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "row_count must be integer", code=ErrorCode.REQUEST_VALIDATION_FAILED) from exc
         if row_count is None and isinstance(sample_json, dict):
             rows = sample_json.get("rows")
             if isinstance(rows, list):
@@ -70,11 +74,11 @@ async def create_dataset_version(
 
         dataset = await dataset_registry.get_dataset(dataset_id=dataset_id)
         if not dataset:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found")
+            raise classified_http_exception(status.HTTP_404_NOT_FOUND, "Dataset not found", code=ErrorCode.RESOURCE_NOT_FOUND)
         try:
             enforce_db_scope(request.headers, db_name=dataset.db_name)
         except ValueError as exc:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+            raise classified_http_exception(status.HTTP_403_FORBIDDEN, str(exc), code=ErrorCode.PERMISSION_DENIED) from exc
 
         dataset_branch = safe_lakefs_ref(getattr(dataset, "branch", None) or "main")
         if not hasattr(dataset_registry, "create_ingest_request"):
@@ -180,15 +184,9 @@ async def create_dataset_version(
         if artifact_key:
             ref = ops._extract_lakefs_ref_from_artifact_key(artifact_key)
             if ref == dataset_branch:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="artifact_key must reference an immutable lakeFS commit id (not a branch ref)",
-                )
+                raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "artifact_key must reference an immutable lakeFS commit id (not a branch ref)", code=ErrorCode.REQUEST_VALIDATION_FAILED)
             if lakefs_commit_id and lakefs_commit_id != ref:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="lakefs_commit_id does not match artifact_key ref",
-                )
+                raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "lakefs_commit_id does not match artifact_key ref", code=ErrorCode.REQUEST_VALIDATION_FAILED)
             lakefs_commit_id = lakefs_commit_id or ref
         else:
             repo = ops._resolve_lakefs_raw_repository()
@@ -237,7 +235,7 @@ async def create_dataset_version(
             artifact_key = commit_state.artifact_key
 
         if not lakefs_commit_id:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="lakefs_commit_id is required")
+            raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "lakefs_commit_id is required", code=ErrorCode.REQUEST_VALIDATION_FAILED)
         ingest_request = await persist_ingest_commit_state(
             dataset_registry=dataset_registry,
             ingest_request=ingest_request,
@@ -277,7 +275,7 @@ async def create_dataset_version(
                 outbox_entries=outbox_entries,
             )
         except ValueError as exc:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+            raise classified_http_exception(status.HTTP_400_BAD_REQUEST, str(exc), code=ErrorCode.REQUEST_VALIDATION_FAILED) from exc
 
         objectify_job_id = await ops._maybe_enqueue_objectify_job(
             dataset=dataset,
@@ -308,4 +306,4 @@ async def create_dataset_version(
             stage="manual",
         )
         logger.error("Failed to create dataset version: %s", exc)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc), code=ErrorCode.INTERNAL_ERROR) from exc

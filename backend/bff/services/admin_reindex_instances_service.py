@@ -18,10 +18,12 @@ from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
 from shared.models.objectify_job import ObjectifyJob
+from shared.observability.tracing import trace_external_call
 
 logger = logging.getLogger(__name__)
 
 
+@trace_external_call("bff.admin_reindex.reindex_all_instances")
 async def reindex_all_instances(
     *,
     db_name: str,

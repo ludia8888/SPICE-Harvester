@@ -7,8 +7,11 @@
 
 import logging
 from typing import Any, Dict, List, Optional
+from shared.observability.tracing import trace_endpoint
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+
+from shared.errors.error_types import ErrorCode, classified_http_exception
 
 from bff.dependencies import BFFDependencyProvider, get_elasticsearch_service
 from bff.routers.registry_deps import get_dataset_registry
@@ -40,6 +43,7 @@ async def _maybe_get_action_log_registry(
 
 
 @router.get("/class/{class_id}/instances")
+@trace_endpoint("bff.instances.get_class_instances")
 async def get_class_instances(
     db_name: str,
     class_id: str,
@@ -79,13 +83,15 @@ async def get_class_instances(
         raise
     except Exception as exc:
         logger.error("Failed to get class instances: %s", exc)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"인스턴스 조회 실패: {str(exc)}",
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            f"인스턴스 조회 실패: {str(exc)}",
+            code=ErrorCode.INTERNAL_ERROR,
         ) from exc
 
 
 @router.get("/class/{class_id}/sample-values")
+@trace_endpoint("bff.instances.get_class_sample_values")
 async def get_class_sample_values(
     db_name: str,
     class_id: str,
@@ -111,13 +117,15 @@ async def get_class_sample_values(
         raise
     except Exception as exc:
         logger.error("Failed to get sample values: %s", exc)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"샘플 값 조회 실패: {str(exc)}",
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            f"샘플 값 조회 실패: {str(exc)}",
+            code=ErrorCode.INTERNAL_ERROR,
         ) from exc
 
 
 @router.get("/class/{class_id}/instance/{instance_id}")
+@trace_endpoint("bff.instances.get_instance")
 async def get_instance(
     db_name: str,
     class_id: str,
@@ -147,7 +155,8 @@ async def get_instance(
         raise
     except Exception as exc:
         logger.error("Failed to get instance %s: %s", instance_id, exc)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"인스턴스 조회 실패: {str(exc)}",
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            f"인스턴스 조회 실패: {str(exc)}",
+            code=ErrorCode.INTERNAL_ERROR,
         ) from exc

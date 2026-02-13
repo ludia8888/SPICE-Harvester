@@ -25,6 +25,7 @@ from oms.exceptions import DatabaseError
 from shared.utils.commit_utils import coerce_commit_id
 from shared.utils.terminus_branch import encode_branch_name
 from shared.utils.diff_utils import normalize_diff_response
+from shared.observability.tracing import trace_db_operation, trace_external_call
 from shared.utils.json_utils import maybe_decode_json
 
 logger = logging.getLogger(__name__)
@@ -67,6 +68,7 @@ class PullRequestService(BaseTerminusService):
         self.version_control = VersionControlService(*args, **kwargs)
     
     @with_mvcc_retry()
+    @trace_external_call("oms.pull_request.create_pull_request")
     async def create_pull_request(
         self,
         db_name: str,
@@ -170,6 +172,7 @@ class PullRequestService(BaseTerminusService):
             logger.error(f"Failed to create pull request: {e}")
             raise DatabaseError(f"Failed to create pull request: {e}")
     
+    @trace_external_call("oms.pull_request.get_branch_diff")
     async def get_branch_diff(
         self,
         db_name: str,
@@ -198,6 +201,7 @@ class PullRequestService(BaseTerminusService):
             diff_payload["error"] = str(e)
             return diff_payload
     
+    @trace_external_call("oms.pull_request.check_merge_conflicts")
     async def check_merge_conflicts(
         self,
         db_name: str,
@@ -246,6 +250,7 @@ class PullRequestService(BaseTerminusService):
     
     @with_mvcc_retry()
     @with_optimistic_lock(entity_type="PullRequest")
+    @trace_external_call("oms.pull_request.merge_pull_request")
     async def merge_pull_request(
         self,
         pr_id: str,
@@ -349,6 +354,7 @@ class PullRequestService(BaseTerminusService):
             logger.error(f"Failed to merge PR {pr_id}: {e}")
             raise DatabaseError(f"Failed to merge pull request: {e}")
     
+    @trace_db_operation("oms.pull_request.get_pull_request")
     async def get_pull_request(self, pr_id: str) -> Optional[Dict[str, Any]]:
         """
         Get pull request details
@@ -398,6 +404,7 @@ class PullRequestService(BaseTerminusService):
             logger.error(f"Failed to get PR {pr_id}: {e}")
             return None
     
+    @trace_db_operation("oms.pull_request.list_pull_requests")
     async def list_pull_requests(
         self,
         db_name: Optional[str] = None,
@@ -451,6 +458,7 @@ class PullRequestService(BaseTerminusService):
             logger.error(f"Failed to list pull requests: {e}")
             return []
     
+    @trace_db_operation("oms.pull_request.close_pull_request")
     async def close_pull_request(
         self,
         pr_id: str,

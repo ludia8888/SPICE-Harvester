@@ -14,6 +14,8 @@ import httpx
 from fastapi import HTTPException, Request, status
 from fastapi.responses import JSONResponse
 
+from shared.errors.error_types import ErrorCode, ErrorCategory, classified_http_exception
+
 from bff.services.database_error_policy import MessageErrorPolicy, apply_message_error_policies
 from bff.services.oms_client import OMSClient
 from shared.config.settings import get_settings
@@ -32,6 +34,7 @@ from shared.security.input_sanitizer import (
 )
 from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.utils.branch_utils import protected_branch_write_message
+from shared.observability.tracing import trace_external_call, trace_db_operation
 
 logger = logging.getLogger(__name__)
 
@@ -139,6 +142,7 @@ def _enrich_db_entry(
     return payload
 
 
+@trace_external_call("bff.database.list_databases")
 async def list_databases(
     *,
     request: Request,
@@ -190,9 +194,10 @@ async def list_databases(
         ).to_dict()
     except Exception as exc:
         logger.error("Failed to list databases: %s", exc)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc), code=ErrorCode.INTERNAL_ERROR) from exc
 
 
+@trace_external_call("bff.database.create_database")
 async def create_database(
     *,
     body: DatabaseCreateRequest,
@@ -265,10 +270,10 @@ async def create_database(
                 detail = detail.get("detail") or detail.get("message") or detail.get("error") or detail
             if not isinstance(detail, str) or not detail.strip():
                 detail = f"데이터베이스 '{body.name}'이(가) 이미 존재합니다"
-        raise HTTPException(status_code=status_code, detail=detail) from exc
+        raise classified_http_exception(status_code, str(detail), code=ErrorCode.UPSTREAM_ERROR) from exc
     except SecurityViolationError as exc:
         logger.warning("Security validation failed for database %r: %s", body.name, exc)
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, str(exc), code=ErrorCode.INPUT_SANITIZATION_FAILED) from exc
     except HTTPException:
         raise
     except Exception as exc:
@@ -288,6 +293,7 @@ async def create_database(
         )
 
 
+@trace_external_call("bff.database.delete_database")
 async def delete_database(
     *,
     db_name: str,
@@ -301,9 +307,10 @@ async def delete_database(
 
         protected_dbs = ["_system", "_meta"]
         if validated_db_name in protected_dbs:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"시스템 데이터베이스 '{validated_db_name}'은(는) 삭제할 수 없습니다",
+            raise classified_http_exception(
+                status.HTTP_403_FORBIDDEN,
+                f"시스템 데이터베이스 '{validated_db_name}'은(는) 삭제할 수 없습니다",
+                code=ErrorCode.PERMISSION_DENIED,
             )
 
         actor_type, actor_id, _actor_name = resolve_database_actor_with_name(http_request.headers)
@@ -314,7 +321,7 @@ async def delete_database(
                 principal_id=actor_id,
             )
             if not role or role.lower() != "owner":
-                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only owners can delete projects.")
+                raise classified_http_exception(status.HTTP_403_FORBIDDEN, "Only owners can delete projects.", code=ErrorCode.PERMISSION_DENIED)
 
         if expected_seq is None:
             expected_seq = await _get_expected_seq_for_database(validated_db_name)
@@ -329,9 +336,9 @@ async def delete_database(
                 detail = exc.response.text or str(exc)
             if isinstance(detail, dict):
                 detail = detail.get("detail") or detail.get("message") or detail.get("error") or detail
-            raise HTTPException(status_code=status_code, detail=detail) from exc
+            raise classified_http_exception(status_code, str(detail), code=ErrorCode.UPSTREAM_ERROR) from exc
         except httpx.RequestError as exc:
-            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+            raise classified_http_exception(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc), code=ErrorCode.UPSTREAM_UNAVAILABLE) from exc
 
         # Event Sourcing mode: pass through async contract (202 + command_id)
         if isinstance(result, dict) and result.get("status") == "accepted":
@@ -357,7 +364,7 @@ async def delete_database(
         )
     except SecurityViolationError as exc:
         logger.warning("Security validation failed for database %r: %s", db_name, exc)
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, str(exc), code=ErrorCode.INPUT_SANITIZATION_FAILED) from exc
     except HTTPException:
         raise
     except Exception as exc:
@@ -371,6 +378,7 @@ async def delete_database(
         )
 
 
+@trace_external_call("bff.database.get_branch_info")
 async def get_branch_info(*, db_name: str, branch_name: str, oms: OMSClient) -> Dict[str, Any]:
     """브랜치 정보 조회 (프론트엔드용 BFF 래핑)"""
     try:
@@ -378,19 +386,20 @@ async def get_branch_info(*, db_name: str, branch_name: str, oms: OMSClient) -> 
         return await oms.get_branch_info(db_name, branch_name)
     except SecurityViolationError as exc:
         logger.warning("Security validation failed for branch info (%s/%s): %s", db_name, branch_name, exc)
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, str(exc), code=ErrorCode.INPUT_SANITIZATION_FAILED) from exc
     except httpx.HTTPStatusError as exc:
         resp = getattr(exc, "response", None)
         if resp is not None and resp.status_code == 404:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="브랜치를 찾을 수 없습니다") from exc
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="OMS 브랜치 조회 실패") from exc
+            raise classified_http_exception(status.HTTP_404_NOT_FOUND, "브랜치를 찾을 수 없습니다", code=ErrorCode.RESOURCE_NOT_FOUND) from exc
+        raise classified_http_exception(status.HTTP_502_BAD_GATEWAY, "OMS 브랜치 조회 실패", code=ErrorCode.UPSTREAM_ERROR) from exc
     except httpx.HTTPError as exc:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="OMS 브랜치 조회 실패") from exc
+        raise classified_http_exception(status.HTTP_502_BAD_GATEWAY, "OMS 브랜치 조회 실패", code=ErrorCode.UPSTREAM_ERROR) from exc
     except Exception as exc:
         logger.error("Failed to get branch info (%s/%s): %s", db_name, branch_name, exc)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc), code=ErrorCode.INTERNAL_ERROR) from exc
 
 
+@trace_external_call("bff.database.delete_branch")
 async def delete_branch(*, db_name: str, branch_name: str, force: bool, oms: OMSClient) -> Dict[str, Any]:
     """브랜치 삭제 (프론트엔드용 BFF 래핑)"""
     try:
@@ -398,27 +407,29 @@ async def delete_branch(*, db_name: str, branch_name: str, force: bool, oms: OMS
         return await oms.delete_branch(db_name, branch_name, force=force)
     except SecurityViolationError as exc:
         logger.warning("Security validation failed for branch delete (%s/%s): %s", db_name, branch_name, exc)
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, str(exc), code=ErrorCode.INPUT_SANITIZATION_FAILED) from exc
     except httpx.HTTPStatusError as exc:
         resp = getattr(exc, "response", None)
         if resp is not None:
             if resp.status_code == 404:
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="브랜치를 찾을 수 없습니다") from exc
+                raise classified_http_exception(status.HTTP_404_NOT_FOUND, "브랜치를 찾을 수 없습니다", code=ErrorCode.RESOURCE_NOT_FOUND) from exc
             if resp.status_code == 403:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail=protected_branch_write_message(),
+                raise classified_http_exception(
+                    status.HTTP_403_FORBIDDEN,
+                    protected_branch_write_message(),
+                    code=ErrorCode.PERMISSION_DENIED,
                 ) from exc
             if resp.status_code == 400:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="현재 브랜치는 삭제할 수 없습니다") from exc
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="OMS 브랜치 삭제 실패") from exc
+                raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "현재 브랜치는 삭제할 수 없습니다", code=ErrorCode.REQUEST_VALIDATION_FAILED) from exc
+        raise classified_http_exception(status.HTTP_502_BAD_GATEWAY, "OMS 브랜치 삭제 실패", code=ErrorCode.UPSTREAM_ERROR) from exc
     except httpx.HTTPError as exc:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="OMS 브랜치 삭제 실패") from exc
+        raise classified_http_exception(status.HTTP_502_BAD_GATEWAY, "OMS 브랜치 삭제 실패", code=ErrorCode.UPSTREAM_ERROR) from exc
     except Exception as exc:
         logger.error("Failed to delete branch (%s/%s): %s", db_name, branch_name, exc)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc), code=ErrorCode.INTERNAL_ERROR) from exc
 
 
+@trace_external_call("bff.database.get_database")
 async def get_database(*, db_name: str, oms: OMSClient) -> Dict[str, Any]:
     """데이터베이스 정보 조회"""
     try:
@@ -427,7 +438,7 @@ async def get_database(*, db_name: str, oms: OMSClient) -> Dict[str, Any]:
         return {"status": "success", "data": result}
     except SecurityViolationError as exc:
         logger.warning("Security validation failed for database %r: %s", db_name, exc)
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, str(exc), code=ErrorCode.INPUT_SANITIZATION_FAILED) from exc
     except HTTPException:
         raise
     except Exception as exc:
@@ -441,6 +452,7 @@ async def get_database(*, db_name: str, oms: OMSClient) -> Dict[str, Any]:
         )
 
 
+@trace_db_operation("bff.database.get_database_expected_seq")
 async def get_database_expected_seq(*, db_name: str) -> Dict[str, Any]:
     """
     Resolve the current `expected_seq` for database (aggregate) operations.
@@ -456,14 +468,15 @@ async def get_database_expected_seq(*, db_name: str) -> Dict[str, Any]:
         ).to_dict()
     except SecurityViolationError as exc:
         logger.warning("Security validation failed for expected-seq (%s): %s", db_name, exc)
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, str(exc), code=ErrorCode.INPUT_SANITIZATION_FAILED) from exc
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, str(exc), code=ErrorCode.REQUEST_VALIDATION_FAILED) from exc
     except Exception as exc:
         logger.error("Failed to get expected_seq for database %r: %s", db_name, exc)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc), code=ErrorCode.INTERNAL_ERROR) from exc
 
 
+@trace_external_call("bff.database.list_classes")
 async def list_classes(
     *,
     db_name: str,
@@ -500,7 +513,7 @@ async def list_classes(
         return {"classes": classes, "count": len(classes)}
     except SecurityViolationError as exc:
         logger.warning("Security validation failed for database %r: %s", db_name, exc)
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, str(exc), code=ErrorCode.INPUT_SANITIZATION_FAILED) from exc
     except HTTPException:
         raise
     except Exception as exc:
@@ -514,6 +527,7 @@ async def list_classes(
         )
 
 
+@trace_external_call("bff.database.create_class")
 async def create_class(*, db_name: str, class_data: Dict[str, Any], oms: OMSClient) -> Dict[str, Any]:
     """데이터베이스에 새 클래스 생성"""
     try:
@@ -521,7 +535,7 @@ async def create_class(*, db_name: str, class_data: Dict[str, Any], oms: OMSClie
         class_data = sanitize_input(class_data)
 
         if not class_data.get("@id"):
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="클래스 ID (@id)가 필요합니다")
+            raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "클래스 ID (@id)가 필요합니다", code=ErrorCode.REQUEST_VALIDATION_FAILED)
 
         oms_data = class_data.copy()
         oms_data["id"] = oms_data.pop("@id", None)
@@ -531,7 +545,7 @@ async def create_class(*, db_name: str, class_data: Dict[str, Any], oms: OMSClie
         return {"status": "success", "@id": class_data.get("@id"), "data": result}
     except SecurityViolationError as exc:
         logger.warning("Security validation failed for create_class (%s): %s", db_name, exc)
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, str(exc), code=ErrorCode.INPUT_SANITIZATION_FAILED) from exc
     except httpx.HTTPStatusError as exc:
         upstream_status = int(getattr(exc.response, "status_code", 502) or 502)
         try:
@@ -540,9 +554,21 @@ async def create_class(*, db_name: str, class_data: Dict[str, Any], oms: OMSClie
             upstream_body = getattr(exc.response, "text", str(exc))
 
         if upstream_status in {400, 401, 403, 404, 409, 422}:
-            raise HTTPException(status_code=upstream_status, detail=upstream_body) from exc
+            code_by_status = {
+                400: ErrorCode.REQUEST_VALIDATION_FAILED,
+                401: ErrorCode.AUTH_REQUIRED,
+                403: ErrorCode.PERMISSION_DENIED,
+                404: ErrorCode.RESOURCE_NOT_FOUND,
+                409: ErrorCode.CONFLICT,
+                422: ErrorCode.REQUEST_VALIDATION_FAILED,
+            }
+            raise classified_http_exception(
+                upstream_status,
+                str(upstream_body),
+                code=code_by_status.get(upstream_status, ErrorCode.UPSTREAM_ERROR),
+            ) from exc
 
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=upstream_body) from exc
+        raise classified_http_exception(status.HTTP_502_BAD_GATEWAY, str(upstream_body) if not isinstance(upstream_body, str) else upstream_body, code=ErrorCode.UPSTREAM_ERROR) from exc
     except HTTPException:
         raise
     except Exception as exc:
@@ -567,6 +593,7 @@ async def create_class(*, db_name: str, class_data: Dict[str, Any], oms: OMSClie
         )
 
 
+@trace_external_call("bff.database.get_class")
 async def get_class(*, db_name: str, class_id: str, oms: OMSClient) -> Dict[str, Any]:
     """특정 클래스 조회"""
     try:
@@ -627,6 +654,7 @@ async def get_class(*, db_name: str, class_id: str, oms: OMSClient) -> Dict[str,
         )
 
 
+@trace_external_call("bff.database.list_branches")
 async def list_branches(*, db_name: str, oms: OMSClient) -> Dict[str, Any]:
     """브랜치 목록 조회"""
     try:
@@ -654,6 +682,7 @@ async def list_branches(*, db_name: str, oms: OMSClient) -> Dict[str, Any]:
         )
 
 
+@trace_external_call("bff.database.create_branch")
 async def create_branch(*, db_name: str, branch_data: Dict[str, Any], oms: OMSClient) -> Dict[str, Any]:
     """새 브랜치 생성"""
     try:
@@ -662,7 +691,7 @@ async def create_branch(*, db_name: str, branch_data: Dict[str, Any], oms: OMSCl
 
         branch_name = branch_data.get("name")
         if not branch_name:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="브랜치 이름이 필요합니다")
+            raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "브랜치 이름이 필요합니다", code=ErrorCode.REQUEST_VALIDATION_FAILED)
         branch_name = validate_branch_name(branch_name)
 
         from_branch = branch_data.get("from_branch", "main")
@@ -692,6 +721,7 @@ async def create_branch(*, db_name: str, branch_data: Dict[str, Any], oms: OMSCl
         )
 
 
+@trace_external_call("bff.database.get_versions")
 async def get_versions(*, db_name: str, oms: OMSClient) -> Dict[str, Any]:
     """버전 히스토리 조회"""
     try:

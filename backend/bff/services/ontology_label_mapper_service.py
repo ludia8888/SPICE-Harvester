@@ -9,8 +9,10 @@ from __future__ import annotations
 from typing import Any, Dict
 
 from shared.utils.label_mapper import LabelMapper
+from shared.observability.tracing import trace_external_call
 
 
+@trace_external_call("bff.ontology_label_mapper.map_relationship_targets")
 async def map_relationship_targets(
     *,
     mapper: LabelMapper,
@@ -33,6 +35,7 @@ async def map_relationship_targets(
             rel["target"] = mapped
 
 
+@trace_external_call("bff.ontology_label_mapper.register_ontology_label_mappings")
 async def register_ontology_label_mappings(
     *,
     mapper: LabelMapper,

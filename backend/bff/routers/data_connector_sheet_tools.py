@@ -6,7 +6,8 @@ Composed by `bff.routers.data_connector` via router composition (Composite patte
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Request, status
+from shared.errors.error_types import ErrorCode, classified_http_exception
 
 from bff.routers.data_connector_deps import get_connector_registry, get_google_sheets_service
 from bff.routers.data_connector_ops import _resolve_optional_access_token
@@ -74,10 +75,10 @@ async def extract_google_sheet_grid(
 
         return sheet_grid
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, str(e), code=ErrorCode.REQUEST_VALIDATION_FAILED) from e
     except Exception as e:
         logger.error("Failed to extract Google Sheets grid: %s", e)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Grid extraction failed: {e}") from e
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, f"Grid extraction failed: {e}", code=ErrorCode.CONNECTOR_ERROR) from e
 
 
 @router.post(
@@ -117,8 +118,7 @@ async def preview_google_sheet_for_funnel(
             total_columns=preview.total_columns,
         )
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, str(e), code=ErrorCode.REQUEST_VALIDATION_FAILED) from e
     except Exception as e:
         logger.error("Failed to preview Google Sheet: %s", e)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Preview failed: {e}") from e
-
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, f"Preview failed: {e}", code=ErrorCode.CONNECTOR_ERROR) from e

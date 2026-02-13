@@ -6,8 +6,10 @@ Composed by `bff.routers.objectify` via router composition (Composite pattern).
 
 import logging
 from typing import Any, Dict, Optional
+from shared.observability.tracing import trace_endpoint
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, Query, Request, status
+from shared.errors.error_types import ErrorCode, classified_http_exception
 
 from bff.dependencies import OMSClientDep
 from bff.routers.objectify_deps import get_dataset_registry, get_objectify_registry
@@ -23,6 +25,7 @@ router = APIRouter(tags=["Objectify"])
 
 
 @router.post("/mapping-specs", response_model=Dict[str, Any], status_code=status.HTTP_201_CREATED)
+@trace_endpoint("bff.objectify.create_mapping_spec")
 async def create_mapping_spec(
     body: CreateMappingSpecRequest,
     request: Request,
@@ -40,6 +43,7 @@ async def create_mapping_spec(
 
 
 @router.get("/mapping-specs", response_model=Dict[str, Any])
+@trace_endpoint("bff.objectify.list_mapping_specs")
 async def list_mapping_specs(
     dataset_id: Optional[str] = Query(default=None),
     include_inactive: bool = Query(default=False),
@@ -53,5 +57,5 @@ async def list_mapping_specs(
         ).to_dict()
     except Exception as exc:
         logger.error("Failed to list mapping specs: %s", exc)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc), code=ErrorCode.INTERNAL_ERROR) from exc
 

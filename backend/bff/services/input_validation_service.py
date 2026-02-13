@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import HTTPException, Request, status
+from shared.errors.error_types import ErrorCode, classified_http_exception
 
 from shared.security.input_sanitizer import (
     SecurityViolationError,
@@ -20,7 +21,7 @@ from shared.security.auth_utils import enforce_db_scope
 
 
 def _to_bad_request(exc: Exception) -> HTTPException:
-    return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    return classified_http_exception(status.HTTP_400_BAD_REQUEST, str(exc), code=ErrorCode.REQUEST_VALIDATION_FAILED)
 
 
 def validated_db_name(db_name: str) -> str:
@@ -48,4 +49,4 @@ def enforce_db_scope_or_403(request: Request, *, db_name: str) -> None:
     try:
         enforce_db_scope(request.headers, db_name=db_name)
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+        raise classified_http_exception(403, str(exc), code=ErrorCode.PERMISSION_DENIED) from exc

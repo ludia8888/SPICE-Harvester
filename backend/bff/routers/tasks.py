@@ -13,10 +13,13 @@ Key features:
 """
 
 from __future__ import annotations
+from shared.observability.tracing import trace_endpoint
 
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, HTTPException, Query, status
+
+from shared.errors.error_types import ErrorCode, classified_http_exception
 
 from bff.schemas.tasks_requests import TaskListResponse, TaskMetricsResponse, TaskStatusResponse
 from bff.services import tasks_service
@@ -28,6 +31,7 @@ router = APIRouter(prefix="/tasks", tags=["Background Tasks"])
 
 # API Endpoints
 @router.get("/{task_id}", response_model=TaskStatusResponse)
+@trace_endpoint("bff.tasks.get_task_status")
 async def get_task_status(
     task_id: str,
     task_manager: BackgroundTaskManagerDep,
@@ -42,6 +46,7 @@ async def get_task_status(
 
 
 @router.get("/", response_model=TaskListResponse)
+@trace_endpoint("bff.tasks.list_tasks")
 async def list_tasks(
     status: Optional[TaskStatus] = Query(None, description="Filter by status"),
     task_type: Optional[str] = Query(None, description="Filter by task type"),
@@ -64,6 +69,7 @@ async def list_tasks(
 
 
 @router.delete("/{task_id}")
+@trace_endpoint("bff.tasks.cancel_task")
 async def cancel_task(
     task_id: str,
     task_manager: BackgroundTaskManagerDep,
@@ -78,6 +84,7 @@ async def cancel_task(
 
 
 @router.get("/metrics/summary", response_model=TaskMetricsResponse)
+@trace_endpoint("bff.tasks.get_task_metrics")
 async def get_task_metrics(
     task_manager: BackgroundTaskManagerDep,
 ) -> TaskMetricsResponse:
@@ -91,6 +98,7 @@ async def get_task_metrics(
 
 
 @router.post("/{task_id}/retry", include_in_schema=False)
+@trace_endpoint("bff.tasks.retry_task")
 async def retry_task(
     task_id: str,
     task_manager: BackgroundTaskManagerDep,
@@ -104,30 +112,32 @@ async def retry_task(
     task = await task_manager.get_task_status(task_id)
     
     if not task:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Task {task_id} not found"
+        raise classified_http_exception(
+            status.HTTP_404_NOT_FOUND,
+            f"Task {task_id} not found",
+            code=ErrorCode.RESOURCE_NOT_FOUND,
         )
     
     if task.status != TaskStatus.FAILED:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Can only retry failed tasks. Current status: {task.status.value}"
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            f"Can only retry failed tasks. Current status: {task.status.value}",
+            code=ErrorCode.REQUEST_VALIDATION_FAILED,
         )
 
     # Enterprise correctness: do not pretend we can requeue a completed/failed in-process task.
     # BackgroundTaskManager retries are implemented *during execution* (within the same process),
     # but manual retry requires a durable task spec (callable + args) which is not persisted today.
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail=(
-            "Manual task retry is not supported. "
-            "Tasks auto-retry while running (in-process); after failure, create a new task/command instead."
-        ),
+    raise classified_http_exception(
+        status.HTTP_501_NOT_IMPLEMENTED,
+        "Manual task retry is not supported. "
+        "Tasks auto-retry while running (in-process); after failure, create a new task/command instead.",
+        code=ErrorCode.FEATURE_NOT_IMPLEMENTED,
     )
 
 
 @router.get("/{task_id}/result")
+@trace_endpoint("bff.tasks.get_task_result")
 async def get_task_result(
     task_id: str,
     task_manager: BackgroundTaskManagerDep,

@@ -26,7 +26,7 @@ from shared.dependencies import get_container, ServiceContainer
 from shared.dependencies.providers import InitializedBackgroundTaskManagerDep, get_settings_dependency
 from shared.config.settings import get_settings as get_settings_ssot
 from shared.errors.error_envelope import build_error_envelope
-from shared.errors.error_types import ErrorCategory, ErrorCode
+from shared.errors.error_types import ErrorCategory, ErrorCode, classified_http_exception
 from shared.observability.request_context import get_correlation_id, get_request_id
 
 router = APIRouter(tags=["Monitoring"])
@@ -345,9 +345,10 @@ async def restart_service(
     This endpoint allows manual restart of individual services for
     troubleshooting and maintenance.
     """
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail="Service restart is not supported via API in this deployment.",
+    raise classified_http_exception(
+        status.HTTP_501_NOT_IMPLEMENTED,
+        "Service restart is not supported via API in this deployment.",
+        code=ErrorCode.FEATURE_NOT_IMPLEMENTED,
     )
 
 
@@ -364,9 +365,10 @@ async def get_service_dependencies(
     Returns the service dependency graph showing how services depend
     on each other and their current status.
     """
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail="Dependency graph is not tracked by the ServiceContainer. Use /health/detailed and /status instead.",
+    raise classified_http_exception(
+        status.HTTP_501_NOT_IMPLEMENTED,
+        "Dependency graph is not tracked by the ServiceContainer. Use /health/detailed and /status instead.",
+        code=ErrorCode.FEATURE_NOT_IMPLEMENTED,
     )
 
 

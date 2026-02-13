@@ -10,10 +10,11 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
-from fastapi import HTTPException, status
+from shared.errors.error_types import ErrorCode, classified_http_exception
 
 from bff.schemas.tasks_requests import TaskListResponse, TaskMetricsResponse, TaskStatusResponse
 from shared.models.background_task import BackgroundTask, TaskStatus
+from shared.observability.tracing import trace_db_operation
 
 
 def _to_status_response(task: BackgroundTask) -> TaskStatusResponse:
@@ -31,13 +32,15 @@ def _to_status_response(task: BackgroundTask) -> TaskStatusResponse:
     )
 
 
+@trace_db_operation("bff.tasks.get_task_status")
 async def get_task_status(*, task_id: str, task_manager: Any) -> TaskStatusResponse:
     task = await task_manager.get_task_status(task_id)
     if not task:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Task {task_id} not found")
+        raise classified_http_exception(404, f"Task {task_id} not found", code=ErrorCode.RESOURCE_NOT_FOUND)
     return _to_status_response(task)
 
 
+@trace_db_operation("bff.tasks.list_tasks")
 async def list_tasks(
     *,
     status_filter: Optional[TaskStatus],
@@ -50,32 +53,32 @@ async def list_tasks(
     return TaskListResponse(tasks=responses, total=len(responses))
 
 
+@trace_db_operation("bff.tasks.cancel_task")
 async def cancel_task(*, task_id: str, task_manager: Any) -> Dict[str, Any]:
     success = await task_manager.cancel_task(task_id)
     if not success:
         task = await task_manager.get_task_status(task_id)
         if not task:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Task {task_id} not found")
+            raise classified_http_exception(404, f"Task {task_id} not found", code=ErrorCode.RESOURCE_NOT_FOUND)
         return {"message": f"Task {task_id} is already {task.status.value}", "cancelled": False}
     return {"message": f"Task {task_id} cancelled successfully", "cancelled": True}
 
 
+@trace_db_operation("bff.tasks.get_task_metrics")
 async def get_task_metrics(*, task_manager: Any) -> TaskMetricsResponse:
     metrics = await task_manager.get_task_metrics()
     return TaskMetricsResponse(metrics=metrics, timestamp=datetime.now(timezone.utc))
 
 
+@trace_db_operation("bff.tasks.get_task_result")
 async def get_task_result(*, task_id: str, task_manager: Any) -> Dict[str, Any]:
     task = await task_manager.get_task_status(task_id)
 
     if not task:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Task {task_id} not found")
+        raise classified_http_exception(404, f"Task {task_id} not found", code=ErrorCode.RESOURCE_NOT_FOUND)
 
     if not task.is_complete:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Task {task_id} is not complete. Current status: {task.status.value}",
-        )
+        raise classified_http_exception(400, f"Task {task_id} is not complete. Current status: {task.status.value}", code=ErrorCode.REQUEST_VALIDATION_FAILED)
 
     if not task.result:
         return {

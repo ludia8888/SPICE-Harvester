@@ -9,6 +9,7 @@ in `bff.schemas.admin_replay_requests`.
 """
 
 from __future__ import annotations
+from shared.observability.tracing import trace_endpoint
 
 from typing import Any, Dict, Optional
 
@@ -26,6 +27,7 @@ router = APIRouter(tags=["Admin Operations"])
 
 
 @router.post("/replay-instance-state", response_model=ReplayInstanceStateResponse)
+@trace_endpoint("bff.admin.replay_instance_state")
 async def replay_instance_state(
     request: ReplayInstanceStateRequest,
     background_tasks: BackgroundTasks,
@@ -44,6 +46,7 @@ async def replay_instance_state(
 
 
 @router.get("/replay-instance-state/{task_id}/result")
+@trace_endpoint("bff.admin.get_replay_result")
 async def get_replay_result(
     task_id: str,
     task_manager: BackgroundTaskManagerDep,
@@ -57,6 +60,7 @@ async def get_replay_result(
 
 
 @router.get("/replay-instance-state/{task_id}/trace")
+@trace_endpoint("bff.admin.get_replay_trace")
 async def get_replay_trace(
     task_id: str,
     command_id: Optional[str] = Query(
@@ -96,6 +100,7 @@ async def get_replay_trace(
 
 
 @router.post("/cleanup-old-replays")
+@trace_endpoint("bff.admin.cleanup_old_replay_results")
 async def cleanup_old_replay_results(
     older_than_hours: int = Query(24, ge=1, le=168, description="Delete results older than N hours"),
     *,

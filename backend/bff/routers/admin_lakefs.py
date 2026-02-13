@@ -6,6 +6,7 @@ Composed by `bff.routers.admin`.
 """
 
 from __future__ import annotations
+from shared.observability.tracing import trace_endpoint
 
 from typing import Any, Dict, Literal
 
@@ -28,6 +29,7 @@ class LakeFSCredentialsUpsertRequest(BaseModel):
 
 
 @router.get("/lakefs/credentials")
+@trace_endpoint("bff.admin.list_lakefs_credentials")
 async def list_lakefs_credentials(
     registry: PipelineRegistry = Depends(get_pipeline_registry),
 ) -> Dict[str, Any]:
@@ -36,6 +38,7 @@ async def list_lakefs_credentials(
 
 
 @router.post("/lakefs/credentials")
+@trace_endpoint("bff.admin.upsert_lakefs_credentials")
 async def upsert_lakefs_credentials(
     payload: LakeFSCredentialsUpsertRequest,
     request: Request,

@@ -10,6 +10,8 @@ from typing import Any
 import httpx
 from fastapi import HTTPException, status
 
+from shared.errors.error_types import ErrorCode, classified_http_exception
+
 
 def extract_httpx_detail(exc: httpx.HTTPStatusError) -> Any:
     resp = getattr(exc, "response", None)
@@ -29,5 +31,5 @@ def extract_httpx_detail(exc: httpx.HTTPStatusError) -> Any:
 def raise_httpx_as_http_exception(exc: httpx.HTTPStatusError) -> None:
     resp = getattr(exc, "response", None)
     if resp is None:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
-    raise HTTPException(status_code=int(resp.status_code), detail=extract_httpx_detail(exc)) from exc
+        raise classified_http_exception(status.HTTP_502_BAD_GATEWAY, str(exc), code=ErrorCode.UPSTREAM_ERROR) from exc
+    raise classified_http_exception(int(resp.status_code), str(extract_httpx_detail(exc)), code=ErrorCode.UPSTREAM_ERROR) from exc

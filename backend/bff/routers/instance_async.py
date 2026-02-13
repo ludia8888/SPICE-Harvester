@@ -6,6 +6,7 @@ This router is intentionally thin: business logic lives in
 """
 
 from __future__ import annotations
+from shared.observability.tracing import trace_endpoint
 
 from typing import Optional
 
@@ -26,6 +27,7 @@ router = APIRouter(prefix="/databases/{db_name}/instances", tags=["Async Instanc
     response_model=CommandResult,
     status_code=status.HTTP_202_ACCEPTED,
 )
+@trace_endpoint("bff.instance_async.create_instance_async")
 async def create_instance_async(
     db_name: str,
     class_label: str,
@@ -60,6 +62,7 @@ async def create_instance_async(
     response_model=CommandResult,
     status_code=status.HTTP_202_ACCEPTED,
 )
+@trace_endpoint("bff.instance_async.update_instance_async")
 async def update_instance_async(
     db_name: str,
     class_label: str,
@@ -95,6 +98,7 @@ async def update_instance_async(
     response_model=CommandResult,
     status_code=status.HTTP_202_ACCEPTED,
 )
+@trace_endpoint("bff.instance_async.delete_instance_async")
 async def delete_instance_async(
     db_name: str,
     class_label: str,
@@ -127,6 +131,7 @@ async def delete_instance_async(
     response_model=CommandResult,
     status_code=status.HTTP_202_ACCEPTED,
 )
+@trace_endpoint("bff.instance_async.bulk_create_instances_async")
 async def bulk_create_instances_async(
     db_name: str,
     class_label: str,

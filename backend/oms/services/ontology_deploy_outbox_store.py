@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from oms.database.postgres import db as postgres_db
+from shared.observability.tracing import trace_db_operation
 
 
 @dataclass
@@ -41,6 +42,7 @@ class OntologyDeployOutboxStore:
     def __init__(self, *, table: OntologyDeployOutboxTableSpec) -> None:
         self._table = table
 
+    @trace_db_operation("oms.deploy_outbox_store.claim_batch")
     async def claim_batch(
         self,
         *,
@@ -117,6 +119,7 @@ class OntologyDeployOutboxStore:
                 for row in rows
             ]
 
+    @trace_db_operation("oms.deploy_outbox_store.mark_published")
     async def mark_published(self, *, outbox_id: str) -> None:
         table = self._table.table_name
         error_col = self._table.error_column
@@ -134,6 +137,7 @@ class OntologyDeployOutboxStore:
             outbox_id,
         )
 
+    @trace_db_operation("oms.deploy_outbox_store.mark_failed")
     async def mark_failed(
         self,
         *,

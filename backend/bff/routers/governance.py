@@ -6,6 +6,7 @@ This router is intentionally thin: business logic lives in
 """
 
 from __future__ import annotations
+from shared.observability.tracing import trace_endpoint
 
 from typing import Optional
 
@@ -27,6 +28,7 @@ router = APIRouter(tags=["Governance"])
 
 
 @router.post("/backing-datasources", response_model=ApiResponse)
+@trace_endpoint("bff.governance.create_backing_datasource")
 async def create_backing_datasource(
     body: CreateBackingDatasourceRequest,
     request: Request,
@@ -41,6 +43,7 @@ async def create_backing_datasource(
 
 
 @router.get("/backing-datasources", response_model=ApiResponse)
+@trace_endpoint("bff.governance.list_backing_datasources")
 async def list_backing_datasources(
     request: Request,
     dataset_id: Optional[str] = Query(default=None),
@@ -59,6 +62,7 @@ async def list_backing_datasources(
 
 
 @router.get("/backing-datasources/{backing_id}", response_model=ApiResponse)
+@trace_endpoint("bff.governance.get_backing_datasource")
 async def get_backing_datasource(
     backing_id: str,
     request: Request,
@@ -73,6 +77,7 @@ async def get_backing_datasource(
 
 
 @router.post("/backing-datasources/{backing_id}/versions", response_model=ApiResponse)
+@trace_endpoint("bff.governance.create_backing_datasource_version")
 async def create_backing_datasource_version(
     backing_id: str,
     body: CreateBackingDatasourceVersionRequest,
@@ -89,6 +94,7 @@ async def create_backing_datasource_version(
 
 
 @router.get("/backing-datasources/{backing_id}/versions", response_model=ApiResponse)
+@trace_endpoint("bff.governance.list_backing_datasource_versions")
 async def list_backing_datasource_versions(
     backing_id: str,
     request: Request,
@@ -103,6 +109,7 @@ async def list_backing_datasource_versions(
 
 
 @router.get("/backing-datasource-versions/{version_id}", response_model=ApiResponse)
+@trace_endpoint("bff.governance.get_backing_datasource_version")
 async def get_backing_datasource_version(
     version_id: str,
     request: Request,
@@ -117,6 +124,7 @@ async def get_backing_datasource_version(
 
 
 @router.post("/key-specs", response_model=ApiResponse)
+@trace_endpoint("bff.governance.create_key_spec")
 async def create_key_spec(
     body: CreateKeySpecRequest,
     request: Request,
@@ -131,6 +139,7 @@ async def create_key_spec(
 
 
 @router.get("/key-specs", response_model=ApiResponse)
+@trace_endpoint("bff.governance.list_key_specs")
 async def list_key_specs(
     request: Request,
     dataset_id: Optional[str] = Query(default=None),
@@ -145,6 +154,7 @@ async def list_key_specs(
 
 
 @router.get("/key-specs/{key_spec_id}", response_model=ApiResponse)
+@trace_endpoint("bff.governance.get_key_spec")
 async def get_key_spec(
     key_spec_id: str,
     request: Request,
@@ -159,6 +169,7 @@ async def get_key_spec(
 
 
 @router.get("/schema-migration-plans", response_model=ApiResponse)
+@trace_endpoint("bff.governance.list_schema_migration_plans")
 async def list_schema_migration_plans(
     request: Request,
     db_name: Optional[str] = Query(default=None),
@@ -179,6 +190,7 @@ async def list_schema_migration_plans(
 
 
 @router.post("/gate-policies", response_model=ApiResponse)
+@trace_endpoint("bff.governance.upsert_gate_policy")
 async def upsert_gate_policy(
     body: GatePolicyRequest,
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
@@ -191,6 +203,7 @@ async def upsert_gate_policy(
 
 
 @router.get("/gate-policies", response_model=ApiResponse)
+@trace_endpoint("bff.governance.list_gate_policies")
 async def list_gate_policies(
     scope: Optional[str] = Query(default=None),
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
@@ -203,6 +216,7 @@ async def list_gate_policies(
 
 
 @router.get("/gate-results", response_model=ApiResponse)
+@trace_endpoint("bff.governance.list_gate_results")
 async def list_gate_results(
     scope: Optional[str] = Query(default=None),
     subject_type: Optional[str] = Query(default=None),
@@ -219,6 +233,7 @@ async def list_gate_results(
 
 
 @router.post("/access-policies", response_model=ApiResponse)
+@trace_endpoint("bff.governance.upsert_access_policy")
 async def upsert_access_policy(
     body: AccessPolicyRequest,
     request: Request,
@@ -233,6 +248,7 @@ async def upsert_access_policy(
 
 
 @router.get("/access-policies", response_model=ApiResponse)
+@trace_endpoint("bff.governance.list_access_policies")
 async def list_access_policies(
     request: Request,
     db_name: Optional[str] = Query(default=None),

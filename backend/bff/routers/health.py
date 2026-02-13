@@ -4,6 +4,7 @@
 """
 
 import logging
+from shared.observability.tracing import trace_endpoint
 
 from fastapi import APIRouter, Depends, status
 from fastapi.responses import JSONResponse
@@ -19,6 +20,7 @@ router = APIRouter(tags=["Health"])
 
 
 @router.get("/")
+@trace_endpoint("bff.health.root")
 async def root():
     """
     루트 엔드포인트
@@ -33,6 +35,7 @@ async def root():
 
 
 @router.get("/health")
+@trace_endpoint("bff.health.health_check")
 async def health_check(oms_client: OMSClient = Depends(get_oms_client)):
     """
     헬스체크 엔드포인트

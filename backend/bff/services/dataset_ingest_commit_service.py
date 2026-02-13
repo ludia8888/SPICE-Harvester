@@ -11,6 +11,7 @@ from typing import Any, Callable, Dict, Optional
 
 import bff.routers.pipeline_datasets_ops as ops
 from shared.utils.s3_uri import build_s3_uri
+from shared.observability.tracing import trace_external_call
 
 
 @dataclass(frozen=True)
@@ -24,6 +25,7 @@ def _normalize_text(value: Any) -> str:
     return str(value or "").strip()
 
 
+@trace_external_call("bff.dataset_ingest_commit.ensure_lakefs_commit_artifact")
 async def ensure_lakefs_commit_artifact(
     *,
     ingest_request: Any,
@@ -79,6 +81,7 @@ async def ensure_lakefs_commit_artifact(
     )
 
 
+@trace_db_operation("bff.dataset_ingest_commit.persist_ingest_commit_state")
 async def persist_ingest_commit_state(
     *,
     dataset_registry: Any,

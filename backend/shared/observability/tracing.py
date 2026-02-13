@@ -538,6 +538,20 @@ def trace_external_call(name: Optional[str] = None):
     return _lazy_trace(name=name, kind=kind, attributes=None)
 
 
+def trace_storage_operation(name: Optional[str] = None, system: str = "s3"):
+    """Trace storage operations (S3/MinIO, Elasticsearch, Redis, etc.)."""
+    attrs = {"storage.system": system}
+    kind = otel_trace.SpanKind.CLIENT if HAS_OPENTELEMETRY and otel_trace is not None else None
+    return _lazy_trace(name=name, kind=kind, attributes=attrs)
+
+
+def trace_kafka_operation(name: Optional[str] = None):
+    """Trace Kafka produce/consume operations."""
+    attrs = {"messaging.system": "kafka"}
+    kind = otel_trace.SpanKind.CLIENT if HAS_OPENTELEMETRY and otel_trace is not None else None
+    return _lazy_trace(name=name, kind=kind, attributes=attrs)
+
+
 def _lazy_trace(*, name: Optional[str], kind=None, attributes: Optional[Dict[str, Any]] = None):
     def decorator(func):
         import asyncio

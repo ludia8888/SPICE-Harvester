@@ -16,6 +16,8 @@ from typing import Annotated, Optional
 
 from fastapi import Depends, HTTPException, status
 
+from shared.errors.error_types import ErrorCode, classified_http_exception
+
 # Import service classes and factories - all dependencies are now explicit in pyproject.toml
 from shared.services.storage.storage_service import StorageService, create_storage_service
 from shared.services.storage.lakefs_storage_service import LakeFSStorageService, create_lakefs_storage_service
@@ -181,9 +183,10 @@ async def get_background_task_manager(
         container.register_instance(BackgroundTaskManager, task_manager)
         return task_manager
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Background task service unavailable",
+        raise classified_http_exception(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "Background task service unavailable",
+            code=ErrorCode.UPSTREAM_UNAVAILABLE,
         ) from e
 
 

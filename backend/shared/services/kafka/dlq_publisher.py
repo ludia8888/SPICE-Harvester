@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from typing import Any, Mapping, Optional
 
 from shared.models.event_envelope import EventEnvelope
+from shared.observability.tracing import trace_kafka_operation
 from shared.observability.context_propagation import (
     attach_context_from_kafka,
     kafka_headers_from_current_context,
@@ -48,6 +49,7 @@ def build_standard_dlq_payload(
     payload_obj: Optional[Mapping[str, Any]] = None,
     error_max_chars: int = 4000,
     extra: Optional[Mapping[str, Any]] = None,
+    enterprise_error: Optional[Mapping[str, Any]] = None,
 ) -> dict[str, Any]:
     try:
         original_value = payload_text if payload_text is not None else _safe_decode(msg.value())
@@ -86,6 +88,9 @@ def build_standard_dlq_payload(
 
     if extra:
         payload.update(dict(extra))
+
+    if enterprise_error:
+        payload["enterprise"] = dict(enterprise_error)
 
     return payload
 
@@ -173,6 +178,7 @@ def default_envelope_dlq_span_attributes(*, spec: EnvelopeDlqSpec, envelope: Eve
     }
 
 
+@trace_kafka_operation("kafka.publish_envelope_dlq")
 async def publish_envelope_dlq(
     *,
     producer_ops: Any,
@@ -222,6 +228,7 @@ async def publish_envelope_dlq(
             pass
 
 
+@trace_kafka_operation("kafka.publish_standard_dlq")
 async def publish_standard_dlq(
     *,
     producer: Any,
@@ -265,6 +272,7 @@ async def publish_standard_dlq(
     )
 
 
+@trace_kafka_operation("kafka.publish_dlq_json")
 async def publish_dlq_json(
     *,
     producer: Any,
@@ -327,6 +335,7 @@ async def publish_dlq_json(
             pass
 
 
+@trace_kafka_operation("kafka.publish_contextual_dlq_json")
 async def publish_contextual_dlq_json(
     *,
     producer: Any,

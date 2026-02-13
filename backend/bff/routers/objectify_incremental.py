@@ -7,8 +7,10 @@ Composed by `bff.routers.objectify` via router composition (Composite pattern).
 import logging
 from typing import Any, Dict
 from uuid import uuid4
+from shared.observability.tracing import trace_endpoint
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from shared.errors.error_types import ErrorCode, classified_http_exception
 
 from bff.routers.objectify_deps import get_dataset_registry, get_objectify_job_queue, get_objectify_registry, _require_db_role
 from bff.schemas.objectify_requests import TriggerIncrementalRequest
@@ -30,6 +32,7 @@ router = APIRouter(tags=["Objectify"])
     summary="Trigger incremental objectify",
     description="Trigger objectify in incremental mode, processing only rows changed since last run.",
 )
+@trace_endpoint("bff.objectify.trigger_incremental_objectify")
 async def trigger_incremental_objectify(
     mapping_spec_id: str,
     request: Request,
@@ -45,11 +48,11 @@ async def trigger_incremental_objectify(
     try:
         mapping_spec = await objectify_registry.get_mapping_spec(mapping_spec_id=mapping_spec_id)
         if not mapping_spec:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Mapping spec not found: {mapping_spec_id}")
+            raise classified_http_exception(status.HTTP_404_NOT_FOUND, f"Mapping spec not found: {mapping_spec_id}", code=ErrorCode.RESOURCE_NOT_FOUND)
 
         dataset = await dataset_registry.get_dataset(dataset_id=str(mapping_spec.dataset_id))
         if not dataset:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Dataset not found: {mapping_spec.dataset_id}")
+            raise classified_http_exception(status.HTTP_404_NOT_FOUND, f"Dataset not found: {mapping_spec.dataset_id}", code=ErrorCode.RESOURCE_NOT_FOUND)
 
         await _require_db_role(request, db_name=dataset.db_name, roles=DATA_ENGINEER_ROLES)
 
@@ -62,7 +65,7 @@ async def trigger_incremental_objectify(
 
         version = await dataset_registry.get_latest_version(dataset_id=str(mapping_spec.dataset_id))
         if not version:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No dataset version available")
+            raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "No dataset version available", code=ErrorCode.REQUEST_VALIDATION_FAILED)
 
         job_id = str(uuid4())
         options = dict(mapping_spec.options or {})
@@ -114,7 +117,7 @@ async def trigger_incremental_objectify(
         raise
     except Exception as exc:
         logger.error("trigger_incremental_objectify failed: %s", exc)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc), code=ErrorCode.INTERNAL_ERROR) from exc
 
 
 @router.get(
@@ -122,6 +125,7 @@ async def trigger_incremental_objectify(
     summary="Get objectify watermark",
     description="Get the current watermark state for a mapping spec.",
 )
+@trace_endpoint("bff.objectify.get_mapping_spec_watermark")
 async def get_mapping_spec_watermark(
     mapping_spec_id: str,
     request: Request,
@@ -152,4 +156,4 @@ async def get_mapping_spec_watermark(
 
     except Exception as exc:
         logger.error("get_mapping_spec_watermark failed: %s", exc)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc), code=ErrorCode.INTERNAL_ERROR) from exc

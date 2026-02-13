@@ -8,9 +8,11 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from fastapi import HTTPException, status
+from shared.errors.error_types import ErrorCode, classified_http_exception
+from shared.observability.tracing import trace_db_operation
 
 
+@trace_db_operation("bff.dataset_ingest_idempotency.resolve_existing_version_or_raise")
 async def resolve_existing_version_or_raise(
     *,
     dataset_registry: Any,
@@ -29,23 +31,14 @@ async def resolve_existing_version_or_raise(
         return None
 
     if str(getattr(ingest_request, "dataset_id", "")) != str(expected_dataset_id):
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Idempotency key already used for a different dataset",
-        )
+        raise classified_http_exception(409, "Idempotency key already used for a different dataset", code=ErrorCode.CONFLICT)
 
     existing_fingerprint = getattr(ingest_request, "request_fingerprint", None)
     if existing_fingerprint and str(existing_fingerprint) != str(request_fingerprint):
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Idempotency key reuse detected with different payload",
-        )
+        raise classified_http_exception(409, "Idempotency key reuse detected with different payload", code=ErrorCode.CONFLICT)
 
     if str(getattr(ingest_request, "status", "")).upper() == "FAILED":
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=getattr(ingest_request, "error", None) or "Previous ingest failed",
-        )
+        raise classified_http_exception(409, getattr(ingest_request, "error", None) or "Previous ingest failed", code=ErrorCode.CONFLICT)
 
     if str(getattr(ingest_request, "status", "")).upper() == "PUBLISHED":
         get_version = getattr(dataset_registry, "get_version_by_ingest_request", None)

@@ -19,6 +19,8 @@ from shared.services.core.command_status_service import CommandStatusService
 from shared.services.registries.processed_event_registry import ProcessedEventRegistry
 from oms.services.event_store import EventStore
 from oms.utils.command_status_utils import map_registry_status
+from shared.errors.error_types import ErrorCode, classified_http_exception
+from shared.observability.tracing import trace_endpoint
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +71,7 @@ async def _fallback_from_registry(
 
 
 @router.get("/{command_id}/status", response_model=CommandResult)
+@trace_endpoint("oms.command_status.get")
 async def get_command_status(
     command_id: str,
     command_status_service: Optional[CommandStatusService] = CommandStatusServiceDep,
@@ -83,9 +86,10 @@ async def get_command_status(
     try:
         command_uuid = UUID(command_id)
     except Exception:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid command_id (must be UUID)",
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            "Invalid command_id (must be UUID)",
+            code=ErrorCode.REQUEST_VALIDATION_FAILED,
         )
 
     try:
@@ -145,9 +149,10 @@ async def get_command_status(
             return fallback
 
         if not status_available and not registry_available:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Command status tracking is unavailable (Redis/Postgres unavailable)",
+            raise classified_http_exception(
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                "Command status tracking is unavailable (Redis/Postgres unavailable)",
+                code=ErrorCode.UPSTREAM_UNAVAILABLE,
             )
 
         try:
@@ -166,16 +171,18 @@ async def get_command_status(
         except Exception as e:
             logger.warning(f"Event store lookup failed for {command_uuid}: {e}")
 
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Command not found: {command_id}",
+        raise classified_http_exception(
+            status.HTTP_404_NOT_FOUND,
+            f"Command not found: {command_id}",
+            code=ErrorCode.RESOURCE_NOT_FOUND,
         )
 
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error getting command status for {command_id}: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get command status: {str(e)}",
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            f"Failed to get command status: {str(e)}",
+            code=ErrorCode.INTERNAL_ERROR,
         )

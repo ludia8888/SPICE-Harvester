@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import logging
 from typing import Any
+from shared.observability.tracing import trace_db_operation
 
 logger = logging.getLogger(__name__)
 
 
+@trace_db_operation("bff.dataset_ingest_failures.mark_ingest_failed")
 async def mark_ingest_failed(
     *,
     dataset_registry: Any,

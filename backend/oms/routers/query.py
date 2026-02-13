@@ -10,7 +10,7 @@ CQRS read path: Query from Elasticsearch with TerminusDB graph federation
 
 import logging
 from typing import Any, AsyncIterator, Dict, List, Optional
-from fastapi import APIRouter, Depends, HTTPException, Query as QueryParam
+from fastapi import APIRouter, Depends, Query as QueryParam
 from pydantic import BaseModel
 
 from oms.dependencies import (
@@ -20,6 +20,8 @@ from oms.dependencies import (
 )
 from elasticsearch import AsyncElasticsearch
 from shared.config.settings import get_settings
+from shared.errors.error_types import ErrorCode, classified_http_exception
+from shared.observability.tracing import trace_endpoint
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +62,7 @@ async def get_elasticsearch() -> AsyncIterator[AsyncElasticsearch]:
 
 
 @router.post("/query/{db_name}")
+@trace_endpoint("oms.query.execute_simple")
 async def execute_simple_query(
     db_name: str = Depends(ValidatedDatabaseName),
     query: SimpleQuery = ...,
@@ -163,12 +166,13 @@ async def execute_simple_query(
         
     except Exception as e:
         logger.error(f"Query execution failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise classified_http_exception(500, str(e), code=ErrorCode.INTERNAL_ERROR)
     finally:
         await es_client.close()
 
 
 @router.post("/query/{db_name}/woql")
+@trace_endpoint("oms.query.execute_woql")
 async def execute_woql_query(
     db_name: str = Depends(ValidatedDatabaseName),
     query: WOQLQuery = ...,
@@ -202,12 +206,13 @@ async def execute_woql_query(
         
     except Exception as e:
         logger.error(f"WOQL query failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise classified_http_exception(500, str(e), code=ErrorCode.INTERNAL_ERROR)
     finally:
         await es_client.close()
 
 
 @router.get("/instances/{db_name}/{class_id}")
+@trace_endpoint("oms.query.list_instances")
 async def list_instances(
     db_name: str = Depends(ValidatedDatabaseName),
     class_id: str = ...,
@@ -263,6 +268,6 @@ async def list_instances(
         
     except Exception as e:
         logger.error(f"Failed to list instances: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise classified_http_exception(500, str(e), code=ErrorCode.INTERNAL_ERROR)
     finally:
         await es_client.close()

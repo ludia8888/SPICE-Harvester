@@ -9,6 +9,8 @@ from uuid import UUID
 
 from fastapi import HTTPException, status
 
+from shared.errors.error_types import ErrorCode, classified_http_exception
+
 from bff.routers.pipeline_ops import (
     _augment_definition_with_canonical_contract,
     _augment_definition_with_casts,
@@ -29,10 +31,12 @@ from shared.security.input_sanitizer import sanitize_input, validate_db_name
 from shared.services.pipeline.pipeline_scheduler import _is_valid_cron_expression
 from shared.services.registries.pipeline_registry import PipelineAlreadyExistsError
 from shared.utils.event_utils import build_command_event
+from shared.observability.tracing import trace_db_operation
 
 logger = logging.getLogger(__name__)
 
 
+@trace_db_operation("bff.pipeline_catalog.list_pipelines")
 async def list_pipelines(
     *,
     db_name: str,
@@ -56,9 +60,10 @@ async def list_pipelines(
         raise
     except Exception as exc:
         logger.error("Failed to list pipelines: %s", exc)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc), code=ErrorCode.INTERNAL_ERROR) from exc
 
 
+@trace_db_operation("bff.pipeline_catalog.create_pipeline")
 async def create_pipeline(
     *,
     payload: dict[str, Any],
@@ -78,11 +83,11 @@ async def create_pipeline(
             try:
                 pipeline_id = str(UUID(str(raw_pipeline_id)))
             except Exception as exc:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="pipeline_id must be a UUID") from exc
+                raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "pipeline_id must be a UUID", code=ErrorCode.REQUEST_VALIDATION_FAILED) from exc
         db_name = validate_db_name(str(sanitized.get("db_name") or ""))
         name = str(sanitized.get("name") or "").strip()
         if not name:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="name is required")
+            raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "name is required", code=ErrorCode.REQUEST_VALIDATION_FAILED)
         pipeline_type = str(sanitized.get("pipeline_type") or "batch").strip() or "batch"
         location = _normalize_location(str(sanitized.get("location") or ""))
         description = str(sanitized.get("description") or "").strip() or None
@@ -124,26 +129,14 @@ async def create_pipeline(
             try:
                 schedule_interval_seconds = int(schedule_interval_seconds)
             except Exception as exc:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="schedule_interval_seconds must be integer",
-                ) from exc
+                raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "schedule_interval_seconds must be integer", code=ErrorCode.REQUEST_VALIDATION_FAILED) from exc
             if schedule_interval_seconds <= 0:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="schedule_interval_seconds must be > 0",
-                )
+                raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "schedule_interval_seconds must be > 0", code=ErrorCode.REQUEST_VALIDATION_FAILED)
         schedule_cron = str(schedule_cron).strip() if schedule_cron else None
         if schedule_interval_seconds and schedule_cron:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Provide either schedule_interval_seconds or schedule_cron (not both)",
-            )
+            raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "Provide either schedule_interval_seconds or schedule_cron (not both)", code=ErrorCode.REQUEST_VALIDATION_FAILED)
         if schedule_cron and not _is_valid_cron_expression(schedule_cron):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="schedule_cron must be a supported 5-field cron expression",
-            )
+            raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "schedule_cron must be a supported 5-field cron expression", code=ErrorCode.PIPELINE_VALIDATION_FAILED)
         proposal_submitted_at = None if not proposal_submitted_at else proposal_submitted_at
         proposal_reviewed_at = None if not proposal_reviewed_at else proposal_reviewed_at
         proposal_review_comment = str(proposal_review_comment).strip() if proposal_review_comment else None
@@ -252,9 +245,10 @@ async def create_pipeline(
     except HTTPException:
         raise
     except PipelineAlreadyExistsError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={"code": "PIPELINE_ALREADY_EXISTS", "message": str(exc)},
+        raise classified_http_exception(
+            status.HTTP_409_CONFLICT,
+            str(exc),
+            code=ErrorCode.RESOURCE_ALREADY_EXISTS,
         ) from exc
     except Exception as exc:
         db_name = ""
@@ -271,5 +265,4 @@ async def create_pipeline(
             error=str(exc),
         )
         logger.error("Failed to create pipeline: %s", exc)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
-
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc), code=ErrorCode.INTERNAL_ERROR) from exc

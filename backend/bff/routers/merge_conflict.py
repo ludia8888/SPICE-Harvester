@@ -5,6 +5,7 @@ Thin router delegating business logic to `bff.services.merge_conflict_service`
 """
 
 from __future__ import annotations
+from shared.observability.tracing import trace_endpoint
 
 from typing import Any, Dict
 
@@ -18,6 +19,7 @@ router = APIRouter(prefix="/databases/{db_name}/merge", tags=["Merge Conflict Re
 
 
 @router.post("/simulate", response_model=ApiResponse)
+@trace_endpoint("bff.merge_conflict.simulate_merge")
 async def simulate_merge(
     db_name: str,
     request: MergeRequest,
@@ -27,6 +29,7 @@ async def simulate_merge(
 
 
 @router.post("/resolve", response_model=ApiResponse)
+@trace_endpoint("bff.merge_conflict.resolve_merge_conflicts")
 async def resolve_merge_conflicts(
     db_name: str,
     request: Dict[str, Any],

@@ -24,6 +24,7 @@ help:
 	@echo "Targets:"
 	@echo "  backend-unit           Run fast backend unit tests (no docker required)"
 	@echo "  backend-coverage       Run unit tests + generate coverage.xml (for Codecov)"
+	@echo "  backend-error-taxonomy Run enterprise error taxonomy audit gate"
 	@echo "  backend-prod-quick     Run correctness layer tests (Postgres-backed)"
 	@echo "  backend-prod-full      Run full backend production gate (requires local stack)"
 	@echo "  backend-chaos-lite     Run destructive chaos-lite scenario (requires local stack)"
@@ -43,17 +44,23 @@ help:
 
 .PHONY: backend-unit
 backend-unit:
+	PYTHONPATH=backend $(PYTHON) backend/shared/tools/error_taxonomy_audit.py --backend-root backend --fail-on-raw-http-without-code --fail-on-raw-code
 	PYTHONPATH=backend $(PYTHON) -m pytest -q -c backend/pytest.ini -m "not requires_infra" \
 		backend/tests/unit backend/bff/tests backend/funnel/tests
 
 .PHONY: backend-coverage
 backend-coverage:
 	rm -f coverage.xml || true
+	PYTHONPATH=backend $(PYTHON) backend/shared/tools/error_taxonomy_audit.py --backend-root backend --fail-on-raw-http-without-code --fail-on-raw-code
 	PYTHONPATH=backend $(PYTHON) -m pytest -q -c backend/pytest.ini -m "not requires_infra" \
 		backend/tests/unit backend/bff/tests backend/funnel/tests \
 		--cov=backend --cov-config=backend/.coveragerc \
 		--cov-branch --cov-report=term-missing:skip-covered --cov-report=xml:coverage.xml \
 		--cov-fail-under=$(COVERAGE_MIN)
+
+.PHONY: backend-error-taxonomy
+backend-error-taxonomy:
+	PYTHONPATH=backend $(PYTHON) backend/shared/tools/error_taxonomy_audit.py --backend-root backend --fail-on-raw-http-without-code --fail-on-raw-code
 
 .PHONY: backend-prod-quick
 backend-prod-quick:

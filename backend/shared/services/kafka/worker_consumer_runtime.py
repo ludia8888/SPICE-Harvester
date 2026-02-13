@@ -20,6 +20,7 @@ from typing import Any, Awaitable, Callable, Optional
 
 from confluent_kafka import TopicPartition
 
+from shared.observability.tracing import trace_kafka_operation
 from shared.services.kafka.consumer_ops import KafkaConsumerOps
 
 logger = logging.getLogger(__name__)
@@ -36,11 +37,13 @@ class WorkerConsumerRuntime:
     uses_commit_state: Callable[[], bool]
     commit_state_by_partition: dict[PartitionKey, bool]
 
+    @trace_kafka_operation("kafka.worker_poll")
     async def poll_message(self, *, timeout: float, poller: Optional[Poller] = None) -> Any:  # noqa: ANN401
         if poller is not None:
             return await poller(timeout)
         return await self.ops.poll(timeout=timeout)
 
+    @trace_kafka_operation("kafka.worker_commit")
     async def commit(self, msg: Any) -> bool:  # noqa: ANN401
         topic = str(msg.topic())
         partition = int(msg.partition())
@@ -69,6 +72,7 @@ class WorkerConsumerRuntime:
             self.commit_state_by_partition[key] = True
         return True
 
+    @trace_kafka_operation("kafka.worker_seek")
     async def seek(self, *, topic: str, partition: int, offset: int) -> bool:
         key: PartitionKey = (str(topic), int(partition))
         revoked = self.revoked_partitions
@@ -94,6 +98,7 @@ class WorkerConsumerRuntime:
             self.commit_state_by_partition[key] = False
         return True
 
+    @trace_kafka_operation("kafka.worker_pause")
     async def pause_partition(self, *, topic: str, partition: int) -> None:
         try:
             await self.ops.pause([TopicPartition(topic, partition)])
@@ -106,6 +111,7 @@ class WorkerConsumerRuntime:
                 exc,
             )
 
+    @trace_kafka_operation("kafka.worker_resume")
     async def resume_partition(self, *, topic: str, partition: int) -> None:
         try:
             await self.ops.resume([TopicPartition(topic, partition)])

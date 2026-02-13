@@ -20,6 +20,7 @@ from fastapi.responses import JSONResponse
 
 from shared.config.settings import ApplicationSettings
 from shared.dependencies.providers import get_settings_dependency
+from shared.errors.error_types import ErrorCode, classified_http_exception
 from shared.observability.config_monitor import (
     ConfigurationMonitor, ConfigChange, ConfigSeverity, 
     ConfigChangeType, ConfigSecurityAudit
@@ -77,9 +78,10 @@ async def get_current_configuration(
         return config_data
         
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to retrieve configuration: {str(e)}"
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            f"Failed to retrieve configuration: {str(e)}",
+            code=ErrorCode.CONFIGURATION_ERROR,
         )
 
 
@@ -117,9 +119,10 @@ async def get_configuration_changes(
                     if ConfigSeverity(change["severity"]) == severity_enum
                 ]
             except ValueError:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Invalid severity: {severity}"
+                raise classified_http_exception(
+                    status.HTTP_400_BAD_REQUEST,
+                    f"Invalid severity: {severity}",
+                    code=ErrorCode.REQUEST_VALIDATION_FAILED,
                 )
         
         if change_type:
@@ -130,9 +133,10 @@ async def get_configuration_changes(
                     if ConfigChangeType(change["change_type"]) == type_enum
                 ]
             except ValueError:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Invalid change type: {change_type}"
+                raise classified_http_exception(
+                    status.HTTP_400_BAD_REQUEST,
+                    f"Invalid change type: {change_type}",
+                    code=ErrorCode.REQUEST_VALIDATION_FAILED,
                 )
         
         if since:
@@ -143,9 +147,10 @@ async def get_configuration_changes(
                     if datetime.fromisoformat(change["timestamp"].replace('Z', '+00:00')) >= since_dt
                 ]
             except ValueError:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Invalid timestamp format: {since}"
+                raise classified_http_exception(
+                    status.HTTP_400_BAD_REQUEST,
+                    f"Invalid timestamp format: {since}",
+                    code=ErrorCode.REQUEST_VALIDATION_FAILED,
                 )
         
         # Apply limit after filtering
@@ -162,9 +167,10 @@ async def get_configuration_changes(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to retrieve configuration changes: {str(e)}"
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            f"Failed to retrieve configuration changes: {str(e)}",
+            code=ErrorCode.CONFIGURATION_ERROR,
         )
 
 
@@ -205,9 +211,10 @@ async def validate_configuration(
         }
         
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Configuration validation failed: {str(e)}"
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            f"Configuration validation failed: {str(e)}",
+            code=ErrorCode.CONFIGURATION_ERROR,
         )
 
 
@@ -249,9 +256,10 @@ async def perform_security_audit(
         return JSONResponse(content=response_data, status_code=status_code)
         
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Security audit failed: {str(e)}"
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            f"Security audit failed: {str(e)}",
+            code=ErrorCode.CONFIGURATION_ERROR,
         )
 
 
@@ -288,9 +296,10 @@ async def get_configuration_report(
         return report
         
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to generate configuration report: {str(e)}"
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            f"Failed to generate configuration report: {str(e)}",
+            code=ErrorCode.CONFIGURATION_ERROR,
         )
 
 
@@ -317,9 +326,10 @@ async def check_configuration_changes(
         }
         
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to check for configuration changes: {str(e)}"
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            f"Failed to check for configuration changes: {str(e)}",
+            code=ErrorCode.CONFIGURATION_ERROR,
         )
 
 
@@ -361,9 +371,10 @@ async def analyze_environment_drift(
         }
         
         if compare_environment not in expected_configs:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Unknown environment: {compare_environment}"
+            raise classified_http_exception(
+                status.HTTP_400_BAD_REQUEST,
+                f"Unknown environment: {compare_environment}",
+                code=ErrorCode.REQUEST_VALIDATION_FAILED,
             )
         
         expected_config = expected_configs[compare_environment]
@@ -422,9 +433,10 @@ async def analyze_environment_drift(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Environment drift analysis failed: {str(e)}"
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            f"Environment drift analysis failed: {str(e)}",
+            code=ErrorCode.CONFIGURATION_ERROR,
         )
 
 
@@ -514,9 +526,10 @@ async def analyze_configuration_health_impact(
         }
         
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Health impact analysis failed: {str(e)}"
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            f"Health impact analysis failed: {str(e)}",
+            code=ErrorCode.CONFIGURATION_ERROR,
         )
 
 

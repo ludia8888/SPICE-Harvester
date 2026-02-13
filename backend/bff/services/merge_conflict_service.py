@@ -12,6 +12,8 @@ from typing import Any, Dict, List, Optional
 import httpx
 from fastapi import HTTPException, status
 
+from shared.errors.error_types import ErrorCode, classified_http_exception
+
 from bff.dependencies import OMSClient
 from bff.utils.conflict_converter import ConflictConverter
 from shared.models.requests import ApiResponse, MergeRequest
@@ -20,6 +22,7 @@ from shared.utils.async_utils import await_if_needed as _await_if_needed
 from shared.utils.async_utils import raise_for_status_async as _raise_for_status
 from shared.utils.async_utils import response_json_async as _response_json
 from shared.utils.diff_utils import normalize_diff_changes
+from shared.observability.tracing import trace_external_call
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +36,7 @@ def _validate_inputs(*, db_name: str, source_branch: str, target_branch: str) ->
     return db_name, source_branch, target_branch
 
 
+@trace_external_call("bff.merge_conflict.simulate_merge")
 async def simulate_merge(*, db_name: str, request: MergeRequest, oms_client: OMSClient) -> ApiResponse:
     """
     Simulate a merge (no write) and return UI-friendly conflict format.
@@ -53,15 +57,12 @@ async def simulate_merge(*, db_name: str, request: MergeRequest, oms_client: OMS
             await _raise_for_status(target_info)
         except httpx.HTTPStatusError as exc:
             if getattr(exc, "response", None) is not None and exc.response.status_code == 404:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="브랜치를 찾을 수 없습니다",
-                ) from exc
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="브랜치 조회 실패") from exc
+                raise classified_http_exception(status.HTTP_404_NOT_FOUND, "브랜치를 찾을 수 없습니다", code=ErrorCode.RESOURCE_NOT_FOUND) from exc
+            raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, "브랜치 조회 실패", code=ErrorCode.INTERNAL_ERROR) from exc
         except httpx.HTTPError as exc:
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="브랜치 조회 실패") from exc
+            raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, "브랜치 조회 실패", code=ErrorCode.INTERNAL_ERROR) from exc
         except Exception as exc:
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="브랜치 조회 실패") from exc
+            raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, "브랜치 조회 실패", code=ErrorCode.INTERNAL_ERROR) from exc
 
         try:
             diff_response = await oms_client.client.get(
@@ -71,10 +72,7 @@ async def simulate_merge(*, db_name: str, request: MergeRequest, oms_client: OMS
             await _raise_for_status(diff_response)
             diff_data = await _response_json(diff_response)
         except Exception as exc:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"차이 분석 실패: {exc}",
-            ) from exc
+            raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, f"차이 분석 실패: {exc}", code=ErrorCode.INTERNAL_ERROR) from exc
 
         try:
             reverse_diff_response = await oms_client.client.get(
@@ -141,17 +139,15 @@ async def simulate_merge(*, db_name: str, request: MergeRequest, oms_client: OMS
 
     except SecurityViolationError as exc:
         logger.warning("Security violation in simulate_merge: %s", exc)
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=_SECURITY_VIOLATION_DETAIL) from exc
+        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, _SECURITY_VIOLATION_DETAIL, code=ErrorCode.REQUEST_VALIDATION_FAILED) from exc
     except HTTPException:
         raise
     except Exception as exc:
         logger.error("Merge simulation failed: %s", exc)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"병합 시뮬레이션 실패: {exc}",
-        ) from exc
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, f"병합 시뮬레이션 실패: {exc}", code=ErrorCode.INTERNAL_ERROR) from exc
 
 
+@trace_external_call("bff.merge_conflict.resolve_merge_conflicts")
 async def resolve_merge_conflicts(*, db_name: str, request: Dict[str, Any], oms_client: OMSClient) -> ApiResponse:
     """
     Resolve merge conflicts using user-provided resolutions, then perform merge.
@@ -165,10 +161,7 @@ async def resolve_merge_conflicts(*, db_name: str, request: Dict[str, Any], oms_
         logger.info("Starting manual merge resolution: %s -> %s", source_branch, target_branch)
 
         if not resolutions:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="충돌 해결책이 제공되지 않았습니다",
-            )
+            raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "충돌 해결책이 제공되지 않았습니다", code=ErrorCode.REQUEST_VALIDATION_FAILED)
 
         terminus_resolutions = []
         for resolution in resolutions:
@@ -188,10 +181,7 @@ async def resolve_merge_conflicts(*, db_name: str, request: Dict[str, Any], oms_
             await _raise_for_status(merge_response)
             merge_result = await _response_json(merge_response)
         except Exception as exc:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"병합 실행 실패: {exc}",
-            ) from exc
+            raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, f"병합 실행 실패: {exc}", code=ErrorCode.INTERNAL_ERROR) from exc
 
         logger.info("Manual merge resolution completed successfully")
         return ApiResponse(
@@ -205,15 +195,12 @@ async def resolve_merge_conflicts(*, db_name: str, request: Dict[str, Any], oms_
 
     except SecurityViolationError as exc:
         logger.warning("Security violation in resolve_merge_conflicts: %s", exc)
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=_SECURITY_VIOLATION_DETAIL) from exc
+        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, _SECURITY_VIOLATION_DETAIL, code=ErrorCode.REQUEST_VALIDATION_FAILED) from exc
     except HTTPException:
         raise
     except Exception as exc:
         logger.error("Manual merge resolution failed: %s", exc)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"충돌 해결 실패: {exc}",
-        ) from exc
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, f"충돌 해결 실패: {exc}", code=ErrorCode.INTERNAL_ERROR) from exc
 
 
 async def _detect_merge_conflicts(

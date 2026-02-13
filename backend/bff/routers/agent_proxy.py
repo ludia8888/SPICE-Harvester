@@ -6,12 +6,15 @@ Includes SSE streaming endpoint for real-time UI updates.
 """
 
 from __future__ import annotations
+from shared.observability.tracing import trace_endpoint
 
 import json
 import logging
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+
+from shared.errors.error_types import ErrorCode, classified_http_exception
 from fastapi.responses import StreamingResponse
 
 from shared.models.pipeline_agent import PipelineAgentRunRequest
@@ -45,6 +48,7 @@ router = APIRouter(prefix="/agent", tags=["Agent"])
 
 
 @router.post("/pipeline-runs")
+@trace_endpoint("bff.agent.create_pipeline_run")
 async def create_pipeline_run(
     request: Request,
     body: PipelineAgentRunRequest,
@@ -61,14 +65,14 @@ async def create_pipeline_run(
     This is the primary API for natural language pipeline creation.
     """
     if not bool(get_settings().pipeline_plan.llm_enabled):
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Pipeline planner is disabled")
+        raise classified_http_exception(status.HTTP_503_SERVICE_UNAVAILABLE, "Pipeline planner is disabled", code=ErrorCode.UPSTREAM_UNAVAILABLE)
 
     data_scope = body.data_scope
     db_name = validate_db_name(str(data_scope.db_name or "").strip())
     try:
         enforce_db_scope(request.headers, db_name=db_name)
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+        raise classified_http_exception(status.HTTP_403_FORBIDDEN, str(exc), code=ErrorCode.PERMISSION_DENIED) from exc
 
     tenant_id = _resolve_tenant_id(request)
     actor = _resolve_actor(request)
@@ -134,6 +138,7 @@ async def create_pipeline_run(
 
 
 @router.post("/pipeline-runs/stream")
+@trace_endpoint("bff.agent.stream_pipeline_run")
 async def stream_pipeline_run(
     request: Request,
     body: PipelineAgentRunRequest,
@@ -158,14 +163,14 @@ async def stream_pipeline_run(
     - complete: 완료
     """
     if not bool(get_settings().pipeline_plan.llm_enabled):
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Pipeline planner is disabled")
+        raise classified_http_exception(status.HTTP_503_SERVICE_UNAVAILABLE, "Pipeline planner is disabled", code=ErrorCode.UPSTREAM_UNAVAILABLE)
 
     data_scope = body.data_scope
     db_name = validate_db_name(str(data_scope.db_name or "").strip())
     try:
         enforce_db_scope(request.headers, db_name=db_name)
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+        raise classified_http_exception(status.HTTP_403_FORBIDDEN, str(exc), code=ErrorCode.PERMISSION_DENIED) from exc
 
     tenant_id = _resolve_tenant_id(request)
     actor = _resolve_actor(request)

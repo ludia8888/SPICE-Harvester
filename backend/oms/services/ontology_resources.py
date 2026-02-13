@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from oms.exceptions import DatabaseError, OntologyNotFoundError
 from oms.services.async_terminus import AsyncTerminusService
+from shared.observability.tracing import trace_external_call
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +95,7 @@ class OntologyResourceService:
         self.terminus = terminus
         self.documents = terminus.document_service
 
+    @trace_external_call("oms.ontology_resources.ensure_resource_schema")
     async def ensure_resource_schema(self, db_name: str, *, branch: str) -> None:
         exists = await self.documents.document_exists(
             db_name, RESOURCE_CLASS_ID, graph_type="schema", branch=branch
@@ -131,6 +133,7 @@ class OntologyResourceService:
             message="Create ontology resource schema",
         )
 
+    @trace_external_call("oms.ontology_resources.create_resource")
     async def create_resource(
         self,
         db_name: str,
@@ -159,6 +162,7 @@ class OntologyResourceService:
 
         return self._document_to_payload(doc)
 
+    @trace_external_call("oms.ontology_resources.update_resource")
     async def update_resource(
         self,
         db_name: str,
@@ -196,6 +200,7 @@ class OntologyResourceService:
 
         return self._document_to_payload(doc)
 
+    @trace_external_call("oms.ontology_resources.delete_resource")
     async def delete_resource(
         self,
         db_name: str,
@@ -214,6 +219,7 @@ class OntologyResourceService:
             message=f"Delete ontology resource {resource_type}:{resource_id}",
         )
 
+    @trace_external_call("oms.ontology_resources.get_resource")
     async def get_resource(
         self,
         db_name: str,
@@ -228,6 +234,7 @@ class OntologyResourceService:
             return None
         return self._document_to_payload(doc)
 
+    @trace_external_call("oms.ontology_resources.list_resources")
     async def list_resources(
         self,
         db_name: str,

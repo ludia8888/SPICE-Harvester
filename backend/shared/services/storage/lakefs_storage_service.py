@@ -11,14 +11,17 @@ from __future__ import annotations
 from typing import Optional
 
 from shared.config.settings import ApplicationSettings
+from shared.observability.tracing import trace_storage_operation
 from shared.services.storage.storage_service import HAS_BOTO3, StorageService
 
 
 class LakeFSStorageService(StorageService):
+    @trace_storage_operation("s3.create_bucket")
     async def create_bucket(self, bucket_name: str) -> bool:  # pragma: no cover
         # lakeFS repositories must exist already (created via REST / infra).
         return True
 
+    @trace_storage_operation("s3.bucket_exists")
     async def bucket_exists(self, bucket_name: str) -> bool:  # pragma: no cover
         # Best-effort; repository existence is enforced by the gateway at request time.
         return True

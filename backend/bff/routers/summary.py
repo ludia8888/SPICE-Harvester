@@ -6,12 +6,15 @@ signals so the UI doesn't need to reconstruct state from multiple backends.
 """
 
 from __future__ import annotations
+from shared.observability.tracing import trace_endpoint
 
 import os
 from typing import Any, Dict, Optional
 
 import httpx
 from fastapi import APIRouter, HTTPException, Query, status
+
+from shared.errors.error_types import ErrorCode, classified_http_exception
 
 from bff.dependencies import OMSClientDep
 from bff.services.oms_client import OMSClient
@@ -23,6 +26,7 @@ from shared.utils.branch_utils import get_protected_branches
 router = APIRouter(prefix="/summary", tags=["Summary"])
 
 @router.get("")
+@trace_endpoint("bff.summary.get_summary")
 async def get_summary(
     db: Optional[str] = Query(None, description="Database (project) name"),
     branch: Optional[str] = Query(None, description="Branch name"),
@@ -55,10 +59,10 @@ async def get_summary(
                     detail = resp.json()
                 except Exception:
                     detail = resp.text
-                raise HTTPException(status_code=resp.status_code, detail=detail) from e
-            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="OMS branch info 조회 실패") from e
+                raise classified_http_exception(resp.status_code, str(detail), code=ErrorCode.UPSTREAM_ERROR) from e
+            raise classified_http_exception(status.HTTP_502_BAD_GATEWAY, "OMS branch info 조회 실패", code=ErrorCode.UPSTREAM_ERROR) from e
         except httpx.HTTPError as e:
-            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="OMS branch info 조회 실패") from e
+            raise classified_http_exception(status.HTTP_502_BAD_GATEWAY, "OMS branch info 조회 실패", code=ErrorCode.UPSTREAM_ERROR) from e
 
     redis_ok = await redis_service.ping()
 

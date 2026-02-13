@@ -13,6 +13,7 @@ from shared.services.events.outbox_runtime import (
 )
 from shared.services.storage.event_store import event_store
 from shared.models.event_envelope import EventEnvelope
+from shared.observability.tracing import trace_external_call
 from shared.utils.backoff_utils import next_exponential_backoff_at
 
 from oms.services.ontology_deployment_registry import OntologyDeploymentRegistry
@@ -46,6 +47,7 @@ class OntologyDeployOutboxPublisher:
         )
         self._last_purge = datetime.now(timezone.utc)
 
+    @trace_external_call("oms.deploy_outbox.flush_once")
     async def flush_once(self) -> None:
         await event_store.connect()
         batch = await self.registry.claim_outbox_batch(
@@ -83,6 +85,7 @@ class OntologyDeployOutboxPublisher:
                     ),
                 )
 
+    @trace_external_call("oms.deploy_outbox.maybe_purge")
     async def maybe_purge(self) -> None:
         self._last_purge = await maybe_purge_with_interval(
             retention_days=self.retention_days,

@@ -21,6 +21,8 @@ from shared.models.base import OptimisticLockError
 from shared.security.input_sanitizer import validate_db_name, validate_branch_name, sanitize_input
 from shared.utils.diff_utils import normalize_diff_response
 from oms.exceptions import DatabaseError
+from shared.errors.error_types import ErrorCode, classified_http_exception
+from shared.observability.tracing import trace_endpoint
 
 logger = logging.getLogger(__name__)
 
@@ -72,9 +74,10 @@ class PRCloseRequest(BaseModel):
 async def get_pr_service() -> PullRequestService:
     """Get PullRequestService instance with MVCC support"""
     if not postgres_db.mvcc_manager:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Database not initialized"
+        raise classified_http_exception(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "Database not initialized",
+            code=ErrorCode.UPSTREAM_UNAVAILABLE,
         )
     
     # Create PullRequestService with MVCC manager
@@ -82,6 +85,7 @@ async def get_pr_service() -> PullRequestService:
 
 
 @router.post("")
+@trace_endpoint("oms.pull_request.create")
 async def create_pull_request(
     db_name: str,
     request: PRCreateRequest,
@@ -122,19 +126,22 @@ async def create_pull_request(
         
     except DatabaseError as e:
         logger.error(f"Database error creating PR: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            str(e),
+            code=ErrorCode.REQUEST_VALIDATION_FAILED,
         )
     except Exception as e:
         logger.error(f"Failed to create pull request: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create pull request: {str(e)}"
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            f"Failed to create pull request: {str(e)}",
+            code=ErrorCode.INTERNAL_ERROR,
         )
 
 
 @router.get("/{pr_id}")
+@trace_endpoint("oms.pull_request.get")
 async def get_pull_request(
     db_name: str,
     pr_id: str,
@@ -153,16 +160,18 @@ async def get_pull_request(
         pr_data = await pr_service.get_pull_request(pr_id)
         
         if not pr_data:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Pull request {pr_id} not found"
+            raise classified_http_exception(
+                status.HTTP_404_NOT_FOUND,
+                f"Pull request {pr_id} not found",
+                code=ErrorCode.RESOURCE_NOT_FOUND,
             )
         
         # Verify PR belongs to this database
         if pr_data['db_name'] != db_name:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Pull request {pr_id} not found in database {db_name}"
+            raise classified_http_exception(
+                status.HTTP_404_NOT_FOUND,
+                f"Pull request {pr_id} not found in database {db_name}",
+                code=ErrorCode.RESOURCE_NOT_FOUND,
             )
         
         return ApiResponse.success(
@@ -174,13 +183,15 @@ async def get_pull_request(
         raise
     except Exception as e:
         logger.error(f"Failed to get pull request {pr_id}: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get pull request: {str(e)}"
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            f"Failed to get pull request: {str(e)}",
+            code=ErrorCode.INTERNAL_ERROR,
         )
 
 
 @router.get("")
+@trace_endpoint("oms.pull_request.list")
 async def list_pull_requests(
     db_name: str,
     status: Optional[str] = Query(None, description="Filter by status (open, merged, closed)"),
@@ -197,9 +208,10 @@ async def list_pull_requests(
         db_name = validate_db_name(db_name)
         
         if status and status not in ["open", "merged", "closed", "rejected"]:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid status: {status}"
+            raise classified_http_exception(
+                status.HTTP_400_BAD_REQUEST,
+                f"Invalid status: {status}",
+                code=ErrorCode.REQUEST_VALIDATION_FAILED,
             )
         
         # List PRs
@@ -226,13 +238,15 @@ async def list_pull_requests(
         raise
     except Exception as e:
         logger.error(f"Failed to list pull requests: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to list pull requests: {str(e)}"
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            f"Failed to list pull requests: {str(e)}",
+            code=ErrorCode.INTERNAL_ERROR,
         )
 
 
 @router.post("/{pr_id}/merge")
+@trace_endpoint("oms.pull_request.merge")
 async def merge_pull_request(
     db_name: str,
     pr_id: str,
@@ -264,25 +278,29 @@ async def merge_pull_request(
         
     except OptimisticLockError as e:
         logger.warning(f"Concurrent modification of PR {pr_id}: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Pull request was modified by another process. Please retry."
+        raise classified_http_exception(
+            status.HTTP_409_CONFLICT,
+            "Pull request was modified by another process. Please retry.",
+            code=ErrorCode.MERGE_CONFLICT,
         )
     except DatabaseError as e:
         logger.error(f"Database error merging PR {pr_id}: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            str(e),
+            code=ErrorCode.REQUEST_VALIDATION_FAILED,
         )
     except Exception as e:
         logger.error(f"Failed to merge pull request {pr_id}: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to merge pull request: {str(e)}"
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            f"Failed to merge pull request: {str(e)}",
+            code=ErrorCode.INTERNAL_ERROR,
         )
 
 
 @router.post("/{pr_id}/close")
+@trace_endpoint("oms.pull_request.close")
 async def close_pull_request(
     db_name: str,
     pr_id: str,
@@ -312,19 +330,22 @@ async def close_pull_request(
         
     except DatabaseError as e:
         logger.error(f"Database error closing PR {pr_id}: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            str(e),
+            code=ErrorCode.REQUEST_VALIDATION_FAILED,
         )
     except Exception as e:
         logger.error(f"Failed to close pull request {pr_id}: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to close pull request: {str(e)}"
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            f"Failed to close pull request: {str(e)}",
+            code=ErrorCode.INTERNAL_ERROR,
         )
 
 
 @router.get("/{pr_id}/diff")
+@trace_endpoint("oms.pull_request.get_diff")
 async def get_pull_request_diff(
     db_name: str,
     pr_id: str,
@@ -345,9 +366,10 @@ async def get_pull_request_diff(
         pr_data = await pr_service.get_pull_request(pr_id)
         
         if not pr_data:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Pull request {pr_id} not found"
+            raise classified_http_exception(
+                status.HTTP_404_NOT_FOUND,
+                f"Pull request {pr_id} not found",
+                code=ErrorCode.RESOURCE_NOT_FOUND,
             )
         
         # Get diff (from cache or fresh)
@@ -381,7 +403,8 @@ async def get_pull_request_diff(
         raise
     except Exception as e:
         logger.error(f"Failed to get diff for PR {pr_id}: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get diff: {str(e)}"
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            f"Failed to get diff: {str(e)}",
+            code=ErrorCode.INTERNAL_ERROR,
         )

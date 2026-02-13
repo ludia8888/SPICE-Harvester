@@ -5,6 +5,7 @@ Composed by `bff.routers.ontology` via router composition (Composite pattern).
 """
 
 from __future__ import annotations
+from shared.observability.tracing import trace_endpoint
 
 import logging
 from typing import Any, Dict, Optional
@@ -26,6 +27,7 @@ router = APIRouter(tags=["Ontology Management"])
 
 
 @router.post("/suggest-schema-from-data")
+@trace_endpoint("bff.ontology.suggest_schema_from_data")
 async def suggest_schema_from_data(
     db_name: str,
     request: SchemaFromDataRequest,
@@ -36,6 +38,7 @@ async def suggest_schema_from_data(
 
 
 @router.post("/suggest-mappings")
+@trace_endpoint("bff.ontology.suggest_mappings")
 async def suggest_mappings(
     db_name: str,
     request: MappingSuggestionRequest,
@@ -44,6 +47,7 @@ async def suggest_mappings(
 
 
 @router.post("/suggest-mappings-from-google-sheets")
+@trace_endpoint("bff.ontology.suggest_mappings_from_google_sheets")
 async def suggest_mappings_from_google_sheets(
     db_name: str,
     request: MappingFromGoogleSheetsRequest,
@@ -52,6 +56,7 @@ async def suggest_mappings_from_google_sheets(
 
 
 @router.post("/suggest-mappings-from-excel")
+@trace_endpoint("bff.ontology.suggest_mappings_from_excel")
 async def suggest_mappings_from_excel(
     db_name: str,
     target_class_id: str = Query(..., description="Target ontology class id"),
@@ -89,6 +94,7 @@ async def suggest_mappings_from_excel(
 
 
 @router.post("/suggest-schema-from-google-sheets")
+@trace_endpoint("bff.ontology.suggest_schema_from_google_sheets")
 async def suggest_schema_from_google_sheets(
     db_name: str,
     request: SchemaFromGoogleSheetsRequest,
@@ -99,6 +105,7 @@ async def suggest_schema_from_google_sheets(
 
 
 @router.post("/suggest-schema-from-excel")
+@trace_endpoint("bff.ontology.suggest_schema_from_excel")
 async def suggest_schema_from_excel(
     db_name: str,
     file: UploadFile = File(...),

@@ -6,6 +6,7 @@ calling internal services directly. This router proxies OMS' command status API.
 """
 
 from __future__ import annotations
+from shared.observability.tracing import trace_endpoint
 
 import logging
 from uuid import UUID
@@ -14,6 +15,7 @@ import httpx
 from fastapi import APIRouter, HTTPException, status
 
 from bff.dependencies import OMSClientDep
+from shared.errors.error_types import ErrorCode, classified_http_exception
 from bff.services.oms_client import OMSClient
 from shared.models.commands import CommandResult
 
@@ -23,6 +25,7 @@ router = APIRouter(prefix="/commands", tags=["Command Status"])
 
 
 @router.get("/{command_id}/status", response_model=CommandResult)
+@trace_endpoint("bff.command_status.get_command_status")
 async def get_command_status(command_id: str, oms: OMSClient = OMSClientDep) -> CommandResult:
     """
     Proxy OMS: `GET /api/v1/commands/{command_id}/status`.
@@ -32,9 +35,10 @@ async def get_command_status(command_id: str, oms: OMSClient = OMSClientDep) -> 
     try:
         UUID(command_id)
     except Exception:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid command_id (must be UUID)",
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            "Invalid command_id (must be UUID)",
+            code=ErrorCode.REQUEST_VALIDATION_FAILED,
         )
 
     try:
@@ -48,19 +52,22 @@ async def get_command_status(command_id: str, oms: OMSClient = OMSClientDep) -> 
                 detail = resp.json().get("detail")
             except Exception:
                 detail = resp.text
-            raise HTTPException(status_code=resp.status_code, detail=detail) from e
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="OMS command status 조회 실패",
+            raise classified_http_exception(resp.status_code, str(detail), code=ErrorCode.UPSTREAM_ERROR) from e
+        raise classified_http_exception(
+            status.HTTP_502_BAD_GATEWAY,
+            "OMS command status 조회 실패",
+            code=ErrorCode.UPSTREAM_ERROR,
         ) from e
     except httpx.HTTPError as e:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="OMS command status 조회 실패",
+        raise classified_http_exception(
+            status.HTTP_502_BAD_GATEWAY,
+            "OMS command status 조회 실패",
+            code=ErrorCode.UPSTREAM_ERROR,
         ) from e
     except Exception as e:
         logger.error(f"Error proxying command status ({command_id}): {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Command status 조회 실패",
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            "Command status 조회 실패",
+            code=ErrorCode.INTERNAL_ERROR,
         ) from e

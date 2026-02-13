@@ -18,6 +18,7 @@ import httpx
 
 from agent.models import AgentToolCall
 from shared.config.settings import get_settings
+from shared.errors.error_types import ErrorCode
 from shared.models.event_envelope import EventEnvelope
 from shared.services.core.audit_log_store import AuditLogStore
 from shared.services.storage.event_store import EventStore
@@ -67,6 +68,8 @@ def _safe_json(obj: Any) -> str:
 
 
 _ERROR_CODE_ALLOWED = re.compile(r"^[A-Z0-9_]{1,120}$")
+_REQUEST_VALIDATION_FAILED_CODE = ErrorCode.REQUEST_VALIDATION_FAILED.value
+_CONFLICT_CODE = ErrorCode.CONFLICT.value
 
 
 def _normalize_error_code(value: Optional[str]) -> Optional[str]:
@@ -1432,7 +1435,7 @@ class AgentRuntime:
             )
             return {
                 "status": "failed",
-                "error_code": "REQUEST_VALIDATION_FAILED",
+                "error_code": _REQUEST_VALIDATION_FAILED_CODE,
                 "error_message": error,
                 "payload": None,
                 "side_effect_summary": {},
@@ -1443,7 +1446,7 @@ class AgentRuntime:
                 "data_scope": mask_pii(tool_call.data_scope, max_string_chars=200),
                 "error": error,
                 "error_key": "template_unresolved",
-                "api_code": "REQUEST_VALIDATION_FAILED",
+                "api_code": _REQUEST_VALIDATION_FAILED_CODE,
             }
 
         missing_artifacts: list[str] = []
@@ -1488,7 +1491,7 @@ class AgentRuntime:
             )
             return {
                 "status": "failed",
-                "error_code": "REQUEST_VALIDATION_FAILED",
+                "error_code": _REQUEST_VALIDATION_FAILED_CODE,
                 "error_message": error,
                 "payload": None,
                 "side_effect_summary": {},
@@ -1500,7 +1503,7 @@ class AgentRuntime:
                 "error": error,
                 "error_key": "artifact_missing",
                 "missing_artifacts": missing_artifacts,
-                "api_code": "REQUEST_VALIDATION_FAILED",
+                "api_code": _REQUEST_VALIDATION_FAILED_CODE,
             }
 
         base_url = self._resolve_base_url(tool_call)
@@ -1574,7 +1577,7 @@ class AgentRuntime:
             )
             return {
                 "status": "failed",
-                "error_code": "REQUEST_VALIDATION_FAILED",
+                "error_code": _REQUEST_VALIDATION_FAILED_CODE,
                 "error_message": error,
                 "payload": None,
                 "side_effect_summary": {},
@@ -1585,7 +1588,7 @@ class AgentRuntime:
                 "data_scope": data_scope,
                 "error": error,
                 "error_key": "agent_proxy_loop",
-                "api_code": "REQUEST_VALIDATION_FAILED",
+                "api_code": _REQUEST_VALIDATION_FAILED_CODE,
             }
 
         if dry_run:
@@ -1636,7 +1639,7 @@ class AgentRuntime:
                 )
                 return {
                     "status": "failed",
-                    "error_code": "CONFLICT",
+                    "error_code": _CONFLICT_CODE,
                     "error_message": error,
                     "payload": None,
                     "side_effect_summary": {},
@@ -1647,7 +1650,7 @@ class AgentRuntime:
                     "data_scope": data_scope,
                     "error": error,
                     "error_key": "overlay_degraded",
-                    "api_code": "CONFLICT",
+                    "api_code": _CONFLICT_CODE,
                 }
 
         start_time = time.monotonic()

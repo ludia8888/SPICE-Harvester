@@ -30,7 +30,7 @@ from shared.dependencies.providers import (
 )
 from shared.config.settings import ApplicationSettings, get_settings
 from shared.errors.error_envelope import build_error_envelope
-from shared.errors.error_types import ErrorCategory, ErrorCode
+from shared.errors.error_types import ErrorCategory, ErrorCode, classified_http_exception
 from shared.observability.request_context import get_correlation_id, get_request_id
 from shared.utils.label_mapper import LabelMapper
 from shared.utils.jsonld import JSONToJSONLDConverter
@@ -84,9 +84,10 @@ class OMSDependencyProvider:
         try:
             return await container.get(AsyncTerminusService)
         except Exception as e:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=f"TerminusDB 서비스가 초기화되지 않았습니다: {str(e)}",
+            raise classified_http_exception(
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                f"TerminusDB 서비스가 초기화되지 않았습니다: {str(e)}",
+                code=ErrorCode.UPSTREAM_UNAVAILABLE,
             )
     
     @staticmethod
@@ -199,9 +200,10 @@ def ValidatedDatabaseName(db_name: str = Path(..., description="데이터베이�
     try:
         return validate_db_name(db_name)
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"잘못된 데이터베이스 이름: {str(e)}"
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            f"잘못된 데이터베이스 이름: {str(e)}",
+            code=ErrorCode.REQUEST_VALIDATION_FAILED,
         )
 
 
@@ -210,9 +212,10 @@ def ValidatedClassId(class_id: str = Path(..., description="클래스 ID")) -> s
     try:
         return validate_class_id(class_id)
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"잘못된 클래스 ID: {str(e)}"
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            f"잘못된 클래스 ID: {str(e)}",
+            code=ErrorCode.REQUEST_VALIDATION_FAILED,
         )
 
 
@@ -227,9 +230,10 @@ async def ensure_database_exists(
         # 올바른 방식: 딕셔너리 리스트에서 name 필드 확인
         db_exists = any(db.get('name') == db_name for db in dbs if isinstance(db, dict))
         if not db_exists:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"데이터베이스 '{db_name}'이(가) 존재하지 않습니다"
+            raise classified_http_exception(
+                status.HTTP_404_NOT_FOUND,
+                f"데이터베이스 '{db_name}'이(가) 존재하지 않습니다",
+                code=ErrorCode.RESOURCE_NOT_FOUND,
             )
         return db_name
     except HTTPException:

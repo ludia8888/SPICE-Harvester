@@ -21,7 +21,7 @@ from pydantic import BaseModel, Field
 
 from bff.services.oms_client import OMSClient
 from shared.errors.error_envelope import build_error_envelope
-from shared.errors.error_types import ErrorCategory, ErrorCode
+from shared.errors.error_types import ErrorCategory, ErrorCode, classified_http_exception
 from shared.models.requests import ApiResponse
 from shared.observability.request_context import get_correlation_id, get_request_id
 from shared.security.input_sanitizer import SecurityViolationError, sanitize_input
@@ -74,30 +74,33 @@ async def export_mappings(*, db_name: str, mapper: LabelMapper) -> JSONResponse:
         )
     except Exception as exc:
         logger.error("Failed to export mappings: %s", exc)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"매핑 내보내기 실패: {str(exc)}",
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            f"매핑 내보내기 실패: {str(exc)}",
+            code=ErrorCode.INTERNAL_ERROR,
         ) from exc
 
 
 async def _validate_file_upload(file: UploadFile) -> None:
     """Validate uploaded file size, type, and extension."""
     if file.size is not None and file.size > 10 * 1024 * 1024:  # 10MB
-        raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail="파일 크기가 너무 큽니다 (최대 10MB)",
+        raise classified_http_exception(
+            status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            "파일 크기가 너무 큽니다 (최대 10MB)",
+            code=ErrorCode.PAYLOAD_TOO_LARGE,
         )
 
     if file.size is not None and file.size == 0:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="빈 파일입니다")
+        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "빈 파일입니다", code=ErrorCode.REQUEST_VALIDATION_FAILED)
 
     if file.content_type and not file.content_type.startswith("application/json"):
         logger.warning("Suspicious content type: %s", file.content_type)
 
     if not file.filename or not any(file.filename.lower().endswith(ext) for ext in [".json", ".txt"]):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="JSON 파일만 지원됩니다 (.json 또는 .txt)",
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            "JSON 파일만 지원됩니다 (.json 또는 .txt)",
+            code=ErrorCode.REQUEST_VALIDATION_FAILED,
         )
 
 
@@ -107,28 +110,30 @@ async def _read_and_parse_file(file: UploadFile) -> Tuple[str, Dict[str, Any]]:
         content = await file.read()
     except Exception as exc:
         logger.error("Failed to read uploaded file: %s", exc)
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"파일을 읽을 수 없습니다: {str(exc)}") from exc
+        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, f"파일을 읽을 수 없습니다: {str(exc)}", code=ErrorCode.REQUEST_VALIDATION_FAILED) from exc
 
     if content is None:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="파일 내용을 읽을 수 없습니다")
+        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "파일 내용을 읽을 수 없습니다", code=ErrorCode.REQUEST_VALIDATION_FAILED)
     if not isinstance(content, (bytes, bytearray)):
         content = str(content).encode("utf-8", errors="replace")
     if len(content) == 0:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="빈 파일입니다")
+        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "빈 파일입니다", code=ErrorCode.REQUEST_VALIDATION_FAILED)
 
     try:
         decoded = bytes(content).decode("utf-8")
     except UnicodeDecodeError as exc:
         logger.error("File encoding error: %s", exc)
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="파일 인코딩이 올바르지 않습니다 (UTF-8 필요)",
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            "파일 인코딩이 올바르지 않습니다 (UTF-8 필요)",
+            code=ErrorCode.REQUEST_VALIDATION_FAILED,
         ) from exc
 
     if not decoded.strip():
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="파일이 비어있거나 공백만 포함되어 있습니다",
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            "파일이 비어있거나 공백만 포함되어 있습니다",
+            code=ErrorCode.REQUEST_VALIDATION_FAILED,
         )
 
     content_hash = hashlib.sha256(bytes(content)).hexdigest()
@@ -137,13 +142,14 @@ async def _read_and_parse_file(file: UploadFile) -> Tuple[str, Dict[str, Any]]:
     try:
         raw_mappings = json.loads(decoded)
     except json.JSONDecodeError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"잘못된 JSON 형식입니다: {str(exc)}",
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            f"잘못된 JSON 형식입니다: {str(exc)}",
+            code=ErrorCode.JSON_DECODE_ERROR,
         ) from exc
 
     if not isinstance(raw_mappings, dict):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="매핑 데이터는 JSON 객체여야 합니다")
+        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "매핑 데이터는 JSON 객체여야 합니다", code=ErrorCode.REQUEST_VALIDATION_FAILED)
 
     return content_hash, raw_mappings
 
@@ -154,9 +160,10 @@ def _sanitize_and_validate_schema(raw_mappings: Dict[str, Any], db_name: str) ->
         sanitized_mappings = sanitize_input(raw_mappings)
     except SecurityViolationError as exc:
         logger.warning("Security violation detected in mapping import: %s", exc)
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="보안 위반이 감지되었습니다. 파일 내용을 확인해주세요.",
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            "보안 위반이 감지되었습니다. 파일 내용을 확인해주세요.",
+            code=ErrorCode.INPUT_SANITIZATION_FAILED,
         ) from exc
 
     try:
@@ -170,9 +177,10 @@ def _sanitize_and_validate_schema(raw_mappings: Dict[str, Any], db_name: str) ->
         )
     except Exception as exc:
         logger.error("Schema validation failed: %s", exc)
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"매핑 데이터 스키마가 올바르지 않습니다: {str(exc)}",
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            f"매핑 데이터 스키마가 올바르지 않습니다: {str(exc)}",
+            code=ErrorCode.REQUEST_VALIDATION_FAILED,
         ) from exc
 
     return mapping_request, sanitized_mappings
@@ -182,35 +190,38 @@ def _validate_business_logic(mapping_request: MappingImportPayload, sanitized_ma
     """Validate business logic and data consistency."""
     file_db_name = sanitized_mappings.get("db_name")
     if file_db_name and file_db_name != db_name:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            (
                 "매핑 데이터의 데이터베이스 이름이 일치하지 않습니다: "
                 f"예상: {db_name}, 실제: {file_db_name}"
             ),
+            code=ErrorCode.REQUEST_VALIDATION_FAILED,
         )
 
     total_mappings = len(mapping_request.classes) + len(mapping_request.properties) + len(mapping_request.relationships)
     if total_mappings == 0:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="가져올 매핑 데이터가 없습니다")
+        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "가져올 매핑 데이터가 없습니다", code=ErrorCode.REQUEST_VALIDATION_FAILED)
 
     for cls in mapping_request.classes:
         if not cls.get("class_id") or not cls.get("label"):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="클래스 매핑에 필수 필드가 누락되었습니다 (class_id, label)",
+            raise classified_http_exception(
+                status.HTTP_400_BAD_REQUEST,
+                "클래스 매핑에 필수 필드가 누락되었습니다 (class_id, label)",
+                code=ErrorCode.REQUEST_VALIDATION_FAILED,
             )
 
     for prop in mapping_request.properties:
         if not prop.get("property_id") or not prop.get("label"):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="속성 매핑에 필수 필드가 누락되었습니다 (property_id, label)",
+            raise classified_http_exception(
+                status.HTTP_400_BAD_REQUEST,
+                "속성 매핑에 필수 필드가 누락되었습니다 (property_id, label)",
+                code=ErrorCode.REQUEST_VALIDATION_FAILED,
             )
 
     class_ids = [cls.get("class_id") for cls in mapping_request.classes]
     if len(class_ids) != len(set(class_ids)):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="중복된 클래스 ID가 있습니다")
+        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "중복된 클래스 ID가 있습니다", code=ErrorCode.REQUEST_VALIDATION_FAILED)
 
     return total_mappings
 
@@ -314,9 +325,10 @@ async def _perform_mapping_import(*, mapper: LabelMapper, validated_mappings: Di
         except Exception as restore_error:
             logger.error("Failed to restore backup: %s", restore_error)
 
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"매핑 가져오기 중 오류가 발생했습니다: {str(import_error)}",
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            f"매핑 가져오기 중 오류가 발생했습니다: {str(import_error)}",
+            code=ErrorCode.INTERNAL_ERROR,
         ) from import_error
 
 
@@ -413,12 +425,13 @@ class _ImportProcessor(_MappingBundleProcessor):
             raise
         except SecurityViolationError as exc:
             logger.warning("Security violation in mapping import: %s", exc)
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="보안 정책 위반이 감지되었습니다") from exc
+            raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "보안 정책 위반이 감지되었습니다", code=ErrorCode.INPUT_SANITIZATION_FAILED) from exc
         except Exception as exc:
             logger.error("Unexpected error in mapping import: %s", exc)
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="매핑 가져오기 실패: 서버 오류가 발생했습니다",
+            raise classified_http_exception(
+                status.HTTP_500_INTERNAL_SERVER_ERROR,
+                "매핑 가져오기 실패: 서버 오류가 발생했습니다",
+                code=ErrorCode.INTERNAL_ERROR,
             ) from exc
 
 
@@ -523,9 +536,10 @@ class _ValidateProcessor(_MappingBundleProcessor):
             raise
         except Exception as exc:
             logger.error("Validation error: %s", exc)
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"매핑 검증 실패: {str(exc)}",
+            raise classified_http_exception(
+                status.HTTP_500_INTERNAL_SERVER_ERROR,
+                f"매핑 검증 실패: {str(exc)}",
+                code=ErrorCode.INTERNAL_ERROR,
             ) from exc
 
 
@@ -593,9 +607,10 @@ async def get_mappings_summary(*, db_name: str, mapper: LabelMapper) -> Dict[str
 
     except Exception as exc:
         logger.error("Failed to get mappings summary: %s", exc)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"매핑 요약 조회 실패: {str(exc)}",
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            f"매핑 요약 조회 실패: {str(exc)}",
+            code=ErrorCode.INTERNAL_ERROR,
         ) from exc
 
 
@@ -624,8 +639,9 @@ async def clear_mappings(*, db_name: str, mapper: LabelMapper) -> Dict[str, Any]
 
     except Exception as exc:
         logger.error("Failed to clear mappings: %s", exc)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"매핑 초기화 실패: {str(exc)}",
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            f"매핑 초기화 실패: {str(exc)}",
+            code=ErrorCode.INTERNAL_ERROR,
         ) from exc
 

@@ -9,6 +9,7 @@ import re
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from shared.errors.error_types import ErrorCategory, ErrorCode
+from shared.observability.tracing import trace_external_call
 from shared.services.pipeline.pipeline_profiler import compute_column_stats
 from shared.utils.llm_safety import mask_pii
 from shared.utils.s3_uri import parse_s3_uri
@@ -243,6 +244,7 @@ def _filter_columns(rows: List[Dict[str, Any]], columns_filter: Any) -> List[Dic
 # ---------------------------------------------------------------------------
 
 
+@trace_external_call("mcp.dataset_get_by_name")
 async def _dataset_get_by_name(server: Any, arguments: Dict[str, Any]) -> Any:
     db_name = str(arguments.get("db_name") or "").strip()
     dataset_name = str(arguments.get("dataset_name") or "").strip()
@@ -275,6 +277,7 @@ async def _dataset_get_by_name(server: Any, arguments: Dict[str, Any]) -> Any:
     }
 
 
+@trace_external_call("mcp.dataset_get_latest_version")
 async def _dataset_get_latest_version(server: Any, arguments: Dict[str, Any]) -> Any:
     dataset_id = str(arguments.get("dataset_id") or "").strip()
 
@@ -298,6 +301,7 @@ async def _dataset_get_latest_version(server: Any, arguments: Dict[str, Any]) ->
     }
 
 
+@trace_external_call("mcp.dataset_validate_columns")
 async def _dataset_validate_columns(server: Any, arguments: Dict[str, Any]) -> Any:
     dataset_id = str(arguments.get("dataset_id") or "").strip()
     columns = arguments.get("columns") or []
@@ -354,6 +358,7 @@ async def _dataset_validate_columns(server: Any, arguments: Dict[str, Any]) -> A
     }
 
 
+@trace_external_call("mcp.dataset_list")
 async def _dataset_list(server: Any, arguments: Dict[str, Any]) -> Any:
     """List all datasets in a given database/project, with schema summaries."""
     db_name = str(arguments.get("db_name") or "").strip()
@@ -383,6 +388,7 @@ async def _dataset_list(server: Any, arguments: Dict[str, Any]) -> Any:
     return {"status": "success", "datasets": result, "total": len(result), "db_name": db_name, "branch": branch}
 
 
+@trace_external_call("mcp.dataset_sample")
 async def _dataset_sample(server: Any, arguments: Dict[str, Any]) -> Any:
     """Return a small sample of actual data rows from a dataset (PII-masked).
 
@@ -434,6 +440,7 @@ async def _dataset_sample(server: Any, arguments: Dict[str, Any]) -> Any:
     }
 
 
+@trace_external_call("mcp.dataset_profile")
 async def _dataset_profile(server: Any, arguments: Dict[str, Any]) -> Any:
     """Get column-level statistics for a dataset: null ratio, distinct count, top values, histogram."""
     dataset_id = str(arguments.get("dataset_id") or "").strip()
@@ -508,6 +515,7 @@ async def _dataset_profile(server: Any, arguments: Dict[str, Any]) -> Any:
     }
 
 
+@trace_external_call("mcp.data_query")
 async def _data_query(server: Any, arguments: Dict[str, Any]) -> Any:
     """Execute ad-hoc SQL query on dataset sample rows using DuckDB."""
     dataset_id = str(arguments.get("dataset_id") or "").strip()

@@ -41,6 +41,8 @@ from shared.security.input_sanitizer import (
     validate_db_name,
     validate_instance_id,
 )
+from shared.errors.error_types import ErrorCode, classified_http_exception
+from shared.observability.tracing import trace_endpoint
 
 logger = logging.getLogger(__name__)
 
@@ -61,11 +63,12 @@ def _enforce_ingest_only_if_writeback_enabled(
         kind = str(metadata.get("kind") or "").strip().lower()
     if kind == "ingest":
         return
-    raise HTTPException(
-        status_code=status.HTTP_409_CONFLICT,
-        detail={
+    raise classified_http_exception(
+        status.HTTP_409_CONFLICT,
+        "Direct CRUD instance writes are ingestion-only for writeback-enabled object types. Use Actions.",
+        code=ErrorCode.CONFLICT,
+        extra={
             "error": "writeback_enforced",
-            "message": "Direct CRUD instance writes are ingestion-only for writeback-enabled object types. Use Actions.",
             "class_id": class_id,
             "hint": "Set metadata.kind=ingest for ingestion paths, or submit an Action for operational edits.",
         },
@@ -215,6 +218,7 @@ class BulkInstanceUpdateRequest(BaseModel):
 
 
 @router.post("/{class_id}/create", response_model=CommandResult, status_code=status.HTTP_202_ACCEPTED)
+@trace_endpoint("oms.instance_async.create")
 async def create_instance_async(
     db_name: str = Depends(ensure_database_exists),
     class_id: str = Depends(ValidatedClassId),
@@ -285,21 +289,24 @@ async def create_instance_async(
         
     except SecurityViolationError as e:
         logger.warning(f"Security violation in instance creation: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            str(e),
+            code=ErrorCode.REQUEST_VALIDATION_FAILED,
         )
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error creating instance command: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create instance command: {str(e)}"
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            f"Failed to create instance command: {str(e)}",
+            code=ErrorCode.INTERNAL_ERROR,
         )
 
 
 @router.put("/{class_id}/{instance_id}/update", response_model=CommandResult, status_code=status.HTTP_202_ACCEPTED)
+@trace_endpoint("oms.instance_async.update")
 async def update_instance_async(
     db_name: str = Depends(ensure_database_exists),
     class_id: str = Depends(ValidatedClassId),
@@ -370,21 +377,24 @@ async def update_instance_async(
         
     except SecurityViolationError as e:
         logger.warning(f"Security violation in instance update: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            str(e),
+            code=ErrorCode.REQUEST_VALIDATION_FAILED,
         )
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error updating instance command: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to update instance command: {str(e)}"
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            f"Failed to update instance command: {str(e)}",
+            code=ErrorCode.INTERNAL_ERROR,
         )
 
 
 @router.delete("/{class_id}/{instance_id}/delete", response_model=CommandResult, status_code=status.HTTP_202_ACCEPTED)
+@trace_endpoint("oms.instance_async.delete")
 async def delete_instance_async(
     db_name: str = Depends(ensure_database_exists),
     class_id: str = Depends(ValidatedClassId),
@@ -454,21 +464,24 @@ async def delete_instance_async(
         
     except SecurityViolationError as e:
         logger.warning(f"Security violation in instance deletion: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            str(e),
+            code=ErrorCode.REQUEST_VALIDATION_FAILED,
         )
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error deleting instance command: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to delete instance command: {str(e)}"
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            f"Failed to delete instance command: {str(e)}",
+            code=ErrorCode.INTERNAL_ERROR,
         )
 
 
 @router.post("/{class_id}/bulk-create", response_model=CommandResult, status_code=status.HTTP_202_ACCEPTED)
+@trace_endpoint("oms.instance_async.bulk_create")
 async def bulk_create_instances_async(
     db_name: str = Depends(ensure_database_exists),
     class_id: str = Depends(ValidatedClassId),
@@ -548,21 +561,24 @@ async def bulk_create_instances_async(
         
     except SecurityViolationError as e:
         logger.warning(f"Security violation in bulk instance creation: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            str(e),
+            code=ErrorCode.REQUEST_VALIDATION_FAILED,
         )
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error creating bulk instance command: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create bulk instance command: {str(e)}"
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            f"Failed to create bulk instance command: {str(e)}",
+            code=ErrorCode.INTERNAL_ERROR,
         )
 
 
 @router.post("/{class_id}/bulk-update", response_model=CommandResult, status_code=status.HTTP_202_ACCEPTED)
+@trace_endpoint("oms.instance_async.bulk_update")
 async def bulk_update_instances_async(
     db_name: str = Depends(ensure_database_exists),
     class_id: str = Depends(ValidatedClassId),
@@ -583,15 +599,15 @@ async def bulk_update_instances_async(
 
         for idx, inst in enumerate(request.instances):
             if not isinstance(inst, dict):
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"instances[{idx}] must be object")
+                raise classified_http_exception(status.HTTP_400_BAD_REQUEST, f"instances[{idx}] must be object", code=ErrorCode.REQUEST_VALIDATION_FAILED)
             instance_id = inst.get("instance_id")
             if not instance_id:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="instance_id is required")
+                raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "instance_id is required", code=ErrorCode.REQUEST_VALIDATION_FAILED)
             instance_id = str(instance_id)
             validate_instance_id(instance_id)
             data = inst.get("data")
             if not isinstance(data, dict):
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="data must be object")
+                raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "data must be object", code=ErrorCode.REQUEST_VALIDATION_FAILED)
             sanitized_instances.append(
                 {
                     "instance_id": instance_id,
@@ -645,13 +661,15 @@ async def bulk_update_instances_async(
         raise
     except Exception as e:
         logger.error(f"Error creating bulk update command: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create bulk update command: {str(e)}"
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            f"Failed to create bulk update command: {str(e)}",
+            code=ErrorCode.INTERNAL_ERROR,
         )
 
 
 @router.get("/command/{command_id}/status", response_model=CommandResult)
+@trace_endpoint("oms.instance_async.get_command_status")
 async def get_instance_command_status(
     db_name: str = Depends(ensure_database_exists),
     command_id: str = ...,
@@ -666,9 +684,10 @@ async def get_instance_command_status(
         try:
             command_uuid = UUID(command_id)
         except Exception:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid command_id (must be UUID)",
+            raise classified_http_exception(
+                status.HTTP_400_BAD_REQUEST,
+                "Invalid command_id (must be UUID)",
+                code=ErrorCode.REQUEST_VALIDATION_FAILED,
             )
 
         status_info = None
@@ -721,23 +740,26 @@ async def get_instance_command_status(
             logger.warning(f"Event store lookup failed for {command_uuid}: {e}")
 
         if not command_status_service and not processed_event_registry:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Command status tracking is unavailable (Redis/Postgres unavailable)",
+            raise classified_http_exception(
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                "Command status tracking is unavailable (Redis/Postgres unavailable)",
+                code=ErrorCode.UPSTREAM_UNAVAILABLE,
             )
 
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Command not found: {command_id}"
+        raise classified_http_exception(
+            status.HTTP_404_NOT_FOUND,
+            f"Command not found: {command_id}",
+            code=ErrorCode.RESOURCE_NOT_FOUND,
         )
         
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error getting command status: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get command status: {str(e)}"
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            f"Failed to get command status: {str(e)}",
+            code=ErrorCode.INTERNAL_ERROR,
         )
 
 
@@ -808,6 +830,7 @@ async def _track_bulk_create_progress(
 
 
 @router.post("/{class_id}/bulk-create-tracked", response_model=Dict[str, Any])
+@trace_endpoint("oms.instance_async.bulk_create_tracked")
 async def bulk_create_instances_with_tracking(
     db_name: str = Depends(ensure_database_exists),
     class_id: str = Depends(ValidatedClassId),

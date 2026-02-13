@@ -17,6 +17,7 @@ from fastapi import WebSocket, WebSocketDisconnect
 
 from bff.middleware.auth import enforce_bff_websocket_auth
 from shared.services.core.websocket_service import WebSocketConnectionManager
+from shared.observability.tracing import trace_external_call
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +69,7 @@ async def _send_connection_established(
     await _send_json(websocket, payload)
 
 
+@trace_external_call("bff.websocket.handle_client_message")
 async def handle_client_message(
     *,
     websocket: WebSocket,
@@ -195,6 +197,7 @@ async def _run_session(
         await manager.disconnect(client_id)
 
 
+@trace_external_call("bff.websocket.run_command_updates")
 async def run_command_updates(
     *,
     websocket: WebSocket,
@@ -226,6 +229,7 @@ async def run_command_updates(
     )
 
 
+@trace_external_call("bff.websocket.run_user_updates")
 async def run_user_updates(
     *,
     websocket: WebSocket,

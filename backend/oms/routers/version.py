@@ -23,6 +23,8 @@ from shared.utils.commit_utils import coerce_commit_id
 from shared.utils.diff_utils import normalize_diff_response
 from shared.utils.branch_utils import protected_branch_write_message
 from shared.config.settings import get_settings
+from shared.errors.error_types import ErrorCode, ErrorCategory, classified_http_exception
+from shared.observability.tracing import trace_endpoint
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +91,7 @@ def _rollback_enabled() -> bool:
 
 
 @router.get("/head")
+@trace_endpoint("oms.version.get_head")
 async def get_branch_head_commit(
     db_name: str,
     branch: str = Query("main", description="브랜치 이름 (default: main)"),
@@ -118,27 +121,31 @@ async def get_branch_head_commit(
                 data={"branch": branch, "head_commit_id": head_commit_id},
             ).to_dict()
 
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"브랜치 '{branch}'을(를) 찾을 수 없습니다",
+        raise classified_http_exception(
+            status.HTTP_404_NOT_FOUND,
+            f"브랜치 '{branch}'을(를) 찾을 수 없습니다",
+            code=ErrorCode.RESOURCE_NOT_FOUND,
         )
     except SecurityViolationError as e:
         logger.warning("Security violation in get_branch_head_commit: %s", e)
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="입력 데이터에 보안 위반이 감지되었습니다",
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            "입력 데이터에 보안 위반이 감지되었습니다",
+            code=ErrorCode.INPUT_SANITIZATION_FAILED,
         )
     except HTTPException:
         raise
     except Exception as e:
         logger.error("Failed to get branch head commit: %s", e)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"브랜치 head 커밋 조회 실패: {str(e)}",
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            f"브랜치 head 커밋 조회 실패: {str(e)}",
+            code=ErrorCode.INTERNAL_ERROR,
         )
 
 
 @router.post("/commit")
+@trace_endpoint("oms.version.create_commit")
 async def create_commit(
     db_name: str,
     request: CommitRequest,
@@ -158,8 +165,9 @@ async def create_commit(
 
         # 커밋 메시지 검증
         if not sanitized_data.get("message"):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail="커밋 메시지는 필수입니다"
+            raise classified_http_exception(
+                status.HTTP_400_BAD_REQUEST, "커밋 메시지는 필수입니다",
+                code=ErrorCode.REQUEST_VALIDATION_FAILED,
             )
 
         # 커밋 생성
@@ -178,24 +186,28 @@ async def create_commit(
 
     except SecurityViolationError as e:
         logger.warning(f"Security violation in create_commit: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="입력 데이터에 보안 위반이 감지되었습니다",
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            "입력 데이터에 보안 위반이 감지되었습니다",
+            code=ErrorCode.INPUT_SANITIZATION_FAILED,
         )
     except Exception as e:
         logger.error(f"Failed to create commit: {e}")
 
         if "no changes" in str(e).lower():
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail="커밋할 변경사항이 없습니다"
+            raise classified_http_exception(
+                status.HTTP_400_BAD_REQUEST, "커밋할 변경사항이 없습니다",
+                code=ErrorCode.REQUEST_VALIDATION_FAILED,
             )
 
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"커밋 생성 실패: {str(e)}"
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR, f"커밋 생성 실패: {str(e)}",
+            code=ErrorCode.INTERNAL_ERROR,
         )
 
 
 @router.get("/history")
+@trace_endpoint("oms.version.get_history")
 async def get_commit_history(
     db_name: str,
     branch: Optional[str] = Query(None, description="브랜치 이름"),
@@ -218,12 +230,14 @@ async def get_commit_history(
 
         # 페이징 파라미터 검증
         if limit < 1 or limit > 1000:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail="limit은 1-1000 범위여야 합니다"
+            raise classified_http_exception(
+                status.HTTP_400_BAD_REQUEST, "limit은 1-1000 범위여야 합니다",
+                code=ErrorCode.REQUEST_VALIDATION_FAILED,
             )
         if offset < 0:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail="offset은 0 이상이어야 합니다"
+            raise classified_http_exception(
+                status.HTTP_400_BAD_REQUEST, "offset은 0 이상이어야 합니다",
+                code=ErrorCode.REQUEST_VALIDATION_FAILED,
             )
 
         # 브랜치가 지정되지 않으면 현재 브랜치 사용
@@ -248,21 +262,24 @@ async def get_commit_history(
 
     except SecurityViolationError as e:
         logger.warning(f"Security violation in get_commit_history: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="입력 데이터에 보안 위반이 감지되었습니다",
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            "입력 데이터에 보안 위반이 감지되었습니다",
+            code=ErrorCode.INPUT_SANITIZATION_FAILED,
         )
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to get commit history: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"커밋 히스토리 조회 실패: {str(e)}",
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            f"커밋 히스토리 조회 실패: {str(e)}",
+            code=ErrorCode.INTERNAL_ERROR,
         )
 
 
 @router.get("/diff")
+@trace_endpoint("oms.version.get_diff")
 async def get_diff(
     db_name: str,
     from_ref: str = Query(..., description="시작 참조 (브랜치 또는 커밋)"),
@@ -282,8 +299,9 @@ async def get_diff(
 
         # 참조 길이 검증
         if len(from_ref) > 100 or len(to_ref) > 100:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail="참조 이름이 너무 깁니다"
+            raise classified_http_exception(
+                status.HTTP_400_BAD_REQUEST, "참조 이름이 너무 깁니다",
+                code=ErrorCode.REQUEST_VALIDATION_FAILED,
             )
 
         # 차이점 조회
@@ -298,9 +316,10 @@ async def get_diff(
 
     except SecurityViolationError as e:
         logger.warning(f"Security violation in get_diff: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="입력 데이터에 보안 위반이 감지되었습니다",
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            "입력 데이터에 보안 위반이 감지되었습니다",
+            code=ErrorCode.INPUT_SANITIZATION_FAILED,
         )
     except HTTPException:
         raise
@@ -308,16 +327,19 @@ async def get_diff(
         logger.error(f"Failed to get diff: {e}")
 
         if "not found" in str(e).lower():
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="참조를 찾을 수 없습니다"
+            raise classified_http_exception(
+                status.HTTP_404_NOT_FOUND, "참조를 찾을 수 없습니다",
+                code=ErrorCode.RESOURCE_NOT_FOUND,
             )
 
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"차이점 조회 실패: {str(e)}"
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR, f"차이점 조회 실패: {str(e)}",
+            code=ErrorCode.INTERNAL_ERROR,
         )
 
 
 @router.post("/merge")
+@trace_endpoint("oms.version.merge")
 async def merge_branches(
     db_name: str,
     request: MergeRequest,
@@ -347,17 +369,19 @@ async def merge_branches(
 
         # 같은 브랜치 머지 방지
         if source_branch == target_branch:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail="소스와 대상 브랜치가 동일합니다"
+            raise classified_http_exception(
+                status.HTTP_400_BAD_REQUEST, "소스와 대상 브랜치가 동일합니다",
+                code=ErrorCode.REQUEST_VALIDATION_FAILED,
             )
 
         # 머지 전략 검증
         allowed_strategies = ["auto", "ours", "theirs"]
         strategy = sanitized_data.get("strategy", "auto")
         if strategy not in allowed_strategies:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"잘못된 머지 전략입니다. 허용된 값: {allowed_strategies}",
+            raise classified_http_exception(
+                status.HTTP_400_BAD_REQUEST,
+                f"잘못된 머지 전략입니다. 허용된 값: {allowed_strategies}",
+                code=ErrorCode.REQUEST_VALIDATION_FAILED,
             )
 
         # 머지 실행
@@ -378,9 +402,10 @@ async def merge_branches(
 
     except SecurityViolationError as e:
         logger.warning(f"Security violation in merge_branches: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="입력 데이터에 보안 위반이 감지되었습니다",
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            "입력 데이터에 보안 위반이 감지되었습니다",
+            code=ErrorCode.INPUT_SANITIZATION_FAILED,
         )
     except HTTPException:
         raise
@@ -388,22 +413,26 @@ async def merge_branches(
         logger.error(f"Failed to merge branches: {e}")
 
         if "conflict" in str(e).lower():
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="머지 충돌이 발생했습니다. 수동으로 해결해야 합니다",
+            raise classified_http_exception(
+                status.HTTP_409_CONFLICT,
+                "머지 충돌이 발생했습니다. 수동으로 해결해야 합니다",
+                code=ErrorCode.CONFLICT,
             )
 
         if "not found" in str(e).lower():
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="브랜치를 찾을 수 없습니다"
+            raise classified_http_exception(
+                status.HTTP_404_NOT_FOUND, "브랜치를 찾을 수 없습니다",
+                code=ErrorCode.RESOURCE_NOT_FOUND,
             )
 
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"브랜치 머지 실패: {str(e)}"
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR, f"브랜치 머지 실패: {str(e)}",
+            code=ErrorCode.INTERNAL_ERROR,
         )
 
 
 @router.post("/rollback")
+@trace_endpoint("oms.version.rollback")
 async def rollback(
     db_name: str,
     request: RollbackRequest,
@@ -421,9 +450,10 @@ async def rollback(
     """
     try:
         if not _rollback_enabled():
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Rollback endpoint is disabled by default (set ENABLE_OMS_ROLLBACK=true to enable in non-prod)",
+            raise classified_http_exception(
+                status.HTTP_403_FORBIDDEN,
+                "Rollback endpoint is disabled by default (set ENABLE_OMS_ROLLBACK=true to enable in non-prod)",
+                code=ErrorCode.PERMISSION_DENIED,
             )
 
         # 입력 데이터 보안 검증
@@ -463,15 +493,17 @@ async def rollback(
                 # Blocking a dangerous operation should still work even if audit is degraded.
                 pass
 
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=protected_branch_write_message(),
+            raise classified_http_exception(
+                status.HTTP_403_FORBIDDEN,
+                protected_branch_write_message(),
+                code=ErrorCode.PERMISSION_DENIED,
             )
 
         # 타겟 검증
         if len(target) > 100:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail="롤백 타겟이 너무 깁니다"
+            raise classified_http_exception(
+                status.HTTP_400_BAD_REQUEST, "롤백 타겟이 너무 깁니다",
+                code=ErrorCode.REQUEST_VALIDATION_FAILED,
             )
 
         # Audit is mandatory for rollback attempts (fail-closed when enabled).
@@ -492,9 +524,10 @@ async def rollback(
                 },
             )
         except Exception as e:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=f"Rollback requires audit logging, but audit store is unavailable: {e}",
+            raise classified_http_exception(
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                f"Rollback requires audit logging, but audit store is unavailable: {e}",
+                code=ErrorCode.UPSTREAM_UNAVAILABLE,
             ) from e
 
         # 롤백 실행 (branch reset)
@@ -533,9 +566,10 @@ async def rollback(
 
     except SecurityViolationError as e:
         logger.warning(f"Security violation in rollback: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="입력 데이터에 보안 위반이 감지되었습니다",
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            "입력 데이터에 보안 위반이 감지되었습니다",
+            code=ErrorCode.INPUT_SANITIZATION_FAILED,
         )
     except HTTPException:
         raise
@@ -569,16 +603,19 @@ async def rollback(
             )
 
         if "not found" in str(e).lower():
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail=f"대상을 찾을 수 없습니다"
+            raise classified_http_exception(
+                status.HTTP_404_NOT_FOUND, f"대상을 찾을 수 없습니다",
+                code=ErrorCode.RESOURCE_NOT_FOUND,
             )
 
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"롤백 실패: {str(e)}"
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR, f"롤백 실패: {str(e)}",
+            code=ErrorCode.INTERNAL_ERROR,
         )
 
 
 @router.post("/rebase")
+@trace_endpoint("oms.version.rebase")
 async def rebase_branch(
     db_name: str,
     onto: str = Query(..., description="리베이스 대상 브랜치"),
@@ -605,9 +642,10 @@ async def rebase_branch(
 
         # 같은 브랜치 리베이스 방지
         if branch == onto:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="리베이스 대상과 브랜치가 동일합니다",
+            raise classified_http_exception(
+                status.HTTP_400_BAD_REQUEST,
+                "리베이스 대상과 브랜치가 동일합니다",
+                code=ErrorCode.REQUEST_VALIDATION_FAILED,
             )
 
         # 리베이스 실행
@@ -624,9 +662,10 @@ async def rebase_branch(
 
     except SecurityViolationError as e:
         logger.warning(f"Security violation in rebase_branch: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="입력 데이터에 보안 위반이 감지되었습니다",
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            "입력 데이터에 보안 위반이 감지되었습니다",
+            code=ErrorCode.INPUT_SANITIZATION_FAILED,
         )
     except HTTPException:
         raise
@@ -634,16 +673,19 @@ async def rebase_branch(
         logger.error(f"Failed to rebase: {e}")
 
         if "conflict" in str(e).lower():
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT, detail="리베이스 충돌이 발생했습니다"
+            raise classified_http_exception(
+                status.HTTP_409_CONFLICT, "리베이스 충돌이 발생했습니다",
+                code=ErrorCode.CONFLICT,
             )
 
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"리베이스 실패: {str(e)}"
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR, f"리베이스 실패: {str(e)}",
+            code=ErrorCode.INTERNAL_ERROR,
         )
 
 
 @router.get("/common-ancestor")
+@trace_endpoint("oms.version.get_common_ancestor")
 async def get_common_ancestor(
     db_name: str,
     branch1: str = Query(..., description="첫 번째 브랜치"),
@@ -692,15 +734,17 @@ async def get_common_ancestor(
         
     except SecurityViolationError as e:
         logger.warning(f"Security violation in get_common_ancestor: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="입력 데이터에 보안 위반이 감지되었습니다",
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            "입력 데이터에 보안 위반이 감지되었습니다",
+            code=ErrorCode.INPUT_SANITIZATION_FAILED,
         )
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to find common ancestor: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
-            detail=f"공통 조상 찾기 실패: {str(e)}"
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            f"공통 조상 찾기 실패: {str(e)}",
+            code=ErrorCode.INTERNAL_ERROR,
         )

@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional
 import httpx
 
 from shared.config.settings import get_settings
+from shared.observability.tracing import trace_external_call
 
 
 class LakeFSError(RuntimeError):
@@ -112,6 +113,7 @@ class LakeFSClient:
             timeout=self._timeout,
         )
 
+    @trace_external_call("lakefs.create_branch")
     async def create_branch(self, *, repository: str, name: str, source: str = "main") -> None:
         repository = str(repository).strip()
         name = str(name).strip()
@@ -134,6 +136,7 @@ class LakeFSClient:
         if not resp.is_success:
             raise LakeFSError(f"lakeFS create_branch failed ({resp.status_code}): {resp.text}")
 
+    @trace_external_call("lakefs.delete_branch")
     async def delete_branch(self, *, repository: str, name: str) -> None:
         repository = str(repository).strip()
         name = str(name).strip()
@@ -152,6 +155,7 @@ class LakeFSClient:
         if not resp.is_success:
             raise LakeFSError(f"lakeFS delete_branch failed ({resp.status_code}): {resp.text}")
 
+    @trace_external_call("lakefs.commit")
     async def commit(
         self,
         *,
@@ -185,6 +189,7 @@ class LakeFSClient:
             raise LakeFSError(f"lakeFS commit failed ({resp.status_code}): {resp.text}")
         return _extract_commit_id(resp.json())
 
+    @trace_external_call("lakefs.get_branch_head_commit_id")
     async def get_branch_head_commit_id(self, *, repository: str, branch: str) -> str:
         repository = str(repository).strip()
         branch = str(branch).strip()
@@ -207,6 +212,7 @@ class LakeFSClient:
                 return commit_id.strip()
         raise LakeFSError(f"lakeFS branch response missing commit_id: {payload!r}")
 
+    @trace_external_call("lakefs.list_diff_objects")
     async def list_diff_objects(
         self,
         *,
@@ -282,6 +288,7 @@ class LakeFSClient:
                     break
         return results
 
+    @trace_external_call("lakefs.merge")
     async def merge(
         self,
         *,

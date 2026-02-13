@@ -29,6 +29,7 @@ from fastapi.responses import JSONResponse
 
 # Centralized configuration and dependency injection
 from shared.config.settings import get_settings, ApplicationSettings
+from shared.errors.error_types import ErrorCode, classified_http_exception
 from shared.dependencies import (
     initialize_container, 
     get_container, 
@@ -925,9 +926,10 @@ install_bff_auth_middleware(app)
 async def get_oms_client() -> OMSClient:
     """Get OMS client from BFF container"""
     if _bff_container is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="BFF services not initialized"
+        raise classified_http_exception(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "BFF services not initialized",
+            code=ErrorCode.UPSTREAM_UNAVAILABLE,
         )
     return _bff_container.get_oms_client()
 
@@ -935,9 +937,10 @@ async def get_oms_client() -> OMSClient:
 async def get_label_mapper() -> LabelMapper:
     """Get label mapper from BFF container"""
     if _bff_container is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="BFF services not initialized"
+        raise classified_http_exception(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "BFF services not initialized",
+            code=ErrorCode.UPSTREAM_UNAVAILABLE,
         )
     return _bff_container.get_label_mapper()
 
@@ -945,9 +948,10 @@ async def get_label_mapper() -> LabelMapper:
 async def get_google_sheets_service() -> GoogleSheetsService:
     """Get Google Sheets service from BFF container"""
     if _bff_container is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="BFF services not initialized"
+        raise classified_http_exception(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "BFF services not initialized",
+            code=ErrorCode.UPSTREAM_UNAVAILABLE,
         )
     return _bff_container.get_google_sheets_service()
 
@@ -955,9 +959,10 @@ async def get_google_sheets_service() -> GoogleSheetsService:
 async def get_connector_registry() -> ConnectorRegistry:
     """Get ConnectorRegistry from BFF container"""
     if _bff_container is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="BFF services not initialized"
+        raise classified_http_exception(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "BFF services not initialized",
+            code=ErrorCode.UPSTREAM_UNAVAILABLE,
         )
     return _bff_container.get_connector_registry()
 
@@ -965,9 +970,10 @@ async def get_connector_registry() -> ConnectorRegistry:
 async def get_dataset_registry() -> DatasetRegistry:
     """Get DatasetRegistry from BFF container"""
     if _bff_container is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="BFF services not initialized"
+        raise classified_http_exception(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "BFF services not initialized",
+            code=ErrorCode.UPSTREAM_UNAVAILABLE,
         )
     return _bff_container.get_dataset_registry()
 
@@ -975,9 +981,10 @@ async def get_dataset_registry() -> DatasetRegistry:
 async def get_dataset_profile_registry() -> DatasetProfileRegistry:
     """Get DatasetProfileRegistry from BFF container"""
     if _bff_container is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="BFF services not initialized"
+        raise classified_http_exception(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "BFF services not initialized",
+            code=ErrorCode.UPSTREAM_UNAVAILABLE,
         )
     return _bff_container.get_dataset_profile_registry()
 
@@ -985,9 +992,10 @@ async def get_dataset_profile_registry() -> DatasetProfileRegistry:
 async def get_pipeline_registry() -> PipelineRegistry:
     """Get PipelineRegistry from BFF container"""
     if _bff_container is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="BFF services not initialized"
+        raise classified_http_exception(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "BFF services not initialized",
+            code=ErrorCode.UPSTREAM_UNAVAILABLE,
         )
     try:
         return _bff_container.get_pipeline_registry()
@@ -1002,9 +1010,10 @@ async def get_pipeline_registry() -> PipelineRegistry:
 async def get_pipeline_plan_registry() -> PipelinePlanRegistry:
     """Get PipelinePlanRegistry from BFF container"""
     if _bff_container is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="BFF services not initialized"
+        raise classified_http_exception(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "BFF services not initialized",
+            code=ErrorCode.UPSTREAM_UNAVAILABLE,
         )
     return _bff_container.get_pipeline_plan_registry()
 
@@ -1035,9 +1044,10 @@ async def get_agent_policy_registry() -> AgentPolicyRegistry:
 async def get_pipeline_executor() -> PipelineExecutor:
     """Get PipelineExecutor from BFF container"""
     if _bff_container is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="BFF services not initialized"
+        raise classified_http_exception(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "BFF services not initialized",
+            code=ErrorCode.UPSTREAM_UNAVAILABLE,
         )
     return _bff_container.get_pipeline_executor()
 

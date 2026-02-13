@@ -10,14 +10,17 @@ internal task management without user-facing features.
 
 from typing import Any, Dict
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Query, status
 
 from shared.dependencies.providers import BackgroundTaskManagerDep, RedisServiceDep
 from shared.models.background_task import TaskStatus
+from shared.errors.error_types import ErrorCode, classified_http_exception
+from shared.observability.tracing import trace_endpoint
 
 router = APIRouter(prefix="/tasks", tags=["Task Management"])
 
 @router.get("/internal/status/{task_id}")
+@trace_endpoint("oms.tasks.get_status")
 async def get_internal_task_status(
     task_id: str,
     task_manager: BackgroundTaskManagerDep,
@@ -30,9 +33,10 @@ async def get_internal_task_status(
     task = await task_manager.get_task_status(task_id)
     
     if not task:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Task {task_id} not found"
+        raise classified_http_exception(
+            status.HTTP_404_NOT_FOUND,
+            f"Task {task_id} not found",
+            code=ErrorCode.RESOURCE_NOT_FOUND,
         )
     
     return {
@@ -47,6 +51,7 @@ async def get_internal_task_status(
 
 
 @router.get("/internal/active")
+@trace_endpoint("oms.tasks.get_active")
 async def get_active_tasks(
     task_manager: BackgroundTaskManagerDep,
 ) -> Dict[str, Any]:
@@ -87,6 +92,7 @@ async def get_active_tasks(
 
 
 @router.post("/internal/cleanup")
+@trace_endpoint("oms.tasks.cleanup")
 async def cleanup_old_tasks(
     older_than_days: int = Query(7, ge=1, le=30, description="Delete tasks older than N days"),
     *,
@@ -121,6 +127,7 @@ async def cleanup_old_tasks(
 
 
 @router.get("/internal/health")
+@trace_endpoint("oms.tasks.health")
 async def task_service_health(
     task_manager: BackgroundTaskManagerDep,
 ) -> Dict[str, Any]:

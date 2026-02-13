@@ -93,3 +93,7 @@ def test_error_response_contains_enterprise_metadata() -> None:
     assert payload["status"] == "error"
     assert payload["code"] == "INTERNAL_ERROR"
     assert payload["enterprise"]["code"].startswith("SHV-")
+    assert payload["diagnostics"]["schema"] == "error_diagnostics.v1"
+    assert payload["diagnostics"]["lookup"]["enterprise_code"] == payload["enterprise"]["code"]
+    assert payload["diagnostics"]["group_fingerprint"].startswith("sha256:")
+    assert payload["diagnostics"]["instance_fingerprint"].startswith("sha256:")

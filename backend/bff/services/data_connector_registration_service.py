@@ -12,6 +12,8 @@ from typing import Any, Dict, Optional, Tuple
 
 from fastapi import HTTPException, status
 
+from shared.errors.error_types import ErrorCode, classified_http_exception
+
 from bff.routers.data_connector_ops import _build_google_oauth_client, _resolve_google_connection
 from data_connector.google_sheets.models import GoogleSheetRegisterResponse, RegisteredSheet
 from data_connector.google_sheets.service import GoogleSheetsService
@@ -21,6 +23,7 @@ from shared.services.registries.connector_registry import ConnectorRegistry
 from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.services.registries.lineage_store import LineageStore
 from shared.utils.number_utils import to_int_or_none
+from shared.observability.tracing import trace_external_call, trace_db_operation
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +52,7 @@ async def _resolve_tokens(
     return access_token, refresh_token, expires_at
 
 
+@trace_external_call("bff.data_connector_registration.register_google_sheet")
 async def register_google_sheet(
     *,
     sheet_data: Dict[str, Any],
@@ -70,7 +74,7 @@ async def register_google_sheet(
         connection_id = sheet_data.get("connection_id")
 
         if not sheet_url:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="sheet_url is required")
+            raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "sheet_url is required", code=ErrorCode.REQUEST_VALIDATION_FAILED)
 
         logger.info(
             "Registering Google Sheet: %s (worksheet=%s, interval=%ss)",
@@ -199,12 +203,13 @@ async def register_google_sheet(
         raise
     except ValueError as e:
         logger.error("Invalid Google Sheet URL or data: %s", e)
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid sheet data: {str(e)}") from e
+        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, f"Invalid sheet data: {str(e)}", code=ErrorCode.REQUEST_VALIDATION_FAILED) from e
     except Exception as e:
         logger.error("Failed to register Google Sheet: %s", e)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Registration failed: {str(e)}") from e
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, f"Registration failed: {str(e)}", code=ErrorCode.CONNECTOR_ERROR) from e
 
 
+@trace_external_call("bff.data_connector_registration.preview_google_sheet")
 async def preview_google_sheet(
     *,
     sheet_id: str,
@@ -218,14 +223,11 @@ async def preview_google_sheet(
 
         source = await connector_registry.get_source(source_type="google_sheets", source_id=sheet_id)
         if not source or not source.enabled:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sheet is not registered")
+            raise classified_http_exception(status.HTTP_404_NOT_FOUND, "Sheet is not registered", code=ErrorCode.RESOURCE_NOT_FOUND)
 
         sheet_url = (source.config_json or {}).get("sheet_url")
         if not sheet_url:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Registered sheet is missing sheet_url",
-            )
+            raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, "Registered sheet is missing sheet_url", code=ErrorCode.CONNECTOR_ERROR)
 
         config = source.config_json or {}
         default_ws = config.get("worksheet_name")
@@ -251,14 +253,15 @@ async def preview_google_sheet(
 
     except ValueError as e:
         logger.error("Invalid sheet ID or worksheet: %s", e)
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid parameters: {str(e)}") from e
+        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, f"Invalid parameters: {str(e)}", code=ErrorCode.REQUEST_VALIDATION_FAILED) from e
     except HTTPException:
         raise
     except Exception as e:
         logger.error("Failed to preview Google Sheet: %s", e)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Preview failed: {str(e)}") from e
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, f"Preview failed: {str(e)}", code=ErrorCode.CONNECTOR_ERROR) from e
 
 
+@trace_db_operation("bff.data_connector_registration.list_registered_sheets")
 async def list_registered_sheets(
     *,
     database_name: Optional[str],
@@ -310,19 +313,17 @@ async def list_registered_sheets(
         raise
     except Exception as e:
         logger.error("Failed to list registered sheets: %s", e)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to retrieve sheets: {str(e)}",
-        ) from e
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, f"Failed to retrieve sheets: {str(e)}", code=ErrorCode.CONNECTOR_ERROR) from e
 
 
+@trace_db_operation("bff.data_connector_registration.unregister_google_sheet")
 async def unregister_google_sheet(*, sheet_id: str, connector_registry: ConnectorRegistry) -> Dict[str, str]:
     try:
         logger.info("Unregistering Google Sheet: %s", sheet_id)
 
         ok = await connector_registry.set_source_enabled(source_type="google_sheets", source_id=sheet_id, enabled=False)
         if not ok:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sheet is not registered")
+            raise classified_http_exception(status.HTTP_404_NOT_FOUND, "Sheet is not registered", code=ErrorCode.RESOURCE_NOT_FOUND)
 
         existing_mapping = await connector_registry.get_mapping(source_type="google_sheets", source_id=sheet_id)
         if existing_mapping:
@@ -344,12 +345,9 @@ async def unregister_google_sheet(*, sheet_id: str, connector_registry: Connecto
 
     except ValueError as e:
         logger.error("Invalid sheet ID: %s", e)
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid sheet ID: {str(e)}") from e
+        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, f"Invalid sheet ID: {str(e)}", code=ErrorCode.REQUEST_VALIDATION_FAILED) from e
     except HTTPException:
         raise
     except Exception as e:
         logger.error("Failed to unregister Google Sheet: %s", e)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Unregistration failed: {str(e)}",
-        ) from e
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, f"Unregistration failed: {str(e)}", code=ErrorCode.CONNECTOR_ERROR) from e

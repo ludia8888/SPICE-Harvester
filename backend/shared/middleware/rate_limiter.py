@@ -14,6 +14,7 @@ import redis.asyncio as redis
 
 from shared.config.settings import get_settings
 from shared.config.rate_limit_config import rate_limit_config
+from shared.errors.error_types import ErrorCode, classified_http_exception
 from shared.security.auth_utils import extract_presented_token
 from shared.utils.app_logger import get_logger
 
@@ -510,9 +511,11 @@ def rate_limit(
                 retry_after = int(info.get("reset_in", 1))
                 headers["Retry-After"] = str(retry_after)
                 if info.get("disabled"):
-                    raise HTTPException(
-                        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                        detail={
+                    raise classified_http_exception(
+                        status.HTTP_503_SERVICE_UNAVAILABLE,
+                        "Rate limiter unavailable",
+                        code=ErrorCode.UPSTREAM_UNAVAILABLE,
+                        extra={
                             "error": "rate_limiter_unavailable",
                             "retry_after": retry_after,
                             "limit": requests,
@@ -521,9 +524,11 @@ def rate_limit(
                         headers=headers,
                     )
 
-                raise HTTPException(
-                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                    detail={
+                raise classified_http_exception(
+                    status.HTTP_429_TOO_MANY_REQUESTS,
+                    "Rate limit exceeded",
+                    code=ErrorCode.RATE_LIMITED,
+                    extra={
                         "error": "Rate limit exceeded",
                         "retry_after": retry_after,
                         "limit": requests,

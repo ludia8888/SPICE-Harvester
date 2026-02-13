@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from bff.routers.pipeline_deps import get_pipeline_registry
 from bff.routers.pipeline_shared import _ensure_pipeline_permission, _log_pipeline_audit
 from shared.dependencies.providers import AuditLogStoreDep
+from shared.errors.error_types import ErrorCode, classified_http_exception
 from shared.models.requests import ApiResponse
 from shared.observability.tracing import trace_endpoint
 from shared.security.input_sanitizer import sanitize_input, validate_db_name
@@ -41,7 +42,7 @@ async def list_pipeline_branches(
         raise
     except Exception as exc:
         logger.error("Failed to list pipeline branches: %s", exc)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc), code=ErrorCode.INTERNAL_ERROR)
 
 
 @router.post("/branches/{branch}/archive", response_model=ApiResponse)
@@ -57,10 +58,10 @@ async def archive_pipeline_branch(
         db_name = validate_db_name(db_name)
         resolved_branch = safe_lakefs_ref(branch)
         if resolved_branch == "main":
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="main branch cannot be archived")
+            raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "main branch cannot be archived", code=ErrorCode.REQUEST_VALIDATION_FAILED)
         existing = await pipeline_registry.get_pipeline_branch(db_name=db_name, branch=resolved_branch)
         if not existing:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Branch not found")
+            raise classified_http_exception(status.HTTP_404_NOT_FOUND, "Branch not found", code=ErrorCode.RESOURCE_NOT_FOUND)
         record = await pipeline_registry.archive_pipeline_branch(db_name=db_name, branch=resolved_branch)
         await _log_pipeline_audit(
             audit_store,
@@ -83,7 +84,7 @@ async def archive_pipeline_branch(
             error=str(exc),
         )
         logger.error("Failed to archive pipeline branch: %s", exc)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc), code=ErrorCode.INTERNAL_ERROR)
 
 
 @router.post("/branches/{branch}/restore", response_model=ApiResponse)
@@ -100,7 +101,7 @@ async def restore_pipeline_branch(
         resolved_branch = safe_lakefs_ref(branch)
         existing = await pipeline_registry.get_pipeline_branch(db_name=db_name, branch=resolved_branch)
         if not existing:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Branch not found")
+            raise classified_http_exception(status.HTTP_404_NOT_FOUND, "Branch not found", code=ErrorCode.RESOURCE_NOT_FOUND)
         record = await pipeline_registry.restore_pipeline_branch(db_name=db_name, branch=resolved_branch)
         await _log_pipeline_audit(
             audit_store,
@@ -123,7 +124,7 @@ async def restore_pipeline_branch(
             error=str(exc),
         )
         logger.error("Failed to restore pipeline branch: %s", exc)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc), code=ErrorCode.INTERNAL_ERROR)
 
 
 @router.post("/{pipeline_id}/branches", response_model=ApiResponse)
@@ -148,11 +149,11 @@ async def create_pipeline_branch(
         sanitized = sanitize_input(payload)
         requested_branch = str(sanitized.get("branch") or "").strip()
         if not requested_branch:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="branch is required")
+            raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "branch is required", code=ErrorCode.REQUEST_VALIDATION_FAILED)
 
         branch = safe_lakefs_ref(requested_branch)
         if branch == "main" and requested_branch.lower() != "main":
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid branch name")
+            raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "Invalid branch name", code=ErrorCode.REQUEST_VALIDATION_FAILED)
 
         record = await pipeline_registry.create_branch(pipeline_id=pipeline_id, new_branch=branch, user_id=actor_user_id)
         await _log_pipeline_audit(
@@ -170,7 +171,7 @@ async def create_pipeline_branch(
     except HTTPException:
         raise
     except (PipelineAlreadyExistsError,) as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
+        raise classified_http_exception(status.HTTP_409_CONFLICT, str(exc), code=ErrorCode.RESOURCE_ALREADY_EXISTS)
     except Exception as exc:
         await _log_pipeline_audit(
             audit_store,
@@ -182,10 +183,10 @@ async def create_pipeline_branch(
         )
         message = str(exc)
         if isinstance(exc, LakeFSConflictError):
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Branch already exists")
+            raise classified_http_exception(status.HTTP_409_CONFLICT, "Branch already exists", code=ErrorCode.RESOURCE_ALREADY_EXISTS)
         if isinstance(exc, LakeFSError):
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=message)
+            raise classified_http_exception(status.HTTP_400_BAD_REQUEST, message, code=ErrorCode.REQUEST_VALIDATION_FAILED)
         if "not found" in message.lower():
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pipeline not found")
+            raise classified_http_exception(status.HTTP_404_NOT_FOUND, "Pipeline not found", code=ErrorCode.PIPELINE_NOT_FOUND)
         logger.error("Failed to create pipeline branch: %s", exc)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=message)
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, message, code=ErrorCode.INTERNAL_ERROR)

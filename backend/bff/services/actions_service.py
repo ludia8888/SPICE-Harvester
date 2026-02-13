@@ -14,6 +14,7 @@ from uuid import UUID
 import httpx
 from fastapi import HTTPException, Request, status
 
+from shared.errors.error_types import ErrorCode, ErrorCategory, classified_http_exception
 from bff.schemas.actions_requests import ActionSimulateRequest, ActionSubmitRequest
 from bff.services.input_validation_service import sanitized_payload, validated_db_name
 from bff.services.oms_client import OMSClient
@@ -22,6 +23,7 @@ from bff.utils.httpx_exceptions import raise_httpx_as_http_exception
 from shared.security.database_access import DOMAIN_MODEL_ROLES, resolve_database_actor
 from shared.services.registries.action_log_registry import ActionLogRegistry
 from shared.services.registries.action_simulation_registry import ActionSimulationRegistry
+from shared.observability.tracing import trace_external_call, trace_db_operation
 
 EnforceDatabaseRoleFn = Callable[..., Any]
 
@@ -29,7 +31,7 @@ EnforceDatabaseRoleFn = Callable[..., Any]
 def _require_action_type_id(action_type_id: str) -> str:
     action_type_id = str(action_type_id or "").strip()
     if not action_type_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="action_type_id is required")
+        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "action_type_id is required", code=ErrorCode.ACTION_INPUT_INVALID)
     return action_type_id
 
 
@@ -42,14 +44,14 @@ async def _enforce_domain_model_role(
     try:
         await enforce_role(headers=http_request.headers, db_name=db_name, required_roles=DOMAIN_MODEL_ROLES)
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+        raise classified_http_exception(status.HTTP_403_FORBIDDEN, str(exc), code=ErrorCode.PERMISSION_DENIED) from exc
 
 
 def _parse_uuid(value: str) -> UUID:
     try:
         return UUID(str(value))
     except Exception as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid UUID") from exc
+        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "Invalid UUID", code=ErrorCode.ACTION_INPUT_INVALID) from exc
 
 
 def _oms_metadata(
@@ -72,7 +74,7 @@ async def _oms_post(*, oms_client: OMSClient, path: str, payload: Dict[str, Any]
         raise_httpx_as_http_exception(exc)
         raise  # pragma: no cover
     except httpx.HTTPError as exc:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="OMS 요청 실패") from exc
+        raise classified_http_exception(status.HTTP_502_BAD_GATEWAY, "OMS 요청 실패", code=ErrorCode.UPSTREAM_ERROR) from exc
 
 
 @asynccontextmanager
@@ -120,6 +122,7 @@ def _serialize_action_simulation_version(record: Any) -> Dict[str, Any]:
     }
 
 
+@trace_external_call("bff.actions.submit_action")
 async def submit_action(
     *,
     db_name: str,
@@ -156,6 +159,7 @@ async def submit_action(
     )
 
 
+@trace_external_call("bff.actions.simulate_action")
 async def simulate_action(
     *,
     db_name: str,
@@ -197,6 +201,7 @@ async def simulate_action(
     )
 
 
+@trace_db_operation("bff.actions.get_action_log")
 async def get_action_log(
     *,
     db_name: str,
@@ -212,11 +217,12 @@ async def get_action_log(
 
     record = await action_logs.get_log(action_log_id=str(action_log_uuid))
     if not record or record.db_name != db_name:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="ActionLog not found")
+        raise classified_http_exception(status.HTTP_404_NOT_FOUND, "ActionLog not found", code=ErrorCode.RESOURCE_NOT_FOUND)
 
     return {"status": "success", "data": serialize_action_log_record(record)}
 
 
+@trace_db_operation("bff.actions.list_action_logs")
 async def list_action_logs(
     *,
     db_name: str,
@@ -244,6 +250,7 @@ async def list_action_logs(
     return {"status": "success", "count": len(records), "data": [serialize_action_log_record(rec) for rec in records]}
 
 
+@trace_db_operation("bff.actions.list_action_simulations")
 async def list_action_simulations(
     *,
     db_name: str,
@@ -266,6 +273,7 @@ async def list_action_simulations(
         return {"status": "success", "count": len(sims), "data": [_serialize_action_simulation(sim) for sim in sims]}
 
 
+@trace_db_operation("bff.actions.get_action_simulation")
 async def get_action_simulation(
     *,
     db_name: str,
@@ -282,7 +290,7 @@ async def get_action_simulation(
     async with _action_simulation_registry() as registry:
         sim = await registry.get_simulation(simulation_id=str(simulation_uuid))
         if not sim or sim.db_name != db_name:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="ActionSimulation not found")
+            raise classified_http_exception(status.HTTP_404_NOT_FOUND, "ActionSimulation not found", code=ErrorCode.RESOURCE_NOT_FOUND)
 
         payload: Dict[str, Any] = {"simulation": _serialize_action_simulation(sim)}
         if include_versions:
@@ -291,6 +299,7 @@ async def get_action_simulation(
         return {"status": "success", "data": payload}
 
 
+@trace_db_operation("bff.actions.list_action_simulation_versions")
 async def list_action_simulation_versions(
     *,
     db_name: str,
@@ -307,7 +316,7 @@ async def list_action_simulation_versions(
     async with _action_simulation_registry() as registry:
         sim = await registry.get_simulation(simulation_id=str(simulation_uuid))
         if not sim or sim.db_name != db_name:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="ActionSimulation not found")
+            raise classified_http_exception(status.HTTP_404_NOT_FOUND, "ActionSimulation not found", code=ErrorCode.RESOURCE_NOT_FOUND)
 
         versions = await registry.list_versions(simulation_id=str(simulation_uuid), limit=limit, offset=offset)
         return {
@@ -317,6 +326,7 @@ async def list_action_simulation_versions(
         }
 
 
+@trace_db_operation("bff.actions.get_action_simulation_version")
 async def get_action_simulation_version(
     *,
     db_name: str,
@@ -332,9 +342,9 @@ async def get_action_simulation_version(
     async with _action_simulation_registry() as registry:
         sim = await registry.get_simulation(simulation_id=str(simulation_uuid))
         if not sim or sim.db_name != db_name:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="ActionSimulation not found")
+            raise classified_http_exception(status.HTTP_404_NOT_FOUND, "ActionSimulation not found", code=ErrorCode.RESOURCE_NOT_FOUND)
 
         ver = await registry.get_version(simulation_id=str(simulation_uuid), version=int(version))
         if not ver:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="ActionSimulationVersion not found")
+            raise classified_http_exception(status.HTTP_404_NOT_FOUND, "ActionSimulationVersion not found", code=ErrorCode.RESOURCE_NOT_FOUND)
         return {"status": "success", "data": _serialize_action_simulation_version(ver)}

@@ -4,6 +4,8 @@ import logging
 from dataclasses import asdict
 from typing import Any, Awaitable, Callable, Dict, List
 
+from shared.observability.tracing import trace_external_call
+
 from bff.services.pipeline_join_evaluator import evaluate_pipeline_joins
 from bff.services.pipeline_plan_validation import validate_pipeline_plan
 from shared.models.pipeline_plan import PipelinePlan
@@ -56,6 +58,7 @@ logger = logging.getLogger(__name__)
 ToolHandler = Callable[[Any, Dict[str, Any]], Awaitable[Any]]
 
 
+@trace_external_call("mcp.plan_new")
 async def _plan_new(_server: Any, arguments: Dict[str, Any]) -> Any:
     plan = new_plan(
         goal=str(arguments.get("goal") or ""),
@@ -66,12 +69,14 @@ async def _plan_new(_server: Any, arguments: Dict[str, Any]) -> Any:
     return {"plan": plan}
 
 
+@trace_external_call("mcp.plan_reset")
 async def _plan_reset(_server: Any, arguments: Dict[str, Any]) -> Any:
     plan = arguments.get("plan") or {}
     result = reset_plan(plan)
     return {"plan": result.plan, "warnings": list(result.warnings)}
 
 
+@trace_external_call("mcp.plan_add_input")
 async def _plan_add_input(_server: Any, arguments: Dict[str, Any]) -> Any:
     plan = arguments.get("plan") or {}
     result = add_input(
@@ -85,6 +90,7 @@ async def _plan_add_input(_server: Any, arguments: Dict[str, Any]) -> Any:
     return {"plan": result.plan, "node_id": result.node_id, "warnings": list(result.warnings)}
 
 
+@trace_external_call("mcp.plan_add_external_input")
 async def _plan_add_external_input(_server: Any, arguments: Dict[str, Any]) -> Any:
     plan = arguments.get("plan") or {}
     read_obj = arguments.get("read")
@@ -99,6 +105,7 @@ async def _plan_add_external_input(_server: Any, arguments: Dict[str, Any]) -> A
     return {"plan": result.plan, "node_id": result.node_id, "warnings": list(result.warnings)}
 
 
+@trace_external_call("mcp.plan_configure_input_read")
 async def _plan_configure_input_read(_server: Any, arguments: Dict[str, Any]) -> Any:
     plan = arguments.get("plan") or {}
     patch: Dict[str, Any] = {}
@@ -133,6 +140,7 @@ async def _plan_configure_input_read(_server: Any, arguments: Dict[str, Any]) ->
     return {"plan": result.plan, "node_id": result.node_id, "warnings": list(result.warnings)}
 
 
+@trace_external_call("mcp.plan_add_join")
 async def _plan_add_join(_server: Any, arguments: Dict[str, Any]) -> Any:
     plan = arguments.get("plan") or {}
     left_keys = (
@@ -199,6 +207,7 @@ async def _plan_add_join(_server: Any, arguments: Dict[str, Any]) -> Any:
     return {"plan": result.plan, "node_id": result.node_id, "warnings": list(result.warnings)}
 
 
+@trace_external_call("mcp.plan_add_group_by")
 async def _plan_add_group_by(_server: Any, arguments: Dict[str, Any]) -> Any:
     plan = arguments.get("plan") or {}
     input_node_id = str(arguments.get("input_node_id") or "")
@@ -222,6 +231,7 @@ async def _plan_add_group_by(_server: Any, arguments: Dict[str, Any]) -> Any:
     return {"plan": result.plan, "node_id": result.node_id, "warnings": all_warnings}
 
 
+@trace_external_call("mcp.plan_add_group_by_expr")
 async def _plan_add_group_by_expr(_server: Any, arguments: Dict[str, Any]) -> Any:
     plan = arguments.get("plan") or {}
     input_node_id = str(arguments.get("input_node_id") or "")
@@ -241,6 +251,7 @@ async def _plan_add_group_by_expr(_server: Any, arguments: Dict[str, Any]) -> An
     return {"plan": result.plan, "node_id": result.node_id, "warnings": list(result.warnings)}
 
 
+@trace_external_call("mcp.plan_add_window")
 async def _plan_add_window(_server: Any, arguments: Dict[str, Any]) -> Any:
     plan = arguments.get("plan") or {}
     input_node_id = str(arguments.get("input_node_id") or "")
@@ -260,6 +271,7 @@ async def _plan_add_window(_server: Any, arguments: Dict[str, Any]) -> Any:
     return {"plan": result.plan, "node_id": result.node_id, "warnings": list(result.warnings)}
 
 
+@trace_external_call("mcp.plan_add_window_expr")
 async def _plan_add_window_expr(_server: Any, arguments: Dict[str, Any]) -> Any:
     plan = arguments.get("plan") or {}
     input_node_id = str(arguments.get("input_node_id") or "")
@@ -273,6 +285,7 @@ async def _plan_add_window_expr(_server: Any, arguments: Dict[str, Any]) -> Any:
     return {"plan": result.plan, "node_id": result.node_id, "warnings": list(result.warnings)}
 
 
+@trace_external_call("mcp.plan_add_transform")
 async def _plan_add_transform(_server: Any, arguments: Dict[str, Any]) -> Any:
     plan = arguments.get("plan") or {}
     operation = str(arguments.get("operation") or "").strip()
@@ -307,6 +320,7 @@ async def _plan_add_transform(_server: Any, arguments: Dict[str, Any]) -> Any:
     return {"plan": result.plan, "node_id": result.node_id, "warnings": all_warnings}
 
 
+@trace_external_call("mcp.plan_add_sort")
 async def _plan_add_sort(_server: Any, arguments: Dict[str, Any]) -> Any:
     plan = arguments.get("plan") or {}
     input_node_id = str(arguments.get("input_node_id") or "")
@@ -321,6 +335,7 @@ async def _plan_add_sort(_server: Any, arguments: Dict[str, Any]) -> Any:
     return {"plan": result.plan, "node_id": result.node_id, "warnings": list(result.warnings)}
 
 
+@trace_external_call("mcp.plan_add_explode")
 async def _plan_add_explode(_server: Any, arguments: Dict[str, Any]) -> Any:
     plan = arguments.get("plan") or {}
     input_node_id = str(arguments.get("input_node_id") or "")
@@ -334,6 +349,7 @@ async def _plan_add_explode(_server: Any, arguments: Dict[str, Any]) -> Any:
     return {"plan": result.plan, "node_id": result.node_id, "warnings": list(result.warnings)}
 
 
+@trace_external_call("mcp.plan_add_union")
 async def _plan_add_union(_server: Any, arguments: Dict[str, Any]) -> Any:
     plan = arguments.get("plan") or {}
     result = add_union(
@@ -346,6 +362,7 @@ async def _plan_add_union(_server: Any, arguments: Dict[str, Any]) -> Any:
     return {"plan": result.plan, "node_id": result.node_id, "warnings": list(result.warnings)}
 
 
+@trace_external_call("mcp.plan_add_pivot")
 async def _plan_add_pivot(_server: Any, arguments: Dict[str, Any]) -> Any:
     plan = arguments.get("plan") or {}
     input_node_id = str(arguments.get("input_node_id") or "")
@@ -376,6 +393,7 @@ async def _plan_add_pivot(_server: Any, arguments: Dict[str, Any]) -> Any:
     return {"plan": result.plan, "node_id": result.node_id, "warnings": list(result.warnings)}
 
 
+@trace_external_call("mcp.plan_add_filter")
 async def _plan_add_filter(_server: Any, arguments: Dict[str, Any]) -> Any:
     plan = arguments.get("plan") or {}
     result = add_filter(
@@ -387,6 +405,7 @@ async def _plan_add_filter(_server: Any, arguments: Dict[str, Any]) -> Any:
     return {"plan": result.plan, "node_id": result.node_id, "warnings": list(result.warnings)}
 
 
+@trace_external_call("mcp.plan_add_compute")
 async def _plan_add_compute(_server: Any, arguments: Dict[str, Any]) -> Any:
     plan = arguments.get("plan") or {}
     input_node_id = str(arguments.get("input_node_id") or "")
@@ -462,6 +481,7 @@ async def _plan_add_compute(_server: Any, arguments: Dict[str, Any]) -> Any:
     return {"plan": result.plan, "node_id": result.node_id, "warnings": list(result.warnings)}
 
 
+@trace_external_call("mcp.plan_add_compute_column")
 async def _plan_add_compute_column(_server: Any, arguments: Dict[str, Any]) -> Any:
     plan = arguments.get("plan") or {}
     result = add_compute_column(
@@ -474,6 +494,7 @@ async def _plan_add_compute_column(_server: Any, arguments: Dict[str, Any]) -> A
     return {"plan": result.plan, "node_id": result.node_id, "warnings": list(result.warnings)}
 
 
+@trace_external_call("mcp.plan_add_compute_assignments")
 async def _plan_add_compute_assignments(_server: Any, arguments: Dict[str, Any]) -> Any:
     plan = arguments.get("plan") or {}
     result = add_compute_assignments(
@@ -485,6 +506,7 @@ async def _plan_add_compute_assignments(_server: Any, arguments: Dict[str, Any])
     return {"plan": result.plan, "node_id": result.node_id, "warnings": list(result.warnings)}
 
 
+@trace_external_call("mcp.plan_add_cast")
 async def _plan_add_cast(_server: Any, arguments: Dict[str, Any]) -> Any:
     plan = arguments.get("plan") or {}
     result = add_cast(
@@ -496,6 +518,7 @@ async def _plan_add_cast(_server: Any, arguments: Dict[str, Any]) -> Any:
     return {"plan": result.plan, "node_id": result.node_id, "warnings": list(result.warnings)}
 
 
+@trace_external_call("mcp.plan_add_rename")
 async def _plan_add_rename(_server: Any, arguments: Dict[str, Any]) -> Any:
     plan = arguments.get("plan") or {}
     # Be forgiving: LLMs often pass rename maps as a list of {from,to} objects or
@@ -549,6 +572,7 @@ async def _plan_add_rename(_server: Any, arguments: Dict[str, Any]) -> Any:
     return {"plan": result.plan, "node_id": result.node_id, "warnings": list(result.warnings)}
 
 
+@trace_external_call("mcp.plan_add_select")
 async def _plan_add_select(_server: Any, arguments: Dict[str, Any]) -> Any:
     plan = arguments.get("plan") or {}
     result = add_select(
@@ -560,6 +584,7 @@ async def _plan_add_select(_server: Any, arguments: Dict[str, Any]) -> Any:
     return {"plan": result.plan, "node_id": result.node_id, "warnings": list(result.warnings)}
 
 
+@trace_external_call("mcp.plan_add_select_expr")
 async def _plan_add_select_expr(_server: Any, arguments: Dict[str, Any]) -> Any:
     plan = arguments.get("plan") or {}
     result = add_select_expr(
@@ -571,6 +596,7 @@ async def _plan_add_select_expr(_server: Any, arguments: Dict[str, Any]) -> Any:
     return {"plan": result.plan, "node_id": result.node_id, "warnings": list(result.warnings)}
 
 
+@trace_external_call("mcp.plan_add_drop")
 async def _plan_add_drop(_server: Any, arguments: Dict[str, Any]) -> Any:
     plan = arguments.get("plan") or {}
     result = add_drop(
@@ -582,6 +608,7 @@ async def _plan_add_drop(_server: Any, arguments: Dict[str, Any]) -> Any:
     return {"plan": result.plan, "node_id": result.node_id, "warnings": list(result.warnings)}
 
 
+@trace_external_call("mcp.plan_add_dedupe")
 async def _plan_add_dedupe(_server: Any, arguments: Dict[str, Any]) -> Any:
     plan = arguments.get("plan") or {}
     result = add_dedupe(
@@ -593,6 +620,7 @@ async def _plan_add_dedupe(_server: Any, arguments: Dict[str, Any]) -> Any:
     return {"plan": result.plan, "node_id": result.node_id, "warnings": list(result.warnings)}
 
 
+@trace_external_call("mcp.plan_add_normalize")
 async def _plan_add_normalize(_server: Any, arguments: Dict[str, Any]) -> Any:
     plan = arguments.get("plan") or {}
     result = add_normalize(
@@ -609,6 +637,7 @@ async def _plan_add_normalize(_server: Any, arguments: Dict[str, Any]) -> Any:
     return {"plan": result.plan, "node_id": result.node_id, "warnings": list(result.warnings)}
 
 
+@trace_external_call("mcp.plan_add_regex_replace")
 async def _plan_add_regex_replace(_server: Any, arguments: Dict[str, Any]) -> Any:
     plan = arguments.get("plan") or {}
     result = add_regex_replace(
@@ -620,6 +649,7 @@ async def _plan_add_regex_replace(_server: Any, arguments: Dict[str, Any]) -> An
     return {"plan": result.plan, "node_id": result.node_id, "warnings": list(result.warnings)}
 
 
+@trace_external_call("mcp.plan_add_output")
 async def _plan_add_output(_server: Any, arguments: Dict[str, Any]) -> Any:
     plan = arguments.get("plan") or {}
     result = add_output(
@@ -633,6 +663,7 @@ async def _plan_add_output(_server: Any, arguments: Dict[str, Any]) -> Any:
     return {"plan": result.plan, "node_id": result.node_id, "warnings": list(result.warnings)}
 
 
+@trace_external_call("mcp.plan_add_edge")
 async def _plan_add_edge(_server: Any, arguments: Dict[str, Any]) -> Any:
     plan = arguments.get("plan") or {}
     result = add_edge(
@@ -643,6 +674,7 @@ async def _plan_add_edge(_server: Any, arguments: Dict[str, Any]) -> Any:
     return {"plan": result.plan, "node_id": result.node_id, "warnings": list(result.warnings)}
 
 
+@trace_external_call("mcp.plan_delete_edge")
 async def _plan_delete_edge(_server: Any, arguments: Dict[str, Any]) -> Any:
     plan = arguments.get("plan") or {}
     result = delete_edge(
@@ -653,6 +685,7 @@ async def _plan_delete_edge(_server: Any, arguments: Dict[str, Any]) -> Any:
     return {"plan": result.plan, "node_id": result.node_id, "warnings": list(result.warnings)}
 
 
+@trace_external_call("mcp.plan_set_node_inputs")
 async def _plan_set_node_inputs(_server: Any, arguments: Dict[str, Any]) -> Any:
     plan = arguments.get("plan") or {}
     result = set_node_inputs(
@@ -663,6 +696,7 @@ async def _plan_set_node_inputs(_server: Any, arguments: Dict[str, Any]) -> Any:
     return {"plan": result.plan, "node_id": result.node_id, "warnings": list(result.warnings)}
 
 
+@trace_external_call("mcp.plan_update_node_metadata")
 async def _plan_update_node_metadata(_server: Any, arguments: Dict[str, Any]) -> Any:
     plan = arguments.get("plan") or {}
     # Models often guess "metadata"/"meta" instead of the canonical "set" param.
@@ -685,6 +719,7 @@ async def _plan_update_node_metadata(_server: Any, arguments: Dict[str, Any]) ->
     return {"plan": result.plan, "node_id": result.node_id, "warnings": list(result.warnings)}
 
 
+@trace_external_call("mcp.plan_update_settings")
 async def _plan_update_settings(_server: Any, arguments: Dict[str, Any]) -> Any:
     plan = arguments.get("plan") or {}
     set_fields = arguments.get("set")
@@ -701,6 +736,7 @@ async def _plan_update_settings(_server: Any, arguments: Dict[str, Any]) -> Any:
     return {"plan": result.plan, "node_id": result.node_id, "warnings": list(result.warnings)}
 
 
+@trace_external_call("mcp.plan_delete_node")
 async def _plan_delete_node(_server: Any, arguments: Dict[str, Any]) -> Any:
     plan = arguments.get("plan") or {}
     result = delete_node(
@@ -710,6 +746,7 @@ async def _plan_delete_node(_server: Any, arguments: Dict[str, Any]) -> Any:
     return {"plan": result.plan, "node_id": result.node_id, "warnings": list(result.warnings)}
 
 
+@trace_external_call("mcp.plan_update_output")
 async def _plan_update_output(_server: Any, arguments: Dict[str, Any]) -> Any:
     plan = arguments.get("plan") or {}
     output_name = str(arguments.get("output_name") or "").strip()
@@ -743,12 +780,14 @@ async def _plan_update_output(_server: Any, arguments: Dict[str, Any]) -> Any:
     return {"plan": result.plan, "node_id": result.node_id, "warnings": list(result.warnings)}
 
 
+@trace_external_call("mcp.plan_validate_structure")
 async def _plan_validate_structure(_server: Any, arguments: Dict[str, Any]) -> Any:
     plan = arguments.get("plan") or {}
     errors, warnings = validate_structure(plan)
     return {"errors": errors, "warnings": warnings}
 
 
+@trace_external_call("mcp.plan_validate")
 async def _plan_validate(server: Any, arguments: Dict[str, Any]) -> Any:
     plan_obj = arguments.get("plan") or {}
     try:
@@ -779,6 +818,7 @@ async def _plan_validate(server: Any, arguments: Dict[str, Any]) -> Any:
     return payload
 
 
+@trace_external_call("mcp.plan_preview")
 async def _plan_preview(server: Any, arguments: Dict[str, Any]) -> Any:
     plan_obj = arguments.get("plan") or {}
     # Validate shape early to avoid opaque executor errors.
@@ -873,6 +913,7 @@ async def _plan_preview(server: Any, arguments: Dict[str, Any]) -> Any:
     return {"status": "success", "preview": preview_masked, "preview_policy": preview_policy, "warnings": warnings}
 
 
+@trace_external_call("mcp.plan_refute_claims")
 async def _plan_refute_claims(server: Any, arguments: Dict[str, Any]) -> Any:
     plan_obj = arguments.get("plan") or {}
     # Validate shape early to avoid opaque executor errors.
@@ -907,6 +948,7 @@ async def _plan_refute_claims(server: Any, arguments: Dict[str, Any]) -> Any:
     return report
 
 
+@trace_external_call("mcp.plan_evaluate_joins")
 async def _plan_evaluate_joins(server: Any, arguments: Dict[str, Any]) -> Any:
     plan_obj = arguments.get("plan") or {}
     try:

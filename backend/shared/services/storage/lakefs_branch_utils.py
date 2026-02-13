@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from typing import Optional
 
+from shared.observability.tracing import trace_external_call
 from shared.services.storage.lakefs_client import LakeFSClient, LakeFSConflictError
 
 
+@trace_external_call("lakefs.ensure_branch")
 async def ensure_lakefs_branch(
     *,
     lakefs_client: Optional[LakeFSClient],

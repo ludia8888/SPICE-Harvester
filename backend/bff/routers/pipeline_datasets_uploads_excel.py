@@ -24,6 +24,7 @@ from bff.routers.pipeline_deps import get_dataset_registry, get_objectify_regist
 from bff.services.pipeline_dataset_upload_context import _prepare_dataset_upload_context
 from bff.services.pipeline_tabular_upload_facade import finalize_tabular_upload
 from shared.config.settings import get_settings
+from shared.errors.error_types import ErrorCode, classified_http_exception
 from shared.dependencies.providers import LineageStoreDep
 from shared.models.requests import ApiResponse
 from shared.observability.tracing import trace_endpoint
@@ -73,14 +74,15 @@ async def upload_excel_dataset(
         lower_filename = filename.lower()
         is_xls = lower_filename.endswith(".xls")
         if not lower_filename.endswith((".xlsx", ".xlsm", ".xls")):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Only .xls, .xlsx, or .xlsm files are supported",
+            raise classified_http_exception(
+                status.HTTP_400_BAD_REQUEST,
+                "Only .xls, .xlsx, or .xlsm files are supported",
+                code=ErrorCode.REQUEST_VALIDATION_FAILED,
             )
 
         sample_bytes = await asyncio.to_thread(file.file.read, 65536)
         if not sample_bytes:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty file")
+            raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "Empty file", code=ErrorCode.REQUEST_VALIDATION_FAILED)
         try:
             file.file.seek(0)
         except Exception:
@@ -89,7 +91,7 @@ async def upload_excel_dataset(
         if is_xls:
             raw_bytes = await asyncio.to_thread(file.file.read)
             if not raw_bytes:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty file")
+                raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "Empty file", code=ErrorCode.REQUEST_VALIDATION_FAILED)
             try:
                 file.file.seek(0)
             except Exception:
@@ -101,7 +103,7 @@ async def upload_excel_dataset(
 
         resolved_name = (dataset_name or "").strip() or _default_dataset_name(filename)
         if not resolved_name:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="dataset_name is required")
+            raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "dataset_name is required", code=ErrorCode.REQUEST_VALIDATION_FAILED)
 
         bbox = _normalize_table_bbox(
             table_top=table_top,
@@ -204,4 +206,4 @@ async def upload_excel_dataset(
         raise
     except Exception as exc:
         logger.error("Failed to upload excel dataset: %s", exc)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc), code=ErrorCode.INTERNAL_ERROR)

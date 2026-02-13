@@ -4,6 +4,7 @@ import logging
 from typing import Any, Awaitable, Dict, List, Callable
 
 from shared.errors.error_types import ErrorCategory, ErrorCode
+from shared.observability.tracing import trace_external_call
 
 from mcp_servers.pipeline_mcp_errors import missing_required_params, tool_error
 
@@ -12,6 +13,7 @@ logger = logging.getLogger(__name__)
 ToolHandler = Callable[[Any, Dict[str, Any]], Awaitable[Any]]
 
 
+@trace_external_call("mcp.check_schema_drift")
 async def _check_schema_drift(server: Any, arguments: Dict[str, Any]) -> Any:
     db_name = str(arguments.get("db_name") or "").strip()
     mapping_spec_id = str(arguments.get("mapping_spec_id") or "").strip()
@@ -115,6 +117,7 @@ async def _check_schema_drift(server: Any, arguments: Dict[str, Any]) -> Any:
         )
 
 
+@trace_external_call("mcp.list_schema_changes")
 async def _list_schema_changes(server: Any, arguments: Dict[str, Any]) -> Any:
     db_name = str(arguments.get("db_name") or "").strip()
     subject_type = str(arguments.get("subject_type") or "").strip()

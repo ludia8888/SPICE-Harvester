@@ -35,10 +35,12 @@ _STATUS_TO_CATEGORY_CODE: Dict[int, Tuple[ErrorCategory, ErrorCode]] = {
     status.HTTP_401_UNAUTHORIZED: (ErrorCategory.AUTH, ErrorCode.AUTH_REQUIRED),
     status.HTTP_403_FORBIDDEN: (ErrorCategory.PERMISSION, ErrorCode.PERMISSION_DENIED),
     status.HTTP_404_NOT_FOUND: (ErrorCategory.RESOURCE, ErrorCode.RESOURCE_NOT_FOUND),
+    status.HTTP_410_GONE: (ErrorCategory.RESOURCE, ErrorCode.RESOURCE_GONE),
     status.HTTP_409_CONFLICT: (ErrorCategory.CONFLICT, ErrorCode.CONFLICT),
     status.HTTP_413_REQUEST_ENTITY_TOO_LARGE: (ErrorCategory.INPUT, ErrorCode.PAYLOAD_TOO_LARGE),
     status.HTTP_422_UNPROCESSABLE_ENTITY: (ErrorCategory.INPUT, ErrorCode.REQUEST_VALIDATION_FAILED),
     status.HTTP_429_TOO_MANY_REQUESTS: (ErrorCategory.RATE_LIMIT, ErrorCode.RATE_LIMITED),
+    status.HTTP_501_NOT_IMPLEMENTED: (ErrorCategory.INTERNAL, ErrorCode.FEATURE_NOT_IMPLEMENTED),
 }
 
 
@@ -103,16 +105,24 @@ def _extract_upstream_metadata(body: Any) -> Tuple[Optional[ErrorCode], Optional
 def _extract_external_code(detail: Any) -> Optional[str]:
     if not isinstance(detail, dict):
         return None
-    code_raw = detail.get("code") or detail.get("error_code")
-    if not isinstance(code_raw, str):
-        code_raw = detail.get("error")
-    if not isinstance(code_raw, str):
-        return None
-    if code_raw in ErrorCode._value2member_map_:
-        return None
-    if not is_external_code(code_raw):
-        return None
-    return code_raw
+    candidates: list[Any] = [
+        detail.get("error_code"),
+        detail.get("external_code"),
+        detail.get("legacy_code"),
+        detail.get("code"),
+        detail.get("error"),
+    ]
+    for raw in candidates:
+        if not isinstance(raw, str):
+            continue
+        code_raw = raw.strip()
+        if not code_raw:
+            continue
+        if code_raw in ErrorCode._value2member_map_:
+            continue
+        if is_external_code(code_raw):
+            return code_raw
+    return None
 
 
 def _classify_upstream_url(url: Optional[str], status_code: Optional[int]) -> Tuple[Optional[ErrorCode], Optional[ErrorCategory]]:
@@ -188,6 +198,42 @@ def _build_payload(
     )
 
 
+def _sanitize_header_value(value: Any, *, max_len: int = 256) -> Optional[str]:
+    if value is None:
+        return None
+    raw = str(value).strip()
+    if not raw:
+        return None
+    cleaned = raw.replace("\r", " ").replace("\n", " ")
+    cleaned = "".join(ch for ch in cleaned if 32 <= ord(ch) <= 126)
+    if not cleaned:
+        return None
+    return cleaned[:max_len]
+
+
+def _build_error_headers(payload: Dict[str, Any]) -> Dict[str, str]:
+    enterprise = payload.get("enterprise") if isinstance(payload.get("enterprise"), dict) else {}
+    diagnostics = payload.get("diagnostics") if isinstance(payload.get("diagnostics"), dict) else {}
+
+    header_pairs = (
+        ("X-Error-Code", payload.get("code")),
+        ("X-Error-Category", payload.get("category")),
+        ("X-Enterprise-Code", enterprise.get("code")),
+        ("X-Runbook-Ref", enterprise.get("runbook_ref")),
+        ("X-Error-Group", diagnostics.get("group_fingerprint")),
+        ("X-Error-Instance", diagnostics.get("instance_fingerprint")),
+        ("X-Request-ID", payload.get("request_id")),
+        ("X-Trace-ID", payload.get("trace_id")),
+    )
+
+    headers: Dict[str, str] = {}
+    for key, value in header_pairs:
+        normalized = _sanitize_header_value(value)
+        if normalized is not None:
+            headers[key] = normalized
+    return headers
+
+
 def _build_response(
     request: Request,
     *,
@@ -213,7 +259,12 @@ def _build_response(
         context=context,
         external_code=external_code,
     )
-    return JSONResponse(status_code=payload.get("http_status", status_code), content=payload)
+    headers = _build_error_headers(payload)
+    return JSONResponse(
+        status_code=payload.get("http_status", status_code),
+        content=payload,
+        headers=headers if headers else None,
+    )
 
 
 def _resolve_validation_error(exc: RequestValidationError) -> Tuple[ErrorCode, str]:

@@ -12,6 +12,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import HTTPException, Request, status
 
+from shared.errors.error_types import ErrorCode, classified_http_exception
+
 from shared.config.app_config import AppConfig
 from shared.config.settings import get_settings
 from shared.models.graph_query import (
@@ -28,6 +30,7 @@ from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.services.registries.lineage_store import LineageStore
 from shared.services.storage.lakefs_storage_service import create_lakefs_storage_service
 from shared.services.storage.storage_service import create_storage_service
+from shared.observability.tracing import trace_external_call
 from shared.utils.access_policy import apply_access_policy
 
 logger = logging.getLogger(__name__)
@@ -97,11 +100,12 @@ def _resolve_graph_branches(
 
 
 def _raise_overlay_degraded(*, ctx: GraphBranchContext) -> None:
-    raise HTTPException(
-        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-        detail={
+    raise classified_http_exception(
+        status.HTTP_503_SERVICE_UNAVAILABLE,
+        "Overlay index unavailable; cannot serve authoritative view.",
+        code=ErrorCode.UPSTREAM_UNAVAILABLE,
+        extra={
             "error": "overlay_degraded",
-            "message": "Overlay index unavailable; cannot serve authoritative view.",
             "base_branch": ctx.terminus_branch,
             "overlay_branch": ctx.es_overlay_branch,
             "overlay_status": "DEGRADED",
@@ -277,6 +281,7 @@ def _collect_class_ids_from_hops(hops: Any) -> List[str]:
     return [c for c in class_ids if c]
 
 
+@trace_external_call("bff.graph_query.execute_graph_query")
 async def execute_graph_query(
     *,
     db_name: str,
@@ -573,20 +578,15 @@ async def execute_graph_query(
 
     except ValueError as exc:
         logger.error("Invalid query parameters: %s", exc)
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid query: {str(exc)}",
-        ) from exc
+        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, f"Invalid query: {str(exc)}", code=ErrorCode.REQUEST_VALIDATION_FAILED) from exc
     except HTTPException:
         raise
     except Exception as exc:
         logger.error("Graph query failed: %s", exc)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Graph query failed: {str(exc)}",
-        ) from exc
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, f"Graph query failed: {str(exc)}", code=ErrorCode.INTERNAL_ERROR) from exc
 
 
+@trace_external_call("bff.graph_query.execute_simple_graph_query")
 async def execute_simple_graph_query(
     *,
     db_name: str,
@@ -694,20 +694,15 @@ async def execute_simple_graph_query(
 
     except ValueError as exc:
         logger.error("Invalid query parameters: %s", exc)
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid query: {str(exc)}",
-        ) from exc
+        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, f"Invalid query: {str(exc)}", code=ErrorCode.REQUEST_VALIDATION_FAILED) from exc
     except HTTPException:
         raise
     except Exception as exc:
         logger.error("Simple graph query failed: %s", exc)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Query failed: {str(exc)}",
-        ) from exc
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, f"Query failed: {str(exc)}", code=ErrorCode.INTERNAL_ERROR) from exc
 
 
+@trace_external_call("bff.graph_query.execute_multi_hop_query")
 async def execute_multi_hop_query(
     *,
     db_name: str,
@@ -844,20 +839,15 @@ async def execute_multi_hop_query(
 
     except ValueError as exc:
         logger.error("Invalid multi-hop query: %s", exc)
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid query: {str(exc)}",
-        ) from exc
+        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, f"Invalid query: {str(exc)}", code=ErrorCode.REQUEST_VALIDATION_FAILED) from exc
     except HTTPException:
         raise
     except Exception as exc:
         logger.error("Multi-hop query failed: %s", exc)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Query failed: {str(exc)}",
-        ) from exc
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, f"Query failed: {str(exc)}", code=ErrorCode.INTERNAL_ERROR) from exc
 
 
+@trace_external_call("bff.graph_query.find_relationship_paths")
 async def find_relationship_paths(
     *,
     db_name: str,
@@ -892,12 +882,10 @@ async def find_relationship_paths(
 
     except Exception as exc:
         logger.error("Path finding failed: %s", exc)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Path finding failed: {str(exc)}",
-        ) from exc
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, f"Path finding failed: {str(exc)}", code=ErrorCode.INTERNAL_ERROR) from exc
 
 
+@trace_external_call("bff.graph_query.graph_service_health")
 async def graph_service_health(*, graph_service: GraphFederationServiceES) -> Dict[str, Any]:
     """
     Check health of graph federation service (ES-only, no TerminusDB).
@@ -921,4 +909,3 @@ async def graph_service_health(*, graph_service: GraphFederationServiceES) -> Di
     except Exception as exc:
         logger.error("Health check failed: %s", exc)
         return {"status": "unhealthy", "error": str(exc)}
-

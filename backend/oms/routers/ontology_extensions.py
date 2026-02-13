@@ -2,6 +2,7 @@
 Ontology extensions router (resources, governance, health).
 """
 
+import json
 import logging
 from typing import Any, Dict, List, Optional
 
@@ -39,6 +40,7 @@ from oms.services.ontology_interface_contract import (
     collect_interface_contract_issues,
 )
 from oms.services.pull_request_service import PullRequestService
+from oms.validation_codes import OntologyValidationCode as OVC
 from oms.validators.relationship_validator import RelationshipValidator, ValidationResult
 from shared.models.requests import ApiResponse, BranchCreateRequest
 from shared.security.input_sanitizer import (
@@ -58,6 +60,9 @@ from shared.services.core.ontology_linter import (
 )
 from shared.utils.commit_utils import coerce_commit_id
 from shared.utils.id_generator import generate_simple_id
+from shared.errors.error_types import ErrorCode, classified_http_exception
+from shared.errors.legacy_codes import LegacyErrorCode
+from shared.observability.tracing import trace_endpoint
 
 logger = logging.getLogger(__name__)
 
@@ -98,9 +103,10 @@ class OntologyApproveRequest(BaseModel):
 
 async def _get_pr_service() -> PullRequestService:
     if not postgres_db.mvcc_manager:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Database not initialized",
+        raise classified_http_exception(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "Database not initialized",
+            code=ErrorCode.DB_UNAVAILABLE,
         )
     return PullRequestService(postgres_db.mvcc_manager)
 
@@ -139,14 +145,16 @@ def _validate_value_type_immutability(existing: Dict[str, Any], incoming: Dict[s
     if normalize_ontology_base_type(existing_spec.get("base_type")) != normalize_ontology_base_type(
         incoming_spec.get("base_type")
     ):
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="value_type base_type is immutable; create a new value type for changes",
+        raise classified_http_exception(
+            status.HTTP_409_CONFLICT,
+            "value_type base_type is immutable; create a new value type for changes",
+            code=ErrorCode.ONTOLOGY_ATOMIC_UPDATE_FAILED,
         )
     if (existing_spec.get("constraints") or {}) != (incoming_spec.get("constraints") or {}):
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="value_type constraints are immutable; create a new value type for changes",
+        raise classified_http_exception(
+            status.HTTP_409_CONFLICT,
+            "value_type constraints are immutable; create a new value type for changes",
+            code=ErrorCode.ONTOLOGY_ATOMIC_UPDATE_FAILED,
         )
 
 
@@ -165,9 +173,10 @@ def _ensure_branch_writable(branch: str) -> None:
     if branch not in protected:
         return
     if bool(get_settings().ontology.require_proposals):
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=protected_branch_write_message(),
+        raise classified_http_exception(
+            status.HTTP_409_CONFLICT,
+            protected_branch_write_message(),
+            code=ErrorCode.CONFLICT,
         )
 
 
@@ -189,21 +198,23 @@ async def _assert_expected_head_commit(
             break
 
     if not head_commit:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Branch '{branch}' not found",
+        raise classified_http_exception(
+            status.HTTP_404_NOT_FOUND,
+            f"Branch '{branch}' not found",
+            code=ErrorCode.RESOURCE_NOT_FOUND,
         )
 
     expected = str(expected_head_commit).strip()
     if head_commit != expected:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={
+        raise classified_http_exception(
+            status.HTTP_409_CONFLICT,
+            json.dumps({
                 "message": "Branch head commit mismatch",
                 "branch": branch,
                 "expected_head_commit": expected,
                 "actual_head_commit": head_commit,
-            },
+            }),
+            code=ErrorCode.ONTOLOGY_ATOMIC_UPDATE_FAILED,
         )
 
     return head_commit
@@ -279,13 +290,13 @@ async def _compute_ontology_health(
                 "resource_type": "object_type",
                 "resource_id": ontology.id,
                 "severity": "error",
-                "code": "RESOURCE_OBJECT_TYPE_CONTRACT_MISSING",
+                "code": OVC.RESOURCE_OBJECT_TYPE_CONTRACT_MISSING.value,
                 "message": f"Missing object_type contract for '{ontology.id}'",
             }
         )
         issue_items.append(
             _build_issue(
-                code="RESOURCE_OBJECT_TYPE_CONTRACT_MISSING",
+                code=OVC.RESOURCE_OBJECT_TYPE_CONTRACT_MISSING.value,
                 severity="ERROR",
                 resource_ref=build_object_type_ref(ontology.id),
                 details={"object_type_id": ontology.id},
@@ -327,7 +338,7 @@ async def _compute_ontology_health(
                     "resource_type": resource_type,
                     "resource_id": resource_id,
                     "severity": "error",
-                    "code": "RES001",
+                    "code": LegacyErrorCode.RES001.value,
                     "message": message,
                 }
             )
@@ -355,7 +366,7 @@ async def _compute_ontology_health(
                     "resource_type": resource_type,
                     "resource_id": resource_id,
                     "severity": "error",
-                    "code": "RES002",
+                    "code": LegacyErrorCode.RES002.value,
                     "message": f"Missing references: {', '.join(missing)}",
                     "missing": missing,
                 }
@@ -461,6 +472,7 @@ async def _compute_ontology_health(
 
 
 @router.get("/resources")
+@trace_endpoint("oms.ontology_ext.list_resources")
 async def list_resources(
     db_name: str,
     resource_type: Optional[str] = Query(None, description="Resource type filter"),
@@ -488,13 +500,18 @@ async def list_resources(
             data={"resources": resources, "total": len(resources)},
         ).to_dict()
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST, str(e), code=ErrorCode.REQUEST_VALIDATION_FAILED,
+        )
     except Exception as e:
         logger.error("Failed to list resources: %s", e)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR, str(e), code=ErrorCode.INTERNAL_ERROR,
+        )
 
 
 @router.get("/resources/{resource_type}")
+@trace_endpoint("oms.ontology_ext.list_resources_by_type")
 async def list_resources_by_type(
     db_name: str,
     resource_type: str,
@@ -514,6 +531,7 @@ async def list_resources_by_type(
 
 
 @router.post("/resources/{resource_type}", status_code=status.HTTP_201_CREATED)
+@trace_endpoint("oms.ontology_ext.create_resource")
 async def create_resource(
     db_name: str,
     resource_type: str,
@@ -562,21 +580,32 @@ async def create_resource(
             data=created,
         ).to_dict()
     except ResourceSpecError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST, str(e), code=ErrorCode.ONTOLOGY_VALIDATION_FAILED,
+        )
     except ResourceReferenceError as e:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST, str(e), code=ErrorCode.ONTOLOGY_RELATIONSHIP_ERROR,
+        )
     except HTTPException:
         raise
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST, str(e), code=ErrorCode.REQUEST_VALIDATION_FAILED,
+        )
     except DatabaseError as e:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
+        raise classified_http_exception(
+            status.HTTP_409_CONFLICT, str(e), code=ErrorCode.DB_CONSTRAINT_VIOLATION,
+        )
     except Exception as e:
         logger.error("Failed to create resource: %s", e)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR, str(e), code=ErrorCode.INTERNAL_ERROR,
+        )
 
 
 @router.get("/resources/{resource_type}/{resource_id}")
+@trace_endpoint("oms.ontology_ext.get_resource")
 async def get_resource(
     db_name: str,
     resource_type: str,
@@ -598,21 +627,27 @@ async def get_resource(
             resource_id=resource_id,
         )
         if not resource:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Resource not found"
+            raise classified_http_exception(
+                status.HTTP_404_NOT_FOUND, "Resource not found",
+                code=ErrorCode.RESOURCE_NOT_FOUND,
             )
 
         return ApiResponse.success(message="Ontology resource retrieved", data=resource).to_dict()
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST, str(e), code=ErrorCode.REQUEST_VALIDATION_FAILED,
+        )
     except HTTPException:
         raise
     except Exception as e:
         logger.error("Failed to get resource: %s", e)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR, str(e), code=ErrorCode.INTERNAL_ERROR,
+        )
 
 
 @router.put("/resources/{resource_type}/{resource_id}")
+@trace_endpoint("oms.ontology_ext.update_resource")
 async def update_resource(
     db_name: str,
     resource_type: str,
@@ -665,21 +700,32 @@ async def update_resource(
 
         return ApiResponse.success(message="Ontology resource updated", data=updated).to_dict()
     except ResourceSpecError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST, str(e), code=ErrorCode.ONTOLOGY_VALIDATION_FAILED,
+        )
     except ResourceReferenceError as e:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST, str(e), code=ErrorCode.ONTOLOGY_RELATIONSHIP_ERROR,
+        )
     except HTTPException:
         raise
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST, str(e), code=ErrorCode.REQUEST_VALIDATION_FAILED,
+        )
     except (DatabaseError, OntologyNotFoundError) as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+        raise classified_http_exception(
+            status.HTTP_404_NOT_FOUND, str(e), code=ErrorCode.ONTOLOGY_NOT_FOUND,
+        )
     except Exception as e:
         logger.error("Failed to update resource: %s", e)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR, str(e), code=ErrorCode.INTERNAL_ERROR,
+        )
 
 
 @router.delete("/resources/{resource_type}/{resource_id}")
+@trace_endpoint("oms.ontology_ext.delete_resource")
 async def delete_resource(
     db_name: str,
     resource_type: str,
@@ -709,17 +755,24 @@ async def delete_resource(
 
         return ApiResponse.success(message="Ontology resource deleted").to_dict()
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST, str(e), code=ErrorCode.REQUEST_VALIDATION_FAILED,
+        )
     except OntologyNotFoundError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+        raise classified_http_exception(
+            status.HTTP_404_NOT_FOUND, str(e), code=ErrorCode.ONTOLOGY_NOT_FOUND,
+        )
     except HTTPException:
         raise
     except Exception as e:
         logger.error("Failed to delete resource: %s", e)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR, str(e), code=ErrorCode.INTERNAL_ERROR,
+        )
 
 
 @router.get("/branches")
+@trace_endpoint("oms.ontology_ext.list_branches")
 async def list_ontology_branches(
     db_name: str,
     terminus: AsyncTerminusService = TerminusServiceDep,
@@ -733,10 +786,13 @@ async def list_ontology_branches(
         ).to_dict()
     except Exception as e:
         logger.error("Failed to list ontology branches: %s", e)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR, str(e), code=ErrorCode.INTERNAL_ERROR,
+        )
 
 
 @router.post("/branches", status_code=status.HTTP_201_CREATED)
+@trace_endpoint("oms.ontology_ext.create_branch")
 async def create_ontology_branch(
     db_name: str,
     request: BranchCreateRequest,
@@ -756,10 +812,13 @@ async def create_ontology_branch(
         ).to_dict()
     except Exception as e:
         logger.error("Failed to create ontology branch: %s", e)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR, str(e), code=ErrorCode.INTERNAL_ERROR,
+        )
 
 
 @router.get("/proposals")
+@trace_endpoint("oms.ontology_ext.list_proposals")
 async def list_ontology_proposals(
     db_name: str,
     status_filter: Optional[str] = Query(None, alias="status"),
@@ -777,10 +836,13 @@ async def list_ontology_proposals(
         ).to_dict()
     except Exception as e:
         logger.error("Failed to list ontology proposals: %s", e)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR, str(e), code=ErrorCode.INTERNAL_ERROR,
+        )
 
 
 @router.post("/proposals", status_code=status.HTTP_201_CREATED)
+@trace_endpoint("oms.ontology_ext.create_proposal")
 async def create_ontology_proposal(
     db_name: str,
     request: OntologyProposalRequest,
@@ -802,13 +864,18 @@ async def create_ontology_proposal(
             data=result,
         ).to_dict()
     except DatabaseError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        raise classified_http_exception(
+            status.HTTP_409_CONFLICT, str(e), code=ErrorCode.DB_CONSTRAINT_VIOLATION,
+        )
     except Exception as e:
         logger.error("Failed to create ontology proposal: %s", e)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR, str(e), code=ErrorCode.INTERNAL_ERROR,
+        )
 
 
 @router.post("/proposals/{proposal_id}/approve")
+@trace_endpoint("oms.ontology_ext.approve_proposal")
 async def approve_ontology_proposal(
     db_name: str,
     proposal_id: str,
@@ -820,7 +887,10 @@ async def approve_ontology_proposal(
         db_name = validate_db_name(db_name)
         pr_data = await pr_service.get_pull_request(proposal_id)
         if not pr_data or pr_data.get("db_name") != db_name:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Proposal not found")
+            raise classified_http_exception(
+                status.HTTP_404_NOT_FOUND, "Proposal not found",
+                code=ErrorCode.RESOURCE_NOT_FOUND,
+            )
 
         source_branch = pr_data.get("source_branch") or "main"
         target_branch = pr_data.get("target_branch") or "main"
@@ -834,14 +904,15 @@ async def approve_ontology_proposal(
                     head_commit = coerce_commit_id(item.get("head"))
                     break
             if head_commit and str(head_commit) != str(source_commit_id):
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail={
+                raise classified_http_exception(
+                    status.HTTP_409_CONFLICT,
+                    json.dumps({
                         "message": "Source branch head moved since proposal creation; re-propose required",
                         "source_branch": source_branch,
                         "captured_commit_id": source_commit_id,
                         "current_head_commit": head_commit,
-                    },
+                    }),
+                    code=ErrorCode.ONTOLOGY_ATOMIC_UPDATE_FAILED,
                 )
 
         if _require_health_gate(target_branch) and not request.force:
@@ -856,13 +927,14 @@ async def approve_ontology_proposal(
                 if str(issue.get("severity") or "").upper() == "ERROR"
             ]
             if errors:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail={
+                raise classified_http_exception(
+                    status.HTTP_409_CONFLICT,
+                    json.dumps({
                         "message": "Ontology health gate failed",
                         "summary": health.get("summary"),
                         "errors": errors,
-                    },
+                    }, default=str),
+                    code=ErrorCode.ONTOLOGY_DEPLOY_FAILED,
                 )
         elif request.force and _require_health_gate(target_branch):
             logger.warning(
@@ -880,15 +952,20 @@ async def approve_ontology_proposal(
             data=result,
         ).to_dict()
     except DatabaseError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        raise classified_http_exception(
+            status.HTTP_409_CONFLICT, str(e), code=ErrorCode.DB_CONSTRAINT_VIOLATION,
+        )
     except HTTPException:
         raise
     except Exception as e:
         logger.error("Failed to approve ontology proposal: %s", e)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR, str(e), code=ErrorCode.INTERNAL_ERROR,
+        )
 
 
 @router.post("/deploy")
+@trace_endpoint("oms.ontology_ext.deploy")
 async def deploy_ontology(
     db_name: str,
     request: OntologyDeployRequest,
@@ -899,29 +976,35 @@ async def deploy_ontology(
         db_name = validate_db_name(db_name)
         pr_data = await pr_service.get_pull_request(request.proposal_id)
         if not pr_data or pr_data.get("db_name") != db_name:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Proposal not found")
+            raise classified_http_exception(
+                status.HTTP_404_NOT_FOUND, "Proposal not found",
+                code=ErrorCode.RESOURCE_NOT_FOUND,
+            )
 
         if pr_data.get("status") != "merged":
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Proposal is not approved/merged",
+            raise classified_http_exception(
+                status.HTTP_409_CONFLICT,
+                "Proposal is not approved/merged",
+                code=ErrorCode.CONFLICT,
             )
 
         merge_commit_id = pr_data.get("merge_commit_id")
         if not merge_commit_id:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Proposal has no merge commit id",
+            raise classified_http_exception(
+                status.HTTP_409_CONFLICT,
+                "Proposal has no merge commit id",
+                code=ErrorCode.CONFLICT,
             )
 
         if str(merge_commit_id) != str(request.ontology_commit_id):
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={
+            raise classified_http_exception(
+                status.HTTP_409_CONFLICT,
+                json.dumps({
                     "message": "Ontology commit id mismatch",
                     "proposal_merge_commit_id": merge_commit_id,
                     "requested_commit_id": request.ontology_commit_id,
-                },
+                }),
+                code=ErrorCode.ONTOLOGY_ATOMIC_UPDATE_FAILED,
             )
 
         target_branch = pr_data.get("target_branch") or "main"
@@ -933,14 +1016,15 @@ async def deploy_ontology(
                 break
 
         if head_commit and str(head_commit) != str(request.ontology_commit_id):
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={
+            raise classified_http_exception(
+                status.HTTP_409_CONFLICT,
+                json.dumps({
                     "message": "Target branch head does not match approved commit",
                     "target_branch": target_branch,
                     "target_head_commit": head_commit,
                     "approved_commit_id": request.ontology_commit_id,
-                },
+                }),
+                code=ErrorCode.ONTOLOGY_ATOMIC_UPDATE_FAILED,
             )
 
         health_summary = None
@@ -984,13 +1068,18 @@ async def deploy_ontology(
             },
         ).to_dict()
     except DatabaseError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        raise classified_http_exception(
+            status.HTTP_409_CONFLICT, str(e), code=ErrorCode.DB_CONSTRAINT_VIOLATION,
+        )
     except Exception as e:
         logger.error("Failed to deploy ontology: %s", e)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR, str(e), code=ErrorCode.INTERNAL_ERROR,
+        )
 
 
 @router.get("/health")
+@trace_endpoint("oms.ontology_ext.health")
 async def ontology_health(
     db_name: str,
     branch: str = Query("main", description="Target branch"),
@@ -1015,7 +1104,9 @@ async def ontology_health(
         raise
     except Exception as e:
         logger.error("Failed to compute ontology health: %s", e)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR, str(e), code=ErrorCode.INTERNAL_ERROR,
+        )
 
 
 def _validation_result_to_issue(result: ValidationResult) -> Dict[str, Any]:

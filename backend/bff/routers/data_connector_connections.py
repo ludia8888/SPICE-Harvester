@@ -8,7 +8,8 @@ import logging
 from datetime import timezone
 from typing import Any, Dict
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Request, status
+from shared.errors.error_types import ErrorCode, classified_http_exception
 
 from bff.routers.data_connector_deps import get_connector_registry
 from shared.middleware.rate_limiter import RateLimitPresets, rate_limit
@@ -64,6 +65,6 @@ async def delete_google_sheets_connection(
         enabled=False,
     )
     if not updated:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Connection not found")
+        raise classified_http_exception(status.HTTP_404_NOT_FOUND, "Connection not found", code=ErrorCode.RESOURCE_NOT_FOUND)
     return ApiResponse.success(message="Connection removed", data={"connection_id": connection_id}).to_dict()
 

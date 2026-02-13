@@ -9,9 +9,11 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
-from fastapi import HTTPException, Request, status
+from fastapi import Request
+from shared.errors.error_types import ErrorCode, classified_http_exception
 
 from bff.routers.registry_deps import get_agent_policy_registry
+from shared.observability.tracing import trace_external_call
 
 
 def resolve_tenant_id(request: Request) -> str:
@@ -29,7 +31,7 @@ def resolve_tenant_id(request: Request) -> str:
 def require_verified_user(request: Request) -> Any:
     user = getattr(request.state, "user", None)
     if user is None or not getattr(user, "verified", False):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User JWT required")
+        raise classified_http_exception(401, "User JWT required", code=ErrorCode.AUTH_REQUIRED)
     return user
 
 
@@ -44,6 +46,7 @@ def resolve_actor(request: Request) -> str:
     return request.headers.get("X-User-ID") or request.headers.get("X-User") or request.headers.get("X-Actor") or "system"
 
 
+@trace_external_call("bff.pipeline_plan_tenant.resolve_tenant_policy")
 async def resolve_tenant_policy(request: Request) -> tuple[Optional[str], Optional[list[str]], Optional[Dict[str, Any]]]:
     tenant_id = resolve_tenant_id(request)
     try:

@@ -15,6 +15,7 @@ from oms.services.ontology_deploy_outbox_store import (
     OntologyDeployOutboxTableSpec,
 )
 from oms.services.ontology_deployment_registry_base import BaseOntologyDeploymentRegistry
+from shared.observability.tracing import trace_db_operation
 
 logger = logging.getLogger(__name__)
 
@@ -99,6 +100,7 @@ class OntologyDeploymentRegistry(BaseOntologyDeploymentRegistry):
             occurred_at=occurred_at,
         )
 
+    @trace_db_operation("oms.deployment_registry.record_deployment")
     async def record_deployment(
         self,
         *,

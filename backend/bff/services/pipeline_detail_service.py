@@ -9,6 +9,8 @@ from typing import Any, Dict, Optional
 
 from fastapi import HTTPException, Request, status
 
+from shared.errors.error_types import ErrorCode, classified_http_exception
+
 from bff.routers.pipeline_ops import (
     _augment_definition_with_canonical_contract,
     _augment_definition_with_casts,
@@ -31,10 +33,12 @@ from shared.services.pipeline.pipeline_dataset_utils import (
 )
 from shared.services.pipeline.pipeline_scheduler import _is_valid_cron_expression
 from shared.utils.event_utils import build_command_event
+from shared.observability.tracing import trace_db_operation
 
 logger = logging.getLogger(__name__)
 
 
+@trace_db_operation("bff.pipeline_detail.get_pipeline")
 async def get_pipeline(
     *,
     pipeline_id: str,
@@ -52,7 +56,7 @@ async def get_pipeline(
         )
         pipeline = await pipeline_registry.get_pipeline(pipeline_id=pipeline_id)
         if not pipeline:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pipeline not found")
+            raise classified_http_exception(status.HTTP_404_NOT_FOUND, "Pipeline not found", code=ErrorCode.PIPELINE_NOT_FOUND)
         version = await pipeline_registry.get_latest_version(
             pipeline_id=pipeline_id,
             branch=branch or pipeline.branch,
@@ -85,9 +89,10 @@ async def get_pipeline(
         raise
     except Exception as exc:
         logger.error("Failed to fetch pipeline: %s", exc)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc), code=ErrorCode.INTERNAL_ERROR) from exc
 
 
+@trace_db_operation("bff.pipeline_detail.get_pipeline_readiness")
 async def get_pipeline_readiness(
     *,
     pipeline_id: str,
@@ -105,7 +110,7 @@ async def get_pipeline_readiness(
         )
         pipeline = await pipeline_registry.get_pipeline(pipeline_id=pipeline_id)
         if not pipeline:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pipeline not found")
+            raise classified_http_exception(status.HTTP_404_NOT_FOUND, "Pipeline not found", code=ErrorCode.PIPELINE_NOT_FOUND)
 
         resolved_branch = (branch or pipeline.branch or "main").strip() or "main"
         version = await pipeline_registry.get_latest_version(pipeline_id=pipeline_id, branch=resolved_branch)
@@ -265,9 +270,10 @@ async def get_pipeline_readiness(
         raise
     except Exception as exc:
         logger.error("Failed to fetch pipeline readiness: %s", exc)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc), code=ErrorCode.INTERNAL_ERROR) from exc
 
 
+@trace_db_operation("bff.pipeline_detail.update_pipeline")
 async def update_pipeline(
     *,
     pipeline_id: str,
@@ -292,7 +298,7 @@ async def update_pipeline(
 
         pipeline = await pipeline_registry.get_pipeline(pipeline_id=pipeline_id)
         if not pipeline:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pipeline not found")
+            raise classified_http_exception(status.HTTP_404_NOT_FOUND, "Pipeline not found", code=ErrorCode.PIPELINE_NOT_FOUND)
         previous_version = await pipeline_registry.get_latest_version(
             pipeline_id=pipeline_id,
             branch=pipeline.branch,
@@ -300,10 +306,7 @@ async def update_pipeline(
         previous_definition = previous_version.definition_json if previous_version else {}
         branch_state = await pipeline_registry.get_pipeline_branch(db_name=pipeline.db_name, branch=pipeline.branch)
         if branch_state and branch_state.get("archived"):
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Archived branch cannot be updated; restore the branch before making changes",
-            )
+            raise classified_http_exception(status.HTTP_409_CONFLICT, "Archived branch cannot be updated; restore the branch before making changes", code=ErrorCode.CONFLICT)
         if pipeline.branch in _resolve_pipeline_protected_branches() and definition_json is not None:
             settings = get_settings()
             state = getattr(request, "state", None)
@@ -311,10 +314,7 @@ async def update_pipeline(
             if settings.is_development and settings.auth.dev_master_auth_enabled and dev_bypass:
                 pass
             else:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail="Protected branch cannot be updated directly; create a branch and submit a proposal",
-                )
+                raise classified_http_exception(status.HTTP_409_CONFLICT, "Protected branch cannot be updated directly; create a branch and submit a proposal", code=ErrorCode.CONFLICT)
         db_name = str(pipeline.db_name)
 
         dependencies_raw: Any = None
@@ -346,14 +346,14 @@ async def update_pipeline(
             try:
                 schedule_interval_seconds = int(schedule_interval_seconds)
             except Exception as exc:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="schedule_interval_seconds must be integer") from exc
+                raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "schedule_interval_seconds must be integer", code=ErrorCode.REQUEST_VALIDATION_FAILED) from exc
         if schedule_interval_seconds is not None and schedule_interval_seconds < 0:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="schedule_interval_seconds must be non-negative")
+            raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "schedule_interval_seconds must be non-negative", code=ErrorCode.REQUEST_VALIDATION_FAILED)
 
         if schedule_cron is not None:
             schedule_cron = str(schedule_cron).strip() or None
         if schedule_cron and not _is_valid_cron_expression(schedule_cron):
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="schedule_cron must be a valid cron expression")
+            raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "schedule_cron must be a valid cron expression", code=ErrorCode.REQUEST_VALIDATION_FAILED)
 
         if schedule:
             schedule_cron = str(schedule.get("cron") or "").strip() or None
@@ -362,9 +362,9 @@ async def update_pipeline(
                 try:
                     schedule_interval_seconds = int(schedule_interval_seconds)
                 except Exception as exc:
-                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="schedule.interval_seconds must be integer") from exc
+                    raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "schedule.interval_seconds must be integer", code=ErrorCode.REQUEST_VALIDATION_FAILED) from exc
             if schedule_cron and not _is_valid_cron_expression(schedule_cron):
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="schedule.cron must be a valid cron expression")
+                raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "schedule.cron must be a valid cron expression", code=ErrorCode.REQUEST_VALIDATION_FAILED)
 
         if proposal_submitted_at is not None:
             proposal_submitted_at = str(proposal_submitted_at).strip() or None
@@ -373,10 +373,7 @@ async def update_pipeline(
 
         sampling_strategy = sanitized.get("sampling_strategy") or sanitized.get("samplingStrategy")
         if sampling_strategy is not None and not isinstance(sampling_strategy, dict):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="sampling_strategy must be an object",
-            )
+            raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "sampling_strategy must be an object", code=ErrorCode.REQUEST_VALIDATION_FAILED)
         expectations = sanitized.get("expectations") if isinstance(sanitized.get("expectations"), list) else None
         schema_contract = sanitized.get("schema_contract") if isinstance(sanitized.get("schema_contract"), list) else None
         if expectations is not None:
@@ -490,4 +487,4 @@ async def update_pipeline(
             error=str(exc),
         )
         logger.error("Failed to update pipeline: %s", exc)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc), code=ErrorCode.INTERNAL_ERROR) from exc

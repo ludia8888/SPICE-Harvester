@@ -18,6 +18,7 @@ from bff.routers.pipeline_deps import get_dataset_registry, get_objectify_regist
 from bff.schemas.pipeline_datasets import FunnelAnalysisApiResponse
 from bff.services import pipeline_dataset_version_service
 from shared.config.app_config import AppConfig
+from shared.errors.error_types import ErrorCode, classified_http_exception
 from shared.models.requests import ApiResponse
 from shared.observability.tracing import trace_endpoint
 from shared.security.auth_utils import enforce_db_scope
@@ -46,11 +47,11 @@ async def create_dataset(
             try:
                 dataset_id = str(UUID(str(raw_dataset_id)))
             except Exception as exc:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="dataset_id must be a UUID") from exc
+                raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "dataset_id must be a UUID", code=ErrorCode.REQUEST_VALIDATION_FAILED) from exc
         db_name = validate_db_name(str(sanitized.get("db_name") or ""))
         name = str(sanitized.get("name") or "").strip()
         if not name:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="name is required")
+            raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "name is required", code=ErrorCode.REQUEST_VALIDATION_FAILED)
         description = str(sanitized.get("description") or "").strip() or None
         source_type = str(sanitized.get("source_type") or "manual").strip() or "manual"
         source_ref = str(sanitized.get("source_ref") or "").strip() or None
@@ -92,7 +93,7 @@ async def create_dataset(
         raise
     except Exception as e:
         logger.error(f"Failed to create dataset: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(e), code=ErrorCode.INTERNAL_ERROR)
 
 
 @router.post("/datasets/{dataset_id}/versions", response_model=ApiResponse)
@@ -133,14 +134,14 @@ async def reanalyze_dataset_version(
     try:
         dataset = await dataset_registry.get_dataset(dataset_id=dataset_id)
         if not dataset:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found")
+            raise classified_http_exception(status.HTTP_404_NOT_FOUND, "Dataset not found", code=ErrorCode.RESOURCE_NOT_FOUND)
         try:
             enforce_db_scope(request.headers, db_name=dataset.db_name)
         except ValueError as exc:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc))
+            raise classified_http_exception(status.HTTP_403_FORBIDDEN, str(exc), code=ErrorCode.PERMISSION_DENIED)
         version = await dataset_registry.get_version(version_id=version_id)
         if not version or version.dataset_id != dataset.dataset_id:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset version not found")
+            raise classified_http_exception(status.HTTP_404_NOT_FOUND, "Dataset version not found", code=ErrorCode.RESOURCE_NOT_FOUND)
         funnel_analysis = await _compute_funnel_analysis_from_sample(version.sample_json)
         return ApiResponse.success(
             message="Funnel analysis refreshed",
@@ -154,4 +155,4 @@ async def reanalyze_dataset_version(
         raise
     except Exception as e:
         logger.error(f"Failed to reanalyze dataset version: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(e), code=ErrorCode.INTERNAL_ERROR)

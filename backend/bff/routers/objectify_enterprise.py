@@ -6,8 +6,10 @@ Composed by `bff.routers.objectify` via router composition (Composite pattern).
 
 import logging
 from typing import Any, Dict
+from shared.observability.tracing import trace_endpoint
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from shared.errors.error_types import ErrorCode, classified_http_exception
 
 from bff.routers.objectify_deps import get_dataset_registry, _require_db_role
 from bff.schemas.objectify_requests import DetectRelationshipsRequest
@@ -26,6 +28,7 @@ router = APIRouter(tags=["Objectify"])
     summary="Detect FK relationships in a dataset",
     description="Analyzes dataset columns to detect potential foreign key relationships based on naming conventions and value overlap.",
 )
+@trace_endpoint("bff.objectify.detect_relationships")
 async def detect_relationships(
     db_name: str,
     dataset_id: str,
@@ -48,7 +51,7 @@ async def detect_relationships(
 
         dataset = await dataset_registry.get_dataset(dataset_id=dataset_id)
         if not dataset:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Dataset not found: {dataset_id}")
+            raise classified_http_exception(status.HTTP_404_NOT_FOUND, f"Dataset not found: {dataset_id}", code=ErrorCode.RESOURCE_NOT_FOUND)
 
         schema = dataset.schema_json or {}
         columns = schema.get("columns") or schema.get("fields") or []
@@ -108,5 +111,5 @@ async def detect_relationships(
         raise
     except Exception as exc:
         logger.error("detect_relationships failed: %s", exc)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc), code=ErrorCode.INTERNAL_ERROR) from exc
 

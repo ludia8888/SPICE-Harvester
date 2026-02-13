@@ -24,6 +24,7 @@ from bff.services.oms_client import OMSClient
 from shared.config.search_config import get_instances_index_name
 from shared.services.registries.objectify_registry import ObjectifyRegistry
 from shared.services.storage.elasticsearch_service import ElasticsearchService
+from shared.observability.tracing import trace_external_call
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +32,7 @@ logger = logging.getLogger(__name__)
 _ES_SCAN_SIZE = 500
 
 
+@trace_external_call("bff.relationship_reconciler.reconcile_relationships")
 async def reconcile_relationships(
     *,
     db_name: str,

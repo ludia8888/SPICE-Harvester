@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-_CODE_KEYS = {"code", "error", "error_code"}
+_CODE_KEYS = {"code", "error", "error_code", "api_code", "legacy_code", "external_code"}
 _CODE_LIKE = re.compile(r"^[A-Za-z0-9_]+$")
 
 
@@ -98,7 +98,8 @@ def test_error_taxonomy_covers_all_code_like_literals() -> None:
     catalog_path = backend_dir / "shared" / "errors" / "enterprise_catalog.py"
     external_codes = _extract_dict_literal_keys(catalog_path, var_name="_EXTERNAL_CODE_SPECS")
     objectify_codes = _extract_dict_literal_keys(catalog_path, var_name="_OBJECTIFY_ERROR_SPECS")
-    allowed = error_code_values | external_codes | objectify_codes
+    legacy_codes = _extract_dict_literal_keys(catalog_path, var_name="_LEGACY_CODE_SPECS")
+    allowed = error_code_values | external_codes | objectify_codes | legacy_codes
 
     occurrences = _collect_code_like_literals(backend_dir=backend_dir)
     missing = {code: refs for code, refs in occurrences.items() if code not in allowed}
@@ -113,4 +114,3 @@ def test_error_taxonomy_covers_all_code_like_literals() -> None:
         suffix = " ..." if len(refs) > 3 else ""
         lines.append(f"- {code}: {sample}{suffix}")
     raise AssertionError("\n".join(lines))
-

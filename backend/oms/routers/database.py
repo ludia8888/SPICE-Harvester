@@ -18,6 +18,8 @@ from shared.models.commands import DatabaseCommand, CommandType
 from shared.security.input_sanitizer import SecurityViolationError, sanitize_input, validate_db_name
 from shared.config.app_config import AppConfig
 from shared.config.settings import get_settings
+from shared.errors.error_types import ErrorCode, classified_http_exception
+from shared.observability.tracing import trace_endpoint
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +27,7 @@ router = APIRouter(prefix="/database", tags=["Database Management"])
 
 
 @router.get("/list")
+@trace_endpoint("oms.database.list")
 async def list_databases(terminus_service: AsyncTerminusService = TerminusServiceDep):
     """
     데이터베이스 목록 조회
@@ -39,13 +42,15 @@ async def list_databases(terminus_service: AsyncTerminusService = TerminusServic
         ).to_dict()
     except Exception as e:
         logger.error(f"Failed to list databases: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"데이터베이스 목록 조회 실패: {str(e)}",
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            f"데이터베이스 목록 조회 실패: {str(e)}",
+            code=ErrorCode.INTERNAL_ERROR,
         )
 
 
 @router.post("/create")
+@trace_endpoint("oms.database.create")
 async def create_database(
     request: dict, 
     event_store=EventStoreDep,
@@ -64,8 +69,9 @@ async def create_database(
         # 요청 데이터 검증
         db_name = sanitized_request.get("name")
         if not db_name:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail="데이터베이스 이름이 필요합니다"
+            raise classified_http_exception(
+                status.HTTP_400_BAD_REQUEST, "데이터베이스 이름이 필요합니다",
+                code=ErrorCode.REQUEST_VALIDATION_FAILED,
             )
 
         # 데이터베이스 이름 보안 검증
@@ -74,8 +80,9 @@ async def create_database(
         # 설명 정화
         description = sanitized_request.get("description")
         if description and len(description) > 500:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail="설명이 너무 깁니다 (500자 이하)"
+            raise classified_http_exception(
+                status.HTTP_400_BAD_REQUEST, "설명이 너무 깁니다 (500자 이하)",
+                code=ErrorCode.REQUEST_VALIDATION_FAILED,
             )
 
         command = DatabaseCommand(
@@ -137,9 +144,10 @@ async def create_database(
         )
     except SecurityViolationError as e:
         logger.warning(f"Security violation in create_database: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="입력 데이터에 보안 위반이 감지되었습니다",
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            "입력 데이터에 보안 위반이 감지되었습니다",
+            code=ErrorCode.INPUT_SANITIZATION_FAILED,
         )
     except HTTPException:
         raise
@@ -162,17 +170,20 @@ async def create_database(
             or "이미 존재합니다" in str(e)
             or "duplicate" in str(e).lower()
         ):
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT, detail="데이터베이스가 이미 존재합니다"
+            raise classified_http_exception(
+                status.HTTP_409_CONFLICT, "데이터베이스가 이미 존재합니다",
+                code=ErrorCode.RESOURCE_ALREADY_EXISTS,
             )
 
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"데이터베이스 생성 실패: {str(e)}",
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            f"데이터베이스 생성 실패: {str(e)}",
+            code=ErrorCode.INTERNAL_ERROR,
         )
 
 
 @router.delete("/{db_name}")
+@trace_endpoint("oms.database.delete")
 async def delete_database(
     db_name: str,
     expected_seq: int = Query(..., ge=0, description="Expected current aggregate sequence (OCC)"),
@@ -192,9 +203,10 @@ async def delete_database(
         # 시스템 데이터베이스 보호
         protected_dbs = ["_system", "_meta"]
         if db_name in protected_dbs:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"시스템 데이터베이스 '{db_name}'은(는) 삭제할 수 없습니다",
+            raise classified_http_exception(
+                status.HTTP_403_FORBIDDEN,
+                f"시스템 데이터베이스 '{db_name}'은(는) 삭제할 수 없습니다",
+                code=ErrorCode.PERMISSION_DENIED,
             )
 
         # Event Sourcing mode: emit command only (async). Existence is checked by workers.
@@ -232,22 +244,25 @@ async def delete_database(
         )
     except SecurityViolationError as e:
         logger.warning(f"Security violation in delete_database: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="입력 데이터에 보안 위반이 감지되었습니다",
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            "입력 데이터에 보안 위반이 감지되었습니다",
+            code=ErrorCode.INPUT_SANITIZATION_FAILED,
         )
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to delete database '{db_name}': {e}")
 
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"데이터베이스 삭제 실패: {str(e)}",
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            f"데이터베이스 삭제 실패: {str(e)}",
+            code=ErrorCode.INTERNAL_ERROR,
         )
 
 
 @router.get("/exists/{db_name}")
+@trace_endpoint("oms.database.exists")
 async def database_exists(
     db_name: str, terminus_service: AsyncTerminusService = TerminusServiceDep
 ):
@@ -269,13 +284,15 @@ async def database_exists(
         ).to_dict()
     except SecurityViolationError as e:
         logger.warning(f"Security violation in database_exists: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="입력 데이터에 보안 위반이 감지되었습니다",
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            "입력 데이터에 보안 위반이 감지되었습니다",
+            code=ErrorCode.INPUT_SANITIZATION_FAILED,
         )
     except Exception as e:
         logger.error(f"Failed to check database existence for '{db_name}': {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"데이터베이스 존재 확인 실패: {str(e)}",
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            f"데이터베이스 존재 확인 실패: {str(e)}",
+            code=ErrorCode.INTERNAL_ERROR,
         )

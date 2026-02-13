@@ -8,8 +8,9 @@ dedupe-key semantics and job option shaping.
 from typing import Any, Dict, Optional
 from uuid import uuid4
 
-from fastapi import HTTPException, status
+from fastapi import status
 
+from shared.errors.error_types import ErrorCode, classified_http_exception
 from shared.models.objectify_job import ObjectifyJob
 from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.services.registries.objectify_registry import ObjectifyRegistry
@@ -44,10 +45,12 @@ async def enqueue_objectify_job_for_mapping_spec(
             return None
 
     if strict_dataset_match and getattr(mapping_spec, "dataset_id", None) != getattr(dataset, "dataset_id", None):
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={
-                "code": "MAPPING_SPEC_DATASET_MISMATCH",
+        raise classified_http_exception(
+            status.HTTP_409_CONFLICT,
+            "Mapping spec does not match dataset",
+            code=ErrorCode.CONFLICT,
+            extra={
+                "reason": "MAPPING_SPEC_DATASET_MISMATCH",
                 "mapping_spec_id": mapping_spec_id,
                 "dataset_id": getattr(dataset, "dataset_id", None),
             },
@@ -110,4 +113,3 @@ async def enqueue_objectify_job_for_mapping_spec(
     )
     await objectify_registry.enqueue_objectify_job(job=job)
     return job_id
-

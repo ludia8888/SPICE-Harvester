@@ -10,6 +10,7 @@ from shared.errors.enterprise_catalog import (
 )
 from shared.errors.error_types import ErrorCategory, ErrorCode
 from shared.observability.tracing import get_tracing_service
+from shared.utils.canonical_json import sha256_canonical_json_prefixed
 
 
 _DEFAULT_CATEGORY_CODE_BY_CLASS: Dict[EnterpriseClass, Tuple[ErrorCategory, ErrorCode]] = {
@@ -45,6 +46,71 @@ def _derive_category_code(enterprise: EnterpriseError) -> Tuple[ErrorCategory, E
     return _DEFAULT_CATEGORY_CODE_BY_CLASS.get(
         enterprise.error_class, (ErrorCategory.INTERNAL, ErrorCode.INTERNAL_ERROR)
     )
+
+
+def _runbook_uri(runbook_ref: str) -> str:
+    token = str(runbook_ref or "").strip() or "unknown_error"
+    safe = "".join(ch if ch.isalnum() or ch in {"_", "-", "."} else "_" for ch in token)
+    safe = safe[:200] or "unknown_error"
+    return f"spice://runbook/{safe}"
+
+
+def _build_diagnostics(
+    *,
+    service_name: str,
+    code: ErrorCode,
+    category: ErrorCategory,
+    http_status: int,
+    enterprise: EnterpriseError,
+    enterprise_payload: Dict[str, object],
+    origin: Dict[str, Optional[str]],
+    request_id: Optional[str],
+    correlation_id: Optional[str],
+    trace_id: Optional[str],
+    span_id: Optional[str],
+) -> Dict[str, Any]:
+    group_seed = {
+        "schema": "error_group_fingerprint.v1",
+        "service": service_name,
+        "code": code.value,
+        "category": category.value,
+        "http_status": int(http_status),
+        "enterprise_code": enterprise.code,
+        "legacy_code": enterprise.legacy_code,
+        "domain": enterprise.domain.value,
+        "class": enterprise.error_class.value,
+        "subsystem": enterprise.subsystem,
+        "runbook_ref": enterprise.runbook_ref,
+        "origin_method": origin.get("method"),
+        "origin_endpoint": origin.get("endpoint"),
+    }
+    group_fingerprint = sha256_canonical_json_prefixed(group_seed)
+    instance_seed = {
+        "schema": "error_instance_fingerprint.v1",
+        "group_fingerprint": group_fingerprint,
+        "request_id": request_id,
+        "correlation_id": correlation_id,
+        "trace_id": trace_id,
+        "span_id": span_id,
+        "origin_path": origin.get("path"),
+    }
+    instance_fingerprint = sha256_canonical_json_prefixed(instance_seed)
+
+    return {
+        "schema": "error_diagnostics.v1",
+        "group_fingerprint": group_fingerprint,
+        "instance_fingerprint": instance_fingerprint,
+        "runbook_ref": enterprise.runbook_ref,
+        "runbook_uri": _runbook_uri(enterprise.runbook_ref),
+        "lookup": {
+            "enterprise_code": enterprise.code,
+            "catalog_fingerprint": enterprise_payload.get("catalog_fingerprint"),
+            "request_id": request_id,
+            "correlation_id": correlation_id,
+            "trace_id": trace_id,
+            "span_id": span_id,
+        },
+    }
 
 
 def build_error_envelope(
@@ -87,10 +153,27 @@ def build_error_envelope(
 
     tracing = get_tracing_service(service_name)
     resolved_trace_id = trace_id if trace_id is not None else tracing.get_trace_id()
+    resolved_span_id = tracing.get_span_id()
     if prefer_status_code and status_code:
         http_status = status_code
     else:
         http_status = resolved_enterprise.http_status if resolved_enterprise else (status_code or 500)
+
+    origin_payload = _normalize_origin(service_name=service_name, origin=origin)
+    enterprise_payload = resolved_enterprise.to_dict() if resolved_enterprise else None
+    diagnostics = _build_diagnostics(
+        service_name=service_name,
+        code=code,
+        category=category,
+        http_status=http_status,
+        enterprise=resolved_enterprise,
+        enterprise_payload=enterprise_payload or {},
+        origin=origin_payload,
+        request_id=request_id,
+        correlation_id=correlation_id,
+        trace_id=resolved_trace_id,
+        span_id=resolved_span_id,
+    )
 
     payload: Dict[str, Any] = {
         "status": "error",
@@ -100,11 +183,13 @@ def build_error_envelope(
         "category": category.value,
         "http_status": http_status,
         "retryable": resolved_enterprise.retryable if resolved_enterprise else False,
-        "enterprise": resolved_enterprise.to_dict() if resolved_enterprise else None,
-        "origin": _normalize_origin(service_name=service_name, origin=origin),
+        "enterprise": enterprise_payload,
+        "origin": origin_payload,
         "trace_id": resolved_trace_id,
+        "span_id": resolved_span_id,
         "request_id": request_id,
         "correlation_id": correlation_id,
+        "diagnostics": diagnostics,
     }
     if errors:
         payload["errors"] = errors

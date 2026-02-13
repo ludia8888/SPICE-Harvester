@@ -16,6 +16,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any, Optional
 
+from shared.observability.tracing import trace_kafka_operation
 from shared.utils.executor_utils import call_in_executor
 
 _LOGGER = logging.getLogger(__name__)
@@ -43,12 +44,15 @@ class InlineKafkaProducerOps(KafkaProducerOps):
 
     producer: Any
 
+    @trace_kafka_operation("kafka.produce")
     async def produce(self, **kwargs) -> None:
         self.producer.produce(**kwargs)
 
+    @trace_kafka_operation("kafka.flush")
     async def flush(self, timeout_s: float) -> int:
         return int(self.producer.flush(timeout_s))
 
+    @trace_kafka_operation("kafka.producer_close")
     async def close(self, *, timeout_s: float = 5.0) -> None:
         self.producer.flush(timeout_s)
 
@@ -75,13 +79,16 @@ class ExecutorKafkaProducerOps(KafkaProducerOps):
             thread_name_prefix=str(thread_name_prefix or "kafka-producer"),
         )
 
+    @trace_kafka_operation("kafka.produce")
     async def produce(self, **kwargs) -> None:
         await call_in_executor(self._executor, self._producer.produce, **kwargs)
 
+    @trace_kafka_operation("kafka.flush")
     async def flush(self, timeout_s: float) -> int:
         remaining = await call_in_executor(self._executor, self._producer.flush, float(timeout_s))
         return int(remaining or 0)
 
+    @trace_kafka_operation("kafka.producer_close")
     async def close(self, *, timeout_s: float = 5.0) -> None:
         try:
             await call_in_executor(self._executor, self._producer.flush, float(timeout_s))
@@ -93,6 +100,7 @@ class ExecutorKafkaProducerOps(KafkaProducerOps):
                     self._executor.shutdown(wait=False)
 
 
+@trace_kafka_operation("kafka.close_producer")
 async def close_kafka_producer(
     *,
     producer: Any = None,

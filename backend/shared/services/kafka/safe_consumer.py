@@ -22,6 +22,7 @@ from typing import Any, Callable, Dict, List, Optional
 from confluent_kafka import Consumer, TopicPartition
 
 from shared.config.settings import get_settings
+from shared.observability.tracing import trace_kafka_operation
 
 logger = logging.getLogger(__name__)
 
@@ -281,6 +282,7 @@ class SafeKafkaConsumer:
         """Check if consumer is currently rebalancing."""
         return self._state == ConsumerState.REBALANCING
 
+    @trace_kafka_operation("kafka.safe_poll")
     def poll(self, timeout: float = 1.0) -> Optional[Any]:
         """
         Poll for a message with rebalance awareness.
@@ -354,6 +356,7 @@ class SafeKafkaConsumer:
                     TopicPartition(msg.topic(), msg.partition(), msg.offset() + 1)
                 )
 
+    @trace_kafka_operation("kafka.safe_commit")
     def commit(
         self,
         message: Optional[Any] = None,
@@ -423,6 +426,7 @@ class SafeKafkaConsumer:
                         state.pending_offset = tp.offset - 1
                 self._pending_commits.clear()
 
+    @trace_kafka_operation("kafka.safe_commit_sync")
     def commit_sync(self, msg: Any) -> None:
         """Synchronously commit a specific message offset."""
         self.commit(message=msg, asynchronous=False)
@@ -445,6 +449,7 @@ class SafeKafkaConsumer:
                     state.current_offset = partition.offset - 1
         self._consumer.seek(partition)
 
+    @trace_kafka_operation("kafka.safe_close")
     def close(self, timeout: float = 10.0) -> None:
         """
         Gracefully close the consumer.

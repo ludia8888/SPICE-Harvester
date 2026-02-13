@@ -18,6 +18,8 @@ from uuid import uuid4
 import httpx
 from fastapi import HTTPException, Request, status
 
+from shared.errors.error_types import ErrorCode, classified_http_exception
+
 from bff.services.objectify_ops_service import _extract_ontology_fields, _unwrap_data_payload
 from bff.schemas.objectify_requests import RunObjectifyDAGRequest
 from bff.services.oms_client import OMSClient
@@ -30,6 +32,7 @@ from shared.security.input_sanitizer import SecurityViolationError, sanitize_inp
 from shared.services.events.objectify_job_queue import ObjectifyJobQueue
 from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.services.registries.objectify_registry import ObjectifyRegistry
+from shared.observability.tracing import trace_external_call
 
 logger = logging.getLogger(__name__)
 
@@ -95,9 +98,11 @@ class _ObjectifyDagOrchestrator:
             )
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code == status.HTTP_404_NOT_FOUND:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail={"code": "OBJECT_TYPE_CONTRACT_MISSING", "class_id": class_id},
+                raise classified_http_exception(
+                    status.HTTP_409_CONFLICT,
+                    "Object type contract not found",
+                    code=ErrorCode.OBJECTIFY_CONTRACT_ERROR,
+                    extra={"class_id": class_id},
                 ) from exc
             raise
         resource = _unwrap_data_payload(resp)
@@ -114,9 +119,11 @@ class _ObjectifyDagOrchestrator:
         dataset_branch = str(backing_source.get("branch") or "main").strip() or "main"
         schema_hash = str(backing_source.get("schema_hash") or backing_source.get("schemaHash") or "").strip() or None
         if not dataset_id:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={"code": "OBJECT_TYPE_BACKING_DATASET_MISSING", "class_id": class_id},
+            raise classified_http_exception(
+                status.HTTP_409_CONFLICT,
+                "Object type backing dataset is missing",
+                code=ErrorCode.OBJECTIFY_CONTRACT_ERROR,
+                extra={"class_id": class_id},
             )
 
         mapping_spec = await self.objectify_registry.get_active_mapping_spec(
@@ -132,10 +139,11 @@ class _ObjectifyDagOrchestrator:
                 target_class_id=class_id,
             )
         if not mapping_spec:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={
-                    "code": "MAPPING_SPEC_NOT_FOUND",
+            raise classified_http_exception(
+                status.HTTP_409_CONFLICT,
+                "Active mapping spec not found for object type contract",
+                code=ErrorCode.OBJECTIFY_CONTRACT_ERROR,
+                extra={
                     "class_id": class_id,
                     "dataset_id": dataset_id,
                     "dataset_branch": dataset_branch,
@@ -185,9 +193,11 @@ class _ObjectifyDagOrchestrator:
         if not version:
             version = await self.dataset_registry.get_latest_version(dataset_id=dataset_id)
         if not version or not getattr(version, "artifact_key", None):
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={"code": "DATASET_VERSION_MISSING", "class_id": class_id, "dataset_id": dataset_id},
+            raise classified_http_exception(
+                status.HTTP_409_CONFLICT,
+                "Dataset version is missing for objectify DAG",
+                code=ErrorCode.CONFLICT,
+                extra={"class_id": class_id, "dataset_id": dataset_id},
             )
 
         rel_targets = await self._fetch_relationship_targets(class_id)
@@ -242,14 +252,12 @@ class _ObjectifyDagOrchestrator:
                 cls: sorted(deps) for cls, deps in self.missing_deps_by_class.items() if deps
             }
             if missing_detail:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail={
-                        "code": "OBJECTIFY_DAG_DEPENDENCIES_MISSING",
-                        "message": (
-                            "Missing dependency classes for safe objectify ordering. "
-                            "Re-run with include_dependencies=true or include the dependencies in class_ids."
-                        ),
+                raise classified_http_exception(
+                    status.HTTP_409_CONFLICT,
+                    "Missing dependency classes for safe objectify ordering. "
+                    "Re-run with include_dependencies=true or include the dependencies in class_ids.",
+                    code=ErrorCode.CONFLICT,
+                    extra={
                         "missing_dependencies": missing_detail,
                         "requested_classes": sorted(requested_set),
                         "branch": self.branch,
@@ -301,13 +309,11 @@ class _ObjectifyDagOrchestrator:
 
         if len(ordered) != len(all_classes):
             remaining = sorted([c for c in all_classes if in_degree.get(c, 0) > 0])
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={
-                    "code": "OBJECTIFY_DAG_CYCLE_DETECTED",
-                    "message": "Cycle detected in objectify dependency graph; cannot compute safe order",
-                    "remaining": remaining,
-                },
+            raise classified_http_exception(
+                status.HTTP_409_CONFLICT,
+                "Cycle detected in objectify dependency graph; cannot compute safe order",
+                code=ErrorCode.CONFLICT,
+                extra={"remaining": remaining},
             )
         return ordered
 
@@ -331,7 +337,7 @@ class _ObjectifyDagOrchestrator:
     async def compute_plan(self, *, class_ids: Sequence[str]) -> tuple[List[str], List[_DagPlanItem], List[str]]:
         start = [validate_class_id(c) for c in class_ids if str(c).strip()]
         if not start:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="class_ids is required")
+            raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "class_ids is required", code=ErrorCode.REQUEST_VALIDATION_FAILED)
         await self._build_dependency_closure(start=start)
         ordered = self._toposort(start=start)
         return ordered, self._build_plan(ordered=ordered), start
@@ -593,6 +599,7 @@ class _ObjectifyDagOrchestrator:
         return {"run_id": self.run_id, "jobs": queued}
 
 
+@trace_external_call("bff.objectify_dag.run_objectify_dag")
 async def run_objectify_dag(
     *,
     db_name: str,
@@ -615,12 +622,12 @@ async def run_objectify_dag(
         try:
             enforce_db_scope(request.headers, db_name=db_name)
         except ValueError as exc:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+            raise classified_http_exception(status.HTTP_403_FORBIDDEN, str(exc), code=ErrorCode.PERMISSION_DENIED) from exc
 
         try:
             await enforce_database_role(headers=request.headers, db_name=db_name, required_roles=DATA_ENGINEER_ROLES)
         except ValueError as exc:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+            raise classified_http_exception(status.HTTP_403_FORBIDDEN, str(exc), code=ErrorCode.PERMISSION_DENIED) from exc
 
         orchestrator = _ObjectifyDagOrchestrator(
             db_name=db_name,
@@ -655,9 +662,9 @@ async def run_objectify_dag(
     except httpx.HTTPStatusError as exc:
         raise_httpx_as_http_exception(exc)
     except (SecurityViolationError, ValueError) as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, str(exc), code=ErrorCode.REQUEST_VALIDATION_FAILED) from exc
     except HTTPException:
         raise
     except Exception as exc:
         logger.error("Failed to orchestrate objectify DAG: %s", exc)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc), code=ErrorCode.INTERNAL_ERROR) from exc

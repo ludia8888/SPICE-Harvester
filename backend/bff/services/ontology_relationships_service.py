@@ -13,6 +13,8 @@ from typing import Any, Dict, Optional
 from fastapi import HTTPException, Request, status
 from fastapi.responses import JSONResponse
 
+from shared.errors.error_types import ErrorCode, classified_http_exception
+
 from bff.dependencies import LabelMapper, TerminusService
 from bff.routers.ontology_ops import _transform_properties_for_oms
 from bff.services.ontology_class_id_service import resolve_or_generate_class_id
@@ -30,11 +32,13 @@ from shared.security.input_sanitizer import (
     validate_class_id,
 )
 from shared.utils.language import get_accept_language
+from shared.observability.tracing import trace_external_call
 
 logger = logging.getLogger(__name__)
 
 _ALLOWED_PATH_TYPES = {"shortest", "all", "weighted", "semantic"}
 
+@trace_external_call("bff.ontology_relationships.create_ontology_with_relationship_validation")
 async def create_ontology_with_relationship_validation(
     *,
     db_name: str,
@@ -58,12 +62,11 @@ async def create_ontology_with_relationship_validation(
     lang = get_accept_language(request)
     try:
         if auto_generate_inverse:
-            raise HTTPException(
-                status_code=status.HTTP_501_NOT_IMPLEMENTED,
-                detail=(
-                    "auto_generate_inverse is not implemented yet. TerminusDB schema documents discard "
-                    "per-property custom metadata, so inverse metadata needs a dedicated projection store."
-                ),
+            raise classified_http_exception(
+                status.HTTP_501_NOT_IMPLEMENTED,
+                "auto_generate_inverse is not implemented yet. TerminusDB schema documents discard "
+                "per-property custom metadata, so inverse metadata needs a dedicated projection store.",
+                code=ErrorCode.FEATURE_NOT_IMPLEMENTED,
             )
 
         db_name = validated_db_name(db_name)
@@ -110,12 +113,10 @@ async def create_ontology_with_relationship_validation(
         raise
     except Exception as exc:
         logger.error("Failed to create ontology with advanced relationships: %s", exc)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"고급 온톨로지 생성 실패: {str(exc)}",
-        ) from exc
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, f"고급 온톨로지 생성 실패: {str(exc)}", code=ErrorCode.INTERNAL_ERROR) from exc
 
 
+@trace_external_call("bff.ontology_relationships.validate_ontology_relationships")
 async def validate_ontology_relationships(
     *,
     db_name: str,
@@ -142,17 +143,15 @@ async def validate_ontology_relationships(
         result = await terminus.validate_relationships(db_name, payload, branch=branch)
         return ApiResponse.success(message="관계 검증이 완료되었습니다", data=result).to_dict()
     except (SecurityViolationError, ValueError) as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, str(exc), code=ErrorCode.REQUEST_VALIDATION_FAILED) from exc
     except HTTPException:
         raise
     except Exception as exc:
         logger.error("Failed to validate relationships: %s", exc)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"관계 검증 실패: {str(exc)}",
-        ) from exc
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, f"관계 검증 실패: {str(exc)}", code=ErrorCode.INTERNAL_ERROR) from exc
 
 
+@trace_external_call("bff.ontology_relationships.check_circular_references")
 async def check_circular_references(
     *,
     db_name: str,
@@ -177,17 +176,15 @@ async def check_circular_references(
         result = await terminus.detect_circular_references(db_name, branch=branch, new_ontology=new_ontology)
         return ApiResponse.success(message="순환 참조 탐지가 완료되었습니다", data=result).to_dict()
     except (SecurityViolationError, ValueError) as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, str(exc), code=ErrorCode.REQUEST_VALIDATION_FAILED) from exc
     except HTTPException:
         raise
     except Exception as exc:
         logger.error("Failed to check circular references: %s", exc)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"순환 참조 탐지 실패: {str(exc)}",
-        ) from exc
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, f"순환 참조 탐지 실패: {str(exc)}", code=ErrorCode.INTERNAL_ERROR) from exc
 
 
+@trace_external_call("bff.ontology_relationships.analyze_relationship_network")
 async def analyze_relationship_network(
     *,
     db_name: str,
@@ -273,12 +270,10 @@ async def analyze_relationship_network(
         raise
     except Exception as exc:
         logger.error("Failed to analyze relationship network: %s", exc)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"관계 네트워크 분석 실패: {str(exc)}",
-        ) from exc
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, f"관계 네트워크 분석 실패: {str(exc)}", code=ErrorCode.INTERNAL_ERROR) from exc
 
 
+@trace_external_call("bff.ontology_relationships.find_relationship_paths")
 async def find_relationship_paths(
     *,
     request: Request,
@@ -299,10 +294,7 @@ async def find_relationship_paths(
             end_entity = sanitize_input(end_entity)
 
         if path_type not in _ALLOWED_PATH_TYPES:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid path_type. Allowed values: {', '.join(_ALLOWED_PATH_TYPES)}",
-            )
+            raise classified_http_exception(status.HTTP_400_BAD_REQUEST, f"Invalid path_type. Allowed values: {', '.join(_ALLOWED_PATH_TYPES)}", code=ErrorCode.REQUEST_VALIDATION_FAILED)
 
         start_id = await mapper.get_class_id(db_name, start_entity, lang)
         if not start_id:
@@ -368,12 +360,9 @@ async def find_relationship_paths(
             "metadata": {"language": lang, "start_id": start_id, "end_id": end_id},
         }
     except (SecurityViolationError, ValueError) as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, str(exc), code=ErrorCode.REQUEST_VALIDATION_FAILED) from exc
     except HTTPException:
         raise
     except Exception as exc:
         logger.error("Failed to find relationship paths: %s", exc)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"관계 경로 탐색 실패: {str(exc)}",
-        ) from exc
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, f"관계 경로 탐색 실패: {str(exc)}", code=ErrorCode.INTERNAL_ERROR) from exc

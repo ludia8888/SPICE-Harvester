@@ -15,6 +15,9 @@ from uuid import uuid4
 
 from fastapi import HTTPException, Request, status
 
+from shared.errors.error_types import ErrorCode, ErrorCategory, classified_http_exception
+from shared.errors.legacy_codes import LegacyErrorCode
+
 from bff.schemas.link_types_requests import (
     ForeignKeyRelationshipSpec,
     JoinTableRelationshipSpec,
@@ -35,6 +38,7 @@ from shared.utils.schema_columns import (
 from shared.utils.schema_hash import compute_schema_hash_from_payload
 from shared.utils.schema_type_compatibility import is_type_compatible
 from shared.utils.string_list_utils import normalize_string_list
+from shared.observability.tracing import trace_external_call, trace_db_operation
 
 
 def extract_schema_columns(schema: Any) -> List[Dict[str, Any]]:
@@ -107,6 +111,7 @@ def normalize_pk_fields(value: Any) -> List[str]:
     return normalize_string_list(value)
 
 
+@trace_external_call("bff.link_types_mapping.resolve_object_type_contract")
 async def resolve_object_type_contract(
     *,
     oms_client: OMSClient,
@@ -127,6 +132,7 @@ async def resolve_object_type_contract(
     return resource, spec
 
 
+@trace_db_operation("bff.link_types_mapping.resolve_dataset_and_version")
 async def resolve_dataset_and_version(
     *,
     dataset_registry: DatasetRegistry,
@@ -135,22 +141,23 @@ async def resolve_dataset_and_version(
 ) -> Tuple[Any, Any, str]:
     dataset = await dataset_registry.get_dataset(dataset_id=dataset_id)
     if not dataset:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found")
+        raise classified_http_exception(status.HTTP_404_NOT_FOUND, "Dataset not found", code=ErrorCode.RESOURCE_NOT_FOUND)
     version = None
     if dataset_version_id:
         version = await dataset_registry.get_version(version_id=dataset_version_id)
         if not version or version.dataset_id != dataset.dataset_id:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset version not found")
+            raise classified_http_exception(status.HTTP_404_NOT_FOUND, "Dataset version not found", code=ErrorCode.RESOURCE_NOT_FOUND)
     if not version:
         version = await dataset_registry.get_latest_version(dataset_id=dataset.dataset_id)
     if not version:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Dataset version is required")
+        raise classified_http_exception(status.HTTP_409_CONFLICT, "Dataset version is required", code=ErrorCode.CONFLICT)
     schema_hash = compute_schema_hash(version.sample_json or dataset.schema_json)
     if not schema_hash:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="schema_hash is required for relationship spec")
+        raise classified_http_exception(status.HTTP_409_CONFLICT, "schema_hash is required for relationship spec", code=ErrorCode.CONFLICT)
     return dataset, version, schema_hash
 
 
+@trace_db_operation("bff.link_types_mapping.ensure_join_dataset")
 async def ensure_join_dataset(
     *,
     dataset_registry: DatasetRegistry,
@@ -173,13 +180,13 @@ async def ensure_join_dataset(
     if join_dataset_id:
         dataset = await dataset_registry.get_dataset(dataset_id=join_dataset_id)
         if not dataset:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Join dataset not found")
+            raise classified_http_exception(status.HTTP_404_NOT_FOUND, "Join dataset not found", code=ErrorCode.RESOURCE_NOT_FOUND)
     else:
         if not auto_create:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="join_dataset_id is required")
+            raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "join_dataset_id is required", code=ErrorCode.REQUEST_VALIDATION_FAILED)
         name = (join_dataset_name or default_name or "").strip()
         if not name:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="join_dataset_name is required")
+            raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "join_dataset_name is required", code=ErrorCode.REQUEST_VALIDATION_FAILED)
         dataset = await dataset_registry.get_dataset_by_name(db_name=db_name, name=name, branch=dataset_branch)
         if not dataset:
             schema_json = build_join_schema(
@@ -200,15 +207,16 @@ async def ensure_join_dataset(
 
     enforce_db_scope(request.headers, db_name=dataset.db_name)
     if dataset.db_name != db_name:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Join dataset does not belong to requested database",
+        raise classified_http_exception(
+            status.HTTP_409_CONFLICT,
+            "Join dataset does not belong to requested database",
+            code=ErrorCode.CONFLICT,
         )
 
     if join_dataset_version_id:
         version = await dataset_registry.get_version(version_id=join_dataset_version_id)
         if not version or version.dataset_id != dataset.dataset_id:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Join dataset version not found")
+            raise classified_http_exception(status.HTTP_404_NOT_FOUND, "Join dataset version not found", code=ErrorCode.RESOURCE_NOT_FOUND)
     if not version:
         version = await dataset_registry.get_latest_version(dataset_id=dataset.dataset_id)
     if not version and auto_create:
@@ -227,11 +235,11 @@ async def ensure_join_dataset(
             schema_json=schema_json,
         )
     if not version:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Join dataset version is required")
+        raise classified_http_exception(status.HTTP_409_CONFLICT, "Join dataset version is required", code=ErrorCode.CONFLICT)
 
     schema_hash = compute_schema_hash(version.sample_json or dataset.schema_json)
     if not schema_hash:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="schema_hash is required for relationship spec")
+        raise classified_http_exception(status.HTTP_409_CONFLICT, "schema_hash is required for relationship spec", code=ErrorCode.CONFLICT)
     return dataset, version, schema_hash
 
 
@@ -286,7 +294,7 @@ class _ForeignKeyMappingStrategy:
     ) -> _MappingResult:
         fk_column = str(fk_spec.fk_column or "").strip()
         if not fk_column:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="fk_column is required")
+            raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "fk_column is required", code=ErrorCode.REQUEST_VALIDATION_FAILED)
 
         backing_source = (
             ctx.source_contract.get("backing_source")
@@ -298,10 +306,10 @@ class _ForeignKeyMappingStrategy:
         dataset_version_id = fk_spec.source_dataset_version_id or None
         if not dataset_id:
             if not backing_id:
-                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="source backing datasource missing")
+                raise classified_http_exception(status.HTTP_409_CONFLICT, "source backing datasource missing", code=ErrorCode.CONFLICT)
             backing = await ctx.dataset_registry.get_backing_datasource(backing_id=backing_id)
             if not backing:
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Backing datasource not found")
+                raise classified_http_exception(status.HTTP_404_NOT_FOUND, "Backing datasource not found", code=ErrorCode.RESOURCE_NOT_FOUND)
             dataset_id = backing.dataset_id
 
         dataset, version, schema_hash = await resolve_dataset_and_version(
@@ -313,45 +321,42 @@ class _ForeignKeyMappingStrategy:
 
         schema_types = extract_schema_types(version.sample_json or dataset.schema_json)
         if fk_column not in schema_types:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="fk_column not found in dataset")
+            raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "fk_column not found in dataset", code=ErrorCode.OBJECTIFY_MAPPING_ERROR)
 
         target_pk_field = str(
             fk_spec.target_pk_field or (target_pk_fields[0] if len(target_pk_fields) == 1 else "")
         ).strip()
         if not target_pk_field:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="target_pk_field is required")
+            raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "target_pk_field is required", code=ErrorCode.REQUEST_VALIDATION_FAILED)
         if target_pk_field not in ctx.target_props:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="target_pk_field missing from ontology")
+            raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "target_pk_field missing from ontology", code=ErrorCode.OBJECTIFY_MAPPING_ERROR)
 
         effective_source_pk_fields = normalize_pk_fields(fk_spec.source_pk_fields) or source_pk_fields
         for field in effective_source_pk_fields:
             if field not in schema_types:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"source pk column missing: {field}")
+                raise classified_http_exception(status.HTTP_400_BAD_REQUEST, f"source pk column missing: {field}", code=ErrorCode.OBJECTIFY_MAPPING_ERROR)
 
         fk_type = schema_types.get(fk_column)
         target_pk_type = resolve_property_type(ctx.target_props, target_pk_field)
         if not fk_type or not target_pk_type or not is_type_compatible(fk_type, target_pk_type):
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={
-                    "code": "RELATIONSHIP_FK_TYPE_MISMATCH",
-                    "fk_type": fk_type,
-                    "target_pk_type": target_pk_type,
-                },
+            raise classified_http_exception(
+                status.HTTP_409_CONFLICT,
+                "Relationship foreign key type mismatch",
+                code=ErrorCode.OBJECTIFY_CONTRACT_ERROR,
+                external_code=LegacyErrorCode.RELATIONSHIP_FK_TYPE_MISMATCH,
+                extra={"fk_type": fk_type, "target_pk_type": target_pk_type},
             )
 
         for field in effective_source_pk_fields:
             source_pk_type = schema_types.get(field)
             expected = resolve_property_type(ctx.source_props, field) or target_pk_type
             if source_pk_type and expected and not is_type_compatible(source_pk_type, expected):
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail={
-                        "code": "RELATIONSHIP_SOURCE_PK_TYPE_MISMATCH",
-                        "field": field,
-                        "observed": source_pk_type,
-                        "expected": expected,
-                    },
+                raise classified_http_exception(
+                    status.HTTP_409_CONFLICT,
+                    "Relationship source primary key type mismatch",
+                    code=ErrorCode.OBJECTIFY_CONTRACT_ERROR,
+                    external_code=LegacyErrorCode.RELATIONSHIP_SOURCE_PK_TYPE_MISMATCH,
+                    extra={"field": field, "observed": source_pk_type, "expected": expected},
                 )
 
         mappings = [{"source_field": field, "target_field": field} for field in effective_source_pk_fields]
@@ -416,7 +421,7 @@ class _JoinTableMappingStrategy:
         source_pk_field = source_pk_fields[0] if len(source_pk_fields) == 1 else None
         target_pk_field = target_pk_fields[0] if len(target_pk_fields) == 1 else None
         if not source_pk_field or not target_pk_field:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="composite pk requires explicit mapping")
+            raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "composite pk requires explicit mapping", code=ErrorCode.OBJECTIFY_MAPPING_ERROR)
 
         source_pk_type = resolve_property_type(ctx.source_props, source_pk_field)
         target_pk_type = resolve_property_type(ctx.target_props, target_pk_field)
@@ -441,29 +446,27 @@ class _JoinTableMappingStrategy:
         source_key_column = str(join_spec.source_key_column or "").strip()
         target_key_column = str(join_spec.target_key_column or "").strip()
         if source_key_column not in schema_types:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="source_key_column missing")
+            raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "source_key_column missing", code=ErrorCode.OBJECTIFY_MAPPING_ERROR)
         if target_key_column not in schema_types:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="target_key_column missing")
+            raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "target_key_column missing", code=ErrorCode.OBJECTIFY_MAPPING_ERROR)
 
         source_type = schema_types.get(source_key_column)
         target_type = schema_types.get(target_key_column)
         if not source_type or not source_pk_type or not is_type_compatible(source_type, source_pk_type):
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={
-                    "code": "RELATIONSHIP_JOIN_SOURCE_TYPE_MISMATCH",
-                    "observed": source_type,
-                    "expected": source_pk_type,
-                },
+            raise classified_http_exception(
+                status.HTTP_409_CONFLICT,
+                "Join source type mismatch",
+                code=ErrorCode.OBJECTIFY_CONTRACT_ERROR,
+                external_code=LegacyErrorCode.RELATIONSHIP_JOIN_SOURCE_TYPE_MISMATCH,
+                extra={"observed": source_type, "expected": source_pk_type},
             )
         if not target_type or not target_pk_type or not is_type_compatible(target_type, target_pk_type):
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={
-                    "code": "RELATIONSHIP_JOIN_TARGET_TYPE_MISMATCH",
-                    "observed": target_type,
-                    "expected": target_pk_type,
-                },
+            raise classified_http_exception(
+                status.HTTP_409_CONFLICT,
+                "Join target type mismatch",
+                code=ErrorCode.OBJECTIFY_CONTRACT_ERROR,
+                external_code=LegacyErrorCode.RELATIONSHIP_JOIN_TARGET_TYPE_MISMATCH,
+                extra={"observed": target_type, "expected": target_pk_type},
             )
 
         mappings = [
@@ -533,14 +536,16 @@ class _ObjectBackedMappingStrategy:
     ) -> _MappingResult:
         relationship_object_type = str(object_backed_spec.relationship_object_type or "").strip()
         if not relationship_object_type:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="relationship_object_type is required for object_backed",
+            raise classified_http_exception(
+                status.HTTP_400_BAD_REQUEST,
+                "relationship_object_type is required for object_backed",
+                code=ErrorCode.REQUEST_VALIDATION_FAILED,
             )
         if ctx.oms_client is None:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="OMS client is required for object_backed",
+            raise classified_http_exception(
+                status.HTTP_500_INTERNAL_SERVER_ERROR,
+                "OMS client is required for object_backed",
+                code=ErrorCode.INTERNAL_ERROR,
             )
 
         _, relationship_contract = await resolve_object_type_contract(
@@ -580,6 +585,7 @@ class _ObjectBackedMappingStrategy:
         )
 
 
+@trace_db_operation("bff.link_types_mapping.build_mapping_request")
 async def build_mapping_request(
     *,
     db_name: str,
@@ -602,14 +608,17 @@ async def build_mapping_request(
     spec_type = normalize_spec_type(spec_payload.get("type") or "")
     normalized_type = "join_table" if spec_type == "object_backed" else spec_type
     if normalized_type not in {"foreign_key", "join_table"}:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="relationship_spec.type is required")
+        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "relationship_spec.type is required", code=ErrorCode.REQUEST_VALIDATION_FAILED)
 
     source_pk_fields = _extract_pk_fields(contract=source_contract, props=source_props)
     target_pk_fields = _extract_pk_fields(contract=target_contract, props=target_props)
     if not source_pk_fields or not target_pk_fields:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={"code": "OBJECT_TYPE_PRIMARY_KEY_MISSING", "source": source_class, "target": target_class},
+        raise classified_http_exception(
+            status.HTTP_409_CONFLICT,
+            "Object type primary key is missing",
+            code=ErrorCode.OBJECTIFY_CONTRACT_ERROR,
+            external_code=LegacyErrorCode.OBJECT_TYPE_PRIMARY_KEY_MISSING,
+            extra={"source": source_class, "target": target_class},
         )
 
     ctx = _MappingContext(

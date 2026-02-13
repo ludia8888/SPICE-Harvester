@@ -5,11 +5,14 @@ Exposes first-class, structured audit logs (Postgres-backed, hash-chained).
 """
 
 from __future__ import annotations
+from shared.observability.tracing import trace_endpoint
 
 from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query, status
+
+from shared.errors.error_types import ErrorCode, classified_http_exception
 
 from shared.dependencies.providers import AuditLogStoreDep
 from shared.models.requests import ApiResponse
@@ -18,6 +21,7 @@ router = APIRouter(prefix="/audit", tags=["Audit"])
 
 
 @router.get("/logs")
+@trace_endpoint("bff.audit.list_audit_logs")
 async def list_audit_logs(
     partition_key: Optional[str] = Query(None, description="Audit partition key (e.g. db:<db_name>)"),
     action: Optional[str] = Query(None, description="Action filter"),
@@ -54,12 +58,13 @@ async def list_audit_logs(
             data={"items": [item.model_dump(mode="json") for item in logs], "count": len(logs)},
         ).to_dict()
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, str(e), code=ErrorCode.REQUEST_VALIDATION_FAILED) from e
     except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(e), code=ErrorCode.INTERNAL_ERROR) from e
 
 
 @router.get("/chain-head")
+@trace_endpoint("bff.audit.get_chain_head")
 async def get_chain_head(
     partition_key: str = Query(..., description="Audit partition key (e.g. db:<db_name>)"),
     *,
@@ -69,6 +74,6 @@ async def get_chain_head(
         head = await audit_store.get_chain_head(partition_key=partition_key)
         return ApiResponse.success(message="Audit chain head fetched", data=head).to_dict()
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, str(e), code=ErrorCode.REQUEST_VALIDATION_FAILED) from e
     except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(e), code=ErrorCode.INTERNAL_ERROR) from e

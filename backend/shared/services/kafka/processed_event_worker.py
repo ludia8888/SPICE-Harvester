@@ -28,6 +28,7 @@ from confluent_kafka import KafkaError, TopicPartition
 
 from shared.models.event_envelope import EventEnvelope
 from shared.observability.context_propagation import attach_context_from_kafka
+from shared.observability.tracing import trace_kafka_operation
 from shared.services.kafka.consumer_ops import ExecutorKafkaConsumerOps, InlineKafkaConsumerOps, KafkaConsumerOps
 from shared.services.kafka.dlq_publisher import (
     DlqPublishSpec,
@@ -1067,6 +1068,7 @@ class ProcessedEventKafkaWorker(Generic[PayloadT, ResultT], ABC):
 
         return msg
 
+    @trace_kafka_operation("kafka.run_loop")
     async def run_loop(
         self,
         *,
@@ -1107,6 +1109,7 @@ class ProcessedEventKafkaWorker(Generic[PayloadT, ResultT], ABC):
                     if post_seek_sleep:
                         await asyncio.sleep(post_seek_sleep)
 
+    @trace_kafka_operation("kafka.run_partitioned_loop")
     async def run_partitioned_loop(
         self,
         *,

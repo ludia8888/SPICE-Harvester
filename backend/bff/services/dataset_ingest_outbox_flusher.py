@@ -4,6 +4,7 @@ import logging
 from typing import Any, Optional
 
 from shared.config.settings import get_settings
+from shared.observability.tracing import trace_external_call
 
 logger = logging.getLogger(__name__)
 
@@ -12,6 +13,7 @@ def _dataset_ingest_outbox_worker_enabled() -> bool:
     return bool(get_settings().workers.dataset_ingest_outbox.enabled)
 
 
+@trace_external_call("bff.dataset_ingest_outbox.maybe_flush_dataset_ingest_outbox_inline")
 async def maybe_flush_dataset_ingest_outbox_inline(
     *,
     dataset_registry: Any,

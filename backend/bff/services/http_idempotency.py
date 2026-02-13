@@ -7,15 +7,16 @@ from __future__ import annotations
 
 from typing import Optional
 
-from fastapi import HTTPException, Request, status
+from fastapi import Request
+from shared.errors.error_types import ErrorCode, classified_http_exception
 
 
 def require_idempotency_key(request: Optional[Request]) -> str:
     if request is None:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Idempotency-Key header is required")
+        raise classified_http_exception(400, "Idempotency-Key header is required", code=ErrorCode.REQUEST_VALIDATION_FAILED)
     key = (request.headers.get("Idempotency-Key") or request.headers.get("X-Idempotency-Key") or "").strip()
     if not key:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Idempotency-Key header is required")
+        raise classified_http_exception(400, "Idempotency-Key header is required", code=ErrorCode.REQUEST_VALIDATION_FAILED)
     return key
 
 

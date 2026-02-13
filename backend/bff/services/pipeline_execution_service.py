@@ -35,7 +35,7 @@ from bff.services.ontology_occ_guard_service import (
 from shared.config.app_config import AppConfig
 from shared.dependencies.providers import AuditLogStoreDep, LineageStoreDep
 from shared.errors.error_envelope import build_error_envelope
-from shared.errors.error_types import ErrorCategory, ErrorCode
+from shared.errors.error_types import ErrorCategory, ErrorCode, classified_http_exception
 from shared.models.pipeline_job import PipelineJob
 from shared.models.requests import ApiResponse
 from shared.security.input_sanitizer import sanitize_input, validate_db_name
@@ -52,10 +52,12 @@ from shared.utils.key_spec import normalize_key_spec
 from shared.utils.s3_uri import build_s3_uri, parse_s3_uri
 from shared.utils.schema_hash import compute_schema_hash
 from shared.utils.time_utils import utcnow
+from shared.observability.tracing import trace_external_call
 
 logger = logging.getLogger(__name__)
 
 
+@trace_external_call("bff.pipeline_execution.preview_pipeline")
 async def preview_pipeline(
     *,
     pipeline_id: str,
@@ -86,22 +88,16 @@ async def preview_pipeline(
         schema_contract = sanitized.get("schema_contract") if isinstance(sanitized.get("schema_contract"), list) else None
         sampling_strategy = sanitized.get("sampling_strategy") or sanitized.get("samplingStrategy")
         if sampling_strategy is not None and not isinstance(sampling_strategy, dict):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="sampling_strategy must be an object",
-            )
+            raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "sampling_strategy must be an object", code=ErrorCode.REQUEST_VALIDATION_FAILED)
         branch = str(sanitized.get("branch") or "").strip() or None
         pipeline = await pipeline_registry.get_pipeline(pipeline_id=pipeline_id)
         if not pipeline:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pipeline not found")
+            raise classified_http_exception(status.HTTP_404_NOT_FOUND, "Pipeline not found", code=ErrorCode.PIPELINE_NOT_FOUND)
         branch_state = await pipeline_registry.get_pipeline_branch(db_name=pipeline.db_name, branch=pipeline.branch)
         if branch_state and branch_state.get("archived"):
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Archived branch cannot be built; restore the branch first",
-            )
+            raise classified_http_exception(status.HTTP_409_CONFLICT, "Archived branch cannot be built; restore the branch first", code=ErrorCode.CONFLICT)
         if branch and branch != pipeline.branch:
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="branch does not match pipeline branch")
+            raise classified_http_exception(status.HTTP_409_CONFLICT, "branch does not match pipeline branch", code=ErrorCode.CONFLICT)
         latest = await pipeline_registry.get_latest_version(
             pipeline_id=pipeline_id,
             branch=pipeline.branch,
@@ -111,7 +107,7 @@ async def preview_pipeline(
         if not db_name:
             db_name = pipeline.db_name if pipeline else ""
         if not db_name:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="db_name is required")
+            raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "db_name is required", code=ErrorCode.REQUEST_VALIDATION_FAILED)
 
         if expectations is not None:
             definition_json = {**definition_json, "expectations": expectations}
@@ -234,7 +230,7 @@ async def preview_pipeline(
                 finished_at=utcnow(),
             )
             logger.error("Failed to enqueue pipeline preview job %s: %s", job_id, exc)
-            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Failed to enqueue preview job")
+            raise classified_http_exception(status.HTTP_503_SERVICE_UNAVAILABLE, "Failed to enqueue preview job", code=ErrorCode.UPSTREAM_UNAVAILABLE)
 
         sample_payload = {"queued": True, "job_id": job_id}
 
@@ -298,7 +294,7 @@ async def preview_pipeline(
             sample_json=validation_payload,
             finished_at=utcnow(),
         )
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, str(e), code=ErrorCode.PIPELINE_VALIDATION_FAILED)
     except HTTPException:
         raise
     except Exception as e:
@@ -311,9 +307,10 @@ async def preview_pipeline(
             error=str(e),
         )
         logger.error(f"Failed to preview pipeline: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(e), code=ErrorCode.INTERNAL_ERROR)
 
 
+@trace_external_call("bff.pipeline_execution.build_pipeline")
 async def build_pipeline(
     *,
     pipeline_id: str,
@@ -347,18 +344,15 @@ async def build_pipeline(
 
         pipeline = await pipeline_registry.get_pipeline(pipeline_id=pipeline_id)
         if not pipeline:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pipeline not found")
+            raise classified_http_exception(status.HTTP_404_NOT_FOUND, "Pipeline not found", code=ErrorCode.PIPELINE_NOT_FOUND)
         is_streaming_pipeline = str(pipeline.pipeline_type or "").strip().lower() in {"stream", "streaming"}
         if is_streaming_pipeline:
             node_id = None
         branch_state = await pipeline_registry.get_pipeline_branch(db_name=pipeline.db_name, branch=pipeline.branch)
         if branch_state and branch_state.get("archived"):
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Archived branch cannot be deployed; restore the branch first",
-            )
+            raise classified_http_exception(status.HTTP_409_CONFLICT, "Archived branch cannot be deployed; restore the branch first", code=ErrorCode.CONFLICT)
         if branch and branch != pipeline.branch:
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="branch does not match pipeline branch")
+            raise classified_http_exception(status.HTTP_409_CONFLICT, "branch does not match pipeline branch", code=ErrorCode.CONFLICT)
         latest = await pipeline_registry.get_latest_version(
             pipeline_id=pipeline_id,
             branch=pipeline.branch,
@@ -368,7 +362,7 @@ async def build_pipeline(
         if not db_name:
             db_name = pipeline.db_name if pipeline else ""
         if not db_name:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="db_name is required")
+            raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "db_name is required", code=ErrorCode.REQUEST_VALIDATION_FAILED)
         db_name = validate_db_name(db_name)
 
         if expectations is not None:
@@ -383,13 +377,12 @@ async def build_pipeline(
             dataset_registry=dataset_registry,
         )
         if preflight.get("has_blocking_errors"):
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={
-                    "code": "PIPELINE_PREFLIGHT_FAILED",
-                    "message": "Pipeline preflight checks failed",
-                    "preflight": preflight,
-                },
+            raise classified_http_exception(
+                status.HTTP_409_CONFLICT,
+                "Pipeline preflight checks failed",
+                code=ErrorCode.CONFLICT,
+                category=ErrorCategory.CONFLICT,
+                extra={"preflight": preflight},
             )
 
         definition_hash = _stable_definition_hash(definition_json)
@@ -431,13 +424,12 @@ async def build_pipeline(
             logger.warning("Failed to resolve ontology head commit (db=%s branch=%s): %s", db_name, ontology_branch, exc)
 
         if not ontology_head_commit_id:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={
-                    "code": "ONTOLOGY_VERSION_UNKNOWN",
-                    "message": "Ontology head commit is unknown; create/publish ontology on this branch before building pipelines",
-                    "branch": ontology_branch,
-                },
+            raise classified_http_exception(
+                status.HTTP_409_CONFLICT,
+                "Ontology head commit is unknown; create/publish ontology on this branch before building pipelines",
+                code=ErrorCode.CONFLICT,
+                category=ErrorCategory.CONFLICT,
+                extra={"branch": ontology_branch},
             )
 
         build_definition = dict(definition_json)
@@ -489,7 +481,7 @@ async def build_pipeline(
                 finished_at=utcnow(),
             )
             logger.error("Failed to enqueue pipeline build job %s: %s", job_id, exc)
-            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Failed to enqueue build job")
+            raise classified_http_exception(status.HTTP_503_SERVICE_UNAVAILABLE, "Failed to enqueue build job", code=ErrorCode.UPSTREAM_UNAVAILABLE)
 
         principal_type, principal_id = _resolve_principal(request)
         await emit_pipeline_control_plane_event(
@@ -535,9 +527,10 @@ async def build_pipeline(
             error=str(e),
         )
         logger.error(f"Failed to build pipeline: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(e), code=ErrorCode.INTERNAL_ERROR)
 
 
+@trace_external_call("bff.pipeline_execution.deploy_pipeline")
 async def deploy_pipeline(
     *,
     pipeline_id: str,
@@ -603,13 +596,13 @@ async def deploy_pipeline(
             try:
                 schedule_interval_seconds = int(schedule_interval_seconds)
             except Exception:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="schedule_interval_seconds must be integer")
+                raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "schedule_interval_seconds must be integer", code=ErrorCode.REQUEST_VALIDATION_FAILED)
             if schedule_interval_seconds <= 0:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="schedule_interval_seconds must be > 0")
+                raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "schedule_interval_seconds must be > 0", code=ErrorCode.REQUEST_VALIDATION_FAILED)
         if schedule_interval_seconds and schedule_cron:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Provide either schedule_interval_seconds or schedule_cron (not both)")
+            raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "Provide either schedule_interval_seconds or schedule_cron (not both)", code=ErrorCode.REQUEST_VALIDATION_FAILED)
         if schedule_cron and not _is_valid_cron_expression(str(schedule_cron)):
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="schedule_cron must be a supported 5-field cron expression")
+            raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "schedule_cron must be a supported 5-field cron expression", code=ErrorCode.REQUEST_VALIDATION_FAILED)
 
         branch = str(sanitized.get("branch") or "").strip() or None
         proposal_status = str(sanitized.get("proposal_status") or "").strip() or None
@@ -617,9 +610,9 @@ async def deploy_pipeline(
         proposal_description = str(sanitized.get("proposal_description") or "").strip() or None
         pipeline = await pipeline_registry.get_pipeline(pipeline_id=pipeline_id)
         if not pipeline:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pipeline not found")
+            raise classified_http_exception(status.HTTP_404_NOT_FOUND, "Pipeline not found", code=ErrorCode.PIPELINE_NOT_FOUND)
         if branch and branch != pipeline.branch:
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="branch does not match pipeline branch")
+            raise classified_http_exception(status.HTTP_409_CONFLICT, "branch does not match pipeline branch", code=ErrorCode.CONFLICT)
         if dependencies_raw is not None:
             dependencies = _normalize_dependencies_payload(dependencies_raw)
             await _validate_dependency_targets(
@@ -634,15 +627,9 @@ async def deploy_pipeline(
         proposal_bundle = getattr(pipeline, "proposal_bundle", {}) if pipeline else {}
         if proposal_required:
             if getattr(pipeline, "proposal_status", None) != "approved":
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail=protected_branch_write_message(),
-                )
+                raise classified_http_exception(status.HTTP_409_CONFLICT, protected_branch_write_message(), code=ErrorCode.CONFLICT)
             if not proposal_bundle:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail="Approved proposal is missing bundle metadata",
-                )
+                raise classified_http_exception(status.HTTP_409_CONFLICT, "Approved proposal is missing bundle metadata", code=ErrorCode.CONFLICT)
         latest = await pipeline_registry.get_latest_version(
             pipeline_id=pipeline_id,
             branch=resolved_branch,
@@ -658,54 +645,39 @@ async def deploy_pipeline(
         if not db_name:
             db_name = pipeline.db_name if pipeline else ""
         if not db_name:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="db_name is required")
+            raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "db_name is required", code=ErrorCode.REQUEST_VALIDATION_FAILED)
         db_name = validate_db_name(db_name)
 
         definition_hash = _stable_definition_hash(definition_json or {})
         definition_commit_id = _resolve_definition_commit_id(definition_json or {}, latest, definition_hash)
 
         if not promote_build:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="deploy requires promote_build; run /build then /deploy with promote_build",
-            )
+            raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "deploy requires promote_build; run /build then /deploy with promote_build", code=ErrorCode.REQUEST_VALIDATION_FAILED)
 
         if promote_build:
             artifact_record = None
             if artifact_id:
                 artifact_record = await pipeline_registry.get_artifact(artifact_id=artifact_id)
                 if not artifact_record:
-                    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Build artifact not found")
+                    raise classified_http_exception(status.HTTP_404_NOT_FOUND, "Build artifact not found", code=ErrorCode.RESOURCE_NOT_FOUND)
                 if artifact_record.pipeline_id != pipeline_id:
-                    raise HTTPException(
-                        status_code=status.HTTP_409_CONFLICT,
-                        detail="artifact_id does not belong to this pipeline",
-                    )
+                    raise classified_http_exception(status.HTTP_409_CONFLICT, "artifact_id does not belong to this pipeline", code=ErrorCode.CONFLICT)
                 if str(artifact_record.mode or "").lower() != "build":
-                    raise HTTPException(
-                        status_code=status.HTTP_409_CONFLICT,
-                        detail="artifact_id is not a build artifact",
-                    )
+                    raise classified_http_exception(status.HTTP_409_CONFLICT, "artifact_id is not a build artifact", code=ErrorCode.CONFLICT)
                 if str(artifact_record.status or "").upper() != "SUCCESS":
-                    raise HTTPException(
-                        status_code=status.HTTP_409_CONFLICT,
-                        detail="artifact_id is not a successful build artifact",
-                    )
+                    raise classified_http_exception(status.HTTP_409_CONFLICT, "artifact_id is not a successful build artifact", code=ErrorCode.CONFLICT)
                 if build_job_id and artifact_record.job_id != build_job_id:
-                    raise HTTPException(
-                        status_code=status.HTTP_409_CONFLICT,
-                        detail="build_job_id does not match artifact_id",
-                    )
+                    raise classified_http_exception(status.HTTP_409_CONFLICT, "build_job_id does not match artifact_id", code=ErrorCode.CONFLICT)
                 build_job_id = build_job_id or artifact_record.job_id
 
             if not build_job_id:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="build_job_id is required for promote_build")
+                raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "build_job_id is required for promote_build", code=ErrorCode.REQUEST_VALIDATION_FAILED)
 
             build_run = await pipeline_registry.get_run(pipeline_id=pipeline_id, job_id=build_job_id)
             if not build_run:
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Build run not found")
+                raise classified_http_exception(status.HTTP_404_NOT_FOUND, "Build run not found", code=ErrorCode.RESOURCE_NOT_FOUND)
             if str(build_run.get("mode") or "").lower() != "build":
-                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="build_job_id is not a build run")
+                raise classified_http_exception(status.HTTP_409_CONFLICT, "build_job_id is not a build run", code=ErrorCode.CONFLICT)
             build_status = str(build_run.get("status") or "").upper()
             if build_status != "SUCCESS":
                 output_json = build_run.get("output_json")
@@ -714,11 +686,12 @@ async def deploy_pipeline(
                     raw_errors = output_json.get("errors")
                     if isinstance(raw_errors, list):
                         errors = [str(item) for item in raw_errors if str(item).strip()]
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail={
-                        "code": "BUILD_NOT_SUCCESS",
-                        "message": "Build is not successful yet",
+                raise classified_http_exception(
+                    status.HTTP_409_CONFLICT,
+                    "Build is not successful yet",
+                    code=ErrorCode.PIPELINE_BUILD_FAILED,
+                    category=ErrorCategory.CONFLICT,
+                    extra={
                         "build_status": build_status or None,
                         "errors": errors,
                         "build_job_id": build_job_id,
@@ -730,12 +703,9 @@ async def deploy_pipeline(
                 output_json = {}
             build_hash = str(output_json.get("definition_hash") or "").strip()
             if build_hash and build_hash != definition_hash:
-                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Build definition does not match deploy definition")
+                raise classified_http_exception(status.HTTP_409_CONFLICT, "Build definition does not match deploy definition", code=ErrorCode.CONFLICT)
             if artifact_record and artifact_record.definition_hash and artifact_record.definition_hash != definition_hash:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail="Build artifact definition does not match deploy definition",
-                )
+                raise classified_http_exception(status.HTTP_409_CONFLICT, "Build artifact definition does not match deploy definition", code=ErrorCode.CONFLICT)
 
             if artifact_record is None:
                 artifact_record = await pipeline_registry.get_artifact_by_job(
@@ -746,68 +716,65 @@ async def deploy_pipeline(
 
             build_branch = str(output_json.get("branch") or "").strip() or "main"
             if build_branch != resolved_branch:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail="Build branch does not match deploy branch",
-                )
+                raise classified_http_exception(status.HTTP_409_CONFLICT, "Build branch does not match deploy branch", code=ErrorCode.CONFLICT)
 
             build_ontology = output_json.get("ontology") if isinstance(output_json.get("ontology"), dict) else {}
             build_ontology_commit = str(build_ontology.get("commit") or "").strip() or None
             if not build_ontology_commit:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail={
-                        "code": "ONTOLOGY_VERSION_UNKNOWN",
-                        "message": "Build output is missing ontology commit id; re-run build after ontology is ready",
-                    },
+                raise classified_http_exception(
+                    status.HTTP_409_CONFLICT,
+                    "Build output is missing ontology commit id; re-run build after ontology is ready",
+                    code=ErrorCode.CONFLICT,
+                    category=ErrorCategory.CONFLICT,
                 )
 
             if proposal_required:
                 bundle_build_job_id = str(proposal_bundle.get("build_job_id") or "").strip()
                 if not bundle_build_job_id:
-                    raise HTTPException(
-                        status_code=status.HTTP_409_CONFLICT,
-                        detail="Approved proposal is missing build_job_id",
-                    )
+                    raise classified_http_exception(status.HTTP_409_CONFLICT, "Approved proposal is missing build_job_id", code=ErrorCode.CONFLICT)
                 if bundle_build_job_id != build_job_id:
-                    raise HTTPException(
-                        status_code=status.HTTP_409_CONFLICT,
-                        detail={
-                            "code": "PROPOSAL_BUILD_MISMATCH",
-                            "message": "Approved proposal build does not match deploy build",
+                    raise classified_http_exception(
+                        status.HTTP_409_CONFLICT,
+                        "Approved proposal build does not match deploy build",
+                        code=ErrorCode.CONFLICT,
+                        category=ErrorCategory.CONFLICT,
+                        extra={
                             "proposal_build_job_id": bundle_build_job_id,
                             "deploy_build_job_id": build_job_id,
                         },
                     )
                 bundle_artifact_id = str(proposal_bundle.get("artifact_id") or "").strip()
                 if bundle_artifact_id and artifact_record and bundle_artifact_id != artifact_record.artifact_id:
-                    raise HTTPException(
-                        status_code=status.HTTP_409_CONFLICT,
-                        detail={
-                            "code": "PROPOSAL_ARTIFACT_MISMATCH",
-                            "message": "Approved proposal artifact does not match deploy artifact",
+                    raise classified_http_exception(
+                        status.HTTP_409_CONFLICT,
+                        "Approved proposal artifact does not match deploy artifact",
+                        code=ErrorCode.CONFLICT,
+                        category=ErrorCategory.CONFLICT,
+                        extra={
                             "proposal_artifact_id": bundle_artifact_id,
                             "deploy_artifact_id": artifact_record.artifact_id,
                         },
                     )
                 bundle_definition_hash = str(proposal_bundle.get("definition_hash") or "").strip()
                 if bundle_definition_hash and bundle_definition_hash != definition_hash:
-                    raise HTTPException(
-                        status_code=status.HTTP_409_CONFLICT,
-                        detail={
-                            "code": "PROPOSAL_DEFINITION_MISMATCH",
-                            "message": "Approved proposal definition hash does not match deploy definition",
+                    raise classified_http_exception(
+                        status.HTTP_409_CONFLICT,
+                        "Approved proposal definition hash does not match deploy definition",
+                        code=ErrorCode.CONFLICT,
+                        category=ErrorCategory.CONFLICT,
+                        extra={
                             "proposal_definition_hash": bundle_definition_hash,
                             "deploy_definition_hash": definition_hash,
                         },
                     )
                 bundle_ontology_commit = str((proposal_bundle.get("ontology") or {}).get("commit") or "").strip()
                 if bundle_ontology_commit and bundle_ontology_commit != build_ontology_commit:
-                    raise HTTPException(
-                        status_code=status.HTTP_409_CONFLICT,
-                        detail={
-                            "code": "PROPOSAL_ONTOLOGY_MISMATCH",
-                            "message": "Approved proposal ontology commit does not match build",
+                    raise classified_http_exception(
+                        status.HTTP_409_CONFLICT,
+                        "Approved proposal ontology commit does not match build",
+                        code=ErrorCode.CONFLICT,
+                        category=ErrorCategory.CONFLICT,
+                        extra={
                             "proposal_ontology_commit": bundle_ontology_commit,
                             "build_ontology_commit": build_ontology_commit,
                         },
@@ -815,11 +782,12 @@ async def deploy_pipeline(
                 bundle_lakefs_commit = str((proposal_bundle.get("lakefs") or {}).get("commit_id") or "").strip()
                 build_lakefs_commit = str((output_json.get("lakefs") or {}).get("commit_id") or "").strip()
                 if bundle_lakefs_commit and build_lakefs_commit and bundle_lakefs_commit != build_lakefs_commit:
-                    raise HTTPException(
-                        status_code=status.HTTP_409_CONFLICT,
-                        detail={
-                            "code": "PROPOSAL_LAKEFS_MISMATCH",
-                            "message": "Approved proposal lakeFS commit does not match build",
+                    raise classified_http_exception(
+                        status.HTTP_409_CONFLICT,
+                        "Approved proposal lakeFS commit does not match build",
+                        code=ErrorCode.LAKEFS_CONFLICT,
+                        category=ErrorCategory.CONFLICT,
+                        extra={
                             "proposal_commit_id": bundle_lakefs_commit,
                             "build_commit_id": build_lakefs_commit,
                         },
@@ -887,13 +855,12 @@ async def deploy_pipeline(
                                     }
                                 )
                     if mismatches:
-                        raise HTTPException(
-                            status_code=status.HTTP_409_CONFLICT,
-                            detail={
-                                "code": "MAPPING_SPEC_MISMATCH",
-                                "message": "Approved proposal mapping specs no longer match active specs",
-                                "mismatches": mismatches,
-                            },
+                        raise classified_http_exception(
+                            status.HTTP_409_CONFLICT,
+                            "Approved proposal mapping specs no longer match active specs",
+                            code=ErrorCode.OBJECTIFY_CONTRACT_ERROR,
+                            category=ErrorCategory.CONFLICT,
+                            extra={"mismatches": mismatches},
                         )
             try:
                 prod_head_commit = await fetch_branch_head_commit_id(
@@ -902,29 +869,28 @@ async def deploy_pipeline(
                     branch=resolved_branch,
                 )
             except Exception as exc:
-                raise HTTPException(
-                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail={
-                        "code": "ONTOLOGY_GATE_UNAVAILABLE",
-                        "message": "Failed to verify ontology head commit; OMS unavailable",
-                        "error": str(exc),
-                    },
+                raise classified_http_exception(
+                    status.HTTP_503_SERVICE_UNAVAILABLE,
+                    "Failed to verify ontology head commit; OMS unavailable",
+                    code=ErrorCode.OMS_UNAVAILABLE,
+                    category=ErrorCategory.UPSTREAM,
+                    extra={"error": str(exc)},
                 ) from exc
             if not prod_head_commit:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail={
-                        "code": "ONTOLOGY_VERSION_UNKNOWN",
-                        "message": "Target branch ontology head commit is unknown; publish ontology first",
-                        "target_branch": resolved_branch,
-                    },
+                raise classified_http_exception(
+                    status.HTTP_409_CONFLICT,
+                    "Target branch ontology head commit is unknown; publish ontology first",
+                    code=ErrorCode.CONFLICT,
+                    category=ErrorCategory.CONFLICT,
+                    extra={"target_branch": resolved_branch},
                 )
             if build_ontology_commit != prod_head_commit:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail={
-                        "code": "ONTOLOGY_VERSION_MISMATCH",
-                        "message": "Ontology version mismatch; publish ontology and rebuild before deploy",
+                raise classified_http_exception(
+                    status.HTTP_409_CONFLICT,
+                    "Ontology version mismatch; publish ontology and rebuild before deploy",
+                    code=ErrorCode.TERMINUS_CONFLICT,
+                    category=ErrorCategory.CONFLICT,
+                    extra={
                         "bundle_terminus_commit_id": build_ontology_commit,
                         "prod_head_commit_id": prod_head_commit,
                         "target_branch": resolved_branch,
@@ -943,11 +909,11 @@ async def deploy_pipeline(
             execution_semantics = str(output_json.get("execution_semantics") or "").strip().lower()
             is_streaming_promotion = execution_semantics == "streaming" or str(pipeline.pipeline_type or "").strip().lower() in {"stream", "streaming"}
             if not node_id and not is_streaming_promotion:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="node_id is required for promote_build")
+                raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "node_id is required for promote_build", code=ErrorCode.REQUEST_VALIDATION_FAILED)
             selected_outputs: list[dict[str, Any]]
             if is_streaming_promotion:
                 if not outputs_list:
-                    raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Build outputs are missing")
+                    raise classified_http_exception(status.HTTP_409_CONFLICT, "Build outputs are missing", code=ErrorCode.PIPELINE_BUILD_FAILED)
                 selected_outputs = outputs_list
             else:
                 selected_output = None
@@ -956,15 +922,15 @@ async def deploy_pipeline(
                         selected_output = item
                         break
                 if not selected_output:
-                    raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Build output for node_id not found")
+                    raise classified_http_exception(status.HTTP_409_CONFLICT, "Build output for node_id not found", code=ErrorCode.PIPELINE_BUILD_FAILED)
                 selected_outputs = [selected_output]
 
             first_artifact_key = str(selected_outputs[0].get("artifact_key") or "").strip()
             if not first_artifact_key:
-                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Build staged artifact_key is missing")
+                raise classified_http_exception(status.HTTP_409_CONFLICT, "Build staged artifact_key is missing", code=ErrorCode.PIPELINE_BUILD_FAILED)
             parsed_first = parse_s3_uri(first_artifact_key)
             if not parsed_first:
-                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Build artifact_key is not a valid s3:// URI")
+                raise classified_http_exception(status.HTTP_409_CONFLICT, "Build artifact_key is not a valid s3:// URI", code=ErrorCode.PIPELINE_BUILD_FAILED)
             staged_bucket, _ = parsed_first
 
             lakefs_meta = output_json.get("lakefs") if isinstance(output_json.get("lakefs"), dict) else {}
@@ -978,22 +944,22 @@ async def deploy_pipeline(
             expected_repo = str(lakefs_meta.get("repository") or "").strip()
             expected_build_branch = str(lakefs_meta.get("build_branch") or "").strip()
             if expected_repo and expected_repo != staged_bucket:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail={
-                        "code": "INVALID_BUILD_REPOSITORY",
-                        "message": "Build artifact_key repository does not match build metadata",
+                raise classified_http_exception(
+                    status.HTTP_409_CONFLICT,
+                    "Build artifact_key repository does not match build metadata",
+                    code=ErrorCode.CONFLICT,
+                    category=ErrorCategory.CONFLICT,
+                    extra={
                         "artifact_bucket": staged_bucket,
                         "expected_repository": expected_repo,
                     },
                 )
             if not expected_build_branch:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail={
-                        "code": "INVALID_BUILD_REF",
-                        "message": "Build output is missing lakefs.build_branch",
-                    },
+                raise classified_http_exception(
+                    status.HTTP_409_CONFLICT,
+                    "Build output is missing lakefs.build_branch",
+                    code=ErrorCode.PIPELINE_BUILD_FAILED,
+                    category=ErrorCategory.CONFLICT,
                 )
             build_ref = expected_build_branch
             staged_prefix = f"{build_ref}/"
@@ -1002,30 +968,32 @@ async def deploy_pipeline(
             for item in selected_outputs:
                 staged_dataset_name = str(item.get("dataset_name") or item.get("datasetName") or "").strip()
                 if not staged_dataset_name:
-                    raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Build dataset_name is missing")
+                    raise classified_http_exception(status.HTTP_409_CONFLICT, "Build dataset_name is missing", code=ErrorCode.PIPELINE_BUILD_FAILED)
                 staged_artifact_key = str(item.get("artifact_key") or "").strip()
                 if not staged_artifact_key:
-                    raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Build staged artifact_key is missing")
+                    raise classified_http_exception(status.HTTP_409_CONFLICT, "Build staged artifact_key is missing", code=ErrorCode.PIPELINE_BUILD_FAILED)
                 parsed = parse_s3_uri(staged_artifact_key)
                 if not parsed:
-                    raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Build artifact_key is not a valid s3:// URI")
+                    raise classified_http_exception(status.HTTP_409_CONFLICT, "Build artifact_key is not a valid s3:// URI", code=ErrorCode.PIPELINE_BUILD_FAILED)
                 bucket, key = parsed
                 if bucket != staged_bucket:
-                    raise HTTPException(
-                        status_code=status.HTTP_409_CONFLICT,
-                        detail={
-                            "code": "INVALID_BUILD_REPOSITORY",
-                            "message": "Build outputs must use a single lakeFS repository",
+                    raise classified_http_exception(
+                        status.HTTP_409_CONFLICT,
+                        "Build outputs must use a single lakeFS repository",
+                        code=ErrorCode.CONFLICT,
+                        category=ErrorCategory.CONFLICT,
+                        extra={
                             "artifact_bucket": bucket,
                             "expected_repository": staged_bucket,
                         },
                     )
                 if not key.startswith(staged_prefix):
-                    raise HTTPException(
-                        status_code=status.HTTP_409_CONFLICT,
-                        detail={
-                            "code": "INVALID_BUILD_REF",
-                            "message": "Build artifact_key does not match build branch metadata",
+                    raise classified_http_exception(
+                        status.HTTP_409_CONFLICT,
+                        "Build artifact_key does not match build branch metadata",
+                        code=ErrorCode.PIPELINE_BUILD_FAILED,
+                        category=ErrorCategory.CONFLICT,
+                        extra={
                             "artifact_key": staged_artifact_key,
                             "artifact_path": key,
                             "expected_build_branch": build_ref,
@@ -1033,11 +1001,12 @@ async def deploy_pipeline(
                     )
                 artifact_path = key[len(staged_prefix) :]
                 if not artifact_path:
-                    raise HTTPException(
-                        status_code=status.HTTP_409_CONFLICT,
-                        detail={
-                            "code": "INVALID_BUILD_REF",
-                            "message": "Build artifact_key is missing artifact path after build ref",
+                    raise classified_http_exception(
+                        status.HTTP_409_CONFLICT,
+                        "Build artifact_key is missing artifact path after build ref",
+                        code=ErrorCode.PIPELINE_BUILD_FAILED,
+                        category=ErrorCategory.CONFLICT,
+                        extra={
                             "artifact_key": staged_artifact_key,
                             "expected_build_branch": build_ref,
                         },
@@ -1095,13 +1064,12 @@ async def deploy_pipeline(
                 breaking_payload: Any = any_breaking_changes
                 if not is_streaming_promotion and normalized_outputs:
                     breaking_payload = normalized_outputs[0].get("breaking_changes") or []
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail={
-                        "code": "REPLAY_REQUIRED",
-                        "message": "Breaking schema change detected; replay_on_deploy is required to proceed",
-                        "breaking_changes": breaking_payload,
-                    },
+                raise classified_http_exception(
+                    status.HTTP_409_CONFLICT,
+                    "Breaking schema change detected; replay_on_deploy is required to proceed",
+                    code=ErrorCode.CONFLICT,
+                    category=ErrorCategory.CONFLICT,
+                    extra={"breaking_changes": breaking_payload},
                 )
 
             promote_job_id = f"promote-{uuid4().hex}"
@@ -1154,11 +1122,12 @@ async def deploy_pipeline(
                     allow_empty=True,
                 )
             except LakeFSConflictError as exc:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail={
-                        "code": "LAKEFS_MERGE_CONFLICT",
-                        "message": "lakeFS merge conflict during promotion",
+                raise classified_http_exception(
+                    status.HTTP_409_CONFLICT,
+                    "lakeFS merge conflict during promotion",
+                    code=ErrorCode.LAKEFS_CONFLICT,
+                    category=ErrorCategory.CONFLICT,
+                    extra={
                         "repository": staged_bucket,
                         "source_ref": build_ref,
                         "destination_branch": resolved_branch,
@@ -1166,11 +1135,12 @@ async def deploy_pipeline(
                     },
                 ) from exc
             except LakeFSError as exc:
-                raise HTTPException(
-                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail={
-                        "code": "LAKEFS_MERGE_FAILED",
-                        "message": "lakeFS merge failed during promotion",
+                raise classified_http_exception(
+                    status.HTTP_503_SERVICE_UNAVAILABLE,
+                    "lakeFS merge failed during promotion",
+                    code=ErrorCode.LAKEFS_ERROR,
+                    category=ErrorCategory.UPSTREAM,
+                    extra={
                         "repository": staged_bucket,
                         "source_ref": build_ref,
                         "destination_branch": resolved_branch,
@@ -1239,32 +1209,35 @@ async def deploy_pipeline(
                         normalized_spec = normalize_key_spec(existing_key_spec.spec)
                         existing_pk = normalized_spec.get("primary_key") or []
                         if existing_pk and not pk_columns:
-                            raise HTTPException(
-                                status_code=status.HTTP_409_CONFLICT,
-                                detail={
-                                    "code": "KEY_SPEC_MISSING",
-                                    "message": "Pipeline output is missing declared primary key columns",
+                            raise classified_http_exception(
+                                status.HTTP_409_CONFLICT,
+                                "Pipeline output is missing declared primary key columns",
+                                code=ErrorCode.CONFLICT,
+                                category=ErrorCategory.CONFLICT,
+                                extra={
                                     "dataset_id": dataset.dataset_id,
                                     "expected_primary_key": existing_pk,
                                 },
                             )
                         if pk_columns and set(existing_pk) and set(existing_pk) != set(pk_columns):
-                            raise HTTPException(
-                                status_code=status.HTTP_409_CONFLICT,
-                                detail={
-                                    "code": "KEY_SPEC_MISMATCH",
-                                    "message": "Pipeline output primary key does not match key spec",
+                            raise classified_http_exception(
+                                status.HTTP_409_CONFLICT,
+                                "Pipeline output primary key does not match key spec",
+                                code=ErrorCode.CONFLICT,
+                                category=ErrorCategory.CONFLICT,
+                                extra={
                                     "dataset_id": dataset.dataset_id,
                                     "expected_primary_key": existing_pk,
                                     "observed_primary_key": pk_columns,
                                 },
                             )
                         if pk_columns and not existing_pk:
-                            raise HTTPException(
-                                status_code=status.HTTP_409_CONFLICT,
-                                detail={
-                                    "code": "KEY_SPEC_MISMATCH",
-                                    "message": "Pipeline output declares primary key but key spec is empty",
+                            raise classified_http_exception(
+                                status.HTTP_409_CONFLICT,
+                                "Pipeline output declares primary key but key spec is empty",
+                                code=ErrorCode.CONFLICT,
+                                category=ErrorCategory.CONFLICT,
+                                extra={
                                     "dataset_id": dataset.dataset_id,
                                     "observed_primary_key": pk_columns,
                                 },
@@ -1501,4 +1474,4 @@ async def deploy_pipeline(
             error=str(e),
         )
         logger.error(f"Failed to deploy pipeline: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(e), code=ErrorCode.INTERNAL_ERROR)

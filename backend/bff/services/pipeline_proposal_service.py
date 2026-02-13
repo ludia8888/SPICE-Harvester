@@ -9,6 +9,8 @@ from typing import Any, Optional
 
 from fastapi import HTTPException, status
 
+from shared.errors.error_types import ErrorCode, classified_http_exception
+
 from bff.routers.pipeline_shared import (
     _ensure_pipeline_permission,
     _log_pipeline_audit,
@@ -21,6 +23,7 @@ from shared.services.registries.pipeline_registry import PipelineMergeNotSupport
 from shared.services.storage.lakefs_client import LakeFSConflictError
 from shared.utils.schema_hash import compute_schema_hash
 from shared.utils.time_utils import utcnow
+from shared.observability.tracing import trace_db_operation
 
 logger = logging.getLogger(__name__)
 
@@ -73,9 +76,9 @@ async def _build_proposal_bundle(
     if build_job_id:
         build_run = await pipeline_registry.get_run(pipeline_id=pipeline.pipeline_id, job_id=build_job_id)
         if not build_run:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Build run not found for proposal bundle")
+            raise classified_http_exception(status.HTTP_404_NOT_FOUND, "Build run not found for proposal bundle", code=ErrorCode.RESOURCE_NOT_FOUND)
         if str(build_run.get("mode") or "").lower() != "build":
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="build_job_id is not a build run")
+            raise classified_http_exception(status.HTTP_409_CONFLICT, "build_job_id is not a build run", code=ErrorCode.CONFLICT)
         build_status = str(build_run.get("status") or "").upper()
         if build_status != "SUCCESS":
             output_json = build_run.get("output_json")
@@ -84,11 +87,11 @@ async def _build_proposal_bundle(
                 raw_errors = output_json.get("errors")
                 if isinstance(raw_errors, list):
                     errors = [str(item) for item in raw_errors if str(item).strip()]
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={
-                    "code": "BUILD_NOT_SUCCESS",
-                    "message": "Build is not successful yet",
+            raise classified_http_exception(
+                status.HTTP_409_CONFLICT,
+                "Build is not successful yet",
+                code=ErrorCode.CONFLICT,
+                extra={
                     "build_status": build_status or None,
                     "errors": errors,
                     "build_job_id": build_job_id,
@@ -157,9 +160,11 @@ async def _build_proposal_bundle(
         for mapping_spec_id in mapping_spec_ids:
             record = await objectify_registry.get_mapping_spec(mapping_spec_id=mapping_spec_id)
             if not record:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail={"code": "MAPPING_SPEC_NOT_FOUND", "mapping_spec_id": mapping_spec_id},
+                raise classified_http_exception(
+                    status.HTTP_404_NOT_FOUND,
+                    "Mapping spec not found",
+                    code=ErrorCode.RESOURCE_NOT_FOUND,
+                    extra={"mapping_spec_id": mapping_spec_id},
                 )
             if record.mapping_spec_id in seen_spec_ids:
                 continue
@@ -215,6 +220,7 @@ async def _build_proposal_bundle(
     return bundle
 
 
+@trace_db_operation("bff.pipeline_proposal.list_pipeline_proposals")
 async def list_pipeline_proposals(
     *,
     db_name: str,
@@ -239,9 +245,10 @@ async def list_pipeline_proposals(
         raise
     except Exception as exc:
         logger.error("Failed to list pipeline proposals: %s", exc)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc), code=ErrorCode.INTERNAL_ERROR) from exc
 
 
+@trace_db_operation("bff.pipeline_proposal.submit_pipeline_proposal")
 async def submit_pipeline_proposal(
     *,
     pipeline_id: str,
@@ -263,7 +270,7 @@ async def submit_pipeline_proposal(
         sanitized = sanitize_input(payload)
         title = str(sanitized.get("title") or "").strip()
         if not title:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="title is required")
+            raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "title is required", code=ErrorCode.REQUEST_VALIDATION_FAILED)
         description = str(sanitized.get("description") or "").strip() or None
         build_job_id = str(sanitized.get("build_job_id") or sanitized.get("buildJobId") or "").strip() or None
         mapping_spec_ids = normalize_mapping_spec_ids(
@@ -276,7 +283,7 @@ async def submit_pipeline_proposal(
         if build_job_id or mapping_spec_ids:
             pipeline = await pipeline_registry.get_pipeline(pipeline_id=pipeline_id)
             if not pipeline:
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pipeline not found")
+                raise classified_http_exception(status.HTTP_404_NOT_FOUND, "Pipeline not found", code=ErrorCode.PIPELINE_NOT_FOUND)
             proposal_bundle = await _build_proposal_bundle(
                 pipeline=pipeline,
                 build_job_id=build_job_id,
@@ -315,9 +322,10 @@ async def submit_pipeline_proposal(
             error=str(exc),
         )
         logger.error("Failed to submit proposal: %s", exc)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc), code=ErrorCode.INTERNAL_ERROR) from exc
 
 
+@trace_db_operation("bff.pipeline_proposal.approve_pipeline_proposal")
 async def approve_pipeline_proposal(
     *,
     pipeline_id: str,
@@ -339,12 +347,9 @@ async def approve_pipeline_proposal(
         review_comment = str(sanitized.get("review_comment") or "").strip() or None
         pipeline = await pipeline_registry.get_pipeline(pipeline_id=pipeline_id)
         if not pipeline:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pipeline not found")
+            raise classified_http_exception(status.HTTP_404_NOT_FOUND, "Pipeline not found", code=ErrorCode.PIPELINE_NOT_FOUND)
         if pipeline.proposal_status != "pending":
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="No pending proposal to approve",
-            )
+            raise classified_http_exception(status.HTTP_409_CONFLICT, "No pending proposal to approve", code=ErrorCode.CONFLICT)
 
         from_branch = str(pipeline.branch or "main")
         if from_branch != to_branch:
@@ -355,16 +360,13 @@ async def approve_pipeline_proposal(
                     to_branch=to_branch,
                 )
             except PipelineMergeNotSupportedError as exc:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail={"code": "MERGE_NOT_SUPPORTED", "message": str(exc)},
-                ) from exc
+                raise classified_http_exception(status.HTTP_409_CONFLICT, str(exc), code=ErrorCode.CONFLICT) from exc
             except LakeFSConflictError as exc:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail={
-                        "code": "MERGE_CONFLICT",
-                        "message": "lakeFS merge conflict",
+                raise classified_http_exception(
+                    status.HTTP_409_CONFLICT,
+                    "lakeFS merge conflict",
+                    code=ErrorCode.MERGE_CONFLICT,
+                    extra={
                         "detail": str(exc),
                         "source_branch": from_branch,
                         "target_branch": to_branch,
@@ -400,9 +402,10 @@ async def approve_pipeline_proposal(
             error=str(exc),
         )
         logger.error("Failed to approve proposal: %s", exc)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc), code=ErrorCode.INTERNAL_ERROR) from exc
 
 
+@trace_db_operation("bff.pipeline_proposal.reject_pipeline_proposal")
 async def reject_pipeline_proposal(
     *,
     pipeline_id: str,
@@ -450,4 +453,4 @@ async def reject_pipeline_proposal(
             error=str(exc),
         )
         logger.error("Failed to reject proposal: %s", exc)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc), code=ErrorCode.INTERNAL_ERROR) from exc

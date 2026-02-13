@@ -14,6 +14,7 @@ from shared.services.pipeline.pipeline_math_utils import safe_ratio
 from shared.services.storage.storage_service import StorageService
 from shared.services.pipeline.pipeline_graph_utils import build_incoming, normalize_edges, normalize_nodes
 from shared.services.pipeline.pipeline_transform_spec import resolve_join_spec, normalize_operation
+from shared.observability.tracing import trace_external_call
 
 
 @dataclass(frozen=True)
@@ -170,6 +171,7 @@ def _choose_join_inputs(
     return ordered[0], ordered[1], warnings
 
 
+@trace_external_call("bff.pipeline_join_evaluator.evaluate_pipeline_joins")
 async def evaluate_pipeline_joins(
     *,
     definition_json: Dict[str, Any],

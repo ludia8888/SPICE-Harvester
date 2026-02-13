@@ -9,6 +9,7 @@ schemas live in `bff.schemas.admin_projection_requests`.
 """
 
 from typing import Any, Dict, Optional
+from shared.observability.tracing import trace_endpoint
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request, status
 
@@ -29,6 +30,7 @@ router = APIRouter(tags=["Admin Operations"])
     status_code=status.HTTP_202_ACCEPTED,
 )
 @rate_limit(**RateLimitPresets.STRICT)
+@trace_endpoint("bff.admin.recompute_projection")
 async def recompute_projection(
     http_request: Request,
     request: RecomputeProjectionRequest,
@@ -53,6 +55,7 @@ async def recompute_projection(
 
 
 @router.get("/recompute-projection/{task_id}/result")
+@trace_endpoint("bff.admin.get_recompute_projection_result")
 async def get_recompute_projection_result(
     task_id: str,
     *,
@@ -72,6 +75,7 @@ async def get_recompute_projection_result(
     summary="Reindex all instances for a database (dataset-primary rebuild)",
 )
 @rate_limit(**RateLimitPresets.STRICT)
+@trace_endpoint("bff.admin.reindex_instances_endpoint")
 async def reindex_instances_endpoint(
     db_name: str = Query(..., description="Database name"),
     branch: str = Query(default="main", description="Branch"),

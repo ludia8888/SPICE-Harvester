@@ -33,4 +33,13 @@ def test_service_factory_installs_error_handlers_by_default() -> None:
     assert payload["code"] == "HTTP_ERROR"
     assert payload["enterprise"]["legacy_code"] == "MAPPING_SPEC_TARGET_UNKNOWN"
     assert payload["enterprise"]["code"].startswith("SHV-")
-
+    assert payload["diagnostics"]["schema"] == "error_diagnostics.v1"
+    assert payload["diagnostics"]["group_fingerprint"].startswith("sha256:")
+    assert payload["diagnostics"]["instance_fingerprint"].startswith("sha256:")
+    assert payload["diagnostics"]["runbook_ref"] == payload["enterprise"]["runbook_ref"]
+    assert payload["diagnostics"]["lookup"]["enterprise_code"] == payload["enterprise"]["code"]
+    assert resp.headers.get("x-error-code") == payload["code"]
+    assert resp.headers.get("x-enterprise-code") == payload["enterprise"]["code"]
+    assert resp.headers.get("x-runbook-ref") == payload["enterprise"]["runbook_ref"]
+    assert resp.headers.get("x-error-group") == payload["diagnostics"]["group_fingerprint"]
+    assert resp.headers.get("x-error-instance") == payload["diagnostics"]["instance_fingerprint"]

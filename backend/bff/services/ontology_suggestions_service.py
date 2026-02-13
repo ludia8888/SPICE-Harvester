@@ -14,6 +14,8 @@ from typing import Any, Dict, List, Optional
 import httpx
 from fastapi import HTTPException, UploadFile, status
 
+from shared.errors.error_types import ErrorCode, classified_http_exception
+
 from bff.routers.ontology_ops import (
     _build_sample_data_from_preview,
     _build_source_schema_from_preview,
@@ -28,6 +30,7 @@ from bff.schemas.ontology_requests import (
 from bff.services.sheet_import_parsing import parse_table_bbox, parse_target_schema_json, read_excel_upload
 from bff.utils.httpx_exceptions import raise_httpx_as_http_exception
 from shared.security.input_sanitizer import validate_class_id, validate_db_name
+from shared.observability.tracing import trace_external_call
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +87,7 @@ def _format_mapping_suggestion(*, suggestion: Any, source_schema: List[Dict[str,
     }
 
 
+@trace_external_call("bff.ontology_suggestions.suggest_schema_from_data")
 async def suggest_schema_from_data(*, db_name: str, body: SchemaFromDataRequest) -> Dict[str, Any]:
     """
     🔥 데이터에서 스키마 자동 제안
@@ -144,12 +148,10 @@ async def suggest_schema_from_data(*, db_name: str, body: SchemaFromDataRequest)
 
     except Exception as exc:
         logger.error("Schema suggestion failed: %s", exc)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"스키마 제안 실패: {str(exc)}",
-        ) from exc
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, f"스키마 제안 실패: {str(exc)}", code=ErrorCode.INTERNAL_ERROR) from exc
 
 
+@trace_external_call("bff.ontology_suggestions.suggest_mappings")
 async def suggest_mappings(*, db_name: str, body: MappingSuggestionRequest) -> Dict[str, Any]:
     try:
         db_name = validate_db_name(db_name)
@@ -183,12 +185,10 @@ async def suggest_mappings(*, db_name: str, body: MappingSuggestionRequest) -> D
 
     except Exception as exc:
         logger.error("Mapping suggestion failed: %s", exc)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"매핑 제안 실패: {str(exc)}",
-        ) from exc
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, f"매핑 제안 실패: {str(exc)}", code=ErrorCode.INTERNAL_ERROR) from exc
 
 
+@trace_external_call("bff.ontology_suggestions.suggest_mappings_from_google_sheets")
 async def suggest_mappings_from_google_sheets(*, db_name: str, body: MappingFromGoogleSheetsRequest) -> Dict[str, Any]:
     try:
         db_name = validate_db_name(db_name)
@@ -198,10 +198,7 @@ async def suggest_mappings_from_google_sheets(*, db_name: str, body: MappingFrom
             include_relationships=bool(body.include_relationships),
         )
         if not target_schema:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="target_schema is required for import (field types)",
-            )
+            raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "target_schema is required for import (field types)", code=ErrorCode.REQUEST_VALIDATION_FAILED)
 
         from bff.services.funnel_client import FunnelClient
         from bff.services.mapping_suggestion_service import MappingSuggestionService
@@ -259,17 +256,15 @@ async def suggest_mappings_from_google_sheets(*, db_name: str, body: MappingFrom
     except httpx.HTTPStatusError as exc:
         raise_httpx_as_http_exception(exc)
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, str(exc), code=ErrorCode.REQUEST_VALIDATION_FAILED) from exc
     except HTTPException:
         raise
     except Exception as exc:
         logger.error("Google Sheets mapping suggestion failed: %s", exc)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Google Sheets 매핑 제안 실패: {str(exc)}",
-        ) from exc
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, f"Google Sheets 매핑 제안 실패: {str(exc)}", code=ErrorCode.INTERNAL_ERROR) from exc
 
 
+@trace_external_call("bff.ontology_suggestions.suggest_mappings_from_excel")
 async def suggest_mappings_from_excel(
     *,
     db_name: str,
@@ -328,10 +323,7 @@ async def suggest_mappings_from_excel(
             include_relationships=bool(include_relationships),
         )
         if not target_schema:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="target_schema_json produced an empty schema",
-            )
+            raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "target_schema_json produced an empty schema", code=ErrorCode.REQUEST_VALIDATION_FAILED)
 
         config = _apply_semantic_hints(_load_mapping_config(), enabled=bool(enable_semantic_hints))
         suggestion_service = MappingSuggestionService(config=config)
@@ -368,17 +360,15 @@ async def suggest_mappings_from_excel(
     except httpx.HTTPStatusError as exc:
         raise_httpx_as_http_exception(exc)
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, str(exc), code=ErrorCode.REQUEST_VALIDATION_FAILED) from exc
     except HTTPException:
         raise
     except Exception as exc:
         logger.error("Excel mapping suggestion failed: %s", exc)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Excel 매핑 제안 실패: {str(exc)}",
-        ) from exc
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, f"Excel 매핑 제안 실패: {str(exc)}", code=ErrorCode.INTERNAL_ERROR) from exc
 
 
+@trace_external_call("bff.ontology_suggestions.suggest_schema_from_google_sheets")
 async def suggest_schema_from_google_sheets(*, db_name: str, body: SchemaFromGoogleSheetsRequest) -> Dict[str, Any]:
     try:
         db_name = validate_db_name(db_name)
@@ -423,17 +413,15 @@ async def suggest_schema_from_google_sheets(*, db_name: str, body: SchemaFromGoo
     except httpx.HTTPStatusError as exc:
         raise_httpx_as_http_exception(exc)
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, str(exc), code=ErrorCode.REQUEST_VALIDATION_FAILED) from exc
     except HTTPException:
         raise
     except Exception as exc:
         logger.error("Google Sheets schema suggestion failed: %s", exc)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Google Sheets 스키마 제안 실패: {str(exc)}",
-        ) from exc
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, f"Google Sheets 스키마 제안 실패: {str(exc)}", code=ErrorCode.INTERNAL_ERROR) from exc
 
 
+@trace_external_call("bff.ontology_suggestions.suggest_schema_from_excel")
 async def suggest_schema_from_excel(
     *,
     db_name: str,
@@ -504,12 +492,9 @@ async def suggest_schema_from_excel(
     except httpx.HTTPStatusError as exc:
         raise_httpx_as_http_exception(exc)
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, str(exc), code=ErrorCode.REQUEST_VALIDATION_FAILED) from exc
     except HTTPException:
         raise
     except Exception as exc:
         logger.error("Excel schema suggestion failed: %s", exc)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Excel 스키마 제안 실패: {str(exc)}",
-        ) from exc
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, f"Excel 스키마 제안 실패: {str(exc)}", code=ErrorCode.INTERNAL_ERROR) from exc

@@ -22,6 +22,7 @@ from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.services.agent.llm_gateway import LLMCallMeta, LLMGateway
 from shared.services.registries.pipeline_plan_registry import PipelinePlanRegistry
 from shared.services.storage.redis_service import RedisService
+from shared.observability.tracing import trace_external_call
 
 
 def _coerce_questions(raw: Any) -> List[PipelineClarificationQuestion]:
@@ -66,6 +67,7 @@ def _coerce_planner_fields(payload: Dict[str, Any]) -> tuple[Optional[float], Op
     return confidence, notes
 
 
+@trace_external_call("bff.pipeline_plan_compiler.compile_pipeline_plan_mcp_autonomous")
 async def compile_pipeline_plan_mcp_autonomous(
     *,
     goal: str,

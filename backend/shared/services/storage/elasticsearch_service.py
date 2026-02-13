@@ -19,6 +19,7 @@ from elasticsearch.exceptions import (
 )
 from elasticsearch.helpers import async_bulk
 
+from shared.observability.tracing import trace_storage_operation
 from shared.services.storage.connectivity import AsyncClientPingMixin
 
 logger = logging.getLogger(__name__)
@@ -75,6 +76,7 @@ class ElasticsearchService(AsyncClientPingMixin):
             
         self._client: Optional[AsyncElasticsearch] = None
         
+    @trace_storage_operation("es.connect", system="elasticsearch")
     async def connect(self) -> None:
         """Initialize Elasticsearch connection."""
         try:
@@ -89,6 +91,7 @@ class ElasticsearchService(AsyncClientPingMixin):
             logger.error(f"Failed to connect to Elasticsearch: {e}")
             raise
             
+    @trace_storage_operation("es.disconnect", system="elasticsearch")
     async def disconnect(self) -> None:
         """Close Elasticsearch connection."""
         try:
@@ -105,6 +108,7 @@ class ElasticsearchService(AsyncClientPingMixin):
             raise RuntimeError("Elasticsearch client not connected. Call connect() first.")
         return self._client
     
+    @trace_storage_operation("es.get_cluster_health", system="elasticsearch")
     async def get_cluster_health(self) -> Dict[str, Any]:
         """Get Elasticsearch cluster health status."""
         try:
@@ -117,6 +121,7 @@ class ElasticsearchService(AsyncClientPingMixin):
         
     # Index Operations
     
+    @trace_storage_operation("es.create_index", system="elasticsearch")
     async def create_index(
         self,
         index: str,
@@ -155,6 +160,7 @@ class ElasticsearchService(AsyncClientPingMixin):
             logger.error(f"Failed to create index {index}: {e}")
             raise
             
+    @trace_storage_operation("es.delete_index", system="elasticsearch")
     async def delete_index(self, index: str) -> bool:
         """
         Delete an index.
@@ -176,6 +182,7 @@ class ElasticsearchService(AsyncClientPingMixin):
             logger.error(f"Failed to delete index {index}: {e}")
             raise
             
+    @trace_storage_operation("es.index_exists", system="elasticsearch")
     async def index_exists(self, index: str) -> bool:
         """Check if index exists."""
         try:
@@ -184,6 +191,7 @@ class ElasticsearchService(AsyncClientPingMixin):
             logger.error(f"Failed to check index existence: {e}")
             return False
             
+    @trace_storage_operation("es.update_mapping", system="elasticsearch")
     async def update_mapping(
         self,
         index: str,
@@ -212,6 +220,7 @@ class ElasticsearchService(AsyncClientPingMixin):
             
     # Document Operations
     
+    @trace_storage_operation("es.index_document", system="elasticsearch")
     async def index_document(
         self,
         index: str,
@@ -255,6 +264,7 @@ class ElasticsearchService(AsyncClientPingMixin):
             logger.error(f"Failed to index document: {e}")
             raise
             
+    @trace_storage_operation("es.get_document", system="elasticsearch")
     async def get_document(
         self,
         index: str,
@@ -288,6 +298,7 @@ class ElasticsearchService(AsyncClientPingMixin):
             logger.error(f"Failed to get document: {e}")
             raise
             
+    @trace_storage_operation("es.update_document", system="elasticsearch")
     async def update_document(
         self,
         index: str,
@@ -336,6 +347,7 @@ class ElasticsearchService(AsyncClientPingMixin):
             logger.error(f"Failed to update document: {e}")
             raise
             
+    @trace_storage_operation("es.delete_document", system="elasticsearch")
     async def delete_document(
         self,
         index: str,
@@ -373,6 +385,7 @@ class ElasticsearchService(AsyncClientPingMixin):
             
     # Bulk Operations
     
+    @trace_storage_operation("es.bulk_index", system="elasticsearch")
     async def bulk_index(
         self,
         index: str,
@@ -422,6 +435,7 @@ class ElasticsearchService(AsyncClientPingMixin):
             
     # Search Operations
     
+    @trace_storage_operation("es.search", system="elasticsearch")
     async def search(
         self,
         index: str,
@@ -475,6 +489,7 @@ class ElasticsearchService(AsyncClientPingMixin):
             logger.error(f"Search failed: {e}")
             raise
             
+    @trace_storage_operation("es.count", system="elasticsearch")
     async def count(
         self,
         index: str,
@@ -503,6 +518,7 @@ class ElasticsearchService(AsyncClientPingMixin):
             
     # Alias Operations
     
+    @trace_storage_operation("es.create_alias", system="elasticsearch")
     async def create_alias(
         self,
         index: str,
@@ -536,6 +552,7 @@ class ElasticsearchService(AsyncClientPingMixin):
             logger.error(f"Failed to create alias: {e}")
             raise
             
+    @trace_storage_operation("es.delete_alias", system="elasticsearch")
     async def delete_alias(self, index: str, alias: str) -> bool:
         """
         Delete an alias.
@@ -558,6 +575,7 @@ class ElasticsearchService(AsyncClientPingMixin):
             logger.error(f"Failed to delete alias: {e}")
             raise
             
+    @trace_storage_operation("es.update_aliases", system="elasticsearch")
     async def update_aliases(
         self,
         actions: List[Dict[str, Any]]
@@ -581,6 +599,7 @@ class ElasticsearchService(AsyncClientPingMixin):
             
     # Utility Operations
     
+    @trace_storage_operation("es.refresh_index", system="elasticsearch")
     async def refresh_index(self, index: str) -> bool:
         """Force refresh an index to make changes searchable."""
         try:

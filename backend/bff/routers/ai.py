@@ -5,6 +5,7 @@ Thin router that delegates domain logic to `bff.services.ai_service`.
 """
 
 from fastapi import APIRouter, Depends, Request
+from shared.observability.tracing import trace_endpoint
 
 from bff.dependencies import LabelMapper, TerminusService, get_label_mapper, get_oms_client, get_terminus_service
 from bff.routers.registry_deps import get_agent_session_registry, get_dataset_registry
@@ -21,6 +22,7 @@ router = APIRouter(prefix="/ai", tags=["AI"])
 
 @router.post("/intent", response_model=AIIntentResponse)
 @rate_limit(**RateLimitPresets.STRICT)
+@trace_endpoint("bff.ai.ai_intent")
 async def ai_intent(
     body: AIIntentRequest,
     request: Request,
@@ -44,6 +46,7 @@ async def ai_intent(
 
 @router.post("/translate/query-plan/{db_name}")
 @rate_limit(**RateLimitPresets.STRICT)
+@trace_endpoint("bff.ai.translate_query_plan")
 async def translate_query_plan(
     db_name: str,
     body: AIQueryRequest,
@@ -70,6 +73,7 @@ async def translate_query_plan(
 
 @router.post("/query/{db_name}", response_model=AIQueryResponse)
 @rate_limit(**RateLimitPresets.STRICT)
+@trace_endpoint("bff.ai.ai_query")
 async def ai_query(
     db_name: str,
     body: AIQueryRequest,

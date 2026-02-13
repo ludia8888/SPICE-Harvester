@@ -5,11 +5,14 @@ The router stays thin by delegating business logic to a service module
 """
 
 from __future__ import annotations
+from shared.observability.tracing import trace_endpoint
 
 import logging
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+
+from shared.errors.error_types import ErrorCode, classified_http_exception
 
 from bff.dependencies import OMSClientDep
 from bff.routers.object_types_deps import get_dataset_registry, get_objectify_registry
@@ -31,10 +34,11 @@ async def _require_domain_role(request: Request, *, db_name: str) -> None:
     try:
         await enforce_database_role(headers=request.headers, db_name=db_name, required_roles=DOMAIN_MODEL_ROLES)
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+        raise classified_http_exception(status.HTTP_403_FORBIDDEN, str(exc), code=ErrorCode.PERMISSION_DENIED) from exc
 
 
 @router.post("/object-types", status_code=status.HTTP_201_CREATED, response_model=ApiResponse)
+@trace_endpoint("bff.object_types.create_object_type_contract")
 async def create_object_type_contract(
     db_name: str,
     body: ObjectTypeContractRequest,
@@ -63,6 +67,7 @@ async def create_object_type_contract(
 
 
 @router.get("/object-types/{class_id}", response_model=ApiResponse)
+@trace_endpoint("bff.object_types.get_object_type_contract")
 async def get_object_type_contract(
     db_name: str,
     class_id: str,
@@ -86,6 +91,7 @@ async def get_object_type_contract(
 
 
 @router.put("/object-types/{class_id}", response_model=ApiResponse)
+@trace_endpoint("bff.object_types.update_object_type_contract")
 async def update_object_type_contract(
     db_name: str,
     class_id: str,
