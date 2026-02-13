@@ -14,3 +14,5 @@ Synthetic CSV fixtures used by:
 
 - Do not put real customer/employee data in this folder.
 - Keep IDs, emails, phone numbers, and names synthetic (`example.com`, dummy numbers, etc.).
+
+<!-- DOC_SYNC: 2026-02-13 Foundry pipeline parity + runtime consistency sweep -->

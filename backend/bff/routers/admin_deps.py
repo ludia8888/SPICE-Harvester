@@ -5,7 +5,6 @@ This module keeps auth-related dependencies separated so `bff.routers.admin`
 can stay a small composition root (Composite/router composition).
 """
 
-from __future__ import annotations
 
 import hmac
 import logging

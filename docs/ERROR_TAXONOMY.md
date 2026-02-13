@@ -1,6 +1,6 @@
 # Enterprise Error Taxonomy
 
-> Updated: 2026-01-30
+> Updated: 2026-02-13
 
 This file is auto-generated from `backend/shared/errors/enterprise_catalog.py`.
 Run: `python scripts/generate_error_taxonomy.py`.
@@ -11,25 +11,61 @@ Run: `python scripts/generate_error_taxonomy.py`.
 
 | Legacy code | Enterprise code | Domain | Class | Severity | Title | Retryable | Default retry policy | Max attempts | Base delay ms | Max delay ms | Jitter strategy | Retry-After respect | Human required | Runbook ref | Safe next actions | HTTP status hint |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| ACTION_BASE_STATE_NOT_FOUND | SHV-{SUBSYS}-ACT-NOT-0002 | data | not_found | error | Action base instance state not found | false | none | 1 | 0 | 0 | none | false | true | ACTION_BASE_STATE_NOT_FOUND | request_human | 404 |
+| ACTION_CONFLICT_POLICY_FAILED | SHV-{SUBSYS}-ACT-CON-0001 | conflict | conflict | error | Action conflict policy rejected change | false | none | 1 | 0 | 0 | none | false | true | ACTION_CONFLICT_POLICY_FAILED | request_human | 409 |
+| ACTION_INPUT_INVALID | SHV-{SUBSYS}-ACT-VAL-0001 | input | validation | error | Action input validation failed | false | none | 1 | 0 | 0 | none | false | true | ACTION_INPUT_INVALID | request_human | 400 |
+| ACTION_TEMPLATE_ERROR | SHV-{SUBSYS}-ACT-CON-0002 | input | conflict | error | Action template error | false | none | 1 | 0 | 0 | none | false | true | ACTION_TEMPLATE_ERROR | request_human | 409 |
+| ACTION_TYPE_NOT_FOUND | SHV-{SUBSYS}-ACT-NOT-0001 | resource | not_found | error | Action type not found | false | none | 1 | 0 | 0 | none | false | true | ACTION_TYPE_NOT_FOUND | request_human | 404 |
 | AUTH_EXPIRED | SHV-{SUBSYS}-ACC-AUT-0003 | access | auth | error | Authentication expired | false | after_refresh | 2 | 0 | 0 | none | false | false | AUTH_EXPIRED | after_refresh | 401 |
 | AUTH_INVALID | SHV-{SUBSYS}-ACC-AUT-0002 | access | auth | error | Invalid authentication | false | after_refresh | 2 | 0 | 0 | none | false | false | AUTH_INVALID | after_refresh | 401 |
 | AUTH_REQUIRED | SHV-{SUBSYS}-ACC-AUT-0001 | access | auth | error | Authentication required | false | after_refresh | 2 | 0 | 0 | none | false | false | AUTH_REQUIRED | after_refresh | 401 |
+| CONFIGURATION_ERROR | SHV-{SUBSYS}-CFG-INT-0001 | system | internal | error | Configuration error | false | none | 1 | 0 | 0 | none | false | true | CONFIGURATION_ERROR | request_human | 500 |
 | CONFLICT | SHV-{SUBSYS}-CNF-CON-0001 | conflict | conflict | error | Conflict detected | false | none | 1 | 0 | 0 | none | false | true | CONFLICT | request_human | 409 |
+| CONNECTOR_ERROR | SHV-{SUBSYS}-CON-INT-0001 | upstream | internal | error | Data connector error | false | none | 1 | 0 | 0 | none | false | true | CONNECTOR_ERROR | request_human | 500 |
 | DB_CONSTRAINT_VIOLATION | SHV-{SUBSYS}-DB-CON-0001 | database | conflict | error | Database constraint violation | false | none | 1 | 0 | 0 | none | false | true | DB_CONSTRAINT_VIOLATION | request_human | 409 |
 | DB_ERROR | SHV-{SUBSYS}-DB-INT-0001 | database | internal | critical | Database error | false | none | 1 | 0 | 0 | none | false | true | DB_ERROR | request_human | 500 |
 | DB_TIMEOUT | SHV-{SUBSYS}-DB-TMO-0001 | database | timeout | critical | Database timeout | true | backoff | 3 | 500 | 10000 | deterministic_equal_jitter | false | false | DB_TIMEOUT | retry_backoff | 504 |
 | DB_UNAVAILABLE | SHV-{SUBSYS}-DB-UNA-0001 | database | unavailable | critical | Database unavailable | true | backoff | 3 | 500 | 10000 | deterministic_equal_jitter | false | false | DB_UNAVAILABLE | retry_backoff | 503 |
+| ES_ERROR | SHV-{SUBSYS}-ES-INT-0001 | upstream | internal | error | Elasticsearch operation failed | false | none | 1 | 0 | 0 | none | false | true | ES_ERROR | request_human | 500 |
+| ES_INDEX_NOT_FOUND | SHV-{SUBSYS}-ES-NOT-0001 | upstream | not_found | error | Elasticsearch index not found | false | none | 1 | 0 | 0 | none | false | true | ES_INDEX_NOT_FOUND | request_human | 404 |
+| ES_UNAVAILABLE | SHV-{SUBSYS}-ES-UNA-0001 | upstream | unavailable | critical | Elasticsearch unavailable | true | backoff | 3 | 500 | 10000 | deterministic_equal_jitter | false | false | ES_UNAVAILABLE | retry_backoff | 503 |
+| FEATURE_NOT_IMPLEMENTED | SHV-{SUBSYS}-SYS-STA-0001 | system | state | error | Feature not implemented | false | none | 1 | 0 | 0 | none | false | true | FEATURE_NOT_IMPLEMENTED | request_human | 501 |
 | HTTP_ERROR | SHV-{SUBSYS}-SYS-INT-0002 | system | internal | error | HTTP error | false | none | 1 | 0 | 0 | none | false | true | HTTP_ERROR | request_human | 400 |
 | INPUT_SANITIZATION_FAILED | SHV-{SUBSYS}-INP-SEC-0001 | input | security | error | Input rejected by security policy | false | none | 1 | 0 | 0 | none | false | true | INPUT_SANITIZATION_FAILED | request_human | 400 |
 | INTERNAL_ERROR | SHV-{SUBSYS}-SYS-INT-0001 | system | internal | critical | Internal server error | false | none | 1 | 0 | 0 | none | false | true | INTERNAL_ERROR | request_human | 500 |
 | JSON_DECODE_ERROR | SHV-{SUBSYS}-INP-VAL-0002 | input | validation | error | Invalid JSON payload | false | none | 1 | 0 | 0 | none | false | true | JSON_DECODE_ERROR | request_human | 400 |
+| KAFKA_CONSUME_FAILED | SHV-{SUBSYS}-KFK-INT-0002 | upstream | internal | critical | Kafka consume failed | false | none | 1 | 0 | 0 | none | false | true | KAFKA_CONSUME_FAILED | request_human | 500 |
+| KAFKA_PRODUCE_FAILED | SHV-{SUBSYS}-KFK-INT-0001 | upstream | internal | critical | Kafka produce failed | false | none | 1 | 0 | 0 | none | false | true | KAFKA_PRODUCE_FAILED | request_human | 500 |
+| LAKEFS_AUTH_ERROR | SHV-{SUBSYS}-LFS-AUT-0001 | access | auth | error | lakeFS authentication failed | false | after_refresh | 2 | 0 | 0 | none | false | false | LAKEFS_AUTH_ERROR | after_refresh | 401 |
+| LAKEFS_CONFLICT | SHV-{SUBSYS}-LFS-CON-0001 | upstream | conflict | error | lakeFS merge conflict | false | none | 1 | 0 | 0 | none | false | true | LAKEFS_CONFLICT | request_human | 409 |
+| LAKEFS_ERROR | SHV-{SUBSYS}-LFS-INT-0001 | upstream | integration | error | lakeFS operation failed | false | none | 1 | 0 | 0 | none | false | true | LAKEFS_ERROR | request_human | 503 |
+| LAKEFS_NOT_FOUND | SHV-{SUBSYS}-LFS-NOT-0001 | upstream | not_found | error | lakeFS resource not found | false | none | 1 | 0 | 0 | none | false | true | LAKEFS_NOT_FOUND | request_human | 404 |
+| LINEAGE_RECORD_FAILED | SHV-{SUBSYS}-LIN-INT-0002 | data | internal | error | Lineage record failed | false | none | 1 | 0 | 0 | none | false | true | LINEAGE_RECORD_FAILED | request_human | 500 |
+| LINEAGE_UNAVAILABLE | SHV-{SUBSYS}-LIN-UNA-0001 | upstream | unavailable | critical | Lineage store unavailable | true | backoff | 3 | 500 | 10000 | deterministic_equal_jitter | false | false | LINEAGE_UNAVAILABLE | retry_backoff | 503 |
+| MERGE_CONFLICT | SHV-{SUBSYS}-MRG-CON-0001 | conflict | conflict | warning | Merge conflict | false | none | 1 | 0 | 0 | none | false | true | MERGE_CONFLICT | request_human | 409 |
+| OBJECTIFY_CONTRACT_ERROR | SHV-{SUBSYS}-OBJ-CON-0002 | objectify | conflict | error | Objectify contract error | false | none | 1 | 0 | 0 | none | false | true | OBJECTIFY_CONTRACT_ERROR | request_human | 409 |
+| OBJECTIFY_JOB_FAILED | SHV-{SUBSYS}-OBJ-INT-0001 | objectify | internal | error | Objectify job failed | false | none | 1 | 0 | 0 | none | false | true | OBJECTIFY_JOB_FAILED | request_human | 500 |
+| OBJECTIFY_MAPPING_ERROR | SHV-{SUBSYS}-OBJ-VAL-0001 | mapping | validation | error | Objectify mapping error | false | none | 1 | 0 | 0 | none | false | true | OBJECTIFY_MAPPING_ERROR | request_human | 400 |
 | OMS_UNAVAILABLE | SHV-{SUBSYS}-UPS-UNA-0003 | upstream | unavailable | error | Upstream service unavailable | true | backoff | 3 | 500 | 10000 | deterministic_equal_jitter | false | false | OMS_UNAVAILABLE | retry_backoff | 503 |
+| ONTOLOGY_ATOMIC_UPDATE_FAILED | SHV-{SUBSYS}-ONT-CON-0002 | ontology | conflict | error | Ontology atomic update conflict | false | none | 1 | 0 | 0 | none | false | true | ONTOLOGY_ATOMIC_UPDATE_FAILED | request_human | 409 |
+| ONTOLOGY_CIRCULAR_REFERENCE | SHV-{SUBSYS}-ONT-VAL-0003 | ontology | validation | error | Circular reference detected in ontology | false | none | 1 | 0 | 0 | none | false | true | ONTOLOGY_CIRCULAR_REFERENCE | request_human | 400 |
+| ONTOLOGY_DEPLOY_FAILED | SHV-{SUBSYS}-ONT-STA-0001 | ontology | state | error | Ontology deployment failed | false | none | 1 | 0 | 0 | none | false | true | ONTOLOGY_DEPLOY_FAILED | request_human | 409 |
+| ONTOLOGY_DUPLICATE | SHV-{SUBSYS}-ONT-CON-0001 | ontology | conflict | error | Duplicate ontology resource | false | none | 1 | 0 | 0 | none | false | true | ONTOLOGY_DUPLICATE | request_human | 409 |
+| ONTOLOGY_NOT_FOUND | SHV-{SUBSYS}-ONT-NOT-0001 | ontology | not_found | error | Ontology resource not found | false | none | 1 | 0 | 0 | none | false | true | ONTOLOGY_NOT_FOUND | request_human | 404 |
+| ONTOLOGY_RELATIONSHIP_ERROR | SHV-{SUBSYS}-ONT-VAL-0002 | ontology | validation | error | Ontology relationship error | false | none | 1 | 0 | 0 | none | false | true | ONTOLOGY_RELATIONSHIP_ERROR | request_human | 400 |
+| ONTOLOGY_VALIDATION_FAILED | SHV-{SUBSYS}-ONT-VAL-0001 | ontology | validation | error | Ontology validation failed | false | none | 1 | 0 | 0 | none | false | true | ONTOLOGY_VALIDATION_FAILED | request_human | 400 |
 | PAYLOAD_TOO_LARGE | SHV-{SUBSYS}-INP-LIM-0001 | input | limit | error | Payload too large | false | none | 1 | 0 | 0 | none | false | true | PAYLOAD_TOO_LARGE | request_human | 413 |
 | PERMISSION_DENIED | SHV-{SUBSYS}-ACC-PER-0001 | access | permission | error | Permission denied | false | none | 1 | 0 | 0 | none | false | true | PERMISSION_DENIED | request_human | 403 |
+| PIPELINE_BUILD_FAILED | SHV-{SUBSYS}-PIP-CON-0001 | pipeline | conflict | error | Pipeline build failed | false | none | 1 | 0 | 0 | none | false | true | PIPELINE_BUILD_FAILED | request_human | 409 |
+| PIPELINE_NOT_FOUND | SHV-{SUBSYS}-PIP-NOT-0001 | pipeline | not_found | error | Pipeline not found | false | none | 1 | 0 | 0 | none | false | true | PIPELINE_NOT_FOUND | request_human | 404 |
+| PIPELINE_VALIDATION_FAILED | SHV-{SUBSYS}-PIP-VAL-0001 | pipeline | validation | error | Pipeline validation failed | false | none | 1 | 0 | 0 | none | false | true | PIPELINE_VALIDATION_FAILED | request_human | 400 |
 | RATE_LIMITED | SHV-{SUBSYS}-RAT-LIM-0001 | rate_limit | limit | error | Rate limit exceeded | true | backoff | 3 | 500 | 10000 | deterministic_equal_jitter | true | false | RATE_LIMITED | retry_backoff | 429 |
-| REQUEST_VALIDATION_FAILED | SHV-{SUBSYS}-INP-VAL-0001 | input | validation | error | Request validation failed | false | none | 1 | 0 | 0 | none | false | true | REQUEST_VALIDATION_FAILED | request_human | 422 |
+| REQUEST_VALIDATION_FAILED | SHV-{SUBSYS}-INP-VAL-0001 | input | validation | error | Request validation failed | false | none | 1 | 0 | 0 | none | false | true | REQUEST_VALIDATION_FAILED | request_human | 400 |
 | RESOURCE_ALREADY_EXISTS | SHV-{SUBSYS}-RES-CON-0001 | resource | conflict | error | Resource already exists | false | none | 1 | 0 | 0 | none | false | true | RESOURCE_ALREADY_EXISTS | request_human | 409 |
+| RESOURCE_GONE | SHV-{SUBSYS}-RES-NOT-0002 | resource | not_found | error | Resource is no longer available | false | none | 1 | 0 | 0 | none | false | true | RESOURCE_GONE | request_human | 410 |
 | RESOURCE_NOT_FOUND | SHV-{SUBSYS}-RES-NOT-0001 | resource | not_found | error | Resource not found | false | none | 1 | 0 | 0 | none | false | true | RESOURCE_NOT_FOUND | request_human | 404 |
+| STORAGE_ERROR | SHV-{SUBSYS}-STO-INT-0001 | upstream | internal | error | Storage operation failed | false | none | 1 | 0 | 0 | none | false | true | STORAGE_ERROR | request_human | 500 |
+| STORAGE_UNAVAILABLE | SHV-{SUBSYS}-STO-UNA-0001 | upstream | unavailable | critical | Storage service unavailable | true | backoff | 3 | 500 | 10000 | deterministic_equal_jitter | false | false | STORAGE_UNAVAILABLE | retry_backoff | 503 |
 | TERMINUS_CONFLICT | SHV-{SUBSYS}-UPS-CON-0001 | upstream | conflict | error | Upstream conflict | false | none | 1 | 0 | 0 | none | false | true | TERMINUS_CONFLICT | request_human | 409 |
 | TERMINUS_UNAVAILABLE | SHV-{SUBSYS}-UPS-UNA-0002 | upstream | unavailable | error | Upstream service unavailable | true | backoff | 3 | 500 | 10000 | deterministic_equal_jitter | false | false | TERMINUS_UNAVAILABLE | retry_backoff | 503 |
 | UPSTREAM_ERROR | SHV-{SUBSYS}-UPS-INTG-0001 | upstream | integration | error | Upstream service error | false | none | 1 | 0 | 0 | none | false | true | UPSTREAM_ERROR | request_human | 502 |

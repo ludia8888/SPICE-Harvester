@@ -114,3 +114,5 @@ Data encryption keyring:
 - Restrict network access to internal services.
 - Back up Postgres + MinIO + lakeFS metadata.
 - Monitor `/api/v1/monitoring/*` and `/metrics`.
+
+<!-- DOC_SYNC: 2026-02-13 Foundry pipeline parity + runtime consistency sweep -->

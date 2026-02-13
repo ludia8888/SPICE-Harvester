@@ -4,7 +4,6 @@ Thin router delegating to `bff.services.pipeline_plan_preview_service` (Facade).
 Composed by `bff.routers.pipeline_plans`.
 """
 
-from __future__ import annotations
 from shared.observability.tracing import trace_endpoint
 
 from fastapi import APIRouter, Depends, Request

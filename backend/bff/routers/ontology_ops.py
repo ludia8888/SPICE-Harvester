@@ -5,7 +5,6 @@ This module acts as a small Facade over repeated normalization / transformation
 logic used by multiple ontology subrouters.
 """
 
-from __future__ import annotations
 
 from bff.services.ontology_ops_service import (
     _build_sample_data_from_preview,

@@ -369,3 +369,5 @@ curl -sS -X POST "$BASE_BFF/agent/pipeline-runs" -H 'Content-Type: application/j
     \"max_transform\": 2
   }" | jq '.data.preview'
 ```
+
+<!-- DOC_SYNC: 2026-02-13 Foundry pipeline parity + runtime consistency sweep -->

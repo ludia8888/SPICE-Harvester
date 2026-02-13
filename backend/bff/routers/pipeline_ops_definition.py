@@ -4,7 +4,6 @@ Stable hashes, commit resolution, location normalization, and diffing.
 Extracted from `bff.routers.pipeline_ops`.
 """
 
-from __future__ import annotations
 
 import hashlib
 import json

@@ -6,7 +6,6 @@ immediately. This module provides best-effort monitoring that logs completion
 without blocking request handling.
 """
 
-from __future__ import annotations
 
 import asyncio
 import logging

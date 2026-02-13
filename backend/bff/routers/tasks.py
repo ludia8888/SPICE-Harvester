@@ -12,7 +12,6 @@ Key features:
 5. ✅ Real-time updates via WebSocket
 """
 
-from __future__ import annotations
 from shared.observability.tracing import trace_endpoint
 
 from typing import Any, Dict, Optional

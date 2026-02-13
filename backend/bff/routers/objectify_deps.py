@@ -5,7 +5,6 @@ Centralizes FastAPI dependencies used across objectify subrouters to support
 router composition (Composite pattern) and keep subrouters focused.
 """
 
-from __future__ import annotations
 
 from fastapi import Depends, HTTPException, Request, status
 

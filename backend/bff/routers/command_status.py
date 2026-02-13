@@ -5,7 +5,6 @@ Frontend should be able to observe async (202 Accepted) command execution withou
 calling internal services directly. This router proxies OMS' command status API.
 """
 
-from __future__ import annotations
 from shared.observability.tracing import trace_endpoint
 
 import logging

@@ -4,7 +4,6 @@ BFF WebSocket Router for Real-time Command Status Updates
 클라이언트와 WebSocket 연결을 통해 실시간 Command 상태 업데이트를 제공합니다.
 """
 
-from __future__ import annotations
 
 from typing import Optional
 

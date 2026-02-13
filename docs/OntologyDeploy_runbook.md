@@ -23,3 +23,5 @@
 - Ensure `ontology_deploy_outbox_v2` rows move from `pending` → `published` (or v1 table).
 - Verify `ontology_events` receives `ONTOLOGY_DEPLOYED` events after deploy.
 - Confirm downstream consumers (search/projection/cache) refresh after deploy.
+
+<!-- DOC_SYNC: 2026-02-13 Foundry pipeline parity + runtime consistency sweep -->

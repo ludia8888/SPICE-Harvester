@@ -3,7 +3,6 @@
 Thin router delegating to `bff.services.context7_service` (Facade pattern).
 """
 
-from __future__ import annotations
 from shared.observability.tracing import trace_endpoint
 
 import logging

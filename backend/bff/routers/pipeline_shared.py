@@ -6,7 +6,6 @@ centralizing cross-cutting helpers (permissions/audit/principal resolution)
 without creating import cycles.
 """
 
-from __future__ import annotations
 
 from typing import Any, Dict, Optional
 from uuid import UUID

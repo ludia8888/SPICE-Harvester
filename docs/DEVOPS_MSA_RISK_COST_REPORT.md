@@ -309,3 +309,5 @@ SPICE-Harvester는 **Event Sourcing(SSoT: S3/MinIO) + CQRS(Projection to ES) + G
 - Audit Logs 문서: `docs/AUDIT_LOGS.md`
 - Lineage backfill 스크립트: `backend/scripts/backfill_lineage.py`
 - Lineage 지표 API(BFF): `GET /api/v1/lineage/metrics`
+
+<!-- DOC_SYNC: 2026-02-13 Foundry pipeline parity + runtime consistency sweep -->

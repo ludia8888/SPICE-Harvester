@@ -6,7 +6,6 @@ This module defines HTTP routes only. Business logic lives in
 `bff.services.ontology_relationships_service` (Facade).
 """
 
-from __future__ import annotations
 from shared.observability.tracing import trace_endpoint
 
 from typing import Optional

@@ -7,7 +7,6 @@ Business logic lives in `bff.services.ontology_imports_service` (Facade).
 Composed by `bff.routers.ontology` via router composition (Composite pattern).
 """
 
-from __future__ import annotations
 from shared.observability.tracing import trace_endpoint
 
 from typing import Optional
@@ -135,4 +134,3 @@ async def commit_import_from_excel(
         options_json=options_json,
         oms_client=oms_client,
     )
-

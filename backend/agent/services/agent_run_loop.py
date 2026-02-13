@@ -19,6 +19,8 @@ _FAILED_STATUSES = {"failed", "failure"}
 
 
 class AgentState(TypedDict):
+    """State envelope for deterministic single-threaded agent step execution."""
+
     run_id: str
     actor: str
     steps: List[AgentToolCall]
@@ -206,6 +208,7 @@ async def run_agent_steps(runtime: AgentRuntime, initial_state: AgentState) -> A
     Execute the provided steps in order, stopping at the first failure.
 
     Notes:
+    
     - BFF plan validation guarantees artifacts/templates only depend on *prior* steps,
       so we do not attempt any dependency scheduling here.
     - The runtime records tool events; we add a deterministic AGENT_STEP_FINALIZED

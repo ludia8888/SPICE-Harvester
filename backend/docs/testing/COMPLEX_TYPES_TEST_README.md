@@ -38,3 +38,5 @@ pytest backend/tests/test_core_functionality.py -q
 ```bash
 pip install phonenumbers email-validator
 ```
+
+<!-- DOC_SYNC: 2026-02-13 Foundry pipeline parity + runtime consistency sweep -->

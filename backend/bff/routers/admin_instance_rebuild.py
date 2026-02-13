@@ -4,7 +4,6 @@ Triggers an ES instance index rebuild with Blue-Green alias swap.
 Composed by ``bff.routers.admin``.
 """
 
-from __future__ import annotations
 from shared.observability.tracing import trace_endpoint
 
 import logging

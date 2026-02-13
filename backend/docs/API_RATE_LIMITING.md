@@ -42,3 +42,5 @@ If no user/api key is present, the limiter falls back to IP-based limits.
 
 - Category limits and endpoint overrides are defined in `rate_limit_config.py`.
 - User tier multipliers and API key tiers are **configured but not automatically assigned**; you must supply user/api key context.
+
+<!-- DOC_SYNC: 2026-02-13 Foundry pipeline parity + runtime consistency sweep -->

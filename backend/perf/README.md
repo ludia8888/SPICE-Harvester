@@ -46,3 +46,5 @@ PYTHONPATH=backend python backend/perf/cleanup_perf_databases.py --prefix perf_ 
 ```
 
 This script derives `expected_seq` from Postgres (`spice_event_registry.aggregate_versions`) and deletes via BFF.
+
+<!-- DOC_SYNC: 2026-02-13 Foundry pipeline parity + runtime consistency sweep -->

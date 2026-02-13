@@ -24,3 +24,5 @@ echo "VITE_MOCK_API=false" >> .env.local
 ## Data
 
 All fixture data under `frontend/mock-data/` is synthetic and intended for local development only.
+
+<!-- DOC_SYNC: 2026-02-13 Foundry pipeline parity + runtime consistency sweep -->

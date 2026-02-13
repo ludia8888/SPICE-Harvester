@@ -2,10 +2,10 @@
 Lineage backfill utilities.
 
 Goals:
-- Eventual recovery when lineage recording is fail-open (ENABLE_LINEAGE=true but store can be unavailable).
+- Eventual recovery when lineage recording is fail-open (`ENABLE_LINEAGE=true` but store can be unavailable).
 - Two operational modes:
-  1) queue: drain `spice_lineage.lineage_backfill_queue`
-  2) replay: scan event store for a time range and rebuild lineage
+  - queue: drain ``spice_lineage.lineage_backfill_queue``
+  - replay: scan event store for a time range and rebuild lineage
 """
 
 from __future__ import annotations
@@ -124,4 +124,3 @@ async def main() -> None:
 
 if __name__ == "__main__":
     asyncio.run(main())
-

@@ -92,3 +92,5 @@ EventStore는 멱등성을 지원하므로, 같은 이벤트를 재시도해서 
 
 - `EVENT_APPENDED`: 실제로 Event Store(S3/MinIO)에 **신규 저장**된 경우
 - `EVENT_APPEND_SKIPPED_DUPLICATE`: 이미 존재해서 **멱등(no-op)** 으로 처리된 경우
+
+<!-- DOC_SYNC: 2026-02-13 Foundry pipeline parity + runtime consistency sweep -->

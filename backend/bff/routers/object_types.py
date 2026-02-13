@@ -4,7 +4,6 @@ The router stays thin by delegating business logic to a service module
 (Facade / Service Layer). Test patch points for role enforcement are preserved.
 """
 
-from __future__ import annotations
 from shared.observability.tracing import trace_endpoint
 
 import logging

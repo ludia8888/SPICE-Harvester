@@ -5,7 +5,6 @@ Composed by `bff.routers.ontology` via router composition (Composite pattern).
 Business logic lives in `bff.services.ontology_crud_service` (Facade).
 """
 
-from __future__ import annotations
 from shared.observability.tracing import trace_endpoint
 
 from typing import Optional

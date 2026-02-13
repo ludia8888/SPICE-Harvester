@@ -102,3 +102,5 @@ export CHAOS_CRASH_EXIT_CODE=42
 - `RUN_LIVE_OMS_SMOKE=true` is intentionally opt-in because it creates and deletes real databases.
 - Elasticsearch is a projection dependency; ES failures should not compromise write-side idempotency.
 - Legacy migration/dual-write tests referenced by older documents (`tests/integration/*`, `migration_helper.py`) are removed/archived.
+
+<!-- DOC_SYNC: 2026-02-13 Foundry pipeline parity + runtime consistency sweep -->

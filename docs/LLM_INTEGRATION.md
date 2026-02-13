@@ -369,3 +369,5 @@ LLM을 여기저기에서 직접 호출하면:
 - [금지] LLM이 권한/정책 결정을 대행
 - [금지] LLM이 “삭제/롤백” 같은 위험 작업을 자동 실행
 - [금지] 원본 파일/전체 시트/PII 원문을 LLM에 그대로 전달
+
+<!-- DOC_SYNC: 2026-02-13 Foundry pipeline parity + runtime consistency sweep -->

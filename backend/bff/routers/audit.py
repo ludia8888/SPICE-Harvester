@@ -4,7 +4,6 @@ Audit log query router for BFF.
 Exposes first-class, structured audit logs (Postgres-backed, hash-chained).
 """
 
-from __future__ import annotations
 from shared.observability.tracing import trace_endpoint
 
 from datetime import datetime

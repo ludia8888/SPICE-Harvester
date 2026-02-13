@@ -6,7 +6,6 @@ added, modified, or deleted per objectify job execution. Enables audit
 tracking similar to Palantir Foundry's Changelog Datasets.
 """
 
-from __future__ import annotations
 from shared.observability.tracing import trace_endpoint
 
 from typing import Any, Dict, List, Optional

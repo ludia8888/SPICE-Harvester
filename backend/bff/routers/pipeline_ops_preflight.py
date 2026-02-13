@@ -3,7 +3,6 @@
 Extracted from `bff.routers.pipeline_ops` to keep helpers cohesive.
 """
 
-from __future__ import annotations
 
 import logging
 from typing import Any, Dict, Optional

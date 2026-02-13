@@ -102,3 +102,5 @@ erDiagram
     ORDER ||--|{ CUSTOMER : placed_by
     ORDER }o--o{ PRODUCT : contains
 ```
+
+<!-- DOC_SYNC: 2026-02-13 Foundry pipeline parity + runtime consistency sweep -->

@@ -261,3 +261,5 @@ Single doc per deploy to keep snapshot atomic.
   - `ontology_deploy_outbox` backlog/oldest/next_attempt
   - latest `ontology_health_runs` summary and counts by severity
   - counts of deployments by status
+
+<!-- DOC_SYNC: 2026-02-13 Foundry pipeline parity + runtime consistency sweep -->

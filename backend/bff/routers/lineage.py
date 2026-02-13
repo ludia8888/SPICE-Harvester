@@ -4,7 +4,6 @@ Lineage (provenance) query router for BFF.
 Exposes first-class, queryable lineage graphs to the frontend via BFF.
 """
 
-from __future__ import annotations
 from shared.observability.tracing import trace_endpoint
 
 from datetime import datetime, timedelta, timezone

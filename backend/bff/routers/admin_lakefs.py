@@ -5,7 +5,6 @@ These endpoints store encrypted credentials in Postgres via PipelineRegistry.
 Composed by `bff.routers.admin`.
 """
 
-from __future__ import annotations
 from shared.observability.tracing import trace_endpoint
 
 from typing import Any, Dict, Literal

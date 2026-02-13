@@ -109,3 +109,5 @@ Goal: keep read-models converging to the latest state under duplicates/out-of-or
 - `EVENT_STORE_SEQUENCE_ALLOCATOR_MODE` (default: `postgres`): `postgres` (atomic), `legacy`/`s3` (best-effort), `off` (require caller).
 - `EVENT_STORE_SEQUENCE_SCHEMA` (default: `spice_event_registry`): Postgres schema for the allocator table.
 - `EVENT_STORE_SEQUENCE_HANDLER_PREFIX` (default: `write_side`): handler prefix namespace for allocator rows.
+
+<!-- DOC_SYNC: 2026-02-13 Foundry pipeline parity + runtime consistency sweep -->

@@ -151,3 +151,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - [API Reference](./docs/API_REFERENCE.md)
 - [Operations Manual](./docs/OPERATIONS.md)
 - [Security Documentation](./docs/SECURITY.md)
+
+<!-- DOC_SYNC: 2026-02-13 Foundry pipeline parity + runtime consistency sweep -->

@@ -204,3 +204,5 @@ For documentation issues or questions:
 *Last updated: 2025-12-17*
 *Documentation reorganization: Complete*
 *Version: 3.0 (Major reorganization)*
+
+<!-- DOC_SYNC: 2026-02-13 Foundry pipeline parity + runtime consistency sweep -->

@@ -5,7 +5,6 @@ Provides the Pipeline Agent API for autonomous LLM-driven pipeline creation.
 Includes SSE streaming endpoint for real-time UI updates.
 """
 
-from __future__ import annotations
 from shared.observability.tracing import trace_endpoint
 
 import json

@@ -4,7 +4,6 @@ Thin router delegating business logic to `bff.services.merge_conflict_service`
 (Facade pattern).
 """
 
-from __future__ import annotations
 from shared.observability.tracing import trace_endpoint
 
 from typing import Any, Dict

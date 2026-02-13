@@ -319,3 +319,5 @@ python scripts/generate_error_taxonomy.py
   - `docs/OPERATIONS.md`
   - `docs/SECURITY.md`
   - `docs/PIPELINE_AGENT.md`
+
+<!-- DOC_SYNC: 2026-02-13 Foundry pipeline parity + runtime consistency sweep -->

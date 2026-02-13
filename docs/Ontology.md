@@ -600,3 +600,5 @@ Action type = “입력(Parameters) + 변경 규칙(Rules) + 제출 게이트(Su
 			1) 정의/스키마 변환: 없음
 			2) 검증 적용 지점: 없음
 			3) 실패 재현: 없음
+
+<!-- DOC_SYNC: 2026-02-13 Foundry pipeline parity + runtime consistency sweep -->

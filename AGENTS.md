@@ -91,3 +91,4 @@ GoF가 “클래스/객체 설계” 중심이라면, 여긴 서비스/레이어
 	•	Domain Service
 	•	Factory(도메인 팩토리)
 	•	Anti-Corruption Layer: 외부 시스템 오염 방지
+<!-- DOC_SYNC: 2026-02-13 Foundry pipeline parity + runtime consistency sweep -->

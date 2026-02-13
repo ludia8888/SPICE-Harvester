@@ -199,3 +199,5 @@ Consumers must remain idempotent; investigate only if side-effects are duplicati
 - Plan retention/archival for `processed_events` (growth is proportional to throughput).
 - Monitor registry indexes and consider partitioning if needed.
 - Keep S3/MinIO lifecycle policies for long-term event storage as required by compliance.
+
+<!-- DOC_SYNC: 2026-02-13 Foundry pipeline parity + runtime consistency sweep -->

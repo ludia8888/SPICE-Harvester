@@ -6,7 +6,6 @@ Keeps a stable import surface for dataset routers/tests while delegating
 implementation details to smaller helpers (Composite + Facade).
 """
 
-from __future__ import annotations
 
 from bff.routers.pipeline_datasets_ops_funnel import (
     FUNNEL_RISK_POLICY,

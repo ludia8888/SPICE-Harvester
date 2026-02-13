@@ -1,18 +1,18 @@
 repos:
   - repo: local
     hooks:
-      - id: update-docs
-        name: Update auto-generated docs
-        entry: bash -c "python scripts/update_docs.py && git add docs/API_REFERENCE.md docs/ARCHITECTURE.md docs/BACKEND_METHODS.md docs/ERROR_TAXONOMY.md docs/reference/_generated"
+      - id: docs-autogen-check
+        name: Docs Auto-Generated Check
+        entry: .venv-docs/bin/python scripts/update_docs.py --check
         language: system
         pass_filenames: false
         always_run: true
-        description: "Regenerate auto-managed docs on commit"
-      - id: generate-architecture
-        name: Generate Architecture Diagrams
-        entry: bash -c "python /Users/isihyeon/Desktop/SPICE\ HARVESTER/generate_architecture.py && git add docs/architecture/"
+        description: "Fail commit if auto-generated docs are stale"
+
+      - id: docs-sphinx-check
+        name: Docs Sphinx Check
+        entry: .venv-docs/bin/python scripts/check_docs.py --allow-warnings
         language: system
         pass_filenames: false
-        always_run: false
-        files: '^backend/.*\.py$'
-        description: "Automatically generate architecture diagrams when Python files change"
+        always_run: true
+        description: "Fail commit on Sphinx build errors"

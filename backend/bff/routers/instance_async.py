@@ -5,7 +5,6 @@ This router is intentionally thin: business logic lives in
 `bff.schemas.instance_async_requests`.
 """
 
-from __future__ import annotations
 from shared.observability.tracing import trace_endpoint
 
 from typing import Optional

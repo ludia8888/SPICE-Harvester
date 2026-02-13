@@ -269,3 +269,5 @@ lsof -i :8002
 # 프로세스 종료
 kill <PID>
 ```
+
+<!-- DOC_SYNC: 2026-02-13 Foundry pipeline parity + runtime consistency sweep -->

@@ -116,10 +116,13 @@ python scripts/generate_api_reference.py
 
 ### Admin Operations
 - `POST /api/v1/admin/cleanup-old-replays`
+- `POST /api/v1/admin/databases/{db_name}/rebuild-index`
+- `GET /api/v1/admin/databases/{db_name}/rebuild-index/{task_id}/status`
 - `GET /api/v1/admin/lakefs/credentials`
 - `POST /api/v1/admin/lakefs/credentials`
 - `POST /api/v1/admin/recompute-projection`
 - `GET /api/v1/admin/recompute-projection/{task_id}/result`
+- `POST /api/v1/admin/reindex-instances`
 - `POST /api/v1/admin/replay-instance-state`
 - `GET /api/v1/admin/replay-instance-state/{task_id}/result`
 - `GET /api/v1/admin/replay-instance-state/{task_id}/trace`
@@ -273,7 +276,10 @@ python scripts/generate_api_reference.py
 - `GET /api/v1/monitoring/status`
 
 ### Objectify
+- `GET /api/v1/objectify/changelog`
+- `GET /api/v1/objectify/changelog/{changelog_id}`
 - `POST /api/v1/objectify/databases/{db_name}/datasets/{dataset_id}/detect-relationships`
+- `POST /api/v1/objectify/databases/{db_name}/reconcile-relationships`
 - `POST /api/v1/objectify/databases/{db_name}/run-dag`
 - `POST /api/v1/objectify/datasets/{dataset_id}/run`
 - `GET /api/v1/objectify/mapping-specs`
@@ -438,3 +444,5 @@ python scripts/generate_api_reference.py
 
 - `WEBSOCKET /api/v1/ws/commands`
 - `WEBSOCKET /api/v1/ws/commands/{command_id}`
+
+<!-- DOC_SYNC: 2026-02-13 Foundry pipeline parity + runtime consistency sweep -->

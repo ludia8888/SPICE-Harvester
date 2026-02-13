@@ -14,3 +14,5 @@ These documents may contain outdated information. For current status:
 - Check `OPERATIONS.md` for operational procedures
 - Check `ARCHITECTURE.md` for system architecture
 - Run `git log` for actual repository changes
+
+<!-- DOC_SYNC: 2026-02-13 Foundry pipeline parity + runtime consistency sweep -->

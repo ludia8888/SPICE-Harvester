@@ -7,7 +7,6 @@ Provides REST endpoints for:
 - Checking mapping spec compatibility
 """
 
-from __future__ import annotations
 from shared.observability.tracing import trace_endpoint
 
 import logging

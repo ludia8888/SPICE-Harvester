@@ -539,7 +539,7 @@ Source: `docker-compose.full.yml` (with extends resolved).
 | `prometheus` | 19090:9090 | otel-collector<br/>alertmanager |
 | `redis` | ${REDIS_PORT_HOST:-6379}:6379 | - |
 | `registry-cleaner` | - | bff<br/>postgres |
-| `search-projection-worker` | - | kafka<br/>elasticsearch<br/>otel-collector |
+| `search-projection-worker` | - | elasticsearch<br/>kafka<br/>otel-collector |
 | `terminusdb` | 6363:6363 | - |
 | `writeback-materializer-worker` | - | minio<br/>lakefs<br/>otel-collector |
 | `zookeeper` | ${ZOOKEEPER_PORT_HOST:-2181}:2181 | - |
@@ -681,8 +681,8 @@ graph TD
   svc_prometheus --> svc_alertmanager
   svc_registry_cleaner --> svc_bff
   svc_registry_cleaner --> svc_postgres
-  svc_search_projection_worker --> svc_kafka
   svc_search_projection_worker --> svc_elasticsearch
+  svc_search_projection_worker --> svc_kafka
   svc_search_projection_worker --> svc_otel_collector
   svc_writeback_materializer_worker --> svc_minio
   svc_writeback_materializer_worker --> svc_lakefs
@@ -709,7 +709,6 @@ graph TD
 - `backend/pipeline_scheduler/main.py`
 - `backend/pipeline_worker/main.py`
 - `backend/projection_worker/main.py`
-- `backend/search_projection_worker/main.py`
 - `backend/writeback_materializer_worker/main.py`
 <!-- END AUTO-GENERATED ARCH: ENTRYPOINTS -->
 
@@ -783,3 +782,5 @@ graph TD
 | --- | --- | --- |
 | `type_inference_router` | `/api/v1` | - |
 <!-- END AUTO-GENERATED ARCH: FUNNEL_ROUTERS -->
+
+<!-- DOC_SYNC: 2026-02-13 Foundry pipeline parity + runtime consistency sweep -->

@@ -110,3 +110,5 @@
 - `POST /api/v1/database/{db_name}/pull-requests/{pr_id}/merge`
 - `POST /api/v1/database/{db_name}/pull-requests/{pr_id}/close`
 - `GET /api/v1/database/{db_name}/pull-requests/{pr_id}/diff`
+
+<!-- DOC_SYNC: 2026-02-13 Foundry pipeline parity + runtime consistency sweep -->

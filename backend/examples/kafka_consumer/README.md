@@ -54,3 +54,5 @@ class MyCustomConsumer(OntologyEventConsumer):
 3. **스케일링**: 여러 컨슈머 인스턴스 실행
 4. **재시도**: 실패한 메시지 재처리 로직
 5. **멱등성**: `event_id` 기준 1회만 side-effect 발생 (Worker/Projection은 `processed_events` 레지스트리 권장)
+
+<!-- DOC_SYNC: 2026-02-13 Foundry pipeline parity + runtime consistency sweep -->

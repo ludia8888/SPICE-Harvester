@@ -146,3 +146,5 @@ flowchart LR
 - `backend/objectify_worker/`: mapping spec -> instance creation
 - `backend/connector_trigger_service/`, `backend/connector_sync_worker/`: connector ingest flow
 - `backend/message_relay/`: S3 tail -> Kafka publisher
+
+<!-- DOC_SYNC: 2026-02-13 Foundry pipeline parity + runtime consistency sweep -->

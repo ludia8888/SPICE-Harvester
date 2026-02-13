@@ -460,3 +460,5 @@ Import these dashboard templates:
 ---
 
 *Implementation based on Context7 analysis and OpenTelemetry best practices for microservices observability.*
+
+<!-- DOC_SYNC: 2026-02-13 Foundry pipeline parity + runtime consistency sweep -->

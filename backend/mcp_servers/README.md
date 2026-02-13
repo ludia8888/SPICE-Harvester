@@ -239,3 +239,5 @@ curl -X POST http://localhost:8002/api/v1/context7/analyze/ontology \
 - [MCP Specification](https://modelcontextprotocol.io/docs)
 - [Context7 Documentation](https://context7.ai/docs)
 - [MCP Python SDK](https://github.com/modelcontextprotocol/python-sdk)
+
+<!-- DOC_SYNC: 2026-02-13 Foundry pipeline parity + runtime consistency sweep -->

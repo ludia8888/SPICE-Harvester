@@ -72,12 +72,13 @@ PYTHONPATH=backend "$PWD/.venv-ci/bin/python" -m pytest -q \
 
 Latest verified run (local dev stack):
 
-- Date: Thu Feb 5 22:26 KST 2026
-- Git: `42800ec` (working tree had local changes)
-- Host: macOS (Apple Silicon), Python 3.12
+- Date: Fri Feb 13 2026 (KST)
+- Git baseline: `b33b56a` (post-parity hardening)
+- Host: macOS (Apple Silicon), Python 3.11 + Java 17 + PySpark
 - Notes:
   - Elasticsearch runs as `linux/amd64` locally for stability on Apple Silicon (aarch64 images can SIGILL).
-  - Kafka must be running for command processing; the writeback E2Es include a preflight to start it if needed.
+  - Spark unit regressions use Java 17 (`/opt/homebrew/opt/openjdk@17`) with local IP pinning.
+  - Core parity regression bundle passed: `116 passed`.
 
 ### 4.1 Production suite
 
@@ -144,6 +145,18 @@ Required metadata semantics:
 - `snapshot_replace_and_remove` requires `post_filtering_column`
 - Output formats are constrained to `parquet|json|csv|avro|orc`
 
+Default mode resolution semantics (aligned with Foundry docs):
+
+- `write_mode=default` resolves to `snapshot_replace` when additive incremental signal is unavailable.
+- `write_mode=default` resolves to append family only when incremental input is explicitly additive.
+- PK presence then chooses `append_only_new_rows`; PK absence chooses `always_append` (with warning).
+
+Runtime semantics hardening:
+
+- `changelog` keeps changed/new rows without input-PK dedupe so repeated updates are preserved as events.
+- `streamJoin(strategy=left_lookup)` is fail-closed when right input is not a direct input node.
+- UDF is reference-only (`udfId` + optional `udfVersion`); inline `udfCode` is rejected in validator/runtime.
+
 Build/deploy consistency:
 
 - build artifacts include resolved write policy metadata and policy hash
@@ -158,3 +171,5 @@ implemented 1:1 in an open repo:
 - Full UI parity (Contour/Quiver/workbooks), advanced governance workflows, enterprise identity
   integrations, and proprietary optimizations.
 - Feature-by-feature behavior equivalence for every edge case without an official Foundry spec.
+
+<!-- DOC_SYNC: 2026-02-13 Foundry pipeline parity + runtime consistency sweep -->

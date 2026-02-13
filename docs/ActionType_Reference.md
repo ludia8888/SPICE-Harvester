@@ -129,3 +129,5 @@ Action type은 온톨로지 중심의 선언적 데이터 수정 API입니다.
 	•	자동화(Automate)에서는 at-least-once 특성을 고려해 멱등성을 설계해야 함
 
 참고 출처(원문에서 사용한 근거): 외부 공식 문서(온톨로지/액션/권한/워크플로/객체 저장소 관련)와 커뮤니티 예시 등을 인용해 구성했습니다.
+
+<!-- DOC_SYNC: 2026-02-13 Foundry pipeline parity + runtime consistency sweep -->

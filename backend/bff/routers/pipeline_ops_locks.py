@@ -3,7 +3,6 @@
 Extracted from `bff.routers.pipeline_ops`.
 """
 
-from __future__ import annotations
 
 import asyncio
 import logging

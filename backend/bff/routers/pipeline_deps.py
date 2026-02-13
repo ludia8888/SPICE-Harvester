@@ -5,7 +5,6 @@ This module supports router composition (Composite pattern) by centralizing
 shared FastAPI dependencies (registries/clients) used across pipeline subrouters.
 """
 
-from __future__ import annotations
 
 from bff.routers.registry_deps import get_dataset_registry, get_objectify_registry, get_pipeline_registry
 

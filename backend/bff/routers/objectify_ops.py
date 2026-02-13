@@ -5,7 +5,6 @@ service layer. It exists to support router composition and keep backwards
 compatibility with existing imports/tests.
 """
 
-from __future__ import annotations
 
 from bff.services.objectify_ops_service import (
     _ALLOWED_SOURCE_TYPES,

@@ -5,7 +5,6 @@ Centralizes common FastAPI-friendly wrappers around
 try/except logic across routers.
 """
 
-from __future__ import annotations
 
 from collections.abc import Callable
 from typing import Any

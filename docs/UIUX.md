@@ -81,3 +81,5 @@
 
 - “무엇을 클릭하면 무엇이 보이고 어떤 API가 호출되는지”를 화면 단위로 명시
 - “거짓 UX” 금지: 백엔드가 제공하지 않는 일관성/보장을 UI가 가정하지 않기
+
+<!-- DOC_SYNC: 2026-02-13 Foundry pipeline parity + runtime consistency sweep -->

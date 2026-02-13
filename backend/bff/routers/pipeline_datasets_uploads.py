@@ -4,7 +4,6 @@ This module composes dataset upload routers via `include_router` (Composite patt
 and re-exports selected endpoints for backwards compatibility.
 """
 
-from __future__ import annotations
 
 from fastapi import APIRouter
 

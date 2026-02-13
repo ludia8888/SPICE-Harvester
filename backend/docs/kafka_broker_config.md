@@ -287,3 +287,5 @@ sudo sysctl -w net.ipv4.tcp_wmem="4096 65536 134217728"
 **Last Updated**: 2024-08-12
 **Version**: 1.0.0
 **Author**: SPICE HARVESTER Team (THINK ULTRA³)
+
+<!-- DOC_SYNC: 2026-02-13 Foundry pipeline parity + runtime consistency sweep -->

@@ -124,3 +124,5 @@ TEST_OMS_URL=http://localhost:8001 pytest
 3. **Backward Compatible**: All existing scripts and tests continue to work
 4. **Centralized Management**: One place to configure all service locations
 5. **Docker-Friendly**: Works seamlessly in containerized environments
+
+<!-- DOC_SYNC: 2026-02-13 Foundry pipeline parity + runtime consistency sweep -->

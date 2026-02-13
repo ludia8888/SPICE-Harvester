@@ -102,3 +102,5 @@
 2) `backend/` 임시 스크립트를 `backend/scripts/`로 재배치하고 문서 참조를 정리.
 3) docker compose 기준을 하나로 고정하고, 레거시 참조를 deprecated/삭제.
 4) `*_legacy` 팩토리/호환 경로는 “운영 데이터 의존성” 확인 후 단계적으로 제거.
+
+<!-- DOC_SYNC: 2026-02-13 Foundry pipeline parity + runtime consistency sweep -->

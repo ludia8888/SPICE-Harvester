@@ -5,7 +5,6 @@ Goal: provide a single, stable endpoint that summarizes cross-store health and c
 signals so the UI doesn't need to reconstruct state from multiple backends.
 """
 
-from __future__ import annotations
 from shared.observability.tracing import trace_endpoint
 
 import os

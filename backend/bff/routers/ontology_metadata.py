@@ -3,7 +3,6 @@
 Composed by `bff.routers.ontology` via router composition (Composite pattern).
 """
 
-from __future__ import annotations
 from shared.observability.tracing import trace_endpoint
 
 import logging

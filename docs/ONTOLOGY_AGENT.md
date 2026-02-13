@@ -333,3 +333,5 @@ Ontology Agent는 한 요청 안에서 반복적으로 도구를 호출하는 **
 - [Ontology](Ontology.md) - 온톨로지 개념 및 스키마 설계
 - [API Reference](API_REFERENCE.md) - 전체 API 참조
 - [Architecture](ARCHITECTURE.md) - 시스템 아키텍처
+
+<!-- DOC_SYNC: 2026-02-13 Foundry pipeline parity + runtime consistency sweep -->

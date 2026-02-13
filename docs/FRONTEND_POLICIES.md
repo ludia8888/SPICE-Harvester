@@ -71,3 +71,5 @@
 - Import commit은 항상 `main`으로 기록되므로, main 이외 브랜치에서는 확인 체크 필수.
 - 보호 브랜치 정책은 Summary의 `policy.is_protected_branch`로 확인하고,
   Ontology 적용/머지 Resolve는 `adminToken + adminMode`가 없으면 차단.
+
+<!-- DOC_SYNC: 2026-02-13 Foundry pipeline parity + runtime consistency sweep -->

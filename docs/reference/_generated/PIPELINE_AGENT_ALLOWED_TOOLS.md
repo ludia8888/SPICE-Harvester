@@ -1,21 +1,28 @@
 # Pipeline Agent Tool Allowlist
 
 <!-- BEGIN AUTO-GENERATED: pipeline_tooling_reference -->
-> Updated: 2026-02-04T21:36:30+09:00
-> Revision: `3f1c9128c08ac4aed8ccd395aafeb1dbb36d5963`
+> Updated: 2026-02-14T02:58:03+09:00
+> Revision: `2025fdb195b800ea75b094938c77e98cecef217f`
 > Source of truth: `backend/bff/services/pipeline_agent_autonomous_loop.py` (`_PIPELINE_AGENT_ALLOWED_TOOLS`).
 > Regenerate: `python scripts/generate_pipeline_tooling_reference.py`
 
 ## Allowed tools (runtime-enforced)
 
+- `create_link_type_from_fk`
+- `data_query`
 - `dataset_get_by_name`
 - `dataset_get_latest_version`
+- `dataset_list`
+- `dataset_profile`
+- `dataset_sample`
 - `dataset_validate_columns`
 - `debug_dry_run`
 - `debug_explain_failure`
 - `debug_get_errors`
 - `debug_get_execution_log`
 - `debug_inspect_node`
+- `detect_foreign_keys`
+- `get_objectify_watermark`
 - `objectify_create_mapping_spec`
 - `objectify_get_status`
 - `objectify_list_mapping_specs`
@@ -62,18 +69,22 @@
 - `plan_add_explode`
 - `plan_add_external_input`
 - `plan_add_filter`
+- `plan_add_geospatial`
 - `plan_add_group_by`
 - `plan_add_group_by_expr`
 - `plan_add_input`
 - `plan_add_join`
 - `plan_add_normalize`
 - `plan_add_output`
+- `plan_add_pattern_mining`
 - `plan_add_pivot`
 - `plan_add_regex_replace`
 - `plan_add_rename`
 - `plan_add_select`
 - `plan_add_select_expr`
 - `plan_add_sort`
+- `plan_add_split`
+- `plan_add_stream_join`
 - `plan_add_transform`
 - `plan_add_union`
 - `plan_add_window`
@@ -93,6 +104,8 @@
 - `plan_validate`
 - `plan_validate_structure`
 - `preview_inspect`
+- `reconcile_relationships`
+- `trigger_incremental_objectify`
 
 ## Consistency checks
 
@@ -124,10 +137,6 @@
 
 - `mcp_specs_minus_allowed`:
   - `check_schema_drift`
-  - `create_link_type_from_fk`
-  - `detect_foreign_keys`
-  - `get_objectify_watermark`
   - `list_schema_changes`
-  - `trigger_incremental_objectify`
 
 <!-- END AUTO-GENERATED: pipeline_tooling_reference -->

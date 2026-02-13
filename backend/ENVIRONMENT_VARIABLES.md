@@ -370,6 +370,20 @@ ONTOLOGY_DEPLOYMENTS_V2=true
 PIPELINE_PLAN_LLM_ENABLED=true
 ```
 
+## Pipeline Runtime Safety / Parity
+
+```bash
+# UDF runtime is reference-only in validator/runtime (`udfCode` inline is rejected).
+# This flag remains for compatibility but runtime behavior is enforced as reference-only.
+PIPELINE_UDF_REQUIRE_REFERENCE=true
+
+# Enable Spark parity execution path for UDF transforms.
+PIPELINE_UDF_SPARK_PARITY_ENABLED=true
+
+# Fail closed when preflight hits internal exceptions.
+PIPELINE_PREFLIGHT_FAIL_CLOSED=true
+```
+
 ## Lineage / Audit
 
 ```bash
@@ -392,3 +406,5 @@ OTEL_ENABLE_TRACING=true
 
 - `.env.example` is the authoritative dev template.
 - For production, use secret management and rotate tokens regularly.
+
+<!-- DOC_SYNC: 2026-02-13 Foundry pipeline parity + runtime consistency sweep -->

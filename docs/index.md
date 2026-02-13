@@ -84,3 +84,5 @@ reference/autoapi/index
 platform_checklist/PIPELINE_ARTIFACT_E2E
 platform_checklist/VERIFICATION_REPORT
 ```
+
+<!-- DOC_SYNC: 2026-02-13 Foundry pipeline parity + runtime consistency sweep -->

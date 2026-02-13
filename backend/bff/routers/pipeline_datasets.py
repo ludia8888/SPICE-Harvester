@@ -8,7 +8,6 @@ Selected helpers and endpoints are re-exported for backwards compatibility with
 existing tests/imports.
 """
 
-from __future__ import annotations
 
 from fastapi import APIRouter
 

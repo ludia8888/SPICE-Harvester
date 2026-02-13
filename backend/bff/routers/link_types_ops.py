@@ -5,7 +5,6 @@ service layer. It exists to support router composition and to keep backwards
 compatibility with existing imports/tests.
 """
 
-from __future__ import annotations
 
 from bff.services.link_types_mapping_service import (
     build_join_schema as _build_join_schema,

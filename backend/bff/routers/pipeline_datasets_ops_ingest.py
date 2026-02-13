@@ -3,7 +3,6 @@
 Small, stable helpers extracted from `bff.routers.pipeline_datasets_ops`.
 """
 
-from __future__ import annotations
 
 import hashlib
 import json

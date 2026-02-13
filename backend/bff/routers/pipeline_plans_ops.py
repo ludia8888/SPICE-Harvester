@@ -5,7 +5,6 @@ services. Concrete implementations live in `bff.services.*` to keep router
 modules thin (Facade pattern).
 """
 
-from __future__ import annotations
 
 from bff.services.pipeline_plan_preview_utils import (  # noqa: F401
     _JOIN_SAMPLE_MIN_ROWS,

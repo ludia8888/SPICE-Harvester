@@ -4,7 +4,6 @@ Normalize/validate dependency payloads.
 Extracted from `bff.routers.pipeline_ops`.
 """
 
-from __future__ import annotations
 
 from typing import Any, Optional
 from uuid import UUID

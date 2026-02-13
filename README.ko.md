@@ -5,3 +5,5 @@
 - 한국어(최신): `README.md`
 - English: `README.en.md`
 - 문서 인덱스: `docs/README.md`
+
+<!-- DOC_SYNC: 2026-02-13 Foundry pipeline parity + runtime consistency sweep -->

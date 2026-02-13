@@ -800,3 +800,5 @@
 
 - Original: •	☐ (P2) 권한 게이트: LLM 기능은 관리자 권한 부여가 필요.
 - Verification type: `unit`
+
+<!-- DOC_SYNC: 2026-02-13 Foundry pipeline parity + runtime consistency sweep -->

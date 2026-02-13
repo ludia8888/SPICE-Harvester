@@ -6,7 +6,6 @@ Keeps a stable import surface for subrouters/tests while delegating
 implementation details to smaller helpers (Composite + Facade).
 """
 
-from __future__ import annotations
 
 from bff.routers.pipeline_ops_augmentation import (
     _augment_definition_with_canonical_contract,

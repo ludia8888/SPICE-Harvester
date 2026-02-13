@@ -90,3 +90,5 @@ psql "$POSTGRES_URL" -c \
 psql "$POSTGRES_URL" -c \
   "SELECT edge_id, edge_type, metadata->>'promoted_from_artifact_id' AS artifact_id FROM spice_lineage.lineage_edges ORDER BY recorded_at DESC LIMIT 5;"
 ```
+
+<!-- DOC_SYNC: 2026-02-13 Foundry pipeline parity + runtime consistency sweep -->

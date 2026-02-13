@@ -7,7 +7,6 @@ schemas live in dedicated modules (Facade) and are re-exported here for
 backwards compatibility.
 """
 
-from __future__ import annotations
 
 from fastapi import APIRouter
 

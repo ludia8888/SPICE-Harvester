@@ -38,3 +38,5 @@ curl http://localhost:8002/debug/cors  # BFF
 # curl http://localhost:8000/debug/cors  # OMS
 # curl http://localhost:8003/debug/cors  # Funnel
 ```
+
+<!-- DOC_SYNC: 2026-02-13 Foundry pipeline parity + runtime consistency sweep -->

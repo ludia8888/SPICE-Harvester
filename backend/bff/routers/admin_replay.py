@@ -8,7 +8,6 @@ This router is intentionally thin: business logic lives in
 in `bff.schemas.admin_replay_requests`.
 """
 
-from __future__ import annotations
 from shared.observability.tracing import trace_endpoint
 
 from typing import Any, Dict, Optional

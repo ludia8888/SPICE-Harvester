@@ -6,7 +6,6 @@ and request schemas live in dedicated modules (Facade) and are re-exported here
 for backwards compatibility with existing tests/imports.
 """
 
-from __future__ import annotations
 
 from fastapi import APIRouter
 

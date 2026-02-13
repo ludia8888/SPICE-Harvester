@@ -82,3 +82,5 @@ Legacy plan-only control plane (`/api/v1/agent-plans/*`) has been removed from t
 | QA-001 | DONE | `backend/tests/unit` | Backend unit tests green |
 | QA-002 | PARTIAL | `scripts/e2e_agent_pipeline_demo.sh`, `docs/PIPELINE_AGENT.md` | E2E demo exists but must be kept aligned with pipeline agent API surface |
 | QA-003 | TODO |  | Harsh E2E: multi-dataset join spanning tree + groupBy/aggregate + window ranking + cast repairs (real datasets) |
+
+<!-- DOC_SYNC: 2026-02-13 Foundry pipeline parity + runtime consistency sweep -->

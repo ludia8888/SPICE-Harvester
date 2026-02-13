@@ -55,3 +55,5 @@
 - Blueprint.js 공식 문서
 - WCAG 2.x 가이드
 - React UI 성능 최적화(가상 스크롤, 메모이제이션) 관련 레퍼런스
+
+<!-- DOC_SYNC: 2026-02-13 Foundry pipeline parity + runtime consistency sweep -->

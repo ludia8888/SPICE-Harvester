@@ -120,3 +120,5 @@ classification across services and workers. The source of truth is
 ## Full Taxonomy
 
 The full legacy-to-enterprise mapping is listed in `docs/ERROR_TAXONOMY.md`.
+
+<!-- DOC_SYNC: 2026-02-13 Foundry pipeline parity + runtime consistency sweep -->

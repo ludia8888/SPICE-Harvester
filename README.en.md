@@ -435,3 +435,5 @@ curl -fsS -X PUT "http://localhost:8002/api/v1/databases/${DB}/instances/Product
   -H 'Content-Type: application/json' \
   -d '{"data":{"name":"Shirt (WhatIf)"}}'
 ```
+
+<!-- DOC_SYNC: 2026-02-13 Foundry pipeline parity + runtime consistency sweep -->

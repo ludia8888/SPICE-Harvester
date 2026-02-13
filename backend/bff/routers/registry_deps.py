@@ -9,7 +9,6 @@ Routers that previously defined local `get_*_registry()` helpers should import
 these functions (or re-export them) to keep code DRY and consistent.
 """
 
-from __future__ import annotations
 
 from shared.services.registries.agent_policy_registry import AgentPolicyRegistry
 from shared.services.registries.agent_session_registry import AgentSessionRegistry

@@ -4,7 +4,6 @@ Pipeline datasets dependencies (BFF).
 Centralizes FastAPI dependency providers for dataset subrouters.
 """
 
-from __future__ import annotations
 
 from fastapi import Depends
 

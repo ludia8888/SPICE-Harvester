@@ -5,7 +5,6 @@ This module defines HTTP routes only. Business logic lives in
 `bff.schemas.actions_requests`.
 """
 
-from __future__ import annotations
 from shared.observability.tracing import trace_endpoint
 
 from typing import Any, Dict, List, Optional

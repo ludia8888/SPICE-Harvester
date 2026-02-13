@@ -69,3 +69,5 @@ If RBAC is reintroduced into runtime:
 - Wire only through explicit imports from active app startup paths.
 - Prohibit large commented example blocks in runtime modules.
 - Require error taxonomy integration (`ErrorCode.PERMISSION_DENIED`) and structured envelope responses.
+
+<!-- DOC_SYNC: 2026-02-13 Foundry pipeline parity + runtime consistency sweep -->

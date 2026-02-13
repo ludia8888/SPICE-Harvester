@@ -3,7 +3,6 @@
 Small, stable helpers extracted from `bff.routers.pipeline_ops`.
 """
 
-from __future__ import annotations
 
 from shared.config.settings import get_settings
 

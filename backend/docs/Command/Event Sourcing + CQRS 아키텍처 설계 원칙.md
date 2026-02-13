@@ -112,3 +112,5 @@ graph TD
 -   **모든 변경은 Command로**: `InstanceWorker`만이 S3와 TerminusDB에 데이터를 쓸 수 있으며, 이는 오직 Kafka를 통해 전달된 Command에 의해서만 촉발됩니다.
 -   **읽기 모델은 Event로부터**: `ProjectionWorker`는 오직 `INSTANCE_EVENTS_TOPIC`의 이벤트를 통해서만 Elasticsearch의 데이터를 변경합니다.
 -   **Idempotency (멱등성)**: Publisher/Kafka/Consumer는 모두 at-least-once입니다. 멱등 키는 `event_id`이며, Worker/Projection은 `processed_events` 레지스트리(영속)로 "같은 event_id는 단 한 번만 side-effect를 만든다"를 강제합니다. 또한 aggregate 단위 `sequence_number`로 out-of-order stale 이벤트를 무시합니다.
+
+<!-- DOC_SYNC: 2026-02-13 Foundry pipeline parity + runtime consistency sweep -->

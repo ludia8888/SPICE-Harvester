@@ -10,7 +10,6 @@ Security model:
   to that tenant in storage.
 """
 
-from __future__ import annotations
 from shared.observability.tracing import trace_endpoint
 
 import contextlib

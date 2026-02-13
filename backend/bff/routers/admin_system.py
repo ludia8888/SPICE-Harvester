@@ -5,7 +5,6 @@ Lightweight health endpoints for operational dashboards. Composed by
 `bff.routers.admin`.
 """
 
-from __future__ import annotations
 from shared.observability.tracing import trace_endpoint
 
 from datetime import datetime, timezone

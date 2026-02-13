@@ -4,7 +4,6 @@ This module contains schema inference and mapping suggestion endpoints.
 Composed by `bff.routers.ontology` via router composition (Composite pattern).
 """
 
-from __future__ import annotations
 from shared.observability.tracing import trace_endpoint
 
 import logging
@@ -136,4 +135,3 @@ async def suggest_schema_from_excel(
         max_rows=max_rows,
         max_cols=max_cols,
     )
-
