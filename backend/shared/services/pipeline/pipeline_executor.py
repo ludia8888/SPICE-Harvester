@@ -1455,12 +1455,15 @@ def _stream_join_tables(
 
     left_event_col = str(stream_spec.left_event_time_column or "").strip()
     right_event_col = str(stream_spec.right_event_time_column or "").strip()
+    time_direction = str(stream_spec.time_direction or "backward").strip().lower() or "backward"
     if not left_event_col or not right_event_col:
         raise ValueError("streamJoin dynamic requires leftEventTimeColumn and rightEventTimeColumn")
     if stream_spec.allowed_lateness_seconds is None:
         raise ValueError("streamJoin dynamic requires allowedLatenessSeconds")
     if stream_spec.allowed_lateness_seconds < 0:
         raise ValueError("streamJoin allowedLatenessSeconds must be >= 0")
+    if time_direction not in {"backward", "forward", "symmetric"}:
+        raise ValueError(f"Invalid streamJoin timeDirection: {time_direction}")
 
     joined = _join_tables(
         left,
@@ -1490,7 +1493,13 @@ def _stream_join_tables(
         right_epoch = _to_epoch_seconds(row.get(resolved_right_event_col))
         if left_epoch is None or right_epoch is None:
             continue
-        if abs(left_epoch - right_epoch) <= lateness_seconds:
+        if time_direction == "backward":
+            is_within_lateness = right_epoch <= left_epoch and (left_epoch - right_epoch) <= lateness_seconds
+        elif time_direction == "forward":
+            is_within_lateness = left_epoch <= right_epoch and (right_epoch - left_epoch) <= lateness_seconds
+        else:
+            is_within_lateness = abs(left_epoch - right_epoch) <= lateness_seconds
+        if is_within_lateness:
             rows.append(row)
             if max_output_rows is not None and len(rows) >= int(max_output_rows):
                 break

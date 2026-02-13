@@ -47,8 +47,9 @@ def test_resolve_dataset_write_policy_default_incremental_with_pk() -> None:
         output_metadata={"primary_key_columns": ["id"]},
         execution_semantics="incremental",
     )
-    assert policy.resolved_write_mode == DatasetWriteMode.APPEND_ONLY_NEW_ROWS
+    assert policy.resolved_write_mode == DatasetWriteMode.ALWAYS_APPEND
     assert policy.runtime_write_mode == "append"
+    assert any("additive update signal is unavailable" in warning for warning in policy.warnings)
 
 
 @pytest.mark.unit
@@ -59,7 +60,67 @@ def test_resolve_dataset_write_policy_default_incremental_without_pk() -> None:
         execution_semantics="incremental",
     )
     assert policy.resolved_write_mode == DatasetWriteMode.ALWAYS_APPEND
-    assert any("always_append" in warning for warning in policy.warnings)
+    assert any("additive update signal is unavailable" in warning for warning in policy.warnings)
+
+
+@pytest.mark.unit
+def test_resolve_dataset_write_policy_default_incremental_with_additive_updates_false() -> None:
+    policy = resolve_dataset_write_policy(
+        definition={},
+        output_metadata={"primary_key_columns": ["id"]},
+        execution_semantics="incremental",
+        has_incremental_input=True,
+        incremental_inputs_have_additive_updates=False,
+    )
+    assert policy.resolved_write_mode == DatasetWriteMode.SNAPSHOT_REPLACE
+    assert policy.runtime_write_mode == "overwrite"
+
+
+@pytest.mark.unit
+def test_resolve_dataset_write_policy_default_incremental_with_additive_updates_true() -> None:
+    policy = resolve_dataset_write_policy(
+        definition={},
+        output_metadata={"primary_key_columns": ["id"]},
+        execution_semantics="incremental",
+        has_incremental_input=True,
+        incremental_inputs_have_additive_updates=True,
+    )
+    assert policy.resolved_write_mode == DatasetWriteMode.ALWAYS_APPEND
+    assert policy.runtime_write_mode == "append"
+
+
+@pytest.mark.unit
+def test_resolve_dataset_write_policy_default_without_incremental_inputs() -> None:
+    policy = resolve_dataset_write_policy(
+        definition={},
+        output_metadata={"primary_key_columns": ["id"]},
+        execution_semantics="incremental",
+        has_incremental_input=False,
+    )
+    assert policy.resolved_write_mode == DatasetWriteMode.SNAPSHOT_REPLACE
+    assert policy.runtime_write_mode == "overwrite"
+
+
+@pytest.mark.unit
+def test_resolve_dataset_write_policy_snapshot_difference_uses_overwrite_runtime() -> None:
+    policy = resolve_dataset_write_policy(
+        definition={},
+        output_metadata={"write_mode": "snapshot_difference", "primary_key_columns": ["id"]},
+        execution_semantics="snapshot",
+    )
+    assert policy.resolved_write_mode == DatasetWriteMode.SNAPSHOT_DIFFERENCE
+    assert policy.runtime_write_mode == "overwrite"
+
+
+@pytest.mark.unit
+def test_resolve_dataset_write_policy_changelog_uses_append_runtime() -> None:
+    policy = resolve_dataset_write_policy(
+        definition={},
+        output_metadata={"write_mode": "changelog", "primary_key_columns": ["id"]},
+        execution_semantics="snapshot",
+    )
+    assert policy.resolved_write_mode == DatasetWriteMode.CHANGELOG
+    assert policy.runtime_write_mode == "append"
 
 
 @pytest.mark.unit

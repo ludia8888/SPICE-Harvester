@@ -698,6 +698,8 @@ class PipelineMCPServer:
                             "left_event_time_column": {"type": "string"},
                             "right_event_time_column": {"type": "string"},
                             "allowed_lateness_seconds": {"type": "number"},
+                            "time_direction": {"type": "string", "enum": ["backward", "forward", "symmetric"]},
+                            "timeDirection": {"type": "string"},
                             "stream_join_metadata": {"type": "object"},
                             "node_id": {"type": "string"},
                         },

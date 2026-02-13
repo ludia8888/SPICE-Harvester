@@ -1497,6 +1497,15 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                 "lakefs_commits": input_commit_payload,
             }
             diff_empty_inputs = _inputs_diff_empty(input_snapshots)
+            has_incremental_input = execution_semantics in {"incremental", "streaming"}
+            incremental_inputs_have_additive_updates: Optional[bool] = None
+            if has_incremental_input:
+                has_diff_signal = any(
+                    isinstance(snapshot, dict) and bool(snapshot.get("diff_requested"))
+                    for snapshot in input_snapshots
+                )
+                if has_diff_signal:
+                    incremental_inputs_have_additive_updates = not diff_empty_inputs
             preview_limit = int(job.preview_limit or 200)
             preview_limit = max(1, min(500, preview_limit))
 
@@ -1874,6 +1883,8 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                             definition=definition,
                             output_metadata=metadata,
                             execution_semantics=execution_semantics,
+                            has_incremental_input=has_incremental_input,
+                            incremental_inputs_have_additive_updates=incremental_inputs_have_additive_updates,
                         )
                         metadata = dict(dataset_policy.normalized_metadata)
                         write_mode_requested = dataset_policy.requested_write_mode
@@ -1886,6 +1897,8 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                             definition=definition,
                             output_metadata=metadata,
                             execution_semantics=execution_semantics,
+                            has_incremental_input=has_incremental_input,
+                            incremental_inputs_have_additive_updates=incremental_inputs_have_additive_updates,
                             available_columns=set(schema_columns or []),
                         )
                         if dataset_output_errors:
@@ -2024,6 +2037,7 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                         branch=base_branch,
                         dataset_name=str(item.get("dataset_name") or ""),
                         execution_semantics=execution_semantics,
+                        incremental_inputs_have_additive_updates=incremental_inputs_have_additive_updates,
                         write_mode=str(item.get("runtime_write_mode") or output_write_mode),
                         file_prefix=job.job_id,
                         file_format=item["output_format"],
@@ -2349,6 +2363,8 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                         definition=definition,
                         output_metadata=metadata,
                         execution_semantics=execution_semantics,
+                        has_incremental_input=has_incremental_input,
+                        incremental_inputs_have_additive_updates=incremental_inputs_have_additive_updates,
                     )
                     metadata = dict(dataset_policy.normalized_metadata)
                     write_mode_requested = dataset_policy.requested_write_mode
@@ -2361,6 +2377,8 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                         definition=definition,
                         output_metadata=metadata,
                         execution_semantics=execution_semantics,
+                        has_incremental_input=has_incremental_input,
+                        incremental_inputs_have_additive_updates=incremental_inputs_have_additive_updates,
                         available_columns=set(schema_columns or []),
                     )
                     if dataset_output_errors:
@@ -2494,6 +2512,7 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                     branch=base_branch,
                     dataset_name=str(item.get("dataset_name") or ""),
                     execution_semantics=execution_semantics,
+                    incremental_inputs_have_additive_updates=incremental_inputs_have_additive_updates,
                     write_mode=str(item.get("runtime_write_mode") or output_write_mode),
                     file_prefix=job.job_id,
                     file_format=item["output_format"],
@@ -3139,6 +3158,7 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
         branch: Optional[str] = None,
         dataset_name: Optional[str] = None,
         execution_semantics: str = "snapshot",
+        incremental_inputs_have_additive_updates: Optional[bool] = None,
         write_mode: str = "overwrite",
         file_prefix: Optional[str] = None,
         file_format: str = "parquet",
@@ -3156,6 +3176,7 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                 branch=branch,
                 dataset_name=dataset_name,
                 execution_semantics=execution_semantics,
+                incremental_inputs_have_additive_updates=incremental_inputs_have_additive_updates,
                 write_mode=write_mode,
                 file_prefix=file_prefix,
                 file_format=file_format,
@@ -3231,6 +3252,7 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
         branch: Optional[str],
         dataset_name: Optional[str],
         execution_semantics: str,
+        incremental_inputs_have_additive_updates: Optional[bool],
         write_mode: str,
         file_prefix: Optional[str],
         file_format: str,
@@ -3241,6 +3263,8 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
             definition={},
             output_metadata=output_metadata,
             execution_semantics=execution_semantics,
+            has_incremental_input=execution_semantics in {"incremental", "streaming"},
+            incremental_inputs_have_additive_updates=incremental_inputs_have_additive_updates,
         )
         for warning in policy.warnings:
             logger.warning("Dataset output policy normalized for %s: %s", dataset_name or prefix, warning)
@@ -3251,6 +3275,8 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
             definition={},
             output_metadata=output_metadata,
             execution_semantics=execution_semantics,
+            has_incremental_input=execution_semantics in {"incremental", "streaming"},
+            incremental_inputs_have_additive_updates=incremental_inputs_have_additive_updates,
             available_columns=set(df.columns or []),
         )
         if validation_errors:
@@ -3267,7 +3293,6 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
         existing_df = self._empty_dataframe()
         if policy.resolved_write_mode in {
             DatasetWriteMode.APPEND_ONLY_NEW_ROWS,
-            DatasetWriteMode.CHANGELOG,
             DatasetWriteMode.SNAPSHOT_DIFFERENCE,
         }:
             existing_df = await self._load_existing_output_dataset(
@@ -3294,24 +3319,19 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
         materialized_df = input_aligned
         if policy.resolved_write_mode == DatasetWriteMode.ALWAYS_APPEND:
             materialized_df = input_aligned
+        elif policy.resolved_write_mode == DatasetWriteMode.CHANGELOG:
+            # Changelog appends all rows produced in the current transaction.
+            materialized_df = input_aligned
         elif policy.resolved_write_mode == DatasetWriteMode.APPEND_ONLY_NEW_ROWS:
             if existing_aligned.columns and pk_columns:
                 existing_keys = existing_aligned.select(*pk_columns).distinct()
                 materialized_df = input_aligned.join(existing_keys, on=pk_columns, how="left_anti")
             else:
                 materialized_df = input_aligned
-        elif policy.resolved_write_mode in {DatasetWriteMode.CHANGELOG, DatasetWriteMode.SNAPSHOT_DIFFERENCE}:
+        elif policy.resolved_write_mode == DatasetWriteMode.SNAPSHOT_DIFFERENCE:
             if existing_aligned.columns and pk_columns:
-                left = input_aligned.withColumn("__input_hash", self._row_hash_expr(input_aligned))
-                right = existing_aligned.withColumn("__existing_hash", self._row_hash_expr(existing_aligned))
-                changed = left.join(
-                    right.select(*(pk_columns + ["__existing_hash"])),
-                    on=pk_columns,
-                    how="left",
-                ).filter(
-                    F.col("__existing_hash").isNull() | (F.col("__existing_hash") != F.col("__input_hash"))
-                )
-                materialized_df = changed.select(*aligned_columns)
+                existing_keys = existing_aligned.select(*pk_columns).distinct()
+                materialized_df = input_aligned.join(existing_keys, on=pk_columns, how="left_anti")
             else:
                 materialized_df = input_aligned
         elif policy.resolved_write_mode == DatasetWriteMode.SNAPSHOT_REPLACE:

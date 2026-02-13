@@ -49,6 +49,7 @@ class StreamJoinSpec:
     left_event_time_column: Optional[str]
     right_event_time_column: Optional[str]
     allowed_lateness_seconds: Optional[float]
+    time_direction: str
 
 
 def normalize_operation(value: Any) -> str:
@@ -113,6 +114,10 @@ def resolve_stream_join_spec(metadata: Dict[str, Any]) -> StreamJoinSpec:
 
     left_event_time_column = _resolve_text(["leftEventTimeColumn", "left_event_time_column"])
     right_event_time_column = _resolve_text(["rightEventTimeColumn", "right_event_time_column"])
+    time_direction = (
+        _resolve_text(["timeDirection", "time_direction", "eventTimeDirection", "event_time_direction"])
+        or "backward"
+    ).lower()
 
     allowed_lateness_raw: Optional[Any] = None
     for source in (stream_meta, metadata):
@@ -141,6 +146,7 @@ def resolve_stream_join_spec(metadata: Dict[str, Any]) -> StreamJoinSpec:
         left_event_time_column=left_event_time_column,
         right_event_time_column=right_event_time_column,
         allowed_lateness_seconds=allowed_lateness_seconds,
+        time_direction=time_direction,
     )
 
 

@@ -194,7 +194,7 @@ def test_stream_join_transform(worker: PipelineWorker) -> None:
         ["id", "left_val", "left_event_time"],
     )
     right = worker.spark.createDataFrame(
-        [(1, "right-a", "2026-01-01T00:00:20Z"), (2, "right-b", "2026-01-01T00:20:00Z")],
+        [(1, "right-a", "2025-12-31T23:59:40Z"), (2, "right-b", "2026-01-01T00:20:00Z")],
         ["id", "right_val", "right_event_time"],
     )
 

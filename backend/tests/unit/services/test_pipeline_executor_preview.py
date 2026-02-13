@@ -168,3 +168,140 @@ async def test_executor_compute_equals_is_treated_as_comparison_when_lhs_exists(
     preview = await executor.preview(definition=definition, db_name=db_name, node_id="t1", limit=10)
     values = [row.get("computed") for row in preview.get("rows") or []]
     assert values == [True, False]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_executor_stream_join_dynamic_uses_backward_time_direction_by_default() -> None:
+    db_name = "demo"
+    left_name = "left_stream"
+    right_name = "right_stream"
+    left_id = "ds-demo-left-main"
+    right_id = "ds-demo-right-main"
+
+    registry = _DatasetRegistry()
+    registry.datasets_by_name[(db_name, left_name, "main")] = _Dataset(
+        dataset_id=left_id,
+        db_name=db_name,
+        name=left_name,
+        branch="main",
+        schema_json={"columns": [{"name": "id", "type": "xsd:integer"}, {"name": "ts_left", "type": "xsd:string"}]},
+    )
+    registry.datasets_by_name[(db_name, right_name, "main")] = _Dataset(
+        dataset_id=right_id,
+        db_name=db_name,
+        name=right_name,
+        branch="main",
+        schema_json={"columns": [{"name": "id", "type": "xsd:integer"}, {"name": "ts_right", "type": "xsd:string"}]},
+    )
+    registry.versions_by_dataset_id[left_id] = _Version(
+        dataset_id=left_id,
+        artifact_key=None,
+        sample_json={"rows": [{"id": 1, "ts_left": "2026-01-01T00:00:00Z"}]},
+    )
+    registry.versions_by_dataset_id[right_id] = _Version(
+        dataset_id=right_id,
+        artifact_key=None,
+        sample_json={"rows": [{"id": 1, "ts_right": "2026-01-01T00:00:20Z"}]},
+    )
+
+    executor = PipelineExecutor(dataset_registry=registry)
+    definition = {
+        "nodes": [
+            {"id": "left", "type": "input", "metadata": {"datasetName": left_name}},
+            {"id": "right", "type": "input", "metadata": {"datasetName": right_name}},
+            {
+                "id": "sj1",
+                "type": "transform",
+                "metadata": {
+                    "operation": "streamJoin",
+                    "leftKeys": ["id"],
+                    "rightKeys": ["id"],
+                    "streamJoin": {
+                        "strategy": "dynamic",
+                        "leftEventTimeColumn": "ts_left",
+                        "rightEventTimeColumn": "ts_right",
+                        "allowedLatenessSeconds": 60,
+                    },
+                },
+            },
+            {"id": "out1", "type": "output"},
+        ],
+        "edges": [
+            {"from": "left", "to": "sj1"},
+            {"from": "right", "to": "sj1"},
+            {"from": "sj1", "to": "out1"},
+        ],
+    }
+
+    preview = await executor.preview(definition=definition, db_name=db_name, node_id="sj1", limit=10)
+    assert preview["row_count"] == 0
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_executor_stream_join_dynamic_supports_forward_direction() -> None:
+    db_name = "demo"
+    left_name = "left_stream"
+    right_name = "right_stream"
+    left_id = "ds-demo-left-main"
+    right_id = "ds-demo-right-main"
+
+    registry = _DatasetRegistry()
+    registry.datasets_by_name[(db_name, left_name, "main")] = _Dataset(
+        dataset_id=left_id,
+        db_name=db_name,
+        name=left_name,
+        branch="main",
+        schema_json={"columns": [{"name": "id", "type": "xsd:integer"}, {"name": "ts_left", "type": "xsd:string"}]},
+    )
+    registry.datasets_by_name[(db_name, right_name, "main")] = _Dataset(
+        dataset_id=right_id,
+        db_name=db_name,
+        name=right_name,
+        branch="main",
+        schema_json={"columns": [{"name": "id", "type": "xsd:integer"}, {"name": "ts_right", "type": "xsd:string"}]},
+    )
+    registry.versions_by_dataset_id[left_id] = _Version(
+        dataset_id=left_id,
+        artifact_key=None,
+        sample_json={"rows": [{"id": 1, "ts_left": "2026-01-01T00:00:00Z"}]},
+    )
+    registry.versions_by_dataset_id[right_id] = _Version(
+        dataset_id=right_id,
+        artifact_key=None,
+        sample_json={"rows": [{"id": 1, "ts_right": "2026-01-01T00:00:20Z"}]},
+    )
+
+    executor = PipelineExecutor(dataset_registry=registry)
+    definition = {
+        "nodes": [
+            {"id": "left", "type": "input", "metadata": {"datasetName": left_name}},
+            {"id": "right", "type": "input", "metadata": {"datasetName": right_name}},
+            {
+                "id": "sj1",
+                "type": "transform",
+                "metadata": {
+                    "operation": "streamJoin",
+                    "leftKeys": ["id"],
+                    "rightKeys": ["id"],
+                    "streamJoin": {
+                        "strategy": "dynamic",
+                        "timeDirection": "forward",
+                        "leftEventTimeColumn": "ts_left",
+                        "rightEventTimeColumn": "ts_right",
+                        "allowedLatenessSeconds": 60,
+                    },
+                },
+            },
+            {"id": "out1", "type": "output"},
+        ],
+        "edges": [
+            {"from": "left", "to": "sj1"},
+            {"from": "right", "to": "sj1"},
+            {"from": "sj1", "to": "out1"},
+        ],
+    }
+
+    preview = await executor.preview(definition=definition, db_name=db_name, node_id="sj1", limit=10)
+    assert preview["row_count"] == 1

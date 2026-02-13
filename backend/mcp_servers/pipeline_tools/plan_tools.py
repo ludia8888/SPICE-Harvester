@@ -735,6 +735,7 @@ async def _plan_add_stream_join(_server: Any, arguments: Dict[str, Any]) -> Any:
         allowed_lateness_seconds=arguments.get("allowed_lateness_seconds")
         if arguments.get("allowed_lateness_seconds") is not None
         else arguments.get("allowedLatenessSeconds"),
+        time_direction=arguments.get("time_direction") or arguments.get("timeDirection"),
         stream_join_metadata=(
             arguments.get("stream_join_metadata")
             if isinstance(arguments.get("stream_join_metadata"), dict)

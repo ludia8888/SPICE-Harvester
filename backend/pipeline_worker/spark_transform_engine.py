@@ -316,12 +316,15 @@ def _apply_stream_join(ctx: _SparkTransformContext) -> DataFrame:
     # dynamic strategy: perform key join first, then apply event-time bounded predicate.
     left_event_col = _clean_col_name(stream_spec.left_event_time_column)
     right_event_col = _clean_col_name(stream_spec.right_event_time_column)
+    time_direction = str(stream_spec.time_direction or "backward").strip().lower() or "backward"
     if not left_event_col or not right_event_col:
         raise ValueError("streamJoin dynamic requires leftEventTimeColumn and rightEventTimeColumn")
     if stream_spec.allowed_lateness_seconds is None:
         raise ValueError("streamJoin dynamic requires allowedLatenessSeconds")
     if stream_spec.allowed_lateness_seconds < 0:
         raise ValueError("streamJoin allowedLatenessSeconds must be >= 0")
+    if time_direction not in {"backward", "forward", "symmetric"}:
+        raise ValueError(f"Invalid streamJoin timeDirection: {time_direction}")
 
     joined = _apply_join(ctx)
     if left_event_col not in joined.columns:
@@ -336,7 +339,18 @@ def _apply_stream_join(ctx: _SparkTransformContext) -> DataFrame:
     lateness_seconds = float(stream_spec.allowed_lateness_seconds)
     left_ts = F.to_timestamp(F.col(left_event_col))
     right_ts = F.to_timestamp(F.col(resolved_right_event_col))
-    within_lateness = F.abs(F.unix_timestamp(left_ts) - F.unix_timestamp(right_ts)) <= F.lit(lateness_seconds)
+    left_epoch = F.unix_timestamp(left_ts)
+    right_epoch = F.unix_timestamp(right_ts)
+    if time_direction == "backward":
+        within_lateness = (
+            right_epoch <= left_epoch
+        ) & ((left_epoch - right_epoch) <= F.lit(lateness_seconds))
+    elif time_direction == "forward":
+        within_lateness = (
+            left_epoch <= right_epoch
+        ) & ((right_epoch - left_epoch) <= F.lit(lateness_seconds))
+    else:
+        within_lateness = F.abs(left_epoch - right_epoch) <= F.lit(lateness_seconds)
     return joined.filter(within_lateness)
 
 
@@ -849,12 +863,7 @@ def _apply_window(ctx: _SparkTransformContext) -> DataFrame:
 
 def _apply_udf(ctx: _SparkTransformContext) -> DataFrame:
     source = ctx.inputs[0]
-    code = str(
-        ctx.metadata.get("__resolved_udf_code")
-        or ctx.metadata.get("udfCode")
-        or ctx.metadata.get("udf_code")
-        or ""
-    ).strip()
+    code = str(ctx.metadata.get("__resolved_udf_code") or "").strip()
     if not code:
         raise ValueError("udf requires resolved code (__resolved_udf_code)")
 

@@ -120,6 +120,8 @@ class ResolvedDatasetWritePolicy:
     execution_semantics: str
     explicit_write_mode: bool
     normalized_metadata: Dict[str, Any]
+    has_incremental_input: bool = False
+    incremental_inputs_have_additive_updates: Optional[bool] = None
     warnings: List[str] = field(default_factory=list)
     policy_hash: str = ""
 
@@ -299,18 +301,34 @@ def normalize_dataset_output_metadata(
 def _resolve_default_mode(
     *,
     execution_semantics: str,
-    primary_key_columns: List[str],
+    has_incremental_input: bool,
+    incremental_inputs_have_additive_updates: Optional[bool],
     warnings: List[str],
 ) -> DatasetWriteMode:
-    semantics = _text(execution_semantics).lower() or "snapshot"
-    if semantics in {"incremental", "streaming"}:
-        if primary_key_columns:
-            return DatasetWriteMode.APPEND_ONLY_NEW_ROWS
-        warnings.append(
-            "write_mode default resolved to always_append because primary_key_columns are missing in incremental/streaming mode"
-        )
+    _ = execution_semantics
+    if not has_incremental_input:
+        return DatasetWriteMode.SNAPSHOT_REPLACE
+    if incremental_inputs_have_additive_updates is True:
         return DatasetWriteMode.ALWAYS_APPEND
-    return DatasetWriteMode.SNAPSHOT_REPLACE
+    if incremental_inputs_have_additive_updates is False:
+        return DatasetWriteMode.SNAPSHOT_REPLACE
+    warnings.append(
+        "write_mode default resolved to always_append because additive update signal is unavailable"
+    )
+    return DatasetWriteMode.ALWAYS_APPEND
+
+
+def _normalize_bool(value: Any) -> Optional[bool]:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    text = _text(value).lower()
+    if text in {"1", "true", "yes", "y", "on"}:
+        return True
+    if text in {"0", "false", "no", "n", "off"}:
+        return False
+    return None
 
 
 def _runtime_write_mode(mode: DatasetWriteMode) -> str:
@@ -318,7 +336,6 @@ def _runtime_write_mode(mode: DatasetWriteMode) -> str:
         DatasetWriteMode.ALWAYS_APPEND,
         DatasetWriteMode.APPEND_ONLY_NEW_ROWS,
         DatasetWriteMode.CHANGELOG,
-        DatasetWriteMode.SNAPSHOT_DIFFERENCE,
     }:
         return "append"
     return "overwrite"
@@ -334,6 +351,8 @@ def _policy_hash_payload(policy: ResolvedDatasetWritePolicy) -> Dict[str, Any]:
         "output_format": policy.output_format,
         "partition_by": list(policy.partition_by),
         "execution_semantics": policy.execution_semantics,
+        "has_incremental_input": policy.has_incremental_input,
+        "incremental_inputs_have_additive_updates": policy.incremental_inputs_have_additive_updates,
     }
 
 
@@ -347,11 +366,18 @@ def resolve_dataset_write_policy(
     definition: Mapping[str, Any],
     output_metadata: Mapping[str, Any],
     execution_semantics: Optional[str] = None,
+    has_incremental_input: Optional[bool] = None,
+    incremental_inputs_have_additive_updates: Optional[bool] = None,
 ) -> ResolvedDatasetWritePolicy:
     normalized = normalize_dataset_output_metadata(definition=definition, output_metadata=output_metadata)
     warnings = list(normalized.warnings)
 
     resolved_execution = _text(execution_semantics) or resolve_execution_semantics(dict(definition or {}))
+    inferred_has_incremental_input = resolved_execution in {"incremental", "streaming"}
+    effective_has_incremental_input = (
+        bool(has_incremental_input) if has_incremental_input is not None else inferred_has_incremental_input
+    )
+    effective_additive_updates = _normalize_bool(incremental_inputs_have_additive_updates)
     requested_write_mode = _text(normalized.metadata.get("write_mode") or DatasetWriteMode.DEFAULT.value).lower()
     if not requested_write_mode:
         requested_write_mode = DatasetWriteMode.DEFAULT.value
@@ -364,7 +390,8 @@ def resolve_dataset_write_policy(
     if effective_write_mode == DatasetWriteMode.DEFAULT.value:
         resolved_mode = _resolve_default_mode(
             execution_semantics=resolved_execution,
-            primary_key_columns=list(normalized.metadata.get("primary_key_columns") or []),
+            has_incremental_input=effective_has_incremental_input,
+            incremental_inputs_have_additive_updates=effective_additive_updates,
             warnings=warnings,
         )
     else:
@@ -385,6 +412,8 @@ def resolve_dataset_write_policy(
         partition_by=partition_by,
         execution_semantics=resolved_execution,
         explicit_write_mode=normalized.explicit_write_mode,
+        has_incremental_input=effective_has_incremental_input,
+        incremental_inputs_have_additive_updates=effective_additive_updates,
         normalized_metadata=dict(normalized.metadata),
         warnings=warnings,
         policy_hash="",
@@ -400,6 +429,8 @@ def resolve_dataset_write_policy(
         partition_by=list(policy.partition_by),
         execution_semantics=policy.execution_semantics,
         explicit_write_mode=policy.explicit_write_mode,
+        has_incremental_input=policy.has_incremental_input,
+        incremental_inputs_have_additive_updates=policy.incremental_inputs_have_additive_updates,
         normalized_metadata=dict(policy.normalized_metadata),
         warnings=list(policy.warnings),
         policy_hash=policy_hash,
@@ -411,12 +442,16 @@ def validate_dataset_output_metadata(
     definition: Mapping[str, Any],
     output_metadata: Mapping[str, Any],
     execution_semantics: Optional[str] = None,
+    has_incremental_input: Optional[bool] = None,
+    incremental_inputs_have_additive_updates: Optional[bool] = None,
     available_columns: Optional[Iterable[str]] = None,
 ) -> List[str]:
     policy = resolve_dataset_write_policy(
         definition=definition,
         output_metadata=output_metadata,
         execution_semantics=execution_semantics,
+        has_incremental_input=has_incremental_input,
+        incremental_inputs_have_additive_updates=incremental_inputs_have_additive_updates,
     )
     errors: List[str] = []
 

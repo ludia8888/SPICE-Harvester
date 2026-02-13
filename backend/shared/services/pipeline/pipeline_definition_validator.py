@@ -370,6 +370,10 @@ def validate_pipeline_definition(
             if stream_spec is not None:
                 if stream_spec.strategy not in {"dynamic", "left_lookup", "static"}:
                     errors.append(f"streamJoin has invalid strategy '{stream_spec.strategy}' on node {node_id}")
+                if stream_spec.time_direction not in {"backward", "forward", "symmetric"}:
+                    errors.append(
+                        f"streamJoin has invalid timeDirection '{stream_spec.time_direction}' on node {node_id}"
+                    )
                 if stream_spec.strategy == "dynamic":
                     if not str(stream_spec.left_event_time_column or "").strip():
                         errors.append(f"streamJoin dynamic requires leftEventTimeColumn on node {node_id}")

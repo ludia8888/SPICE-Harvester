@@ -1115,6 +1115,7 @@ def add_stream_join(
     left_event_time_column: Optional[str] = None,
     right_event_time_column: Optional[str] = None,
     allowed_lateness_seconds: Optional[float] = None,
+    time_direction: Optional[str] = None,
     stream_join_metadata: Optional[Dict[str, Any]] = None,
     node_id: Optional[str] = None,
 ) -> PlanMutation:
@@ -1132,6 +1133,16 @@ def add_stream_join(
         raise PipelinePlanBuilderError("strategy must be one of: dynamic|left_lookup|static")
     stream_meta = dict(stream_join_metadata or {})
     stream_meta["strategy"] = strategy_norm
+
+    direction_norm = str(
+        time_direction
+        or stream_meta.get("timeDirection")
+        or stream_meta.get("time_direction")
+        or "backward"
+    ).strip().lower() or "backward"
+    if direction_norm not in {"backward", "forward", "symmetric"}:
+        raise PipelinePlanBuilderError("time_direction must be one of: backward|forward|symmetric")
+    stream_meta["timeDirection"] = direction_norm
 
     left_event = str(
         left_event_time_column

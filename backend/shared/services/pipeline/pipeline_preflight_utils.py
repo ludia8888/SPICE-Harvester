@@ -821,6 +821,18 @@ async def compute_pipeline_preflight(
                                 "message": f"streamJoin strategy must be dynamic|left_lookup|static (got: {stream_spec.strategy})",
                             }
                         )
+                    elif stream_spec.time_direction not in {"backward", "forward", "symmetric"}:
+                        issues.append(
+                            {
+                                "kind": "stream_join_time_direction_invalid",
+                                "severity": "error",
+                                "node_id": node_id,
+                                "message": (
+                                    "streamJoin timeDirection must be backward|forward|symmetric "
+                                    f"(got: {stream_spec.time_direction})"
+                                ),
+                            }
+                        )
                     elif stream_spec.strategy == "dynamic":
                         missing_fields: List[str] = []
                         if not str(stream_spec.left_event_time_column or "").strip():
