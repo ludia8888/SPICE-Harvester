@@ -1,105 +1,15 @@
-# SPICE HARVESTER — BFF API Reference (v1, code-backed)
+# API Reference (Auto-Generated)
 
-> Updated: 2026-01-11  \
-> Base URL (local): `http://localhost:8002/api/v1`  \
-> OpenAPI (local): `http://localhost:8002/openapi.json`  \
-> Swagger UI (local): `http://localhost:8002/docs`
+> Generated from BFF OpenAPI by `scripts/generate_api_reference.py`.
+> Do not edit manually.
 
-## Scope
+## OpenAPI Metadata
 
-- **BFF is the frontend contract**. Frontend clients should only call `/api/v1/...` BFF routes.
-- OMS/Funnel/Workers are internal dependencies. Their APIs are not the frontend contract.
-- Payload schemas are best read from OpenAPI. This document enumerates **current routes** and behavior.
-- Agent service (:8004) is reachable via the BFF `/api/v1/agent/*` proxy only; direct access is internal. Details in `docs/ARCHITECTURE.md` / `docs/LLM_INTEGRATION.md`.
+- Title: `BFF (Backend for Frontend) Service`
+- Version: `2.0.0`
+- OpenAPI: `3.1.0`
 
-## Conventions
-
-### Authentication
-
-- **Required by default**. BFF requires a shared token unless explicitly disabled.
-- Token sources: `X-Admin-Token` or `Authorization: Bearer <token>`.
-- Config:
-  - `BFF_REQUIRE_AUTH=true` (default)
-  - `BFF_ADMIN_TOKEN` or `BFF_WRITE_TOKEN` (or `ADMIN_API_KEY`/`ADMIN_TOKEN`)
-  - To disable auth **only in non-production**: set `BFF_REQUIRE_AUTH=false` AND `ALLOW_INSECURE_BFF_AUTH_DISABLE=true`.
-- Exempt paths (default): `/api/v1`, `/api/v1/health`, Google Sheets OAuth callback.
-
-### Async writes (202 Accepted)
-
-- Many write endpoints return **202 + `command_id`**; poll `/api/v1/commands/{command_id}/status`.
-- Some writes are synchronous (200/201) when no async command is created.
-- Action writeback submissions return **202 + `action_log_id`** (not `command_id`).
-
-### Rate limiting
-
-- Rate limiting is active when Redis is available.
-- Standard headers are returned:
-  - `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset`
-  - `X-RateLimit-Mode`, `X-RateLimit-Degraded`, `X-RateLimit-Disabled` (best-effort)
-
-### Common response shapes
-
-- `ApiResponse`: `{ status, message, data, errors }`
-- `CommandResult`: `{ command_id, status, result, error, completed_at, retry_count }`
-
-### Branching
-
-- Many endpoints accept `?branch=` (default `main`). For read APIs, `branch` is a deprecated alias for `base_branch`.
-- Branch names in path parameters use `{branch_name:path}` to allow `/`.
-
-### Action writeback (overlay reads)
-
-Some read APIs support **Action-only writeback overlay** (`docs/ACTION_WRITEBACK_DESIGN.md`).
-
-Branch parameters (read APIs):
-- `base_branch`: authoritative base branch (Terminus + base ES index). Default: `main`.
-- `overlay_branch`: ES overlay branch. Default is resolved server-side for writeback-enabled types (usually `writeback-{db_name}`).
-- `branch` (deprecated): alias for `base_branch` only.
-
-Writeback read flags:
-- `WRITEBACK_READ_OVERLAY=true` enables automatic overlay reads for object types listed in `WRITEBACK_ENABLED_OBJECT_TYPES`.
-- `overlay_branch` can be explicitly provided to force overlay reads regardless of `WRITEBACK_READ_OVERLAY`.
-
-Overlay response metadata (best-effort, varies per endpoint):
-- `overlay_status`: `ACTIVE | DISABLED | DEGRADED`
-- `writeback_enabled`: whether the type is writeback-enabled (by server config)
-- `writeback_edits_present`: whether writeback edits exist (may be `null` when not computable)
-
-Notes:
-- ES overlay documents are only written when an Action produces a **non-noop** `applied_changes` (or a tombstone).
-  If a conflict policy results in a no-op (e.g. `BASE_WINS` skip), reads may return the base document even when
-  `overlay_branch` is provided, and overlay-only fields like `patchset_commit_id` may be absent.
-- Conflict/decision details should be read from the ActionLog (`/api/v1/databases/{db_name}/actions/logs/...`).
-
-Degraded behavior:
-- For writeback-enabled types, **no silent Terminus-only fallback** is allowed when overlay is required.
-- If ES overlay is unavailable, endpoints either:
-  - return `503` with `overlay_status=DEGRADED`, or
-  - return a server-merged view with `overlay_status=DEGRADED` (currently only implemented for single-instance reads).
-
-Action submission note:
-- `POST /api/v1/databases/{db_name}/actions/{action_type_id}/submit` returns an `action_log_id` (ActionLog).
-- Use `GET /api/v1/databases/{db_name}/actions/logs/{action_log_id}` (or `GET /api/v1/databases/{db_name}/actions/logs`) to read status/result.
-- Actor identity is derived from request headers (`X-User-ID`, optional `X-User-Type` default `user`) and forwarded to OMS as `metadata.user_id` / `metadata.user_type`.
-- ActionLog is also exposed as a virtual ontology object type `ActionLog`:
-  `GET /api/v1/databases/{db_name}/class/ActionLog/instance/{action_log_id}` and `GET /api/v1/databases/{db_name}/class/ActionLog/instances`.
-
-### Direct CRUD guard (writeback-enabled types)
-
-When `WRITEBACK_ENFORCE=true`, direct instance CRUD is **ingestion-only** for writeback-enabled object types:
-- `POST/PUT/DELETE /api/v1/databases/{db_name}/instances/...` requires `metadata.kind=ingest` (or a system principal).
-- Operational edits should use `POST /api/v1/databases/{db_name}/actions/{action_type_id}/submit`.
-
-## Endpoint Index
-
-This section is auto-generated from BFF OpenAPI. To update, run:
-
-```bash
-python scripts/generate_api_reference.py
-```
-
-<!-- BEGIN AUTO-GENERATED ENDPOINTS -->
-> Generated from OpenAPI by `scripts/generate_api_reference.py`. Do not edit manually.
+## Endpoint Index (`/api/v1`)
 
 ### Actions
 - `GET /api/v1/databases/{db_name}/actions/logs`
@@ -432,17 +342,3 @@ python scripts/generate_api_reference.py
 
 ### Summary
 - `GET /api/v1/summary`
-
-<!-- END AUTO-GENERATED ENDPOINTS -->
-
-### Service-level (non `/api/v1`, not in OpenAPI)
-
-- `GET /metrics`
-- `GET /debug/cors` (debug only)
-
-### WebSocket (not in OpenAPI)
-
-- `WEBSOCKET /api/v1/ws/commands`
-- `WEBSOCKET /api/v1/ws/commands/{command_id}`
-
-<!-- DOC_SYNC: 2026-02-13 Foundry pipeline parity + runtime consistency sweep -->

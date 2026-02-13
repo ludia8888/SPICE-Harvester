@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate the auto-managed Endpoint Index in docs/API_REFERENCE.md from BFF OpenAPI."""
+"""Generate fully auto-managed API reference markdown from BFF OpenAPI."""
 
 from __future__ import annotations
 
@@ -9,8 +9,6 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Tuple
 
-BEGIN_MARKER = "<!-- BEGIN AUTO-GENERATED ENDPOINTS -->"
-END_MARKER = "<!-- END AUTO-GENERATED ENDPOINTS -->"
 METHOD_ORDER = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"]
 
 
@@ -32,7 +30,7 @@ def _load_openapi() -> Dict:
     return bff_main.app.openapi()
 
 
-def _render_endpoint_index(schema: Dict) -> str:
+def _collect_tagged_routes(schema: Dict) -> Dict[str, List[Tuple[str, str]]]:
     paths = schema.get("paths", {})
     tag_map: Dict[str, List[Tuple[str, str]]] = {}
 
@@ -46,34 +44,39 @@ def _render_endpoint_index(schema: Dict) -> str:
             tags = meta.get("tags") or ["Untagged"]
             tag = tags[0]
             tag_map.setdefault(tag, []).append((method_upper, path))
+    return tag_map
+
+
+def _render_api_reference(schema: Dict) -> str:
+    info = schema.get("info", {})
+    title = str(info.get("title") or "API")
+    version = str(info.get("version") or "unknown")
+    openapi_version = str(schema.get("openapi") or "unknown")
+    routes_by_tag = _collect_tagged_routes(schema)
 
     lines: List[str] = []
-    lines.append(BEGIN_MARKER)
-    lines.append("> Generated from OpenAPI by `scripts/generate_api_reference.py`. Do not edit manually.")
+    lines.append("# API Reference (Auto-Generated)")
+    lines.append("")
+    lines.append("> Generated from BFF OpenAPI by `scripts/generate_api_reference.py`.")
+    lines.append("> Do not edit manually.")
+    lines.append("")
+    lines.append("## OpenAPI Metadata")
+    lines.append("")
+    lines.append(f"- Title: `{title}`")
+    lines.append(f"- Version: `{version}`")
+    lines.append(f"- OpenAPI: `{openapi_version}`")
+    lines.append("")
+    lines.append("## Endpoint Index (`/api/v1`)")
     lines.append("")
 
-    for tag in sorted(tag_map, key=lambda value: value.lower()):
+    for tag in sorted(routes_by_tag, key=lambda value: value.lower()):
         lines.append(f"### {tag}")
-        entries = sorted(tag_map[tag], key=lambda item: (item[1], _method_sort_key(item[0])))
+        entries = sorted(routes_by_tag[tag], key=lambda item: (item[1], _method_sort_key(item[0])))
         for method, path in entries:
             lines.append(f"- `{method} {path}`")
         lines.append("")
 
-    lines.append(END_MARKER)
     return "\n".join(lines).rstrip() + "\n"
-
-
-def _replace_block(content: str, replacement: str) -> str:
-    if BEGIN_MARKER in content and END_MARKER in content:
-        before = content.split(BEGIN_MARKER, 1)[0].rstrip()
-        after = content.split(END_MARKER, 1)[1].lstrip()
-        return f"{before}\n\n{replacement}\n{after}".rstrip() + "\n"
-
-    if "## Endpoint Index" not in content:
-        raise ValueError("docs/API_REFERENCE.md missing '## Endpoint Index' section.")
-
-    head, tail = content.split("## Endpoint Index", 1)
-    return f"{head}## Endpoint Index\n\n{replacement}\n{tail.lstrip()}".rstrip() + "\n"
 
 
 def parse_args() -> argparse.Namespace:
@@ -96,19 +99,17 @@ def main() -> int:
     args = parse_args()
     output_path: Path = args.output
 
-    if not output_path.exists():
-        raise SystemExit(f"Missing API reference file: {output_path}")
-
     schema = _load_openapi()
-    replacement = _render_endpoint_index(schema)
-    updated = _replace_block(output_path.read_text(encoding="utf-8"), replacement)
+    updated = _render_api_reference(schema)
+    current = output_path.read_text(encoding="utf-8") if output_path.exists() else ""
 
     if args.check:
-        if output_path.read_text(encoding="utf-8") != updated:
+        if current != updated:
             print(f"{output_path} is out of date. Run: python scripts/generate_api_reference.py")
             return 1
         return 0
 
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(updated, encoding="utf-8")
     return 0
 
