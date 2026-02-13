@@ -124,3 +124,14 @@ async def test_resolve_udf_reference_uses_registry_and_cache_key() -> None:
     assert resolved.udf_id == "udf-1"
     assert resolved.version == 2
     assert resolved.cache_key.startswith("udf-1:2:")
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_resolve_udf_reference_rejects_inline_code_even_when_reference_flag_disabled() -> None:
+    with pytest.raises(PipelineUdfError, match="udfCode is not allowed"):
+        await resolve_udf_reference(
+            metadata={"operation": "udf", "udfCode": "def transform(row): return row"},
+            pipeline_registry=None,
+            require_reference=False,
+        )

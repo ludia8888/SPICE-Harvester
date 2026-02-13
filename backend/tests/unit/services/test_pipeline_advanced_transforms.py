@@ -236,6 +236,45 @@ def test_validate_pipeline_definition_rejects_dynamic_stream_join_without_event_
 
 
 @pytest.mark.unit
+def test_validate_pipeline_definition_rejects_left_lookup_with_transformed_right_input() -> None:
+    definition = {
+        "nodes": [
+            {"id": "left", "type": "input", "metadata": {"datasetName": "left_ds"}},
+            {"id": "right", "type": "input", "metadata": {"datasetName": "right_ds"}},
+            {
+                "id": "right_filter",
+                "type": "transform",
+                "metadata": {"operation": "filter", "expression": "id > 0"},
+            },
+            {
+                "id": "sj1",
+                "type": "transform",
+                "metadata": {
+                    "operation": "streamJoin",
+                    "leftKeys": ["id"],
+                    "rightKeys": ["id"],
+                    "streamJoin": {"strategy": "left_lookup"},
+                },
+            },
+        ],
+        "edges": [
+            {"from": "right", "to": "right_filter"},
+            {"from": "left", "to": "sj1"},
+            {"from": "right_filter", "to": "sj1"},
+        ],
+    }
+    result = validate_pipeline_definition(
+        definition,
+        policy=PipelineDefinitionValidationPolicy(
+            supported_ops=SUPPORTED_TRANSFORMS,
+            require_output=False,
+            normalize_metadata=True,
+        ),
+    )
+    assert any("requires right input to be a direct input node" in err for err in result.errors)
+
+
+@pytest.mark.unit
 def test_builder_helpers_add_geospatial_pattern_mining_stream_join() -> None:
     plan = new_plan(goal="advanced transforms", db_name="demo")
     definition = plan["definition_json"]

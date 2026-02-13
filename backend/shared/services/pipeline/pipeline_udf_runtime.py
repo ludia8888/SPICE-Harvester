@@ -151,18 +151,15 @@ async def resolve_udf_reference(
     require_reference: bool,
     code_cache: Optional[MutableMapping[str, str]] = None,
 ) -> ResolvedPipelineUdf:
+    _ = require_reference
     udf_id = str(metadata.get("udfId") or metadata.get("udf_id") or "").strip() or None
     udf_code = str(metadata.get("udfCode") or metadata.get("udf_code") or "").strip() or None
     udf_version = _parse_udf_version(metadata.get("udfVersion") or metadata.get("udf_version"))
 
-    if require_reference:
-        if udf_code:
-            raise PipelineUdfError("udfCode is not allowed; use udfId (+udfVersion)")
-        if not udf_id:
-            raise PipelineUdfError("udf requires udfId")
-
-    if not udf_id and not udf_code:
-        raise PipelineUdfError("udf missing udfId")
+    if udf_code:
+        raise PipelineUdfError("udfCode is not allowed; use udfId (+udfVersion)")
+    if not udf_id:
+        raise PipelineUdfError("udf requires udfId")
 
     if udf_id:
         if not pipeline_registry:
@@ -195,17 +192,7 @@ async def resolve_udf_reference(
             code=resolved_code,
             cache_key=build_udf_cache_key(udf_id=udf_id, version=resolved_version, code=resolved_code),
         )
-
-    # Legacy compatibility path (reference policy disabled).
-    legacy_code = str(udf_code or "").strip()
-    if not legacy_code:
-        raise PipelineUdfError("udf missing udfCode")
-    return ResolvedPipelineUdf(
-        udf_id=None,
-        version=None,
-        code=legacy_code,
-        cache_key=build_udf_cache_key(udf_id=None, version=None, code=legacy_code),
-    )
+    raise PipelineUdfError("udf requires udfId")
 
 
 def validate_udf_output_schema(payload: Any) -> Dict[str, Any]:

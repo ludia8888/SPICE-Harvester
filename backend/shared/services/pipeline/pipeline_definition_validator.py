@@ -216,13 +216,10 @@ def validate_pipeline_definition(
             udf_code = str(metadata.get("udfCode") or metadata.get("udf_code") or "").strip()
             udf_version_raw = metadata.get("udfVersion") or metadata.get("udf_version")
 
-            if policy.require_udf_reference:
-                if udf_code:
-                    errors.append(f"udfCode is not allowed on node {node_id}; use udfId (+udfVersion)")
-                if not udf_id:
-                    errors.append(f"udf requires udfId on node {node_id}")
-            elif not udf_id and not udf_code:
-                errors.append(f"udf requires udfId or udfCode on node {node_id}")
+            if udf_code:
+                errors.append(f"udfCode is not allowed on node {node_id}; use udfId (+udfVersion)")
+            if not udf_id:
+                errors.append(f"udf requires udfId on node {node_id}")
 
             if udf_version_raw is not None and str(udf_version_raw).strip():
                 try:
@@ -348,7 +345,8 @@ def validate_pipeline_definition(
                 errors.append(f"patternMining matchMode must be contains|extract|count on node {node_id}")
 
         if operation == "streamJoin":
-            if len(incoming.get(node_id, [])) < 2:
+            incoming_ids = incoming.get(node_id, [])
+            if len(incoming_ids) < 2:
                 errors.append(f"streamJoin requires two inputs on node {node_id}")
             join_spec = resolve_join_spec(metadata)
             left_keys = list(join_spec.left_keys or [])
@@ -374,6 +372,15 @@ def validate_pipeline_definition(
                     errors.append(
                         f"streamJoin has invalid timeDirection '{stream_spec.time_direction}' on node {node_id}"
                     )
+                if stream_spec.strategy == "left_lookup" and len(incoming_ids) >= 2:
+                    right_input_id = str(incoming_ids[1] or "").strip()
+                    right_node = nodes.get(right_input_id) if right_input_id else None
+                    right_node_type = str((right_node or {}).get("type") or "").strip().lower()
+                    if right_node_type != "input":
+                        errors.append(
+                            "streamJoin strategy=left_lookup requires right input to be a direct input node "
+                            f"(no upstream transforms) on node {node_id}"
+                        )
                 if stream_spec.strategy == "dynamic":
                     if not str(stream_spec.left_event_time_column or "").strip():
                         errors.append(f"streamJoin dynamic requires leftEventTimeColumn on node {node_id}")

@@ -958,6 +958,23 @@ async def compute_pipeline_preflight(
                                 "message": f"streamJoin strategy must be dynamic|left_lookup|static (got: {stream_spec.strategy})",
                             }
                         )
+                    elif stream_spec.strategy == "left_lookup":
+                        right_input_id = str(input_ids[1] or "").strip() if len(input_ids) >= 2 else ""
+                        right_node = nodes.get(right_input_id) if right_input_id else None
+                        right_node_type = str((right_node or {}).get("type") or "").strip().lower()
+                        if right_node_type != "input":
+                            issues.append(
+                                {
+                                    "kind": "stream_join_left_lookup_right_input_invalid",
+                                    "severity": "error",
+                                    "node_id": node_id,
+                                    "message": (
+                                        "streamJoin strategy=left_lookup requires right input to be a direct input node "
+                                        "(no upstream transforms)"
+                                    ),
+                                    "right_input_id": right_input_id or None,
+                                }
+                            )
                     elif stream_spec.time_direction not in {"backward", "forward", "symmetric"}:
                         issues.append(
                             {

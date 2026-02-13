@@ -1511,7 +1511,8 @@ def validate_structure(plan: Dict[str, Any]) -> Tuple[List[str], List[str]]:
                 if allow_cross:
                     warnings.append(f"join allowCrossJoin=true on node {node_id}")
             if op == "streamJoin":
-                if len(incoming.get(node_id, [])) < 2:
+                incoming_ids = incoming.get(node_id, [])
+                if len(incoming_ids) < 2:
                     errors.append(f"streamJoin requires two inputs on node {node_id}")
                 left_keys = metadata.get("leftKeys") or metadata.get("left_keys") or []
                 right_keys = metadata.get("rightKeys") or metadata.get("right_keys") or []
@@ -1523,6 +1524,15 @@ def validate_structure(plan: Dict[str, Any]) -> Tuple[List[str], List[str]]:
                 strategy = str(stream_meta.get("strategy") or "").strip().lower() or "dynamic"
                 if strategy not in {"dynamic", "left_lookup", "static"}:
                     errors.append(f"streamJoin strategy must be dynamic|left_lookup|static on node {node_id}")
+                elif strategy == "left_lookup" and len(incoming_ids) >= 2:
+                    right_input_id = str(incoming_ids[1] or "").strip()
+                    right_node = node_by_id.get(right_input_id) if right_input_id else None
+                    right_node_type = str((right_node or {}).get("type") or "").strip().lower()
+                    if right_node_type != "input":
+                        errors.append(
+                            "streamJoin strategy=left_lookup requires right input to be a direct input node "
+                            f"(no upstream transforms) on node {node_id}"
+                        )
             if op == "union":
                 if len(incoming.get(node_id, [])) < 2:
                     errors.append(f"union requires two inputs on node {node_id}")

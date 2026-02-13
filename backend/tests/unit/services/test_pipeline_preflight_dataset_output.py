@@ -190,3 +190,64 @@ async def test_compute_pipeline_preflight_blocks_virtual_dataset_write_settings(
     assert result["has_blocking_errors"] is True
     messages = [str(issue.get("message") or "") for issue in result["blocking_errors"]]
     assert any("virtual output does not support dataset write settings" in message for message in messages)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_compute_pipeline_preflight_blocks_left_lookup_with_transformed_right_input(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _fake_resolve_dataset_version(*args, **kwargs):
+        selection = kwargs.get("selection")
+        dataset_name = str(getattr(selection, "dataset_name", "") or "")
+        if dataset_name == "left_stream":
+            schema_columns = [{"name": "id", "type": "xsd:integer"}]
+            sample_rows = [{"id": 1}]
+        else:
+            schema_columns = [{"name": "id", "type": "xsd:integer"}]
+            sample_rows = [{"id": 1}]
+        return SimpleNamespace(
+            dataset=SimpleNamespace(
+                schema_json={"columns": schema_columns},
+                dataset_id=f"ds-{dataset_name or 'x'}",
+                name=dataset_name or "source",
+                branch="main",
+            ),
+            version=SimpleNamespace(sample_json={"rows": sample_rows}),
+        )
+
+    monkeypatch.setattr(pipeline_preflight_utils, "resolve_dataset_version", _fake_resolve_dataset_version)
+
+    definition = {
+        "nodes": [
+            {"id": "left", "type": "input", "metadata": {"datasetName": "left_stream", "datasetBranch": "main"}},
+            {"id": "right", "type": "input", "metadata": {"datasetName": "right_lookup", "datasetBranch": "main"}},
+            {"id": "right_filter", "type": "transform", "metadata": {"operation": "filter", "expression": "id > 0"}},
+            {
+                "id": "sj",
+                "type": "transform",
+                "metadata": {
+                    "operation": "streamJoin",
+                    "leftKeys": ["id"],
+                    "rightKeys": ["id"],
+                    "streamJoin": {"strategy": "left_lookup"},
+                },
+            },
+            {"id": "out", "type": "output", "metadata": {"outputName": "joined"}},
+        ],
+        "edges": [
+            {"from": "right", "to": "right_filter"},
+            {"from": "left", "to": "sj"},
+            {"from": "right_filter", "to": "sj"},
+            {"from": "sj", "to": "out"},
+        ],
+    }
+    result = await pipeline_preflight_utils.compute_pipeline_preflight(
+        definition=definition,
+        db_name="demo",
+        dataset_registry=SimpleNamespace(),
+        branch="main",
+    )
+    assert result["has_blocking_errors"] is True
+    messages = [str(issue.get("message") or "") for issue in result["blocking_errors"]]
+    assert any("streamJoin strategy=left_lookup requires right input to be a direct input node" in message for message in messages)

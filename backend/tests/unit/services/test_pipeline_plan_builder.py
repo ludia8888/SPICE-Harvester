@@ -16,6 +16,7 @@ from shared.services.pipeline.pipeline_plan_builder import (
     add_pivot,
     add_select_expr,
     add_sort,
+    add_stream_join,
     add_output,
     add_union,
     configure_input_read,
@@ -271,6 +272,26 @@ def test_add_union_builds_metadata():
     node = next(node for node in res.plan["definition_json"]["nodes"] if node["id"] == res.node_id)
     assert node["metadata"]["operation"] == "union"
     assert node["metadata"]["unionMode"] == "pad"
+
+
+def test_validate_structure_rejects_left_lookup_with_transformed_right_input():
+    plan = new_plan(goal="stream join validation", db_name="demo")
+    plan = add_input(plan, dataset_id="left", node_id="left").plan
+    plan = add_input(plan, dataset_id="right", node_id="right").plan
+    right_filtered = add_filter(plan, input_node_id="right", expression="id > 0", node_id="right_filter").plan
+    stream_joined = add_stream_join(
+        right_filtered,
+        left_node_id="left",
+        right_node_id="right_filter",
+        left_keys=["id"],
+        right_keys=["id"],
+        strategy="left_lookup",
+        node_id="sj1",
+    ).plan
+    with_output = add_output(stream_joined, input_node_id="sj1", output_name="joined").plan
+
+    errors, _ = validate_structure(with_output)
+    assert any("requires right input to be a direct input node" in err for err in errors)
 
 
 def test_add_pivot_builds_metadata():

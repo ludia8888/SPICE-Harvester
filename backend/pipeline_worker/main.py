@@ -3356,6 +3356,7 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                 input_df=input_aligned,
                 existing_df=existing_aligned,
                 pk_columns=pk_columns,
+                dedupe_input=False,
             )
         elif policy.resolved_write_mode == DatasetWriteMode.APPEND_ONLY_NEW_ROWS:
             deduped_input = input_aligned.dropDuplicates(pk_columns) if pk_columns else input_aligned
@@ -3644,26 +3645,27 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
         input_df: DataFrame,
         existing_df: DataFrame,
         pk_columns: List[str],
+        dedupe_input: bool = True,
     ) -> DataFrame:
-        deduped_input = input_df.dropDuplicates(pk_columns) if pk_columns else input_df
+        selected_input = input_df.dropDuplicates(pk_columns) if (pk_columns and dedupe_input) else input_df
         if not existing_df.columns or not pk_columns:
-            return deduped_input
+            return selected_input
 
-        tracked_columns = [column for column in deduped_input.columns if column not in set(pk_columns)]
+        tracked_columns = [column for column in selected_input.columns if column not in set(pk_columns)]
         existing_selected = [F.col(column) for column in pk_columns]
         existing_selected.append(F.lit(1).alias("__existing_present__"))
         existing_selected.extend(
             F.col(column).alias(f"__existing_{column}") for column in tracked_columns
         )
         existing_lookup = existing_df.dropDuplicates(pk_columns).select(*existing_selected)
-        joined = deduped_input.join(existing_lookup, on=pk_columns, how="left")
+        joined = selected_input.join(existing_lookup, on=pk_columns, how="left")
         if not tracked_columns:
-            return joined.filter(F.col("__existing_present__").isNull()).select(*deduped_input.columns)
+            return joined.filter(F.col("__existing_present__").isNull()).select(*selected_input.columns)
 
         changed_expr = F.col("__existing_present__").isNull()
         for column in tracked_columns:
             changed_expr = changed_expr | (~F.col(column).eqNullSafe(F.col(f"__existing_{column}")))
-        return joined.filter(changed_expr).select(*deduped_input.columns)
+        return joined.filter(changed_expr).select(*selected_input.columns)
 
     def _post_filter_false_expr(self, *, post_filtering_column: str) -> Any:
         normalized = F.lower(F.trim(F.col(post_filtering_column).cast("string")))

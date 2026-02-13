@@ -310,6 +310,34 @@ def test_select_new_or_changed_rows_without_pk_returns_input(worker: PipelineWor
 
 
 @pytest.mark.unit
+def test_select_new_or_changed_rows_can_preserve_input_duplicates_for_changelog(worker: PipelineWorker) -> None:
+    incoming = worker.spark.createDataFrame(
+        [
+            (1, "v2"),
+            (1, "v3"),
+            (2, "new"),
+        ],
+        ["id", "name"],
+    )
+    existing = worker.spark.createDataFrame(
+        [
+            (1, "v1"),
+        ],
+        ["id", "name"],
+    )
+
+    out = worker._select_new_or_changed_rows(
+        input_df=incoming,
+        existing_df=existing,
+        pk_columns=["id"],
+        dedupe_input=False,
+    )
+    rows = out.orderBy("id", "name").collect()
+    assert len(rows) == 3
+    assert [row["name"] for row in rows] == ["v2", "v3", "new"]
+
+
+@pytest.mark.unit
 def test_udf_transform_applies_resolved_code(worker: PipelineWorker) -> None:
     df = worker.spark.createDataFrame([(1, "a"), (2, "b")], ["id", "value"])
     code = """
