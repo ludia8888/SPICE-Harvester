@@ -10,6 +10,7 @@ from shared.models.structure_analysis import BoundingBox, SheetStructureAnalysis
 from shared.models.structure_patch import SheetStructurePatch, SheetStructurePatchOp
 
 from funnel.services.structure_analysis import FunnelStructureAnalyzer
+import logging
 
 
 def _resolve_table_index(
@@ -26,6 +27,7 @@ def _resolve_table_index(
                 if str(getattr(t, "id", None) or t.get("id")) == str(op.table_id):
                     return i
             except Exception:
+                logging.getLogger(__name__).warning("Broad exception fallback at funnel/services/structure_patch.py:28", exc_info=True)
                 continue
     return None
 

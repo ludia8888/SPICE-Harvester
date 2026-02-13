@@ -11,6 +11,7 @@ import httpx
 from fastapi import HTTPException, status
 
 from shared.errors.error_types import ErrorCode, classified_http_exception
+import logging
 
 
 def extract_httpx_detail(exc: httpx.HTTPStatusError) -> Any:
@@ -24,6 +25,7 @@ def extract_httpx_detail(exc: httpx.HTTPStatusError) -> Any:
         if isinstance(detail_json, dict):
             detail = detail_json.get("detail") or detail_json.get("message") or detail_json.get("error") or detail_json
     except Exception:
+        logging.getLogger(__name__).warning("Broad exception fallback at bff/utils/httpx_exceptions.py:26", exc_info=True)
         pass
     return detail
 

@@ -20,6 +20,7 @@ from shared.config.settings import get_settings
 from shared.security.data_encryption import encryptor_from_keys, is_encrypted_json, is_encrypted_text
 from shared.services.registries.postgres_schema_registry import PostgresSchemaRegistry
 from shared.utils.json_utils import coerce_json_dataset, coerce_json_pipeline, normalize_json_payload
+import logging
 
 
 def _wrap_json_object(value: Any) -> Dict[str, Any]:
@@ -568,6 +569,7 @@ class AgentSessionRegistry(PostgresSchemaRegistry):
                     aad=_aad_for_session(session_id=str(row["session_id"])),
                 )
             except Exception:
+                logging.getLogger(__name__).warning("Broad exception fallback at shared/services/registries/agent_session_registry.py:570", exc_info=True)
                 content_value = "<encrypted>"
         return AgentSessionMessageRecord(
             message_id=str(row["message_id"]),
@@ -658,11 +660,13 @@ class AgentSessionRegistry(PostgresSchemaRegistry):
                 try:
                     request_body = encryptor.decrypt_json(request_body, aad=aad)
                 except Exception:
+                    logging.getLogger(__name__).warning("Broad exception fallback at shared/services/registries/agent_session_registry.py:660", exc_info=True)
                     request_body = None
             if is_encrypted_json(response_body):
                 try:
                     response_body = encryptor.decrypt_json(response_body, aad=aad)
                 except Exception:
+                    logging.getLogger(__name__).warning("Broad exception fallback at shared/services/registries/agent_session_registry.py:665", exc_info=True)
                     response_body = None
         return AgentSessionToolCallRecord(
             tool_run_id=str(row["tool_run_id"]),
@@ -1076,6 +1080,7 @@ class AgentSessionRegistry(PostgresSchemaRegistry):
         try:
             return int(str(result).split()[-1])
         except Exception:  # pragma: no cover
+            logging.getLogger(__name__).warning("Broad exception fallback at shared/services/registries/agent_session_registry.py:1078", exc_info=True)
             return 0
 
     async def create_job(
@@ -1342,6 +1347,7 @@ class AgentSessionRegistry(PostgresSchemaRegistry):
         try:
             return int(str(result).split()[-1])
         except Exception:  # pragma: no cover
+            logging.getLogger(__name__).warning("Broad exception fallback at shared/services/registries/agent_session_registry.py:1344", exc_info=True)
             return 0
 
     async def append_event(
@@ -2042,6 +2048,7 @@ class AgentSessionRegistry(PostgresSchemaRegistry):
             try:
                 return int(str(result).split()[-1])
             except Exception:  # pragma: no cover
+                logging.getLogger(__name__).warning("Broad exception fallback at shared/services/registries/agent_session_registry.py:2044", exc_info=True)
                 return 0
 
         stats: dict[str, int] = {

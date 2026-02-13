@@ -18,6 +18,7 @@ from shared.observability.request_context import (
     get_request_id as get_context_request_id,
 )
 from shared.utils.app_logger import get_logger
+import logging
 
 logger = get_logger(__name__)
 
@@ -26,6 +27,7 @@ try:  # optional
 
     HAS_ASYNCPG = True
 except Exception:  # pragma: no cover - optional dependency
+    logging.getLogger(__name__).warning("Broad exception fallback at shared/errors/error_response.py:28", exc_info=True)
     asyncpg = None
     HAS_ASYNCPG = False
 

@@ -217,7 +217,7 @@ def _find_commented_exports(
             if not stripped.startswith("#"):
                 continue
             payload = stripped[1:].strip()
-            if payload.startswith("from ") or payload.startswith("import ") or "__all__" in payload:
+            if payload.startswith("from ") or payload.startswith("import ") or payload.startswith("__all__"):
                 hits.append((str(path), idx))
     return hits
 
@@ -229,6 +229,8 @@ def _find_doc_only_modules(
 ) -> List[Tuple[str, int]]:
     hits: List[Tuple[str, int]] = []
     for path in _iter_runtime_files(root, runtime_scope_glob=runtime_scope_glob):
+        if path.name == "__init__.py":
+            continue
         try:
             source = path.read_text(encoding="utf-8")
             tree = ast.parse(source)
@@ -251,15 +253,11 @@ def _find_doc_only_modules(
             hits.append((str(path), 1))
             continue
 
-        executable = 0
-        for node in non_doc_nodes:
-            if isinstance(node, (ast.Import, ast.ImportFrom)):
-                continue
-            executable += 1
-
-        if executable == 0:
-            first = getattr(non_doc_nodes[0], "lineno", 1)
-            hits.append((str(path), int(first)))
+        # Import-only modules are legitimate facades/re-export modules and should not be
+        # treated as garbage legacy code. This guard targets modules that are effectively
+        # empty (docstring/comments only).
+        if all(isinstance(node, (ast.Import, ast.ImportFrom)) for node in non_doc_nodes):
+            continue
 
     return hits
 

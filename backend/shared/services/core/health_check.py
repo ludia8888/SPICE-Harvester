@@ -104,6 +104,7 @@ class HealthCheckInterface(ABC):
                 error="timeout"
             )
         except Exception as e:
+            logging.getLogger(__name__).warning("Broad exception fallback at shared/services/core/health_check.py:106", exc_info=True)
             return HealthCheckResult(
                 status=HealthStatus.UNHEALTHY,
                 service_name=self.service_name,
@@ -158,6 +159,7 @@ class DatabaseHealthCheck(HealthCheckInterface):
             )
             
         except Exception as e:
+            logging.getLogger(__name__).warning("Broad exception fallback at shared/services/core/health_check.py:160", exc_info=True)
             response_time = (time.time() - start_time) * 1000
             return HealthCheckResult(
                 status=HealthStatus.UNHEALTHY,
@@ -210,6 +212,7 @@ class RedisHealthCheck(HealthCheckInterface):
                     details["memory_usage"] = info.get("used_memory_human", "unknown")
                     details["connected_clients"] = info.get("connected_clients", "unknown")
                 except Exception:
+                    logging.getLogger(__name__).warning("Broad exception fallback at shared/services/core/health_check.py:212", exc_info=True)
                     pass  # Info not available, continue without it
             
             return HealthCheckResult(
@@ -222,6 +225,7 @@ class RedisHealthCheck(HealthCheckInterface):
             )
             
         except Exception as e:
+            logging.getLogger(__name__).warning("Broad exception fallback at shared/services/core/health_check.py:224", exc_info=True)
             response_time = (time.time() - start_time) * 1000
             return HealthCheckResult(
                 status=HealthStatus.UNHEALTHY,
@@ -290,6 +294,7 @@ class ElasticsearchHealthCheck(HealthCheckInterface):
             )
             
         except Exception as e:
+            logging.getLogger(__name__).warning("Broad exception fallback at shared/services/core/health_check.py:292", exc_info=True)
             response_time = (time.time() - start_time) * 1000
             return HealthCheckResult(
                 status=HealthStatus.UNHEALTHY,
@@ -355,6 +360,7 @@ class StorageHealthCheck(HealthCheckInterface):
                 )
                 
         except Exception as e:
+            logging.getLogger(__name__).warning("Broad exception fallback at shared/services/core/health_check.py:357", exc_info=True)
             response_time = (time.time() - start_time) * 1000
             return HealthCheckResult(
                 status=HealthStatus.UNHEALTHY,
@@ -407,6 +413,7 @@ class TerminusDBHealthCheck(HealthCheckInterface):
                     else:
                         db_count = "unknown"
                 except Exception:
+                    logging.getLogger(__name__).warning("Broad exception fallback at shared/services/core/health_check.py:409", exc_info=True)
                     db_count = "error"
                 
                 return HealthCheckResult(
@@ -430,6 +437,7 @@ class TerminusDBHealthCheck(HealthCheckInterface):
                 )
                 
         except Exception as e:
+            logging.getLogger(__name__).warning("Broad exception fallback at shared/services/core/health_check.py:432", exc_info=True)
             response_time = (time.time() - start_time) * 1000
             return HealthCheckResult(
                 status=HealthStatus.UNHEALTHY,

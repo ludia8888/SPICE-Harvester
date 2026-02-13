@@ -21,6 +21,7 @@ from shared.models.lineage import LineageDirection, LineageEdge, LineageGraph, L
 from shared.services.registries.postgres_schema_registry import PostgresSchemaRegistry
 from shared.utils.ontology_version import extract_ontology_version
 from shared.utils.sql_filter_builder import SqlFilterBuilder
+import logging
 
 
 class LineageStore(PostgresSchemaRegistry):
@@ -181,6 +182,7 @@ class LineageStore(PostgresSchemaRegistry):
                 """
             )
         except Exception:
+            logging.getLogger(__name__).warning("Broad exception fallback at shared/services/registries/lineage_store.py:183", exc_info=True)
             pass
         try:
             await conn.execute(
@@ -191,6 +193,7 @@ class LineageStore(PostgresSchemaRegistry):
                 """
             )
         except Exception:
+            logging.getLogger(__name__).warning("Broad exception fallback at shared/services/registries/lineage_store.py:193", exc_info=True)
             pass
 
         await conn.execute(
@@ -221,6 +224,7 @@ class LineageStore(PostgresSchemaRegistry):
             )
         except Exception:
             # Best-effort cleanup; index creation will still enforce correctness.
+            logging.getLogger(__name__).warning("Broad exception fallback at shared/services/registries/lineage_store.py:222", exc_info=True)
             pass
 
         await conn.execute(
@@ -372,15 +376,18 @@ class LineageStore(PostgresSchemaRegistry):
                     return parsed
                 return {"value": parsed}
             except Exception:
+                logging.getLogger(__name__).warning("Broad exception fallback at shared/services/registries/lineage_store.py:374", exc_info=True)
                 return {"raw": value}
         if isinstance(value, (list, tuple)):
             try:
                 return dict(value)
             except Exception:
+                logging.getLogger(__name__).warning("Broad exception fallback at shared/services/registries/lineage_store.py:379", exc_info=True)
                 return {"raw": value}
         try:
             return dict(value)
         except Exception:
+            logging.getLogger(__name__).warning("Broad exception fallback at shared/services/registries/lineage_store.py:383", exc_info=True)
             return {}
 
     async def upsert_node(

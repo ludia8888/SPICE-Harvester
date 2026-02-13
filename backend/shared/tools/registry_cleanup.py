@@ -21,6 +21,7 @@ import httpx
 
 from shared.config.settings import get_settings
 from shared.tools.bff_admin_api import delete_database, list_databases, normalize_base_url
+import logging
 
 
 DEFAULT_TEST_PREFIXES = [
@@ -218,6 +219,7 @@ async def _run_once(plan: CleanupPlan, *, base_url: str, token: str) -> int:
             try:
                 conn = await _connect_postgres()
             except Exception as exc:
+                logging.getLogger(__name__).warning("Broad exception fallback at shared/tools/registry_cleanup.py:220", exc_info=True)
                 if not plan.quiet:
                     print(f"Skipping cleanup: cannot connect to Postgres ({exc})")
                 return 0
@@ -246,6 +248,7 @@ async def _run_once(plan: CleanupPlan, *, base_url: str, token: str) -> int:
             try:
                 result = await delete_database(client, base_url=base_url, db_name=name, allow_missing=True)
             except Exception as exc:
+                logging.getLogger(__name__).warning("Broad exception fallback at shared/tools/registry_cleanup.py:248", exc_info=True)
                 if not plan.quiet:
                     print(f"Failed to delete {name}: {exc}")
                 continue
@@ -290,6 +293,7 @@ async def _async_main(args: argparse.Namespace) -> int:
             try:
                 await _run_once(plan, base_url=base_url, token=token)
             except Exception as exc:
+                logging.getLogger(__name__).warning("Broad exception fallback at shared/tools/registry_cleanup.py:292", exc_info=True)
                 if not plan.quiet:
                     print(f"Cleanup loop error: {exc}")
             await asyncio.sleep(plan.interval_seconds)

@@ -27,6 +27,7 @@ from shared.services.storage.elasticsearch_service import ElasticsearchService
 from shared.services.core.command_status_service import CommandStatusService
 from shared.utils.label_mapper import LabelMapper
 from shared.utils.jsonld import JSONToJSONLDConverter
+import logging
 
 T = TypeVar('T')
 
@@ -145,6 +146,7 @@ class MockServiceContainer:
                         is_healthy = service.health_check()
                     health_status[service_name] = "healthy" if is_healthy else "unhealthy"
                 except Exception as e:
+                    logging.getLogger(__name__).warning("Broad exception fallback at shared/testing/config_fixtures.py:147", exc_info=True)
                     health_status[service_name] = f"error: {str(e)}"
             else:
                 health_status[service_name] = "mock_healthy"
@@ -160,6 +162,7 @@ class MockServiceContainer:
                     else:
                         service.close()
                 except Exception:
+                    logging.getLogger(__name__).warning("Broad exception fallback at shared/testing/config_fixtures.py:162", exc_info=True)
                     pass  # Ignore errors during test cleanup
             elif hasattr(service, 'disconnect'):
                 try:
@@ -168,6 +171,7 @@ class MockServiceContainer:
                     else:
                         service.disconnect()
                 except Exception:
+                    logging.getLogger(__name__).warning("Broad exception fallback at shared/testing/config_fixtures.py:170", exc_info=True)
                     pass  # Ignore errors during test cleanup
 
 

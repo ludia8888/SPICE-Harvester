@@ -86,6 +86,7 @@ async def upload_excel_dataset(
         try:
             file.file.seek(0)
         except Exception:
+            logging.getLogger(__name__).warning("Broad exception fallback at bff/routers/pipeline_datasets_uploads_excel.py:88", exc_info=True)
             pass
         upload_stream: Any = file.file
         if is_xls:
@@ -95,6 +96,7 @@ async def upload_excel_dataset(
             try:
                 file.file.seek(0)
             except Exception:
+                logging.getLogger(__name__).warning("Broad exception fallback at bff/routers/pipeline_datasets_uploads_excel.py:97", exc_info=True)
                 pass
             converted = await asyncio.to_thread(_convert_xls_to_xlsx_bytes, raw_bytes)
             stem = filename.rsplit(".", 1)[0].strip() or "upload"

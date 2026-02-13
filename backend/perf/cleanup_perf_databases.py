@@ -23,6 +23,7 @@ import httpx
 
 from shared.config.settings import get_settings
 from shared.tools.bff_admin_api import delete_database, list_databases, normalize_base_url
+import logging
 
 
 def _postgres_dsn_candidates() -> list[str]:
@@ -47,6 +48,7 @@ async def _connect_postgres() -> asyncpg.Connection:
             conn = await asyncpg.connect(dsn)
             return conn
         except Exception as exc:
+            logging.getLogger(__name__).warning("Broad exception fallback at perf/cleanup_perf_databases.py:49", exc_info=True)
             last_error = exc
             continue
     raise RuntimeError(f"Could not connect to Postgres (candidates={_postgres_dsn_candidates()}): {last_error}")

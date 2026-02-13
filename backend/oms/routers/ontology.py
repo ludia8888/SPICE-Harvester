@@ -304,6 +304,7 @@ async def _apply_shared_properties(
                 merged.append(Property(**payload))
                 existing_names.add(name)
             except Exception:
+                logging.getLogger(__name__).warning("Broad exception fallback at oms/routers/ontology.py:306", exc_info=True)
                 invalid_defs.append(ref)
 
     issues = {}

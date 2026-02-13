@@ -8,6 +8,7 @@ from decimal import Decimal
 from typing import Any, Callable, Dict, List, Optional
 
 from .base_validator import ValidationResult
+import logging
 
 
 class ConstraintValidator:
@@ -276,6 +277,7 @@ class ConstraintValidator:
                     is_valid=False, message="Invalid return from custom validator"
                 )
         except Exception as e:
+            logging.getLogger(__name__).warning("Broad exception fallback at shared/validators/constraint_validator.py:278", exc_info=True)
             return ValidationResult(is_valid=False, message=f"Custom validation error: {str(e)}")
 
     @classmethod

@@ -635,6 +635,7 @@ async def simulate_action_async(
                         subject_id=tgt.class_id,
                     )
                 except Exception:
+                    logging.getLogger(__name__).warning("Broad exception fallback at oms/routers/action_async.py:637", exc_info=True)
                     rec = None
                 policy = rec.policy if rec and isinstance(rec.policy, dict) else None
                 if isinstance(policy, dict) and policy:
@@ -907,6 +908,7 @@ async def simulate_action_async(
                     created_by_type=submitted_by_type or "user",
                 )
             except Exception:
+                logging.getLogger(__name__).warning("Broad exception fallback at oms/routers/action_async.py:909", exc_info=True)
                 pass
         raise classified_http_exception(
             exc.status_code,
@@ -934,6 +936,7 @@ async def simulate_action_async(
                     created_by_type=submitted_by_type or "user",
                 )
             except Exception:
+                logging.getLogger(__name__).warning("Broad exception fallback at oms/routers/action_async.py:936", exc_info=True)
                 pass
         raise
     finally:

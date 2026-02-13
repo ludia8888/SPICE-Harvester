@@ -22,6 +22,7 @@ from shared.dependencies.providers import ElasticsearchServiceDep, RedisServiceD
 from shared.models.requests import ApiResponse
 from shared.security.input_sanitizer import validate_branch_name, validate_db_name
 from shared.utils.branch_utils import get_protected_branches
+import logging
 
 router = APIRouter(prefix="/summary", tags=["Summary"])
 
@@ -58,6 +59,7 @@ async def get_summary(
                 try:
                     detail = resp.json()
                 except Exception:
+                    logging.getLogger(__name__).warning("Broad exception fallback at bff/routers/summary.py:60", exc_info=True)
                     detail = resp.text
                 raise classified_http_exception(resp.status_code, str(detail), code=ErrorCode.UPSTREAM_ERROR) from e
             raise classified_http_exception(status.HTTP_502_BAD_GATEWAY, "OMS branch info 조회 실패", code=ErrorCode.UPSTREAM_ERROR) from e
@@ -75,11 +77,13 @@ async def get_summary(
         if es_ok:
             es_health = await es_service.get_cluster_health()
     except Exception as e:
+        logging.getLogger(__name__).warning("Broad exception fallback at bff/routers/summary.py:77", exc_info=True)
         es_error = str(e)
     finally:
         try:
             await es_service.disconnect()
         except Exception:
+            logging.getLogger(__name__).warning("Broad exception fallback at bff/routers/summary.py:82", exc_info=True)
             pass
 
     return ApiResponse.success(

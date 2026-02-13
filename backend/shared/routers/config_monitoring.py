@@ -560,6 +560,7 @@ async def get_monitoring_status(
         }
         
     except Exception as e:
+        logging.getLogger(__name__).warning("Broad exception fallback at shared/routers/config_monitoring.py:562", exc_info=True)
         return {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "system_status": "error",

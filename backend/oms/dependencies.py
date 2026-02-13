@@ -298,6 +298,7 @@ async def check_oms_dependencies_health(
                 else:
                     health_status[service_name] = "not_registered"
             except Exception as e:
+                logging.getLogger(__name__).warning("Broad exception fallback at oms/dependencies.py:300", exc_info=True)
                 health_status[service_name] = f"error: {str(e)}"
         
         return {
@@ -307,6 +308,7 @@ async def check_oms_dependencies_health(
         }
         
     except Exception as e:
+        logging.getLogger(__name__).warning("Broad exception fallback at oms/dependencies.py:309", exc_info=True)
         return build_error_envelope(
             service_name=SERVICE_NAME,
             message="OMS dependency health check failed",

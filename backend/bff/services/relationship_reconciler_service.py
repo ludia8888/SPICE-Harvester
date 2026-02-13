@@ -356,6 +356,7 @@ async def _get_class_instance_ids(
             if iid:
                 ids.add(str(iid).strip())
     except Exception:
+        logging.getLogger(__name__).warning("Broad exception fallback at bff/services/relationship_reconciler_service.py:358", exc_info=True)
         pass
     return ids
 

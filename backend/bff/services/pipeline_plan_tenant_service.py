@@ -14,6 +14,7 @@ from shared.errors.error_types import ErrorCode, classified_http_exception
 
 from bff.routers.registry_deps import get_agent_policy_registry
 from shared.observability.tracing import trace_external_call
+import logging
 
 
 def resolve_tenant_id(request: Request) -> str:
@@ -53,6 +54,7 @@ async def resolve_tenant_policy(request: Request) -> tuple[Optional[str], Option
         policy_registry = await get_agent_policy_registry()
         policy = await policy_registry.get_tenant_policy(tenant_id=tenant_id)
     except Exception:
+        logging.getLogger(__name__).warning("Broad exception fallback at bff/services/pipeline_plan_tenant_service.py:55", exc_info=True)
         return None, None, None
 
     if not policy:

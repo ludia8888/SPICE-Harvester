@@ -185,6 +185,7 @@ def _apply_join(ctx: _SparkTransformContext) -> DataFrame:
         try:
             return left.crossJoin(right)
         except Exception:
+            logging.getLogger(__name__).warning("Broad exception fallback at pipeline_worker/spark_transform_engine.py:187", exc_info=True)
             return left.join(right, how="cross")
 
     raise ValueError(

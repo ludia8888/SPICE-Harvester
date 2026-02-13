@@ -8,6 +8,7 @@ import re
 from typing import Any, Dict, List, Optional
 
 from .base_validator import BaseValidator, ValidationResult
+import logging
 
 
 _GEOHASH_RE = re.compile(r"^[0123456789bcdefghjkmnpqrstuvwxyz]+$")
@@ -32,6 +33,7 @@ class GeoPointValidator(BaseValidator):
                 lat_f = float(lat)
                 lon_f = float(lon)
             except Exception:
+                logging.getLogger(__name__).warning("Broad exception fallback at shared/validators/geopoint_validator.py:34", exc_info=True)
                 return ValidationResult(is_valid=False, message="Invalid geopoint dictionary")
             if not (-90.0 <= lat_f <= 90.0 and -180.0 <= lon_f <= 180.0):
                 return ValidationResult(is_valid=False, message="Geopoint out of range")
@@ -48,6 +50,7 @@ class GeoPointValidator(BaseValidator):
                     lat_f = float(lat_str)
                     lon_f = float(lon_str)
                 except Exception:
+                    logging.getLogger(__name__).warning("Broad exception fallback at shared/validators/geopoint_validator.py:50", exc_info=True)
                     return ValidationResult(is_valid=False, message="Invalid geopoint lat/lon format")
                 if not (-90.0 <= lat_f <= 90.0 and -180.0 <= lon_f <= 180.0):
                     return ValidationResult(is_valid=False, message="Geopoint out of range")

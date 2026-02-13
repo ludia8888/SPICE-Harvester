@@ -369,6 +369,7 @@ async def create_object_type_contract(
         try:
             detail: Any = exc.response.json()
         except Exception:
+            logging.getLogger(__name__).warning("Broad exception fallback at bff/services/object_type_contract_service.py:371", exc_info=True)
             detail = exc.response.text
         raise classified_http_exception(exc.response.status_code, str(detail), code=ErrorCode.UPSTREAM_ERROR) from exc
     except HTTPException:
@@ -447,6 +448,7 @@ async def get_object_type_contract(
         try:
             detail: Any = exc.response.json()
         except Exception:
+            logging.getLogger(__name__).warning("Broad exception fallback at bff/services/object_type_contract_service.py:449", exc_info=True)
             detail = exc.response.text
         raise classified_http_exception(exc.response.status_code, str(detail), code=ErrorCode.UPSTREAM_ERROR) from exc
     except HTTPException:
@@ -808,6 +810,7 @@ async def update_object_type_contract(
                     )
                     edit_actions["invalidated_edits"] = invalidated
             except Exception as exc:
+                logging.getLogger(__name__).warning("Broad exception fallback at bff/services/object_type_contract_service.py:810", exc_info=True)
                 edit_actions["error"] = str(exc)
 
         if pk_changed and id_remap and edit_count:
@@ -819,6 +822,7 @@ async def update_object_type_contract(
                     status="ACTIVE",
                 )
             except Exception:
+                logging.getLogger(__name__).warning("Broad exception fallback at bff/services/object_type_contract_service.py:821", exc_info=True)
                 remapped = None
             migration_payload = {
                 **(migration_payload or {}),
@@ -829,6 +833,7 @@ async def update_object_type_contract(
             try:
                 cleared = await dataset_registry.clear_instance_edits(db_name=db_name, class_id=class_id)
             except Exception:
+                logging.getLogger(__name__).warning("Broad exception fallback at bff/services/object_type_contract_service.py:831", exc_info=True)
                 cleared = None
             migration_payload = {
                 **(migration_payload or {}),
@@ -943,6 +948,7 @@ async def update_object_type_contract(
         try:
             detail: Any = exc.response.json()
         except Exception:
+            logging.getLogger(__name__).warning("Broad exception fallback at bff/services/object_type_contract_service.py:945", exc_info=True)
             detail = exc.response.text
         raise classified_http_exception(exc.response.status_code, str(detail), code=ErrorCode.UPSTREAM_ERROR) from exc
     except HTTPException:

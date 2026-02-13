@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional
 from .base_validator import BaseValidator, ValidationResult
 from .constraint_validator import ConstraintValidator
 from shared.utils.json_utils import maybe_decode_json
+import logging
 
 
 class VectorValidator(BaseValidator):
@@ -26,6 +27,7 @@ class VectorValidator(BaseValidator):
             try:
                 normalized = json.loads(value)
             except Exception:
+                logging.getLogger(__name__).warning("Broad exception fallback at shared/validators/vector_validator.py:28", exc_info=True)
                 return ValidationResult(is_valid=False, message="Invalid JSON vector format")
 
         if not isinstance(normalized, list):
@@ -40,6 +42,7 @@ class VectorValidator(BaseValidator):
             try:
                 expected = int(dimensions)
             except Exception:
+                logging.getLogger(__name__).warning("Broad exception fallback at shared/validators/vector_validator.py:42", exc_info=True)
                 return ValidationResult(is_valid=False, message="Invalid vector dimensions constraint")
             if len(normalized) != expected:
                 return ValidationResult(

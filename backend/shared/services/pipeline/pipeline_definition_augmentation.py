@@ -19,6 +19,7 @@ from shared.services.pipeline.pipeline_schema_casts import extract_schema_casts
 from shared.services.pipeline.pipeline_transform_spec import normalize_operation
 from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.utils.time_utils import utcnow
+import logging
 
 _CANONICAL_OUTPUT_PREFIX = "canonical_"
 _SYS_COLUMN_SPECS = [
@@ -545,6 +546,7 @@ async def augment_definition_with_casts(
                 selection=selection,
             )
         except Exception:
+            logging.getLogger(__name__).warning("Broad exception fallback at shared/services/pipeline/pipeline_definition_augmentation.py:547", exc_info=True)
             continue
         dataset = resolution.dataset
         version = resolution.version

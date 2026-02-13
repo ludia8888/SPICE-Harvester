@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 from collections import Counter
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+import logging
 
 
 def _safe_stringify(value: Any) -> str:
@@ -22,6 +23,7 @@ def _safe_stringify(value: Any) -> str:
     try:
         return json.dumps(value, sort_keys=True, ensure_ascii=False, default=str)
     except Exception:
+        logging.getLogger(__name__).warning("Broad exception fallback at shared/services/pipeline/pipeline_profiler.py:24", exc_info=True)
         return str(value)
 
 
@@ -39,6 +41,7 @@ def _coerce_float(value: Any) -> Optional[float]:
         try:
             return float(raw)
         except Exception:
+            logging.getLogger(__name__).warning("Broad exception fallback at shared/services/pipeline/pipeline_profiler.py:41", exc_info=True)
             return None
     return None
 

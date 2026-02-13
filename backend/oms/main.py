@@ -632,18 +632,21 @@ async def container_health_check():
             is_connected = await terminus_service.check_connection()
             oms_services_status["terminus_service"] = "connected" if is_connected else "disconnected"
         except Exception as e:
+            logging.getLogger(__name__).warning("Broad exception fallback at oms/main.py:634", exc_info=True)
             oms_services_status["terminus_service"] = f"unhealthy: {str(e)}"
         
         try:
             _oms_container.get_jsonld_converter()
             oms_services_status["jsonld_converter"] = "healthy"
         except Exception as e:
+            logging.getLogger(__name__).warning("Broad exception fallback at oms/main.py:640", exc_info=True)
             oms_services_status["jsonld_converter"] = f"unhealthy: {str(e)}"
         
         try:
             _oms_container.get_label_mapper()
             oms_services_status["label_mapper"] = "healthy"
         except Exception as e:
+            logging.getLogger(__name__).warning("Broad exception fallback at oms/main.py:646", exc_info=True)
             oms_services_status["label_mapper"] = f"unhealthy: {str(e)}"
         
         # Check optional services

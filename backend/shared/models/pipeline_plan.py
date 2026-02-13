@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from uuid import UUID
 
 from shared.models.pipeline_task_spec import PipelineTaskSpec
+import logging
 
 
 class PipelinePlanOutputKind(str, Enum):
@@ -74,6 +75,7 @@ class PipelinePlanAssociation(BaseModel):
             try:
                 UUID(left_text)
             except Exception:
+                logging.getLogger(__name__).warning("Broad exception fallback at shared/models/pipeline_plan.py:76", exc_info=True)
                 normalized["left_dataset_name"] = normalized.get("left_dataset_name") or left_text
             else:
                 normalized["left_dataset_id"] = left_text
@@ -82,6 +84,7 @@ class PipelinePlanAssociation(BaseModel):
             try:
                 UUID(right_text)
             except Exception:
+                logging.getLogger(__name__).warning("Broad exception fallback at shared/models/pipeline_plan.py:84", exc_info=True)
                 normalized["right_dataset_name"] = normalized.get("right_dataset_name") or right_text
             else:
                 normalized["right_dataset_id"] = right_text

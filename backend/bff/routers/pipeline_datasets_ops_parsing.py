@@ -12,6 +12,7 @@ from typing import Any, Dict, Optional
 
 from fastapi import status
 from shared.errors.error_types import ErrorCode, classified_http_exception
+import logging
 
 
 def _default_dataset_name(filename: str) -> str:
@@ -62,6 +63,7 @@ def _convert_xls_to_xlsx_bytes(xls_bytes: bytes) -> bytes:
                     try:
                         value = xlrd.xldate.xldate_as_datetime(value, book.datemode)
                     except Exception:
+                        logging.getLogger(__name__).warning("Broad exception fallback at bff/routers/pipeline_datasets_ops_parsing.py:64", exc_info=True)
                         pass
                 worksheet.cell(row=row_idx + 1, column=col_idx + 1, value=value)
 
@@ -193,10 +195,12 @@ def _parse_csv_file(
         try:
             text_stream.detach()
         except Exception:
+            logging.getLogger(__name__).warning("Broad exception fallback at bff/routers/pipeline_datasets_ops_parsing.py:195", exc_info=True)
             pass
         try:
             file_obj.seek(0)
         except Exception:
+            logging.getLogger(__name__).warning("Broad exception fallback at bff/routers/pipeline_datasets_ops_parsing.py:199", exc_info=True)
             pass
 
     return columns, preview_rows, total_rows, hasher.hexdigest()

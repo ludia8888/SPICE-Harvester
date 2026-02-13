@@ -22,6 +22,7 @@ from typing import Any, Dict, Iterator, Mapping, Optional
 from urllib.parse import unquote
 
 from shared.utils.blank_utils import strip_to_none
+import logging
 
 
 _REQUEST_ID: ContextVar[Optional[str]] = ContextVar("spice.request_id", default=None)
@@ -36,6 +37,7 @@ try:  # optional OpenTelemetry API
 
     _HAS_OTEL = True
 except Exception:  # pragma: no cover - env dependent
+    logging.getLogger(__name__).warning("Broad exception fallback at shared/observability/request_context.py:38", exc_info=True)
     otel_baggage = None
     otel_context = None
     _HAS_OTEL = False
@@ -92,6 +94,7 @@ def parse_baggage_header(header_value: Optional[str]) -> Dict[str, str]:
         try:
             value = unquote(v.strip())
         except Exception:
+            logging.getLogger(__name__).warning("Broad exception fallback at shared/observability/request_context.py:94", exc_info=True)
             value = v.strip()
         if value:
             parsed[key] = value
@@ -174,6 +177,7 @@ def request_context(
                 ctx = otel_baggage.set_baggage("db_name", db_name, context=ctx)
             otel_token = otel_context.attach(ctx)
         except Exception:
+            logging.getLogger(__name__).warning("Broad exception fallback at shared/observability/request_context.py:176", exc_info=True)
             otel_token = None
 
     try:
@@ -183,6 +187,7 @@ def request_context(
             try:
                 otel_context.detach(otel_token)
             except Exception:
+                logging.getLogger(__name__).warning("Broad exception fallback at shared/observability/request_context.py:185", exc_info=True)
                 pass
         _REQUEST_ID.reset(token_request)
         _CORRELATION_ID.reset(token_corr)

@@ -9,6 +9,7 @@ from starlette.responses import JSONResponse, Response, StreamingResponse
 from shared.i18n.context import reset_language, set_language
 from shared.i18n.translator import localize_free_text
 from shared.utils.language import get_accept_language
+import logging
 
 
 def install_i18n_middleware(app: FastAPI, *, max_body_bytes: int = 1_000_000) -> None:
@@ -73,6 +74,7 @@ def install_i18n_middleware(app: FastAPI, *, max_body_bytes: int = 1_000_000) ->
         try:
             payload = json.loads(body.decode("utf-8"))
         except Exception:
+            logging.getLogger(__name__).warning("Broad exception fallback at shared/i18n/middleware.py:75", exc_info=True)
             return Response(
                 content=body,
                 status_code=response.status_code,

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 from shared.services.pipeline.pipeline_executor import PipelineExecutor, PipelineRunResult, PipelineTable
+import logging
 
 
 @dataclass(frozen=True)
@@ -78,6 +79,7 @@ def _diff_tables(actual: PipelineTable, expected: PipelineTable, *, max_rows: in
         try:
             parsed = json.loads(row_key)
         except Exception:
+            logging.getLogger(__name__).warning("Broad exception fallback at shared/services/pipeline/pipeline_unit_test_runner.py:80", exc_info=True)
             parsed = {"raw": row_key}
         for _ in range(min(count, max_rows - len(missing_rows))):
             missing_rows.append(parsed)
@@ -88,6 +90,7 @@ def _diff_tables(actual: PipelineTable, expected: PipelineTable, *, max_rows: in
         try:
             parsed = json.loads(row_key)
         except Exception:
+            logging.getLogger(__name__).warning("Broad exception fallback at shared/services/pipeline/pipeline_unit_test_runner.py:90", exc_info=True)
             parsed = {"raw": row_key}
         for _ in range(min(count, max_rows - len(extra_rows))):
             extra_rows.append(parsed)
@@ -163,6 +166,7 @@ async def run_unit_tests(
             diff = _diff_tables(actual_table, expected_table)
             results.append(PipelineUnitTestResult(name=name, passed=not diff, diff=diff))
         except Exception as exc:
+            logging.getLogger(__name__).warning("Broad exception fallback at shared/services/pipeline/pipeline_unit_test_runner.py:165", exc_info=True)
             results.append(PipelineUnitTestResult(name=name, passed=False, diff={}, error=str(exc)))
     return results
 

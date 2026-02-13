@@ -38,6 +38,7 @@ class DatabaseService(BaseTerminusService):
             return True
         except Exception:
             # Cache is best-effort; the database may have been deleted by another worker/process.
+            logging.getLogger(__name__).warning("Broad exception fallback at oms/services/terminus/database.py:39", exc_info=True)
             self._db_cache.discard(db_name)
             return False
     

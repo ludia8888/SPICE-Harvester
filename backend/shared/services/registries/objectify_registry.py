@@ -20,6 +20,7 @@ from shared.services.registries.postgres_schema_registry import PostgresSchemaRe
 
 from shared.models.objectify_job import ObjectifyJob
 from shared.utils.json_utils import coerce_json_dataset, coerce_json_list, normalize_json_payload
+import logging
 
 
 class OCCConflictError(RuntimeError):
@@ -802,6 +803,7 @@ class ObjectifyRegistry(PostgresSchemaRegistry):
             try:
                 oldest_age_seconds = int((now - oldest_created).total_seconds())
             except Exception:
+                logging.getLogger(__name__).warning("Broad exception fallback at shared/services/registries/objectify_registry.py:804", exc_info=True)
                 oldest_age_seconds = None
 
         return {

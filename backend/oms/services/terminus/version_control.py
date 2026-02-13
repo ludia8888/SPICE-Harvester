@@ -81,6 +81,7 @@ class VersionControlService(DatabaseBackedTerminusService):
                     if head:
                         return head
         except Exception:
+            logging.getLogger(__name__).warning("Broad exception fallback at oms/services/terminus/version_control.py:83", exc_info=True)
             pass
 
         commits = await self.get_commits(db_name, branch_name=branch_name, limit=1, offset=0)
@@ -369,6 +370,7 @@ class VersionControlService(DatabaseBackedTerminusService):
 
                 return commits
             except Exception as e:
+                logging.getLogger(__name__).warning("Broad exception fallback at oms/services/terminus/version_control.py:371", exc_info=True)
                 last_error = e
                 # Empty history is acceptable if the branch/ref is not ready yet on a freshly created DB.
                 if self._is_origin_branch_missing_error(e):
@@ -610,6 +612,7 @@ class VersionControlService(DatabaseBackedTerminusService):
                     result = await self._make_request("POST", endpoint, payload)
                     return {"from": from_ref, "to": to_ref, "changes": result}
                 except Exception as e:
+                    logging.getLogger(__name__).warning("Broad exception fallback at oms/services/terminus/version_control.py:612", exc_info=True)
                     last_error = e
                     continue
 
@@ -697,6 +700,7 @@ class VersionControlService(DatabaseBackedTerminusService):
                     }
                 return {"merged": True, "conflicts": [], "raw": result}
             except Exception as e:
+                logging.getLogger(__name__).warning("Broad exception fallback at oms/services/terminus/version_control.py:699", exc_info=True)
                 last_error = e
                 if self._is_merge_endpoint_missing_error(e):
                     endpoint_missing = True

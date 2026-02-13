@@ -15,6 +15,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, Optional, Tuple
 import redis.asyncio as aioredis
 from dataclasses import dataclass, asdict
+import logging
 
 @dataclass
 class ConsistencyToken:
@@ -244,6 +245,7 @@ class ConsistencyTokenService:
             
         except Exception:
             # Document not found yet
+            logging.getLogger(__name__).warning("Broad exception fallback at shared/services/core/consistency_token.py:245", exc_info=True)
             pass
         
         return False
@@ -273,6 +275,7 @@ class ConsistencyTokenService:
             return False, None
             
         except Exception as e:
+            logging.getLogger(__name__).warning("Broad exception fallback at shared/services/core/consistency_token.py:275", exc_info=True)
             print(f"Token validation error: {e}")
             return False, None
     

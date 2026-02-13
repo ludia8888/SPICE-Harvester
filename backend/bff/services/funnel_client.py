@@ -567,6 +567,7 @@ class FunnelClient(ManagedAsyncClient):
         try:
             fileobj.seek(0)
         except Exception:
+            logging.getLogger(__name__).warning("Broad exception fallback at bff/services/funnel_client.py:569", exc_info=True)
             pass
         return response.json(), hasher.hexdigest()
     @staticmethod
@@ -590,6 +591,7 @@ class FunnelClient(ManagedAsyncClient):
                     bbox.get("right", 0) - bbox.get("left", 0) + 1
                 )
             except Exception:
+                logging.getLogger(__name__).warning("Broad exception fallback at bff/services/funnel_client.py:592", exc_info=True)
                 return 0
 
         def rank(t: Dict[str, Any]) -> tuple:
@@ -658,6 +660,7 @@ class FunnelClient(ManagedAsyncClient):
                 return None
             return {k: int(bbox[k]) for k in keys}
         except Exception:
+            logging.getLogger(__name__).warning("Broad exception fallback at bff/services/funnel_client.py:660", exc_info=True)
             return None
 
     @staticmethod
@@ -692,6 +695,7 @@ class FunnelClient(ManagedAsyncClient):
             elif mode == "property":
                 total_rows_est = len(table.get("key_values") or [])
         except Exception:
+            logging.getLogger(__name__).warning("Broad exception fallback at bff/services/funnel_client.py:694", exc_info=True)
             total_rows_est = 0
 
         return {
@@ -740,6 +744,7 @@ class FunnelClient(ManagedAsyncClient):
             elif mode == "property":
                 total_rows_est = len(table.get("key_values") or [])
         except Exception:
+            logging.getLogger(__name__).warning("Broad exception fallback at bff/services/funnel_client.py:742", exc_info=True)
             total_rows_est = 0
 
         return {

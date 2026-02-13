@@ -29,6 +29,7 @@ from shared.services.storage.lakefs_storage_service import LakeFSStorageService
 from shared.utils.path_utils import safe_path_segment
 from shared.utils.time_utils import utcnow
 from shared.utils.json_utils import coerce_json_pipeline, normalize_json_payload
+import logging
 
 
 class PipelineMergeNotSupportedError(RuntimeError):
@@ -1963,6 +1964,7 @@ class PipelineRegistry(PostgresSchemaRegistry):
             try:
                 committed = await lakefs_storage.load_json(bucket=repository, key=f"{commit_id}/{definition_key}")
             except Exception:
+                logging.getLogger(__name__).warning("Broad exception fallback at shared/services/registries/pipeline_registry.py:1965", exc_info=True)
                 return False
             return committed == definition_dict
 

@@ -48,6 +48,7 @@ from shared.utils.action_writeback import is_noop_changes, safe_str
 from shared.observability.tracing import trace_external_call
 from shared.utils.writeback_patch_apply import apply_changes_to_payload
 from shared.utils.time_utils import utcnow
+import logging
 
 
 class ActionSimulationRejected(Exception):
@@ -78,6 +79,7 @@ def _enterprise_payload_for_error(*, error_key: str) -> Optional[Dict[str, Any]]
             external_code=None,
         ).to_dict()
     except Exception:
+        logging.getLogger(__name__).warning("Broad exception fallback at oms/services/action_simulation_service.py:80", exc_info=True)
         return None
 
 
@@ -924,6 +926,7 @@ async def preflight_action_writeback(
                     subject_id=tgt.class_id,
                 )
             except Exception:
+                logging.getLogger(__name__).warning("Broad exception fallback at oms/services/action_simulation_service.py:926", exc_info=True)
                 access_policy = None
             if not access_policy or not isinstance(access_policy.policy, dict) or not access_policy.policy:
                 continue
@@ -1220,6 +1223,7 @@ async def simulate_effects_for_patchset(
             )
             baseline = merged.document
         except Exception:
+            logging.getLogger(__name__).warning("Broad exception fallback at oms/services/action_simulation_service.py:1222", exc_info=True)
             baseline = {
                 "instance_id": instance_id,
                 "class_id": class_id,

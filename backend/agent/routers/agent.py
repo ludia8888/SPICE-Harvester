@@ -16,6 +16,7 @@ from shared.services.registries.agent_registry import AgentRegistry
 from shared.models.responses import ApiResponse
 from shared.security.principal_utils import actor_label, resolve_principal_from_headers
 from shared.utils.llm_safety import digest_for_audit, mask_pii
+import logging
 
 router = APIRouter(prefix="/agent", tags=["Agent"])
 
@@ -66,6 +67,7 @@ def _extract_plan_id(context: Dict[str, Any]) -> Optional[str]:
             try:
                 return str(UUID(str(value)))
             except Exception:
+                logging.getLogger(__name__).warning("Broad exception fallback at agent/routers/agent.py:68", exc_info=True)
                 return None
     return None
 
@@ -201,6 +203,7 @@ async def _execute_agent_run(
                 finished_at=datetime.now(timezone.utc),
             )
     except Exception as exc:
+        logging.getLogger(__name__).warning("Broad exception fallback at agent/routers/agent.py:203", exc_info=True)
         await runtime.record_event(
             event_type="AGENT_RUN_FAILED",
             run_id=run_id,
@@ -355,6 +358,7 @@ async def get_agent_run(
             try:
                 step_idx = int(event.data.get("step_index") or 0)
             except Exception:
+                logging.getLogger(__name__).warning("Broad exception fallback at agent/routers/agent.py:357", exc_info=True)
                 step_idx = 0
             finalized_steps.add(step_idx)
             meta = event.metadata if isinstance(event.metadata, dict) else {}
@@ -382,6 +386,7 @@ async def get_agent_run(
                     try:
                         failed_step = int(ev.data.get("step_index") or 0)
                     except Exception:
+                        logging.getLogger(__name__).warning("Broad exception fallback at agent/routers/agent.py:384", exc_info=True)
                         failed_step = 0
                     break
 

@@ -263,6 +263,7 @@ async def create_database(
         try:
             detail: Any = exc.response.json()
         except Exception:
+            logging.getLogger(__name__).warning("Broad exception fallback at bff/services/database_service.py:265", exc_info=True)
             detail = exc.response.text or str(exc)
 
         if status_code == status.HTTP_409_CONFLICT:
@@ -277,6 +278,7 @@ async def create_database(
     except HTTPException:
         raise
     except Exception as exc:
+        logging.getLogger(__name__).warning("Broad exception fallback at bff/services/database_service.py:279", exc_info=True)
         apply_message_error_policies(
             exc=exc,
             logger=logger,
@@ -333,6 +335,7 @@ async def delete_database(
             try:
                 detail: Any = exc.response.json()
             except Exception:
+                logging.getLogger(__name__).warning("Broad exception fallback at bff/services/database_service.py:335", exc_info=True)
                 detail = exc.response.text or str(exc)
             if isinstance(detail, dict):
                 detail = detail.get("detail") or detail.get("message") or detail.get("error") or detail
@@ -368,6 +371,7 @@ async def delete_database(
     except HTTPException:
         raise
     except Exception as exc:
+        logging.getLogger(__name__).warning("Broad exception fallback at bff/services/database_service.py:370", exc_info=True)
         apply_message_error_policies(
             exc=exc,
             logger=logger,
@@ -442,6 +446,7 @@ async def get_database(*, db_name: str, oms: OMSClient) -> Dict[str, Any]:
     except HTTPException:
         raise
     except Exception as exc:
+        logging.getLogger(__name__).warning("Broad exception fallback at bff/services/database_service.py:444", exc_info=True)
         apply_message_error_policies(
             exc=exc,
             logger=logger,
@@ -517,6 +522,7 @@ async def list_classes(
     except HTTPException:
         raise
     except Exception as exc:
+        logging.getLogger(__name__).warning("Broad exception fallback at bff/services/database_service.py:519", exc_info=True)
         apply_message_error_policies(
             exc=exc,
             logger=logger,
@@ -551,6 +557,7 @@ async def create_class(*, db_name: str, class_data: Dict[str, Any], oms: OMSClie
         try:
             upstream_body: Any = exc.response.json()
         except Exception:  # pragma: no cover (depends on upstream)
+            logging.getLogger(__name__).warning("Broad exception fallback at bff/services/database_service.py:553", exc_info=True)
             upstream_body = getattr(exc.response, "text", str(exc))
 
         if upstream_status in {400, 401, 403, 404, 409, 422}:
@@ -572,6 +579,7 @@ async def create_class(*, db_name: str, class_data: Dict[str, Any], oms: OMSClie
     except HTTPException:
         raise
     except Exception as exc:
+        logging.getLogger(__name__).warning("Broad exception fallback at bff/services/database_service.py:574", exc_info=True)
         apply_message_error_policies(
             exc=exc,
             logger=logger,
@@ -638,6 +646,7 @@ async def get_class(*, db_name: str, class_id: str, oms: OMSClient) -> Dict[str,
         result = await oms.get_ontology(db_name, class_id)
         return result
     except Exception as exc:
+        logging.getLogger(__name__).warning("Broad exception fallback at bff/services/database_service.py:640", exc_info=True)
         apply_message_error_policies(
             exc=exc,
             logger=logger,
@@ -665,6 +674,7 @@ async def list_branches(*, db_name: str, oms: OMSClient) -> Dict[str, Any]:
 
         return {"branches": branches, "count": len(branches)}
     except Exception as exc:
+        logging.getLogger(__name__).warning("Broad exception fallback at bff/services/database_service.py:667", exc_info=True)
         apply_message_error_policies(
             exc=exc,
             logger=logger,
@@ -704,6 +714,7 @@ async def create_branch(*, db_name: str, branch_data: Dict[str, Any], oms: OMSCl
     except HTTPException:
         raise
     except Exception as exc:
+        logging.getLogger(__name__).warning("Broad exception fallback at bff/services/database_service.py:706", exc_info=True)
         apply_message_error_policies(
             exc=exc,
             logger=logger,
@@ -732,6 +743,7 @@ async def get_versions(*, db_name: str, oms: OMSClient) -> Dict[str, Any]:
 
         return {"versions": versions, "count": len(versions)}
     except Exception as exc:
+        logging.getLogger(__name__).warning("Broad exception fallback at bff/services/database_service.py:734", exc_info=True)
         return apply_message_error_policies(
             exc=exc,
             logger=logger,

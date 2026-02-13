@@ -141,6 +141,7 @@ async def save_mapping_metadata(
                     if isinstance(detail_json, dict):
                         detail = detail_json.get("detail") or detail_json
                 except Exception:
+                    logging.getLogger(__name__).warning("Broad exception fallback at bff/routers/ontology_metadata.py:143", exc_info=True)
                     pass
                 raise classified_http_exception(status_code, str(detail), code=ErrorCode.UPSTREAM_ERROR) from e
         

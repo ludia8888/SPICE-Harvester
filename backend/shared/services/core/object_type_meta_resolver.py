@@ -4,6 +4,7 @@ from typing import Any, Awaitable, Callable, Dict, Optional, TypedDict
 
 from shared.utils.resource_rid import parse_metadata_rev
 from shared.utils.writeback_conflicts import parse_conflict_policy
+import logging
 
 
 class ObjectTypeMeta(TypedDict):
@@ -42,6 +43,7 @@ def build_object_type_meta_resolver(
             obj_metadata = object_resource.get("metadata") if isinstance(object_resource, dict) else None
             meta["rev"] = parse_metadata_rev(obj_metadata)
         except Exception:
+            logging.getLogger(__name__).warning("Broad exception fallback at shared/services/core/object_type_meta_resolver.py:44", exc_info=True)
             pass
 
         cache[key] = meta

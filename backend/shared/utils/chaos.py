@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Optional
 
 from shared.config.settings import get_settings
+import logging
 
 
 def chaos_enabled() -> bool:
@@ -60,6 +61,7 @@ def maybe_crash(point: str, *, logger: Optional[object] = None) -> None:
             marker.write_text("crashed\n", encoding="utf-8")
         except Exception:
             # Marker best-effort; still crash if requested.
+            logging.getLogger(__name__).warning("Broad exception fallback at shared/utils/chaos.py:61", exc_info=True)
             pass
 
     msg = f"CHAOS: crashing at {point}"
@@ -69,6 +71,7 @@ def maybe_crash(point: str, *, logger: Optional[object] = None) -> None:
         else:
             print(msg, flush=True)
     except Exception:
+        logging.getLogger(__name__).warning("Broad exception fallback at shared/utils/chaos.py:71", exc_info=True)
         pass
 
     os._exit(int(chaos.crash_exit_code))

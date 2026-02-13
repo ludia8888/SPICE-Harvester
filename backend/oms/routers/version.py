@@ -491,6 +491,7 @@ async def rollback(
                 )
             except Exception:
                 # Blocking a dangerous operation should still work even if audit is degraded.
+                logging.getLogger(__name__).warning("Broad exception fallback at oms/routers/version.py:492", exc_info=True)
                 pass
 
             raise classified_http_exception(
@@ -552,6 +553,7 @@ async def rollback(
             )
         except Exception:
             # Best-effort; request log is already written.
+            logging.getLogger(__name__).warning("Broad exception fallback at oms/routers/version.py:553", exc_info=True)
             pass
 
         return ApiResponse.success(

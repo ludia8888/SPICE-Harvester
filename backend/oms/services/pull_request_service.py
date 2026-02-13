@@ -239,6 +239,7 @@ class PullRequestService(BaseTerminusService):
                 return None
             except Exception as e:
                 # If dry run fails, there might be conflicts
+                logging.getLogger(__name__).warning("Broad exception fallback at oms/services/pull_request_service.py:240", exc_info=True)
                 if "conflict" in str(e).lower():
                     return [{"type": "merge_conflict", "message": str(e)}]
                 # Other errors are not conflicts

@@ -120,6 +120,7 @@ async def get_command_status(
                 try:
                     parsed_status = CommandStatus(raw_status)
                 except Exception:
+                    logging.getLogger(__name__).warning("Broad exception fallback at oms/routers/command_status.py:122", exc_info=True)
                     parsed_status = CommandStatus.PENDING
 
                 if parsed_status in {CommandStatus.PENDING, CommandStatus.RETRYING}:

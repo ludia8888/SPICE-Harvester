@@ -368,6 +368,7 @@ class StorageService:
                 try:
                     body.close()
                 except Exception:
+                    logging.getLogger(__name__).warning("Broad exception fallback at shared/services/storage/storage_service.py:370", exc_info=True)
                     pass
             return bytes(out)
 

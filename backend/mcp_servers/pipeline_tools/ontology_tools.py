@@ -297,6 +297,7 @@ async def _detect_foreign_keys(server: Any, arguments: Dict[str, Any]) -> Any:
                 try:
                     ds_schema = _json.loads(ds_schema)
                 except Exception:
+                    logging.getLogger(__name__).warning("Broad exception fallback at mcp_servers/pipeline_tools/ontology_tools.py:299", exc_info=True)
                     ds_schema = {}
             ds_columns = ds_schema.get("columns") or ds_schema.get("fields") or []
             pk_cols = [

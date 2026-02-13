@@ -42,6 +42,7 @@ def _expects_many(cardinality: Optional[Any]) -> Optional[bool]:
     try:
         card = str(cardinality).strip()
     except Exception:
+        logging.getLogger(__name__).warning("Broad exception fallback at shared/services/core/relationship_extractor.py:44", exc_info=True)
         return None
     if not card:
         return None

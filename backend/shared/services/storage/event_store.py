@@ -39,6 +39,7 @@ try:
     from shared.services.registries.lineage_store import LineageStore
     from shared.services.core.audit_log_store import AuditLogStore
 except Exception:  # pragma: no cover
+    logging.getLogger(__name__).warning("Broad exception fallback at shared/services/storage/event_store.py:41", exc_info=True)
     LineageStore = None  # type: ignore
     AuditLogStore = None  # type: ignore
 
@@ -391,6 +392,7 @@ class EventStore:
                     or 0
                 )
             except Exception:
+                logging.getLogger(__name__).warning("Broad exception fallback at shared/services/storage/event_store.py:393", exc_info=True)
                 return int(seed or 0)
 
         expected_seq = None

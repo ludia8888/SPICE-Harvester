@@ -103,6 +103,7 @@ async def create_ontology(
         )
 
     except Exception as exc:
+        logging.getLogger(__name__).warning("Broad exception fallback at bff/services/ontology_crud_service.py:105", exc_info=True)
         raise_oms_boundary_exception(exc=exc, action="온톨로지 생성", logger=logger)
 
 
@@ -160,6 +161,7 @@ async def list_ontologies(
         }
 
     except Exception as exc:
+        logging.getLogger(__name__).warning("Broad exception fallback at bff/services/ontology_crud_service.py:162", exc_info=True)
         raise_oms_boundary_exception(
             exc=exc,
             action="온톨로지 목록 조회",
@@ -225,6 +227,7 @@ async def get_ontology(
         return OntologyResponse(**ontology_base_data)
 
     except Exception as exc:
+        logging.getLogger(__name__).warning("Broad exception fallback at bff/services/ontology_crud_service.py:227", exc_info=True)
         raise_oms_boundary_exception(exc=exc, action="온톨로지 조회", logger=logger)
 
 
@@ -243,6 +246,7 @@ async def validate_ontology_create(
         payload = sanitize_input(body.model_dump(exclude_unset=True))
         return await oms_client.validate_ontology_create(db_name, payload, branch=branch)
     except Exception as exc:
+        logging.getLogger(__name__).warning("Broad exception fallback at bff/services/ontology_crud_service.py:245", exc_info=True)
         raise_oms_boundary_exception(exc=exc, action="온톨로지 생성 검증", logger=logger)
 
 
@@ -268,6 +272,7 @@ async def validate_ontology_update(
         payload = sanitize_input(body.model_dump(exclude_unset=True))
         return await oms_client.validate_ontology_update(db_name, class_id, payload, branch=branch)
     except Exception as exc:
+        logging.getLogger(__name__).warning("Broad exception fallback at bff/services/ontology_crud_service.py:270", exc_info=True)
         raise_oms_boundary_exception(exc=exc, action="온톨로지 업데이트 검증", logger=logger)
 
 
@@ -323,6 +328,7 @@ async def update_ontology(
         )
 
     except Exception as exc:
+        logging.getLogger(__name__).warning("Broad exception fallback at bff/services/ontology_crud_service.py:325", exc_info=True)
         raise_oms_boundary_exception(exc=exc, action="온톨로지 수정", logger=logger)
 
 
@@ -373,6 +379,7 @@ async def delete_ontology(
         )
 
     except Exception as exc:
+        logging.getLogger(__name__).warning("Broad exception fallback at bff/services/ontology_crud_service.py:375", exc_info=True)
         raise_oms_boundary_exception(exc=exc, action="온톨로지 삭제", logger=logger)
 
 
@@ -427,4 +434,5 @@ async def get_ontology_schema(
         return ontology
 
     except Exception as exc:
+        logging.getLogger(__name__).warning("Broad exception fallback at bff/services/ontology_crud_service.py:429", exc_info=True)
         raise_oms_boundary_exception(exc=exc, action="온톨로지 스키마 조회", logger=logger)

@@ -96,6 +96,7 @@ def _load_pricing_table(raw: Optional[str]) -> dict[str, dict[str, float]]:
     try:
         parsed = json.loads(raw_value)
     except Exception:
+        logging.getLogger(__name__).warning("Broad exception fallback at shared/services/agent/llm_gateway.py:98", exc_info=True)
         _PRICING_CACHE = (raw_value, {})
         return _PRICING_CACHE[1]
     table: dict[str, dict[str, float]] = {}
@@ -136,6 +137,7 @@ def _parse_provider_policies(raw: Optional[str]) -> dict[str, dict[str, Any]]:
     try:
         parsed = json.loads(text)
     except Exception:
+        logging.getLogger(__name__).warning("Broad exception fallback at shared/services/agent/llm_gateway.py:138", exc_info=True)
         return {}
     if not isinstance(parsed, dict):
         return {}
@@ -263,6 +265,7 @@ def _extract_json_object(text: str) -> Dict[str, Any]:
         if isinstance(obj, dict):
             return obj
     except Exception:
+        logging.getLogger(__name__).warning("Broad exception fallback at shared/services/agent/llm_gateway.py:265", exc_info=True)
         pass
 
     # Fallback: find outermost braces
@@ -291,6 +294,7 @@ def _tool_parameters_from_model(model: Type[BaseModel]) -> Dict[str, Any]:
     try:
         schema = model.model_json_schema()
     except Exception:
+        logging.getLogger(__name__).warning("Broad exception fallback at shared/services/agent/llm_gateway.py:293", exc_info=True)
         schema = {}
     if not isinstance(schema, dict):
         schema = {}
@@ -1188,6 +1192,7 @@ class LLMGateway:
                         try:
                             parsed = json.loads(raw)
                         except Exception:
+                            logging.getLogger(__name__).warning("Broad exception fallback at shared/services/agent/llm_gateway.py:1190", exc_info=True)
                             parsed = None
 
                         if isinstance(parsed, list):

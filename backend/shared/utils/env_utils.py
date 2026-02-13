@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from typing import Optional
+import logging
 
 
 def parse_bool(raw: str) -> Optional[bool]:
@@ -25,5 +26,6 @@ def parse_int_env(name: str, default: int, *, min_value: int = 0, max_value: int
     try:
         value = int(raw)
     except Exception:
+        logging.getLogger(__name__).warning("Broad exception fallback at shared/utils/env_utils.py:27", exc_info=True)
         return default
     return max(min_value, min(max_value, value))

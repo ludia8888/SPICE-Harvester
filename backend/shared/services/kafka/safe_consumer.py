@@ -329,12 +329,14 @@ class SafeKafkaConsumer:
                 self._consumer.poll(0.1)
             except Exception:
                 # Keep trying; transient broker/DNS issues can resolve shortly after startup.
+                logging.getLogger(__name__).warning("Broad exception fallback at shared/services/kafka/safe_consumer.py:330", exc_info=True)
                 time.sleep(0.1)
                 continue
             try:
                 if self._consumer.assignment():
                     return True
             except Exception:
+                logging.getLogger(__name__).warning("Broad exception fallback at shared/services/kafka/safe_consumer.py:337", exc_info=True)
                 pass
             time.sleep(0.1)
         return False

@@ -23,6 +23,7 @@ import aiohttp
 import redis.asyncio as aioredis
 import boto3
 from botocore.client import Config
+import logging
 
 class ConsistencyChecker:
     """
@@ -136,6 +137,7 @@ class ConsistencyChecker:
                 }
                 
         except Exception as e:
+            logging.getLogger(__name__).warning("Broad exception fallback at shared/services/core/consistency_checker.py:138", exc_info=True)
             print(f"   ❌ Error: {e}")
             return {"passed": False, "error": str(e)}
     
@@ -174,6 +176,7 @@ class ConsistencyChecker:
             }
             
         except Exception as e:
+            logging.getLogger(__name__).warning("Broad exception fallback at shared/services/core/consistency_checker.py:176", exc_info=True)
             print(f"   ❌ Error: {e}")
             return {"passed": False, "error": str(e)}
     
@@ -235,6 +238,7 @@ class ConsistencyChecker:
             }
             
         except Exception as e:
+            logging.getLogger(__name__).warning("Broad exception fallback at shared/services/core/consistency_checker.py:237", exc_info=True)
             print(f"   ❌ Error: {e}")
             return {"passed": False, "error": str(e)}
     
@@ -290,6 +294,7 @@ class ConsistencyChecker:
                 }
                 
         except Exception as e:
+            logging.getLogger(__name__).warning("Broad exception fallback at shared/services/core/consistency_checker.py:292", exc_info=True)
             print(f"   ❌ Error: {e}")
             return {"passed": False, "error": str(e)}
     
@@ -356,6 +361,7 @@ class ConsistencyChecker:
             }
             
         except Exception as e:
+            logging.getLogger(__name__).warning("Broad exception fallback at shared/services/core/consistency_checker.py:358", exc_info=True)
             print(f"   ❌ Error: {e}")
             return {"passed": False, "error": str(e)}
     
@@ -398,6 +404,7 @@ class ConsistencyChecker:
             }
             
         except Exception as e:
+            logging.getLogger(__name__).warning("Broad exception fallback at shared/services/core/consistency_checker.py:400", exc_info=True)
             print(f"   ❌ Error: {e}")
             return {"passed": False, "error": str(e)}
 

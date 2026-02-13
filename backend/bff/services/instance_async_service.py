@@ -98,6 +98,7 @@ async def convert_labels_to_ids(
             input_sanitizer.sanitize_field_name(label)
             converted[label] = value
         except Exception:
+            logging.getLogger(__name__).warning("Broad exception fallback at bff/services/instance_async_service.py:100", exc_info=True)
             unknown_labels.append(label)
 
     if unknown_labels:

@@ -118,10 +118,12 @@ async def run_ontology_agent(
     try:
         redis_service = create_redis_service_legacy()
     except Exception:
+        logging.getLogger(__name__).warning("Broad exception fallback at bff/routers/ontology_agent.py:120", exc_info=True)
         redis_service = None
     try:
         audit_store = AuditLogStore()
     except Exception:
+        logging.getLogger(__name__).warning("Broad exception fallback at bff/routers/ontology_agent.py:124", exc_info=True)
         audit_store = None
 
     # Get registries (required by pipeline agent, but won't be used for ontology-only)

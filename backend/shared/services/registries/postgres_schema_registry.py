@@ -17,6 +17,7 @@ from typing import Optional
 import asyncpg
 
 from shared.config.settings import get_settings
+import logging
 
 
 class PostgresSchemaRegistry(ABC):
@@ -66,6 +67,7 @@ class PostgresSchemaRegistry(ABC):
                 await conn.execute("SELECT 1")
             return True
         except Exception:
+            logging.getLogger(__name__).warning("Broad exception fallback at shared/services/registries/postgres_schema_registry.py:68", exc_info=True)
             return False
 
     async def ensure_schema(self) -> None:

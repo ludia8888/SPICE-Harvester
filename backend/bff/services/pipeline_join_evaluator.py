@@ -15,6 +15,7 @@ from shared.services.storage.storage_service import StorageService
 from shared.services.pipeline.pipeline_graph_utils import build_incoming, normalize_edges, normalize_nodes
 from shared.services.pipeline.pipeline_transform_spec import resolve_join_spec, normalize_operation
 from shared.observability.tracing import trace_external_call
+import logging
 
 
 @dataclass(frozen=True)
@@ -217,6 +218,7 @@ async def evaluate_pipeline_joins(
         try:
             run_result = await executor.run(definition=definition_for_run, db_name=db_name)
         except Exception as exc:
+            logging.getLogger(__name__).warning("Broad exception fallback at bff/services/pipeline_join_evaluator.py:219", exc_info=True)
             return [], [f"preview run failed: {exc}"]
         tables = run_result.tables
     evaluations: List[JoinEvaluation] = []

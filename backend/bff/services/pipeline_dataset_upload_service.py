@@ -75,6 +75,7 @@ async def _save_artifact(
     try:
         fileobj.seek(0)
     except Exception:
+        logging.getLogger(__name__).warning("Broad exception fallback at bff/services/pipeline_dataset_upload_service.py:77", exc_info=True)
         pass
 
     save_fileobj = getattr(lakefs_storage_service, "save_fileobj", None)

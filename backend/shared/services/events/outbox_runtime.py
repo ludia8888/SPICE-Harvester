@@ -47,6 +47,7 @@ async def maybe_purge_with_interval(
         if deleted:
             info_logger(success_message, deleted)
     except Exception as exc:
+        logging.getLogger(__name__).warning("Broad exception fallback at shared/services/events/outbox_runtime.py:49", exc_info=True)
         warning_logger(failure_message, exc)
     return now
 
@@ -84,6 +85,7 @@ async def run_outbox_poll_loop(
                 elif result and isinstance(result, dict) and result.get("published", 0) > 0:
                     had_work = True
             except Exception as exc:
+                logging.getLogger(__name__).warning("Broad exception fallback at shared/services/events/outbox_runtime.py:86", exc_info=True)
                 warning_logger(failure_message, exc)
 
             # Adaptive poll interval

@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 from ..models.common import DataType
 from .base_validator import ValidationResult
+import logging
 
 
 @dataclass
@@ -242,6 +243,7 @@ class ComplexTypeValidator:
                     return True, f"Default validation passed for type: {data_type}", value
 
         except Exception as e:
+            logging.getLogger(__name__).warning("Broad exception fallback at shared/validators/complex_type_validator.py:244", exc_info=True)
             return False, f"Validation error: {str(e)}", value
 
     @classmethod

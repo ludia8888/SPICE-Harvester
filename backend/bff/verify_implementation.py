@@ -7,6 +7,7 @@ think ultra! 실제로 작동하는 구현의 핵심 기능들 검증
 import asyncio
 import importlib.util
 import json
+import logging
 
 
 def test_core_conflict_system():
@@ -100,6 +101,7 @@ def test_core_conflict_system():
         print("✅ 모든 UI/클라이언트 친화 충돌 형식 검증 완료")
 
     except Exception as e:
+        logging.getLogger(__name__).warning("Broad exception fallback at bff/verify_implementation.py:102", exc_info=True)
         print(f"❌ ConflictConverter 검증 실패: {e}")
         return False
 
@@ -141,6 +143,7 @@ def test_core_conflict_system():
         print("✅ JSON-LD 경로 매핑 검증 완료")
 
     except Exception as e:
+        logging.getLogger(__name__).warning("Broad exception fallback at bff/verify_implementation.py:143", exc_info=True)
         print(f"❌ 경로 매핑 검증 실패: {e}")
         return False
 
@@ -186,6 +189,7 @@ def test_core_conflict_system():
         print("✅ 충돌 해결 옵션 생성 검증 완료")
 
     except Exception as e:
+        logging.getLogger(__name__).warning("Broad exception fallback at bff/verify_implementation.py:188", exc_info=True)
         print(f"❌ 해결 옵션 검증 실패: {e}")
         return False
 
@@ -229,6 +233,7 @@ def test_core_conflict_system():
         print("✅ API 라우터 구조 검증 완료")
 
     except Exception as e:
+        logging.getLogger(__name__).warning("Broad exception fallback at bff/verify_implementation.py:231", exc_info=True)
         print(f"❌ API 구조 검증 실패: {e}")
         return False
 
@@ -327,6 +332,7 @@ def test_real_world_scenario():
         print("\n✅ 실제 시나리오 해결 완료!")
 
     except Exception as e:
+        logging.getLogger(__name__).warning("Broad exception fallback at bff/verify_implementation.py:329", exc_info=True)
         print(f"❌ 시나리오 해결 실패: {e}")
 
 

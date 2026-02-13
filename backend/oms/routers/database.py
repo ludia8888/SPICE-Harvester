@@ -119,6 +119,7 @@ async def create_database(
                         await command_status_service.start_processing(command_id=str(command.command_id))
                     except Exception:
                         # Ignore best-effort start update
+                        logging.getLogger(__name__).warning("Broad exception fallback at oms/routers/database.py:120", exc_info=True)
                         pass
                     await command_status_service.complete_command(
                         command_id=str(command.command_id),

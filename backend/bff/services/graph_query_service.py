@@ -74,6 +74,7 @@ def _resolve_graph_branches(
     try:
         virtualization_base_branch = validate_branch_name(get_settings().branch_virtualization.base_branch)
     except Exception:
+        logging.getLogger(__name__).warning("Broad exception fallback at bff/services/graph_query_service.py:76", exc_info=True)
         virtualization_base_branch = "main"
 
     es_base_branch = resolved_terminus_branch
@@ -365,6 +366,7 @@ async def execute_graph_query(
                 )
                 degraded_fallback = True
             except Exception:
+                logging.getLogger(__name__).warning("Broad exception fallback at bff/services/graph_query_service.py:367", exc_info=True)
                 _raise_overlay_degraded(ctx=ctx)
 
         raw_nodes = list(result.get("nodes", []) or [])
@@ -487,6 +489,7 @@ async def execute_graph_query(
                         node_index_status["projection_last_indexed_at"] = e_at.isoformat()
                         node_index_status["projection_lag_seconds"] = max(0.0, (t_at - e_at).total_seconds())
                 except Exception:
+                    logging.getLogger(__name__).warning("Broad exception fallback at bff/services/graph_query_service.py:489", exc_info=True)
                     pass
 
             nodes.append(
@@ -643,6 +646,7 @@ async def execute_simple_graph_query(
                 )
                 degraded_fallback = True
             except Exception:
+                logging.getLogger(__name__).warning("Broad exception fallback at bff/services/graph_query_service.py:645", exc_info=True)
                 _raise_overlay_degraded(ctx=ctx)
 
         policy = await dataset_registry.get_access_policy(
@@ -780,6 +784,7 @@ async def execute_multi_hop_query(
                 )
                 degraded_fallback = True
             except Exception:
+                logging.getLogger(__name__).warning("Broad exception fallback at bff/services/graph_query_service.py:782", exc_info=True)
                 _raise_overlay_degraded(ctx=ctx)
 
         raw_nodes = list(result.get("nodes", []) or [])

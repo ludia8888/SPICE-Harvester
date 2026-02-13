@@ -17,6 +17,7 @@ from shared.config.settings import get_settings
 
 from .commands import BaseCommand
 from .events import BaseEvent
+import logging
 
 
 class EventEnvelope(BaseModel):
@@ -90,6 +91,7 @@ class EventEnvelope(BaseModel):
             if ctx_req and "request_id" not in base_metadata:
                 base_metadata["request_id"] = ctx_req
         except Exception:
+            logging.getLogger(__name__).warning("Broad exception fallback at shared/models/event_envelope.py:92", exc_info=True)
             pass
         if kafka_topic:
             base_metadata["kafka_topic"] = kafka_topic

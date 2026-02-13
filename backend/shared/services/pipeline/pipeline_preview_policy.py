@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Literal, Optional, Tuple
 
 from shared.services.pipeline.pipeline_definition_utils import resolve_execution_semantics
 from shared.services.pipeline.pipeline_transform_spec import normalize_operation
+import logging
 
 PreviewPolicyLevel = Literal["allow", "warn", "require_spark", "deny"]
 PreviewIssueSeverity = Literal["warn", "require_spark", "deny"]
@@ -146,6 +147,7 @@ def _is_preview_safe_compute_expression(expression: str) -> bool:
     try:
         tree = ast.parse(expr, mode="eval")
     except Exception:
+        logging.getLogger(__name__).warning("Broad exception fallback at shared/services/pipeline/pipeline_preview_policy.py:148", exc_info=True)
         return False
     return _is_safe_python_ast(tree)
 
@@ -188,6 +190,7 @@ def evaluate_preview_policy(definition_json: Dict[str, Any]) -> Dict[str, Any]:
     try:
         semantics = resolve_execution_semantics(definition_json)
     except Exception:
+        logging.getLogger(__name__).warning("Broad exception fallback at shared/services/pipeline/pipeline_preview_policy.py:190", exc_info=True)
         semantics = "snapshot"
     if semantics in {"incremental", "streaming"}:
         issues.append(

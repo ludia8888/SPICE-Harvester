@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any, Dict, List
+import logging
 
 
 def unique_node_id(base: str, existing: set[str], *, start_index: int = 1) -> str:
@@ -15,6 +16,7 @@ def unique_node_id(base: str, existing: set[str], *, start_index: int = 1) -> st
     try:
         index = int(start_index)
     except Exception:
+        logging.getLogger(__name__).warning("Broad exception fallback at shared/services/pipeline/pipeline_graph_utils.py:17", exc_info=True)
         index = 1
     if index < 1:
         index = 1

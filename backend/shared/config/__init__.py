@@ -28,6 +28,7 @@ from .search_config import (
     sanitize_index_name,
     get_default_index_settings,
 )
+import logging
 
 # Create unified Config class that inherits from AppConfig and adds other configs
 class Config(AppConfig):
@@ -124,6 +125,7 @@ class Config(AppConfig):
                 "minio": bool(cls.get_minio_url())
             }
         except Exception as e:
+            logging.getLogger(__name__).warning("Broad exception fallback at shared/config/__init__.py:126", exc_info=True)
             results["service_urls"] = {"error": str(e)}
         
         return results

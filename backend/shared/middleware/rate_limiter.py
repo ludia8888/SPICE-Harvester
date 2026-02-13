@@ -17,6 +17,7 @@ from shared.config.rate_limit_config import rate_limit_config
 from shared.errors.error_types import ErrorCode, classified_http_exception
 from shared.security.auth_utils import extract_presented_token
 from shared.utils.app_logger import get_logger
+import logging
 
 logger = get_logger(__name__)
 
@@ -448,6 +449,7 @@ def rate_limit(
                         if client_ip and rate_limit_config.is_whitelisted(client_ip):
                             bypass_rate_limit = True
                     except Exception:
+                        logging.getLogger(__name__).warning("Broad exception fallback at shared/middleware/rate_limiter.py:450", exc_info=True)
                         bypass_rate_limit = False
             
             # If no Request found, skip rate limiting (for non-HTTP contexts)
@@ -485,6 +487,7 @@ def rate_limit(
                         strategy=strategy,
                     )
                 except Exception:
+                    logging.getLogger(__name__).warning("Broad exception fallback at shared/middleware/rate_limiter.py:487", exc_info=True)
                     pass
             
             # Add rate limit headers

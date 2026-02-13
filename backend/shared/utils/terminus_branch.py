@@ -14,6 +14,7 @@ Encoding format:
 from __future__ import annotations
 
 import base64
+import logging
 
 _BRANCH_B64_PREFIX = "spiceb64_"
 
@@ -37,5 +38,6 @@ def decode_branch_name(branch_name: str) -> str:
     try:
         return base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8")
     except Exception:
+        logging.getLogger(__name__).warning("Broad exception fallback at shared/utils/terminus_branch.py:39", exc_info=True)
         return branch_name
 

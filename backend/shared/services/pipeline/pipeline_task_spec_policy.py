@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from shared.models.pipeline_plan import PipelinePlan
 from shared.models.pipeline_task_spec import PipelineTaskIntent, PipelineTaskScope, PipelineTaskSpec
 from shared.services.pipeline.pipeline_transform_spec import normalize_operation
+import logging
 
 
 _ADVANCED_OPS_LOWER = {
@@ -56,6 +57,7 @@ def normalize_task_spec(raw: Optional[Dict[str, Any]], *, dataset_count: int) ->
     try:
         spec = PipelineTaskSpec.model_validate(raw)
     except Exception:
+        logging.getLogger(__name__).warning("Broad exception fallback at shared/services/pipeline/pipeline_task_spec_policy.py:58", exc_info=True)
         return None
     return clamp_task_spec(spec=spec, dataset_count=int(dataset_count or 0))
 

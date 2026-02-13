@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import Any, Dict, Optional
 
 from shared.services.registries.action_log_registry import ActionLogRecord
+import logging
 
 ACTION_LOG_CLASS_ID = "ActionLog"
 
@@ -18,6 +19,7 @@ def dt_iso(value: Any) -> Optional[str]:
     try:
         return value.isoformat()
     except Exception:
+        logging.getLogger(__name__).warning("Broad exception fallback at bff/utils/action_log_serialization.py:20", exc_info=True)
         return str(value)
 
 

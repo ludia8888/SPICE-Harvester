@@ -15,6 +15,7 @@ import httpx
 
 from shared.config.settings import get_settings
 from shared.observability.tracing import trace_external_call
+import logging
 
 
 class LakeFSError(RuntimeError):
@@ -87,6 +88,7 @@ def _normalize_metadata(metadata: Dict[str, Any]) -> Dict[str, str]:
         try:
             normalized[key] = json.dumps(raw_value, ensure_ascii=False, sort_keys=True)
         except Exception:
+            logging.getLogger(__name__).warning("Broad exception fallback at shared/services/storage/lakefs_client.py:89", exc_info=True)
             normalized[key] = str(raw_value)
     return normalized
 

@@ -168,6 +168,7 @@ async def rebuild_instance_index(
         try:
             await elasticsearch_service.delete_index(new_index)
         except Exception:
+            logging.getLogger(__name__).warning("Broad exception fallback at shared/services/core/instance_index_rebuild_service.py:170", exc_info=True)
             pass
         return RebuildIndexResult(
             task_id=task_id,
@@ -197,6 +198,7 @@ async def _resolve_alias_targets(
         result = await es.client.indices.get_alias(name=alias_name)
         return list(result.keys())
     except Exception:
+        logging.getLogger(__name__).warning("Broad exception fallback at shared/services/core/instance_index_rebuild_service.py:199", exc_info=True)
         return []
 
 
@@ -244,4 +246,5 @@ async def _get_class_counts(
         buckets = aggs.get("classes", {}).get("buckets", [])
         return {b["key"]: b["doc_count"] for b in buckets if "key" in b}
     except Exception:
+        logging.getLogger(__name__).warning("Broad exception fallback at shared/services/core/instance_index_rebuild_service.py:246", exc_info=True)
         return {}

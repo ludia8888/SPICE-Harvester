@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List, Tuple, Optional
 import stat
+import logging
 
 
 class LogRotationManager:
@@ -87,6 +88,7 @@ class LogRotationManager:
             return True
             
         except Exception as e:
+            logging.getLogger(__name__).warning("Broad exception fallback at shared/utils/log_rotation.py:89", exc_info=True)
             print(f"❌ Failed to rotate {log_file}: {e}")
             return False
     
@@ -124,6 +126,7 @@ class LogRotationManager:
                     compressed_count += 1
                     
                 except Exception as e:
+                    logging.getLogger(__name__).warning("Broad exception fallback at shared/utils/log_rotation.py:126", exc_info=True)
                     print(f"❌ Failed to compress {log_file}: {e}")
         
         return compressed_count
@@ -161,6 +164,7 @@ class LogRotationManager:
                         print(f"🗑️  Deleted old log: {log_file.name} (age: {age_days:.1f} days)")
                         
                     except Exception as e:
+                        logging.getLogger(__name__).warning("Broad exception fallback at shared/utils/log_rotation.py:163", exc_info=True)
                         print(f"❌ Failed to delete {log_file}: {e}")
         
         freed_space_mb = freed_space / (1024 * 1024)
@@ -200,6 +204,7 @@ class LogRotationManager:
                     print(f"🗑️  Removed excess rotated file: {file_path.name}")
                     
                 except Exception as e:
+                    logging.getLogger(__name__).warning("Broad exception fallback at shared/utils/log_rotation.py:202", exc_info=True)
                     print(f"❌ Failed to remove {file_path_str}: {e}")
         
         return removed_count
@@ -257,6 +262,7 @@ class LogRotationManager:
                 stats["limited_files"] += self.limit_rotated_files(service_name)
             
         except Exception as e:
+            logging.getLogger(__name__).warning("Broad exception fallback at shared/utils/log_rotation.py:259", exc_info=True)
             error_msg = f"Maintenance error: {e}"
             stats["errors"].append(error_msg)
             print(f"❌ {error_msg}")
@@ -298,6 +304,7 @@ class LogRotationManager:
             }
             
         except Exception as e:
+            logging.getLogger(__name__).warning("Broad exception fallback at shared/utils/log_rotation.py:300", exc_info=True)
             return {
                 "directory": str(self.log_dir),
                 "error": str(e),

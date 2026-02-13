@@ -189,6 +189,7 @@ class S3EventStoreDashboard:
                 raw = await obj["Body"].read()
                 checkpoint = json.loads(raw.decode("utf-8"))
             except Exception as e:
+                logging.getLogger(__name__).warning("Broad exception fallback at monitoring/s3_event_store_dashboard.py:191", exc_info=True)
                 error_rate.labels(operation="publisher_checkpoint", error_type=type(e).__name__).inc()
                 publisher_checkpoint_age_seconds.labels(
                     bucket=self.bucket_name, checkpoint_key=self.checkpoint_key
@@ -213,6 +214,7 @@ class S3EventStoreDashboard:
                     dt = dt.replace(tzinfo=timezone.utc)
                 age_s = max(0.0, (now - dt.astimezone(timezone.utc)).total_seconds())
             except Exception:
+                logging.getLogger(__name__).warning("Broad exception fallback at monitoring/s3_event_store_dashboard.py:215", exc_info=True)
                 age_s = None
 
         lag_s: Optional[float] = None

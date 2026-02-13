@@ -2354,6 +2354,7 @@ class DatasetRegistry(PostgresSchemaRegistry):
             try:
                 return int(str(result).split()[-1])
             except Exception:
+                logging.getLogger(__name__).warning("Broad exception fallback at shared/services/registries/dataset_registry.py:2356", exc_info=True)
                 return 0
 
     async def remap_instance_edits(
@@ -2390,6 +2391,7 @@ class DatasetRegistry(PostgresSchemaRegistry):
                     try:
                         updated += int(str(result).split()[-1])
                     except Exception:
+                        logging.getLogger(__name__).warning("Broad exception fallback at shared/services/registries/dataset_registry.py:2392", exc_info=True)
                         continue
         return updated
 
@@ -2527,6 +2529,7 @@ class DatasetRegistry(PostgresSchemaRegistry):
                     try:
                         updated += int(str(result).split()[-1])
                     except Exception:
+                        logging.getLogger(__name__).warning("Broad exception fallback at shared/services/registries/dataset_registry.py:2529", exc_info=True)
                         continue
         return updated
 
@@ -2584,6 +2587,7 @@ class DatasetRegistry(PostgresSchemaRegistry):
         try:
             return int(str(result).split()[-1])
         except Exception:
+            logging.getLogger(__name__).warning("Broad exception fallback at shared/services/registries/dataset_registry.py:2586", exc_info=True)
             return 0
 
     async def create_relationship_spec(
@@ -3022,6 +3026,7 @@ class DatasetRegistry(PostgresSchemaRegistry):
             try:
                 return int(str(result).split()[-1])
             except Exception:
+                logging.getLogger(__name__).warning("Broad exception fallback at shared/services/registries/dataset_registry.py:3024", exc_info=True)
                 return 0
 
     async def create_schema_migration_plan(
@@ -4114,6 +4119,7 @@ class DatasetRegistry(PostgresSchemaRegistry):
             try:
                 oldest_age_seconds = int((now - oldest_created).total_seconds())
             except Exception:
+                logging.getLogger(__name__).warning("Broad exception fallback at shared/services/registries/dataset_registry.py:4116", exc_info=True)
                 oldest_age_seconds = None
 
         return {
@@ -4347,6 +4353,7 @@ class DatasetRegistry(PostgresSchemaRegistry):
                 try:
                     results["committed_tx"] = int(repaired.split()[-1])
                 except Exception:
+                    logging.getLogger(__name__).warning("Broad exception fallback at shared/services/registries/dataset_registry.py:4349", exc_info=True)
                     pass
 
             # 3) Abort stale OPEN transactions.

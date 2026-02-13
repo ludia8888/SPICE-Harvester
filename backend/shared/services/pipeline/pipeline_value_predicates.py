@@ -8,6 +8,7 @@ from shared.services.pipeline.pipeline_type_utils import (
     parse_decimal_text,
     parse_int_text,
 )
+import logging
 
 
 def is_bool_like(value: Any) -> bool:
@@ -50,6 +51,7 @@ def is_datetime_like(value: Any, *, iso_only: bool = False, allow_ambiguous: boo
             datetime.fromisoformat(value.replace("Z", "+00:00"))
             return True
         except Exception:
+            logging.getLogger(__name__).warning("Broad exception fallback at shared/services/pipeline/pipeline_value_predicates.py:52", exc_info=True)
             return False
     return parse_datetime_text(value, allow_ambiguous=allow_ambiguous) is not None
 

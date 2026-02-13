@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional
 from shared.config.settings import get_settings
 from shared.models.pipeline_job import PipelineJob
 from shared.services.pipeline.pipeline_definition_utils import resolve_execution_semantics
+import logging
 
 _SENSITIVE_CONF_TOKENS = (
     "secret",
@@ -78,6 +79,7 @@ def _max_watermark_from_snapshots(
                 if float(candidate) > float(max_value):
                     max_value = candidate
             except Exception:
+                logging.getLogger(__name__).warning("Broad exception fallback at pipeline_worker/worker_helpers.py:80", exc_info=True)
                 if str(candidate) > str(max_value):
                     max_value = candidate
     return max_value
@@ -89,6 +91,7 @@ def _watermark_values_match(left: Any, right: Any) -> bool:
     try:
         return float(left) == float(right)
     except Exception:
+        logging.getLogger(__name__).warning("Broad exception fallback at pipeline_worker/worker_helpers.py:91", exc_info=True)
         return str(left) == str(right)
 
 

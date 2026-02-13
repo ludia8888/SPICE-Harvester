@@ -91,6 +91,7 @@ def _parse_retention_policy(raw: Optional[str]) -> dict[str, dict[str, Any]]:
     try:
         parsed = json.loads(text)
     except Exception:
+        logging.getLogger(__name__).warning("Broad exception fallback at shared/services/agent/agent_retention_worker.py:93", exc_info=True)
         return {}
     if not isinstance(parsed, dict):
         return {}
@@ -104,6 +105,7 @@ def _parse_retention_policy(raw: Optional[str]) -> dict[str, dict[str, Any]]:
             try:
                 days = int(str(value).strip())
             except Exception:
+                logging.getLogger(__name__).warning("Broad exception fallback at shared/services/agent/agent_retention_worker.py:106", exc_info=True)
                 continue
             policy[name] = {"days": max(0, min(3650, days))}
             continue

@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+import logging
 
 _TEXT_PREFIX = "enc:v1:"
 _BYTES_PREFIX = b"encb:v1:"
@@ -98,6 +99,7 @@ class DataEncryptor:
                 pt = aesgcm.decrypt(nonce, ct, aad)
                 return pt.decode("utf-8")
             except Exception as exc:
+                logging.getLogger(__name__).warning("Broad exception fallback at shared/security/data_encryption.py:100", exc_info=True)
                 last_exc = exc
                 continue
         raise ValueError("Unable to decrypt payload") from last_exc
@@ -126,6 +128,7 @@ class DataEncryptor:
                 aesgcm = self._aesgcm(key)
                 return aesgcm.decrypt(nonce, ct, aad)
             except Exception as exc:
+                logging.getLogger(__name__).warning("Broad exception fallback at shared/security/data_encryption.py:128", exc_info=True)
                 last_exc = exc
                 continue
         raise ValueError("Unable to decrypt payload") from last_exc

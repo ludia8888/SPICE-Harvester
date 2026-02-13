@@ -10,6 +10,7 @@ from shared.security.input_sanitizer import (
     validate_class_id,
     validate_instance_id,
 )
+import logging
 
 
 class ActionInputSchemaError(ValueError):
@@ -49,6 +50,7 @@ def _json_size_bytes(value: Any) -> int:
     try:
         payload = json.dumps(value, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
     except Exception:
+        logging.getLogger(__name__).warning("Broad exception fallback at shared/utils/action_input_schema.py:51", exc_info=True)
         payload = json.dumps(str(value), ensure_ascii=False, separators=(",", ":"), sort_keys=True)
     return len(payload.encode("utf-8"))
 

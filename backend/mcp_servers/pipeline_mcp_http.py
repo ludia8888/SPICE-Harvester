@@ -8,6 +8,7 @@ import httpx
 
 from mcp_servers.bff_auth import bff_admin_token as _bff_admin_token
 from mcp_servers.bff_auth import bff_api_base_url
+import logging
 
 
 async def http_json(
@@ -26,6 +27,7 @@ async def http_json(
     try:
         payload = resp.json()
     except Exception:
+        logging.getLogger(__name__).warning("Broad exception fallback at mcp_servers/pipeline_mcp_http.py:28", exc_info=True)
         payload = {"raw": (resp.text or "").strip()}
     if resp.status_code >= 400:
         detail = payload.get("detail") if isinstance(payload, dict) else None

@@ -46,6 +46,7 @@ from shared.services.registries.action_log_registry import ActionLogRegistry
 
 # BFF specific imports
 from bff.services.oms_client import OMSClient
+import logging
 
 SERVICE_NAME = "BFF"
 
@@ -200,6 +201,7 @@ class TerminusService:
                 if isinstance(detail_json, dict):
                     detail = detail_json.get("detail") or detail_json
             except Exception:
+                logging.getLogger(__name__).warning("Broad exception fallback at bff/dependencies.py:202", exc_info=True)
                 pass
             raise classified_http_exception(e.response.status_code, str(detail), code=ErrorCode.UPSTREAM_ERROR) from e
         except Exception:
@@ -443,6 +445,7 @@ class TerminusService:
                 try:
                     payload = response.json()
                 except Exception:
+                    logging.getLogger(__name__).warning("Broad exception fallback at bff/dependencies.py:445", exc_info=True)
                     payload = {"detail": response.text}
                 raise classified_http_exception(response.status_code, str(payload), code=ErrorCode.UPSTREAM_ERROR)
             return response.json()
@@ -605,6 +608,7 @@ async def check_bff_dependencies_health(
                 else:
                     health_status[service_name] = "not_registered"
             except Exception as e:
+                logging.getLogger(__name__).warning("Broad exception fallback at bff/dependencies.py:607", exc_info=True)
                 health_status[service_name] = f"error: {str(e)}"
         
         return {
@@ -614,6 +618,7 @@ async def check_bff_dependencies_health(
         }
         
     except Exception as e:
+        logging.getLogger(__name__).warning("Broad exception fallback at bff/dependencies.py:616", exc_info=True)
         return build_error_envelope(
             service_name=SERVICE_NAME,
             message="BFF dependency health check failed",

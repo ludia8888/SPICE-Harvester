@@ -76,6 +76,7 @@ class PipelineScheduler:
                         try:
                             self.metrics.record_business_metric("pipeline_scheduler_ticks", 1)
                         except Exception:
+                            logging.getLogger(__name__).warning("Broad exception fallback at shared/services/pipeline/pipeline_scheduler.py:78", exc_info=True)
                             pass
                     await self._tick()
             except Exception as exc:
@@ -84,6 +85,7 @@ class PipelineScheduler:
                     try:
                         self.metrics.record_business_metric("pipeline_scheduler_tick_errors", 1)
                     except Exception:
+                        logging.getLogger(__name__).warning("Broad exception fallback at shared/services/pipeline/pipeline_scheduler.py:86", exc_info=True)
                         pass
             await asyncio.sleep(self.poll_seconds)
 
@@ -96,6 +98,7 @@ class PipelineScheduler:
             try:
                 self.tracing.set_span_attribute("pipeline.scheduled_count", len(pipelines))
             except Exception:
+                logging.getLogger(__name__).warning("Broad exception fallback at shared/services/pipeline/pipeline_scheduler.py:98", exc_info=True)
                 pass
         now = _utcnow()
         for pipeline in pipelines:
@@ -276,6 +279,7 @@ class PipelineScheduler:
                             attributes={"trigger": trigger_reason},
                         )
                     except Exception:
+                        logging.getLogger(__name__).warning("Broad exception fallback at shared/services/pipeline/pipeline_scheduler.py:278", exc_info=True)
                         pass
                 await emit_pipeline_control_plane_event(
                     event_type="PIPELINE_SCHEDULE_TRIGGERED",

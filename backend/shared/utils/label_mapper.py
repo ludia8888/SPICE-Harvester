@@ -602,10 +602,12 @@ class LabelMapper:
                     normalized_data.append(item.model_dump(mode="json"))
                     continue
                 except Exception:
+                    logging.getLogger(__name__).warning("Broad exception fallback at shared/utils/label_mapper.py:604", exc_info=True)
                     try:
                         normalized_data.append(item.model_dump())
                         continue
                     except Exception:
+                        logging.getLogger(__name__).warning("Broad exception fallback at shared/utils/label_mapper.py:608", exc_info=True)
                         pass
             if hasattr(item, "__dict__"):
                 normalized_data.append(dict(item.__dict__))

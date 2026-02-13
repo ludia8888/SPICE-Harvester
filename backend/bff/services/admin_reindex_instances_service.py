@@ -164,6 +164,7 @@ async def reindex_all_instances(
                 "mapping_spec_id": spec_id,
             })
         except Exception as exc:
+            logging.getLogger(__name__).warning("Broad exception fallback at bff/services/admin_reindex_instances_service.py:166", exc_info=True)
             errors.append({
                 "mapping_spec_id": spec_id,
                 "target_class_id": target_class_id,

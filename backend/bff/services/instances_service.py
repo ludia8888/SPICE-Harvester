@@ -376,6 +376,7 @@ async def list_class_instances(
             overlay_error = "query"
             overlay_status = "DEGRADED"
         except Exception:
+            logging.getLogger(__name__).warning("Broad exception fallback at bff/services/instances_service.py:378", exc_info=True)
             overlay_error = "unknown"
             overlay_status = "DEGRADED"
 
