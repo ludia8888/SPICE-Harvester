@@ -4,7 +4,12 @@ from dataclasses import dataclass
 from typing import AbstractSet, Any, Dict, List, Optional
 
 from shared.services.pipeline.pipeline_graph_utils import build_incoming, normalize_edges, normalize_nodes
-from shared.services.pipeline.pipeline_transform_spec import normalize_operation, normalize_union_mode, resolve_join_spec
+from shared.services.pipeline.pipeline_transform_spec import (
+    normalize_operation,
+    normalize_union_mode,
+    resolve_join_spec,
+    resolve_stream_join_spec,
+)
 
 _ALLOWED_UNION_MODES: frozenset[str] = frozenset({"strict", "common_only", "pad_missing_nulls", "pad"})
 
@@ -207,6 +212,12 @@ def validate_pipeline_definition(
             condition = metadata.get("condition") or metadata.get("expression")
             if not str(condition or "").strip():
                 errors.append(f"split missing condition/expression on node {node_id}")
+            split_branch = str(metadata.get("splitBranch") or metadata.get("split_branch") or "").strip().lower()
+            if split_branch:
+                if split_branch not in {"true", "false"}:
+                    errors.append(f"splitBranch must be true|false on node {node_id}")
+                if not str(metadata.get("splitExpression") or metadata.get("split_expression") or "").strip():
+                    errors.append(f"splitBranch requires splitExpression on node {node_id}")
 
         if operation == "geospatial":
             geospatial = metadata.get("geospatial") if isinstance(metadata.get("geospatial"), dict) else metadata
@@ -237,20 +248,42 @@ def validate_pipeline_definition(
                 errors.append(f"patternMining missing pattern on node {node_id}")
             if not str(pattern_meta.get("outputColumn") or pattern_meta.get("output_column") or "").strip():
                 errors.append(f"patternMining missing outputColumn on node {node_id}")
+            match_mode = str(pattern_meta.get("matchMode") or pattern_meta.get("match_mode") or "contains").strip().lower()
+            if match_mode not in {"contains", "extract", "count"}:
+                errors.append(f"patternMining matchMode must be contains|extract|count on node {node_id}")
 
         if operation == "streamJoin":
             if len(incoming.get(node_id, [])) < 2:
                 errors.append(f"streamJoin requires two inputs on node {node_id}")
-            left_keys = metadata.get("leftKeys") or metadata.get("left_keys") or []
-            right_keys = metadata.get("rightKeys") or metadata.get("right_keys") or []
+            join_spec = resolve_join_spec(metadata)
+            left_keys = list(join_spec.left_keys or [])
+            right_keys = list(join_spec.right_keys or [])
+            if join_spec.left_key and not left_keys:
+                left_keys = [join_spec.left_key]
+            if join_spec.right_key and not right_keys:
+                right_keys = [join_spec.right_key]
             if not left_keys or not right_keys:
                 errors.append(f"streamJoin requires leftKeys/rightKeys on node {node_id}")
             elif len(left_keys) != len(right_keys):
                 errors.append(f"streamJoin requires leftKeys/rightKeys of the same length on node {node_id}")
-            stream_meta = metadata.get("streamJoin") if isinstance(metadata.get("streamJoin"), dict) else {}
-            strategy = str(stream_meta.get("strategy") or "").strip().lower() or "dynamic"
-            if strategy not in {"dynamic", "left_lookup", "static"}:
-                errors.append(f"streamJoin has invalid strategy '{strategy}' on node {node_id}")
+            try:
+                stream_spec = resolve_stream_join_spec(metadata)
+            except ValueError as exc:
+                errors.append(f"{exc} on node {node_id}")
+                stream_spec = None
+
+            if stream_spec is not None:
+                if stream_spec.strategy not in {"dynamic", "left_lookup", "static"}:
+                    errors.append(f"streamJoin has invalid strategy '{stream_spec.strategy}' on node {node_id}")
+                if stream_spec.strategy == "dynamic":
+                    if not str(stream_spec.left_event_time_column or "").strip():
+                        errors.append(f"streamJoin dynamic requires leftEventTimeColumn on node {node_id}")
+                    if not str(stream_spec.right_event_time_column or "").strip():
+                        errors.append(f"streamJoin dynamic requires rightEventTimeColumn on node {node_id}")
+                    if stream_spec.allowed_lateness_seconds is None:
+                        errors.append(f"streamJoin dynamic requires allowedLatenessSeconds on node {node_id}")
+                    elif stream_spec.allowed_lateness_seconds < 0:
+                        errors.append(f"streamJoin allowedLatenessSeconds must be >= 0 on node {node_id}")
 
         if operation == "union":
             if len(incoming.get(node_id, [])) < 2:

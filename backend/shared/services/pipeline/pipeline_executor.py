@@ -51,6 +51,7 @@ from shared.services.pipeline.pipeline_transform_spec import (
     normalize_operation,
     normalize_union_mode,
     resolve_join_spec,
+    resolve_stream_join_spec,
 )
 from shared.services.pipeline.pipeline_validation_utils import (
     TableOps,
@@ -574,16 +575,10 @@ class PipelineExecutor:
                 max_output_rows=self._preview_max_output_rows if self._preview_mode else None,
             )
         if operation == "streamJoin" and len(inputs) >= 2:
-            join_spec = resolve_join_spec(metadata)
-            return _join_tables(
+            return _stream_join_tables(
                 inputs[0],
                 inputs[1],
-                join_type=join_spec.join_type,
-                left_key=join_spec.left_key,
-                right_key=join_spec.right_key,
-                left_keys=join_spec.left_keys,
-                right_keys=join_spec.right_keys,
-                allow_cross_join=join_spec.allow_cross_join,
+                metadata=metadata,
                 max_output_rows=self._preview_max_output_rows if self._preview_mode else None,
             )
         if operation == "split":
@@ -1401,6 +1396,169 @@ def _join_tables(
     return PipelineTable(columns=columns, rows=rows)
 
 
+def _stream_join_tables(
+    left: PipelineTable,
+    right: PipelineTable,
+    *,
+    metadata: Dict[str, Any],
+    max_output_rows: Optional[int],
+) -> PipelineTable:
+    join_spec = resolve_join_spec(metadata)
+    stream_spec = resolve_stream_join_spec(metadata)
+    strategy = stream_spec.strategy
+    if strategy not in {"dynamic", "left_lookup", "static"}:
+        raise ValueError(f"Invalid streamJoin strategy: {strategy}")
+
+    if strategy == "static":
+        return _join_tables(
+            left,
+            right,
+            join_type=join_spec.join_type,
+            left_key=join_spec.left_key,
+            right_key=join_spec.right_key,
+            left_keys=join_spec.left_keys,
+            right_keys=join_spec.right_keys,
+            allow_cross_join=join_spec.allow_cross_join,
+            max_output_rows=max_output_rows,
+        )
+
+    left_keys = normalize_join_key_list(join_spec.left_keys)
+    right_keys = normalize_join_key_list(join_spec.right_keys)
+    if join_spec.left_key and not left_keys:
+        left_keys = [join_spec.left_key]
+    if join_spec.right_key and not right_keys:
+        right_keys = [join_spec.right_key]
+    if not left_keys or not right_keys:
+        raise ValueError("streamJoin requires leftKeys/rightKeys")
+    if len(left_keys) != len(right_keys):
+        raise ValueError("streamJoin requires leftKeys/rightKeys of the same length")
+
+    right_join_table = right
+    if strategy == "left_lookup":
+        right_event_col = str(stream_spec.right_event_time_column or "").strip()
+        right_join_table = _right_latest_snapshot_table(
+            right,
+            right_keys=right_keys,
+            right_event_time_column=right_event_col or None,
+        )
+        return _join_tables(
+            left,
+            right_join_table,
+            join_type=join_spec.join_type,
+            left_key=join_spec.left_key,
+            right_key=join_spec.right_key,
+            left_keys=left_keys,
+            right_keys=right_keys,
+            allow_cross_join=join_spec.allow_cross_join,
+            max_output_rows=max_output_rows,
+        )
+
+    left_event_col = str(stream_spec.left_event_time_column or "").strip()
+    right_event_col = str(stream_spec.right_event_time_column or "").strip()
+    if not left_event_col or not right_event_col:
+        raise ValueError("streamJoin dynamic requires leftEventTimeColumn and rightEventTimeColumn")
+    if stream_spec.allowed_lateness_seconds is None:
+        raise ValueError("streamJoin dynamic requires allowedLatenessSeconds")
+    if stream_spec.allowed_lateness_seconds < 0:
+        raise ValueError("streamJoin allowedLatenessSeconds must be >= 0")
+
+    joined = _join_tables(
+        left,
+        right,
+        join_type=join_spec.join_type,
+        left_key=join_spec.left_key,
+        right_key=join_spec.right_key,
+        left_keys=left_keys,
+        right_keys=right_keys,
+        allow_cross_join=join_spec.allow_cross_join,
+        max_output_rows=max_output_rows,
+    )
+    if left_event_col not in joined.columns:
+        raise ValueError(f"streamJoin dynamic leftEventTimeColumn missing from join output: {left_event_col}")
+    resolved_right_event_col = _resolve_stream_join_right_column(
+        columns=joined.columns,
+        left_col=left_event_col,
+        right_col=right_event_col,
+    )
+    if resolved_right_event_col not in joined.columns:
+        raise ValueError(f"streamJoin dynamic rightEventTimeColumn missing from join output: {right_event_col}")
+
+    lateness_seconds = float(stream_spec.allowed_lateness_seconds)
+    rows: List[Dict[str, Any]] = []
+    for row in joined.rows:
+        left_epoch = _to_epoch_seconds(row.get(left_event_col))
+        right_epoch = _to_epoch_seconds(row.get(resolved_right_event_col))
+        if left_epoch is None or right_epoch is None:
+            continue
+        if abs(left_epoch - right_epoch) <= lateness_seconds:
+            rows.append(row)
+            if max_output_rows is not None and len(rows) >= int(max_output_rows):
+                break
+    return PipelineTable(columns=joined.columns, rows=rows)
+
+
+def _right_latest_snapshot_table(
+    table: PipelineTable,
+    *,
+    right_keys: List[str],
+    right_event_time_column: Optional[str],
+) -> PipelineTable:
+    if not right_keys:
+        return table
+    latest: Dict[Tuple[Any, ...], Tuple[float, int, Dict[str, Any]]] = {}
+    event_col = str(right_event_time_column or "").strip()
+    for index, row in enumerate(table.rows):
+        key = tuple(row.get(col) for col in right_keys)
+        event_rank = _to_epoch_seconds(row.get(event_col)) if event_col else None
+        rank_value = float(event_rank if event_rank is not None else -1e30)
+        current = latest.get(key)
+        candidate = (rank_value, index, row)
+        if current is None or candidate > current:
+            latest[key] = candidate
+    selected_rows = [payload[2] for payload in sorted(latest.values(), key=lambda item: item[1])]
+    return PipelineTable(columns=table.columns, rows=selected_rows)
+
+
+def _resolve_stream_join_right_column(*, columns: List[str], left_col: str, right_col: str) -> str:
+    left_norm = str(left_col or "").strip()
+    right_norm = str(right_col or "").strip()
+    if right_norm == left_norm:
+        preferred = [f"right_{right_norm}", right_norm]
+    else:
+        preferred = [right_norm, f"right_{right_norm}"]
+    for candidate in preferred:
+        if candidate in columns:
+            return candidate
+    prefix = f"right_{right_norm}"
+    for column in columns:
+        if column.startswith(prefix):
+            return column
+    return right_norm
+
+
+def _to_epoch_seconds(value: Any) -> Optional[float]:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        dt = value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+        return float(dt.timestamp())
+    if isinstance(value, (int, float)):
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+    parsed = _parse_timestamp_literal(str(value))
+    if isinstance(parsed, datetime):
+        dt = parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+        return float(dt.timestamp())
+    if isinstance(parsed, (int, float)):
+        try:
+            return float(parsed)
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
 def _merge_rows(
     left: Optional[Dict[str, Any]],
     right: Optional[Dict[str, Any]],
@@ -1855,7 +2013,9 @@ def _geospatial_table(table: PipelineTable, metadata: Dict[str, Any], parameters
                 next_row[output_col] = f"POINT({lon} {lat})"
             else:
                 precision = int(geo.get("precision") or 7)
-                next_row[output_col] = f"{round(lat, precision)}:{round(lon, precision)}"
+                if precision < 1 or precision > 12:
+                    raise ValueError("geospatial geohash precision must be between 1 and 12")
+                next_row[output_col] = _encode_geohash_text(lat, lon, precision)
         elif mode == "distance":
             lat1_col = str(geo.get("lat1Column") or geo.get("lat1_column") or "").strip()
             lon1_col = str(geo.get("lon1Column") or geo.get("lon1_column") or "").strip()
@@ -1888,6 +2048,8 @@ def _pattern_mining_table(table: PipelineTable, metadata: Dict[str, Any], parame
     output_col = str(pattern_meta.get("outputColumn") or pattern_meta.get("output_column") or "").strip() or "pattern_match"
     pattern = apply_parameters(str(pattern_meta.get("pattern") or "").strip(), parameters)
     mode = str(pattern_meta.get("matchMode") or pattern_meta.get("match_mode") or "contains").strip().lower()
+    if mode not in {"contains", "extract", "count"}:
+        raise ValueError(f"Invalid patternMining matchMode: {mode}")
     if not source_col or not pattern:
         return table
     regex = re.compile(pattern)
@@ -1903,6 +2065,8 @@ def _pattern_mining_table(table: PipelineTable, metadata: Dict[str, Any], parame
                 next_row[output_col] = match.group(1)
             else:
                 next_row[output_col] = match.group(0)
+        elif mode == "count":
+            next_row[output_col] = len(regex.findall(source_value)) if source_value else 0
         else:
             next_row[output_col] = bool(match)
         rows.append(next_row)
@@ -1910,6 +2074,42 @@ def _pattern_mining_table(table: PipelineTable, metadata: Dict[str, Any], parame
     if output_col not in columns:
         columns.append(output_col)
     return PipelineTable(columns=columns, rows=rows)
+
+
+def _encode_geohash_text(lat: float, lon: float, precision: int) -> Optional[str]:
+    if not (-90.0 <= float(lat) <= 90.0 and -180.0 <= float(lon) <= 180.0):
+        return None
+    base32 = "0123456789bcdefghjkmnpqrstuvwxyz"
+    bits = [16, 8, 4, 2, 1]
+    lat_range = [-90.0, 90.0]
+    lon_range = [-180.0, 180.0]
+    geohash_chars: List[str] = []
+    bit_index = 0
+    ch = 0
+    is_even = True
+    while len(geohash_chars) < precision:
+        if is_even:
+            mid = (lon_range[0] + lon_range[1]) / 2.0
+            if float(lon) >= mid:
+                ch |= bits[bit_index]
+                lon_range[0] = mid
+            else:
+                lon_range[1] = mid
+        else:
+            mid = (lat_range[0] + lat_range[1]) / 2.0
+            if float(lat) >= mid:
+                ch |= bits[bit_index]
+                lat_range[0] = mid
+            else:
+                lat_range[1] = mid
+        is_even = not is_even
+        if bit_index < 4:
+            bit_index += 1
+            continue
+        geohash_chars.append(base32[ch])
+        bit_index = 0
+        ch = 0
+    return "".join(geohash_chars)
 
 
 def _regex_flags(raw: Any) -> int:

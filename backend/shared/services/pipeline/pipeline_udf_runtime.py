@@ -224,6 +224,21 @@ def compile_udf(code: str) -> Callable[[Dict[str, Any]], Dict[str, Any]]:
     return compile_row_udf(code)
 
 
+def _normalize_udf_source(code: str) -> str:
+    normalized = (code or "").strip()
+    if not normalized:
+        return normalized
+    # Backward compatibility: some call paths still pass escaped newlines.
+    if "\\n" in normalized and "\n" not in normalized:
+        try:
+            decoded = normalized.encode("utf-8").decode("unicode_escape")
+        except UnicodeDecodeError:
+            return normalized
+        if decoded.strip():
+            return decoded.strip()
+    return normalized
+
+
 def compile_row_udf(code: str) -> Callable[[Dict[str, Any]], Dict[str, Any]]:
     """
     Compile a Python UDF for row-level transforms.
@@ -233,7 +248,7 @@ def compile_row_udf(code: str) -> Callable[[Dict[str, Any]], Dict[str, Any]]:
     - imports are not allowed
     """
 
-    code = (code or "").strip()
+    code = _normalize_udf_source(code)
     if not code:
         raise PipelineUdfError("UDF code is empty")
 

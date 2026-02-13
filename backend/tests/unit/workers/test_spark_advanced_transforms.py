@@ -107,6 +107,28 @@ def test_geospatial_point_and_distance(worker: PipelineWorker) -> None:
 
 
 @pytest.mark.unit
+def test_geospatial_geohash(worker: PipelineWorker) -> None:
+    df = worker.spark.createDataFrame([(37.5665, 126.9780)], ["lat", "lon"])
+    out = worker._apply_transform(
+        {
+            "operation": "geospatial",
+            "geospatial": {
+                "mode": "geohash",
+                "latColumn": "lat",
+                "lonColumn": "lon",
+                "outputColumn": "gh",
+                "precision": 7,
+            },
+        },
+        [df],
+        {},
+    )
+    row = out.collect()[0]
+    assert isinstance(row["gh"], str)
+    assert len(row["gh"]) == 7
+
+
+@pytest.mark.unit
 def test_pattern_mining_contains_and_extract(worker: PipelineWorker) -> None:
     df = worker.spark.createDataFrame(
         [(1, "ERR-100 failed"), (2, "ok")],
@@ -147,11 +169,34 @@ def test_pattern_mining_contains_and_extract(worker: PipelineWorker) -> None:
     assert extract_rows[0]["error_code"] == "100"
     assert extract_rows[1]["error_code"] is None
 
+    count_df = worker._apply_transform(
+        {
+            "operation": "patternMining",
+            "patternMining": {
+                "sourceColumn": "message",
+                "pattern": "ERR-(\\d+)",
+                "outputColumn": "error_count",
+                "matchMode": "count",
+            },
+        },
+        [df],
+        {},
+    )
+    count_rows = count_df.orderBy("id").collect()
+    assert count_rows[0]["error_count"] == 1
+    assert count_rows[1]["error_count"] == 0
+
 
 @pytest.mark.unit
 def test_stream_join_transform(worker: PipelineWorker) -> None:
-    left = worker.spark.createDataFrame([(1, "left-a"), (2, "left-b")], ["id", "left_val"])
-    right = worker.spark.createDataFrame([(1, "right-a"), (3, "right-c")], ["id", "right_val"])
+    left = worker.spark.createDataFrame(
+        [(1, "left-a", "2026-01-01T00:00:00Z"), (2, "left-b", "2026-01-01T00:10:00Z")],
+        ["id", "left_val", "left_event_time"],
+    )
+    right = worker.spark.createDataFrame(
+        [(1, "right-a", "2026-01-01T00:00:20Z"), (2, "right-b", "2026-01-01T00:20:00Z")],
+        ["id", "right_val", "right_event_time"],
+    )
 
     out = worker._apply_transform(
         {
@@ -159,7 +204,12 @@ def test_stream_join_transform(worker: PipelineWorker) -> None:
             "joinType": "inner",
             "leftKeys": ["id"],
             "rightKeys": ["id"],
-            "streamJoin": {"strategy": "dynamic"},
+            "streamJoin": {
+                "strategy": "dynamic",
+                "leftEventTimeColumn": "left_event_time",
+                "rightEventTimeColumn": "right_event_time",
+                "allowedLatenessSeconds": 60,
+            },
         },
         [left, right],
         {},

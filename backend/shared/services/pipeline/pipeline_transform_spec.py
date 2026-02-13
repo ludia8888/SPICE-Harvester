@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, Optional, List
+from typing import Any, Dict, List, Optional
 
 from shared.services.pipeline.pipeline_join_keys import normalize_join_key_list
 
@@ -41,6 +41,14 @@ class JoinSpec:
     right_key: Optional[str]
     left_keys: Optional[List[str]]
     right_keys: Optional[List[str]]
+
+
+@dataclass(frozen=True)
+class StreamJoinSpec:
+    strategy: str
+    left_event_time_column: Optional[str]
+    right_event_time_column: Optional[str]
+    allowed_lateness_seconds: Optional[float]
 
 
 def normalize_operation(value: Any) -> str:
@@ -85,6 +93,54 @@ def resolve_join_spec(metadata: Dict[str, Any]) -> JoinSpec:
         right_key=right_key,
         left_keys=left_keys or None,
         right_keys=right_keys or None,
+    )
+
+
+def resolve_stream_join_spec(metadata: Dict[str, Any]) -> StreamJoinSpec:
+    stream_meta = metadata.get("streamJoin") if isinstance(metadata.get("streamJoin"), dict) else {}
+    strategy = str(stream_meta.get("strategy") or metadata.get("strategy") or "dynamic").strip().lower() or "dynamic"
+
+    def _resolve_text(keys: List[str]) -> Optional[str]:
+        for source in (stream_meta, metadata):
+            for key in keys:
+                value = source.get(key)
+                if value is None:
+                    continue
+                text = str(value).strip()
+                if text:
+                    return text
+        return None
+
+    left_event_time_column = _resolve_text(["leftEventTimeColumn", "left_event_time_column"])
+    right_event_time_column = _resolve_text(["rightEventTimeColumn", "right_event_time_column"])
+
+    allowed_lateness_raw: Optional[Any] = None
+    for source in (stream_meta, metadata):
+        for key in ("allowedLatenessSeconds", "allowed_lateness_seconds"):
+            if key not in source:
+                continue
+            value = source.get(key)
+            if value is None:
+                continue
+            if str(value).strip() == "":
+                continue
+            allowed_lateness_raw = value
+            break
+        if allowed_lateness_raw is not None:
+            break
+
+    allowed_lateness_seconds: Optional[float] = None
+    if allowed_lateness_raw is not None:
+        try:
+            allowed_lateness_seconds = float(str(allowed_lateness_raw).strip())
+        except (TypeError, ValueError) as exc:
+            raise ValueError("streamJoin allowedLatenessSeconds must be a number") from exc
+
+    return StreamJoinSpec(
+        strategy=strategy,
+        left_event_time_column=left_event_time_column,
+        right_event_time_column=right_event_time_column,
+        allowed_lateness_seconds=allowed_lateness_seconds,
     )
 
 

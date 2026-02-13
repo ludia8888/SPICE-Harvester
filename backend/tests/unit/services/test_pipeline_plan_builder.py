@@ -57,6 +57,30 @@ def test_add_input_and_output_wires_edges():
     assert {"from": input_id, "to": out.node_id} in plan["definition_json"]["edges"]
 
 
+def test_add_output_persists_output_metadata_into_outputs_entry():
+    plan = new_plan(goal="output metadata", db_name="demo")
+    plan = add_input(plan, dataset_id="ds-1", node_id="in_1").plan
+    out = add_output(
+        plan,
+        input_node_id="in_1",
+        output_name="out_1",
+        output_kind="virtual",
+        output_metadata={"query_sql": "select 1", "refresh_mode": "on_read"},
+    )
+    output_entry = out.plan["outputs"][0]
+    assert output_entry["output_kind"] == "virtual"
+    assert output_entry["output_metadata"]["query_sql"] == "select 1"
+    assert output_entry["output_metadata"]["refresh_mode"] == "on_read"
+
+
+def test_add_output_warns_when_legacy_alias_kind_used():
+    plan = new_plan(goal="legacy output kind", db_name="demo")
+    plan = add_input(plan, dataset_id="ds-1", node_id="in_1").plan
+    out = add_output(plan, input_node_id="in_1", output_name="out_1", output_kind="unknown")
+    assert out.plan["outputs"][0]["output_kind"] == "dataset"
+    assert any("output_kind alias" in warning for warning in out.warnings)
+
+
 def test_add_input_supports_read_config():
     plan = new_plan(goal="read permissive", db_name="demo")
     res = add_input(
@@ -334,6 +358,7 @@ def test_update_output_renames_and_syncs_output_node_metadata():
 
     updated = update_output(plan, output_name="out_1", set_fields={"output_name": "out_renamed"})
     assert updated.plan["outputs"][0]["output_name"] == "out_renamed"
+    assert updated.plan["outputs"][0]["output_metadata"]["outputName"] == "out_renamed"
 
     output_nodes = [
         node

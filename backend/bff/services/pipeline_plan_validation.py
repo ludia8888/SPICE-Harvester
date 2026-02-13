@@ -67,7 +67,7 @@ async def validate_pipeline_plan(
     # Validate output metadata.
     for output in plan.outputs or []:
         kind = normalize_output_kind(getattr(output.output_kind, "value", output.output_kind))
-        payload = {
+        ontology_payload = {
             "target_class_id": output.target_class_id,
             "source_class_id": output.source_class_id,
             "link_type_id": output.link_type_id,
@@ -77,10 +77,14 @@ async def validate_pipeline_plan(
             "target_key_column": output.target_key_column,
             "relationship_spec_type": output.relationship_spec_type,
         }
+        payload = dict(output.output_metadata or {})
+        payload.update({key: value for key, value in ontology_payload.items() if value is not None})
         for detail in validate_output_payload(kind=kind, payload=payload):
             errors.append(f"output {output.output_name}: {detail}")
 
-        if kind != OUTPUT_KIND_ONTOLOGY and any(payload.values()):
+        if kind != OUTPUT_KIND_ONTOLOGY and any(
+            str(value).strip() for value in ontology_payload.values() if value is not None
+        ):
             warnings.append(
                 f"output {output.output_name}: output_kind={kind} but ontology metadata is set"
             )

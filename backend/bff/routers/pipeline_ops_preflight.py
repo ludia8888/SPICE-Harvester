@@ -8,7 +8,10 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, Optional
 
+from fastapi import status
+
 from shared.config.settings import get_settings
+from shared.errors.error_types import ErrorCategory, ErrorCode, classified_http_exception
 from shared.services.pipeline.pipeline_definition_validator import (
     PipelineDefinitionValidationPolicy,
     validate_pipeline_definition,
@@ -27,6 +30,8 @@ async def _run_pipeline_preflight(
     branch: Optional[str],
     dataset_registry: DatasetRegistry,
 ) -> Dict[str, Any]:
+    settings = get_settings()
+    fail_closed = bool(settings.pipeline.preflight_fail_closed)
     try:
         return await compute_pipeline_preflight(
             definition=definition_json,
@@ -35,7 +40,16 @@ async def _run_pipeline_preflight(
             branch=branch,
         )
     except Exception as exc:
-        logger.warning("Pipeline preflight failed: %s", exc)
+        logger.warning("Pipeline preflight failed: %s", exc, exc_info=True)
+        if fail_closed:
+            raise classified_http_exception(
+                status.HTTP_500_INTERNAL_SERVER_ERROR,
+                "Pipeline preflight failed",
+                code=ErrorCode.INTERNAL_ERROR,
+                category=ErrorCategory.INTERNAL,
+                external_code="PIPELINE_PREFLIGHT_FAILED",
+                extra={"stage": "preflight", "reason": str(exc)},
+            ) from exc
         return {
             "issues": [
                 {

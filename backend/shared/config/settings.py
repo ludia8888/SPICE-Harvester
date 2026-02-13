@@ -1131,6 +1131,10 @@ class PipelineSettings(BaseSettings):
         default=True,
         description="Enable Spark execution parity for UDF transforms (PIPELINE_UDF_SPARK_PARITY_ENABLED)",
     )
+    preflight_fail_closed: bool = Field(
+        default=True,
+        description="Fail closed when pipeline preflight throws internal errors (PIPELINE_PREFLIGHT_FAIL_CLOSED)",
+    )
     artifact_path: str = Field(
         default="data/pipeline_artifacts",
         description="Local pipeline artifact path root (PIPELINE_ARTIFACT_PATH)",

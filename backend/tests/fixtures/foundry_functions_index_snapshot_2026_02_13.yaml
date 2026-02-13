@@ -36,11 +36,53 @@ functions:
       spark: supported
     notes: "groupBy aggregate max"
 
+  - name: approx_count_distinct
+    category: aggregation
+    engines:
+      preview: unsupported
+      spark: partial
+    notes: "requires Spark SQL expression runtime"
+
+  - name: approx_percentile
+    category: aggregation
+    engines:
+      preview: unsupported
+      spark: partial
+    notes: "available through aggregateExpressions only"
+
+  - name: collect_list
+    category: aggregation
+    engines:
+      preview: unsupported
+      spark: partial
+    notes: "not implemented in lightweight preview"
+
+  - name: collect_set
+    category: aggregation
+    engines:
+      preview: unsupported
+      spark: partial
+    notes: "not implemented in lightweight preview"
+
+  - name: stddev
+    category: aggregation
+    engines:
+      preview: unsupported
+      spark: partial
+    notes: "expression evaluator gap"
+
+  - name: variance
+    category: aggregation
+    engines:
+      preview: unsupported
+      spark: partial
+    notes: "expression evaluator gap"
+
   - name: to_timestamp
     category: datetime
     engines:
       preview: partial
-      spark: supported
+      spark: partial
     notes: "preview supports literal-only parsing"
 
   - name: date_trunc
@@ -49,6 +91,55 @@ functions:
       preview: unsupported
       spark: partial
     notes: "not fully aligned in lightweight preview"
+
+  - name: current_timestamp
+    category: datetime
+    engines:
+      preview: unsupported
+      spark: partial
+    notes: "runtime clock semantics differ"
+
+  - name: year
+    category: datetime
+    engines:
+      preview: unsupported
+      spark: partial
+    notes: "function calls disabled in preview evaluator"
+
+  - name: month
+    category: datetime
+    engines:
+      preview: unsupported
+      spark: partial
+    notes: "function calls disabled in preview evaluator"
+
+  - name: dayofmonth
+    category: datetime
+    engines:
+      preview: unsupported
+      spark: partial
+    notes: "function calls disabled in preview evaluator"
+
+  - name: hour
+    category: datetime
+    engines:
+      preview: unsupported
+      spark: partial
+    notes: "function calls disabled in preview evaluator"
+
+  - name: minute
+    category: datetime
+    engines:
+      preview: unsupported
+      spark: partial
+    notes: "function calls disabled in preview evaluator"
+
+  - name: second
+    category: datetime
+    engines:
+      preview: unsupported
+      spark: partial
+    notes: "function calls disabled in preview evaluator"
 
   - name: regexp_extract
     category: string
@@ -85,12 +176,96 @@ functions:
       spark: partial
     notes: "available via normalize transform rather than expression call"
 
+  - name: ltrim
+    category: string
+    engines:
+      preview: unsupported
+      spark: partial
+    notes: "not first-class in preview evaluator"
+
+  - name: rtrim
+    category: string
+    engines:
+      preview: unsupported
+      spark: partial
+    notes: "not first-class in preview evaluator"
+
+  - name: split
+    category: string
+    engines:
+      preview: unsupported
+      spark: partial
+    notes: "implemented as transform macro, not expression function"
+
+  - name: concat
+    category: string
+    engines:
+      preview: unsupported
+      spark: partial
+    notes: "not first-class in preview evaluator"
+
+  - name: substr
+    category: string
+    engines:
+      preview: unsupported
+      spark: partial
+    notes: "not first-class in preview evaluator"
+
+  - name: length
+    category: string
+    engines:
+      preview: unsupported
+      spark: partial
+    notes: "not first-class in preview evaluator"
+
+  - name: coalesce
+    category: null-handling
+    engines:
+      preview: unsupported
+      spark: partial
+    notes: "partial via expression runtime only"
+
+  - name: nvl
+    category: null-handling
+    engines:
+      preview: unsupported
+      spark: partial
+    notes: "partial via expression runtime only"
+
+  - name: isnull
+    category: null-handling
+    engines:
+      preview: unsupported
+      spark: partial
+    notes: "partial via expression runtime only"
+
+  - name: isnan
+    category: null-handling
+    engines:
+      preview: unsupported
+      spark: partial
+    notes: "partial via expression runtime only"
+
   - name: row_number
     category: window
     engines:
       preview: unsupported
       spark: partial
     notes: "window transform exists, but full SQL function parity is partial"
+
+  - name: rank
+    category: window
+    engines:
+      preview: unsupported
+      spark: partial
+    notes: "not first-class in preview evaluator"
+
+  - name: dense_rank
+    category: window
+    engines:
+      preview: unsupported
+      spark: partial
+    notes: "not first-class in preview evaluator"
 
   - name: lag
     category: window
@@ -106,16 +281,65 @@ functions:
       spark: partial
     notes: "not first-class in preview evaluator"
 
-  - name: approx_percentile
-    category: aggregation
+  - name: first_value
+    category: window
     engines:
       preview: unsupported
       spark: partial
-    notes: "available through aggregateExpressions only"
+    notes: "not first-class in preview evaluator"
 
-  - name: split
-    category: string
+  - name: last_value
+    category: window
     engines:
       preview: unsupported
       spark: partial
-    notes: "implemented as transform macro, not expression function"
+    notes: "not first-class in preview evaluator"
+
+  - name: abs
+    category: math
+    engines:
+      preview: partial
+      spark: partial
+    notes: "preview path supports basic arithmetic but not full function syntax"
+
+  - name: round
+    category: math
+    engines:
+      preview: partial
+      spark: partial
+    notes: "partial in preview formula evaluator"
+
+  - name: floor
+    category: math
+    engines:
+      preview: unsupported
+      spark: partial
+    notes: "function calls disabled in preview evaluator"
+
+  - name: ceil
+    category: math
+    engines:
+      preview: unsupported
+      spark: partial
+    notes: "function calls disabled in preview evaluator"
+
+  - name: greatest
+    category: conditional
+    engines:
+      preview: unsupported
+      spark: partial
+    notes: "partial via expression runtime only"
+
+  - name: least
+    category: conditional
+    engines:
+      preview: unsupported
+      spark: partial
+    notes: "partial via expression runtime only"
+
+  - name: when
+    category: conditional
+    engines:
+      preview: unsupported
+      spark: partial
+    notes: "partial via expression runtime only"

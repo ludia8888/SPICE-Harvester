@@ -45,6 +45,7 @@ class PipelinePlanDataScope(BaseModel):
 class PipelinePlanOutput(BaseModel):
     output_name: str = Field(..., min_length=1, max_length=200)
     output_kind: PipelinePlanOutputKind = Field(default=PipelinePlanOutputKind.dataset)
+    output_metadata: Dict[str, Any] = Field(default_factory=dict)
     target_class_id: Optional[str] = Field(default=None, max_length=200)
     source_class_id: Optional[str] = Field(default=None, max_length=200)
     link_type_id: Optional[str] = Field(default=None, max_length=200)

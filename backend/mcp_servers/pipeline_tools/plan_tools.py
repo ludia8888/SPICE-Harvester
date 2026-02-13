@@ -730,6 +730,16 @@ async def _plan_add_stream_join(_server: Any, arguments: Dict[str, Any]) -> Any:
         right_keys=normalize_string_list(arguments.get("right_keys") or arguments.get("rightKeys") or []),
         join_type=str(arguments.get("join_type") or arguments.get("joinType") or "inner"),
         strategy=str(arguments.get("strategy") or "dynamic"),
+        left_event_time_column=arguments.get("left_event_time_column") or arguments.get("leftEventTimeColumn"),
+        right_event_time_column=arguments.get("right_event_time_column") or arguments.get("rightEventTimeColumn"),
+        allowed_lateness_seconds=arguments.get("allowed_lateness_seconds")
+        if arguments.get("allowed_lateness_seconds") is not None
+        else arguments.get("allowedLatenessSeconds"),
+        stream_join_metadata=(
+            arguments.get("stream_join_metadata")
+            if isinstance(arguments.get("stream_join_metadata"), dict)
+            else (arguments.get("streamJoin") if isinstance(arguments.get("streamJoin"), dict) else None)
+        ),
         node_id=arguments.get("node_id"),
     )
     return {"plan": result.plan, "node_id": result.node_id, "warnings": list(result.warnings)}

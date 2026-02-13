@@ -22,6 +22,9 @@ _STRICT_RUNTIME_GLOBS = (
     "shared/services/kafka/processed_event_worker.py",
     "shared/services/kafka/dlq_publisher.py",
     "shared/services/pipeline/pipeline_executor.py",
+    "shared/services/pipeline/pipeline_preflight_utils.py",
+    "shared/services/pipeline/pipeline_definition_validator.py",
+    "shared/services/pipeline/output_plugins.py",
     "shared/config/settings.py",
     "shared/errors/runtime_exception_policy.py",
     "shared/utils/json_utils.py",
@@ -39,6 +42,8 @@ _STRICT_RUNTIME_GLOBS = (
     "mcp_servers/pipeline_tools/dataset_tools.py",
     "mcp_servers/pipeline_tools/pipeline_tools.py",
     "mcp_servers/pipeline_tools/plan_tools.py",
+    "pipeline_worker/spark_transform_engine.py",
+    "bff/routers/pipeline_ops_preflight.py",
 )
 
 
@@ -98,6 +103,9 @@ def test_runtime_scope_disallows_silent_failures() -> None:
         "--fail-on-suppress-exception",
         "--fail-on-silent-broad-except",
         "--fail-on-lineage-fail-open",
+        "--fail-on-streamjoin-strategy-ignored",
+        "--fail-on-output-kind-metadata-gap",
+        "--fail-on-preflight-swallowed",
         "--fail-on-commented-export",
         "--fail-on-doc-only-module",
     ]

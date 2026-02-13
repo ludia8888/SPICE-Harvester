@@ -192,14 +192,46 @@ def _count_runtime_guard_patterns(
         "silent_broad_except": [],
         "broad_except_no_log": [],
         "lineage_fail_open": [],
+        "streamjoin_strategy_ignored": [],
+        "output_kind_metadata_gap": [],
+        "preflight_swallowed_error": [],
     }
     for path in _iter_runtime_files(root, runtime_scope_glob=runtime_scope_glob):
         try:
-            tree = ast.parse(path.read_text(encoding="utf-8"))
+            source = path.read_text(encoding="utf-8")
+            tree = ast.parse(source)
         except SyntaxError:
             continue
+        rel = str(path.relative_to(root))
+
+        if rel == "shared/services/pipeline/output_plugins.py":
+            gap_patterns = (
+                r"OUTPUT_KIND_GEOTEMPORAL\s*:\s*_RequiredFieldsPlugin\([^)]*required_fields=\(\)",
+                r"OUTPUT_KIND_MEDIA\s*:\s*_RequiredFieldsPlugin\([^)]*required_fields=\(\)",
+                r"OUTPUT_KIND_VIRTUAL\s*:\s*_RequiredFieldsPlugin\([^)]*required_fields=\(\)",
+            )
+            if any(re.search(pattern, source, flags=re.DOTALL) for pattern in gap_patterns):
+                issues["output_kind_metadata_gap"].append((str(path), 1))
 
         for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef) and node.name == "_apply_stream_join":
+                has_apply_join_return = False
+                has_stream_spec_call = False
+                for sub in ast.walk(node):
+                    if isinstance(sub, ast.Return) and isinstance(sub.value, ast.Call):
+                        func = sub.value.func
+                        if isinstance(func, ast.Name) and func.id == "_apply_join":
+                            has_apply_join_return = True
+                        if isinstance(func, ast.Attribute) and func.attr == "_apply_join":
+                            has_apply_join_return = True
+                    if isinstance(sub, ast.Call):
+                        func = sub.func
+                        if isinstance(func, ast.Name) and func.id == "resolve_stream_join_spec":
+                            has_stream_spec_call = True
+                        if isinstance(func, ast.Attribute) and func.attr == "resolve_stream_join_spec":
+                            has_stream_spec_call = True
+                if has_apply_join_return and not has_stream_spec_call:
+                    issues["streamjoin_strategy_ignored"].append((str(path), node.lineno))
             if isinstance(node, ast.Try):
                 contains_lineage_calls = _try_contains_lineage_calls(node)
                 for stmt in node.finalbody:
@@ -227,6 +259,11 @@ def _count_runtime_guard_patterns(
                         and (not _handler_contains_runtime_policy_call(handler))
                     ):
                         issues["lineage_fail_open"].append((str(path), handler.lineno))
+                    if rel == "bff/routers/pipeline_ops_preflight.py":
+                        has_return = any(isinstance(sub, ast.Return) for sub in ast.walk(handler))
+                        has_raise = any(isinstance(sub, ast.Raise) for sub in ast.walk(handler))
+                        if has_return and not has_raise:
+                            issues["preflight_swallowed_error"].append((str(path), handler.lineno))
             elif isinstance(node, ast.With):
                 for item in node.items:
                     expr = item.context_expr
@@ -598,6 +635,21 @@ def main() -> int:
         help="Fail when lineage write calls are wrapped by broad exception handlers that do not re-raise",
     )
     parser.add_argument(
+        "--fail-on-streamjoin-strategy-ignored",
+        action="store_true",
+        help="Fail when streamJoin execution path delegates to generic join without strategy-aware spec handling",
+    )
+    parser.add_argument(
+        "--fail-on-output-kind-metadata-gap",
+        action="store_true",
+        help="Fail when output kind plugins leave geotemporal/media/virtual metadata requirements empty",
+    )
+    parser.add_argument(
+        "--fail-on-preflight-swallowed",
+        action="store_true",
+        help="Fail when pipeline preflight catches broad exceptions and returns fallback without re-raise",
+    )
+    parser.add_argument(
         "--runtime-scope-glob",
         action="append",
         default=[],
@@ -657,6 +709,9 @@ def main() -> int:
     print(f"Runtime silent broad except: {len(runtime_issues['silent_broad_except'])}")
     print(f"Runtime broad except without log/raise: {len(runtime_issues['broad_except_no_log'])}")
     print(f"Runtime lineage fail-open handlers: {len(runtime_issues['lineage_fail_open'])}")
+    print(f"Runtime streamJoin strategy ignored handlers: {len(runtime_issues['streamjoin_strategy_ignored'])}")
+    print(f"Runtime output kind metadata gap handlers: {len(runtime_issues['output_kind_metadata_gap'])}")
+    print(f"Runtime preflight swallowed handlers: {len(runtime_issues['preflight_swallowed_error'])}")
     print(f"Runtime commented exports in __init__.py: {len(commented_exports)}")
     print(f"Runtime doc-only modules: {len(doc_only_modules)}")
 
@@ -714,6 +769,18 @@ def main() -> int:
         print("\\nRuntime lineage fail-open hits:")
         for path, line in runtime_issues["lineage_fail_open"][:120]:
             print(f"  {path}:{line}")
+    if runtime_issues["streamjoin_strategy_ignored"]:
+        print("\\nRuntime streamJoin strategy ignored hits:")
+        for path, line in runtime_issues["streamjoin_strategy_ignored"][:120]:
+            print(f"  {path}:{line}")
+    if runtime_issues["output_kind_metadata_gap"]:
+        print("\\nRuntime output kind metadata gap hits:")
+        for path, line in runtime_issues["output_kind_metadata_gap"][:120]:
+            print(f"  {path}:{line}")
+    if runtime_issues["preflight_swallowed_error"]:
+        print("\\nRuntime preflight swallowed hits:")
+        for path, line in runtime_issues["preflight_swallowed_error"][:120]:
+            print(f"  {path}:{line}")
     if commented_exports:
         print("\\nRuntime commented export hits (__init__.py):")
         for path, line in commented_exports[:120]:
@@ -741,6 +808,12 @@ def main() -> int:
     ):
         exit_code = 1
     if args.fail_on_lineage_fail_open and runtime_issues["lineage_fail_open"]:
+        exit_code = 1
+    if args.fail_on_streamjoin_strategy_ignored and runtime_issues["streamjoin_strategy_ignored"]:
+        exit_code = 1
+    if args.fail_on_output_kind_metadata_gap and runtime_issues["output_kind_metadata_gap"]:
+        exit_code = 1
+    if args.fail_on_preflight_swallowed and runtime_issues["preflight_swallowed_error"]:
         exit_code = 1
     if args.fail_on_commented_export and commented_exports:
         exit_code = 1

@@ -65,7 +65,12 @@ from shared.services.storage.lakefs_storage_service import LakeFSStorageService
 from shared.services.registries.lineage_store import LineageStore
 from shared.services.pipeline.pipeline_profiler import compute_column_stats
 from shared.services.pipeline.output_plugins import (
+    OUTPUT_KIND_ALIASES,
     OUTPUT_KIND_DATASET,
+    OUTPUT_KIND_GEOTEMPORAL,
+    OUTPUT_KIND_MEDIA,
+    OUTPUT_KIND_ONTOLOGY,
+    OUTPUT_KIND_VIRTUAL,
     normalize_output_kind,
     validate_output_payload,
 )
@@ -187,12 +192,32 @@ def _resolve_declared_output_kind(
         ).strip()
         if node_id and declared_node_id == node_id:
             try:
-                return normalize_output_kind(item.get("output_kind") or item.get("outputKind") or OUTPUT_KIND_DATASET)
+                raw_kind = str(item.get("output_kind") or item.get("outputKind") or OUTPUT_KIND_DATASET).strip().lower()
+                normalized = normalize_output_kind(raw_kind)
+                if raw_kind in OUTPUT_KIND_ALIASES:
+                    logger.warning(
+                        "Output kind alias normalized: raw=%s normalized=%s node_id=%s output_name=%s",
+                        raw_kind,
+                        normalized,
+                        node_id,
+                        name or declared_name,
+                    )
+                return normalized
             except ValueError:
                 return OUTPUT_KIND_DATASET
         if name and declared_name and declared_name == name:
             try:
-                return normalize_output_kind(item.get("output_kind") or item.get("outputKind") or OUTPUT_KIND_DATASET)
+                raw_kind = str(item.get("output_kind") or item.get("outputKind") or OUTPUT_KIND_DATASET).strip().lower()
+                normalized = normalize_output_kind(raw_kind)
+                if raw_kind in OUTPUT_KIND_ALIASES:
+                    logger.warning(
+                        "Output kind alias normalized: raw=%s normalized=%s node_id=%s output_name=%s",
+                        raw_kind,
+                        normalized,
+                        node_id or declared_node_id,
+                        name,
+                    )
+                return normalized
             except ValueError:
                 return OUTPUT_KIND_DATASET
     return OUTPUT_KIND_DATASET
@@ -1850,6 +1875,7 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                             "node_id": node_id,
                             "output_name": output_name,
                             "output_kind": output_kind,
+                            "output_metadata": dict(metadata),
                             "dataset_name": dataset_name,
                             "output_df": output_df,
                             "output_format": output_format,
@@ -1912,8 +1938,10 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                 build_outputs: List[Dict[str, Any]] = []
                 for item in output_work:
                     output_df = item["output_df"]
-                    artifact_key = await self._materialize_output_dataframe(
-                        output_df,
+                    artifact_key = await self._materialize_output_by_kind(
+                        output_kind=str(item.get("output_kind") or OUTPUT_KIND_DATASET),
+                        output_metadata=item.get("output_metadata") if isinstance(item.get("output_metadata"), dict) else {},
+                        df=output_df,
                         artifact_bucket=artifact_repo,
                         prefix=f"{build_branch}/{item['artifact_prefix']}",
                         write_mode=output_write_mode,
@@ -1945,6 +1973,7 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                             "node_id": item["node_id"],
                             "output_name": item["output_name"],
                             "output_kind": item.get("output_kind", OUTPUT_KIND_DATASET),
+                            "output_metadata": item.get("output_metadata") if isinstance(item.get("output_metadata"), dict) else {},
                             "dataset_name": item["dataset_name"],
                             "artifact_key": artifact_key,
                             "artifact_prefix": item["artifact_prefix"],
@@ -2225,6 +2254,7 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                         "node_id": node_id,
                         "output_name": output_name,
                         "output_kind": output_kind,
+                        "output_metadata": dict(metadata),
                         "dataset_name": dataset_name,
                         "output_df": output_df,
                         "artifact_prefix": artifact_prefix,
@@ -2285,8 +2315,10 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
             staged_outputs: List[Dict[str, Any]] = []
             for item in output_work:
                 branch_prefix = f"{run_branch}/{item['artifact_prefix']}"
-                await self._materialize_output_dataframe(
-                    item["output_df"],
+                await self._materialize_output_by_kind(
+                    output_kind=str(item.get("output_kind") or OUTPUT_KIND_DATASET),
+                    output_metadata=item.get("output_metadata") if isinstance(item.get("output_metadata"), dict) else {},
+                    df=item["output_df"],
                     artifact_bucket=artifact_repo,
                     prefix=branch_prefix,
                     write_mode=output_write_mode,
@@ -2299,6 +2331,7 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                         "node_id": item["node_id"],
                         "output_name": item.get("output_name"),
                         "output_kind": item.get("output_kind", OUTPUT_KIND_DATASET),
+                        "output_metadata": item.get("output_metadata") if isinstance(item.get("output_metadata"), dict) else {},
                         "dataset_name": item["dataset_name"],
                         "artifact_prefix": item["artifact_prefix"],
                         "output_format": item["output_format"],
@@ -2404,6 +2437,9 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                 build_outputs.append(
                     {
                         "node_id": item.get("node_id"),
+                        "output_name": item.get("output_name"),
+                        "output_kind": item.get("output_kind", OUTPUT_KIND_DATASET),
+                        "output_metadata": item.get("output_metadata") if isinstance(item.get("output_metadata"), dict) else {},
                         "dataset_name": dataset_name,
                         "artifact_key": artifact_key,
                         "row_count": total_row_count,
@@ -2888,6 +2924,192 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                 logger.warning("Failed to enqueue relationship job %s: %s", job_id, exc)
 
         return job_ids
+
+    async def _materialize_output_by_kind(
+        self,
+        *,
+        output_kind: str,
+        output_metadata: Dict[str, Any],
+        df: DataFrame,
+        artifact_bucket: str,
+        prefix: str,
+        write_mode: str = "overwrite",
+        file_prefix: Optional[str] = None,
+        file_format: str = "parquet",
+        partition_cols: Optional[List[str]] = None,
+    ) -> str:
+        normalized_kind = normalize_output_kind(output_kind)
+        if normalized_kind == OUTPUT_KIND_DATASET:
+            return await self._materialize_dataset_output(
+                output_metadata=output_metadata,
+                df=df,
+                artifact_bucket=artifact_bucket,
+                prefix=prefix,
+                write_mode=write_mode,
+                file_prefix=file_prefix,
+                file_format=file_format,
+                partition_cols=partition_cols,
+            )
+        if normalized_kind == OUTPUT_KIND_GEOTEMPORAL:
+            return await self._materialize_geotemporal_output(
+                output_metadata=output_metadata,
+                df=df,
+                artifact_bucket=artifact_bucket,
+                prefix=prefix,
+                write_mode=write_mode,
+                file_prefix=file_prefix,
+                file_format=file_format,
+                partition_cols=partition_cols,
+            )
+        if normalized_kind == OUTPUT_KIND_MEDIA:
+            return await self._materialize_media_output(
+                output_metadata=output_metadata,
+                df=df,
+                artifact_bucket=artifact_bucket,
+                prefix=prefix,
+                write_mode=write_mode,
+                file_prefix=file_prefix,
+                file_format=file_format,
+                partition_cols=partition_cols,
+            )
+        if normalized_kind == OUTPUT_KIND_VIRTUAL:
+            return await self._materialize_virtual_output(
+                output_metadata=output_metadata,
+                df=df,
+                artifact_bucket=artifact_bucket,
+                prefix=prefix,
+                write_mode=write_mode,
+                file_prefix=file_prefix,
+                file_format=file_format,
+                partition_cols=partition_cols,
+            )
+        if normalized_kind == OUTPUT_KIND_ONTOLOGY:
+            return await self._materialize_ontology_output(
+                output_metadata=output_metadata,
+                df=df,
+                artifact_bucket=artifact_bucket,
+                prefix=prefix,
+                write_mode=write_mode,
+                file_prefix=file_prefix,
+                file_format=file_format,
+                partition_cols=partition_cols,
+            )
+        raise ValueError(f"Unsupported output_kind for materialization: {normalized_kind}")
+
+    async def _materialize_dataset_output(
+        self,
+        *,
+        output_metadata: Dict[str, Any],
+        df: DataFrame,
+        artifact_bucket: str,
+        prefix: str,
+        write_mode: str,
+        file_prefix: Optional[str],
+        file_format: str,
+        partition_cols: Optional[List[str]],
+    ) -> str:
+        _ = output_metadata
+        return await self._materialize_output_dataframe(
+            df,
+            artifact_bucket=artifact_bucket,
+            prefix=prefix,
+            write_mode=write_mode,
+            file_prefix=file_prefix,
+            file_format=file_format,
+            partition_cols=partition_cols,
+        )
+
+    async def _materialize_geotemporal_output(
+        self,
+        *,
+        output_metadata: Dict[str, Any],
+        df: DataFrame,
+        artifact_bucket: str,
+        prefix: str,
+        write_mode: str,
+        file_prefix: Optional[str],
+        file_format: str,
+        partition_cols: Optional[List[str]],
+    ) -> str:
+        _ = output_metadata
+        return await self._materialize_output_dataframe(
+            df,
+            artifact_bucket=artifact_bucket,
+            prefix=prefix,
+            write_mode=write_mode,
+            file_prefix=file_prefix,
+            file_format=file_format,
+            partition_cols=partition_cols,
+        )
+
+    async def _materialize_media_output(
+        self,
+        *,
+        output_metadata: Dict[str, Any],
+        df: DataFrame,
+        artifact_bucket: str,
+        prefix: str,
+        write_mode: str,
+        file_prefix: Optional[str],
+        file_format: str,
+        partition_cols: Optional[List[str]],
+    ) -> str:
+        _ = output_metadata
+        return await self._materialize_output_dataframe(
+            df,
+            artifact_bucket=artifact_bucket,
+            prefix=prefix,
+            write_mode=write_mode,
+            file_prefix=file_prefix,
+            file_format=file_format,
+            partition_cols=partition_cols,
+        )
+
+    async def _materialize_virtual_output(
+        self,
+        *,
+        output_metadata: Dict[str, Any],
+        df: DataFrame,
+        artifact_bucket: str,
+        prefix: str,
+        write_mode: str,
+        file_prefix: Optional[str],
+        file_format: str,
+        partition_cols: Optional[List[str]],
+    ) -> str:
+        _ = output_metadata
+        return await self._materialize_output_dataframe(
+            df,
+            artifact_bucket=artifact_bucket,
+            prefix=prefix,
+            write_mode=write_mode,
+            file_prefix=file_prefix,
+            file_format=file_format,
+            partition_cols=partition_cols,
+        )
+
+    async def _materialize_ontology_output(
+        self,
+        *,
+        output_metadata: Dict[str, Any],
+        df: DataFrame,
+        artifact_bucket: str,
+        prefix: str,
+        write_mode: str,
+        file_prefix: Optional[str],
+        file_format: str,
+        partition_cols: Optional[List[str]],
+    ) -> str:
+        _ = output_metadata
+        return await self._materialize_output_dataframe(
+            df,
+            artifact_bucket=artifact_bucket,
+            prefix=prefix,
+            write_mode=write_mode,
+            file_prefix=file_prefix,
+            file_format=file_format,
+            partition_cols=partition_cols,
+        )
 
     async def _materialize_output_dataframe(
         self,

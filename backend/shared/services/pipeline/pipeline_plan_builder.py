@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
 from shared.services.pipeline.pipeline_graph_utils import unique_node_id
-from shared.services.pipeline.output_plugins import normalize_output_kind
+from shared.services.pipeline.output_plugins import OUTPUT_KIND_ALIASES, normalize_output_kind
 from shared.services.pipeline.pipeline_transform_spec import SUPPORTED_TRANSFORMS
 
 
@@ -1084,8 +1084,8 @@ def add_pattern_mining(
     pattern_text = _ensure_str(pattern, name="pattern")
     output = _ensure_str(output_column, name="output_column")
     mode = str(match_mode or "contains").strip().lower() or "contains"
-    if mode not in {"contains", "extract"}:
-        raise PipelinePlanBuilderError("match_mode must be one of: contains|extract")
+    if mode not in {"contains", "extract", "count"}:
+        raise PipelinePlanBuilderError("match_mode must be one of: contains|extract|count")
     return add_transform(
         plan,
         operation="patternMining",
@@ -1111,6 +1111,10 @@ def add_stream_join(
     right_keys: List[str],
     join_type: str = "inner",
     strategy: str = "dynamic",
+    left_event_time_column: Optional[str] = None,
+    right_event_time_column: Optional[str] = None,
+    allowed_lateness_seconds: Optional[float] = None,
+    stream_join_metadata: Optional[Dict[str, Any]] = None,
     node_id: Optional[str] = None,
 ) -> PlanMutation:
     left = _ensure_str(left_node_id, name="left_node_id")
@@ -1125,6 +1129,54 @@ def add_stream_join(
     strategy_norm = str(strategy or "dynamic").strip().lower() or "dynamic"
     if strategy_norm not in {"dynamic", "left_lookup", "static"}:
         raise PipelinePlanBuilderError("strategy must be one of: dynamic|left_lookup|static")
+    stream_meta = dict(stream_join_metadata or {})
+    stream_meta["strategy"] = strategy_norm
+
+    left_event = str(
+        left_event_time_column
+        or stream_meta.get("leftEventTimeColumn")
+        or stream_meta.get("left_event_time_column")
+        or ""
+    ).strip()
+    right_event = str(
+        right_event_time_column
+        or stream_meta.get("rightEventTimeColumn")
+        or stream_meta.get("right_event_time_column")
+        or ""
+    ).strip()
+    if left_event:
+        stream_meta["leftEventTimeColumn"] = left_event
+    if right_event:
+        stream_meta["rightEventTimeColumn"] = right_event
+
+    lateness_raw: Optional[Any] = allowed_lateness_seconds
+    if lateness_raw is None:
+        for key in ("allowedLatenessSeconds", "allowed_lateness_seconds"):
+            if key in stream_meta and stream_meta.get(key) is not None and str(stream_meta.get(key)).strip() != "":
+                lateness_raw = stream_meta.get(key)
+                break
+    lateness_value: Optional[float] = None
+    if lateness_raw is not None:
+        try:
+            lateness_value = float(str(lateness_raw).strip())
+        except (TypeError, ValueError) as exc:
+            raise PipelinePlanBuilderError("allowed_lateness_seconds must be numeric") from exc
+        if lateness_value < 0:
+            raise PipelinePlanBuilderError("allowed_lateness_seconds must be >= 0")
+        stream_meta["allowedLatenessSeconds"] = lateness_value
+
+    if strategy_norm == "dynamic":
+        missing: List[str] = []
+        if not left_event:
+            missing.append("left_event_time_column")
+        if not right_event:
+            missing.append("right_event_time_column")
+        if lateness_value is None:
+            missing.append("allowed_lateness_seconds")
+        if missing:
+            raise PipelinePlanBuilderError(
+                "dynamic streamJoin requires: " + ", ".join(missing)
+            )
     return add_transform(
         plan,
         operation="streamJoin",
@@ -1134,9 +1186,7 @@ def add_stream_join(
             "joinType": join_type_norm,
             "leftKeys": lk,
             "rightKeys": rk,
-            "streamJoin": {
-                "strategy": strategy_norm,
-            },
+            "streamJoin": stream_meta,
         },
     )
 
@@ -1158,6 +1208,7 @@ def add_output(
         raise PipelinePlanBuilderError(f"input_node_id missing node: {src}")
 
     name = _ensure_str(output_name, name="output_name")
+    raw_kind = str(output_kind or "dataset").strip().lower()
     try:
         kind = normalize_output_kind(output_kind)
     except ValueError as exc:
@@ -1169,6 +1220,9 @@ def add_output(
 
     metadata = dict(output_metadata or {})
     metadata["outputName"] = name
+    warnings: List[str] = []
+    if raw_kind in OUTPUT_KIND_ALIASES:
+        warnings.append(f"output_kind alias '{raw_kind}' normalized to '{kind}'")
 
     if resolved_id in existing:
         if str(node_id or "").strip():
@@ -1189,9 +1243,9 @@ def add_output(
     definition["edges"].append({"from": src, "to": resolved_id})
 
     outputs = _ensure_list(plan.get("outputs"), name="outputs")
-    outputs.append({"output_name": name, "output_kind": kind})
+    outputs.append({"output_name": name, "output_kind": kind, "output_metadata": dict(metadata)})
     plan["outputs"] = outputs
-    return PlanMutation(plan=plan, node_id=resolved_id)
+    return PlanMutation(plan=plan, node_id=resolved_id, warnings=tuple(warnings))
 
 
 def validate_structure(plan: Dict[str, Any]) -> Tuple[List[str], List[str]]:
@@ -1600,6 +1654,14 @@ def update_output(
     plan["outputs"] = outputs
 
     new_name = str(next_item.get("output_name") or "").strip()
+    output_meta = next_item.get("output_metadata")
+    if isinstance(output_meta, dict):
+        updated_output_meta = dict(output_meta)
+        if str(updated_output_meta.get("outputName") or "").strip() in {"", name}:
+            updated_output_meta["outputName"] = new_name
+            next_item["output_metadata"] = updated_output_meta
+            outputs[idx] = next_item
+            plan["outputs"] = outputs
     if new_name != name:
         definition = _definition(plan)
         for node in _ensure_list(definition.get("nodes"), name="definition_json.nodes"):

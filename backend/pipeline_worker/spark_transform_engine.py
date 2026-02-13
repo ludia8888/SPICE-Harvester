@@ -7,12 +7,14 @@ This module implements transform execution as a small Strategy registry so the
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional
 
 try:
     from pyspark.sql import DataFrame  # type: ignore
     from pyspark.sql import functions as F  # type: ignore
+    from pyspark.sql.types import StringType  # type: ignore
     from pyspark.sql.window import Window  # type: ignore
 
     _PYSPARK_AVAILABLE = True
@@ -21,10 +23,16 @@ except ModuleNotFoundError:  # pragma: no cover
     _PYSPARK_AVAILABLE = False
     DataFrame = Any  # type: ignore[assignment,misc]
     F = None  # type: ignore[assignment]
+    StringType = Any  # type: ignore[assignment,misc]
     Window = None  # type: ignore[assignment]
 
 from shared.services.pipeline.pipeline_parameter_utils import apply_parameters
-from shared.services.pipeline.pipeline_transform_spec import normalize_operation, normalize_union_mode, resolve_join_spec
+from shared.services.pipeline.pipeline_transform_spec import (
+    normalize_operation,
+    normalize_union_mode,
+    resolve_join_spec,
+    resolve_stream_join_spec,
+)
 from shared.services.pipeline.pipeline_udf_runtime import compile_udf
 
 logger = logging.getLogger(__name__)
@@ -41,6 +49,8 @@ class _SparkTransformContext:
 
 
 SparkTransformHandler = Callable[[_SparkTransformContext], DataFrame]
+
+_GEOHASH_BASE32 = "0123456789bcdefghjkmnpqrstuvwxyz"
 
 
 def apply_spark_transform(
@@ -90,6 +100,48 @@ def _regex_inline_flags(value: Any) -> str:
     return inline
 
 
+def _encode_geohash(lat: Any, lon: Any, precision: int) -> Optional[str]:
+    try:
+        lat_value = float(lat)
+        lon_value = float(lon)
+    except (TypeError, ValueError):
+        return None
+    if math.isnan(lat_value) or math.isnan(lon_value):
+        return None
+    if not (-90.0 <= lat_value <= 90.0 and -180.0 <= lon_value <= 180.0):
+        return None
+    bits = [16, 8, 4, 2, 1]
+    lat_range = [-90.0, 90.0]
+    lon_range = [-180.0, 180.0]
+    geohash_chars: List[str] = []
+    bit_index = 0
+    ch = 0
+    is_even = True
+    while len(geohash_chars) < precision:
+        if is_even:
+            mid = (lon_range[0] + lon_range[1]) / 2.0
+            if lon_value >= mid:
+                ch |= bits[bit_index]
+                lon_range[0] = mid
+            else:
+                lon_range[1] = mid
+        else:
+            mid = (lat_range[0] + lat_range[1]) / 2.0
+            if lat_value >= mid:
+                ch |= bits[bit_index]
+                lat_range[0] = mid
+            else:
+                lat_range[1] = mid
+        is_even = not is_even
+        if bit_index < 4:
+            bit_index += 1
+            continue
+        geohash_chars.append(_GEOHASH_BASE32[ch])
+        bit_index = 0
+        ch = 0
+    return "".join(geohash_chars)
+
+
 def _resolve_join_col(df: DataFrame, col_name: str) -> str:
     """Resolve join column names defensively (handles UTF-8 BOM artifacts)."""
     if col_name in df.columns:
@@ -101,6 +153,35 @@ def _resolve_join_col(df: DataFrame, col_name: str) -> str:
     if bom in df.columns:
         return bom
     return col_name
+
+
+def _resolve_join_keys(metadata: Dict[str, Any]) -> tuple[List[str], List[str]]:
+    join_spec = resolve_join_spec(metadata)
+    left_keys = list(join_spec.left_keys or [])
+    right_keys = list(join_spec.right_keys or [])
+    if join_spec.left_key and not left_keys:
+        left_keys = [join_spec.left_key]
+    if join_spec.right_key and not right_keys:
+        right_keys = [join_spec.right_key]
+    return left_keys, right_keys
+
+
+def _resolve_stream_join_right_column(joined: DataFrame, *, left_col: str, right_col: str) -> str:
+    right_norm = _clean_col_name(right_col)
+    left_norm = _clean_col_name(left_col)
+    preferred: List[str]
+    if right_norm == left_norm:
+        preferred = [f"right_{right_norm}", right_norm]
+    else:
+        preferred = [right_norm, f"right_{right_norm}"]
+    for candidate in preferred:
+        if candidate in joined.columns:
+            return candidate
+    prefixed = f"right_{right_norm}"
+    for column in joined.columns:
+        if column.startswith(prefixed):
+            return column
+    return right_norm
 
 
 def _apply_join(ctx: _SparkTransformContext) -> DataFrame:
@@ -191,16 +272,72 @@ def _apply_join(ctx: _SparkTransformContext) -> DataFrame:
 
 
 def _apply_stream_join(ctx: _SparkTransformContext) -> DataFrame:
-    strategy_meta = (
-        ctx.metadata.get("streamJoin")
-        if isinstance(ctx.metadata.get("streamJoin"), dict)
-        else {}
-    )
-    strategy = str(strategy_meta.get("strategy") or "dynamic").strip().lower() or "dynamic"
+    if len(ctx.inputs) < 2:
+        return ctx.inputs[0]
+    stream_spec = resolve_stream_join_spec(ctx.metadata)
+    strategy = stream_spec.strategy
     if strategy not in {"dynamic", "left_lookup", "static"}:
         raise ValueError(f"Invalid streamJoin strategy: {strategy}")
-    # Runtime join semantics align with standard join while preserving strategy metadata.
-    return _apply_join(ctx)
+
+    if strategy == "static":
+        return _apply_join(ctx)
+
+    left_keys, right_keys = _resolve_join_keys(ctx.metadata)
+    if not left_keys or not right_keys:
+        raise ValueError("streamJoin requires leftKeys/rightKeys")
+    if len(left_keys) != len(right_keys):
+        raise ValueError("streamJoin requires leftKeys/rightKeys of the same length")
+
+    if strategy == "left_lookup":
+        left = ctx.inputs[0]
+        right = ctx.inputs[1]
+        resolved_right_keys = [_resolve_join_col(right, key) for key in right_keys]
+        right_event_col = _clean_col_name(stream_spec.right_event_time_column)
+        if right_event_col and right_event_col in right.columns:
+            lookup_window = Window.partitionBy(*[F.col(key) for key in resolved_right_keys]).orderBy(
+                F.col(right_event_col).cast("timestamp").desc_nulls_last()
+            )
+            right_lookup = (
+                right.withColumn("__stream_join_rank__", F.row_number().over(lookup_window))
+                .filter(F.col("__stream_join_rank__") == 1)
+                .drop("__stream_join_rank__")
+            )
+        else:
+            right_lookup = right.dropDuplicates(resolved_right_keys)
+        return _apply_join(
+            _SparkTransformContext(
+                metadata=ctx.metadata,
+                inputs=[left, right_lookup],
+                parameters=ctx.parameters,
+                apply_casts=ctx.apply_casts,
+            )
+        )
+
+    # dynamic strategy: perform key join first, then apply event-time bounded predicate.
+    left_event_col = _clean_col_name(stream_spec.left_event_time_column)
+    right_event_col = _clean_col_name(stream_spec.right_event_time_column)
+    if not left_event_col or not right_event_col:
+        raise ValueError("streamJoin dynamic requires leftEventTimeColumn and rightEventTimeColumn")
+    if stream_spec.allowed_lateness_seconds is None:
+        raise ValueError("streamJoin dynamic requires allowedLatenessSeconds")
+    if stream_spec.allowed_lateness_seconds < 0:
+        raise ValueError("streamJoin allowedLatenessSeconds must be >= 0")
+
+    joined = _apply_join(ctx)
+    if left_event_col not in joined.columns:
+        raise ValueError(f"streamJoin dynamic leftEventTimeColumn missing from join output: {left_event_col}")
+    resolved_right_event_col = _resolve_stream_join_right_column(
+        joined,
+        left_col=left_event_col,
+        right_col=right_event_col,
+    )
+    if resolved_right_event_col not in joined.columns:
+        raise ValueError(f"streamJoin dynamic rightEventTimeColumn missing from join output: {right_event_col}")
+    lateness_seconds = float(stream_spec.allowed_lateness_seconds)
+    left_ts = F.to_timestamp(F.col(left_event_col))
+    right_ts = F.to_timestamp(F.col(resolved_right_event_col))
+    within_lateness = F.abs(F.unix_timestamp(left_ts) - F.unix_timestamp(right_ts)) <= F.lit(lateness_seconds)
+    return joined.filter(within_lateness)
 
 
 def _apply_filter(ctx: _SparkTransformContext) -> DataFrame:
@@ -515,7 +652,10 @@ def _apply_geospatial(ctx: _SparkTransformContext) -> DataFrame:
             point_expr = F.concat(F.lit("POINT("), lon_expr, F.lit(" "), lat_expr, F.lit(")"))
             return ctx.inputs[0].withColumn(output_col, F.when(missing_expr, F.lit(None)).otherwise(point_expr))
         precision = int(geo.get("precision") or 7)
-        geohash_expr = F.concat_ws(":", F.round(lat_expr, precision), F.round(lon_expr, precision))
+        if precision < 1 or precision > 12:
+            raise ValueError("geospatial geohash precision must be between 1 and 12")
+        geohash_fn = F.udf(lambda lat, lon: _encode_geohash(lat, lon, precision), StringType())
+        geohash_expr = geohash_fn(lat_expr, lon_expr)
         return ctx.inputs[0].withColumn(output_col, F.when(missing_expr, F.lit(None)).otherwise(geohash_expr))
 
     if mode == "distance":
@@ -556,6 +696,8 @@ def _apply_pattern_mining(ctx: _SparkTransformContext) -> DataFrame:
     output_col = _clean_col_name(pattern_meta.get("outputColumn") or pattern_meta.get("output_column")) or "pattern_match"
     pattern = _clean_expr(pattern_meta.get("pattern"), ctx.parameters).strip()
     mode = str(pattern_meta.get("matchMode") or pattern_meta.get("match_mode") or "contains").strip().lower()
+    if mode not in {"contains", "extract", "count"}:
+        raise ValueError(f"Invalid patternMining matchMode: {mode}")
     if not source_col or not pattern:
         return ctx.inputs[0]
     source = F.col(source_col).cast("string")
@@ -563,6 +705,9 @@ def _apply_pattern_mining(ctx: _SparkTransformContext) -> DataFrame:
         extracted = F.regexp_extract(source, pattern, 1)
         result = F.when(extracted == "", F.lit(None)).otherwise(extracted)
         return ctx.inputs[0].withColumn(output_col, result)
+    if mode == "count":
+        count_expr = F.when(source.isNull(), F.lit(0)).otherwise(F.size(F.split(source, pattern)) - F.lit(1))
+        return ctx.inputs[0].withColumn(output_col, count_expr.cast("int"))
     return ctx.inputs[0].withColumn(
         output_col,
         F.when(source.isNull(), F.lit(False)).otherwise(source.rlike(pattern)),

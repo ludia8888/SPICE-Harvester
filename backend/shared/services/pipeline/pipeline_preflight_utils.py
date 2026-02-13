@@ -6,7 +6,12 @@ from typing import Any, Dict, List, Optional, Tuple
 from shared.services.pipeline.pipeline_dataset_utils import normalize_dataset_selection, resolve_dataset_version
 from shared.services.pipeline.pipeline_graph_utils import build_incoming, normalize_edges, normalize_nodes, topological_sort
 from shared.services.pipeline.pipeline_schema_utils import normalize_schema_contract, normalize_schema_type
-from shared.services.pipeline.pipeline_transform_spec import normalize_operation, normalize_union_mode, resolve_join_spec
+from shared.services.pipeline.pipeline_transform_spec import (
+    normalize_operation,
+    normalize_union_mode,
+    resolve_join_spec,
+    resolve_stream_join_spec,
+)
 from shared.services.pipeline.pipeline_type_utils import infer_xsd_type_from_values
 from shared.utils.schema_columns import extract_schema_columns
 
@@ -281,7 +286,12 @@ def _apply_pattern_mining(schema: SchemaInfo, metadata: Dict[str, Any]) -> Schem
     if output_col not in columns:
         columns.append(output_col)
     type_map = dict(schema.type_map)
-    type_map[output_col] = "xsd:string" if mode == "extract" else "xsd:boolean"
+    if mode == "extract":
+        type_map[output_col] = "xsd:string"
+    elif mode == "count":
+        type_map[output_col] = "xsd:integer"
+    else:
+        type_map[output_col] = "xsd:boolean"
     return SchemaInfo(columns=columns, type_map=type_map, dynamic_columns=schema.dynamic_columns)
 
 
@@ -684,6 +694,83 @@ async def compute_pipeline_preflight(
                         "right_keys": right_keys,
                     }
                 )
+            if operation == "streamJoin":
+                try:
+                    stream_spec = resolve_stream_join_spec(metadata)
+                except ValueError as exc:
+                    issues.append(
+                        {
+                            "kind": "stream_join_invalid",
+                            "severity": "error",
+                            "node_id": node_id,
+                            "message": str(exc),
+                        }
+                    )
+                else:
+                    if stream_spec.strategy not in {"dynamic", "left_lookup", "static"}:
+                        issues.append(
+                            {
+                                "kind": "stream_join_strategy_invalid",
+                                "severity": "error",
+                                "node_id": node_id,
+                                "message": f"streamJoin strategy must be dynamic|left_lookup|static (got: {stream_spec.strategy})",
+                            }
+                        )
+                    elif stream_spec.strategy == "dynamic":
+                        missing_fields: List[str] = []
+                        if not str(stream_spec.left_event_time_column or "").strip():
+                            missing_fields.append("leftEventTimeColumn")
+                        if not str(stream_spec.right_event_time_column or "").strip():
+                            missing_fields.append("rightEventTimeColumn")
+                        if stream_spec.allowed_lateness_seconds is None:
+                            missing_fields.append("allowedLatenessSeconds")
+                        if missing_fields:
+                            issues.append(
+                                {
+                                    "kind": "stream_join_required_field_missing",
+                                    "severity": "error",
+                                    "node_id": node_id,
+                                    "message": f"streamJoin dynamic missing required fields: {', '.join(missing_fields)}",
+                                }
+                            )
+                        elif stream_spec.allowed_lateness_seconds < 0:
+                            issues.append(
+                                {
+                                    "kind": "stream_join_allowed_lateness_invalid",
+                                    "severity": "error",
+                                    "node_id": node_id,
+                                    "message": "streamJoin allowedLatenessSeconds must be >= 0",
+                                }
+                            )
+                        elif _schema_empty(inputs[0]) or _schema_empty(inputs[1]) or inputs[0].dynamic_columns or inputs[1].dynamic_columns:
+                            issues.append(
+                                {
+                                    "kind": "stream_join_dynamic_preflight_skipped",
+                                    "severity": "warning",
+                                    "node_id": node_id,
+                                    "message": "streamJoin dynamic event-time check skipped (missing schema metadata)",
+                                }
+                            )
+                        else:
+                            left_cols = set(str(col).lstrip("\ufeff") for col in inputs[0].columns or [])
+                            right_cols = set(str(col).lstrip("\ufeff") for col in inputs[1].columns or [])
+                            left_col = str(stream_spec.left_event_time_column or "").lstrip("\ufeff")
+                            right_col = str(stream_spec.right_event_time_column or "").lstrip("\ufeff")
+                            missing_schema_fields: List[str] = []
+                            if left_col and left_col not in left_cols:
+                                missing_schema_fields.append(f"left:{left_col}")
+                            if right_col and right_col not in right_cols:
+                                missing_schema_fields.append(f"right:{right_col}")
+                            if missing_schema_fields:
+                                issues.append(
+                                    {
+                                        "kind": "stream_join_event_time_missing_in_schema",
+                                        "severity": "error",
+                                        "node_id": node_id,
+                                        "message": "streamJoin dynamic event-time columns missing in input schema",
+                                        "missing": missing_schema_fields,
+                                    }
+                                )
             elif _schema_empty(inputs[0]) or _schema_empty(inputs[1]) or inputs[0].dynamic_columns or inputs[1].dynamic_columns:
                 issues.append(
                     {
@@ -1158,6 +1245,11 @@ async def compute_schema_by_node(
                 left_keys = [left_key]
             if right_key and not right_keys:
                 right_keys = [right_key]
+            if operation == "streamJoin":
+                try:
+                    resolve_stream_join_spec(metadata)
+                except ValueError:
+                    pass
             schema_by_node[node_id] = _apply_join(inputs[0], inputs[1], left_keys=left_keys, right_keys=right_keys)
             continue
 

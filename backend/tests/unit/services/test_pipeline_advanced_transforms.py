@@ -86,7 +86,12 @@ def test_validate_pipeline_definition_accepts_advanced_transforms() -> None:
                     "operation": "streamJoin",
                     "leftKeys": ["id"],
                     "rightKeys": ["id"],
-                    "streamJoin": {"strategy": "dynamic"},
+                    "streamJoin": {
+                        "strategy": "dynamic",
+                        "leftEventTimeColumn": "event_time_left",
+                        "rightEventTimeColumn": "event_time_right",
+                        "allowedLatenessSeconds": 120,
+                    },
                 },
             },
             {
@@ -148,6 +153,41 @@ def test_validate_pipeline_definition_rejects_invalid_stream_join_strategy() -> 
         ),
     )
     assert any("streamJoin has invalid strategy" in err for err in result.errors)
+
+
+@pytest.mark.unit
+def test_validate_pipeline_definition_rejects_dynamic_stream_join_without_event_time_fields() -> None:
+    definition = {
+        "nodes": [
+            {"id": "in1", "type": "input", "metadata": {"datasetName": "orders"}},
+            {"id": "in2", "type": "input", "metadata": {"datasetName": "inventory"}},
+            {
+                "id": "sj1",
+                "type": "transform",
+                "metadata": {
+                    "operation": "streamJoin",
+                    "leftKeys": ["id"],
+                    "rightKeys": ["id"],
+                    "streamJoin": {"strategy": "dynamic"},
+                },
+            },
+        ],
+        "edges": [
+            {"from": "in1", "to": "sj1"},
+            {"from": "in2", "to": "sj1"},
+        ],
+    }
+    result = validate_pipeline_definition(
+        definition,
+        policy=PipelineDefinitionValidationPolicy(
+            supported_ops=SUPPORTED_TRANSFORMS,
+            require_output=False,
+            normalize_metadata=True,
+        ),
+    )
+    assert any("streamJoin dynamic requires leftEventTimeColumn" in err for err in result.errors)
+    assert any("streamJoin dynamic requires rightEventTimeColumn" in err for err in result.errors)
+    assert any("streamJoin dynamic requires allowedLatenessSeconds" in err for err in result.errors)
 
 
 @pytest.mark.unit

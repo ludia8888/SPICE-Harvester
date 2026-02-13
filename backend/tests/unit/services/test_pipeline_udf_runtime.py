@@ -38,6 +38,14 @@ def transform(row):
 
 
 @pytest.mark.unit
+def test_compile_row_udf_accepts_escaped_newline_source():
+    code = "def transform(row):\\n    row['id_plus'] = int(row.get('id') or 0) + 1\\n    return row"
+
+    fn = compile_row_udf(code)
+    assert fn({"id": 1})["id_plus"] == 2
+
+
+@pytest.mark.unit
 def test_compile_row_udf_rejects_imports():
     code = """
 import os
