@@ -156,7 +156,7 @@ class ProjectionWorker(StrictHeartbeatEventEnvelopeKafkaWorker[None]):
         if not text and value is not None and not i18n_map:
             try:
                 text = str(value).strip()
-            except Exception:
+            except (TypeError, ValueError):
                 text = ""
         return text, i18n_map
 
@@ -448,9 +448,14 @@ class ProjectionWorker(StrictHeartbeatEventEnvelopeKafkaWorker[None]):
             try:
                 if await self.elasticsearch_service.index_exists(index_name):
                     return index_name
-            except Exception:
+            except Exception as exc:
                 # Fall through to recreate on any transient ES error.
-                pass
+                logger.warning(
+                    "Failed to verify existing projection index %s, recreating: %s",
+                    index_name,
+                    exc,
+                    exc_info=True,
+                )
             self.created_indices.discard(index_name)
             
         try:
@@ -600,8 +605,8 @@ class ProjectionWorker(StrictHeartbeatEventEnvelopeKafkaWorker[None]):
                 payload.event_id,
                 int(getattr(claim, "attempt_count", 0) or 0),
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Failed to record projection lease metric: %s", exc, exc_info=True)
         return 2.0
 
     async def _on_retry_scheduled(  # type: ignore[override]
@@ -1696,7 +1701,13 @@ class ProjectionWorker(StrictHeartbeatEventEnvelopeKafkaWorker[None]):
                     )
                     if isinstance(result, dict):
                         indices_to_delete.extend(list(result.keys()))
-                except Exception:
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to resolve projection indices for wildcard %s: %s",
+                        pattern,
+                        exc,
+                        exc_info=True,
+                    )
                     continue
 
             # Always include canonical base names (in case wildcards are restricted).

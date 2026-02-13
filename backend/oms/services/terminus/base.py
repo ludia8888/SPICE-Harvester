@@ -219,7 +219,7 @@ class BaseTerminusService:
                 try:
                     error_data = response.json()
                     error_msg += f" - {error_data}"
-                except Exception:
+                except (ValueError, TypeError):
                     error_msg += f" - {response.text}"
                 
                 logger.error(error_msg)
@@ -297,7 +297,8 @@ class BaseTerminusService:
         try:
             await self._make_request("GET", "/api/info")
             return True
-        except Exception:
+        except Exception as exc:
+            logger.warning("Terminus base check_connection failed: %s", exc, exc_info=True)
             return False
     
     async def __aenter__(self):

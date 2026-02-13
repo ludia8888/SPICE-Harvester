@@ -480,7 +480,8 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                     continue
                 try:
                     prev_conf[conf_key] = self.spark.conf.get(conf_key)
-                except Exception:
+                except Exception as exc:
+                    logger.warning("Failed to read existing Spark conf %s before override: %s", conf_key, exc, exc_info=True)
                     prev_conf[conf_key] = None
                 try:
                     self.spark.conf.set(conf_key, str(value))
@@ -522,8 +523,12 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
             ):
                 if hasattr(SparkContext, attr):
                     setattr(SparkContext, attr, None)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning(
+                "Failed to reset SparkContext attributes before Spark recreation: %s",
+                exc,
+                exc_info=True,
+            )
         self.spark = self._create_spark_session()
 
     @staticmethod
@@ -540,7 +545,7 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
         try:
             from py4j.java_gateway import Py4JJavaError  # type: ignore
             from py4j.protocol import Py4JError, Py4JNetworkError  # type: ignore
-        except Exception:
+        except ImportError:
             return False
         return isinstance(exc, (Py4JError, Py4JNetworkError, Py4JJavaError))
 
@@ -929,8 +934,8 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
         try:
             UUID(pipeline_id)
             return pipeline_id
-        except Exception:
-            pass
+        except ValueError:
+            logger.warning("Invalid pipeline_id format, trying name lookup: %s", pipeline_id, exc_info=True)
         pipeline = await self.pipeline_registry.get_pipeline_by_name(
             db_name=db_name,
             name=pipeline_id,
@@ -1589,8 +1594,13 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                         try:
                             output_df = output_df.persist(StorageLevel.DISK_ONLY)
                             persisted_dfs.append(output_df)
-                        except Exception:
-                            pass
+                        except Exception as exc:
+                            logger.warning(
+                                "Failed to persist output dataframe for node %s: %s",
+                                node_id,
+                                exc,
+                                exc_info=True,
+                            )
                     schema_columns = _schema_from_dataframe(output_df)
                     delta_row_count = int(
                         await self._run_spark(lambda: output_df.count(), label=f"count:build:{node_id}")
@@ -2494,9 +2504,14 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                             self.spark.conf.unset(key)
                         else:
                             self.spark.conf.set(key, value)
-                    except Exception:
+                    except Exception as exc:
                         # Best-effort restore; some conf keys may be non-modifiable.
-                        pass
+                        logger.warning(
+                            "Failed to restore Spark conf key %s: %s",
+                            key,
+                            exc,
+                            exc_info=True,
+                        )
             self.cast_mode = prev_cast_mode
 
     async def _maybe_enqueue_objectify_job(self, *, dataset, version) -> Optional[str]:
@@ -2879,7 +2894,8 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                 .distinct()
                 .collect()
             )
-        except Exception:
+        except Exception as exc:
+            logger.warning("Failed to collect changed row keys: %s", exc, exc_info=True)
             return []
         keys: list[str] = []
         for row in rows:
@@ -3060,7 +3076,14 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                                 .collect()[0]["watermark_max"],
                                 label=f"watermark_max:diff:{node_id}",
                             )
-                        except Exception:
+                        except Exception as exc:
+                            logger.warning(
+                                "Failed to compute watermark max for node %s (column=%s): %s",
+                                node_id,
+                                resolved_watermark_column,
+                                exc,
+                                exc_info=True,
+                            )
                             watermark_max = None
                         snapshot["watermark_max"] = watermark_max
                         if watermark_max is not None:
@@ -3352,8 +3375,8 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                 guessed, _ = mimetypes.guess_type(filename)
                 if guessed:
                     content_type = guessed
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("Failed to infer MIME type for %s: %s", filename, exc, exc_info=True)
             rows.append(
                 {
                     "s3_uri": build_s3_uri(bucket, object_key),
@@ -3377,8 +3400,8 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
         try:
             UUID(pipeline_id)
             return pipeline_id
-        except Exception:
-            pass
+        except ValueError:
+            logger.warning("Invalid pipeline_id in objectify payload, trying name lookup: %s", pipeline_id, exc_info=True)
         if job.db_name and pipeline_id:
             pipeline = await self.pipeline_registry.get_pipeline_by_name(
                 db_name=job.db_name,
@@ -3590,11 +3613,11 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
             max_value = result["max"]
             try:
                 min_value = float(min_value) if min_value is not None else None
-            except Exception:
+            except (TypeError, ValueError):
                 min_value = None
             try:
                 max_value = float(max_value) if max_value is not None else None
-            except Exception:
+            except (TypeError, ValueError):
                 max_value = None
             return (min_value, max_value)
 
@@ -3972,9 +3995,9 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
         if schema_ddl and fmt not in {"kafka"}:
             try:
                 reader = reader.schema(schema_ddl)
-            except Exception:
+            except Exception as exc:
                 # Some sources ignore/forbid schema(); best-effort only.
-                pass
+                logger.warning("Failed to apply schema to source reader: %s", exc, exc_info=True)
 
         if fmt == "kafka":
             return reader.format("kafka").load()
@@ -4181,7 +4204,8 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
             return df
         try:
             cols = list(df.columns)
-        except Exception:
+        except Exception as exc:
+            logger.warning("Failed to read dataframe columns for dedupe rename: %s", exc, exc_info=True)
             return df
         if not cols:
             return df
@@ -4202,7 +4226,8 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
             return df
         try:
             return df.toDF(*new_cols)
-        except Exception:
+        except Exception as exc:
+            logger.warning("Failed to rename duplicate dataframe columns: %s", exc, exc_info=True)
             return df
 
     def _load_excel_path(self, path: str) -> DataFrame:
@@ -4224,8 +4249,8 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                     if rows:
                         return self.spark.createDataFrame(rows)
                     return self._empty_dataframe()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Fell back to Spark JSON reader for %s due to parser error: %s", path, exc, exc_info=True)
         return reader.json(path)
 
     def _empty_dataframe(self) -> DataFrame:

@@ -14,7 +14,6 @@ import asyncio
 import json
 import logging
 from collections import Counter
-from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
@@ -546,6 +545,7 @@ class ActionWorker(StrictHeartbeatKafkaWorker[_ActionCommandPayload, None]):
         try:
             writeback_dataset = await self.dataset_registry.get_dataset(dataset_id=writeback_dataset_id)
         except Exception as exc:
+            logger.warning("Failed to load writeback dataset %s: %s", writeback_dataset_id, exc, exc_info=True)
             return {
                 "error": "writeback_acl_unverifiable",
                 "message": "Failed to load writeback dataset",
@@ -578,6 +578,12 @@ class ActionWorker(StrictHeartbeatKafkaWorker[_ActionCommandPayload, None]):
                 subject_id=writeback_dataset_id,
             )
         except Exception as exc:
+            logger.warning(
+                "Failed to load writeback dataset ACL policy for %s: %s",
+                writeback_dataset_id,
+                exc,
+                exc_info=True,
+            )
             return {
                 "error": "writeback_acl_unverifiable",
                 "message": "Failed to load writeback dataset ACL policy",
@@ -626,6 +632,7 @@ class ActionWorker(StrictHeartbeatKafkaWorker[_ActionCommandPayload, None]):
                     resource_id=class_id,
                 )
             except Exception as exc:
+                logger.warning("Failed to load object_type resource for class %s: %s", class_id, exc, exc_info=True)
                 return {
                     "error": "writeback_acl_unverifiable",
                     "message": "Failed to load object_type resource for writeback governance checks",
@@ -646,6 +653,13 @@ class ActionWorker(StrictHeartbeatKafkaWorker[_ActionCommandPayload, None]):
             try:
                 backing_dataset = await self.dataset_registry.get_dataset(dataset_id=backing_dataset_id)
             except Exception as exc:
+                logger.warning(
+                    "Failed to load backing dataset %s for class %s: %s",
+                    backing_dataset_id,
+                    class_id,
+                    exc,
+                    exc_info=True,
+                )
                 return {
                     "error": "writeback_acl_unverifiable",
                     "message": "Failed to load backing dataset for writeback governance checks",
@@ -681,6 +695,13 @@ class ActionWorker(StrictHeartbeatKafkaWorker[_ActionCommandPayload, None]):
                     subject_id=backing_dataset_id,
                 )
             except Exception as exc:
+                logger.warning(
+                    "Failed to load backing dataset ACL policy for %s (class=%s): %s",
+                    backing_dataset_id,
+                    class_id,
+                    exc,
+                    exc_info=True,
+                )
                 return {
                     "error": "writeback_acl_unverifiable",
                     "message": "Failed to load backing dataset ACL policy",
@@ -789,7 +810,7 @@ class ActionWorker(StrictHeartbeatKafkaWorker[_ActionCommandPayload, None]):
                         external_code=error_key,
                     ).to_dict()
                 else:
-                    with suppress(Exception):
+                    try:
                         enterprise = resolve_enterprise_error(
                             service_name="action-worker",
                             code=ErrorCode(error_key),
@@ -797,6 +818,8 @@ class ActionWorker(StrictHeartbeatKafkaWorker[_ActionCommandPayload, None]):
                             status_code=400,
                             external_code=None,
                         ).to_dict()
+                    except Exception as exc:
+                        logger.warning("Failed to resolve enterprise error for key=%s: %s", error_key, exc, exc_info=True)
                 if enterprise is not None:
                     enriched["enterprise"] = enterprise
             return audit_action_log_result(enriched, audit_policy=audit_policy)
@@ -1030,7 +1053,13 @@ class ActionWorker(StrictHeartbeatKafkaWorker[_ActionCommandPayload, None]):
                                 subject_type="object_type",
                                 subject_id=class_id,
                             )
-                        except Exception:
+                        except Exception as exc:
+                            logger.warning(
+                                "Failed to load object_type access policy for class %s: %s",
+                                class_id,
+                                exc,
+                                exc_info=True,
+                            )
                             access_policy = None
                         if not access_policy or not isinstance(access_policy.policy, dict) or not access_policy.policy:
                             continue
@@ -1581,8 +1610,15 @@ class ActionWorker(StrictHeartbeatKafkaWorker[_ActionCommandPayload, None]):
             metadata={"action_log_id": action_log_id, "kind": "writeback_patchset_merge"},
             allow_empty=True,
         )
-        with suppress(Exception):
+        try:
             await self.lakefs_client.delete_branch(repository=repository, name=staging_branch)
+        except Exception as exc:
+            logger.warning(
+                "Failed to cleanup writeback patchset staging branch %s: %s",
+                staging_branch,
+                exc,
+                exc_info=True,
+            )
         return commit_id
 
     async def _append_queue_entries(
@@ -1650,8 +1686,15 @@ class ActionWorker(StrictHeartbeatKafkaWorker[_ActionCommandPayload, None]):
         # Nothing to write (e.g., conflict_policy=BASE_WINS skipped all targets).
         # Avoid failing the action on an empty commit/merge; cleanup any stale staging branch.
         if not entries:
-            with suppress(Exception):
+            try:
                 await self.lakefs_client.delete_branch(repository=repository, name=staging_branch)
+            except Exception as exc:
+                logger.warning(
+                    "Failed to cleanup empty writeback queue staging branch %s: %s",
+                    staging_branch,
+                    exc,
+                    exc_info=True,
+                )
             return
 
         try:
@@ -1682,8 +1725,15 @@ class ActionWorker(StrictHeartbeatKafkaWorker[_ActionCommandPayload, None]):
             metadata={"kind": "writeback_queue_entries_merge", "action_log_id": action_log_id},
             allow_empty=True,
         )
-        with suppress(Exception):
+        try:
             await self.lakefs_client.delete_branch(repository=repository, name=staging_branch)
+        except Exception as exc:
+            logger.warning(
+                "Failed to cleanup writeback queue staging branch %s: %s",
+                staging_branch,
+                exc,
+                exc_info=True,
+            )
 
 
 async def main() -> None:

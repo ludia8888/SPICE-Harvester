@@ -34,7 +34,8 @@ def _parse_csv_bytes(raw_bytes: bytes, *, max_rows: int = 200) -> List[Dict[str,
     """Parse CSV payload into row dicts (standalone version of PipelineExecutor helper)."""
     try:
         text = raw_bytes.decode("utf-8", errors="replace")
-    except Exception:
+    except (UnicodeDecodeError, AttributeError) as exc:
+        logger.warning("Failed to decode CSV bytes for MCP sample parse: %s", exc, exc_info=True)
         return []
     if not text.strip():
         return []
@@ -69,14 +70,16 @@ def _parse_excel_bytes(raw_bytes: bytes, *, max_rows: int = 200) -> List[Dict[st
         from io import BytesIO
         frame = pd.read_excel(BytesIO(raw_bytes))
         return frame.fillna("").to_dict(orient="records")[: max(1, int(max_rows))]
-    except Exception:
+    except (ImportError, ValueError, TypeError, OSError) as exc:
+        logger.warning("Failed to parse Excel bytes for MCP sample parse: %s", exc, exc_info=True)
         return []
 
 
 def _parse_json_bytes(raw_bytes: bytes, *, max_rows: int = 200) -> List[Dict[str, Any]]:
     try:
         payload = json.loads(raw_bytes.decode("utf-8"))
-    except Exception:
+    except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
+        logger.warning("Failed to parse JSON bytes, falling back to JSONL scan: %s", exc, exc_info=True)
         text = raw_bytes.decode("utf-8", errors="replace")
         rows: List[Dict[str, Any]] = []
         resolved_limit = max(1, int(max_rows))
@@ -85,7 +88,7 @@ def _parse_json_bytes(raw_bytes: bytes, *, max_rows: int = 200) -> List[Dict[str
                 continue
             try:
                 item = json.loads(line)
-            except Exception:
+            except json.JSONDecodeError:
                 continue
             if isinstance(item, dict):
                 rows.append(item)
@@ -158,7 +161,8 @@ async def _load_artifact_rows(
             )
         else:
             raw_bytes = await storage_service.load_bytes(bucket, key)
-    except Exception:
+    except Exception as exc:
+        logger.warning("Failed to load artifact bytes (bucket=%s key=%s): %s", bucket, key, exc, exc_info=True)
         return []
     if extension == ".csv":
         return _parse_csv_bytes(raw_bytes, max_rows=resolved_limit)
@@ -173,7 +177,8 @@ async def _load_artifact_rows(
     prefix = f"{prefix}/"
     try:
         objects = await storage_service.list_objects(bucket, prefix=prefix)
-    except Exception:
+    except Exception as exc:
+        logger.warning("Failed to list artifact objects (bucket=%s prefix=%s): %s", bucket, prefix, exc, exc_info=True)
         return []
     keys = [obj.get("Key") for obj in objects or [] if obj.get("Key")]
     for candidate in keys:
@@ -182,7 +187,14 @@ async def _load_artifact_rows(
             continue
         try:
             candidate_bytes = await storage_service.load_bytes(bucket, candidate)
-        except Exception:
+        except Exception as exc:
+            logger.warning(
+                "Failed to load artifact candidate bytes (bucket=%s key=%s): %s",
+                bucket,
+                candidate,
+                exc,
+                exc_info=True,
+            )
             continue
         if ext == ".csv":
             return _parse_csv_bytes(candidate_bytes, max_rows=resolved_limit)
@@ -209,8 +221,8 @@ async def _load_sample_rows(server: Any, dataset_id: str, *, limit: int = 200) -
                 )
                 if isinstance(rows, list) and rows:
                     return rows[:limit]
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Failed to load cached dataset profile rows (dataset_id=%s): %s", dataset_id, exc, exc_info=True)
 
     # 2. Artifact (direct S3/lakeFS read)
     version = await dataset_registry.get_latest_version(dataset_id=dataset_id)
@@ -591,19 +603,21 @@ async def _data_query(server: Any, arguments: Dict[str, Any]) -> Any:
             "note": f"Query executed on {len(rows)} sample rows (not full dataset)",
         }
     except Exception as exc:
+        logger.warning("MCP data_query execution failed for dataset_id=%s: %s", dataset_id, exc, exc_info=True)
         return tool_error(
             f"SQL query failed: {exc}",
             code=ErrorCode.REQUEST_VALIDATION_FAILED,
             category=ErrorCategory.INPUT,
             status_code=400,
             context={"sql": sql[:500], "dataset_id": dataset_id},
+            operation="pipeline.data_query",
         )
     finally:
         if conn:
             try:
                 conn.close()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("Failed to close in-memory DuckDB connection: %s", exc, exc_info=True)
 
 
 # ---------------------------------------------------------------------------

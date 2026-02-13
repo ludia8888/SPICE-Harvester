@@ -249,18 +249,21 @@ async def _capture_agent_tool_request(request: Request) -> dict[str, Any]:
     raw_body = b""
     try:
         raw_body = await request.body()
-    except Exception:
+    except (RuntimeError, TypeError, ValueError) as exc:
+        logger.warning("Failed to read request body for agent tool capture: %s", exc, exc_info=True)
         raw_body = b""
     if raw_body:
         try:
             body_obj = await request.json()
-        except Exception:
+        except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
+            logger.warning("Failed to parse request JSON for agent tool capture: %s", exc, exc_info=True)
             body_obj = raw_body.decode("utf-8", errors="replace")
 
     query_items = []
     try:
         query_items = sorted([(k, v) for (k, v) in request.query_params.multi_items()])
-    except Exception:
+    except (AttributeError, RuntimeError, TypeError, ValueError) as exc:
+        logger.warning("Failed to capture query params for agent tool request: %s", exc, exc_info=True)
         query_items = []
 
     payload = {
@@ -355,7 +358,8 @@ async def _maybe_start_session_tool_call(request: Request) -> None:
                 "idempotency_key": idempotency_key,
             },
         )
-    except Exception:
+    except Exception as exc:
+        logger.warning("Failed to persist TOOL_CALL_STARTED session event: %s", exc, exc_info=True)
         return
 
 
@@ -382,7 +386,8 @@ async def _finalize_session_tool_call(request: Request, response: Response, *, t
         if isinstance(raw, (bytes, bytearray)) and raw:
             try:
                 body_obj = json.loads(bytes(raw).decode("utf-8", errors="replace"))
-            except Exception:
+            except json.JSONDecodeError as exc:
+                logger.warning("Failed to decode tool response body for session finalize: %s", exc, exc_info=True)
                 body_obj = {"raw": bytes(raw).decode("utf-8", errors="replace")}
         else:
             body_obj = {}
@@ -434,7 +439,8 @@ async def _finalize_session_tool_call(request: Request, response: Response, *, t
                 "side_effect_summary": side_effect_summary,
             },
         )
-    except Exception:
+    except Exception as exc:
+        logger.warning("Failed to persist TOOL_CALL_FINISHED session event: %s", exc, exc_info=True)
         return
 
 
@@ -444,7 +450,8 @@ def _resolve_agent_tool_registry(request: Request):
         return None
     try:
         return container.get_agent_tool_registry()
-    except Exception:
+    except (AttributeError, RuntimeError, TypeError, ValueError) as exc:
+        logger.warning("Failed to resolve agent tool registry: %s", exc, exc_info=True)
         return None
 
 
@@ -454,7 +461,8 @@ def _resolve_agent_session_registry(request: Request):
         return None
     try:
         return container.get_agent_session_registry()
-    except Exception:
+    except (AttributeError, RuntimeError, TypeError, ValueError) as exc:
+        logger.warning("Failed to resolve agent session registry: %s", exc, exc_info=True)
         return None
 
 
@@ -464,7 +472,8 @@ def _resolve_agent_policy_registry(request: Request):
         return None
     try:
         return container.get_agent_policy_registry()
-    except Exception:
+    except (AttributeError, RuntimeError, TypeError, ValueError) as exc:
+        logger.warning("Failed to resolve agent policy registry: %s", exc, exc_info=True)
         return None
 
 
@@ -474,7 +483,8 @@ def _resolve_agent_registry(request: Request):
         return None
     try:
         return container.get_agent_registry()
-    except Exception:
+    except (AttributeError, RuntimeError, TypeError, ValueError) as exc:
+        logger.warning("Failed to resolve agent registry: %s", exc, exc_info=True)
         return None
 
 
@@ -587,7 +597,8 @@ async def _enforce_internal_agent_tool_policy(request: Request) -> Optional[JSON
             )
         try:
             session = await session_registry.get_session(session_id=session_header, tenant_id=tenant_id)
-        except Exception:
+        except Exception as exc:
+            logger.warning("Failed to fetch agent session during policy check: %s", exc, exc_info=True)
             session = None
         user_id = str(getattr(principal, "id", "") or "").strip()
         if not session or (user_id and session.created_by != user_id):
@@ -749,18 +760,21 @@ async def _compute_agent_tool_idempotency_digest(request: Request, *, tool_id: s
     raw_body = b""
     try:
         raw_body = await request.body()
-    except Exception:
+    except (RuntimeError, TypeError, ValueError) as exc:
+        logger.warning("Failed to read request body for idempotency digest: %s", exc, exc_info=True)
         raw_body = b""
     if raw_body:
         try:
             body_obj = await request.json()
-        except Exception:
+        except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
+            logger.warning("Failed to parse request JSON for idempotency digest: %s", exc, exc_info=True)
             body_obj = raw_body.decode("utf-8", errors="replace")
 
     query_items = []
     try:
         query_items = sorted([(k, v) for (k, v) in request.query_params.multi_items()])
-    except Exception:
+    except (AttributeError, RuntimeError, TypeError, ValueError) as exc:
+        logger.warning("Failed to capture query params for idempotency digest: %s", exc, exc_info=True)
         query_items = []
 
     signature = {
@@ -826,7 +840,8 @@ async def _maybe_replay_or_start_tool_idempotency(request: Request) -> Optional[
             tool_id=tool_id,
             request_digest=request_digest,
         )
-    except Exception:
+    except Exception as exc:
+        logger.warning("Failed to begin tool idempotency transaction: %s", exc, exc_info=True)
         record, created = None, False
 
     if record is None:
@@ -923,7 +938,8 @@ async def _finalize_tool_idempotency(request: Request, response: Response) -> Re
                     chunk = chunk.encode("utf-8")
                 chunks.append(chunk)
             body_bytes = b"".join(chunks)
-        except Exception:
+        except (AttributeError, RuntimeError, TypeError, ValueError) as exc:
+            logger.warning("Failed to buffer streaming tool response body: %s", exc, exc_info=True)
             body_bytes = b""
         headers = dict(response.headers)
         headers.pop("content-length", None)
@@ -946,17 +962,15 @@ async def _finalize_tool_idempotency(request: Request, response: Response) -> Re
             body_obj = json.loads(decoded)
         else:
             body_obj = {}
-    except Exception:
+    except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
+        logger.warning("Failed to parse tool response body JSON for idempotency finalize: %s", exc, exc_info=True)
         body_obj = {}
     request.state.agent_tool_response_body = body_obj
 
     error_value = None
     if response.status_code >= 400:
-        try:
-            if isinstance(body_obj, dict):
-                error_value = str(body_obj.get("message") or body_obj.get("detail") or "").strip() or None
-        except Exception:
-            error_value = None
+        if isinstance(body_obj, dict):
+            error_value = str(body_obj.get("message") or body_obj.get("detail") or "").strip() or None
 
     try:
         await registry.finalize_tool_idempotency(
@@ -968,7 +982,8 @@ async def _finalize_tool_idempotency(request: Request, response: Response) -> Re
             response_body=body_obj,
             error=error_value,
         )
-    except Exception:
+    except Exception as exc:
+        logger.warning("Failed to finalize tool idempotency success path: %s", exc, exc_info=True)
         return response
 
     return response
@@ -994,7 +1009,8 @@ async def _finalize_tool_idempotency_error(request: Request, exc: Exception) -> 
             response_body=_internal_error_payload(request, message="Internal error"),
             error=error_value or "Internal error",
         )
-    except Exception:
+    except Exception as finalize_exc:
+        logger.warning("Failed to finalize tool idempotency error path: %s", finalize_exc, exc_info=True)
         return
 
 
@@ -1311,7 +1327,8 @@ async def enforce_bff_websocket_auth(websocket: WebSocket, token: Optional[str])
     query_token = None
     try:
         query_token = websocket.query_params.get("token")
-    except Exception:
+    except (AttributeError, RuntimeError, TypeError, ValueError) as exc:
+        logger.warning("Failed to read websocket query token: %s", exc, exc_info=True)
         query_token = None
 
     presented = token or query_token or extract_presented_token(websocket.headers)

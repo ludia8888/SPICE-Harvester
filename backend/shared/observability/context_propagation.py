@@ -14,6 +14,7 @@ Design goals:
 
 from __future__ import annotations
 
+import logging
 from contextlib import contextmanager
 from typing import Any, Dict, Iterable, Iterator, Mapping, MutableMapping, Optional, Sequence, Tuple
 from urllib.parse import quote
@@ -32,6 +33,7 @@ _TRACEPARENT = "traceparent"
 _TRACESTATE = "tracestate"
 _BAGGAGE = "baggage"
 _KNOWN_KEYS = (_TRACEPARENT, _TRACESTATE, _BAGGAGE)
+logger = logging.getLogger(__name__)
 
 
 try:  # OpenTelemetry API (no SDK dependency)
@@ -49,7 +51,7 @@ try:  # OpenTelemetry API (no SDK dependency)
         ]
     )
     _HAS_OTEL_API = True
-except Exception:  # pragma: no cover - env dependent
+except ImportError:  # pragma: no cover - env dependent
     otel_context = None
     otel_trace = None
     otel_baggage = None
@@ -63,13 +65,13 @@ def _to_text(value: Any) -> Optional[str]:
     if isinstance(value, bytes):
         try:
             return value.decode("utf-8", errors="replace")
-        except Exception:
+        except UnicodeDecodeError:
             return None
     if isinstance(value, str):
         return value
     try:
         return str(value)
-    except Exception:
+    except (TypeError, ValueError, RuntimeError):
         return None
 
 
@@ -182,7 +184,8 @@ def kafka_headers_from_carrier(carrier: Mapping[str, str]) -> list[Tuple[str, by
             continue
         try:
             headers.append((key, str(value).encode("utf-8")))
-        except Exception:
+        except (UnicodeEncodeError, TypeError, ValueError, RuntimeError) as exc:
+            logger.warning("Failed to encode Kafka header %s: %s", key, exc, exc_info=True)
             continue
     return headers
 
@@ -240,7 +243,8 @@ def kafka_headers_from_current_context() -> list[Tuple[str, bytes]]:
     carrier: Dict[str, str] = {}
     try:
         _PROPAGATOR.inject(carrier)
-    except Exception:
+    except (AttributeError, TypeError, ValueError, RuntimeError) as exc:
+        logger.warning("Failed to inject OTel context into Kafka headers: %s", exc, exc_info=True)
         return []
 
     baggage = _merge_baggage(
@@ -267,7 +271,8 @@ def enrich_metadata_with_current_trace(metadata: Any) -> None:
     carrier: Dict[str, str] = {}
     try:
         _PROPAGATOR.inject(carrier)
-    except Exception:
+    except (AttributeError, TypeError, ValueError, RuntimeError) as exc:
+        logger.warning("Failed to inject OTel context into metadata: %s", exc, exc_info=True)
         return
 
     baggage = _merge_baggage(
@@ -299,8 +304,8 @@ def enrich_metadata_with_current_trace(metadata: Any) -> None:
                     metadata.setdefault("trace_id", format(int(trace_id), "032x"))
                 if span_id:
                     metadata.setdefault("span_id", format(int(span_id), "016x"))
-    except Exception:
-        pass
+    except (AttributeError, TypeError, ValueError, RuntimeError) as exc:
+        logger.warning("Failed to enrich metadata with trace/span ids: %s", exc, exc_info=True)
 
     try:
         if otel_baggage is not None:
@@ -308,8 +313,8 @@ def enrich_metadata_with_current_trace(metadata: Any) -> None:
                 value = otel_baggage.get_baggage(key)
                 if value:
                     metadata.setdefault(key, value)
-    except Exception:
-        pass
+    except (AttributeError, TypeError, ValueError, RuntimeError) as exc:
+        logger.warning("Failed to enrich metadata from baggage: %s", exc, exc_info=True)
 
     try:
         for key, getter in (
@@ -320,8 +325,8 @@ def enrich_metadata_with_current_trace(metadata: Any) -> None:
             value = getter()
             if value:
                 metadata.setdefault(key, value)
-    except Exception:
-        pass
+    except (AttributeError, TypeError, ValueError, RuntimeError) as exc:
+        logger.warning("Failed to enrich metadata from request context getters: %s", exc, exc_info=True)
 
 
 @contextmanager
@@ -347,7 +352,8 @@ def attach_context_from_carrier(
     try:
         ctx = _PROPAGATOR.extract(dict(carrier))
         token = otel_context.attach(ctx)
-    except Exception:
+    except (AttributeError, TypeError, ValueError, RuntimeError) as exc:
+        logger.warning("Failed to attach extracted OTel context: %s", exc, exc_info=True)
         token = None
 
     try:
@@ -364,8 +370,8 @@ def attach_context_from_carrier(
         if token is not None:
             try:
                 otel_context.detach(token)
-            except Exception:
-                pass
+            except (AttributeError, TypeError, ValueError, RuntimeError) as exc:
+                logger.warning("Failed to detach OTel context token: %s", exc, exc_info=True)
 
 
 @contextmanager

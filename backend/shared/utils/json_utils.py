@@ -1,8 +1,14 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
+
+from shared.errors.error_types import ErrorCategory, ErrorCode
+from shared.errors.runtime_exception_policy import FallbackPolicy, RuntimeZone, fallback_value
+
+logger = logging.getLogger(__name__)
 
 
 def json_default(value: Any) -> str:
@@ -15,8 +21,19 @@ def maybe_decode_json(value: Any) -> Any:
     if isinstance(value, str):
         try:
             return json.loads(value)
-        except Exception:
-            return value
+        except json.JSONDecodeError as exc:
+            return fallback_value(
+                policy=FallbackPolicy(
+                    zone=RuntimeZone.ADAPTER,
+                    operation="json_utils.maybe_decode_json",
+                    default_factory=lambda: value,
+                    allowed_exceptions=(json.JSONDecodeError,),
+                    code=ErrorCode.REQUEST_VALIDATION_FAILED,
+                    category=ErrorCategory.INPUT,
+                ),
+                exc=exc,
+                logger=logger,
+            )
     return value
 
 
@@ -45,12 +62,34 @@ def coerce_json_dataset(value: Any) -> Dict[str, Any]:
             if isinstance(parsed, dict):
                 return parsed
             return {"value": parsed}
-        except Exception:
-            return {"raw": value}
+        except json.JSONDecodeError as exc:
+            return fallback_value(
+                policy=FallbackPolicy(
+                    zone=RuntimeZone.ADAPTER,
+                    operation="json_utils.coerce_json_dataset.parse",
+                    default_factory=lambda: {"raw": value},
+                    allowed_exceptions=(json.JSONDecodeError,),
+                    code=ErrorCode.REQUEST_VALIDATION_FAILED,
+                    category=ErrorCategory.INPUT,
+                ),
+                exc=exc,
+                logger=logger,
+            )
     try:
         return dict(value)
-    except Exception:
-        return {}
+    except (TypeError, ValueError) as exc:
+        return fallback_value(
+            policy=FallbackPolicy(
+                zone=RuntimeZone.ADAPTER,
+                operation="json_utils.coerce_json_dataset.dict",
+                default_factory=dict,
+                allowed_exceptions=(TypeError, ValueError),
+                code=ErrorCode.REQUEST_VALIDATION_FAILED,
+                category=ErrorCategory.INPUT,
+            ),
+            exc=exc,
+            logger=logger,
+        )
 
 
 def coerce_json_pipeline(value: Any) -> Any:
@@ -66,8 +105,19 @@ def coerce_json_pipeline(value: Any) -> Any:
             return {}
         try:
             parsed = json.loads(raw)
-        except Exception:
-            return {}
+        except json.JSONDecodeError as exc:
+            return fallback_value(
+                policy=FallbackPolicy(
+                    zone=RuntimeZone.ADAPTER,
+                    operation="json_utils.coerce_json_pipeline.parse",
+                    default_factory=dict,
+                    allowed_exceptions=(json.JSONDecodeError,),
+                    code=ErrorCode.REQUEST_VALIDATION_FAILED,
+                    category=ErrorCategory.INPUT,
+                ),
+                exc=exc,
+                logger=logger,
+            )
         if isinstance(parsed, dict):
             return dict(parsed)
         if isinstance(parsed, list):
@@ -98,8 +148,19 @@ def coerce_json_list(
             return []
         try:
             parsed = json.loads(raw)
-        except Exception:
-            return []
+        except json.JSONDecodeError as exc:
+            return fallback_value(
+                policy=FallbackPolicy(
+                    zone=RuntimeZone.ADAPTER,
+                    operation="json_utils.coerce_json_list.parse",
+                    default_factory=list,
+                    allowed_exceptions=(json.JSONDecodeError,),
+                    code=ErrorCode.REQUEST_VALIDATION_FAILED,
+                    category=ErrorCategory.INPUT,
+                ),
+                exc=exc,
+                logger=logger,
+            )
         if isinstance(parsed, list):
             return list(parsed)
         if isinstance(parsed, dict):
@@ -111,8 +172,19 @@ def coerce_json_list(
         return []
     try:
         return list(value)
-    except Exception:
-        return []
+    except TypeError as exc:
+        return fallback_value(
+            policy=FallbackPolicy(
+                zone=RuntimeZone.ADAPTER,
+                operation="json_utils.coerce_json_list.list",
+                default_factory=list,
+                allowed_exceptions=(TypeError,),
+                code=ErrorCode.REQUEST_VALIDATION_FAILED,
+                category=ErrorCategory.INPUT,
+            ),
+            exc=exc,
+            logger=logger,
+        )
 
 
 def coerce_json_dict(
@@ -130,8 +202,19 @@ def coerce_json_dict(
             return {}
         try:
             parsed = json.loads(raw)
-        except Exception:
-            return {}
+        except json.JSONDecodeError as exc:
+            return fallback_value(
+                policy=FallbackPolicy(
+                    zone=RuntimeZone.ADAPTER,
+                    operation="json_utils.coerce_json_dict.parse",
+                    default_factory=dict,
+                    allowed_exceptions=(json.JSONDecodeError,),
+                    code=ErrorCode.REQUEST_VALIDATION_FAILED,
+                    category=ErrorCategory.INPUT,
+                ),
+                exc=exc,
+                logger=logger,
+            )
         if isinstance(parsed, dict):
             return dict(parsed)
         if parsed_fallback_key:
@@ -139,8 +222,19 @@ def coerce_json_dict(
         return {}
     try:
         return dict(value)
-    except Exception:
-        return {}
+    except (TypeError, ValueError) as exc:
+        return fallback_value(
+            policy=FallbackPolicy(
+                zone=RuntimeZone.ADAPTER,
+                operation="json_utils.coerce_json_dict.dict",
+                default_factory=dict,
+                allowed_exceptions=(TypeError, ValueError),
+                code=ErrorCode.REQUEST_VALIDATION_FAILED,
+                category=ErrorCategory.INPUT,
+            ),
+            exc=exc,
+            logger=logger,
+        )
 
 
 def coerce_json_strict(value: Any) -> Dict[str, Any]:

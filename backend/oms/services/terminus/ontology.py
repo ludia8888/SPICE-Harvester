@@ -74,14 +74,21 @@ class OntologyService(DatabaseBackedTerminusService):
         for prop in list(ontology.properties or []):
             try:
                 prop_name = str(getattr(prop, "name", "") or "")
-            except Exception:
+            except (AttributeError, TypeError, ValueError) as exc:
+                logger.warning("Failed to read ontology property name during key_spec overlay: %s", exc, exc_info=True)
                 continue
             if not prop_name:
                 continue
             try:
                 prop.primary_key = prop_name in pk_set
                 prop.title_key = prop_name in title_set
-            except Exception:
+            except (AttributeError, TypeError, ValueError) as exc:
+                logger.warning(
+                    "Failed to apply key_spec flags for property %s: %s",
+                    prop_name,
+                    exc,
+                    exc_info=True,
+                )
                 continue
 
         meta = ontology.metadata if isinstance(ontology.metadata, dict) else {}
@@ -501,7 +508,15 @@ class OntologyService(DatabaseBackedTerminusService):
         try:
             ontology = await self.get_ontology(db_name, ontology_id, branch=branch)
             return ontology is not None
-        except Exception:
+        except Exception as exc:
+            logger.warning(
+                "Failed to check ontology existence (db=%s ontology_id=%s branch=%s): %s",
+                db_name,
+                ontology_id,
+                branch,
+                exc,
+                exc_info=True,
+            )
             return False
     
     def _create_property_schema(self, prop: Property) -> Any:

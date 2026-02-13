@@ -362,8 +362,10 @@ class ProcessedEventKafkaWorker(Generic[PayloadT, ResultT], ABC):
         )
 
     def _safe_message_headers(self, msg: Any) -> Optional[Any]:
-        with suppress(Exception):
+        try:
             return msg.headers()
+        except Exception as exc:
+            logger.warning("Failed to read Kafka message headers: %s", exc, exc_info=True)
         return None
 
     def _fallback_metadata_from_raw_payload(self, raw_payload: Optional[str]) -> Optional[Dict[str, Any]]:
@@ -371,7 +373,7 @@ class ProcessedEventKafkaWorker(Generic[PayloadT, ResultT], ABC):
             return None
         try:
             payload_obj = json.loads(raw_payload)
-        except Exception:
+        except json.JSONDecodeError:
             return None
         if not isinstance(payload_obj, dict):
             return None
@@ -429,8 +431,14 @@ class ProcessedEventKafkaWorker(Generic[PayloadT, ResultT], ABC):
         inferred_stage: Optional[str] = None,
     ) -> tuple[str, Optional[str], Optional[Dict[str, Any]], Optional[Any], Optional[Dict[str, Any]]]:
         if kafka_headers is None:
-            with suppress(Exception):
+            try:
                 kafka_headers = msg.headers()
+            except Exception as exc:
+                logger.warning(
+                    "Failed to read Kafka headers during DLQ normalization: %s",
+                    exc,
+                    exc_info=True,
+                )
 
         stage_final = str(stage or "").strip() or str(default_stage or "").strip() or "process_command"
         inferred_stage_final = str(inferred_stage or "").strip()
@@ -611,8 +619,8 @@ class ProcessedEventKafkaWorker(Generic[PayloadT, ResultT], ABC):
             return
         try:
             metrics.record_event(name, action="processed", duration=duration_s)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Failed to record processed-event metric %s: %s", name, exc, exc_info=True)
 
     async def _on_retry_scheduled(
         self,
@@ -780,13 +788,13 @@ class ProcessedEventKafkaWorker(Generic[PayloadT, ResultT], ABC):
     def _is_partition_eof(self, msg: Any) -> bool:
         try:
             error = msg.error()
-        except Exception:
+        except (AttributeError, TypeError, RuntimeError):
             return False
         if not error:
             return False
         try:
             return error.code() == KafkaError._PARTITION_EOF
-        except Exception:
+        except (AttributeError, TypeError, RuntimeError):
             return False
 
     def _loop_label(self) -> str:
@@ -805,12 +813,14 @@ class ProcessedEventKafkaWorker(Generic[PayloadT, ResultT], ABC):
         logger.error("Unexpected %s error: %s", self._loop_label(), exc, exc_info=True)
 
     async def _seek_on_unexpected_error(self, msg: Any) -> None:
-        with suppress(Exception):
+        try:
             await self._seek(
                 topic=str(msg.topic()),
                 partition=int(msg.partition()),
                 offset=int(msg.offset()),
             )
+        except Exception as exc:
+            logger.warning("Failed to seek after unexpected message error: %s", exc, exc_info=True)
 
     def _init_partition_state(self, *, reset: bool = True) -> None:
         if not hasattr(self, "_event_loop"):
@@ -1073,6 +1083,7 @@ class ProcessedEventKafkaWorker(Generic[PayloadT, ResultT], ABC):
         try:
             msg = await self._poll_message(timeout=poll_timeout)
         except Exception as exc:
+            logger.warning("Kafka poll_message failed: %s", exc, exc_info=True)
             await self._on_poll_exception(exc)
             if poll_exception_sleep:
                 await asyncio.sleep(poll_exception_sleep)
@@ -1124,6 +1135,7 @@ class ProcessedEventKafkaWorker(Generic[PayloadT, ResultT], ABC):
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
+                logger.warning("Kafka handle_message failed: %s", exc, exc_info=True)
                 await self._on_unexpected_message_error(exc, msg)
                 if unexpected_error_sleep:
                     await asyncio.sleep(unexpected_error_sleep)
@@ -1199,7 +1211,7 @@ class ProcessedEventKafkaWorker(Generic[PayloadT, ResultT], ABC):
         kafka_headers = None
         try:
             kafka_headers = msg.headers()
-        except Exception:
+        except (AttributeError, TypeError, RuntimeError):
             kafka_headers = None
 
         payload_raw = msg.value()
@@ -1214,6 +1226,7 @@ class ProcessedEventKafkaWorker(Generic[PayloadT, ResultT], ABC):
         try:
             payload = self._parse_payload(payload_raw)
         except Exception as exc:
+            logger.warning("Failed to parse Kafka payload, routing parse error handling: %s", exc, exc_info=True)
             await self._on_parse_error(msg=msg, raw_payload=raw_text, error=exc)
             await self._commit(msg)
             return

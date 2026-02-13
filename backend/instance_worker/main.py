@@ -18,7 +18,6 @@ import json
 import logging
 import os
 import time
-from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional, Set, List, Union
@@ -333,8 +332,13 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
             try:
                 if await self.elasticsearch_service.index_exists(index_name):
                     return index_name
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning(
+                    "Failed to verify cached Elasticsearch index %s, forcing recreate: %s",
+                    index_name,
+                    exc,
+                    exc_info=True,
+                )
             self._created_es_indices.discard(index_name)
 
         if not await self.elasticsearch_service.index_exists(index_name):
@@ -1071,7 +1075,7 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
                         proposed = values[0] if len(values) == 1 else ":".join(values)
                         try:
                             validate_instance_id(proposed)
-                        except Exception:
+                        except (TypeError, ValueError):
                             suffix = deterministic_uuid5_hex_prefix(
                                 f"objectify:{class_id}:{'|'.join(values)}",
                                 length=12,
@@ -1315,7 +1319,7 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
             if raw_seq is not None:
                 try:
                     to_version = int(raw_seq) - 1
-                except Exception:
+                except (TypeError, ValueError):
                     to_version = None
 
         if self.enable_event_sourcing and self.event_store:
@@ -1353,7 +1357,7 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
         base_branch = get_settings().branch_virtualization.base_branch
         try:
             base_branch = validate_branch_name(base_branch)
-        except Exception:
+        except (TypeError, ValueError):
             base_branch = "main"
 
         if (
@@ -1564,8 +1568,14 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
             if existing_doc and isinstance(existing_doc, dict):
                 source = existing_doc.get("_source") or existing_doc
                 created_at_override = source.get("created_at")
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning(
+                "Failed to fetch existing document for created_at override (index=%s, id=%s): %s",
+                index_name,
+                instance_id,
+                exc,
+                exc_info=True,
+            )
 
         es_doc = self._build_es_document(
             db_name=db_name,
@@ -2328,7 +2338,7 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
         sequence_number = command.get("sequence_number")
         try:
             seq_int = int(sequence_number) if sequence_number is not None else None
-        except Exception:
+        except (TypeError, ValueError):
             seq_int = None
 
         command_type = command.get("command_type")
@@ -2465,11 +2475,18 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
         command_id = str(command.get("command_id") or "").strip()
         if command_id:
             max_attempts = self._max_retries_for_error(Exception(error), payload=payload, error=error, retryable=retryable)
-            with suppress(Exception):
+            try:
                 await self.set_command_status(
                     command_id,
                     "retrying",
                     {"error": error, "attempt": attempt_count, "max_attempts": int(max_attempts)},
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Failed to mark command as retrying (command_id=%s): %s",
+                    command_id,
+                    exc,
+                    exc_info=True,
                 )
         logger.warning(
             "Retrying instance command in %ss (attempt %s): %s",
@@ -2489,8 +2506,15 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
         command = payload.command if isinstance(payload.command, dict) else {}
         command_id = str(command.get("command_id") or "").strip()
         if command_id:
-            with suppress(Exception):
+            try:
                 await self.set_command_status(command_id, "failed", {"error": error})
+            except Exception as exc:
+                logger.warning(
+                    "Failed to mark command as failed (command_id=%s): %s",
+                    command_id,
+                    exc,
+                    exc_info=True,
+                )
         logger.error(
             "Instance command failed after %s attempts (retryable=%s): %s",
             attempt_count,

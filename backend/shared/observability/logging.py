@@ -22,12 +22,13 @@ from shared.observability.request_context import (
     get_principal,
     get_request_id,
 )
+_module_logger = logging.getLogger(__name__)
 
 try:  # OpenTelemetry API (no SDK dependency)
     from opentelemetry import trace as otel_trace
 
     _HAS_OTEL_API = True
-except Exception:  # pragma: no cover - env dependent
+except ImportError:  # pragma: no cover - env dependent
     otel_trace = None
     _HAS_OTEL_API = False
 
@@ -76,7 +77,7 @@ def install_trace_context_record_factory() -> None:
                 record.db_name = db_name  # type: ignore[attr-defined]
             if principal:
                 record.principal = principal  # type: ignore[attr-defined]
-        except Exception:
+        except (LookupError, RuntimeError, ValueError, TypeError):
             pass
 
         if not _HAS_OTEL_API or otel_trace is None:
@@ -100,7 +101,7 @@ def install_trace_context_record_factory() -> None:
                 record.trace_id = format(int(trace_id), "032x")  # type: ignore[attr-defined]
             if span_id:
                 record.span_id = format(int(span_id), "016x")  # type: ignore[attr-defined]
-        except Exception:
+        except (AttributeError, RuntimeError, ValueError, TypeError):
             return record
 
         return record
@@ -137,7 +138,7 @@ class TraceContextFilter(logging.Filter):
                 record.db_name = db_name  # type: ignore[attr-defined]
             if principal:
                 record.principal = principal  # type: ignore[attr-defined]
-        except Exception:
+        except (LookupError, RuntimeError, ValueError, TypeError):
             pass
 
         if not _HAS_OTEL_API or otel_trace is None:
@@ -161,7 +162,7 @@ class TraceContextFilter(logging.Filter):
                 record.trace_id = format(int(trace_id), "032x")  # type: ignore[attr-defined]
             if span_id:
                 record.span_id = format(int(span_id), "016x")  # type: ignore[attr-defined]
-        except Exception:
+        except (AttributeError, RuntimeError, ValueError, TypeError):
             return True
 
         return True
@@ -194,7 +195,8 @@ def install_trace_context_filter(*, logger: Optional[logging.Logger] = None) -> 
     for handler in list(target.handlers):
         try:
             handler.addFilter(filt)
-        except Exception:
+        except (AttributeError, RuntimeError, ValueError, TypeError) as exc:
+            _module_logger.warning("Failed to install trace context filter on handler %r: %s", handler, exc, exc_info=True)
             continue
 
     _installed = True

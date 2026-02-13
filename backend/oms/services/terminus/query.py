@@ -47,7 +47,7 @@ class QueryService(BaseTerminusService):
                 return float(value)
             if isinstance(value, str) and value.strip() != "":
                 return float(value.strip())
-        except Exception:
+        except (TypeError, ValueError):
             return None
         return None
 
@@ -196,11 +196,11 @@ class QueryService(BaseTerminusService):
 
         try:
             limit = int(query_dict.get("limit") or 50)
-        except Exception:
+        except (TypeError, ValueError):
             limit = 50
         try:
             offset = int(query_dict.get("offset") or 0)
-        except Exception:
+        except (TypeError, ValueError):
             offset = 0
 
         if limit < 0:

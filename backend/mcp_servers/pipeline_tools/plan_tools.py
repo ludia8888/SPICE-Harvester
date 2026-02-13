@@ -9,6 +9,7 @@ from shared.observability.tracing import trace_external_call
 from bff.services.pipeline_join_evaluator import evaluate_pipeline_joins
 from bff.services.pipeline_plan_validation import validate_pipeline_plan
 from shared.models.pipeline_plan import PipelinePlan
+from shared.errors.error_types import ErrorCategory, ErrorCode
 from shared.services.pipeline.pipeline_claim_refuter import refute_pipeline_plan_claims
 from shared.services.pipeline.pipeline_executor import PipelineExecutor
 from shared.services.pipeline.pipeline_preview_policy import evaluate_preview_policy
@@ -52,6 +53,7 @@ from shared.services.pipeline.pipeline_plan_builder import (
 from shared.utils.llm_safety import mask_pii
 
 from ..pipeline_mcp_helpers import normalize_aggregates, normalize_string_list
+from ..pipeline_mcp_errors import tool_error
 
 logger = logging.getLogger(__name__)
 
@@ -793,11 +795,24 @@ async def _plan_validate(server: Any, arguments: Dict[str, Any]) -> Any:
     try:
         plan = PipelinePlan.model_validate(plan_obj)
     except Exception as exc:
-        return {"status": "invalid", "errors": [str(exc)], "warnings": []}
+        logger.warning("plan_validate model validation failed: %s", exc, exc_info=True)
+        return tool_error(
+            f"Invalid plan: {exc}",
+            status_code=400,
+            code=ErrorCode.REQUEST_VALIDATION_FAILED,
+            category=ErrorCategory.INPUT,
+            operation="plan.validate",
+        )
 
     db_name = str(plan.data_scope.db_name or "").strip()
     if not db_name:
-        return {"status": "invalid", "errors": ["plan.data_scope.db_name is required"], "warnings": []}
+        return tool_error(
+            "plan.data_scope.db_name is required",
+            status_code=400,
+            code=ErrorCode.REQUEST_VALIDATION_FAILED,
+            category=ErrorCategory.INPUT,
+            operation="plan.validate",
+        )
 
     dataset_registry, _ = await server._ensure_registries()
     validation = await validate_pipeline_plan(
@@ -829,11 +844,26 @@ async def _plan_preview(server: Any, arguments: Dict[str, Any]) -> Any:
     try:
         plan = PipelinePlan.model_validate(plan_obj)
     except Exception as exc:
-        return {"status": "invalid", "errors": [str(exc)], "warnings": warnings}
+        logger.warning("plan_preview model validation failed: %s", exc, exc_info=True)
+        return tool_error(
+            f"Invalid plan: {exc}",
+            status_code=400,
+            code=ErrorCode.REQUEST_VALIDATION_FAILED,
+            category=ErrorCategory.INPUT,
+            operation="plan.preview",
+            diagnostics={"warnings": list(warnings or [])},
+        )
 
     db_name = str(plan.data_scope.db_name or "").strip()
     if not db_name:
-        return {"status": "invalid", "errors": ["plan.data_scope.db_name is required"], "warnings": warnings}
+        return tool_error(
+            "plan.data_scope.db_name is required",
+            status_code=400,
+            code=ErrorCode.REQUEST_VALIDATION_FAILED,
+            category=ErrorCategory.INPUT,
+            operation="plan.preview",
+            diagnostics={"warnings": list(warnings or [])},
+        )
 
     dataset_registry, _ = await server._ensure_registries()
 
@@ -924,11 +954,26 @@ async def _plan_refute_claims(server: Any, arguments: Dict[str, Any]) -> Any:
     try:
         plan = PipelinePlan.model_validate(plan_obj)
     except Exception as exc:
-        return {"status": "invalid", "errors": [str(exc)], "warnings": warnings}
+        logger.warning("plan_refute_claims model validation failed: %s", exc, exc_info=True)
+        return tool_error(
+            f"Invalid plan: {exc}",
+            status_code=400,
+            code=ErrorCode.REQUEST_VALIDATION_FAILED,
+            category=ErrorCategory.INPUT,
+            operation="plan.refute_claims",
+            diagnostics={"warnings": list(warnings or [])},
+        )
 
     db_name = str(plan.data_scope.db_name or "").strip()
     if not db_name:
-        return {"status": "invalid", "errors": ["plan.data_scope.db_name is required"], "warnings": warnings}
+        return tool_error(
+            "plan.data_scope.db_name is required",
+            status_code=400,
+            code=ErrorCode.REQUEST_VALIDATION_FAILED,
+            category=ErrorCategory.INPUT,
+            operation="plan.refute_claims",
+            diagnostics={"warnings": list(warnings or [])},
+        )
 
     dataset_registry, _ = await server._ensure_registries()
     report = await refute_pipeline_plan_claims(
@@ -954,11 +999,24 @@ async def _plan_evaluate_joins(server: Any, arguments: Dict[str, Any]) -> Any:
     try:
         plan = PipelinePlan.model_validate(plan_obj)
     except Exception as exc:
-        return {"status": "invalid", "errors": [str(exc)], "warnings": []}
+        logger.warning("plan_evaluate_joins model validation failed: %s", exc, exc_info=True)
+        return tool_error(
+            f"Invalid plan: {exc}",
+            status_code=400,
+            code=ErrorCode.REQUEST_VALIDATION_FAILED,
+            category=ErrorCategory.INPUT,
+            operation="plan.evaluate_joins",
+        )
 
     db_name = str(plan.data_scope.db_name or "").strip()
     if not db_name:
-        return {"status": "invalid", "errors": ["plan.data_scope.db_name is required"], "warnings": []}
+        return tool_error(
+            "plan.data_scope.db_name is required",
+            status_code=400,
+            code=ErrorCode.REQUEST_VALIDATION_FAILED,
+            category=ErrorCategory.INPUT,
+            operation="plan.evaluate_joins",
+        )
 
     dataset_registry, _ = await server._ensure_registries()
     evaluations, warnings = await evaluate_pipeline_joins(
@@ -1021,4 +1079,3 @@ PLAN_TOOL_HANDLERS: Dict[str, ToolHandler] = {
 
 def build_plan_tool_handlers() -> Dict[str, ToolHandler]:
     return dict(PLAN_TOOL_HANDLERS)
-

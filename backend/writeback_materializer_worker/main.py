@@ -11,7 +11,6 @@ import asyncio
 import hashlib
 import logging
 import time
-from contextlib import suppress
 from typing import Any, Dict, Optional, Set, Tuple
 from uuid import uuid4
 
@@ -141,8 +140,8 @@ class WritebackMaterializerWorker:
                 action="processed",
                 duration=time.monotonic() - start,
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Failed to record writeback materializer metric: %s", exc, exc_info=True)
 
     async def _materialize_db_inner(self, *, db_name: str) -> None:
         repo = AppConfig.ONTOLOGY_WRITEBACK_REPO
@@ -293,8 +292,16 @@ class WritebackMaterializerWorker:
             metadata={"kind": "writeback_merged_snapshot_merge", "db_name": db_name, "snapshot_id": snapshot_id},
             allow_empty=True,
         )
-        with suppress(Exception):
+        try:
             await self.lakefs_client.delete_branch(repository=repo, name=staging_branch)
+        except Exception as exc:
+            logger.warning(
+                "Failed to cleanup writeback staging branch %s for repo %s: %s",
+                staging_branch,
+                repo,
+                exc,
+                exc_info=True,
+            )
 
         logger.info(
             "Materialized writeback snapshot db=%s snapshot_id=%s commit_id=%s objects=%s high_watermark=%s",

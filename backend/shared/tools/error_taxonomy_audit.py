@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import fnmatch
 import re
 import sys
 from collections import Counter
@@ -100,6 +101,167 @@ def _iter_python_files(root: Path) -> Iterable[Path]:
         if "tests" in path.parts:
             continue
         yield path
+
+
+def _iter_runtime_files(root: Path, *, runtime_scope_glob: Optional[List[str]] = None) -> Iterable[Path]:
+    scope_patterns = list(runtime_scope_glob or [])
+    for path in root.rglob("*.py"):
+        rel = path.relative_to(root)
+        if rel.parts and rel.parts[0] in {"tests", "scripts"}:
+            continue
+        rel_text = str(rel)
+        if scope_patterns:
+            if not any(fnmatch.fnmatch(rel_text, pattern) for pattern in scope_patterns):
+                continue
+        yield path
+
+
+def _is_exception_type(node: Optional[ast.AST]) -> bool:
+    if node is None:
+        return False
+    if isinstance(node, ast.Name):
+        return node.id == "Exception"
+    if isinstance(node, ast.Tuple):
+        return any(_is_exception_type(item) for item in node.elts)
+    return False
+
+
+def _handler_contains_log_call(handler: ast.ExceptHandler) -> bool:
+    for node in ast.walk(handler):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if isinstance(func, ast.Attribute) and func.attr in {
+            "debug",
+            "info",
+            "warning",
+            "error",
+            "exception",
+            "critical",
+        }:
+            return True
+    return False
+
+
+def _handler_contains_raise(handler: ast.ExceptHandler) -> bool:
+    for node in ast.walk(handler):
+        if isinstance(node, ast.Raise):
+            return True
+    return False
+
+
+def _count_runtime_guard_patterns(
+    root: Path,
+    *,
+    runtime_scope_glob: Optional[List[str]] = None,
+) -> Dict[str, List[Tuple[str, int]]]:
+    issues: Dict[str, List[Tuple[str, int]]] = {
+        "return_in_finally": [],
+        "bare_except": [],
+        "suppress_exception": [],
+        "silent_broad_except": [],
+        "broad_except_no_log": [],
+    }
+    for path in _iter_runtime_files(root, runtime_scope_glob=runtime_scope_glob):
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except SyntaxError:
+            continue
+
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Try):
+                for stmt in node.finalbody:
+                    for sub in ast.walk(stmt):
+                        if isinstance(sub, ast.Return):
+                            issues["return_in_finally"].append((str(path), sub.lineno))
+                for handler in node.handlers:
+                    if handler.type is None:
+                        issues["bare_except"].append((str(path), handler.lineno))
+                        continue
+                    if not _is_exception_type(handler.type):
+                        continue
+                    body = handler.body
+                    if len(body) == 1 and isinstance(body[0], (ast.Pass, ast.Return, ast.Continue, ast.Break)):
+                        issues["silent_broad_except"].append((str(path), handler.lineno))
+                    if (not _handler_contains_log_call(handler)) and (not _handler_contains_raise(handler)):
+                        issues["broad_except_no_log"].append((str(path), handler.lineno))
+            elif isinstance(node, ast.With):
+                for item in node.items:
+                    expr = item.context_expr
+                    if not isinstance(expr, ast.Call):
+                        continue
+                    if not isinstance(expr.func, ast.Name) or expr.func.id != "suppress":
+                        continue
+                    if not expr.args:
+                        continue
+                    if _is_exception_type(expr.args[0]):
+                        issues["suppress_exception"].append((str(path), node.lineno))
+    return issues
+
+
+def _find_commented_exports(
+    root: Path,
+    *,
+    runtime_scope_glob: Optional[List[str]] = None,
+) -> List[Tuple[str, int]]:
+    hits: List[Tuple[str, int]] = []
+    for path in _iter_runtime_files(root, runtime_scope_glob=runtime_scope_glob):
+        if path.name != "__init__.py":
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        for idx, line in enumerate(text.splitlines(), start=1):
+            stripped = line.strip()
+            if not stripped.startswith("#"):
+                continue
+            payload = stripped[1:].strip()
+            if payload.startswith("from ") or payload.startswith("import ") or "__all__" in payload:
+                hits.append((str(path), idx))
+    return hits
+
+
+def _find_doc_only_modules(
+    root: Path,
+    *,
+    runtime_scope_glob: Optional[List[str]] = None,
+) -> List[Tuple[str, int]]:
+    hits: List[Tuple[str, int]] = []
+    for path in _iter_runtime_files(root, runtime_scope_glob=runtime_scope_glob):
+        try:
+            source = path.read_text(encoding="utf-8")
+            tree = ast.parse(source)
+        except (OSError, SyntaxError):
+            continue
+        if not tree.body:
+            continue
+
+        non_doc_nodes: List[ast.stmt] = []
+        for node in tree.body:
+            if (
+                isinstance(node, ast.Expr)
+                and isinstance(node.value, ast.Constant)
+                and isinstance(node.value.value, str)
+            ):
+                continue
+            non_doc_nodes.append(node)
+
+        if not non_doc_nodes:
+            hits.append((str(path), 1))
+            continue
+
+        executable = 0
+        for node in non_doc_nodes:
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                continue
+            executable += 1
+
+        if executable == 0:
+            first = getattr(non_doc_nodes[0], "lineno", 1)
+            hits.append((str(path), int(first)))
+
+    return hits
 
 
 def _parse_catalog_specs(catalog_path: Path) -> Dict[str, CodeSpec]:
@@ -375,6 +537,37 @@ def main() -> int:
         action="store_true",
         help='Fail when raw code-like payload strings are found (`code/error_code/api_code/legacy_code/external_code`)',
     )
+    parser.add_argument(
+        "--fail-on-bare-except",
+        action="store_true",
+        help="Fail when `except:` (bare except) exists in runtime files",
+    )
+    parser.add_argument(
+        "--fail-on-suppress-exception",
+        action="store_true",
+        help="Fail when `suppress(Exception)` exists in runtime files",
+    )
+    parser.add_argument(
+        "--fail-on-silent-broad-except",
+        action="store_true",
+        help="Fail on runtime `except Exception` handlers that are pass/return/continue/break or no-log/no-raise",
+    )
+    parser.add_argument(
+        "--runtime-scope-glob",
+        action="append",
+        default=[],
+        help="Optional glob(s) for runtime audit scope under backend root (repeatable)",
+    )
+    parser.add_argument(
+        "--fail-on-commented-export",
+        action="store_true",
+        help="Fail when commented import/export lines exist in runtime __init__.py files",
+    )
+    parser.add_argument(
+        "--fail-on-doc-only-module",
+        action="store_true",
+        help="Fail when runtime modules contain only docstrings/imports (potential legacy garbage modules)",
+    )
     args = parser.parse_args()
 
     root = Path(args.backend_root).resolve()
@@ -390,6 +583,18 @@ def main() -> int:
     raw_http_without_code = [(row.path, row.line) for row in raw_http if not row.has_code]
     raw_audited, raw_mismatches, raw_unknown = _audit_raw_http_status_codes(raw_http, specs)
     raw_codes = _count_raw_string_codes(root)
+    runtime_issues = _count_runtime_guard_patterns(
+        root,
+        runtime_scope_glob=list(args.runtime_scope_glob or []),
+    )
+    commented_exports = _find_commented_exports(
+        root,
+        runtime_scope_glob=list(args.runtime_scope_glob or []),
+    )
+    doc_only_modules = _find_doc_only_modules(
+        root,
+        runtime_scope_glob=list(args.runtime_scope_glob or []),
+    )
 
     print("=== Error Taxonomy Audit ===")
     print(f"Catalog specs: {len(specs)}")
@@ -401,6 +606,13 @@ def main() -> int:
     print(f"Raw HTTPException literal status+code audited: {raw_audited}")
     print(f"Raw HTTPException status/code mismatches: {len(raw_mismatches)}")
     print(f"Unknown ErrorCode in raw HTTPException: {len(raw_unknown)}")
+    print(f"Runtime return-in-finally: {len(runtime_issues['return_in_finally'])}")
+    print(f"Runtime bare except: {len(runtime_issues['bare_except'])}")
+    print(f"Runtime suppress(Exception): {len(runtime_issues['suppress_exception'])}")
+    print(f"Runtime silent broad except: {len(runtime_issues['silent_broad_except'])}")
+    print(f"Runtime broad except without log/raise: {len(runtime_issues['broad_except_no_log'])}")
+    print(f"Runtime commented exports in __init__.py: {len(commented_exports)}")
+    print(f"Runtime doc-only modules: {len(doc_only_modules)}")
 
     if mismatches:
         print("\\nTop mismatches:")
@@ -432,6 +644,34 @@ def main() -> int:
     print(f"Raw string payload codes (code/error_code/api_code/legacy_code/external_code): {len(raw_codes)}")
     for path, line, code in raw_codes[:120]:
         print(f"  {path}:{line} code={code}")
+    if runtime_issues["return_in_finally"]:
+        print("\\nRuntime return-in-finally hits:")
+        for path, line in runtime_issues["return_in_finally"][:120]:
+            print(f"  {path}:{line}")
+    if runtime_issues["bare_except"]:
+        print("\\nRuntime bare except hits:")
+        for path, line in runtime_issues["bare_except"][:120]:
+            print(f"  {path}:{line}")
+    if runtime_issues["suppress_exception"]:
+        print("\\nRuntime suppress(Exception) hits:")
+        for path, line in runtime_issues["suppress_exception"][:120]:
+            print(f"  {path}:{line}")
+    if runtime_issues["silent_broad_except"]:
+        print("\\nRuntime silent broad except hits:")
+        for path, line in runtime_issues["silent_broad_except"][:120]:
+            print(f"  {path}:{line}")
+    if runtime_issues["broad_except_no_log"]:
+        print("\\nRuntime broad except no-log/no-raise hits:")
+        for path, line in runtime_issues["broad_except_no_log"][:120]:
+            print(f"  {path}:{line}")
+    if commented_exports:
+        print("\\nRuntime commented export hits (__init__.py):")
+        for path, line in commented_exports[:120]:
+            print(f"  {path}:{line}")
+    if doc_only_modules:
+        print("\\nRuntime doc-only module hits:")
+        for path, line in doc_only_modules[:120]:
+            print(f"  {path}:{line}")
 
     exit_code = 0
     if mismatches or unknown or raw_mismatches or raw_unknown:
@@ -441,6 +681,18 @@ def main() -> int:
     if args.fail_on_raw_http_without_code and raw_http_without_code:
         exit_code = 1
     if args.fail_on_raw_code and raw_codes:
+        exit_code = 1
+    if args.fail_on_bare_except and runtime_issues["bare_except"]:
+        exit_code = 1
+    if args.fail_on_suppress_exception and runtime_issues["suppress_exception"]:
+        exit_code = 1
+    if args.fail_on_silent_broad_except and (
+        runtime_issues["silent_broad_except"] or runtime_issues["broad_except_no_log"]
+    ):
+        exit_code = 1
+    if args.fail_on_commented_export and commented_exports:
+        exit_code = 1
+    if args.fail_on_doc_only_module and doc_only_modules:
         exit_code = 1
     return exit_code
 

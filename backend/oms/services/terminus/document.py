@@ -337,7 +337,16 @@ class DocumentService(DatabaseBackedTerminusService):
         try:
             doc = await self.get_document(db_name, doc_id, graph_type, branch=branch)
             return doc is not None
-        except Exception:
+        except Exception as exc:
+            logger.warning(
+                "Failed to check document existence (db=%s doc_id=%s graph_type=%s branch=%s): %s",
+                db_name,
+                doc_id,
+                graph_type,
+                branch,
+                exc,
+                exc_info=True,
+            )
             return False
     
     async def bulk_create_documents(

@@ -16,6 +16,8 @@ from mcp_servers.pipeline_mcp_helpers import (
     trim_preview_payload,
 )
 from mcp_servers.pipeline_mcp_http import bff_json
+from mcp_servers.pipeline_mcp_errors import tool_error
+from shared.errors.error_types import ErrorCategory, ErrorCode
 
 logger = logging.getLogger(__name__)
 
@@ -211,7 +213,13 @@ def _build_output(selected_run: Dict[str, Any], job_id: str, reused_existing: bo
 async def _preview_inspect(_server: Any, arguments: Dict[str, Any]) -> Any:
     preview = arguments.get("preview") or {}
     if not isinstance(preview, dict):
-        return {"error": "preview must be an object"}
+        return tool_error(
+            "preview must be an object",
+            status_code=400,
+            code=ErrorCode.REQUEST_VALIDATION_FAILED,
+            category=ErrorCategory.INPUT,
+            operation="pipeline.preview_inspect",
+        )
     inspection = inspect_preview(preview)
     return {"status": "success", "inspector": mask_pii(inspection)}
 
@@ -222,17 +230,42 @@ async def _pipeline_create_from_plan(_server: Any, arguments: Dict[str, Any]) ->
     try:
         plan = PipelinePlan.model_validate(plan_obj)
     except Exception as exc:
-        return {"status": "invalid", "errors": [str(exc)]}
+        logger.warning("pipeline_create_from_plan validation failed: %s", exc, exc_info=True)
+        return tool_error(
+            f"Invalid plan: {exc}",
+            status_code=400,
+            code=ErrorCode.REQUEST_VALIDATION_FAILED,
+            category=ErrorCategory.INPUT,
+            operation="pipeline.create_from_plan.validate",
+        )
     db_name = str(plan.data_scope.db_name or "").strip()
     if not db_name:
-        return {"status": "invalid", "errors": ["plan.data_scope.db_name is required"]}
+        return tool_error(
+            "plan.data_scope.db_name is required",
+            status_code=400,
+            code=ErrorCode.REQUEST_VALIDATION_FAILED,
+            category=ErrorCategory.INPUT,
+            operation="pipeline.create_from_plan.validate",
+        )
 
     pipeline_name = str(arguments.get("name") or "").strip()
     if not pipeline_name:
-        return {"status": "invalid", "errors": ["name is required"]}
+        return tool_error(
+            "name is required",
+            status_code=400,
+            code=ErrorCode.REQUEST_VALIDATION_FAILED,
+            category=ErrorCategory.INPUT,
+            operation="pipeline.create_from_plan.validate",
+        )
     location = str(arguments.get("location") or "").strip()
     if not location:
-        return {"status": "invalid", "errors": ["location is required"]}
+        return tool_error(
+            "location is required",
+            status_code=400,
+            code=ErrorCode.REQUEST_VALIDATION_FAILED,
+            category=ErrorCategory.INPUT,
+            operation="pipeline.create_from_plan.validate",
+        )
 
     payload: Dict[str, Any] = {
         "db_name": db_name,
@@ -345,15 +378,34 @@ async def _pipeline_create_from_plan(_server: Any, arguments: Dict[str, Any]) ->
 async def _pipeline_update_from_plan(_server: Any, arguments: Dict[str, Any]) -> Any:
     pipeline_id = str(arguments.get("pipeline_id") or "").strip()
     if not pipeline_id:
-        return {"status": "invalid", "errors": ["pipeline_id is required"]}
+        return tool_error(
+            "pipeline_id is required",
+            status_code=400,
+            code=ErrorCode.REQUEST_VALIDATION_FAILED,
+            category=ErrorCategory.INPUT,
+            operation="pipeline.update_from_plan.validate",
+        )
     plan_obj = arguments.get("plan") or {}
     try:
         plan = PipelinePlan.model_validate(plan_obj)
     except Exception as exc:
-        return {"status": "invalid", "errors": [str(exc)]}
+        logger.warning("pipeline_update_from_plan validation failed: %s", exc, exc_info=True)
+        return tool_error(
+            f"Invalid plan: {exc}",
+            status_code=400,
+            code=ErrorCode.REQUEST_VALIDATION_FAILED,
+            category=ErrorCategory.INPUT,
+            operation="pipeline.update_from_plan.validate",
+        )
     db_name = str(plan.data_scope.db_name or "").strip()
     if not db_name:
-        return {"status": "invalid", "errors": ["plan.data_scope.db_name is required"]}
+        return tool_error(
+            "plan.data_scope.db_name is required",
+            status_code=400,
+            code=ErrorCode.REQUEST_VALIDATION_FAILED,
+            category=ErrorCategory.INPUT,
+            operation="pipeline.update_from_plan.validate",
+        )
     payload: Dict[str, Any] = {"definition_json": dict(plan.definition_json or {})}
     branch = str(arguments.get("branch") or "").strip() or None
     if branch:
@@ -390,7 +442,13 @@ async def _pipeline_update_from_plan(_server: Any, arguments: Dict[str, Any]) ->
 async def _pipeline_preview_wait(server: Any, arguments: Dict[str, Any]) -> Any:
     pipeline_id = str(arguments.get("pipeline_id") or "").strip()
     if not pipeline_id:
-        return {"status": "invalid", "errors": ["pipeline_id is required"]}
+        return tool_error(
+            "pipeline_id is required",
+            status_code=400,
+            code=ErrorCode.REQUEST_VALIDATION_FAILED,
+            category=ErrorCategory.INPUT,
+            operation="pipeline.preview_wait.validate",
+        )
     return await _pipeline_wait_for_mode(
         server,
         pipeline_id=pipeline_id,
@@ -407,7 +465,13 @@ async def _pipeline_preview_wait(server: Any, arguments: Dict[str, Any]) -> Any:
 async def _pipeline_build_wait(server: Any, arguments: Dict[str, Any]) -> Any:
     pipeline_id = str(arguments.get("pipeline_id") or "").strip()
     if not pipeline_id:
-        return {"status": "invalid", "errors": ["pipeline_id is required"]}
+        return tool_error(
+            "pipeline_id is required",
+            status_code=400,
+            code=ErrorCode.REQUEST_VALIDATION_FAILED,
+            category=ErrorCategory.INPUT,
+            operation="pipeline.build_wait.validate",
+        )
     return await _pipeline_wait_for_mode(
         server,
         pipeline_id=pipeline_id,

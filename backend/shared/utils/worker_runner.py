@@ -52,8 +52,15 @@ async def run_worker_until_stopped(
         )
         if stop_task in done and not run_task.done():
             if hasattr(worker, running_attr):
-                with suppress(Exception):
+                try:
                     setattr(worker, running_attr, False)
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to set worker attribute %s during stop handling: %s",
+                        running_attr,
+                        exc,
+                        exc_info=True,
+                    )
             run_task.cancel()
 
         stop_task.cancel()

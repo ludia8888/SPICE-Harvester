@@ -27,6 +27,8 @@ for _path in (str(_backend_root), str(_repo_root)):
         sys.path.append(_path)
 
 from shared.utils.llm_safety import mask_pii
+from mcp_servers.pipeline_mcp_errors import tool_error
+from shared.errors.error_types import ErrorCategory, ErrorCode
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -57,7 +59,15 @@ def _mask_observation(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 def _build_error_response(tool_name: str, error: str, hint: Optional[str] = None) -> Dict[str, Any]:
     """Build a structured error response."""
-    response: Dict[str, Any] = {"error": error, "tool": tool_name}
+    response = tool_error(
+        str(error),
+        code=ErrorCode.INTERNAL_ERROR,
+        category=ErrorCategory.INTERNAL,
+        status_code=500,
+        context={"tool": tool_name},
+        operation=f"ontology.{tool_name}",
+    )
+    response["tool"] = tool_name
     if hint:
         response["hint"] = hint
     return response
@@ -535,6 +545,7 @@ class OntologyMCPServer:
                     },
                 }
         except Exception as exc:
+            logger.warning("Ontology tool failed: ontology_load err=%s", exc, exc_info=True)
             return _build_error_response("ontology_load", str(exc))
 
     async def _tool_ontology_reset(self, args: Dict[str, Any]) -> Dict[str, Any]:
@@ -894,6 +905,7 @@ class OntologyMCPServer:
                     "schema_suggestion": result.get("schema_suggestion"),
                 }
         except Exception as exc:
+            logger.warning("Ontology tool failed: ontology_infer_schema_from_data err=%s", exc, exc_info=True)
             return _build_error_response("ontology_infer_schema_from_data", str(exc))
 
     async def _tool_ontology_suggest_mappings(self, args: Dict[str, Any]) -> Dict[str, Any]:
@@ -956,6 +968,7 @@ class OntologyMCPServer:
                 "overall_confidence": suggestion.overall_confidence,
             }
         except Exception as exc:
+            logger.warning("Ontology tool failed: ontology_suggest_mappings err=%s", exc, exc_info=True)
             return _build_error_response("ontology_suggest_mappings", str(exc))
 
     async def _tool_ontology_validate(self, args: Dict[str, Any]) -> Dict[str, Any]:
@@ -1051,6 +1064,7 @@ class OntologyMCPServer:
                 }
             return {"status": "valid", "message": "All relationship targets exist"}
         except Exception as exc:
+            logger.warning("Ontology tool failed: ontology_check_relationships err=%s", exc, exc_info=True)
             return _build_error_response("ontology_check_relationships", str(exc))
 
     async def _tool_ontology_check_circular_refs(self, args: Dict[str, Any]) -> Dict[str, Any]:
@@ -1097,6 +1111,7 @@ class OntologyMCPServer:
 
             return {"status": "valid", "message": "No circular references found"}
         except Exception as exc:
+            logger.warning("Ontology tool failed: ontology_check_circular_refs err=%s", exc, exc_info=True)
             return _build_error_response("ontology_check_circular_refs", str(exc))
 
     async def _tool_ontology_list_classes(self, args: Dict[str, Any]) -> Dict[str, Any]:
@@ -1138,6 +1153,7 @@ class OntologyMCPServer:
                     "limit": limit,
                 }
         except Exception as exc:
+            logger.warning("Ontology tool failed: ontology_list_classes err=%s", exc, exc_info=True)
             return _build_error_response("ontology_list_classes", str(exc))
 
     async def _tool_ontology_get_class(self, args: Dict[str, Any]) -> Dict[str, Any]:
@@ -1171,6 +1187,7 @@ class OntologyMCPServer:
                     },
                 }
         except Exception as exc:
+            logger.warning("Ontology tool failed: ontology_get_class err=%s", exc, exc_info=True)
             return _build_error_response("ontology_get_class", str(exc))
 
     async def _tool_ontology_search_classes(self, args: Dict[str, Any]) -> Dict[str, Any]:
@@ -1230,6 +1247,7 @@ class OntologyMCPServer:
                     "result_count": len(summaries),
                 }
         except Exception as exc:
+            logger.warning("Ontology tool failed: ontology_search_classes err=%s", exc, exc_info=True)
             return _build_error_response("ontology_search_classes", str(exc))
 
     async def _tool_ontology_create(self, args: Dict[str, Any]) -> Dict[str, Any]:
@@ -1300,6 +1318,7 @@ class OntologyMCPServer:
                 "result": _mask_observation(result) if isinstance(result, dict) else result,
             }
         except Exception as exc:
+            logger.warning("Ontology tool failed: ontology_create err=%s", exc, exc_info=True)
             return _build_error_response("ontology_create", str(exc))
 
     async def _tool_ontology_update(self, args: Dict[str, Any]) -> Dict[str, Any]:
@@ -1365,6 +1384,7 @@ class OntologyMCPServer:
                 "result": _mask_observation(result) if isinstance(result, dict) else result,
             }
         except Exception as exc:
+            logger.warning("Ontology tool failed: ontology_update err=%s", exc, exc_info=True)
             return _build_error_response("ontology_update", str(exc))
 
     async def _tool_ontology_preview(self, args: Dict[str, Any]) -> Dict[str, Any]:

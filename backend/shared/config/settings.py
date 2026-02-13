@@ -39,7 +39,7 @@ def _clamp_int(raw: Any, *, default: int, min_value: int = 0, max_value: int = 1
         return default
     try:
         value = int(str(raw).strip())
-    except Exception:
+    except (TypeError, ValueError):
         return default
     return max(min_value, min(max_value, value))
 
@@ -75,7 +75,7 @@ def _normalize_base_branch(raw: Any) -> str:
 def _clamp_flush_timeout_seconds(raw: Any, *, default: float = 10.0) -> float:
     try:
         value = float(raw)
-    except Exception:
+    except (TypeError, ValueError):
         return float(default)
     return max(0.1, min(value, 600.0))
 
@@ -497,7 +497,7 @@ class ServiceSettings(BaseSettings):
     def clamp_funnel_excel_timeout(cls, v):  # noqa: ANN001
         try:
             value = float(v)
-        except Exception:
+        except (TypeError, ValueError):
             return 120.0
         return max(5.0, min(value, 3600.0))
 
@@ -514,7 +514,7 @@ class ServiceSettings(BaseSettings):
     def clamp_funnel_infer_timeout(cls, v):  # noqa: ANN001
         try:
             value = float(v)
-        except Exception:
+        except (TypeError, ValueError):
             return 8.0
         return max(0.5, min(value, 120.0))
 
@@ -913,7 +913,7 @@ class ObservabilitySettings(BaseSettings):
     def clamp_trace_sample_rate(cls, v):  # noqa: ANN001
         try:
             value = float(v)
-        except Exception:
+        except (TypeError, ValueError):
             return 1.0
         if value < 0.0:
             return 0.0
@@ -931,7 +931,7 @@ class ObservabilitySettings(BaseSettings):
     def clamp_metric_export_interval_seconds(cls, v):  # noqa: ANN001
         try:
             value = float(v)
-        except Exception:
+        except (TypeError, ValueError):
             return 10.0
         return max(1.0, min(value, 3600.0))
 
@@ -1188,7 +1188,7 @@ class PipelineSettings(BaseSettings):
     def clamp_job_queue_flush_timeout_seconds(cls, v):  # noqa: ANN001
         try:
             value = float(v)
-        except Exception:
+        except (TypeError, ValueError):
             return 5.0
         return max(0.1, min(value, 60.0))
 
@@ -1604,7 +1604,7 @@ class ClientSettings(BaseSettings):
     def clamp_agent_proxy_timeout(cls, v):  # noqa: ANN001
         try:
             value = float(v)
-        except Exception:
+        except (TypeError, ValueError):
             return 30.0
         return max(1.0, min(value, 300.0))
 
@@ -2679,7 +2679,7 @@ class InstanceWorkerSettings(BaseSettings):
     def clamp_untyped_ref_backoff_max_seconds(cls, v):  # noqa: ANN001
         try:
             value = float(v)
-        except Exception:
+        except (TypeError, ValueError):
             return 15.0
         return max(0.1, min(value, 300.0))
 

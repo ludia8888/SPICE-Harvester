@@ -16,7 +16,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from contextlib import suppress
 from typing import Any, Dict, Optional
 
 from shared.config.app_config import AppConfig
@@ -245,8 +244,16 @@ class ActionOutboxWorker:
         # Nothing to write (e.g., conflict_policy=BASE_WINS skipped all targets).
         # Avoid failing reconciliation on empty commits; cleanup staging branch.
         if not entries:
-            with suppress(Exception):
+            try:
                 await self.lakefs_client.delete_branch(repository=repo, name=staging_branch)
+            except Exception as exc:
+                logger.warning(
+                    "Failed to cleanup empty staging branch %s for repo %s: %s",
+                    staging_branch,
+                    repo,
+                    exc,
+                    exc_info=True,
+                )
             return
 
         for key, payload in entries:
@@ -271,8 +278,16 @@ class ActionOutboxWorker:
             metadata={"kind": "writeback_queue_entries_merge", "action_log_id": action_log_id},
             allow_empty=True,
         )
-        with suppress(Exception):
+        try:
             await self.lakefs_client.delete_branch(repository=repo, name=staging_branch)
+        except Exception as exc:
+            logger.warning(
+                "Failed to cleanup staging branch %s after merge (repo=%s): %s",
+                staging_branch,
+                repo,
+                exc,
+                exc_info=True,
+            )
 
     async def _reconcile_log(self, log: ActionLogRecord) -> None:
         action_log_id = str(log.action_log_id)
@@ -366,8 +381,8 @@ class ActionOutboxWorker:
                             await self._reconcile_log(log)
                     try:
                         self.metrics.record_event("ACTION_LOG_RECONCILE", action="processed", duration=time.monotonic() - start)
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        logger.warning("Failed to record outbox reconcile metric: %s", exc, exc_info=True)
                     if self.processed_event_registry:
                         await self.processed_event_registry.mark_done(
                             handler="action_outbox_worker",
@@ -378,16 +393,30 @@ class ActionOutboxWorker:
                 except Exception as e:
                     logger.warning("Outbox reconcile failed action_log_id=%s: %s", log.action_log_id, e, exc_info=True)
                     if self.processed_event_registry:
-                        with suppress(Exception):
+                        try:
                             await self.processed_event_registry.mark_failed(
                                 handler="action_outbox_worker",
                                 event_id=str(log.action_log_id),
                                 error=str(e),
                             )
+                        except Exception as exc:
+                            logger.warning(
+                                "Failed to mark action outbox event as failed (action_log_id=%s): %s",
+                                log.action_log_id,
+                                exc,
+                                exc_info=True,
+                            )
                 finally:
                     # Release advisory lock so other workers can pick this row next cycle
-                    with suppress(Exception):
+                    try:
                         await self.action_logs.release_outbox_lock(action_log_id=str(log.action_log_id))
+                    except Exception as exc:
+                        logger.warning(
+                            "Failed to release action outbox lock (action_log_id=%s): %s",
+                            log.action_log_id,
+                            exc,
+                            exc_info=True,
+                        )
 
             await asyncio.sleep(poll_seconds)
 

@@ -172,7 +172,8 @@ class AsyncTerminusService:
                 # 기본적으로 데이터베이스 목록 조회로 연결 확인
                 await self.list_databases()
                 return True
-        except Exception:
+        except Exception as exc:
+            logger.warning("Terminus check_connection failed: %s", exc, exc_info=True)
             return False
 
     async def connect(self) -> None:
@@ -996,7 +997,8 @@ class AsyncTerminusService:
             # Try to list databases as a ping test
             await self.list_databases()
             return True
-        except Exception:
+        except Exception as exc:
+            logger.warning("Terminus ping failed: %s", exc, exc_info=True)
             return False
 
     def get_connection_info(self) -> ConnectionConfig:

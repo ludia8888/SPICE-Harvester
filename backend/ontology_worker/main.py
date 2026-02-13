@@ -7,7 +7,6 @@ import asyncio
 import json
 import logging
 import os
-from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any
@@ -738,7 +737,15 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
             # Idempotent delete: "not found" is success (already deleted).
             try:
                 success = await self.terminus_service.delete_ontology(db_name, class_id, branch=branch)
-            except Exception:
+            except Exception as exc:
+                logger.warning(
+                    "Failed to delete ontology class via Terminus (db=%s class_id=%s branch=%s): %s",
+                    db_name,
+                    class_id,
+                    branch,
+                    exc,
+                    exc_info=True,
+                )
                 success = False
 
             already_missing = False
@@ -1183,7 +1190,7 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
         sequence_number = command.get("sequence_number")
         try:
             seq_int = int(sequence_number) if sequence_number is not None else None
-        except Exception:
+        except (TypeError, ValueError):
             seq_int = None
 
         return RegistryKey(event_id=registry_event_id, aggregate_id=aggregate_id, sequence_number=seq_int)
@@ -1233,16 +1240,20 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
         command = payload.command if isinstance(payload.command, dict) else {}
         command_id = str(command.get("command_id") or "").strip()
         if command_id and self.command_status_service:
-            with suppress(Exception):
+            try:
                 await self.command_status_service.update_status(
                     command_id,
                     CommandStatus.RETRYING,
                     message="Retrying command after transient failure",
                     error=error,
                 )
+            except Exception as exc:
+                logger.warning("Failed to mark ontology command retrying (command_id=%s): %s", command_id, exc, exc_info=True)
 
-        with suppress(Exception):
+        try:
             await self.publish_failure_event(command, error)
+        except Exception as exc:
+            logger.warning("Failed to publish ontology retry failure event: %s", exc, exc_info=True)
 
         logger.warning(
             "Retrying ontology command in %ss (attempt %s): %s",
@@ -1262,11 +1273,15 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
         command = payload.command if isinstance(payload.command, dict) else {}
         command_id = str(command.get("command_id") or "").strip()
         if command_id and self.command_status_service:
-            with suppress(Exception):
+            try:
                 await self.command_status_service.fail_command(command_id, error, retry_count=int(attempt_count))
+            except Exception as exc:
+                logger.warning("Failed to mark ontology command failed (command_id=%s): %s", command_id, exc, exc_info=True)
 
-        with suppress(Exception):
+        try:
             await self.publish_failure_event(command, error)
+        except Exception as exc:
+            logger.warning("Failed to publish ontology terminal failure event: %s", exc, exc_info=True)
 
         logger.error(
             "Ontology command failed after %s attempts (retryable=%s): %s",
@@ -1304,8 +1319,10 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
         if self.processed_event_registry:
             await self.processed_event_registry.close()
         if self.key_spec_registry:
-            with suppress(Exception):
+            try:
                 await self.key_spec_registry.close()
+            except Exception as exc:
+                logger.warning("Failed to close ontology key_spec registry: %s", exc, exc_info=True)
             
         logger.info("Ontology Worker shut down successfully")
 

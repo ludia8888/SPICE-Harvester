@@ -847,8 +847,8 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
             record = getattr(self.tracing, "record_exception", None)
             if callable(record):
                 record(error)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Tracing record_exception failed during parse error handling: %s", exc, exc_info=True)
         await super()._on_parse_error(msg=msg, raw_payload=raw_payload, error=error)
 
     def _is_retryable_error(self, exc: Exception, *, payload: ObjectifyJob) -> bool:  # type: ignore[override]
@@ -856,8 +856,8 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
             record = getattr(self.tracing, "record_exception", None)
             if callable(record):
                 record(exc)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Tracing record_exception failed during retryability check: %s", exc, exc_info=True)
         return self._is_retryable_error_impl(exc)
 
     async def _persist_objectify_failure_status(
@@ -1107,7 +1107,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
             max_rows = self.max_rows_default
         try:
             max_rows = int(max_rows)
-        except Exception:
+        except (TypeError, ValueError):
             max_rows = self.max_rows_default
         if max_rows <= 0:
             max_rows = None
@@ -2512,13 +2512,14 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                     row_offset += len(rows)
                 _safe_put(("done", columns, [], row_offset))
             except Exception as exc:
+                logger.warning("Objectify sidecar stream reader failed: %s", exc, exc_info=True)
                 _safe_put(("error", exc, None, None))
             finally:
                 try:
                     if body:
                         body.close()
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.warning("Failed to close objectify sidecar stream body: %s", exc, exc_info=True)
 
         thread = threading.Thread(target=_reader, daemon=True)
         thread.start()
@@ -2563,7 +2564,8 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                     continue
                 try:
                     payload = json.loads(line)
-                except Exception:
+                except json.JSONDecodeError as exc:
+                    logger.warning("Invalid JSON line from objectify sidecar output: %s", exc, exc_info=True)
                     continue
                 if isinstance(payload, dict):
                     if not columns:
@@ -2780,7 +2782,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
             if row_index is not None:
                 try:
                     row_index = int(row_index) + int(row_offset)
-                except Exception:
+                except (TypeError, ValueError):
                     row_index = None
                 adjusted["row_index"] = row_index
             errors.append(adjusted)
@@ -2790,7 +2792,8 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
         for idx in build.get("error_row_indices") or []:
             try:
                 error_row_indices.add(int(row_offset) + int(idx))
-            except Exception:
+            except (TypeError, ValueError) as exc:
+                logger.warning("Invalid error_row_index value=%r offset=%r: %s", idx, row_offset, exc, exc_info=True)
                 continue
 
         instances = build.get("instances") or []
@@ -3107,6 +3110,12 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                         ids.add(instance_id)
                     target_instances[target_class] = ids
                 except Exception as exc:
+                    logger.warning(
+                        "Failed to prefetch target instances for class %s: %s",
+                        target_class,
+                        exc,
+                        exc_info=True,
+                    )
                     target_fetch_errors.append(
                         {
                             "code": VC.RELATIONSHIP_TARGET_LOOKUP_FAILED.value,
@@ -3237,6 +3246,13 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                     try:
                         ref = self._normalize_relationship_ref(raw, target_class=target_class)
                     except Exception as exc:
+                        logger.warning(
+                            "Failed to normalize relationship ref for target_class=%s row=%s: %s",
+                            target_class,
+                            absolute_idx,
+                            exc,
+                            exc_info=True,
+                        )
                         dangling_count += 1
                         if dangling_policy == "FAIL":
                             error_rows.append(absolute_idx)
@@ -3352,6 +3368,12 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                         limit=10000,
                     )
                 except Exception as exc:
+                    logger.warning(
+                        "Failed to load link edits for class %s: %s",
+                        class_id,
+                        exc,
+                        exc_info=True,
+                    )
                     edits = []
                     link_edit_errors.append({"code": VC.LINK_EDIT_FETCH_FAILED.value, "error": str(exc)})
                 for edit in edits:
@@ -3369,6 +3391,13 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                     try:
                         ref = self._normalize_relationship_ref(edit.target_instance_id, target_class=target_class)
                     except Exception as exc:
+                        logger.warning(
+                            "Invalid link edit target instance ref for predicate=%s target=%s: %s",
+                            predicate,
+                            target_class,
+                            exc,
+                            exc_info=True,
+                        )
                         link_edit_errors.append(
                             {
                                 "code": VC.LINK_EDIT_TARGET_INVALID.value,

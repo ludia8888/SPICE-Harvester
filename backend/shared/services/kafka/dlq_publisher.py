@@ -34,7 +34,7 @@ def _safe_decode(value: Any) -> Optional[str]:
         return bytes(value).decode("utf-8", errors="replace")
     try:
         return str(value)
-    except Exception:
+    except (TypeError, ValueError, RuntimeError):
         return None
 
 
@@ -53,7 +53,7 @@ def build_standard_dlq_payload(
 ) -> dict[str, Any]:
     try:
         original_value = payload_text if payload_text is not None else _safe_decode(msg.value())
-    except Exception:
+    except (AttributeError, TypeError, ValueError, RuntimeError):
         original_value = payload_text
     if original_value is None:
         original_value = "<unavailable>"
@@ -63,7 +63,7 @@ def build_standard_dlq_payload(
         ts = msg.timestamp()
         if ts:
             timestamp_ms = int(ts[1])
-    except Exception:
+    except (AttributeError, TypeError, ValueError, RuntimeError):
         timestamp_ms = None
 
     payload: dict[str, Any] = {
@@ -224,8 +224,8 @@ async def publish_envelope_dlq(
     if metrics is not None and spec.metric_event_name:
         try:
             metrics.record_event(str(spec.metric_event_name), action="published")
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Failed to record DLQ metric %s: %s", spec.metric_event_name, exc, exc_info=True)
 
 
 @trace_kafka_operation("kafka.publish_standard_dlq")
@@ -331,8 +331,8 @@ async def publish_dlq_json(
     if metrics is not None and spec.metric_event_name:
         try:
             metrics.record_event(str(spec.metric_event_name), action="published")
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Failed to record contextual DLQ metric %s: %s", spec.metric_event_name, exc, exc_info=True)
 
 
 @trace_kafka_operation("kafka.publish_contextual_dlq_json")

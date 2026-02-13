@@ -178,8 +178,8 @@ class EventPublisher:
             try:
                 checkpoint = self._initial_checkpoint()
                 await self._save_checkpoint(checkpoint)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("Failed to reset publisher checkpoint to default: %s", exc, exc_info=True)
 
         # Ensure bucket exists
         async with self.session.client(
@@ -551,7 +551,8 @@ class EventPublisher:
                     if not event_id:
                         try:
                             event_id = s3_key.rsplit("/", 1)[-1].split(".", 1)[0]
-                        except Exception:
+                        except (AttributeError, TypeError, ValueError) as exc:
+                            logger.warning("Failed to derive event_id from S3 key %r: %s", s3_key, exc, exc_info=True)
                             event_id = None
 
                     if self._recent_published_event_ids.was_published(event_id):
@@ -583,13 +584,15 @@ class EventPublisher:
                         try:
                             env = EventEnvelope.model_validate_json(ev_bytes)
                             topic = env.metadata.get("kafka_topic") if isinstance(env.metadata, dict) else None
-                        except Exception:
+                        except Exception as exc:
+                            logger.warning("Failed to parse EventEnvelope for topic inference: %s", exc, exc_info=True)
                             env = None
                             topic = None
                     if not topic:
                         try:
                             raw_payload = json.loads(ev_bytes.decode("utf-8"))
-                        except Exception:
+                        except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
+                            logger.warning("Failed to decode raw event payload for topic inference: %s", exc, exc_info=True)
                             raw_payload = None
 
                     aggregate_type = ""
@@ -667,8 +670,8 @@ class EventPublisher:
                                 try:
                                     if event_type:
                                         self.metrics.record_event(event_type, action="published")
-                                except Exception:
-                                    pass
+                                except Exception as exc:
+                                    logger.warning("Failed to record relay publish metric: %s", exc, exc_info=True)
                     except BufferError:
                         # Local buffer is full: flush pending messages then retry.
                         self._metrics_total["kafka_produce_buffer_full"] += 1

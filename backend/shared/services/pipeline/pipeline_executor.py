@@ -11,6 +11,7 @@ import csv
 import difflib
 import io
 import json
+import logging
 import os
 import re
 from dataclasses import dataclass
@@ -58,6 +59,8 @@ from shared.services.pipeline.pipeline_validation_utils import (
 )
 from shared.utils.s3_uri import parse_s3_uri
 from shared.services.pipeline.pipeline_join_keys import normalize_join_key_list
+
+logger = logging.getLogger(__name__)
 
 
 class PipelineExpectationError(ValueError):
@@ -365,7 +368,8 @@ class PipelineExecutor:
                 )
             else:
                 raw_bytes = await self._storage_service.load_bytes(bucket, key)
-        except Exception:
+        except Exception as exc:
+            logger.warning("Failed to load artifact bytes from storage (bucket=%s key=%s): %s", bucket, key, exc, exc_info=True)
             return []
         if extension == ".csv":
             return _parse_csv_bytes(raw_bytes, max_rows=resolved_limit)
@@ -379,7 +383,8 @@ class PipelineExecutor:
         prefix = f"{prefix}/"
         try:
             objects = await self._storage_service.list_objects(bucket, prefix=prefix)
-        except Exception:
+        except Exception as exc:
+            logger.warning("Failed to list artifact objects (bucket=%s prefix=%s): %s", bucket, prefix, exc, exc_info=True)
             return []
         keys = [obj.get("Key") for obj in objects or [] if obj.get("Key")]
         for candidate in keys:
@@ -388,7 +393,14 @@ class PipelineExecutor:
                 continue
             try:
                 candidate_bytes = await self._storage_service.load_bytes(bucket, candidate)
-            except Exception:
+            except Exception as exc:
+                logger.warning(
+                    "Failed to load artifact candidate bytes (bucket=%s key=%s): %s",
+                    bucket,
+                    candidate,
+                    exc,
+                    exc_info=True,
+                )
                 continue
             if ext == ".csv":
                 return _parse_csv_bytes(candidate_bytes, max_rows=resolved_limit)
@@ -1499,7 +1511,7 @@ def _compare(left: Any, op: str, right: Any) -> bool:
     try:
         left_num = float(left) if left is not None else None
         right_num = float(right) if right is not None else None
-    except Exception:
+    except (TypeError, ValueError):
         left_num = None
         right_num = None
     if left_num is None or right_num is None:
@@ -1620,7 +1632,7 @@ def _safe_eval(expression: str, row: Dict[str, Any], parameters: Dict[str, Any])
         return literal
     try:
         tree = ast.parse(expression, mode="eval")
-    except Exception:
+    except (SyntaxError, ValueError, TypeError):
         # Spark SQL expressions (e.g. CAST/TRY_CAST/date_trunc) are not Python.
         # In preview mode, treat unsupported expressions as NULL rather than leaking the raw expression
         # into downstream ops (e.g. groupBy(sum) would crash on float("cast(...)")).
@@ -1629,7 +1641,7 @@ def _safe_eval(expression: str, row: Dict[str, Any], parameters: Dict[str, Any])
         return None
     try:
         return _eval_ast(tree.body, variables)
-    except Exception:
+    except (TypeError, ValueError, ZeroDivisionError, ArithmeticError, KeyError, AttributeError):
         return None
 
 
@@ -1718,7 +1730,7 @@ def _eval_ast(node: ast.AST, variables: Dict[str, Any]) -> Any:
                 return left < right
             if isinstance(op, ast.LtE):
                 return left <= right
-        except Exception:
+        except (TypeError, ValueError):
             return None
         return None
 
@@ -1746,7 +1758,7 @@ def _parse_literal(raw: str) -> Any:
         if "." in raw:
             return float(raw)
         return int(raw)
-    except Exception:
+    except ValueError:
         return raw
 
 
@@ -1757,14 +1769,14 @@ def _parse_timestamp_literal(raw: str) -> Any:
     if isinstance(literal, (int, float)):
         try:
             return datetime.fromtimestamp(literal, tz=timezone.utc)
-        except Exception:
+        except (TypeError, ValueError, OSError, OverflowError):
             return literal
     if isinstance(literal, str):
         candidate = literal.strip()
         if candidate:
             try:
                 return datetime.fromisoformat(candidate.replace("Z", "+00:00"))
-            except Exception:
+            except ValueError:
                 return literal
     return literal
 
@@ -1897,7 +1909,7 @@ def _parse_csv_bytes(raw_bytes: bytes, *, max_rows: int = 200) -> List[Dict[str,
     """
     try:
         text = raw_bytes.decode("utf-8", errors="replace")
-    except Exception:
+    except (UnicodeDecodeError, AttributeError):
         return []
     if not text.strip():
         return []
@@ -1947,14 +1959,14 @@ def _parse_excel_bytes(raw_bytes: bytes, *, max_rows: int = 200) -> List[Dict[st
         frame = pd.read_excel(BytesIO(raw_bytes))
         resolved_limit = max(1, int(max_rows))
         return frame.fillna("").to_dict(orient="records")[:resolved_limit]
-    except Exception:
+    except (ImportError, ValueError, TypeError, OSError):
         return []
 
 
 def _parse_json_bytes(raw_bytes: bytes, *, max_rows: int = 200) -> List[Dict[str, Any]]:
     try:
         payload = json.loads(raw_bytes.decode("utf-8"))
-    except Exception:
+    except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError):
         text = raw_bytes.decode("utf-8", errors="replace")
         rows: List[Dict[str, Any]] = []
         resolved_limit = max(1, int(max_rows))
@@ -1963,7 +1975,7 @@ def _parse_json_bytes(raw_bytes: bytes, *, max_rows: int = 200) -> List[Dict[str
                 continue
             try:
                 item = json.loads(line)
-            except Exception:
+            except json.JSONDecodeError:
                 continue
             if isinstance(item, dict):
                 rows.append(item)

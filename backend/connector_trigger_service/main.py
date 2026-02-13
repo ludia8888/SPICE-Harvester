@@ -301,8 +301,8 @@ class ConnectorTriggerService:
                                 )
                                 try:
                                     self.metrics.record_event("CONNECTOR_UPDATE", action="published")
-                                except Exception:
-                                    pass
+                                except Exception as exc:
+                                    logger.warning("Failed to record connector publish metric: %s", exc, exc_info=True)
 
                     remaining = await producer_ops.flush(10)
                     if remaining != 0:
@@ -326,8 +326,8 @@ class ConnectorTriggerService:
                             action="processed",
                             duration=time.monotonic() - batch_start,
                         )
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        logger.warning("Failed to record connector outbox batch metric: %s", exc, exc_info=True)
 
             except Exception as e:
                 logger.error(f"Outbox publish loop error: {e}")
