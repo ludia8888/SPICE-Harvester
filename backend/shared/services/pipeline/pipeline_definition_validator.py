@@ -4,6 +4,11 @@ from dataclasses import dataclass
 from typing import AbstractSet, Any, Dict, List, Optional
 
 from shared.services.pipeline.output_plugins import OUTPUT_KIND_DATASET, normalize_output_kind, validate_output_payload
+from shared.services.pipeline.pipeline_definition_utils import (
+    resolve_execution_semantics,
+    resolve_incremental_watermark_column,
+)
+from shared.services.pipeline.pipeline_kafka_avro import validate_kafka_avro_schema_config
 from shared.services.pipeline.pipeline_graph_utils import build_incoming, normalize_edges, normalize_nodes
 from shared.services.pipeline.pipeline_transform_spec import (
     is_stream_like_input_node,
@@ -171,8 +176,97 @@ def validate_pipeline_definition(
 
     incoming = build_incoming(edges)
 
+    execution_semantics = resolve_execution_semantics(definition_json)
+    if execution_semantics in {"incremental", "streaming"}:
+        watermark_column = resolve_incremental_watermark_column(definition=definition_json)
+        if not watermark_column:
+            errors.append(
+                "execution_semantics="
+                f"{execution_semantics} requires incremental.watermark_column"
+            )
+
     for node_id, node in nodes.items():
         node_type = str(node.get("type") or "").strip().lower()
+        if node_type == "input":
+            metadata = node.get("metadata") if isinstance(node.get("metadata"), dict) else {}
+            dataset_id = str(
+                metadata.get("datasetId")
+                or metadata.get("dataset_id")
+                or metadata.get("id")
+                or ""
+            ).strip()
+            dataset_name = str(
+                metadata.get("datasetName")
+                or metadata.get("dataset_name")
+                or metadata.get("name")
+                or ""
+            ).strip()
+            read_config = metadata.get("read") if isinstance(metadata.get("read"), dict) else {}
+            read_format = str(
+                read_config.get("format")
+                or read_config.get("file_format")
+                or read_config.get("fileFormat")
+                or ""
+            ).strip().lower()
+            read_mode = str(
+                read_config.get("mode")
+                or read_config.get("readMode")
+                or read_config.get("read_mode")
+                or read_config.get("inputMode")
+                or read_config.get("input_mode")
+                or ""
+            ).strip().lower()
+            streaming_read_mode = read_mode in {"stream", "streaming", "microbatch", "micro_batch"}
+            if read_config and not read_format:
+                errors.append(f"input node {node_id} metadata.read.format is required")
+            if read_config and streaming_read_mode and read_format and read_format != "kafka":
+                errors.append(
+                    f"input node {node_id} read.mode=streaming currently supports only read.format=kafka"
+                )
+            if read_config and read_format == "kafka":
+                value_format = str(
+                    read_config.get("value_format")
+                    or read_config.get("valueFormat")
+                    or read_config.get("kafka_value_format")
+                    or read_config.get("kafkaValueFormat")
+                    or "raw"
+                ).strip().lower() or "raw"
+                if value_format not in {"raw", "json", "avro"}:
+                    errors.append(
+                        f"input node {node_id} kafka value_format must be one of: raw|json|avro"
+                    )
+                if value_format == "json":
+                    has_schema = bool(
+                        read_config.get("schema")
+                        or read_config.get("schema_columns")
+                        or read_config.get("schemaColumns")
+                    )
+                    if not has_schema:
+                        errors.append(
+                            f"input node {node_id} kafka value_format=json requires read.schema/schema_columns"
+                        )
+                if value_format == "avro":
+                    errors.extend(
+                        validate_kafka_avro_schema_config(
+                            read_config=read_config,
+                            node_id=node_id,
+                        )
+                    )
+
+            if read_config and streaming_read_mode:
+                checkpoint_location = str(
+                    read_config.get("checkpoint_location")
+                    or read_config.get("checkpointLocation")
+                    or read_config.get("stream_checkpoint")
+                    or read_config.get("streamCheckpoint")
+                    or ""
+                ).strip()
+                if not checkpoint_location:
+                    errors.append(
+                        f"input node {node_id} read.mode=streaming requires read.checkpoint_location"
+                    )
+            continue
+
         if node_type == "output":
             metadata = node.get("metadata") if isinstance(node.get("metadata"), dict) else {}
             output_name = str(

@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import os
+import pytest
 
 from pipeline_worker.main import (
+    PipelineWorker,
     _collect_input_commit_map,
+    _resolve_external_read_mode,
     _collect_watermark_keys_from_snapshots,
     _inputs_diff_empty,
     _is_sensitive_conf_key,
@@ -12,6 +15,8 @@ from pipeline_worker.main import (
     _resolve_lakefs_repository,
     _resolve_output_format,
     _resolve_partition_columns,
+    _resolve_streaming_timeout_seconds,
+    _resolve_streaming_trigger_mode,
     _resolve_watermark_column,
     _watermark_values_match,
 )
@@ -67,3 +72,120 @@ def test_resolve_output_format_and_partitions() -> None:
     assert partitions == ["a", "b"]
 
     assert _resolve_watermark_column(incremental={"watermark": "ts"}, metadata={}) == "ts"
+
+
+def test_resolve_external_read_mode_streaming_aliases() -> None:
+    assert _resolve_external_read_mode(read_config={"mode": "stream"}) == "streaming"
+    assert _resolve_external_read_mode(read_config={"readMode": "streaming"}) == "streaming"
+    assert _resolve_external_read_mode(read_config={"mode": "microbatch"}) == "streaming"
+    assert _resolve_external_read_mode(read_config={}) == "batch"
+
+
+def test_resolve_streaming_trigger_mode_and_timeout() -> None:
+    assert _resolve_streaming_trigger_mode(read_config={}, default_mode="available_now") == "available_now"
+    assert _resolve_streaming_trigger_mode(read_config={"trigger": "once"}, default_mode="available_now") == "once"
+    assert (
+        _resolve_streaming_trigger_mode(
+            read_config={"trigger": {"mode": "availableNow"}},
+            default_mode="once",
+        )
+        == "available_now"
+    )
+    assert _resolve_streaming_timeout_seconds(read_config={}, default_seconds=90) == 90
+    assert _resolve_streaming_timeout_seconds(read_config={"timeout_seconds": "30"}, default_seconds=90) == 30
+
+
+def test_streaming_external_source_requires_kafka_format() -> None:
+    worker = PipelineWorker()
+    worker.spark = object()
+    try:
+        with pytest.raises(ValueError):
+            worker._load_external_streaming_dataframe(
+                read_config={"mode": "streaming"},
+                node_id="in_stream",
+                fmt="json",
+                temp_dirs=[],
+            )
+    finally:
+        worker.spark = None
+
+
+def test_streaming_external_source_respects_global_toggle() -> None:
+    worker = PipelineWorker()
+    worker.spark = object()
+    worker.spark_streaming_enabled = False
+    try:
+        with pytest.raises(ValueError):
+            worker._load_external_streaming_dataframe(
+                read_config={"mode": "streaming"},
+                node_id="in_stream",
+                fmt="kafka",
+                temp_dirs=[],
+            )
+    finally:
+        worker.spark = None
+
+
+def test_resolve_kafka_value_format_and_checkpoint_policy() -> None:
+    worker = PipelineWorker()
+    assert worker._resolve_kafka_value_format(read_config={}) == "raw"
+    assert worker._resolve_kafka_value_format(read_config={"value_format": "json"}) == "json"
+    with pytest.raises(ValueError):
+        worker._resolve_kafka_value_format(read_config={"value_format": "xml"})
+    with pytest.raises(ValueError):
+        worker._resolve_streaming_checkpoint_location(read_config={}, node_id="in_stream")
+
+
+def test_resolve_kafka_avro_schema_accepts_schema_registry_reference(monkeypatch) -> None:
+    worker = PipelineWorker()
+    fetch_calls: list[str] = []
+
+    def _fake_fetch(**kwargs):  # noqa: ANN003
+        reference = kwargs["reference"]
+        fetch_calls.append(reference.request_url)
+        return '{"type":"record","name":"Order","fields":[{"name":"id","type":"string"}]}'
+
+    monkeypatch.setattr("pipeline_worker.main.fetch_kafka_avro_schema_from_registry", _fake_fetch)
+    read_config = {
+        "value_format": "avro",
+        "schema_registry": {
+            "url": "https://registry.example",
+            "subject": "orders-value",
+            "version": 3,
+        },
+    }
+    schema_text = worker._resolve_kafka_avro_schema(read_config=read_config, node_id="in")
+    assert "Order" in schema_text
+    # Cached on repeated lookups.
+    assert worker._resolve_kafka_avro_schema(read_config=read_config, node_id="in") == schema_text
+    assert len(fetch_calls) == 1
+
+
+def test_resolve_kafka_avro_schema_rejects_incomplete_schema_registry_reference() -> None:
+    worker = PipelineWorker()
+    with pytest.raises(ValueError) as exc_info:
+        worker._resolve_kafka_avro_schema(
+            read_config={
+                "value_format": "avro",
+                "schema_registry": {"url": "https://registry.example", "subject": "orders-value"},
+            },
+            node_id="in",
+        )
+    assert "schema registry requires version" in str(exc_info.value)
+
+
+def test_resolve_kafka_avro_schema_rejects_latest_registry_version() -> None:
+    worker = PipelineWorker()
+    with pytest.raises(ValueError) as exc_info:
+        worker._resolve_kafka_avro_schema(
+            read_config={
+                "value_format": "avro",
+                "schema_registry": {
+                    "url": "https://registry.example",
+                    "subject": "orders-value",
+                    "version": "latest",
+                },
+            },
+            node_id="in",
+        )
+    assert "schema registry version=latest is not allowed" in str(exc_info.value)

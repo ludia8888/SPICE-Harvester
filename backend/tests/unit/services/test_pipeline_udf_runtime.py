@@ -103,6 +103,23 @@ async def test_resolve_udf_reference_requires_udf_id_when_policy_enabled() -> No
             metadata={"operation": "udf"},
             pipeline_registry=None,
             require_reference=True,
+            require_version_pinning=True,
+        )
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_resolve_udf_reference_requires_version_when_pinning_enabled() -> None:
+    registry = _FakeUdfRegistry()
+    registry.latest_by_udf_id["udf-1"] = _FakeUdfVersion(2, "def transform(row): return row")
+    registry.by_udf_and_version[("udf-1", 2)] = _FakeUdfVersion(2, "def transform(row): return row")
+
+    with pytest.raises(PipelineUdfError, match="udfVersion is required"):
+        await resolve_udf_reference(
+            metadata={"operation": "udf", "udfId": "udf-1"},
+            pipeline_registry=registry,
+            require_reference=True,
+            require_version_pinning=True,
         )
 
 
@@ -115,9 +132,10 @@ async def test_resolve_udf_reference_uses_registry_and_cache_key() -> None:
     cache: dict[str, str] = {}
 
     resolved = await resolve_udf_reference(
-        metadata={"operation": "udf", "udfId": "udf-1"},
+        metadata={"operation": "udf", "udfId": "udf-1", "udfVersion": 2},
         pipeline_registry=registry,
         require_reference=True,
+        require_version_pinning=True,
         code_cache=cache,
     )
 
@@ -128,10 +146,27 @@ async def test_resolve_udf_reference_uses_registry_and_cache_key() -> None:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_resolve_udf_reference_allows_latest_when_version_pinning_disabled() -> None:
+    registry = _FakeUdfRegistry()
+    registry.latest_by_udf_id["udf-1"] = _FakeUdfVersion(2, "def transform(row): return row")
+    registry.by_udf_and_version[("udf-1", 2)] = _FakeUdfVersion(2, "def transform(row): return row")
+
+    resolved = await resolve_udf_reference(
+        metadata={"operation": "udf", "udfId": "udf-1"},
+        pipeline_registry=registry,
+        require_reference=True,
+        require_version_pinning=False,
+    )
+    assert resolved.version == 2
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_resolve_udf_reference_rejects_inline_code_even_when_reference_flag_disabled() -> None:
     with pytest.raises(PipelineUdfError, match="udfCode is not allowed"):
         await resolve_udf_reference(
             metadata={"operation": "udf", "udfCode": "def transform(row): return row"},
             pipeline_registry=None,
             require_reference=False,
+            require_version_pinning=False,
         )

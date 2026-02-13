@@ -119,6 +119,7 @@ class PipelineExecutor:
         self._storage_service = storage_service
         self._cast_mode = normalize_cast_mode(get_settings().pipeline.cast_mode)
         self._udf_require_reference = bool(get_settings().pipeline.udf_require_reference)
+        self._udf_require_version_pinning = bool(get_settings().pipeline.udf_require_version_pinning)
         self._cast_stats: Dict[str, Dict[str, int]] = {}
         self._udf_code_cache: Dict[str, str] = {}
         self._udf_callable_cache: Dict[str, Any] = {}
@@ -714,6 +715,7 @@ class PipelineExecutor:
             metadata=metadata,
             pipeline_registry=self._pipeline_registry,
             require_reference=self._udf_require_reference,
+            require_version_pinning=self._udf_require_version_pinning,
             code_cache=self._udf_code_cache,
         )
         fn = self._udf_callable_cache.get(resolved.cache_key)

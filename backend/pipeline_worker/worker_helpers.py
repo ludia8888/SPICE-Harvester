@@ -12,7 +12,10 @@ from typing import Any, Dict, List, Optional
 
 from shared.config.settings import get_settings
 from shared.models.pipeline_job import PipelineJob
-from shared.services.pipeline.pipeline_definition_utils import resolve_execution_semantics
+from shared.services.pipeline.pipeline_definition_utils import (
+    resolve_execution_semantics,
+    resolve_incremental_watermark_column,
+)
 import logging
 
 _SENSITIVE_CONF_TOKENS = (
@@ -43,14 +46,10 @@ def _resolve_lakefs_repository() -> str:
 
 
 def _resolve_watermark_column(*, incremental: Dict[str, Any], metadata: Dict[str, Any]) -> Optional[str]:
-    for key in ("watermark_column", "watermarkColumn", "watermark"):
-        value = metadata.get(key) if isinstance(metadata, dict) else None
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-        value = incremental.get(key) if isinstance(incremental, dict) else None
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-    return None
+    return resolve_incremental_watermark_column(
+        definition={"incremental": dict(incremental or {})},
+        metadata=dict(metadata or {}),
+    )
 
 
 def _max_watermark_from_snapshots(
@@ -200,3 +199,74 @@ def _resolve_partition_columns(
         deduped.append(value)
     return deduped
 
+
+def _resolve_external_read_mode(*, read_config: Dict[str, Any]) -> str:
+    for key in ("mode", "readMode", "read_mode", "inputMode", "input_mode"):
+        value = read_config.get(key) if isinstance(read_config, dict) else None
+        text = str(value or "").strip().lower()
+        if not text:
+            continue
+        if text in {"stream", "streaming", "microbatch", "micro_batch"}:
+            return "streaming"
+        return "batch"
+    return "batch"
+
+
+def _resolve_streaming_trigger_mode(
+    *,
+    read_config: Dict[str, Any],
+    default_mode: str = "available_now",
+) -> str:
+    trigger_raw: Any = None
+    if isinstance(read_config, dict):
+        trigger_raw = read_config.get("trigger")
+        if trigger_raw is None:
+            trigger_raw = read_config.get("stream_trigger")
+        if trigger_raw is None:
+            trigger_raw = read_config.get("streamTrigger")
+
+    if isinstance(trigger_raw, dict):
+        for key in ("mode", "type", "triggerMode", "trigger_mode"):
+            candidate = str(trigger_raw.get(key) or "").strip().lower()
+            if candidate:
+                trigger_raw = candidate
+                break
+        else:
+            trigger_raw = None
+
+    trigger_mode = str(trigger_raw or default_mode or "available_now").strip().lower()
+    if trigger_mode in {"available_now", "availablenow", "available-now"}:
+        return "available_now"
+    if trigger_mode in {"once"}:
+        return "once"
+    raise ValueError("streaming trigger must be one of: available_now|once")
+
+
+def _resolve_streaming_timeout_seconds(
+    *,
+    read_config: Dict[str, Any],
+    default_seconds: int,
+) -> int:
+    timeout_raw: Any = None
+    if isinstance(read_config, dict):
+        for key in (
+            "stream_timeout_seconds",
+            "streamTimeoutSeconds",
+            "await_timeout_seconds",
+            "awaitTimeoutSeconds",
+            "timeout_seconds",
+            "timeoutSeconds",
+        ):
+            if key in read_config and read_config.get(key) is not None:
+                timeout_raw = read_config.get(key)
+                break
+
+    if timeout_raw is None:
+        return max(1, int(default_seconds))
+    try:
+        parsed = int(str(timeout_raw).strip())
+    except (TypeError, ValueError) as exc:
+        raise ValueError("streaming timeout_seconds must be a positive integer") from exc
+    if parsed <= 0:
+        raise ValueError("streaming timeout_seconds must be a positive integer")
+    return parsed

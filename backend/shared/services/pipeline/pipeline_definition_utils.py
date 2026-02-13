@@ -57,6 +57,21 @@ def resolve_incremental_config(definition: Dict[str, Any]) -> Dict[str, Any]:
     return dict(raw) if isinstance(raw, dict) else {}
 
 
+def resolve_incremental_watermark_column(
+    *,
+    definition: Dict[str, Any],
+    metadata: Optional[Dict[str, Any]] = None,
+) -> Optional[str]:
+    settings = definition.get("settings") if isinstance(definition.get("settings"), dict) else {}
+    incremental = resolve_incremental_config(definition)
+    metadata = metadata if isinstance(metadata, dict) else {}
+    for key in ("watermark_column", "watermarkColumn", "watermark"):
+        value = metadata.get(key) or incremental.get(key) or settings.get(key) or definition.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
 def is_truthy(value: Any) -> bool:
     if isinstance(value, bool):
         return value

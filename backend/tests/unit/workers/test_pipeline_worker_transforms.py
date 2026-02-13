@@ -26,9 +26,23 @@ from pipeline_worker.main import (
 )
 
 
+def _resolve_java_home() -> str:
+    explicit = os.environ.get("JAVA_HOME")
+    if explicit:
+        return explicit
+    for candidate in (
+        "/opt/homebrew/opt/openjdk@17",
+        "/opt/homebrew/opt/openjdk@21",
+        "/opt/homebrew/opt/openjdk",
+    ):
+        if os.path.exists(candidate):
+            return candidate
+    return ""
+
+
 @pytest.fixture(scope="module")
 def spark() -> SparkSession:
-    java_home = os.environ.get("JAVA_HOME", "/opt/homebrew/opt/openjdk")
+    java_home = _resolve_java_home()
     if java_home and os.path.exists(java_home):
         os.environ.setdefault("JAVA_HOME", java_home)
         os.environ.setdefault("PATH", f"{java_home}/bin:" + os.environ.get("PATH", ""))

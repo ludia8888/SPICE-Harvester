@@ -5,7 +5,11 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from shared.services.pipeline.dataset_output_semantics import validate_dataset_output_metadata
 from shared.services.pipeline.pipeline_dataset_utils import normalize_dataset_selection, resolve_dataset_version
-from shared.services.pipeline.pipeline_definition_utils import resolve_execution_semantics
+from shared.services.pipeline.pipeline_definition_utils import (
+    resolve_execution_semantics,
+    resolve_incremental_watermark_column,
+)
+from shared.services.pipeline.pipeline_kafka_avro import validate_kafka_avro_schema_config
 from shared.services.pipeline.pipeline_graph_utils import build_incoming, normalize_edges, normalize_nodes, topological_sort
 from shared.services.pipeline.output_plugins import (
     OUTPUT_KIND_DATASET,
@@ -21,6 +25,8 @@ from shared.services.pipeline.pipeline_transform_spec import (
     is_stream_like_input_node,
     normalize_operation,
     normalize_union_mode,
+    resolve_input_read_format,
+    resolve_input_read_mode,
     resolve_join_spec,
     resolve_stream_join_spec,
 )
@@ -176,6 +182,34 @@ def _schema_for_input(dataset: Any, version: Any) -> SchemaInfo:
         merged_types = _merge_types(merged_types, inferred)
 
     return SchemaInfo(columns=columns, type_map=merged_types)
+
+
+def _schema_for_external_input_read(read_config: Dict[str, Any]) -> SchemaInfo:
+    schema_raw = (
+        read_config.get("schema")
+        or read_config.get("schema_columns")
+        or read_config.get("schemaColumns")
+    )
+    if isinstance(schema_raw, dict):
+        schema_raw = schema_raw.get("columns") or schema_raw.get("fields") or schema_raw.get("schema")
+    if not isinstance(schema_raw, list):
+        return SchemaInfo(columns=[], type_map={}, dynamic_columns=True)
+    columns: List[str] = []
+    type_map: Dict[str, Optional[str]] = {}
+    for item in schema_raw:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or item.get("column") or "").strip()
+        if not name:
+            continue
+        normalized = name.lstrip("\ufeff") or name
+        columns.append(normalized)
+        raw_type = item.get("type") or item.get("data_type") or item.get("datatype")
+        if raw_type:
+            type_map[normalized] = normalize_schema_type(raw_type)
+    if not columns:
+        return SchemaInfo(columns=[], type_map={}, dynamic_columns=True)
+    return SchemaInfo(columns=columns, type_map=type_map, dynamic_columns=False)
 
 
 def _apply_select(schema: SchemaInfo, columns: List[str]) -> SchemaInfo:
@@ -657,10 +691,23 @@ async def compute_pipeline_preflight(
     edges = normalize_edges(definition.get("edges"))
     incoming = build_incoming(edges)
     order = topological_sort(nodes, edges, include_unordered=True)
+    issues: List[Dict[str, Any]] = []
     execution_semantics = resolve_execution_semantics(definition)
+    if execution_semantics in {"incremental", "streaming"}:
+        watermark_column = resolve_incremental_watermark_column(definition=definition)
+        if not watermark_column:
+            issues.append(
+                {
+                    "kind": "execution_watermark_missing",
+                    "severity": "error",
+                    "node_id": None,
+                    "message": (
+                        f"execution_semantics={execution_semantics} requires incremental.watermark_column"
+                    ),
+                }
+            )
 
     schema_by_node: Dict[str, SchemaInfo] = {}
-    issues: List[Dict[str, Any]] = []
 
     for node_id in order:
         node = nodes.get(node_id) or {}
@@ -670,6 +717,124 @@ async def compute_pipeline_preflight(
         inputs = [schema_by_node[in_id] for in_id in input_ids if in_id in schema_by_node]
 
         if node_type == "input":
+            dataset_id = str(
+                metadata.get("datasetId")
+                or metadata.get("dataset_id")
+                or metadata.get("id")
+                or ""
+            ).strip()
+            dataset_name = str(
+                metadata.get("datasetName")
+                or metadata.get("dataset_name")
+                or metadata.get("name")
+                or ""
+            ).strip()
+            read_config = metadata.get("read") if isinstance(metadata.get("read"), dict) else {}
+            if not dataset_id and not dataset_name:
+                if not read_config:
+                    issues.append(
+                        {
+                            "kind": "input_source_missing",
+                            "severity": "error",
+                            "node_id": node_id,
+                            "message": "input requires dataset selection (datasetId/datasetName) or metadata.read",
+                        }
+                    )
+                    schema_by_node[node_id] = SchemaInfo(columns=[], type_map={}, dynamic_columns=True)
+                    continue
+
+                read_format = resolve_input_read_format(node)
+                read_mode = resolve_input_read_mode(node)
+                if not read_format:
+                    issues.append(
+                        {
+                            "kind": "input_read_format_missing",
+                            "severity": "error",
+                            "node_id": node_id,
+                            "message": "input metadata.read.format is required for external inputs",
+                        }
+                    )
+                if read_mode in {"stream", "streaming", "microbatch", "micro_batch"} and read_format != "kafka":
+                    issues.append(
+                        {
+                            "kind": "input_streaming_format_invalid",
+                            "severity": "error",
+                            "node_id": node_id,
+                            "message": "input read.mode=streaming currently supports only read.format=kafka",
+                            "read_mode": read_mode,
+                            "read_format": read_format or None,
+                        }
+                    )
+                if read_format == "kafka":
+                    value_format = str(
+                        read_config.get("value_format")
+                        or read_config.get("valueFormat")
+                        or read_config.get("kafka_value_format")
+                        or read_config.get("kafkaValueFormat")
+                        or "raw"
+                    ).strip().lower() or "raw"
+                    if value_format not in {"raw", "json", "avro"}:
+                        issues.append(
+                            {
+                                "kind": "input_kafka_value_format_invalid",
+                                "severity": "error",
+                                "node_id": node_id,
+                                "message": "kafka value_format must be one of: raw|json|avro",
+                                "value_format": value_format,
+                            }
+                        )
+                    if value_format == "json":
+                        has_schema = bool(
+                            read_config.get("schema")
+                            or read_config.get("schema_columns")
+                            or read_config.get("schemaColumns")
+                        )
+                        if not has_schema:
+                            issues.append(
+                                {
+                                    "kind": "input_kafka_json_schema_missing",
+                                    "severity": "error",
+                                    "node_id": node_id,
+                                    "message": "kafka value_format=json requires read.schema/schema_columns",
+                                }
+                            )
+                    if value_format == "avro":
+                        avro_errors = validate_kafka_avro_schema_config(
+                            read_config=read_config,
+                            node_id=node_id,
+                        )
+                        for message in avro_errors:
+                            kind = "input_kafka_avro_schema_registry_invalid"
+                            if "requires read.avro_schema or read.schema_registry" in message:
+                                kind = "input_kafka_avro_schema_missing"
+                            issues.append(
+                                {
+                                    "kind": kind,
+                                    "severity": "error",
+                                    "node_id": node_id,
+                                    "message": message,
+                                }
+                            )
+                if read_mode in {"stream", "streaming", "microbatch", "micro_batch"}:
+                    checkpoint_location = str(
+                        read_config.get("checkpoint_location")
+                        or read_config.get("checkpointLocation")
+                        or read_config.get("stream_checkpoint")
+                        or read_config.get("streamCheckpoint")
+                        or ""
+                    ).strip()
+                    if not checkpoint_location:
+                        issues.append(
+                            {
+                                "kind": "input_streaming_checkpoint_missing",
+                                "severity": "error",
+                                "node_id": node_id,
+                                "message": "input read.mode=streaming requires read.checkpoint_location",
+                            }
+                        )
+                schema_by_node[node_id] = _schema_for_external_input_read(read_config)
+                continue
+
             selection = normalize_dataset_selection(metadata, default_branch=branch or "main")
             resolution = await resolve_dataset_version(
                 dataset_registry,
@@ -1527,6 +1692,22 @@ async def compute_schema_by_node(
         inputs = [schema_by_node[in_id] for in_id in input_ids if in_id in schema_by_node]
 
         if node_type == "input":
+            dataset_id = str(
+                metadata.get("datasetId")
+                or metadata.get("dataset_id")
+                or metadata.get("id")
+                or ""
+            ).strip()
+            dataset_name = str(
+                metadata.get("datasetName")
+                or metadata.get("dataset_name")
+                or metadata.get("name")
+                or ""
+            ).strip()
+            read_config = metadata.get("read") if isinstance(metadata.get("read"), dict) else {}
+            if not dataset_id and not dataset_name:
+                schema_by_node[node_id] = _schema_for_external_input_read(read_config)
+                continue
             selection = normalize_dataset_selection(metadata, default_branch=branch or "main")
             resolution = await resolve_dataset_version(
                 dataset_registry,

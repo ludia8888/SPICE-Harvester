@@ -7,6 +7,7 @@ Consumes Kafka pipeline-jobs and executes dataset transforms using Spark.
 from __future__ import annotations
 
 import asyncio
+import base64
 import contextlib
 import hashlib
 import json
@@ -64,6 +65,11 @@ from shared.services.storage.lakefs_client import LakeFSClient, LakeFSConflictEr
 from shared.services.storage.lakefs_storage_service import LakeFSStorageService
 from shared.services.registries.lineage_store import LineageStore
 from shared.services.pipeline.pipeline_profiler import compute_column_stats
+from shared.services.pipeline.pipeline_kafka_avro import (
+    fetch_kafka_avro_schema_from_registry,
+    resolve_inline_avro_schema,
+    resolve_kafka_avro_schema_registry_reference,
+)
 from shared.services.pipeline.dataset_output_semantics import (
     DatasetWriteMode,
     resolve_dataset_write_policy,
@@ -138,10 +144,13 @@ from pipeline_worker.worker_helpers import (
     _is_sensitive_conf_key,
     _max_watermark_from_snapshots,
     _resolve_code_version,
+    _resolve_external_read_mode,
     _resolve_execution_semantics,
     _resolve_lakefs_repository,
     _resolve_output_format,
     _resolve_partition_columns,
+    _resolve_streaming_timeout_seconds,
+    _resolve_streaming_trigger_mode,
     _resolve_watermark_column,
     _watermark_values_match,
 )
@@ -295,11 +304,18 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
         self.spark_adaptive_enabled = pipeline_settings.spark_adaptive_enabled
         self.spark_shuffle_partitions = int(pipeline_settings.spark_shuffle_partitions)
         self.spark_console_progress = pipeline_settings.spark_console_progress
+        self.spark_streaming_enabled = bool(pipeline_settings.spark_streaming_enabled)
+        self.spark_streaming_default_trigger = str(
+            pipeline_settings.spark_streaming_default_trigger or "available_now"
+        ).strip().lower() or "available_now"
+        self.spark_streaming_await_timeout_seconds = int(pipeline_settings.spark_streaming_await_timeout_seconds)
+        self.kafka_schema_registry_timeout_seconds = int(pipeline_settings.kafka_schema_registry_timeout_seconds)
         self.cast_mode = normalize_cast_mode(pipeline_settings.cast_mode)
         self._udf_require_reference = bool(pipeline_settings.udf_require_reference)
         self._udf_require_version_pinning = bool(pipeline_settings.udf_require_version_pinning)
         self._udf_spark_parity_enabled = bool(pipeline_settings.udf_spark_parity_enabled)
         self._udf_code_cache: Dict[str, str] = {}
+        self._kafka_avro_schema_cache: Dict[str, str] = {}
         self.use_lakefs_diff = pipeline_settings.lakefs_diff_enabled
         self.processed_event_heartbeat_interval_seconds = settings.event_sourcing.processed_event_heartbeat_interval_seconds
         self.service_name = (settings.observability.service_name or "").strip() or None
@@ -1437,6 +1453,7 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                             metadata=transform_metadata,
                             pipeline_registry=self.pipeline_registry,
                             require_reference=self._udf_require_reference,
+                            require_version_pinning=self._udf_require_version_pinning,
                             code_cache=self._udf_code_cache,
                         )
                         transform_metadata["__resolved_udf_code"] = resolved.code
@@ -3351,6 +3368,20 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
         input_aligned = self._align_columns(df, aligned_columns) if aligned_columns else df
         existing_aligned = self._align_columns(existing_df, aligned_columns) if aligned_columns else existing_df
 
+        if policy.resolved_write_mode in {
+            DatasetWriteMode.APPEND_ONLY_NEW_ROWS,
+            DatasetWriteMode.CHANGELOG,
+            DatasetWriteMode.SNAPSHOT_DIFFERENCE,
+            DatasetWriteMode.SNAPSHOT_REPLACE,
+            DatasetWriteMode.SNAPSHOT_REPLACE_AND_REMOVE,
+        } and pk_columns:
+            await self._assert_no_duplicate_primary_keys(
+                df=input_aligned,
+                pk_columns=pk_columns,
+                write_mode=policy.resolved_write_mode.value,
+                dataset_label=str(dataset_name or prefix or "output"),
+            )
+
         materialized_df = input_aligned
         if policy.resolved_write_mode == DatasetWriteMode.ALWAYS_APPEND:
             materialized_df = input_aligned
@@ -3362,12 +3393,11 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                 dedupe_input=False,
             )
         elif policy.resolved_write_mode == DatasetWriteMode.APPEND_ONLY_NEW_ROWS:
-            deduped_input = input_aligned.dropDuplicates(pk_columns) if pk_columns else input_aligned
             if existing_aligned.columns and pk_columns:
                 existing_keys = existing_aligned.select(*pk_columns).distinct()
-                materialized_df = deduped_input.join(existing_keys, on=pk_columns, how="left_anti")
+                materialized_df = input_aligned.join(existing_keys, on=pk_columns, how="left_anti")
             else:
-                materialized_df = deduped_input
+                materialized_df = input_aligned
         elif policy.resolved_write_mode == DatasetWriteMode.SNAPSHOT_DIFFERENCE:
             if existing_aligned.columns and pk_columns:
                 existing_keys = existing_aligned.select(*pk_columns).distinct()
@@ -3377,7 +3407,7 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
             else:
                 materialized_df = input_aligned
         elif policy.resolved_write_mode == DatasetWriteMode.SNAPSHOT_REPLACE:
-            upsert_df = input_aligned.dropDuplicates(pk_columns) if pk_columns else input_aligned
+            upsert_df = input_aligned
             if existing_aligned.columns and pk_columns:
                 existing_dedup = existing_aligned.dropDuplicates(pk_columns)
                 upsert_keys = upsert_df.select(*pk_columns).distinct()
@@ -3391,7 +3421,7 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                 raise ValueError("post_filtering_column is required for snapshot_replace_and_remove")
             is_false_expr = self._post_filter_false_expr(post_filtering_column=post_col)
             upsert_input = input_aligned.filter(~is_false_expr)
-            upsert_df = upsert_input.dropDuplicates(pk_columns) if pk_columns else upsert_input
+            upsert_df = upsert_input
             false_keys = input_aligned.filter(is_false_expr).select(*pk_columns).distinct()
             if existing_aligned.columns and pk_columns:
                 existing_dedup = existing_aligned.dropDuplicates(pk_columns)
@@ -3706,6 +3736,31 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
             changed_expr = changed_expr | (~F.col(column).eqNullSafe(F.col(f"__existing_{column}")))
         return joined.filter(changed_expr).select(*selected_input.columns)
 
+    async def _assert_no_duplicate_primary_keys(
+        self,
+        *,
+        df: DataFrame,
+        pk_columns: List[str],
+        write_mode: str,
+        dataset_label: str,
+    ) -> None:
+        if not pk_columns:
+            return
+        duplicate_candidates = df.groupBy(*[F.col(column) for column in pk_columns]).count().filter(F.col("count") > 1).limit(1)
+        duplicate_rows = await self._run_spark(
+            lambda: duplicate_candidates.collect(),
+            label=f"check_duplicate_pk:{dataset_label}",
+        )
+        if not duplicate_rows:
+            return
+        sample_row = duplicate_rows[0].asDict(recursive=True)
+        duplicate_count = int(sample_row.get("count") or 0)
+        sample_pk = {column: sample_row.get(column) for column in pk_columns}
+        raise ValueError(
+            "Duplicate primary_key_columns detected for "
+            f"write_mode={write_mode}: sample={sample_pk}, duplicate_count={duplicate_count}"
+        )
+
     def _post_filter_false_expr(self, *, post_filtering_column: str) -> Any:
         normalized = F.lower(F.trim(F.col(post_filtering_column).cast("string")))
         return normalized.isin("0", "false", "f", "no", "n", "off")
@@ -3909,18 +3964,33 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
 
         # External inputs (no DatasetRegistry selection) are loaded directly via Spark read config.
         if not dataset_id and not dataset_name:
+            read_mode = _resolve_external_read_mode(read_config=read_config)
             df = await self._run_spark(
-                lambda: self._load_external_input_dataframe(read_config, node_id=node_id),
+                lambda: self._load_external_input_dataframe(read_config, node_id=node_id, temp_dirs=temp_dirs),
                 label=f"external_input:{node_id}",
             )
             if input_snapshots is not None:
                 fmt = str(read_config.get("format") or read_config.get("file_format") or read_config.get("fileFormat") or "").strip().lower() or None
                 options = self._normalize_read_options(read_config)
+                stream_trigger_mode: Optional[str] = None
+                stream_timeout_seconds: Optional[int] = None
+                if read_mode == "streaming":
+                    stream_trigger_mode = _resolve_streaming_trigger_mode(
+                        read_config=read_config,
+                        default_mode=self.spark_streaming_default_trigger,
+                    )
+                    stream_timeout_seconds = _resolve_streaming_timeout_seconds(
+                        read_config=read_config,
+                        default_seconds=self.spark_streaming_await_timeout_seconds,
+                    )
                 input_snapshots.append(
                     {
                         "node_id": node_id,
                         "source_type": "external",
+                        "read_mode": read_mode,
                         "format": fmt,
+                        "stream_trigger_mode": stream_trigger_mode,
+                        "stream_timeout_seconds": stream_timeout_seconds,
                         "options": self._mask_sensitive_options(options),
                     }
                 )
@@ -4941,22 +5011,297 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
             return "orc"
         return ""
 
-    def _load_external_input_dataframe(self, read_config: Dict[str, Any], *, node_id: str) -> DataFrame:
+    def _resolve_streaming_checkpoint_location(self, *, read_config: Dict[str, Any], node_id: str) -> str:
+        checkpoint = (
+            read_config.get("checkpoint_location")
+            or read_config.get("checkpointLocation")
+            or read_config.get("stream_checkpoint")
+            or read_config.get("streamCheckpoint")
+            or ""
+        )
+        checkpoint_text = str(checkpoint or "").strip()
+        if not checkpoint_text:
+            raise ValueError(
+                f"Input node {node_id} read.mode=streaming requires read.checkpoint_location"
+            )
+        return checkpoint_text
+
+    def _resolve_kafka_value_format(self, *, read_config: Dict[str, Any]) -> str:
+        raw_value = (
+            read_config.get("value_format")
+            or read_config.get("valueFormat")
+            or read_config.get("kafka_value_format")
+            or read_config.get("kafkaValueFormat")
+            or "raw"
+        )
+        value_format = str(raw_value or "raw").strip().lower() or "raw"
+        if value_format in {"none"}:
+            value_format = "raw"
+        if value_format not in {"raw", "json", "avro"}:
+            raise ValueError("kafka value_format must be one of: raw|json|avro")
+        return value_format
+
+    def _resolve_kafka_schema_registry_headers(self, *, read_config: Dict[str, Any]) -> Dict[str, str]:
+        headers: Dict[str, str] = {}
+        raw_headers = read_config.get("schema_registry_headers") or read_config.get("schemaRegistryHeaders")
+        if isinstance(raw_headers, dict):
+            for key, value in raw_headers.items():
+                key_text = str(key or "").strip()
+                value_text = str(value or "").strip()
+                if key_text and value_text:
+                    headers[key_text] = value_text
+
+        if not any(key.lower() == "authorization" for key in headers):
+            token = str(
+                read_config.get("schema_registry_auth_token")
+                or read_config.get("schemaRegistryAuthToken")
+                or ""
+            ).strip()
+            if token:
+                headers["Authorization"] = f"Bearer {token}"
+
+        if not any(key.lower() == "authorization" for key in headers):
+            options = self._normalize_read_options(read_config)
+            basic_user_info = str(
+                read_config.get("schema_registry_basic_auth")
+                or read_config.get("schemaRegistryBasicAuth")
+                or options.get("basic.auth.user.info")
+                or options.get("schema.registry.basic.auth.user.info")
+                or ""
+            ).strip()
+            username = str(
+                read_config.get("schema_registry_username")
+                or read_config.get("schemaRegistryUsername")
+                or ""
+            ).strip()
+            password = str(
+                read_config.get("schema_registry_password")
+                or read_config.get("schemaRegistryPassword")
+                or ""
+            ).strip()
+            if username and password:
+                basic_user_info = f"{username}:{password}"
+            if basic_user_info and ":" in basic_user_info:
+                encoded = base64.b64encode(basic_user_info.encode("utf-8")).decode("ascii")
+                headers["Authorization"] = f"Basic {encoded}"
+
+        return headers
+
+    def _resolve_kafka_avro_schema(
+        self,
+        *,
+        read_config: Dict[str, Any],
+        node_id: str,
+    ) -> str:
+        inline_schema = resolve_inline_avro_schema(read_config=read_config)
+        if inline_schema:
+            return inline_schema
+
+        reference = resolve_kafka_avro_schema_registry_reference(
+            read_config=read_config,
+            node_id=node_id,
+        )
+        cached = self._kafka_avro_schema_cache.get(reference.cache_key)
+        if cached:
+            return cached
+
+        headers = self._resolve_kafka_schema_registry_headers(read_config=read_config)
+        try:
+            schema_text = fetch_kafka_avro_schema_from_registry(
+                reference=reference,
+                timeout_seconds=float(self.kafka_schema_registry_timeout_seconds),
+                headers=headers or None,
+            )
+        except Exception as exc:
+            raise ValueError(
+                f"Input node {node_id} kafka value_format=avro schema-registry lookup failed: {exc}"
+            ) from exc
+        self._kafka_avro_schema_cache[reference.cache_key] = schema_text
+        return schema_text
+
+    def _apply_kafka_value_parsing(
+        self,
+        *,
+        df: DataFrame,
+        read_config: Dict[str, Any],
+        node_id: str,
+    ) -> DataFrame:
+        value_format = self._resolve_kafka_value_format(read_config=read_config)
+        if value_format == "raw":
+            return df
+
+        parsed_column = str(
+            read_config.get("parsed_value_column")
+            or read_config.get("parsedValueColumn")
+            or "value_parsed"
+        ).strip() or "value_parsed"
+
+        if value_format == "json":
+            schema_ddl = self._schema_ddl_from_read_config(read_config)
+            if not schema_ddl:
+                raise ValueError(
+                    f"Input node {node_id} kafka value_format=json requires read.schema/schema_columns"
+                )
+            parse_mode = str(
+                read_config.get("json_parse_mode")
+                or read_config.get("jsonParseMode")
+                or "FAILFAST"
+            ).strip().upper() or "FAILFAST"
+            if parse_mode not in {"PERMISSIVE", "FAILFAST"}:
+                raise ValueError("json parse mode must be PERMISSIVE or FAILFAST")
+            return df.withColumn(
+                parsed_column,
+                F.from_json(
+                    F.col("value").cast("string"),
+                    schema_ddl,
+                    {"mode": parse_mode},
+                ),
+            )
+
+        avro_schema_text = self._resolve_kafka_avro_schema(
+            read_config=read_config,
+            node_id=node_id,
+        )
+        try:
+            from pyspark.sql.avro.functions import from_avro  # type: ignore
+        except Exception as exc:
+            raise ValueError(
+                "Spark avro functions are not available; install/enable spark-avro for kafka value_format=avro"
+            ) from exc
+        return df.withColumn(parsed_column, from_avro(F.col("value"), avro_schema_text))
+
+    def _load_external_streaming_dataframe(
+        self,
+        *,
+        read_config: Dict[str, Any],
+        node_id: str,
+        fmt: str,
+        temp_dirs: list[str],
+    ) -> DataFrame:
+        if not self.spark_streaming_enabled:
+            raise ValueError("Streaming external inputs are disabled by PIPELINE_SPARK_STREAMING_ENABLED")
+        if fmt != "kafka":
+            raise ValueError(
+                f"Input node {node_id} read.mode=streaming currently supports only read.format=kafka"
+            )
+
+        options = self._normalize_read_options(read_config)
+        stream_reader = self.spark.readStream.format("kafka")
+        for key, value in options.items():
+            stream_reader = stream_reader.option(key, value)
+        stream_df = stream_reader.load()
+
+        temp_root = tempfile.mkdtemp(prefix=f"pipeline-streaming-{node_id}-")
+        temp_dirs.append(temp_root)
+        sink_path = os.path.join(temp_root, "sink")
+        checkpoint_path = self._resolve_streaming_checkpoint_location(read_config=read_config, node_id=node_id)
+        os.makedirs(sink_path, exist_ok=True)
+        if "://" not in checkpoint_path and not checkpoint_path.startswith("dbfs:/"):
+            os.makedirs(checkpoint_path, exist_ok=True)
+
+        trigger_mode = _resolve_streaming_trigger_mode(
+            read_config=read_config,
+            default_mode=self.spark_streaming_default_trigger,
+        )
+        timeout_seconds = _resolve_streaming_timeout_seconds(
+            read_config=read_config,
+            default_seconds=self.spark_streaming_await_timeout_seconds,
+        )
+
+        writer = (
+            stream_df.writeStream.format("parquet")
+            .option("path", sink_path)
+            .option("checkpointLocation", checkpoint_path)
+            .outputMode("append")
+        )
+        if trigger_mode == "once":
+            writer = writer.trigger(once=True)
+        else:
+            writer = writer.trigger(availableNow=True)
+
+        try:
+            query = writer.start()
+        except Exception as exc:
+            if trigger_mode != "available_now":
+                raise
+            logger.warning(
+                "Failed to start streaming query with available_now trigger; retrying once trigger (node_id=%s): %s",
+                node_id,
+                exc,
+                exc_info=True,
+            )
+            writer = (
+                stream_df.writeStream.format("parquet")
+                .option("path", sink_path)
+                .option("checkpointLocation", checkpoint_path)
+                .outputMode("append")
+                .trigger(once=True)
+            )
+            trigger_mode = "once"
+            query = writer.start()
+        terminated = query.awaitTermination(timeout=timeout_seconds)
+        if not terminated:
+            query.stop()
+            raise TimeoutError(
+                f"Input node {node_id} streaming query timed out after {timeout_seconds}s "
+                f"(trigger={trigger_mode})"
+            )
+        query_exception = query.exception()
+        if query_exception is not None:
+            raise RuntimeError(f"Input node {node_id} streaming query failed: {query_exception}")
+
+        reader = self.spark.read
+        if fmt == "kafka":
+            # Structured streaming source writes sink files as parquet snapshots.
+            # When no rows arrive within the trigger window, the sink can be empty.
+            try:
+                parsed = reader.parquet(sink_path)
+                return self._apply_kafka_value_parsing(
+                    df=parsed,
+                    read_config=read_config,
+                    node_id=node_id,
+                )
+            except Exception:
+                logger.warning(
+                    "External streaming source produced no rows (node_id=%s trigger=%s)",
+                    node_id,
+                    trigger_mode,
+                    exc_info=True,
+                )
+                return self.spark.createDataFrame([], schema=stream_df.schema)
+        return reader.parquet(sink_path)
+
+    def _load_external_input_dataframe(
+        self,
+        read_config: Dict[str, Any],
+        *,
+        node_id: str,
+        temp_dirs: list[str],
+    ) -> DataFrame:
         """
         Load an input DataFrame directly from Spark using metadata.read (no DatasetRegistry artifact).
 
         Supported (initial):
         - jdbc: requires options.url + options.dbtable (or options.query)
         - kafka (batch): requires Spark kafka options (e.g., kafka.bootstrap.servers + subscribe)
+        - kafka (streaming snapshot): read.mode=streaming + available_now/once trigger
         - file formats: requires read.path/paths and a Spark data source for read.format
         """
         if not self.spark:
             raise RuntimeError("Spark session not initialized")
 
         read_config = dict(read_config or {})
+        read_mode = _resolve_external_read_mode(read_config=read_config)
         fmt = str(read_config.get("format") or read_config.get("file_format") or read_config.get("fileFormat") or "").strip().lower()
         if not fmt:
             raise ValueError(f"Input node {node_id} external source requires metadata.read.format")
+        if read_mode == "streaming":
+            return self._load_external_streaming_dataframe(
+                read_config=read_config,
+                node_id=node_id,
+                fmt=fmt,
+                temp_dirs=temp_dirs,
+            )
 
         options = self._normalize_read_options(read_config)
         schema_ddl = self._schema_ddl_from_read_config(read_config)
@@ -4987,7 +5332,12 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                 logger.warning("Failed to apply schema to source reader: %s", exc, exc_info=True)
 
         if fmt == "kafka":
-            return reader.format("kafka").load()
+            loaded = reader.format("kafka").load()
+            return self._apply_kafka_value_parsing(
+                df=loaded,
+                read_config=read_config,
+                node_id=node_id,
+            )
 
         # File/data-source paths.
         path_value = read_config.get("path")

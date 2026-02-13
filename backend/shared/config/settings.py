@@ -1119,6 +1119,25 @@ class PipelineSettings(BaseSettings):
         default=1,
         description="Spark executor thread pool size (PIPELINE_SPARK_EXECUTOR_THREADS)",
     )
+    spark_streaming_enabled: bool = Field(
+        default=True,
+        description="Enable Spark Structured Streaming input mode (PIPELINE_SPARK_STREAMING_ENABLED)",
+    )
+    spark_streaming_default_trigger: str = Field(
+        default="available_now",
+        description="Default trigger for streaming external inputs: available_now|once (PIPELINE_SPARK_STREAMING_DEFAULT_TRIGGER)",
+    )
+    spark_streaming_await_timeout_seconds: int = Field(
+        default=120,
+        description="Streaming query await timeout seconds for external inputs (PIPELINE_SPARK_STREAMING_AWAIT_TIMEOUT_SECONDS)",
+    )
+    kafka_schema_registry_timeout_seconds: int = Field(
+        default=10,
+        description=(
+            "HTTP timeout seconds for kafka AVRO schema-registry resolution "
+            "(PIPELINE_KAFKA_SCHEMA_REGISTRY_TIMEOUT_SECONDS)"
+        ),
+    )
     cast_mode: str = Field(
         default="SAFE_NULL",
         description="Casting policy: SAFE_NULL or STRICT (PIPELINE_CAST_MODE)",
@@ -1202,6 +1221,7 @@ class PipelineSettings(BaseSettings):
         "artifact_path",
         "worker_handler",
         "worker_name",
+        "spark_streaming_default_trigger",
         mode="before",
     )(_strip_text_if_not_none)
 
@@ -1247,6 +1267,26 @@ class PipelineSettings(BaseSettings):
     @classmethod
     def clamp_spark_shuffle_partitions(cls, v):  # noqa: ANN001
         return _clamp_int(v, default=16, min_value=1, max_value=5000)
+
+    @field_validator("spark_streaming_await_timeout_seconds", mode="before")
+    @classmethod
+    def clamp_spark_streaming_await_timeout_seconds(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=120, min_value=1, max_value=86_400)
+
+    @field_validator("kafka_schema_registry_timeout_seconds", mode="before")
+    @classmethod
+    def clamp_kafka_schema_registry_timeout_seconds(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=10, min_value=1, max_value=120)
+
+    @field_validator("spark_streaming_default_trigger", mode="before")
+    @classmethod
+    def normalize_spark_streaming_default_trigger(cls, v):  # noqa: ANN001
+        text = str(v or "").strip().lower() or "available_now"
+        if text in {"available_now", "availablenow", "available-now"}:
+            return "available_now"
+        if text == "once":
+            return "once"
+        return "available_now"
 
     @field_validator("lock_ttl_seconds", mode="before")
     @classmethod

@@ -307,7 +307,14 @@ def _resolve_default_mode(
     incremental_inputs_have_additive_updates: Optional[bool],
     warnings: List[str],
 ) -> DatasetWriteMode:
-    _ = execution_semantics
+    if execution_semantics == "streaming":
+        if primary_key_columns:
+            return DatasetWriteMode.APPEND_ONLY_NEW_ROWS
+        warnings.append(
+            "write_mode default resolved to always_append for streaming semantics because primary_key_columns are missing"
+        )
+        return DatasetWriteMode.ALWAYS_APPEND
+
     if not has_incremental_input:
         return DatasetWriteMode.SNAPSHOT_REPLACE
     if incremental_inputs_have_additive_updates is False:

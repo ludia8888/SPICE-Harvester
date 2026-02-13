@@ -194,6 +194,374 @@ async def test_compute_pipeline_preflight_blocks_partitioned_json_dataset_output
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_compute_pipeline_preflight_blocks_streaming_external_non_kafka_input() -> None:
+    definition = {
+        "nodes": [
+            {
+                "id": "in",
+                "type": "input",
+                "metadata": {
+                    "read": {
+                        "mode": "streaming",
+                        "format": "json",
+                        "path": "/tmp/events.json",
+                    }
+                },
+            },
+            {
+                "id": "out",
+                "type": "output",
+                "metadata": {
+                    "outputName": "target",
+                    "outputKind": "dataset",
+                    "write_mode": "snapshot_replace",
+                    "output_format": "parquet",
+                },
+            },
+        ],
+        "edges": [{"from": "in", "to": "out"}],
+    }
+    result = await pipeline_preflight_utils.compute_pipeline_preflight(
+        definition=definition,
+        db_name="demo",
+        dataset_registry=SimpleNamespace(),
+        branch="main",
+    )
+    assert result["has_blocking_errors"] is True
+    messages = [str(issue.get("message") or "") for issue in result["blocking_errors"]]
+    assert any("read.mode=streaming currently supports only read.format=kafka" in message for message in messages)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_compute_pipeline_preflight_blocks_streaming_external_missing_checkpoint() -> None:
+    definition = {
+        "nodes": [
+            {
+                "id": "in",
+                "type": "input",
+                "metadata": {
+                    "read": {
+                        "mode": "streaming",
+                        "format": "kafka",
+                    }
+                },
+            },
+            {
+                "id": "out",
+                "type": "output",
+                "metadata": {
+                    "outputName": "target",
+                    "outputKind": "dataset",
+                    "write_mode": "snapshot_replace",
+                    "output_format": "parquet",
+                },
+            },
+        ],
+        "edges": [{"from": "in", "to": "out"}],
+    }
+    result = await pipeline_preflight_utils.compute_pipeline_preflight(
+        definition=definition,
+        db_name="demo",
+        dataset_registry=SimpleNamespace(),
+        branch="main",
+    )
+    assert result["has_blocking_errors"] is True
+    messages = [str(issue.get("message") or "") for issue in result["blocking_errors"]]
+    assert any("read.mode=streaming requires read.checkpoint_location" in message for message in messages)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_compute_pipeline_preflight_blocks_kafka_json_without_schema() -> None:
+    definition = {
+        "nodes": [
+            {
+                "id": "in",
+                "type": "input",
+                "metadata": {
+                    "read": {
+                        "format": "kafka",
+                        "value_format": "json",
+                    }
+                },
+            },
+            {
+                "id": "out",
+                "type": "output",
+                "metadata": {
+                    "outputName": "target",
+                    "outputKind": "dataset",
+                    "write_mode": "snapshot_replace",
+                    "output_format": "parquet",
+                },
+            },
+        ],
+        "edges": [{"from": "in", "to": "out"}],
+    }
+    result = await pipeline_preflight_utils.compute_pipeline_preflight(
+        definition=definition,
+        db_name="demo",
+        dataset_registry=SimpleNamespace(),
+        branch="main",
+    )
+    assert result["has_blocking_errors"] is True
+    messages = [str(issue.get("message") or "") for issue in result["blocking_errors"]]
+    assert any("kafka value_format=json requires read.schema/schema_columns" in message for message in messages)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_compute_pipeline_preflight_allows_kafka_avro_with_schema_registry_reference() -> None:
+    definition = {
+        "nodes": [
+            {
+                "id": "in",
+                "type": "input",
+                "metadata": {
+                    "read": {
+                        "format": "kafka",
+                        "value_format": "avro",
+                        "schema_registry": {
+                            "url": "https://registry.example",
+                            "subject": "orders-value",
+                            "version": 7,
+                        },
+                    }
+                },
+            },
+            {
+                "id": "out",
+                "type": "output",
+                "metadata": {
+                    "outputName": "target",
+                    "outputKind": "dataset",
+                    "write_mode": "snapshot_replace",
+                    "output_format": "parquet",
+                },
+            },
+        ],
+        "edges": [{"from": "in", "to": "out"}],
+    }
+    result = await pipeline_preflight_utils.compute_pipeline_preflight(
+        definition=definition,
+        db_name="demo",
+        dataset_registry=SimpleNamespace(),
+        branch="main",
+    )
+    messages = [str(issue.get("message") or "") for issue in result.get("blocking_errors") or []]
+    assert not any("kafka value_format=avro" in message for message in messages)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_compute_pipeline_preflight_blocks_kafka_avro_without_schema_or_registry() -> None:
+    definition = {
+        "nodes": [
+            {
+                "id": "in",
+                "type": "input",
+                "metadata": {"read": {"format": "kafka", "value_format": "avro"}},
+            },
+            {
+                "id": "out",
+                "type": "output",
+                "metadata": {
+                    "outputName": "target",
+                    "outputKind": "dataset",
+                    "write_mode": "snapshot_replace",
+                    "output_format": "parquet",
+                },
+            },
+        ],
+        "edges": [{"from": "in", "to": "out"}],
+    }
+    result = await pipeline_preflight_utils.compute_pipeline_preflight(
+        definition=definition,
+        db_name="demo",
+        dataset_registry=SimpleNamespace(),
+        branch="main",
+    )
+    assert result["has_blocking_errors"] is True
+    messages = [str(issue.get("message") or "") for issue in result["blocking_errors"]]
+    assert any(
+        "kafka value_format=avro requires read.avro_schema or read.schema_registry(url+subject+version)"
+        in message
+        for message in messages
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_compute_pipeline_preflight_blocks_kafka_avro_with_missing_registry_version() -> None:
+    definition = {
+        "nodes": [
+            {
+                "id": "in",
+                "type": "input",
+                "metadata": {
+                    "read": {
+                        "format": "kafka",
+                        "value_format": "avro",
+                        "schema_registry": {
+                            "url": "https://registry.example",
+                            "subject": "orders-value",
+                        },
+                    }
+                },
+            },
+            {
+                "id": "out",
+                "type": "output",
+                "metadata": {
+                    "outputName": "target",
+                    "outputKind": "dataset",
+                    "write_mode": "snapshot_replace",
+                    "output_format": "parquet",
+                },
+            },
+        ],
+        "edges": [{"from": "in", "to": "out"}],
+    }
+    result = await pipeline_preflight_utils.compute_pipeline_preflight(
+        definition=definition,
+        db_name="demo",
+        dataset_registry=SimpleNamespace(),
+        branch="main",
+    )
+    assert result["has_blocking_errors"] is True
+    messages = [str(issue.get("message") or "") for issue in result["blocking_errors"]]
+    assert any("kafka value_format=avro schema registry requires version" in message for message in messages)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_compute_pipeline_preflight_blocks_kafka_avro_with_latest_registry_version() -> None:
+    definition = {
+        "nodes": [
+            {
+                "id": "in",
+                "type": "input",
+                "metadata": {
+                    "read": {
+                        "format": "kafka",
+                        "value_format": "avro",
+                        "schema_registry": {
+                            "url": "https://registry.example",
+                            "subject": "orders-value",
+                            "version": "latest",
+                        },
+                    }
+                },
+            },
+            {
+                "id": "out",
+                "type": "output",
+                "metadata": {
+                    "outputName": "target",
+                    "outputKind": "dataset",
+                    "write_mode": "snapshot_replace",
+                    "output_format": "parquet",
+                },
+            },
+        ],
+        "edges": [{"from": "in", "to": "out"}],
+    }
+    result = await pipeline_preflight_utils.compute_pipeline_preflight(
+        definition=definition,
+        db_name="demo",
+        dataset_registry=SimpleNamespace(),
+        branch="main",
+    )
+    assert result["has_blocking_errors"] is True
+    messages = [str(issue.get("message") or "") for issue in result["blocking_errors"]]
+    assert any("kafka value_format=avro schema registry version=latest is not allowed" in message for message in messages)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_compute_pipeline_preflight_allows_batch_kafka_without_checkpoint() -> None:
+    definition = {
+        "nodes": [
+            {
+                "id": "in",
+                "type": "input",
+                "metadata": {
+                    "read": {
+                        "format": "kafka",
+                        "options": {
+                            "kafka.bootstrap.servers": "localhost:9092",
+                            "subscribe": "orders",
+                        },
+                    }
+                },
+            },
+            {
+                "id": "out",
+                "type": "output",
+                "metadata": {
+                    "outputName": "target",
+                    "outputKind": "dataset",
+                    "write_mode": "snapshot_replace",
+                    "output_format": "parquet",
+                },
+            },
+        ],
+        "edges": [{"from": "in", "to": "out"}],
+    }
+    result = await pipeline_preflight_utils.compute_pipeline_preflight(
+        definition=definition,
+        db_name="demo",
+        dataset_registry=SimpleNamespace(),
+        branch="main",
+    )
+    messages = [str(issue.get("message") or "") for issue in result.get("blocking_errors") or []]
+    assert not any("read.mode=streaming requires read.checkpoint_location" in message for message in messages)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_compute_pipeline_preflight_blocks_streaming_without_watermark() -> None:
+    definition = {
+        "execution_mode": "streaming",
+        "nodes": [
+            {
+                "id": "in",
+                "type": "input",
+                "metadata": {
+                    "read": {
+                        "mode": "streaming",
+                        "format": "kafka",
+                        "checkpoint_location": "/tmp/chk",
+                    }
+                },
+            },
+            {
+                "id": "out",
+                "type": "output",
+                "metadata": {
+                    "outputName": "target",
+                    "outputKind": "dataset",
+                    "write_mode": "snapshot_replace",
+                    "output_format": "parquet",
+                },
+            },
+        ],
+        "edges": [{"from": "in", "to": "out"}],
+    }
+    result = await pipeline_preflight_utils.compute_pipeline_preflight(
+        definition=definition,
+        db_name="demo",
+        dataset_registry=SimpleNamespace(),
+        branch="main",
+    )
+    assert result["has_blocking_errors"] is True
+    messages = [str(issue.get("message") or "") for issue in result["blocking_errors"]]
+    assert any("execution_semantics=streaming requires incremental.watermark_column" in message for message in messages)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_compute_pipeline_preflight_blocks_geotemporal_missing_required_columns(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

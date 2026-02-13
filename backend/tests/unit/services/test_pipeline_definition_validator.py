@@ -158,3 +158,218 @@ def test_validate_pipeline_definition_rejects_invalid_dataset_output_metadata() 
     }
     result = validate_pipeline_definition(definition, policy=_spark_policy())
     assert "output orders invalid metadata on node out: write_mode=append_only_new_rows requires primary_key_columns" in result.errors
+
+
+def test_validate_pipeline_definition_rejects_streaming_non_kafka_external_input() -> None:
+    definition = {
+        "nodes": [
+            {
+                "id": "in",
+                "type": "input",
+                "metadata": {
+                    "read": {
+                        "mode": "streaming",
+                        "format": "json",
+                    }
+                },
+            },
+            {"id": "out", "type": "output", "metadata": {"outputName": "orders"}},
+        ],
+        "edges": [{"from": "in", "to": "out"}],
+    }
+    result = validate_pipeline_definition(definition, policy=_spark_policy())
+    assert (
+        "input node in read.mode=streaming currently supports only read.format=kafka"
+        in result.errors
+    )
+
+
+def test_validate_pipeline_definition_rejects_streaming_without_checkpoint_location() -> None:
+    definition = {
+        "nodes": [
+            {
+                "id": "in",
+                "type": "input",
+                "metadata": {
+                    "read": {
+                        "mode": "streaming",
+                        "format": "kafka",
+                    }
+                },
+            },
+            {"id": "out", "type": "output", "metadata": {"outputName": "orders"}},
+        ],
+        "edges": [{"from": "in", "to": "out"}],
+    }
+    result = validate_pipeline_definition(definition, policy=_spark_policy())
+    assert (
+        "input node in read.mode=streaming requires read.checkpoint_location"
+        in result.errors
+    )
+
+
+def test_validate_pipeline_definition_rejects_kafka_json_without_schema() -> None:
+    definition = {
+        "nodes": [
+            {
+                "id": "in",
+                "type": "input",
+                "metadata": {
+                    "read": {
+                        "format": "kafka",
+                        "value_format": "json",
+                    }
+                },
+            },
+            {"id": "out", "type": "output", "metadata": {"outputName": "orders"}},
+        ],
+        "edges": [{"from": "in", "to": "out"}],
+    }
+    result = validate_pipeline_definition(definition, policy=_spark_policy())
+    assert (
+        "input node in kafka value_format=json requires read.schema/schema_columns"
+        in result.errors
+    )
+
+
+def test_validate_pipeline_definition_allows_kafka_avro_with_schema_registry_reference() -> None:
+    definition = {
+        "nodes": [
+            {
+                "id": "in",
+                "type": "input",
+                "metadata": {
+                    "read": {
+                        "format": "kafka",
+                        "value_format": "avro",
+                        "schema_registry": {
+                            "url": "https://registry.example",
+                            "subject": "orders-value",
+                            "version": 7,
+                        },
+                    }
+                },
+            },
+            {"id": "out", "type": "output", "metadata": {"outputName": "orders"}},
+        ],
+        "edges": [{"from": "in", "to": "out"}],
+    }
+    result = validate_pipeline_definition(definition, policy=_spark_policy())
+    assert not any("kafka value_format=avro" in message for message in result.errors)
+
+
+def test_validate_pipeline_definition_rejects_kafka_avro_without_schema_or_registry() -> None:
+    definition = {
+        "nodes": [
+            {
+                "id": "in",
+                "type": "input",
+                "metadata": {"read": {"format": "kafka", "value_format": "avro"}},
+            },
+            {"id": "out", "type": "output", "metadata": {"outputName": "orders"}},
+        ],
+        "edges": [{"from": "in", "to": "out"}],
+    }
+    result = validate_pipeline_definition(definition, policy=_spark_policy())
+    assert (
+        "input node in kafka value_format=avro requires read.avro_schema or read.schema_registry(url+subject+version)"
+        in result.errors
+    )
+
+
+def test_validate_pipeline_definition_rejects_kafka_avro_with_missing_registry_version() -> None:
+    definition = {
+        "nodes": [
+            {
+                "id": "in",
+                "type": "input",
+                "metadata": {
+                    "read": {
+                        "format": "kafka",
+                        "value_format": "avro",
+                        "schema_registry": {"url": "https://registry.example", "subject": "orders-value"},
+                    }
+                },
+            },
+            {"id": "out", "type": "output", "metadata": {"outputName": "orders"}},
+        ],
+        "edges": [{"from": "in", "to": "out"}],
+    }
+    result = validate_pipeline_definition(definition, policy=_spark_policy())
+    assert (
+        "input node in kafka value_format=avro schema registry requires version"
+        in result.errors
+    )
+
+
+def test_validate_pipeline_definition_rejects_kafka_avro_with_latest_registry_version() -> None:
+    definition = {
+        "nodes": [
+            {
+                "id": "in",
+                "type": "input",
+                "metadata": {
+                    "read": {
+                        "format": "kafka",
+                        "value_format": "avro",
+                        "schema_registry": {
+                            "url": "https://registry.example",
+                            "subject": "orders-value",
+                            "version": "latest",
+                        },
+                    }
+                },
+            },
+            {"id": "out", "type": "output", "metadata": {"outputName": "orders"}},
+        ],
+        "edges": [{"from": "in", "to": "out"}],
+    }
+    result = validate_pipeline_definition(definition, policy=_spark_policy())
+    assert (
+        "input node in kafka value_format=avro schema registry version=latest is not allowed; pin an integer version >= 1"
+        in result.errors
+    )
+
+
+def test_validate_pipeline_definition_allows_batch_kafka_without_checkpoint() -> None:
+    definition = {
+        "nodes": [
+            {
+                "id": "in",
+                "type": "input",
+                "metadata": {
+                    "read": {
+                        "format": "kafka",
+                        "options": {"subscribe": "orders"},
+                    }
+                },
+            },
+            {"id": "out", "type": "output", "metadata": {"outputName": "orders"}},
+        ],
+        "edges": [{"from": "in", "to": "out"}],
+    }
+    result = validate_pipeline_definition(definition, policy=_spark_policy())
+    assert "read.mode=streaming requires read.checkpoint_location" not in result.errors
+
+
+def test_validate_pipeline_definition_requires_watermark_for_streaming_semantics() -> None:
+    definition = {
+        "execution_mode": "streaming",
+        "nodes": [
+            {
+                "id": "in",
+                "type": "input",
+                "metadata": {
+                    "read": {
+                        "mode": "streaming",
+                        "format": "kafka",
+                        "checkpoint_location": "/tmp/chk",
+                    }
+                },
+            },
+            {"id": "out", "type": "output", "metadata": {"outputName": "orders"}},
+        ],
+        "edges": [{"from": "in", "to": "out"}],
+    }
+    result = validate_pipeline_definition(definition, policy=_spark_policy())
+    assert "execution_semantics=streaming requires incremental.watermark_column" in result.errors

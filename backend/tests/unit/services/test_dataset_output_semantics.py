@@ -64,6 +64,31 @@ def test_resolve_dataset_write_policy_default_incremental_without_pk() -> None:
 
 
 @pytest.mark.unit
+def test_resolve_dataset_write_policy_default_streaming_with_pk_uses_append_only_new_rows() -> None:
+    policy = resolve_dataset_write_policy(
+        definition={},
+        output_metadata={"primary_key_columns": ["id"]},
+        execution_semantics="streaming",
+        has_incremental_input=True,
+    )
+    assert policy.resolved_write_mode == DatasetWriteMode.APPEND_ONLY_NEW_ROWS
+    assert policy.runtime_write_mode == "append"
+
+
+@pytest.mark.unit
+def test_resolve_dataset_write_policy_default_streaming_without_pk_uses_always_append() -> None:
+    policy = resolve_dataset_write_policy(
+        definition={},
+        output_metadata={},
+        execution_semantics="streaming",
+        has_incremental_input=True,
+    )
+    assert policy.resolved_write_mode == DatasetWriteMode.ALWAYS_APPEND
+    assert policy.runtime_write_mode == "append"
+    assert any("streaming semantics" in warning for warning in policy.warnings)
+
+
+@pytest.mark.unit
 def test_resolve_dataset_write_policy_default_incremental_with_additive_updates_false() -> None:
     policy = resolve_dataset_write_policy(
         definition={},

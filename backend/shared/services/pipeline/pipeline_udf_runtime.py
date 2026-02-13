@@ -149,17 +149,21 @@ async def resolve_udf_reference(
     metadata: Mapping[str, Any],
     pipeline_registry: Optional[PipelineUdfRegistry],
     require_reference: bool,
+    require_version_pinning: bool = True,
     code_cache: Optional[MutableMapping[str, str]] = None,
 ) -> ResolvedPipelineUdf:
-    _ = require_reference
     udf_id = str(metadata.get("udfId") or metadata.get("udf_id") or "").strip() or None
     udf_code = str(metadata.get("udfCode") or metadata.get("udf_code") or "").strip() or None
     udf_version = _parse_udf_version(metadata.get("udfVersion") or metadata.get("udf_version"))
 
     if udf_code:
         raise PipelineUdfError("udfCode is not allowed; use udfId (+udfVersion)")
+    if require_reference and not udf_id:
+        raise PipelineUdfError("udf requires udfId")
     if not udf_id:
         raise PipelineUdfError("udf requires udfId")
+    if require_version_pinning and udf_version is None:
+        raise PipelineUdfError("udfVersion is required")
 
     if udf_id:
         if not pipeline_registry:

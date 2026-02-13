@@ -20,9 +20,23 @@ from pyspark.sql import SparkSession  # noqa: E402
 from pipeline_worker.main import PipelineWorker  # noqa: E402
 
 
+def _resolve_java_home() -> str:
+    explicit = os.environ.get("JAVA_HOME")
+    if explicit:
+        return explicit
+    for candidate in (
+        "/opt/homebrew/opt/openjdk@17",
+        "/opt/homebrew/opt/openjdk@21",
+        "/opt/homebrew/opt/openjdk",
+    ):
+        if os.path.exists(candidate):
+            return candidate
+    return ""
+
+
 @pytest.fixture(scope="module")
 def spark() -> SparkSession:
-    java_home = os.environ.get("JAVA_HOME", "/opt/homebrew/opt/openjdk")
+    java_home = _resolve_java_home()
     if java_home and os.path.exists(java_home):
         os.environ.setdefault("JAVA_HOME", java_home)
         os.environ.setdefault("PATH", f"{java_home}/bin:" + os.environ.get("PATH", ""))
@@ -376,6 +390,44 @@ async def test_materialize_output_dataframe_rejects_partitioned_json(worker: Pip
             partition_cols=["ds"],
         )
     assert "output_format=json does not support partition_by" in str(exc_info.value)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_materialize_dataset_output_fails_on_duplicate_primary_keys(worker: PipelineWorker) -> None:
+    storage = _StorageStub()
+    worker.storage = storage  # type: ignore[assignment]
+    df = worker.spark.createDataFrame(
+        [
+            (1, "first"),
+            (1, "second"),
+        ],
+        ["id", "name"],
+    )
+
+    with pytest.raises(ValueError) as exc_info:
+        await worker._materialize_dataset_output(
+            output_metadata={
+                "write_mode": "append_only_new_rows",
+                "primary_key_columns": ["id"],
+                "output_format": "parquet",
+            },
+            df=df,
+            artifact_bucket="bucket-dataset",
+            prefix="pipeline/dataset-output",
+            db_name=None,
+            branch=None,
+            dataset_name="dataset_output",
+            execution_semantics="streaming",
+            incremental_inputs_have_additive_updates=True,
+            write_mode="append",
+            file_prefix=None,
+            file_format="parquet",
+            partition_cols=None,
+            base_row_count=2,
+        )
+
+    assert "Duplicate primary_key_columns detected for write_mode=append_only_new_rows" in str(exc_info.value)
 
 
 @pytest.mark.unit

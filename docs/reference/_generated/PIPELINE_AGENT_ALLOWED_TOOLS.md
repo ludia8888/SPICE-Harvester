@@ -1,8 +1,8 @@
 # Pipeline Agent Tool Allowlist
 
 <!-- BEGIN AUTO-GENERATED: pipeline_tooling_reference -->
-> Updated: 2026-02-14T02:58:03+09:00
-> Revision: `2025fdb195b800ea75b094938c77e98cecef217f`
+> Updated: 2026-02-14T05:19:52+09:00
+> Revision: `1b3fff40bb3164e05885cef15a29d51429709e53`
 > Source of truth: `backend/bff/services/pipeline_agent_autonomous_loop.py` (`_PIPELINE_AGENT_ALLOWED_TOOLS`).
 > Regenerate: `python scripts/generate_pipeline_tooling_reference.py`
 
