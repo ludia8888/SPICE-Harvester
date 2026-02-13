@@ -1110,11 +1110,13 @@ def add_stream_join(
     right_node_id: str,
     left_keys: List[str],
     right_keys: List[str],
-    join_type: str = "inner",
+    join_type: Optional[str] = None,
     strategy: str = "dynamic",
     left_event_time_column: Optional[str] = None,
     right_event_time_column: Optional[str] = None,
     allowed_lateness_seconds: Optional[float] = None,
+    left_cache_expiration_seconds: Optional[float] = None,
+    right_cache_expiration_seconds: Optional[float] = None,
     time_direction: Optional[str] = None,
     stream_join_metadata: Optional[Dict[str, Any]] = None,
     node_id: Optional[str] = None,
@@ -1127,11 +1129,30 @@ def add_stream_join(
     rk = _ensure_string_list(right_keys, name="right_keys")
     if len(lk) != len(rk):
         raise PipelinePlanBuilderError("left_keys/right_keys must have the same length")
-    join_type_norm = str(join_type or "inner").strip().lower() or "inner"
     strategy_norm = str(strategy or "dynamic").strip().lower() or "dynamic"
     if strategy_norm not in {"dynamic", "left_lookup", "static"}:
         raise PipelinePlanBuilderError("strategy must be one of: dynamic|left_lookup|static")
     stream_meta = dict(stream_join_metadata or {})
+    warnings: List[str] = []
+
+    join_type_raw = (
+        join_type
+        if join_type is not None and str(join_type).strip()
+        else (stream_meta.get("joinType") or stream_meta.get("join_type"))
+    )
+    if join_type_raw is None or str(join_type_raw).strip() == "":
+        join_type_norm = "left" if strategy_norm == "left_lookup" else "full"
+    else:
+        join_type_norm = str(join_type_raw).strip().lower()
+    if strategy_norm == "left_lookup" and join_type_norm != "left":
+        warnings.append("streamJoin strategy=left_lookup forces joinType=left")
+        join_type_norm = "left"
+    if strategy_norm in {"dynamic", "static"} and join_type_norm not in {"full", "outer", "full_outer", "fullouter"}:
+        warnings.append("streamJoin strategy=dynamic|static forces joinType=full (outer semantics)")
+        join_type_norm = "full"
+    if join_type_norm in {"outer", "full_outer", "fullouter"}:
+        join_type_norm = "full"
+
     stream_meta["strategy"] = strategy_norm
 
     direction_norm = str(
@@ -1177,6 +1198,43 @@ def add_stream_join(
             raise PipelinePlanBuilderError("allowed_lateness_seconds must be >= 0")
         stream_meta["allowedLatenessSeconds"] = lateness_value
 
+    def _parse_positive_float(raw: Any, *, field_name: str) -> Optional[float]:
+        if raw is None or str(raw).strip() == "":
+            return None
+        try:
+            value = float(str(raw).strip())
+        except (TypeError, ValueError) as exc:
+            raise PipelinePlanBuilderError(f"{field_name} must be numeric") from exc
+        if value <= 0:
+            raise PipelinePlanBuilderError(f"{field_name} must be > 0")
+        return value
+
+    left_cache_raw: Optional[Any] = left_cache_expiration_seconds
+    if left_cache_raw is None:
+        for key in ("leftCacheExpirationSeconds", "left_cache_expiration_seconds"):
+            if key in stream_meta and stream_meta.get(key) is not None and str(stream_meta.get(key)).strip() != "":
+                left_cache_raw = stream_meta.get(key)
+                break
+    right_cache_raw: Optional[Any] = right_cache_expiration_seconds
+    if right_cache_raw is None:
+        for key in ("rightCacheExpirationSeconds", "right_cache_expiration_seconds"):
+            if key in stream_meta and stream_meta.get(key) is not None and str(stream_meta.get(key)).strip() != "":
+                right_cache_raw = stream_meta.get(key)
+                break
+
+    left_cache_value = _parse_positive_float(
+        left_cache_raw,
+        field_name="left_cache_expiration_seconds",
+    )
+    right_cache_value = _parse_positive_float(
+        right_cache_raw,
+        field_name="right_cache_expiration_seconds",
+    )
+    if left_cache_value is not None:
+        stream_meta["leftCacheExpirationSeconds"] = left_cache_value
+    if right_cache_value is not None:
+        stream_meta["rightCacheExpirationSeconds"] = right_cache_value
+
     if strategy_norm == "dynamic":
         missing: List[str] = []
         if not left_event:
@@ -1185,11 +1243,15 @@ def add_stream_join(
             missing.append("right_event_time_column")
         if lateness_value is None:
             missing.append("allowed_lateness_seconds")
+        if left_cache_value is None:
+            missing.append("left_cache_expiration_seconds")
+        if right_cache_value is None:
+            missing.append("right_cache_expiration_seconds")
         if missing:
             raise PipelinePlanBuilderError(
                 "dynamic streamJoin requires: " + ", ".join(missing)
             )
-    return add_transform(
+    mutation = add_transform(
         plan,
         operation="streamJoin",
         input_node_ids=[left, right],
@@ -1200,6 +1262,13 @@ def add_stream_join(
             "rightKeys": rk,
             "streamJoin": stream_meta,
         },
+    )
+    if not warnings:
+        return mutation
+    return PlanMutation(
+        plan=mutation.plan,
+        node_id=mutation.node_id,
+        warnings=tuple([*mutation.warnings, *warnings]),
     )
 
 

@@ -383,6 +383,14 @@ def validate_pipeline_definition(
                         errors.append(f"streamJoin dynamic requires allowedLatenessSeconds on node {node_id}")
                     elif stream_spec.allowed_lateness_seconds < 0:
                         errors.append(f"streamJoin allowedLatenessSeconds must be >= 0 on node {node_id}")
+                    if stream_spec.left_cache_expiration_seconds is None:
+                        errors.append(f"streamJoin dynamic requires leftCacheExpirationSeconds on node {node_id}")
+                    elif stream_spec.left_cache_expiration_seconds <= 0:
+                        errors.append(f"streamJoin leftCacheExpirationSeconds must be > 0 on node {node_id}")
+                    if stream_spec.right_cache_expiration_seconds is None:
+                        errors.append(f"streamJoin dynamic requires rightCacheExpirationSeconds on node {node_id}")
+                    elif stream_spec.right_cache_expiration_seconds <= 0:
+                        errors.append(f"streamJoin rightCacheExpirationSeconds must be > 0 on node {node_id}")
 
         if operation == "union":
             if len(incoming.get(node_id, [])) < 2:

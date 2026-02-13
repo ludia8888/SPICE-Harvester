@@ -3352,8 +3352,11 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
         if policy.resolved_write_mode == DatasetWriteMode.ALWAYS_APPEND:
             materialized_df = input_aligned
         elif policy.resolved_write_mode == DatasetWriteMode.CHANGELOG:
-            # Changelog appends all rows produced in the current transaction.
-            materialized_df = input_aligned
+            materialized_df = self._select_new_or_changed_rows(
+                input_df=input_aligned,
+                existing_df=existing_aligned,
+                pk_columns=pk_columns,
+            )
         elif policy.resolved_write_mode == DatasetWriteMode.APPEND_ONLY_NEW_ROWS:
             deduped_input = input_aligned.dropDuplicates(pk_columns) if pk_columns else input_aligned
             if existing_aligned.columns and pk_columns:
@@ -3364,6 +3367,8 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
         elif policy.resolved_write_mode == DatasetWriteMode.SNAPSHOT_DIFFERENCE:
             if existing_aligned.columns and pk_columns:
                 existing_keys = existing_aligned.select(*pk_columns).distinct()
+                # Foundry snapshot_difference keeps only newly seen PK rows in this transaction.
+                # It intentionally does not deduplicate duplicates within the incoming transaction.
                 materialized_df = input_aligned.join(existing_keys, on=pk_columns, how="left_anti")
             else:
                 materialized_df = input_aligned
@@ -3561,6 +3566,33 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
             if column not in existing:
                 aligned = aligned.withColumn(column, F.lit(None))
         return aligned.select(*columns)
+
+    def _select_new_or_changed_rows(
+        self,
+        *,
+        input_df: DataFrame,
+        existing_df: DataFrame,
+        pk_columns: List[str],
+    ) -> DataFrame:
+        deduped_input = input_df.dropDuplicates(pk_columns) if pk_columns else input_df
+        if not existing_df.columns or not pk_columns:
+            return deduped_input
+
+        tracked_columns = [column for column in deduped_input.columns if column not in set(pk_columns)]
+        existing_selected = [F.col(column) for column in pk_columns]
+        existing_selected.append(F.lit(1).alias("__existing_present__"))
+        existing_selected.extend(
+            F.col(column).alias(f"__existing_{column}") for column in tracked_columns
+        )
+        existing_lookup = existing_df.dropDuplicates(pk_columns).select(*existing_selected)
+        joined = deduped_input.join(existing_lookup, on=pk_columns, how="left")
+        if not tracked_columns:
+            return joined.filter(F.col("__existing_present__").isNull()).select(*deduped_input.columns)
+
+        changed_expr = F.col("__existing_present__").isNull()
+        for column in tracked_columns:
+            changed_expr = changed_expr | (~F.col(column).eqNullSafe(F.col(f"__existing_{column}")))
+        return joined.filter(changed_expr).select(*deduped_input.columns)
 
     def _post_filter_false_expr(self, *, post_filtering_column: str) -> Any:
         normalized = F.lower(F.trim(F.col(post_filtering_column).cast("string")))

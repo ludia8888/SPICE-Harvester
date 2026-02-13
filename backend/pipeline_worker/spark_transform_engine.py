@@ -31,6 +31,7 @@ from shared.services.pipeline.pipeline_transform_spec import (
     normalize_operation,
     normalize_union_mode,
     resolve_join_spec,
+    resolve_stream_join_effective_join_type,
     resolve_stream_join_spec,
 )
 from shared.services.pipeline.pipeline_udf_runtime import compile_udf
@@ -274,13 +275,26 @@ def _apply_join(ctx: _SparkTransformContext) -> DataFrame:
 def _apply_stream_join(ctx: _SparkTransformContext) -> DataFrame:
     if len(ctx.inputs) < 2:
         return ctx.inputs[0]
+    join_spec = resolve_join_spec(ctx.metadata)
     stream_spec = resolve_stream_join_spec(ctx.metadata)
     strategy = stream_spec.strategy
     if strategy not in {"dynamic", "left_lookup", "static"}:
         raise ValueError(f"Invalid streamJoin strategy: {strategy}")
+    effective_join_type = resolve_stream_join_effective_join_type(
+        strategy=strategy,
+        requested_join_type=join_spec.join_type,
+    )
+    join_metadata = dict(ctx.metadata)
+    join_metadata["joinType"] = effective_join_type
+    join_ctx = _SparkTransformContext(
+        metadata=join_metadata,
+        inputs=ctx.inputs,
+        parameters=ctx.parameters,
+        apply_casts=ctx.apply_casts,
+    )
 
     if strategy == "static":
-        return _apply_join(ctx)
+        return _apply_join(join_ctx)
 
     left_keys, right_keys = _resolve_join_keys(ctx.metadata)
     if not left_keys or not right_keys:
@@ -306,7 +320,7 @@ def _apply_stream_join(ctx: _SparkTransformContext) -> DataFrame:
             right_lookup = right.dropDuplicates(resolved_right_keys)
         return _apply_join(
             _SparkTransformContext(
-                metadata=ctx.metadata,
+                metadata=join_metadata,
                 inputs=[left, right_lookup],
                 parameters=ctx.parameters,
                 apply_casts=ctx.apply_casts,
@@ -323,10 +337,27 @@ def _apply_stream_join(ctx: _SparkTransformContext) -> DataFrame:
         raise ValueError("streamJoin dynamic requires allowedLatenessSeconds")
     if stream_spec.allowed_lateness_seconds < 0:
         raise ValueError("streamJoin allowedLatenessSeconds must be >= 0")
+    if stream_spec.left_cache_expiration_seconds is None:
+        raise ValueError("streamJoin dynamic requires leftCacheExpirationSeconds")
+    if stream_spec.left_cache_expiration_seconds <= 0:
+        raise ValueError("streamJoin leftCacheExpirationSeconds must be > 0")
+    if stream_spec.right_cache_expiration_seconds is None:
+        raise ValueError("streamJoin dynamic requires rightCacheExpirationSeconds")
+    if stream_spec.right_cache_expiration_seconds <= 0:
+        raise ValueError("streamJoin rightCacheExpirationSeconds must be > 0")
     if time_direction not in {"backward", "forward", "symmetric"}:
         raise ValueError(f"Invalid streamJoin timeDirection: {time_direction}")
 
-    joined = _apply_join(ctx)
+    left_tagged = ctx.inputs[0].withColumn("__stream_left_row_id__", F.monotonically_increasing_id())
+    right_tagged = ctx.inputs[1].withColumn("__stream_right_row_id__", F.monotonically_increasing_id())
+    joined = _apply_join(
+        _SparkTransformContext(
+            metadata=join_metadata,
+            inputs=[left_tagged, right_tagged],
+            parameters=ctx.parameters,
+            apply_casts=ctx.apply_casts,
+        )
+    )
     if left_event_col not in joined.columns:
         raise ValueError(f"streamJoin dynamic leftEventTimeColumn missing from join output: {left_event_col}")
     resolved_right_event_col = _resolve_stream_join_right_column(
@@ -337,21 +368,81 @@ def _apply_stream_join(ctx: _SparkTransformContext) -> DataFrame:
     if resolved_right_event_col not in joined.columns:
         raise ValueError(f"streamJoin dynamic rightEventTimeColumn missing from join output: {right_event_col}")
     lateness_seconds = float(stream_spec.allowed_lateness_seconds)
+    cache_horizon_seconds = min(
+        float(stream_spec.left_cache_expiration_seconds or 0.0),
+        float(stream_spec.right_cache_expiration_seconds or 0.0),
+    )
     left_ts = F.to_timestamp(F.col(left_event_col))
     right_ts = F.to_timestamp(F.col(resolved_right_event_col))
     left_epoch = F.unix_timestamp(left_ts)
     right_epoch = F.unix_timestamp(right_ts)
     if time_direction == "backward":
-        within_lateness = (
-            right_epoch <= left_epoch
-        ) & ((left_epoch - right_epoch) <= F.lit(lateness_seconds))
+        delta = left_epoch - right_epoch
+        within_lateness = (right_epoch <= left_epoch) & (delta <= F.lit(lateness_seconds))
+        within_cache = delta <= F.lit(cache_horizon_seconds)
     elif time_direction == "forward":
-        within_lateness = (
-            left_epoch <= right_epoch
-        ) & ((right_epoch - left_epoch) <= F.lit(lateness_seconds))
+        delta = right_epoch - left_epoch
+        within_lateness = (left_epoch <= right_epoch) & (delta <= F.lit(lateness_seconds))
+        within_cache = delta <= F.lit(cache_horizon_seconds)
     else:
-        within_lateness = F.abs(left_epoch - right_epoch) <= F.lit(lateness_seconds)
-    return joined.filter(within_lateness)
+        delta = F.abs(left_epoch - right_epoch)
+        within_lateness = delta <= F.lit(lateness_seconds)
+        within_cache = delta <= F.lit(cache_horizon_seconds)
+    both_present = left_ts.isNotNull() & right_ts.isNotNull()
+    within_match = within_lateness & within_cache
+    base_output = joined.filter((~both_present) | within_match)
+    mismatched = joined.filter(both_present & (~within_match))
+
+    joined_schema_types = {field.name: field.dataType for field in joined.schema.fields}
+    joined_columns = list(joined.columns)
+    left_columns = set(left_tagged.columns)
+    right_columns = set(right_tagged.columns)
+
+    resolved_left_keys = [_resolve_join_col(left_tagged, key) for key in left_keys]
+    resolved_right_keys = [_resolve_join_col(right_tagged, key) for key in right_keys]
+    shared_join_key_names = {
+        left_key_name
+        for left_key_name, right_key_name in zip(resolved_left_keys, resolved_right_keys)
+        if left_key_name == right_key_name
+    }
+
+    right_specific_columns: set[str] = {
+        col for col in right_columns if col not in left_columns and col in joined_columns
+    }
+    shared_collisions = (left_columns & right_columns) - shared_join_key_names
+    for column in shared_collisions:
+        prefixed = f"right_{column}"
+        for joined_column in joined_columns:
+            if joined_column == prefixed or joined_column.startswith(f"{prefixed}__"):
+                right_specific_columns.add(joined_column)
+    right_specific_columns.add("__stream_right_row_id__")
+
+    left_specific_columns: set[str] = {
+        col for col in left_columns if col not in right_columns and col in joined_columns
+    }
+    left_specific_columns.update(col for col in shared_collisions if col in joined_columns)
+    left_specific_columns.add("__stream_left_row_id__")
+
+    def _null_columns(df: DataFrame, columns: set[str]) -> DataFrame:
+        out = df
+        for column in columns:
+            if column not in out.columns:
+                continue
+            out = out.withColumn(column, F.lit(None).cast(joined_schema_types[column]))
+        return out
+
+    output = base_output
+    if effective_join_type in {"left", "full"}:
+        left_unmatched = _null_columns(mismatched, right_specific_columns)
+        output = output.unionByName(left_unmatched, allowMissingColumns=True)
+    if effective_join_type in {"right", "full"}:
+        right_unmatched = _null_columns(mismatched, left_specific_columns)
+        output = output.unionByName(right_unmatched, allowMissingColumns=True)
+
+    drop_columns = [col for col in ("__stream_left_row_id__", "__stream_right_row_id__") if col in output.columns]
+    if drop_columns:
+        output = output.drop(*drop_columns)
+    return output
 
 
 def _apply_filter(ctx: _SparkTransformContext) -> DataFrame:

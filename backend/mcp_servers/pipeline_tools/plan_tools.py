@@ -728,13 +728,19 @@ async def _plan_add_stream_join(_server: Any, arguments: Dict[str, Any]) -> Any:
         right_node_id=str(arguments.get("right_node_id") or ""),
         left_keys=normalize_string_list(arguments.get("left_keys") or arguments.get("leftKeys") or []),
         right_keys=normalize_string_list(arguments.get("right_keys") or arguments.get("rightKeys") or []),
-        join_type=str(arguments.get("join_type") or arguments.get("joinType") or "inner"),
+        join_type=arguments.get("join_type") or arguments.get("joinType"),
         strategy=str(arguments.get("strategy") or "dynamic"),
         left_event_time_column=arguments.get("left_event_time_column") or arguments.get("leftEventTimeColumn"),
         right_event_time_column=arguments.get("right_event_time_column") or arguments.get("rightEventTimeColumn"),
         allowed_lateness_seconds=arguments.get("allowed_lateness_seconds")
         if arguments.get("allowed_lateness_seconds") is not None
         else arguments.get("allowedLatenessSeconds"),
+        left_cache_expiration_seconds=arguments.get("left_cache_expiration_seconds")
+        if arguments.get("left_cache_expiration_seconds") is not None
+        else arguments.get("leftCacheExpirationSeconds"),
+        right_cache_expiration_seconds=arguments.get("right_cache_expiration_seconds")
+        if arguments.get("right_cache_expiration_seconds") is not None
+        else arguments.get("rightCacheExpirationSeconds"),
         time_direction=arguments.get("time_direction") or arguments.get("timeDirection"),
         stream_join_metadata=(
             arguments.get("stream_join_metadata")

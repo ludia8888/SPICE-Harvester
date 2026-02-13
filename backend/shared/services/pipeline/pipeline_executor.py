@@ -51,6 +51,7 @@ from shared.services.pipeline.pipeline_transform_spec import (
     normalize_operation,
     normalize_union_mode,
     resolve_join_spec,
+    resolve_stream_join_effective_join_type,
     resolve_stream_join_spec,
 )
 from shared.services.pipeline.pipeline_validation_utils import (
@@ -1306,28 +1307,7 @@ def _join_tables(
     if resolved_left and resolved_right and len(resolved_left) != len(resolved_right):
         raise ValueError("join requires leftKeys/rightKeys of the same length")
 
-    # Enterprise Enhancement (2026-01): Detect and warn about column collisions
-    # Column collision causes silent renames that can confuse downstream transforms
-    right_column_map: List[Tuple[str, str]] = []
-    collision_renames: List[Tuple[str, str]] = []
-    for col in right.columns:
-        if col in left.columns:
-            mapped = f"right_{col}"
-            collision_renames.append((col, mapped))
-        else:
-            mapped = col
-        right_column_map.append((col, mapped))
-
-    # Log collision warning for Agent visibility
-    if collision_renames:
-        import logging
-        logger = logging.getLogger(__name__)
-        rename_list = ", ".join(f"'{orig}' -> '{new}'" for orig, new in collision_renames)
-        logger.warning(
-            f"JOIN COLUMN COLLISION: Columns renamed to avoid duplicates: {rename_list}. "
-            "Downstream transforms should use the renamed column names."
-        )
-
+    right_column_map = _build_join_output_layout(left.columns, right.columns)
     columns = left.columns + [mapped for _, mapped in right_column_map]
 
     rows: List[Dict[str, Any]] = []
@@ -1396,6 +1376,33 @@ def _join_tables(
     return PipelineTable(columns=columns, rows=rows)
 
 
+def _build_join_output_layout(
+    left_columns: List[str],
+    right_columns: List[str],
+) -> List[Tuple[str, str]]:
+    # Deterministically rename right-side collisions to preserve both payloads.
+    right_column_map: List[Tuple[str, str]] = []
+    collision_renames: List[Tuple[str, str]] = []
+    for col in right_columns:
+        if col in left_columns:
+            mapped = f"right_{col}"
+            collision_renames.append((col, mapped))
+        else:
+            mapped = col
+        right_column_map.append((col, mapped))
+
+    if collision_renames:
+        import logging
+
+        logger = logging.getLogger(__name__)
+        rename_list = ", ".join(f"'{orig}' -> '{new}'" for orig, new in collision_renames)
+        logger.warning(
+            f"JOIN COLUMN COLLISION: Columns renamed to avoid duplicates: {rename_list}. "
+            "Downstream transforms should use the renamed column names."
+        )
+    return right_column_map
+
+
 def _stream_join_tables(
     left: PipelineTable,
     right: PipelineTable,
@@ -1408,12 +1415,16 @@ def _stream_join_tables(
     strategy = stream_spec.strategy
     if strategy not in {"dynamic", "left_lookup", "static"}:
         raise ValueError(f"Invalid streamJoin strategy: {strategy}")
+    effective_join_type = resolve_stream_join_effective_join_type(
+        strategy=strategy,
+        requested_join_type=join_spec.join_type,
+    )
 
     if strategy == "static":
         return _join_tables(
             left,
             right,
-            join_type=join_spec.join_type,
+            join_type=effective_join_type,
             left_key=join_spec.left_key,
             right_key=join_spec.right_key,
             left_keys=join_spec.left_keys,
@@ -1444,7 +1455,7 @@ def _stream_join_tables(
         return _join_tables(
             left,
             right_join_table,
-            join_type=join_spec.join_type,
+            join_type=effective_join_type,
             left_key=join_spec.left_key,
             right_key=join_spec.right_key,
             left_keys=left_keys,
@@ -1462,13 +1473,21 @@ def _stream_join_tables(
         raise ValueError("streamJoin dynamic requires allowedLatenessSeconds")
     if stream_spec.allowed_lateness_seconds < 0:
         raise ValueError("streamJoin allowedLatenessSeconds must be >= 0")
+    if stream_spec.left_cache_expiration_seconds is None:
+        raise ValueError("streamJoin dynamic requires leftCacheExpirationSeconds")
+    if stream_spec.left_cache_expiration_seconds <= 0:
+        raise ValueError("streamJoin leftCacheExpirationSeconds must be > 0")
+    if stream_spec.right_cache_expiration_seconds is None:
+        raise ValueError("streamJoin dynamic requires rightCacheExpirationSeconds")
+    if stream_spec.right_cache_expiration_seconds <= 0:
+        raise ValueError("streamJoin rightCacheExpirationSeconds must be > 0")
     if time_direction not in {"backward", "forward", "symmetric"}:
         raise ValueError(f"Invalid streamJoin timeDirection: {time_direction}")
 
     joined = _join_tables(
         left,
         right,
-        join_type=join_spec.join_type,
+        join_type=effective_join_type,
         left_key=join_spec.left_key,
         right_key=join_spec.right_key,
         left_keys=left_keys,
@@ -1486,23 +1505,62 @@ def _stream_join_tables(
     if resolved_right_event_col not in joined.columns:
         raise ValueError(f"streamJoin dynamic rightEventTimeColumn missing from join output: {right_event_col}")
 
+    right_column_map = _build_join_output_layout(left.columns, right.columns)
+    right_specific_columns = [mapped for _, mapped in right_column_map]
+    left_columns = list(left.columns)
+
     lateness_seconds = float(stream_spec.allowed_lateness_seconds)
+    cache_horizon_seconds = min(
+        float(stream_spec.left_cache_expiration_seconds or 0.0),
+        float(stream_spec.right_cache_expiration_seconds or 0.0),
+    )
     rows: List[Dict[str, Any]] = []
+    mismatched_pairs: List[Dict[str, Any]] = []
     for row in joined.rows:
         left_epoch = _to_epoch_seconds(row.get(left_event_col))
         right_epoch = _to_epoch_seconds(row.get(resolved_right_event_col))
         if left_epoch is None or right_epoch is None:
-            continue
-        if time_direction == "backward":
-            is_within_lateness = right_epoch <= left_epoch and (left_epoch - right_epoch) <= lateness_seconds
-        elif time_direction == "forward":
-            is_within_lateness = left_epoch <= right_epoch and (right_epoch - left_epoch) <= lateness_seconds
-        else:
-            is_within_lateness = abs(left_epoch - right_epoch) <= lateness_seconds
-        if is_within_lateness:
             rows.append(row)
             if max_output_rows is not None and len(rows) >= int(max_output_rows):
                 break
+            continue
+        if time_direction == "backward":
+            delta = left_epoch - right_epoch
+            is_within_lateness = right_epoch <= left_epoch and delta <= lateness_seconds
+            is_within_cache = delta <= cache_horizon_seconds
+        elif time_direction == "forward":
+            delta = right_epoch - left_epoch
+            is_within_lateness = left_epoch <= right_epoch and delta <= lateness_seconds
+            is_within_cache = delta <= cache_horizon_seconds
+        else:
+            delta = abs(left_epoch - right_epoch)
+            is_within_lateness = delta <= lateness_seconds
+            is_within_cache = delta <= cache_horizon_seconds
+        if is_within_lateness and is_within_cache:
+            rows.append(row)
+            if max_output_rows is not None and len(rows) >= int(max_output_rows):
+                break
+        else:
+            mismatched_pairs.append(row)
+
+    if mismatched_pairs and effective_join_type in {"left", "full"}:
+        for row in mismatched_pairs:
+            left_row = {column: row.get(column) for column in left_columns}
+            for column in right_specific_columns:
+                left_row[column] = None
+            rows.append(left_row)
+            if max_output_rows is not None and len(rows) >= int(max_output_rows):
+                break
+
+    if mismatched_pairs and effective_join_type in {"right", "full"}:
+        for row in mismatched_pairs:
+            right_row = {column: None for column in left_columns}
+            for column in right_specific_columns:
+                right_row[column] = row.get(column)
+            rows.append(right_row)
+            if max_output_rows is not None and len(rows) >= int(max_output_rows):
+                break
+
     return PipelineTable(columns=joined.columns, rows=rows)
 
 

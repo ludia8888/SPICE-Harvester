@@ -91,6 +91,8 @@ def test_validate_pipeline_definition_accepts_advanced_transforms() -> None:
                         "leftEventTimeColumn": "event_time_left",
                         "rightEventTimeColumn": "event_time_right",
                         "allowedLatenessSeconds": 120,
+                        "leftCacheExpirationSeconds": 300,
+                        "rightCacheExpirationSeconds": 300,
                     },
                 },
             },
@@ -174,6 +176,8 @@ def test_validate_pipeline_definition_rejects_invalid_stream_join_time_direction
                         "leftEventTimeColumn": "left_ts",
                         "rightEventTimeColumn": "right_ts",
                         "allowedLatenessSeconds": 30,
+                        "leftCacheExpirationSeconds": 300,
+                        "rightCacheExpirationSeconds": 300,
                     },
                 },
             },
@@ -227,6 +231,8 @@ def test_validate_pipeline_definition_rejects_dynamic_stream_join_without_event_
     assert any("streamJoin dynamic requires leftEventTimeColumn" in err for err in result.errors)
     assert any("streamJoin dynamic requires rightEventTimeColumn" in err for err in result.errors)
     assert any("streamJoin dynamic requires allowedLatenessSeconds" in err for err in result.errors)
+    assert any("streamJoin dynamic requires leftCacheExpirationSeconds" in err for err in result.errors)
+    assert any("streamJoin dynamic requires rightCacheExpirationSeconds" in err for err in result.errors)
 
 
 @pytest.mark.unit
@@ -269,5 +275,6 @@ def test_builder_helpers_add_geospatial_pattern_mining_stream_join() -> None:
     assert nodes["geo1"]["metadata"]["operation"] == "geospatial"
     assert nodes["pm1"]["metadata"]["operation"] == "patternMining"
     assert nodes["sj1"]["metadata"]["operation"] == "streamJoin"
+    assert nodes["sj1"]["metadata"]["joinType"] == "left"
     assert nodes["sj1"]["metadata"]["streamJoin"]["strategy"] == "left_lookup"
     assert nodes["sj1"]["metadata"]["streamJoin"]["timeDirection"] == "backward"

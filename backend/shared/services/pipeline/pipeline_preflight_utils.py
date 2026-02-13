@@ -841,6 +841,10 @@ async def compute_pipeline_preflight(
                             missing_fields.append("rightEventTimeColumn")
                         if stream_spec.allowed_lateness_seconds is None:
                             missing_fields.append("allowedLatenessSeconds")
+                        if stream_spec.left_cache_expiration_seconds is None:
+                            missing_fields.append("leftCacheExpirationSeconds")
+                        if stream_spec.right_cache_expiration_seconds is None:
+                            missing_fields.append("rightCacheExpirationSeconds")
                         if missing_fields:
                             issues.append(
                                 {
@@ -857,6 +861,24 @@ async def compute_pipeline_preflight(
                                     "severity": "error",
                                     "node_id": node_id,
                                     "message": "streamJoin allowedLatenessSeconds must be >= 0",
+                                }
+                            )
+                        elif stream_spec.left_cache_expiration_seconds <= 0:
+                            issues.append(
+                                {
+                                    "kind": "stream_join_left_cache_expiration_invalid",
+                                    "severity": "error",
+                                    "node_id": node_id,
+                                    "message": "streamJoin leftCacheExpirationSeconds must be > 0",
+                                }
+                            )
+                        elif stream_spec.right_cache_expiration_seconds <= 0:
+                            issues.append(
+                                {
+                                    "kind": "stream_join_right_cache_expiration_invalid",
+                                    "severity": "error",
+                                    "node_id": node_id,
+                                    "message": "streamJoin rightCacheExpirationSeconds must be > 0",
                                 }
                             )
                         elif _schema_empty(inputs[0]) or _schema_empty(inputs[1]) or inputs[0].dynamic_columns or inputs[1].dynamic_columns:

@@ -302,18 +302,24 @@ def _resolve_default_mode(
     *,
     execution_semantics: str,
     has_incremental_input: bool,
+    primary_key_columns: List[str],
     incremental_inputs_have_additive_updates: Optional[bool],
     warnings: List[str],
 ) -> DatasetWriteMode:
     _ = execution_semantics
     if not has_incremental_input:
         return DatasetWriteMode.SNAPSHOT_REPLACE
-    if incremental_inputs_have_additive_updates is True:
-        return DatasetWriteMode.ALWAYS_APPEND
     if incremental_inputs_have_additive_updates is False:
         return DatasetWriteMode.SNAPSHOT_REPLACE
+    if incremental_inputs_have_additive_updates is None:
+        warnings.append(
+            "write_mode default resolved to snapshot_replace because additive incremental update signal is unavailable"
+        )
+        return DatasetWriteMode.SNAPSHOT_REPLACE
+    if primary_key_columns:
+        return DatasetWriteMode.APPEND_ONLY_NEW_ROWS
     warnings.append(
-        "write_mode default resolved to always_append because additive update signal is unavailable"
+        "write_mode default resolved to always_append because primary_key_columns are missing"
     )
     return DatasetWriteMode.ALWAYS_APPEND
 
@@ -378,6 +384,7 @@ def resolve_dataset_write_policy(
         bool(has_incremental_input) if has_incremental_input is not None else inferred_has_incremental_input
     )
     effective_additive_updates = _normalize_bool(incremental_inputs_have_additive_updates)
+    primary_key_columns = _normalize_primary_key_columns(normalized.metadata.get("primary_key_columns"))
     requested_write_mode = _text(normalized.metadata.get("write_mode") or DatasetWriteMode.DEFAULT.value).lower()
     if not requested_write_mode:
         requested_write_mode = DatasetWriteMode.DEFAULT.value
@@ -391,6 +398,7 @@ def resolve_dataset_write_policy(
         resolved_mode = _resolve_default_mode(
             execution_semantics=resolved_execution,
             has_incremental_input=effective_has_incremental_input,
+            primary_key_columns=primary_key_columns,
             incremental_inputs_have_additive_updates=effective_additive_updates,
             warnings=warnings,
         )
@@ -399,7 +407,6 @@ def resolve_dataset_write_policy(
 
     output_format = _text(normalized.metadata.get("output_format") or "parquet").lower() or "parquet"
     partition_by = _normalize_partition_by(normalized.metadata.get("partition_by"))
-    primary_key_columns = _normalize_primary_key_columns(normalized.metadata.get("primary_key_columns"))
     post_filtering_column = _text(normalized.metadata.get("post_filtering_column")) or None
 
     policy = ResolvedDatasetWritePolicy(

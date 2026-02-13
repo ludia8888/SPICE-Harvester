@@ -41,15 +41,15 @@ def test_resolve_dataset_write_policy_default_snapshot() -> None:
 
 
 @pytest.mark.unit
-def test_resolve_dataset_write_policy_default_incremental_with_pk() -> None:
+def test_resolve_dataset_write_policy_default_incremental_with_pk_without_additive_signal() -> None:
     policy = resolve_dataset_write_policy(
         definition={},
         output_metadata={"primary_key_columns": ["id"]},
         execution_semantics="incremental",
     )
-    assert policy.resolved_write_mode == DatasetWriteMode.ALWAYS_APPEND
-    assert policy.runtime_write_mode == "append"
-    assert any("additive update signal is unavailable" in warning for warning in policy.warnings)
+    assert policy.resolved_write_mode == DatasetWriteMode.SNAPSHOT_REPLACE
+    assert policy.runtime_write_mode == "overwrite"
+    assert any("additive incremental update signal is unavailable" in warning for warning in policy.warnings)
 
 
 @pytest.mark.unit
@@ -59,8 +59,8 @@ def test_resolve_dataset_write_policy_default_incremental_without_pk() -> None:
         output_metadata={},
         execution_semantics="incremental",
     )
-    assert policy.resolved_write_mode == DatasetWriteMode.ALWAYS_APPEND
-    assert any("additive update signal is unavailable" in warning for warning in policy.warnings)
+    assert policy.resolved_write_mode == DatasetWriteMode.SNAPSHOT_REPLACE
+    assert any("additive incremental update signal is unavailable" in warning for warning in policy.warnings)
 
 
 @pytest.mark.unit
@@ -85,8 +85,22 @@ def test_resolve_dataset_write_policy_default_incremental_with_additive_updates_
         has_incremental_input=True,
         incremental_inputs_have_additive_updates=True,
     )
+    assert policy.resolved_write_mode == DatasetWriteMode.APPEND_ONLY_NEW_ROWS
+    assert policy.runtime_write_mode == "append"
+
+
+@pytest.mark.unit
+def test_resolve_dataset_write_policy_default_incremental_additive_without_pk() -> None:
+    policy = resolve_dataset_write_policy(
+        definition={},
+        output_metadata={},
+        execution_semantics="incremental",
+        has_incremental_input=True,
+        incremental_inputs_have_additive_updates=True,
+    )
     assert policy.resolved_write_mode == DatasetWriteMode.ALWAYS_APPEND
     assert policy.runtime_write_mode == "append"
+    assert any("primary_key_columns are missing" in warning for warning in policy.warnings)
 
 
 @pytest.mark.unit

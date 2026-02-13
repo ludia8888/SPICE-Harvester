@@ -50,6 +50,8 @@ class StreamJoinSpec:
     right_event_time_column: Optional[str]
     allowed_lateness_seconds: Optional[float]
     time_direction: str
+    left_cache_expiration_seconds: Optional[float]
+    right_cache_expiration_seconds: Optional[float]
 
 
 def normalize_operation(value: Any) -> str:
@@ -141,13 +143,55 @@ def resolve_stream_join_spec(metadata: Dict[str, Any]) -> StreamJoinSpec:
         except (TypeError, ValueError) as exc:
             raise ValueError("streamJoin allowedLatenessSeconds must be a number") from exc
 
+    def _resolve_number(keys: List[str], *, error_message: str) -> Optional[float]:
+        raw_value: Optional[Any] = None
+        for source in (stream_meta, metadata):
+            for key in keys:
+                if key not in source:
+                    continue
+                value = source.get(key)
+                if value is None or str(value).strip() == "":
+                    continue
+                raw_value = value
+                break
+            if raw_value is not None:
+                break
+        if raw_value is None:
+            return None
+        try:
+            return float(str(raw_value).strip())
+        except (TypeError, ValueError) as exc:
+            raise ValueError(error_message) from exc
+
+    left_cache_expiration_seconds = _resolve_number(
+        ["leftCacheExpirationSeconds", "left_cache_expiration_seconds"],
+        error_message="streamJoin leftCacheExpirationSeconds must be a number",
+    )
+    right_cache_expiration_seconds = _resolve_number(
+        ["rightCacheExpirationSeconds", "right_cache_expiration_seconds"],
+        error_message="streamJoin rightCacheExpirationSeconds must be a number",
+    )
+
     return StreamJoinSpec(
         strategy=strategy,
         left_event_time_column=left_event_time_column,
         right_event_time_column=right_event_time_column,
         allowed_lateness_seconds=allowed_lateness_seconds,
         time_direction=time_direction,
+        left_cache_expiration_seconds=left_cache_expiration_seconds,
+        right_cache_expiration_seconds=right_cache_expiration_seconds,
     )
+
+
+def resolve_stream_join_effective_join_type(*, strategy: str, requested_join_type: str) -> str:
+    strategy_norm = str(strategy or "dynamic").strip().lower() or "dynamic"
+    requested_norm = str(requested_join_type or "").strip().lower()
+    if strategy_norm == "left_lookup":
+        return "left"
+    if requested_norm in {"full", "outer", "full_outer", "fullouter"}:
+        return "full"
+    # Foundry stream-stream join behavior is outer by default.
+    return "full"
 
 
 def normalize_union_mode(metadata: Dict[str, Any]) -> str:

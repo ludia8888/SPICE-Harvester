@@ -209,13 +209,101 @@ def test_stream_join_transform(worker: PipelineWorker) -> None:
                 "leftEventTimeColumn": "left_event_time",
                 "rightEventTimeColumn": "right_event_time",
                 "allowedLatenessSeconds": 60,
+                "leftCacheExpirationSeconds": 300,
+                "rightCacheExpirationSeconds": 300,
             },
         },
         [left, right],
         {},
     )
     rows = out.orderBy("id").collect()
-    assert len(rows) == 1
-    assert rows[0]["id"] == 1
-    assert rows[0]["left_val"] == "left-a"
-    assert rows[0]["right_val"] == "right-a"
+    assert len(rows) == 3
+    assert any(row["id"] == 1 and row["left_val"] == "left-a" and row["right_val"] == "right-a" for row in rows)
+    assert any(row["id"] == 2 and row["left_val"] == "left-b" and row["right_val"] is None for row in rows)
+    assert any(row["id"] == 2 and row["left_val"] is None and row["right_val"] == "right-b" for row in rows)
+
+
+@pytest.mark.unit
+def test_stream_join_transform_respects_cache_expiration(worker: PipelineWorker) -> None:
+    left = worker.spark.createDataFrame(
+        [(1, "left-a", "2026-01-01T00:05:00Z")],
+        ["id", "left_val", "left_event_time"],
+    )
+    right = worker.spark.createDataFrame(
+        [(1, "right-a", "2026-01-01T00:03:00Z")],
+        ["id", "right_val", "right_event_time"],
+    )
+
+    out = worker._apply_transform(
+        {
+            "operation": "streamJoin",
+            "joinType": "inner",
+            "leftKeys": ["id"],
+            "rightKeys": ["id"],
+            "streamJoin": {
+                "strategy": "dynamic",
+                "leftEventTimeColumn": "left_event_time",
+                "rightEventTimeColumn": "right_event_time",
+                "allowedLatenessSeconds": 300,
+                "leftCacheExpirationSeconds": 60,
+                "rightCacheExpirationSeconds": 60,
+            },
+        },
+        [left, right],
+        {},
+    )
+    rows = out.collect()
+    assert len(rows) == 2
+    assert any(row["left_val"] == "left-a" and row["right_val"] is None for row in rows)
+    assert any(row["left_val"] is None and row["right_val"] == "right-a" for row in rows)
+
+
+@pytest.mark.unit
+def test_select_new_or_changed_rows_returns_new_and_changed(worker: PipelineWorker) -> None:
+    incoming = worker.spark.createDataFrame(
+        [
+            (1, "same", 10),
+            (2, "changed", 20),
+            (3, "new", 30),
+        ],
+        ["id", "name", "score"],
+    )
+    existing = worker.spark.createDataFrame(
+        [
+            (1, "same", 10),
+            (2, "before", 20),
+        ],
+        ["id", "name", "score"],
+    )
+
+    out = worker._select_new_or_changed_rows(
+        input_df=incoming,
+        existing_df=existing,
+        pk_columns=["id"],
+    )
+    ids = [row["id"] for row in out.orderBy("id").collect()]
+    assert ids == [2, 3]
+
+
+@pytest.mark.unit
+def test_select_new_or_changed_rows_without_pk_returns_input(worker: PipelineWorker) -> None:
+    incoming = worker.spark.createDataFrame(
+        [
+            (1, "a"),
+            (2, "b"),
+        ],
+        ["id", "name"],
+    )
+    existing = worker.spark.createDataFrame(
+        [
+            (1, "a"),
+        ],
+        ["id", "name"],
+    )
+
+    out = worker._select_new_or_changed_rows(
+        input_df=incoming,
+        existing_df=existing,
+        pk_columns=[],
+    )
+    assert out.count() == 2
