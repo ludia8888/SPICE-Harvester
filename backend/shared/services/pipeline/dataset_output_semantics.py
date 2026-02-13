@@ -307,14 +307,8 @@ def _resolve_default_mode(
     warnings: List[str],
 ) -> DatasetWriteMode:
     _ = execution_semantics
+    _ = incremental_inputs_have_additive_updates
     if not has_incremental_input:
-        return DatasetWriteMode.SNAPSHOT_REPLACE
-    if incremental_inputs_have_additive_updates is False:
-        return DatasetWriteMode.SNAPSHOT_REPLACE
-    if incremental_inputs_have_additive_updates is None:
-        warnings.append(
-            "write_mode default resolved to snapshot_replace because additive incremental update signal is unavailable"
-        )
         return DatasetWriteMode.SNAPSHOT_REPLACE
     if primary_key_columns:
         return DatasetWriteMode.APPEND_ONLY_NEW_ROWS

@@ -307,3 +307,47 @@ def test_select_new_or_changed_rows_without_pk_returns_input(worker: PipelineWor
         pk_columns=[],
     )
     assert out.count() == 2
+
+
+@pytest.mark.unit
+def test_udf_transform_applies_resolved_code(worker: PipelineWorker) -> None:
+    df = worker.spark.createDataFrame([(1, "a"), (2, "b")], ["id", "value"])
+    code = """
+def transform(row):
+    return {
+        "id": row["id"],
+        "value": row["value"],
+        "value_upper": str(row["value"]).upper(),
+    }
+"""
+    out = worker._apply_transform(
+        {
+            "operation": "udf",
+            "__resolved_udf_code": code,
+        },
+        [df],
+        {},
+    )
+    rows = out.orderBy("id").collect()
+    assert rows[0]["value_upper"] == "A"
+    assert rows[1]["value_upper"] == "B"
+
+
+@pytest.mark.unit
+def test_udf_transform_rejects_schema_drift(worker: PipelineWorker) -> None:
+    df = worker.spark.createDataFrame([(1,), (2,)], ["id"])
+    code = """
+def transform(row):
+    if row["id"] == 1:
+        return {"id": row["id"], "left_only": "x"}
+    return {"id": row["id"], "right_only": "y"}
+"""
+    with pytest.raises(ValueError, match="consistent output schema"):
+        worker._apply_transform(
+            {
+                "operation": "udf",
+                "__resolved_udf_code": code,
+            },
+            [df],
+            {},
+        )

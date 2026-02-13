@@ -163,6 +163,22 @@ def test_validate_output_payload_virtual_accepts_required_values() -> None:
 
 
 @pytest.mark.unit
+def test_validate_output_payload_virtual_rejects_dataset_write_settings() -> None:
+    errors = validate_output_payload(
+        kind=OUTPUT_KIND_VIRTUAL,
+        payload={
+            "query_sql": "select * from t",
+            "refresh_mode": "on_read",
+            "write_mode": "append_only_new_rows",
+            "partition_by": ["ds"],
+        },
+    )
+    assert errors == [
+        "virtual output does not support dataset write settings: partition_by, write_mode"
+    ]
+
+
+@pytest.mark.unit
 def test_normalize_output_kind_rejects_unknown_kind() -> None:
     with pytest.raises(ValueError):
         normalize_output_kind("not-a-kind")

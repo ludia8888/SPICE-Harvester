@@ -7,7 +7,15 @@ from shared.services.pipeline.dataset_output_semantics import validate_dataset_o
 from shared.services.pipeline.pipeline_dataset_utils import normalize_dataset_selection, resolve_dataset_version
 from shared.services.pipeline.pipeline_definition_utils import resolve_execution_semantics
 from shared.services.pipeline.pipeline_graph_utils import build_incoming, normalize_edges, normalize_nodes, topological_sort
-from shared.services.pipeline.output_plugins import OUTPUT_KIND_DATASET, normalize_output_kind, validate_output_payload
+from shared.services.pipeline.output_plugins import (
+    OUTPUT_KIND_DATASET,
+    OUTPUT_KIND_GEOTEMPORAL,
+    OUTPUT_KIND_MEDIA,
+    OUTPUT_KIND_ONTOLOGY,
+    OUTPUT_KIND_VIRTUAL,
+    normalize_output_kind,
+    validate_output_payload,
+)
 from shared.services.pipeline.pipeline_schema_utils import normalize_schema_contract, normalize_schema_type
 from shared.services.pipeline.pipeline_transform_spec import (
     normalize_operation,
@@ -110,6 +118,17 @@ def _extract_sample_rows(sample: Any) -> List[Dict[str, Any]]:
             output.append(normalized)
         return output
     return []
+
+
+def _output_metadata_text(payload: Dict[str, Any], *keys: str) -> str:
+    for key in keys:
+        value = payload.get(key)
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text:
+            return text
+    return ""
 
 
 def _infer_types_from_rows(rows: List[Dict[str, Any]], columns: List[str]) -> Dict[str, str]:
@@ -731,12 +750,12 @@ async def compute_pipeline_preflight(
                     }
                 )
 
+            available_columns = (
+                set(output_schema.columns or [])
+                if output_schema and output_schema.columns and (not output_schema.dynamic_columns)
+                else None
+            )
             if resolved_output_kind == OUTPUT_KIND_DATASET:
-                available_columns = (
-                    set(output_schema.columns or [])
-                    if output_schema and output_schema.columns and (not output_schema.dynamic_columns)
-                    else None
-                )
                 dataset_errors = validate_dataset_output_metadata(
                     definition=definition,
                     output_metadata=merged_output_payload,
@@ -760,6 +779,124 @@ async def compute_pipeline_preflight(
                             "severity": "warning",
                             "node_id": node_id,
                             "message": "dataset required-column checks skipped (missing output schema metadata)",
+                        }
+                    )
+            elif resolved_output_kind == OUTPUT_KIND_GEOTEMPORAL:
+                if available_columns is None:
+                    issues.append(
+                        {
+                            "kind": "geotemporal_output_preflight_schema_skipped",
+                            "severity": "warning",
+                            "node_id": node_id,
+                            "message": "geotemporal required-column checks skipped (missing output schema metadata)",
+                        }
+                    )
+                else:
+                    required_columns = [
+                        _output_metadata_text(merged_output_payload, "time_column", "timeColumn"),
+                        _output_metadata_text(merged_output_payload, "geometry_column", "geometryColumn"),
+                    ]
+                    missing_columns = [column for column in required_columns if column and column not in available_columns]
+                    if missing_columns:
+                        issues.append(
+                            {
+                                "kind": "geotemporal_output_required_columns_missing",
+                                "severity": "error",
+                                "node_id": node_id,
+                                "message": "geotemporal required columns missing in output schema: "
+                                + ", ".join(missing_columns),
+                                "output_kind": resolved_output_kind,
+                            }
+                        )
+            elif resolved_output_kind == OUTPUT_KIND_MEDIA:
+                if available_columns is None:
+                    issues.append(
+                        {
+                            "kind": "media_output_preflight_schema_skipped",
+                            "severity": "warning",
+                            "node_id": node_id,
+                            "message": "media required-column checks skipped (missing output schema metadata)",
+                        }
+                    )
+                else:
+                    media_uri_column = _output_metadata_text(
+                        merged_output_payload,
+                        "media_uri_column",
+                        "mediaUriColumn",
+                    )
+                    if media_uri_column and media_uri_column not in available_columns:
+                        issues.append(
+                            {
+                                "kind": "media_output_required_columns_missing",
+                                "severity": "error",
+                                "node_id": node_id,
+                                "message": (
+                                    "media required columns missing in output schema: "
+                                    + media_uri_column
+                                ),
+                                "output_kind": resolved_output_kind,
+                            }
+                        )
+            elif resolved_output_kind == OUTPUT_KIND_ONTOLOGY:
+                if available_columns is None:
+                    issues.append(
+                        {
+                            "kind": "ontology_output_preflight_schema_skipped",
+                            "severity": "warning",
+                            "node_id": node_id,
+                            "message": "ontology key-column checks skipped (missing output schema metadata)",
+                        }
+                    )
+                else:
+                    source_key_column = _output_metadata_text(
+                        merged_output_payload,
+                        "source_key_column",
+                        "sourceKeyColumn",
+                    )
+                    target_key_column = _output_metadata_text(
+                        merged_output_payload,
+                        "target_key_column",
+                        "targetKeyColumn",
+                    )
+                    required_columns = [column for column in (source_key_column, target_key_column) if column]
+                    missing_columns = [column for column in required_columns if column not in available_columns]
+                    if missing_columns:
+                        issues.append(
+                            {
+                                "kind": "ontology_output_required_columns_missing",
+                                "severity": "error",
+                                "node_id": node_id,
+                                "message": "ontology key columns missing in output schema: "
+                                + ", ".join(missing_columns),
+                                "output_kind": resolved_output_kind,
+                            }
+                        )
+            elif resolved_output_kind == OUTPUT_KIND_VIRTUAL:
+                unsupported_settings: List[str] = []
+                for canonical, aliases in (
+                    ("write_mode", ("write_mode", "writeMode")),
+                    ("primary_key_columns", ("primary_key_columns", "primaryKeyColumns")),
+                    ("post_filtering_column", ("post_filtering_column", "postFilteringColumn")),
+                    ("output_format", ("output_format", "outputFormat", "format")),
+                    ("partition_by", ("partition_by", "partitionBy")),
+                ):
+                    if _output_metadata_text(merged_output_payload, *aliases):
+                        unsupported_settings.append(canonical)
+                        continue
+                    raw = merged_output_payload.get(canonical)
+                    if isinstance(raw, list) and raw:
+                        unsupported_settings.append(canonical)
+                if unsupported_settings:
+                    issues.append(
+                        {
+                            "kind": "virtual_output_dataset_settings_not_supported",
+                            "severity": "error",
+                            "node_id": node_id,
+                            "message": (
+                                "virtual output does not support dataset write settings: "
+                                + ", ".join(sorted(set(unsupported_settings)))
+                            ),
+                            "output_kind": resolved_output_kind,
                         }
                     )
             continue

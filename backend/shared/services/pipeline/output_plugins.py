@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, Mapping, Protocol, Sequence
+from typing import Any, Dict, List, Mapping, Protocol, Sequence
 
 from shared.services.pipeline.dataset_output_semantics import validate_dataset_output_metadata
 
@@ -129,6 +129,13 @@ class _MediaPlugin(_RequiredMetadataPlugin):
 
 class _VirtualPlugin(_RequiredMetadataPlugin):
     kind = OUTPUT_KIND_VIRTUAL
+    _UNSUPPORTED_DATASET_STYLE_KEYS = (
+        ("write_mode", "writeMode"),
+        ("primary_key_columns", "primaryKeyColumns"),
+        ("post_filtering_column", "postFilteringColumn"),
+        ("output_format", "outputFormat", "format"),
+        ("partition_by", "partitionBy"),
+    )
 
     def __init__(self) -> None:
         super().__init__(
@@ -146,6 +153,21 @@ class _VirtualPlugin(_RequiredMetadataPlugin):
         refresh_mode = _text(payload, "refresh_mode", "refreshMode").lower()
         if refresh_mode not in {"on_read", "scheduled"}:
             return ["refresh_mode must be one of: on_read|scheduled"]
+
+        unsupported: List[str] = []
+        for aliases in self._UNSUPPORTED_DATASET_STYLE_KEYS:
+            value = _text(payload, *aliases)
+            if value:
+                unsupported.append(aliases[0])
+                continue
+            raw = payload.get(aliases[0])
+            if isinstance(raw, list) and raw:
+                unsupported.append(aliases[0])
+        if unsupported:
+            return [
+                "virtual output does not support dataset write settings: "
+                + ", ".join(sorted(set(unsupported)))
+            ]
         return []
 
 

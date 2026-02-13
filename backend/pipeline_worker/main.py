@@ -3441,7 +3441,18 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
         file_format: str,
         partition_cols: Optional[List[str]],
     ) -> str:
-        _ = output_metadata
+        time_column = str(output_metadata.get("time_column") or output_metadata.get("timeColumn") or "").strip()
+        geometry_column = str(output_metadata.get("geometry_column") or output_metadata.get("geometryColumn") or "").strip()
+        geometry_format = str(output_metadata.get("geometry_format") or output_metadata.get("geometryFormat") or "").strip().lower()
+        if not time_column or not geometry_column:
+            raise ValueError("geotemporal output requires time_column and geometry_column")
+        if geometry_format not in {"wkt", "geojson"}:
+            raise ValueError("geotemporal geometry_format must be one of: wkt|geojson")
+        self._ensure_output_columns_present(
+            df=df,
+            required_columns=[time_column, geometry_column],
+            output_kind=OUTPUT_KIND_GEOTEMPORAL,
+        )
         return await self._materialize_output_dataframe(
             df,
             artifact_bucket=artifact_bucket,
@@ -3464,7 +3475,17 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
         file_format: str,
         partition_cols: Optional[List[str]],
     ) -> str:
-        _ = output_metadata
+        media_uri_column = str(output_metadata.get("media_uri_column") or output_metadata.get("mediaUriColumn") or "").strip()
+        media_type = str(output_metadata.get("media_type") or output_metadata.get("mediaType") or "").strip().lower()
+        if not media_uri_column:
+            raise ValueError("media output requires media_uri_column")
+        if media_type not in {"image", "video", "audio", "document"}:
+            raise ValueError("media_type must be one of: image|video|audio|document")
+        self._ensure_output_columns_present(
+            df=df,
+            required_columns=[media_uri_column],
+            output_kind=OUTPUT_KIND_MEDIA,
+        )
         return await self._materialize_output_dataframe(
             df,
             artifact_bucket=artifact_bucket,
@@ -3487,7 +3508,33 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
         file_format: str,
         partition_cols: Optional[List[str]],
     ) -> str:
-        _ = output_metadata
+        query_sql = str(output_metadata.get("query_sql") or output_metadata.get("querySql") or "").strip()
+        refresh_mode = str(output_metadata.get("refresh_mode") or output_metadata.get("refreshMode") or "").strip().lower()
+        if not query_sql:
+            raise ValueError("virtual output requires query_sql")
+        if refresh_mode not in {"on_read", "scheduled"}:
+            raise ValueError("virtual output refresh_mode must be one of: on_read|scheduled")
+        dataset_style_keys = [
+            key
+            for key in (
+                "write_mode",
+                "writeMode",
+                "primary_key_columns",
+                "primaryKeyColumns",
+                "post_filtering_column",
+                "postFilteringColumn",
+                "output_format",
+                "outputFormat",
+                "partition_by",
+                "partitionBy",
+            )
+            if output_metadata.get(key) not in (None, "", [])
+        ]
+        if dataset_style_keys:
+            raise ValueError(
+                "virtual output does not support dataset write settings: "
+                + ", ".join(sorted(set(dataset_style_keys)))
+            )
         return await self._materialize_output_dataframe(
             df,
             artifact_bucket=artifact_bucket,
@@ -3510,7 +3557,15 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
         file_format: str,
         partition_cols: Optional[List[str]],
     ) -> str:
-        _ = output_metadata
+        source_key_column = str(output_metadata.get("source_key_column") or output_metadata.get("sourceKeyColumn") or "").strip()
+        target_key_column = str(output_metadata.get("target_key_column") or output_metadata.get("targetKeyColumn") or "").strip()
+        required_columns = [column for column in (source_key_column, target_key_column) if column]
+        if required_columns:
+            self._ensure_output_columns_present(
+                df=df,
+                required_columns=required_columns,
+                output_kind=OUTPUT_KIND_ONTOLOGY,
+            )
         return await self._materialize_output_dataframe(
             df,
             artifact_bucket=artifact_bucket,
@@ -3520,6 +3575,22 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
             file_format=file_format,
             partition_cols=partition_cols,
         )
+
+    def _ensure_output_columns_present(
+        self,
+        *,
+        df: DataFrame,
+        required_columns: List[str],
+        output_kind: str,
+    ) -> None:
+        if not required_columns:
+            return
+        available_columns = set(df.columns or [])
+        missing_columns = [column for column in required_columns if column not in available_columns]
+        if missing_columns:
+            raise ValueError(
+                f"{output_kind} output columns missing from dataframe: {', '.join(missing_columns)}"
+            )
 
     async def _load_existing_output_dataset(
         self,
