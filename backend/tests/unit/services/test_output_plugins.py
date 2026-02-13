@@ -9,6 +9,7 @@ from shared.services.pipeline.output_plugins import (
     OUTPUT_KIND_ONTOLOGY,
     OUTPUT_KIND_VIRTUAL,
     normalize_output_kind,
+    resolve_output_kind,
     validate_output_payload,
 )
 
@@ -18,6 +19,14 @@ def test_normalize_output_kind_supports_legacy_aliases() -> None:
     assert normalize_output_kind("unknown") == OUTPUT_KIND_DATASET
     assert normalize_output_kind("object") == OUTPUT_KIND_ONTOLOGY
     assert normalize_output_kind("link") == OUTPUT_KIND_ONTOLOGY
+
+
+@pytest.mark.unit
+def test_resolve_output_kind_reports_alias_usage() -> None:
+    resolved = resolve_output_kind("object")
+    assert resolved.raw_kind == "object"
+    assert resolved.normalized_kind == OUTPUT_KIND_ONTOLOGY
+    assert resolved.used_alias is True
 
 
 @pytest.mark.unit

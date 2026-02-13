@@ -16,7 +16,7 @@ from fastapi import HTTPException, status
 from shared.errors.error_types import ErrorCode, classified_http_exception
 
 from shared.config.settings import get_settings
-from shared.services.storage.redis_service import create_redis_service_legacy
+from shared.services.storage.redis_service import create_redis_service
 from shared.utils.path_utils import safe_lakefs_ref
 
 logger = logging.getLogger(__name__)
@@ -28,10 +28,11 @@ async def _acquire_pipeline_publish_lock(
     branch: str,
     job_id: str,
 ) -> Optional[tuple[Any, str, str]]:
-    pipeline_settings = get_settings().pipeline
+    settings = get_settings()
+    pipeline_settings = settings.pipeline
     if not pipeline_settings.locks_enabled:
         return None
-    redis_service = create_redis_service_legacy()
+    redis_service = create_redis_service(settings)
     try:
         await redis_service.connect()
     except Exception as exc:

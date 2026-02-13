@@ -33,6 +33,13 @@ class OutputPlugin(Protocol):
     def validate(self, payload: Mapping[str, Any]) -> list[str]: ...
 
 
+@dataclass(frozen=True)
+class ResolvedOutputKind:
+    raw_kind: str
+    normalized_kind: str
+    used_alias: bool
+
+
 def _text(payload: Mapping[str, Any], *keys: str) -> str:
     for key in keys:
         value = payload.get(key)
@@ -184,14 +191,22 @@ _PLUGINS: Dict[str, OutputPlugin] = {
 }
 
 
-def normalize_output_kind(value: Any) -> str:
+def resolve_output_kind(value: Any) -> ResolvedOutputKind:
     raw = str(value or OUTPUT_KIND_DATASET).strip().lower() or OUTPUT_KIND_DATASET
     mapped = OUTPUT_KIND_ALIASES.get(raw, raw)
     if mapped not in SUPPORTED_OUTPUT_KINDS:
         raise ValueError(
             "output_kind must be one of: " + "|".join(sorted(SUPPORTED_OUTPUT_KINDS))
         )
-    return mapped
+    return ResolvedOutputKind(
+        raw_kind=raw,
+        normalized_kind=mapped,
+        used_alias=raw in OUTPUT_KIND_ALIASES,
+    )
+
+
+def normalize_output_kind(value: Any) -> str:
+    return resolve_output_kind(value).normalized_kind
 
 
 def get_output_plugin(kind: str) -> OutputPlugin:

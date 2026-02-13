@@ -65,13 +65,13 @@ from shared.services.storage.lakefs_storage_service import LakeFSStorageService
 from shared.services.registries.lineage_store import LineageStore
 from shared.services.pipeline.pipeline_profiler import compute_column_stats
 from shared.services.pipeline.output_plugins import (
-    OUTPUT_KIND_ALIASES,
     OUTPUT_KIND_DATASET,
     OUTPUT_KIND_GEOTEMPORAL,
     OUTPUT_KIND_MEDIA,
     OUTPUT_KIND_ONTOLOGY,
     OUTPUT_KIND_VIRTUAL,
     normalize_output_kind,
+    resolve_output_kind,
     validate_output_payload,
 )
 from shared.services.registries.pipeline_registry import PipelineRegistry
@@ -117,7 +117,7 @@ from shared.models.objectify_job import ObjectifyJob
 from shared.services.registries.processed_event_registry import ProcessedEventRegistry
 from shared.services.registries.processed_event_registry_factory import create_processed_event_registry
 from shared.services.pipeline.pipeline_lock import PipelineLock, PipelineLockError
-from shared.services.storage.redis_service import RedisService, create_redis_service_legacy
+from shared.services.storage.redis_service import RedisService, create_redis_service
 from shared.services.storage.storage_service import StorageService
 from shared.utils.path_utils import safe_lakefs_ref
 from shared.utils.s3_uri import build_s3_uri, parse_s3_uri
@@ -177,6 +177,27 @@ def _resolve_declared_output_kind(
     output_node_id: Optional[str],
     output_name: Optional[str],
 ) -> str:
+    def _normalize_declared_kind(
+        *,
+        item: Dict[str, Any],
+        resolved_node_id: str,
+        resolved_output_name: str,
+    ) -> str:
+        raw_kind = str(item.get("output_kind") or item.get("outputKind") or OUTPUT_KIND_DATASET).strip().lower()
+        try:
+            resolved = resolve_output_kind(raw_kind)
+        except ValueError:
+            return OUTPUT_KIND_DATASET
+        if resolved.used_alias:
+            logger.warning(
+                "Output kind alias normalized: raw=%s normalized=%s node_id=%s output_name=%s",
+                resolved.raw_kind,
+                resolved.normalized_kind,
+                resolved_node_id,
+                resolved_output_name,
+            )
+        return resolved.normalized_kind
+
     node_id = str(output_node_id or "").strip()
     name = str(output_name or "").strip()
     for item in declared_outputs:
@@ -191,35 +212,17 @@ def _resolve_declared_output_kind(
             or ""
         ).strip()
         if node_id and declared_node_id == node_id:
-            try:
-                raw_kind = str(item.get("output_kind") or item.get("outputKind") or OUTPUT_KIND_DATASET).strip().lower()
-                normalized = normalize_output_kind(raw_kind)
-                if raw_kind in OUTPUT_KIND_ALIASES:
-                    logger.warning(
-                        "Output kind alias normalized: raw=%s normalized=%s node_id=%s output_name=%s",
-                        raw_kind,
-                        normalized,
-                        node_id,
-                        name or declared_name,
-                    )
-                return normalized
-            except ValueError:
-                return OUTPUT_KIND_DATASET
+            return _normalize_declared_kind(
+                item=item,
+                resolved_node_id=node_id,
+                resolved_output_name=name or declared_name,
+            )
         if name and declared_name and declared_name == name:
-            try:
-                raw_kind = str(item.get("output_kind") or item.get("outputKind") or OUTPUT_KIND_DATASET).strip().lower()
-                normalized = normalize_output_kind(raw_kind)
-                if raw_kind in OUTPUT_KIND_ALIASES:
-                    logger.warning(
-                        "Output kind alias normalized: raw=%s normalized=%s node_id=%s output_name=%s",
-                        raw_kind,
-                        normalized,
-                        node_id or declared_node_id,
-                        name,
-                    )
-                return normalized
-            except ValueError:
-                return OUTPUT_KIND_DATASET
+            return _normalize_declared_kind(
+                item=item,
+                resolved_node_id=node_id or declared_node_id,
+                resolved_output_name=name,
+            )
     return OUTPUT_KIND_DATASET
 
 
@@ -425,7 +428,7 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
         self.http = httpx.AsyncClient(timeout=120.0, headers=headers)
 
         if self.lock_enabled:
-            self.redis = create_redis_service_legacy()
+            self.redis = create_redis_service(settings)
             try:
                 await self.redis.connect()
             except Exception as exc:

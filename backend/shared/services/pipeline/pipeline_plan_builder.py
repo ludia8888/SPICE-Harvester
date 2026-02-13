@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
 from shared.services.pipeline.pipeline_graph_utils import unique_node_id
-from shared.services.pipeline.output_plugins import OUTPUT_KIND_ALIASES, normalize_output_kind
+from shared.services.pipeline.output_plugins import resolve_output_kind
 from shared.services.pipeline.pipeline_transform_spec import SUPPORTED_TRANSFORMS
 
 
@@ -1208,9 +1208,9 @@ def add_output(
         raise PipelinePlanBuilderError(f"input_node_id missing node: {src}")
 
     name = _ensure_str(output_name, name="output_name")
-    raw_kind = str(output_kind or "dataset").strip().lower()
     try:
-        kind = normalize_output_kind(output_kind)
+        resolved_kind = resolve_output_kind(output_kind)
+        kind = resolved_kind.normalized_kind
     except ValueError as exc:
         raise PipelinePlanBuilderError(str(exc)) from exc
 
@@ -1221,8 +1221,10 @@ def add_output(
     metadata = dict(output_metadata or {})
     metadata["outputName"] = name
     warnings: List[str] = []
-    if raw_kind in OUTPUT_KIND_ALIASES:
-        warnings.append(f"output_kind alias '{raw_kind}' normalized to '{kind}'")
+    if resolved_kind.used_alias:
+        warnings.append(
+            f"output_kind alias '{resolved_kind.raw_kind}' normalized to '{resolved_kind.normalized_kind}'"
+        )
 
     if resolved_id in existing:
         if str(node_id or "").strip():

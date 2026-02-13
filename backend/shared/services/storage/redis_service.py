@@ -466,33 +466,3 @@ def create_redis_service(settings: 'ApplicationSettings') -> RedisService:
         port=settings.database.redis_port,
         password=settings.database.redis_password
     )
-
-
-def create_redis_service_legacy(
-    host: Optional[str] = None,
-    port: Optional[int] = None,
-    password: Optional[str] = None
-) -> RedisService:
-    """
-    레거시 Redis 서비스 팩토리 함수 (하위 호환성)
-    
-    이 함수는 기존 코드와의 호환성을 위해 유지되며,
-    마이그레이션 완료 후 제거될 예정입니다.
-    
-    Args:
-        host: Redis host (defaults to env var or 'redis')
-        port: Redis port (defaults to env var or 6379)
-        password: Redis password (defaults to env var)
-        
-    Returns:
-        RedisService instance
-    """
-    from shared.config.settings import get_settings
-
-    settings = get_settings()
-    
-    return RedisService(
-        host=host or settings.database.redis_host,
-        port=port or settings.database.redis_port,
-        password=password or settings.database.redis_password,
-    )

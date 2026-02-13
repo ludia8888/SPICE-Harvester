@@ -23,7 +23,7 @@ from shared.services.agent.llm_gateway import LLMGateway
 from shared.services.core.audit_log_store import AuditLogStore
 from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.services.registries.pipeline_plan_registry import PipelinePlanRegistry
-from shared.services.storage.redis_service import RedisService, create_redis_service_legacy
+from shared.services.storage.redis_service import RedisService, create_redis_service
 from shared.config.settings import get_settings
 from bff.services.pipeline_agent_autonomous_loop import run_pipeline_agent_mcp_autonomous
 
@@ -113,25 +113,25 @@ async def run_ontology_agent(
             code=ErrorCode.PERMISSION_DENIED,
         )
 
+    settings = get_settings()
+
     # Get services
     llm_gateway = LLMGateway()
     try:
-        redis_service = create_redis_service_legacy()
+        redis_service = create_redis_service(settings)
     except Exception:
-        logging.getLogger(__name__).warning("Broad exception fallback at bff/routers/ontology_agent.py:120", exc_info=True)
+        logging.getLogger(__name__).warning("Ontology agent redis service init fallback", exc_info=True)
         redis_service = None
     try:
         audit_store = AuditLogStore()
     except Exception:
-        logging.getLogger(__name__).warning("Broad exception fallback at bff/routers/ontology_agent.py:124", exc_info=True)
+        logging.getLogger(__name__).warning("Ontology agent audit store init fallback", exc_info=True)
         audit_store = None
 
     # Get registries (required by pipeline agent, but won't be used for ontology-only)
     dataset_registry = DatasetRegistry()
     plan_registry = PipelinePlanRegistry()
 
-    # Get settings
-    settings = get_settings()
     data_policies = getattr(settings, "data_policies", None)
     allowed_models = list(settings.llm.allowed_models or []) if hasattr(settings.llm, "allowed_models") else None
 
