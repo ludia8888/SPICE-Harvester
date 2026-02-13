@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -120,3 +121,76 @@ async def test_flush_outbox_until_empty_stops_and_closes() -> None:
 
     assert publisher.values == []
     assert publisher.closed is True
+
+
+@pytest.mark.asyncio
+async def test_flush_outbox_until_empty_propagates_primary_error_without_close() -> None:
+    class _Publisher:
+        async def flush_once(self) -> int:
+            raise RuntimeError("flush-failed")
+
+    with pytest.raises(RuntimeError, match="flush-failed"):
+        await flush_outbox_until_empty(
+            publisher=_Publisher(),
+            is_empty=lambda processed: processed == 0,
+        )
+
+
+@pytest.mark.asyncio
+async def test_flush_outbox_until_empty_keeps_primary_error_when_close_also_fails(caplog: pytest.LogCaptureFixture) -> None:
+    class _Publisher:
+        async def flush_once(self) -> int:
+            raise RuntimeError("flush-failed")
+
+        async def close(self) -> None:
+            raise RuntimeError("close-failed")
+
+    with caplog.at_level(logging.WARNING, logger="shared.services.events.outbox_runtime"):
+        with pytest.raises(RuntimeError, match="flush-failed"):
+            await flush_outbox_until_empty(
+                publisher=_Publisher(),
+                is_empty=lambda processed: processed == 0,
+            )
+
+    assert any("close failed after primary error" in rec.message.lower() for rec in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_flush_outbox_until_empty_raises_close_error_when_no_primary_error() -> None:
+    class _Publisher:
+        async def flush_once(self) -> int:
+            return 0
+
+        async def close(self) -> None:
+            raise RuntimeError("close-failed")
+
+    with pytest.raises(RuntimeError, match="close-failed"):
+        await flush_outbox_until_empty(
+            publisher=_Publisher(),
+            is_empty=lambda processed: processed == 0,
+        )
+
+
+@pytest.mark.asyncio
+async def test_run_outbox_poll_loop_raises_close_error_when_no_primary_error() -> None:
+    stop_event = asyncio.Event()
+
+    class _Publisher:
+        async def flush_once(self) -> int:
+            stop_event.set()
+            return 1
+
+        async def maybe_purge(self) -> None:
+            return None
+
+        async def close(self) -> None:
+            raise RuntimeError("close-failed")
+
+    with pytest.raises(RuntimeError, match="close-failed"):
+        await run_outbox_poll_loop(
+            publisher=_Publisher(),
+            poll_interval_seconds=1,
+            stop_event=stop_event,
+            warning_logger=lambda _msg, _exc: None,
+            failure_message="loop failed: %s",
+        )

@@ -231,8 +231,17 @@ async def get_service_metrics(
     """
     # Deprecated endpoint: the canonical Prometheus scrape target is `/metrics`.
     # Keep this endpoint as a redirect so dashboards/operators don't 404.
-    _ = service_name  # explicitly unused
-    return RedirectResponse(url="/metrics", status_code=status.HTTP_307_TEMPORARY_REDIRECT)
+    headers: Dict[str, str] = {}
+    if service_name is not None:
+        headers["Deprecation"] = "true"
+        headers["Warning"] = (
+            '299 - "The \'service_name\' query parameter is deprecated and will be removed in the next release."'
+        )
+    return RedirectResponse(
+        url="/metrics",
+        status_code=status.HTTP_307_TEMPORARY_REDIRECT,
+        headers=headers or None,
+    )
 
 
 @router.get("/status", 

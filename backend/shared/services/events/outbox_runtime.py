@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import logging
 import os
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Optional
+
+logger = logging.getLogger(__name__)
 
 
 def build_outbox_worker_id(
@@ -68,6 +71,7 @@ async def run_outbox_poll_loop(
     """
     stop_event = stop_event or asyncio.Event()
     current_interval = float(poll_interval_seconds)
+    primary_exc: Optional[BaseException] = None
     try:
         while not stop_event.is_set():
             had_work = False
@@ -96,13 +100,21 @@ async def run_outbox_poll_loop(
                 await asyncio.wait_for(stop_event.wait(), timeout=current_interval)
             except asyncio.TimeoutError:
                 continue
+    except BaseException as exc:
+        primary_exc = exc
+        raise
     finally:
         close = getattr(publisher, "close", None)
-        if close is None:
-            return
-        result = close()
-        if inspect.isawaitable(result):
-            await result
+        if close is not None:
+            try:
+                result = close()
+                if inspect.isawaitable(result):
+                    await result
+            except Exception as close_exc:
+                if primary_exc is not None:
+                    warning_logger("Outbox publisher close failed after primary error: %s", close_exc)
+                else:
+                    raise
 
 
 async def flush_outbox_until_empty(
@@ -110,15 +122,28 @@ async def flush_outbox_until_empty(
     publisher: Any,
     is_empty: Callable[[Any], bool],
 ) -> None:
+    primary_exc: Optional[BaseException] = None
     try:
         while True:
             processed = await publisher.flush_once()
             if is_empty(processed):
                 return
+    except BaseException as exc:
+        primary_exc = exc
+        raise
     finally:
         close = getattr(publisher, "close", None)
-        if close is None:
-            return
-        result = close()
-        if inspect.isawaitable(result):
-            await result
+        if close is not None:
+            try:
+                result = close()
+                if inspect.isawaitable(result):
+                    await result
+            except Exception as close_exc:
+                if primary_exc is not None:
+                    logger.warning(
+                        "Outbox publisher close failed after primary error: %s",
+                        close_exc,
+                        exc_info=True,
+                    )
+                else:
+                    raise

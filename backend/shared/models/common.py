@@ -4,6 +4,7 @@ Common data types and enums for SPICE HARVESTER
 
 from dataclasses import dataclass
 from enum import Enum
+import warnings
 from typing import Any, Dict, List, Optional, Union
 import logging
 
@@ -300,6 +301,28 @@ QUERY_OPERATORS = {
 # Import the standardized ApiResponse
 from .responses import ApiResponse
 
-# Backward compatibility alias for BaseResponse
-# TODO: Remove this alias after all services migrate to ApiResponse
-BaseResponse = ApiResponse
+_base_response_deprecation_emitted = False
+
+
+def _emit_base_response_deprecation_once() -> None:
+    global _base_response_deprecation_emitted
+    if _base_response_deprecation_emitted:
+        return
+    _base_response_deprecation_emitted = True
+    message = "BaseResponse is deprecated; use ApiResponse directly (scheduled for removal in next release)."
+    warnings.warn(message, DeprecationWarning, stacklevel=3)
+    logger.warning("[deprecation][base_response_alias] %s", message)
+
+
+class BaseResponse(ApiResponse):
+    """Deprecated compatibility wrapper for ApiResponse."""
+
+    def __init__(
+        self,
+        status: str,
+        message: str,
+        data: Optional[Dict[str, Any]] = None,
+        errors: Optional[List[str]] = None,
+    ) -> None:
+        _emit_base_response_deprecation_once()
+        super().__init__(status=status, message=message, data=data, errors=errors)

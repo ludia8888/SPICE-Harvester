@@ -11,9 +11,12 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import logging
 import signal
 from contextlib import suppress
 from typing import Any, Optional
+
+logger = logging.getLogger(__name__)
 
 
 async def run_worker_until_stopped(
@@ -79,13 +82,26 @@ async def run_component_lifecycle(
 ) -> None:
     initializer = getattr(component, init_method)
     await initializer()
+    primary_exc: Optional[BaseException] = None
     try:
         runner = getattr(component, run_method)
         await runner()
+    except BaseException as exc:
+        primary_exc = exc
+        raise
     finally:
         closer = getattr(component, close_method, None)
-        if closer is None:
-            return
-        result = closer()
-        if inspect.isawaitable(result):
-            await result
+        if closer is not None:
+            try:
+                result = closer()
+                if inspect.isawaitable(result):
+                    await result
+            except Exception as close_exc:
+                if primary_exc is not None:
+                    logger.warning(
+                        "Component close failed after primary lifecycle error: %s",
+                        close_exc,
+                        exc_info=True,
+                    )
+                else:
+                    raise

@@ -1,15 +1,13 @@
-"""
-미들웨어 패키지
-향후 구현될 미들웨어 모듈들을 포함합니다.
-"""
+"""BFF middleware exports."""
 
-# RBAC 미들웨어 (향후 구현)
-# from .rbac import RBACMiddleware, UserContext, Permission, Role
+from .auth import (
+    enforce_bff_websocket_auth,
+    ensure_bff_auth_configured,
+    install_bff_auth_middleware,
+)
 
 __all__ = [
-    # 향후 export할 클래스들
-    # "RBACMiddleware",
-    # "UserContext",
-    # "Permission",
-    # "Role"
+    "enforce_bff_websocket_auth",
+    "ensure_bff_auth_configured",
+    "install_bff_auth_middleware",
 ]

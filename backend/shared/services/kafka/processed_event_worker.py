@@ -989,8 +989,12 @@ class ProcessedEventKafkaWorker(Generic[PayloadT, ResultT], ABC):
         key = self._partition_key(msg)
         if self._uses_commit_state():
             self._commit_state_by_partition[key] = False
+        primary_exc: Optional[BaseException] = None
         try:
             await self.handle_message(msg)
+        except BaseException as exc:
+            primary_exc = exc
+            raise
         finally:
             committed = True
             if self._uses_commit_state():
@@ -998,26 +1002,45 @@ class ProcessedEventKafkaWorker(Generic[PayloadT, ResultT], ABC):
             current = self._inflight_by_partition.get(key)
             if current is asyncio.current_task():
                 self._inflight_by_partition.pop(key, None)
-            if not getattr(self, "consumer", None):
-                return
-            if key in self._revoked_partitions:
-                self._pending_by_partition.pop(key, None)
-                return
+            should_resume_partition = False
+            next_msg: Optional[Any] = None
 
-            if self._buffer_messages():
+            if not getattr(self, "consumer", None):
+                should_resume_partition = False
+            elif key in self._revoked_partitions:
+                self._pending_by_partition.pop(key, None)
+            elif self._buffer_messages():
                 if not committed:
                     self._pending_by_partition.pop(key, None)
-                    await self._resume_partition(topic=key[0], partition=key[1])
-                    return
-                pending = self._pending_by_partition.get(key)
-                if pending and len(pending) > 0:
-                    next_msg = pending.popleft()
-                    if len(pending) == 0:
-                        self._pending_by_partition.pop(key, None)
-                    await self._start_partition_task(next_msg)
-                    return
+                    should_resume_partition = True
+                else:
+                    pending = self._pending_by_partition.get(key)
+                    if pending and len(pending) > 0:
+                        next_msg = pending.popleft()
+                        if len(pending) == 0:
+                            self._pending_by_partition.pop(key, None)
+                    else:
+                        should_resume_partition = True
+            else:
+                should_resume_partition = True
 
-            await self._resume_partition(topic=key[0], partition=key[1])
+            try:
+                if next_msg is not None:
+                    await self._start_partition_task(next_msg)
+                elif should_resume_partition:
+                    await self._resume_partition(topic=key[0], partition=key[1])
+            except Exception as cleanup_exc:
+                if primary_exc is not None:
+                    logger.warning(
+                        "%s partition cleanup failed after primary error (topic=%s partition=%s): %s",
+                        self._loop_label(),
+                        key[0],
+                        key[1],
+                        cleanup_exc,
+                        exc_info=True,
+                    )
+                else:
+                    raise
 
     async def _cancel_inflight_tasks(self) -> None:
         inflight = list(self._inflight_by_partition.values())
@@ -1386,8 +1409,13 @@ class ProcessedEventKafkaWorker(Generic[PayloadT, ResultT], ABC):
                     await heartbeat_task
                 except asyncio.CancelledError:
                     pass
-                except Exception:
-                    pass
+                except Exception as heartbeat_exc:
+                    logger.warning(
+                        "Heartbeat task join failed after cancellation (event_id=%s): %s",
+                        registry_key.event_id,
+                        heartbeat_exc,
+                        exc_info=True,
+                    )
 
 
 class StrictHeartbeatPolicyMixin:
