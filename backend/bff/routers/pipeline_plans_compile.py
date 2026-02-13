@@ -4,7 +4,7 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
-from bff.routers.pipeline_deps import get_dataset_registry
+from bff.routers.pipeline_deps import get_dataset_registry, get_pipeline_registry
 from bff.routers.pipeline_plans_deps import get_pipeline_plan_registry
 from bff.routers.pipeline_plans_ops import _resolve_actor, _resolve_tenant_id, _resolve_tenant_policy
 from bff.schemas.pipeline_plans_requests import PipelinePlanCompileRequest
@@ -19,6 +19,7 @@ from shared.security.input_sanitizer import sanitize_input, sanitize_label_input
 from shared.services.agent.llm_quota import LLMQuotaExceededError
 from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.services.registries.pipeline_plan_registry import PipelinePlanRegistry
+from shared.services.registries.pipeline_registry import PipelineRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +35,7 @@ async def compile_plan(
     redis_service: RedisServiceDep,
     audit_store: AuditLogStoreDep,
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
+    pipeline_registry: PipelineRegistry = Depends(get_pipeline_registry),
     plan_registry: PipelinePlanRegistry = Depends(get_pipeline_plan_registry),
 ) -> ApiResponse:
     if not bool(get_settings().pipeline_plan.llm_enabled):
@@ -80,6 +82,7 @@ async def compile_plan(
             redis_service=redis_service,
             audit_store=audit_store,
             dataset_registry=dataset_registry,
+            pipeline_registry=pipeline_registry,
             plan_registry=plan_registry,
         )
     except LLMQuotaExceededError as exc:
@@ -132,4 +135,3 @@ async def compile_plan(
         )
 
     return ApiResponse.success(message="Pipeline plan compiled", data=response_data)
-

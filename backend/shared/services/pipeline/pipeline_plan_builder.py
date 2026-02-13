@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from shared.services.pipeline.dataset_output_semantics import normalize_dataset_output_metadata
 from shared.services.pipeline.pipeline_graph_utils import unique_node_id
 from shared.services.pipeline.output_plugins import OUTPUT_KIND_DATASET, resolve_output_kind
-from shared.services.pipeline.pipeline_transform_spec import SUPPORTED_TRANSFORMS
+from shared.services.pipeline.pipeline_transform_spec import SUPPORTED_TRANSFORMS, is_stream_like_input_node
 
 
 class PipelinePlanBuilderError(ValueError):
@@ -533,6 +533,37 @@ def add_compute(plan: Dict[str, Any], *, input_node_id: str, expression: str, no
         input_node_ids=[src],
         node_id=node_id,
         metadata={"expression": expr},
+    )
+
+
+def add_udf(
+    plan: Dict[str, Any],
+    *,
+    input_node_id: str,
+    udf_id: str,
+    udf_version: Any,
+    node_id: Optional[str] = None,
+) -> PlanMutation:
+    src = _ensure_str(input_node_id, name="input_node_id")
+    udf_id_text = _ensure_str(udf_id, name="udf_id")
+    metadata: Dict[str, Any] = {"udfId": udf_id_text}
+
+    if udf_version is None or not str(udf_version).strip():
+        raise PipelinePlanBuilderError("udf_version is required and must be an integer >= 1")
+    try:
+        parsed_version = int(str(udf_version).strip())
+    except (TypeError, ValueError) as exc:
+        raise PipelinePlanBuilderError("udf_version is required and must be an integer >= 1") from exc
+    if parsed_version <= 0:
+        raise PipelinePlanBuilderError("udf_version is required and must be an integer >= 1")
+    metadata["udfVersion"] = parsed_version
+
+    return add_transform(
+        plan,
+        operation="udf",
+        input_node_ids=[src],
+        node_id=node_id,
+        metadata=metadata,
     )
 
 
@@ -1121,6 +1152,12 @@ def add_stream_join(
     stream_join_metadata: Optional[Dict[str, Any]] = None,
     node_id: Optional[str] = None,
 ) -> PlanMutation:
+    definition = _definition(plan)
+    node_by_id = {
+        str(node.get("id") or "").strip(): node
+        for node in _ensure_list(definition.get("nodes"), name="definition_json.nodes")
+        if isinstance(node, dict)
+    }
     left = _ensure_str(left_node_id, name="left_node_id")
     right = _ensure_str(right_node_id, name="right_node_id")
     if left == right:
@@ -1250,6 +1287,19 @@ def add_stream_join(
         if missing:
             raise PipelinePlanBuilderError(
                 "dynamic streamJoin requires: " + ", ".join(missing)
+            )
+    if strategy_norm == "left_lookup":
+        right_node = node_by_id.get(right)
+        right_node_type = str((right_node or {}).get("type") or "").strip().lower()
+        if right_node_type != "input":
+            raise PipelinePlanBuilderError(
+                "streamJoin strategy=left_lookup requires right input to be a direct input node "
+                "(no upstream transforms)"
+            )
+        if is_stream_like_input_node(right_node):
+            raise PipelinePlanBuilderError(
+                "streamJoin strategy=left_lookup requires right input to be batch lookup source "
+                "(stream read mode/format is not allowed)"
             )
     mutation = add_transform(
         plan,
@@ -1532,6 +1582,11 @@ def validate_structure(plan: Dict[str, Any]) -> Tuple[List[str], List[str]]:
                         errors.append(
                             "streamJoin strategy=left_lookup requires right input to be a direct input node "
                             f"(no upstream transforms) on node {node_id}"
+                        )
+                    elif is_stream_like_input_node(right_node):
+                        errors.append(
+                            "streamJoin strategy=left_lookup requires right input to be batch lookup source "
+                            f"(stream read mode/format is not allowed) on node {node_id}"
                         )
             if op == "union":
                 if len(incoming.get(node_id, [])) < 2:

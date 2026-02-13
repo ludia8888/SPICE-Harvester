@@ -40,6 +40,7 @@ from shared.services.pipeline.pipeline_plan_builder import (
     add_stream_join,
     add_sort,
     add_transform,
+    add_udf,
     add_union,
     add_window_expr,
     configure_input_read,
@@ -482,6 +483,21 @@ async def _plan_add_compute(_server: Any, arguments: Dict[str, Any]) -> Any:
         plan,
         input_node_id=input_node_id,
         expression=expr,
+        node_id=arguments.get("node_id"),
+    )
+    return {"plan": result.plan, "node_id": result.node_id, "warnings": list(result.warnings)}
+
+
+@trace_external_call("mcp.plan_add_udf")
+async def _plan_add_udf(_server: Any, arguments: Dict[str, Any]) -> Any:
+    plan = arguments.get("plan") or {}
+    result = add_udf(
+        plan,
+        input_node_id=str(arguments.get("input_node_id") or ""),
+        udf_id=str(arguments.get("udf_id") or arguments.get("udfId") or ""),
+        udf_version=arguments.get("udf_version")
+        if arguments.get("udf_version") is not None
+        else arguments.get("udfVersion"),
         node_id=arguments.get("node_id"),
     )
     return {"plan": result.plan, "node_id": result.node_id, "warnings": list(result.warnings)}
@@ -1179,6 +1195,7 @@ PLAN_TOOL_HANDLERS: Dict[str, ToolHandler] = {
     "plan_add_pivot": _plan_add_pivot,
     "plan_add_filter": _plan_add_filter,
     "plan_add_compute": _plan_add_compute,
+    "plan_add_udf": _plan_add_udf,
     "plan_add_compute_column": _plan_add_compute_column,
     "plan_add_compute_assignments": _plan_add_compute_assignments,
     "plan_add_cast": _plan_add_cast,

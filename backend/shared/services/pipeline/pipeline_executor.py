@@ -1484,9 +1484,17 @@ def _stream_join_tables(
     if time_direction not in {"backward", "forward", "symmetric"}:
         raise ValueError(f"Invalid streamJoin timeDirection: {time_direction}")
 
+    left_tagged = PipelineTable(
+        columns=[*left.columns, "__stream_left_row_id__"],
+        rows=[{**row, "__stream_left_row_id__": idx} for idx, row in enumerate(left.rows)],
+    )
+    right_tagged = PipelineTable(
+        columns=[*right.columns, "__stream_right_row_id__"],
+        rows=[{**row, "__stream_right_row_id__": idx} for idx, row in enumerate(right.rows)],
+    )
     joined = _join_tables(
-        left,
-        right,
+        left_tagged,
+        right_tagged,
         join_type=effective_join_type,
         left_key=join_spec.left_key,
         right_key=join_spec.right_key,
@@ -1505,63 +1513,82 @@ def _stream_join_tables(
     if resolved_right_event_col not in joined.columns:
         raise ValueError(f"streamJoin dynamic rightEventTimeColumn missing from join output: {right_event_col}")
 
+    output_columns = [col for col in joined.columns if col not in {"__stream_left_row_id__", "__stream_right_row_id__"}]
     right_column_map = _build_join_output_layout(left.columns, right.columns)
-    right_specific_columns = [mapped for _, mapped in right_column_map]
-    left_columns = list(left.columns)
-
     lateness_seconds = float(stream_spec.allowed_lateness_seconds)
     cache_horizon_seconds = min(
         float(stream_spec.left_cache_expiration_seconds or 0.0),
         float(stream_spec.right_cache_expiration_seconds or 0.0),
     )
-    rows: List[Dict[str, Any]] = []
-    mismatched_pairs: List[Dict[str, Any]] = []
+    best_by_left: Dict[int, Tuple[Tuple[float, float, float, int], Dict[str, Any], int]] = {}
     for row in joined.rows:
+        left_row_id = row.get("__stream_left_row_id__")
+        right_row_id = row.get("__stream_right_row_id__")
+        if left_row_id is None or right_row_id is None:
+            continue
+        try:
+            left_idx = int(left_row_id)
+            right_idx = int(right_row_id)
+        except (TypeError, ValueError):
+            continue
+
         left_epoch = _to_epoch_seconds(row.get(left_event_col))
         right_epoch = _to_epoch_seconds(row.get(resolved_right_event_col))
+
         if left_epoch is None or right_epoch is None:
-            rows.append(row)
-            if max_output_rows is not None and len(rows) >= int(max_output_rows):
-                break
-            continue
-        if time_direction == "backward":
-            delta = left_epoch - right_epoch
-            is_within_lateness = right_epoch <= left_epoch and delta <= lateness_seconds
-            is_within_cache = delta <= cache_horizon_seconds
-        elif time_direction == "forward":
-            delta = right_epoch - left_epoch
-            is_within_lateness = left_epoch <= right_epoch and delta <= lateness_seconds
-            is_within_cache = delta <= cache_horizon_seconds
+            # Keep backward compatibility for sparse timestamps: treat as fallback match
+            # if both rows are present, but always lower priority than valid event-time matches.
+            score = (1.0, float("inf"), float("inf"), right_idx)
         else:
-            delta = abs(left_epoch - right_epoch)
-            is_within_lateness = delta <= lateness_seconds
-            is_within_cache = delta <= cache_horizon_seconds
-        if is_within_lateness and is_within_cache:
-            rows.append(row)
-            if max_output_rows is not None and len(rows) >= int(max_output_rows):
-                break
-        else:
-            mismatched_pairs.append(row)
+            if time_direction == "backward":
+                delta = left_epoch - right_epoch
+                is_within_lateness = right_epoch <= left_epoch and delta <= lateness_seconds
+                is_within_cache = delta <= cache_horizon_seconds
+                tie = -right_epoch
+            elif time_direction == "forward":
+                delta = right_epoch - left_epoch
+                is_within_lateness = left_epoch <= right_epoch and delta <= lateness_seconds
+                is_within_cache = delta <= cache_horizon_seconds
+                tie = right_epoch
+            else:
+                delta = abs(left_epoch - right_epoch)
+                is_within_lateness = delta <= lateness_seconds
+                is_within_cache = delta <= cache_horizon_seconds
+                tie = abs(left_epoch - right_epoch)
+            if not (is_within_lateness and is_within_cache):
+                continue
+            score = (0.0, float(delta), float(tie), right_idx)
 
-    if mismatched_pairs and effective_join_type in {"left", "full"}:
-        for row in mismatched_pairs:
-            left_row = {column: row.get(column) for column in left_columns}
-            for column in right_specific_columns:
-                left_row[column] = None
-            rows.append(left_row)
-            if max_output_rows is not None and len(rows) >= int(max_output_rows):
-                break
+        cleaned = {col: row.get(col) for col in output_columns}
+        current = best_by_left.get(left_idx)
+        if current is None or score < current[0]:
+            best_by_left[left_idx] = (score, cleaned, right_idx)
 
-    if mismatched_pairs and effective_join_type in {"right", "full"}:
-        for row in mismatched_pairs:
-            right_row = {column: None for column in left_columns}
-            for column in right_specific_columns:
-                right_row[column] = row.get(column)
-            rows.append(right_row)
-            if max_output_rows is not None and len(rows) >= int(max_output_rows):
-                break
+    rows: List[Dict[str, Any]] = []
+    matched_right_ids = {item[2] for item in best_by_left.values()}
 
-    return PipelineTable(columns=joined.columns, rows=rows)
+    for left_idx in sorted(best_by_left.keys()):
+        rows.append({col: best_by_left[left_idx][1].get(col) for col in output_columns})
+        if max_output_rows is not None and len(rows) >= int(max_output_rows):
+            return PipelineTable(columns=output_columns, rows=rows)
+
+    if effective_join_type in {"left", "full"}:
+        for left_idx, left_row in enumerate(left.rows):
+            if left_idx in best_by_left:
+                continue
+            rows.append({col: _merge_rows(left_row, None, right_column_map).get(col) for col in output_columns})
+            if max_output_rows is not None and len(rows) >= int(max_output_rows):
+                return PipelineTable(columns=output_columns, rows=rows)
+
+    if effective_join_type in {"right", "full"}:
+        for right_idx, right_row in enumerate(right.rows):
+            if right_idx in matched_right_ids:
+                continue
+            rows.append({col: _merge_rows(None, right_row, right_column_map).get(col) for col in output_columns})
+            if max_output_rows is not None and len(rows) >= int(max_output_rows):
+                return PipelineTable(columns=output_columns, rows=rows)
+
+    return PipelineTable(columns=output_columns, rows=rows)
 
 
 def _right_latest_snapshot_table(

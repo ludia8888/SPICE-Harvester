@@ -120,6 +120,30 @@ def test_validate_pipeline_definition_udf_rejects_inline_code_when_reference_pol
     assert "udfCode is not allowed on node t; use udfId (+udfVersion)" in result.errors
 
 
+def test_validate_pipeline_definition_udf_requires_version_when_pinning_enabled() -> None:
+    definition = {
+        "nodes": [
+            {"id": "in", "type": "input"},
+            {
+                "id": "t",
+                "type": "transform",
+                "metadata": {"operation": "udf", "udfId": "udf-orders"},
+            },
+            {"id": "out", "type": "output"},
+        ],
+        "edges": [{"from": "in", "to": "t"}, {"from": "t", "to": "out"}],
+    }
+    policy = PipelineDefinitionValidationPolicy(
+        supported_ops=SUPPORTED_TRANSFORMS,
+        require_output=True,
+        normalize_metadata=True,
+        require_udf_reference=True,
+        require_udf_version_pinning=True,
+    )
+    result = validate_pipeline_definition(definition, policy=policy)
+    assert "udfVersion is required on node t" in result.errors
+
+
 def test_validate_pipeline_definition_rejects_invalid_dataset_output_metadata() -> None:
     definition = {
         "nodes": [

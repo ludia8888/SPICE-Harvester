@@ -275,6 +275,43 @@ def test_validate_pipeline_definition_rejects_left_lookup_with_transformed_right
 
 
 @pytest.mark.unit
+def test_validate_pipeline_definition_rejects_left_lookup_with_streaming_right_input() -> None:
+    definition = {
+        "nodes": [
+            {"id": "left", "type": "input", "metadata": {"datasetName": "left_ds"}},
+            {
+                "id": "right",
+                "type": "input",
+                "metadata": {"datasetName": "right_ds", "read": {"format": "kafka"}},
+            },
+            {
+                "id": "sj1",
+                "type": "transform",
+                "metadata": {
+                    "operation": "streamJoin",
+                    "leftKeys": ["id"],
+                    "rightKeys": ["id"],
+                    "streamJoin": {"strategy": "left_lookup"},
+                },
+            },
+        ],
+        "edges": [
+            {"from": "left", "to": "sj1"},
+            {"from": "right", "to": "sj1"},
+        ],
+    }
+    result = validate_pipeline_definition(
+        definition,
+        policy=PipelineDefinitionValidationPolicy(
+            supported_ops=SUPPORTED_TRANSFORMS,
+            require_output=False,
+            normalize_metadata=True,
+        ),
+    )
+    assert any("requires right input to be batch lookup source" in err for err in result.errors)
+
+
+@pytest.mark.unit
 def test_builder_helpers_add_geospatial_pattern_mining_stream_join() -> None:
     plan = new_plan(goal="advanced transforms", db_name="demo")
     definition = plan["definition_json"]

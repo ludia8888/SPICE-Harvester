@@ -80,6 +80,7 @@
 | `plan_add_split` | `plan, input_node_id, expression` | Add split semantics as macro-expanded true/false filter branches. |
 | `plan_add_stream_join` | `plan, left_node_id, right_node_id, left_keys, right_keys` | Add streamJoin transform with strategy metadata (dynamic|left_lookup|static). |
 | `plan_add_transform` | `plan, operation, input_node_ids` | Add a generic transform node (operation + metadata) with edges from input_node_ids. |
+| `plan_add_udf` | `plan, input_node_id` | Add a reference-only UDF transform node (udfId + pinned udfVersion). |
 | `plan_add_union` | `plan, left_node_id, right_node_id` | Add a union transform node for two inputs (unionByName). union_mode: strict|common_only|pad_missing_nulls|pad. |
 | `plan_add_window` | `plan, input_node_id` | Add a window transform node. order_by supports ['-col'] for DESC or [{'column','direction'}]. |
 | `plan_add_window_expr` | `plan, input_node_id, expressions` | Add a window transform node computing one or more Spark SQL window expressions. |

@@ -86,6 +86,28 @@ def test_validate_output_payload_dataset_rejects_unsupported_output_format() -> 
 
 
 @pytest.mark.unit
+def test_validate_output_payload_dataset_rejects_partitioned_csv() -> None:
+    errors = validate_output_payload(
+        kind="dataset",
+        payload={"output_format": "csv", "partition_by": ["ds"]},
+    )
+    assert errors == [
+        "output_format=csv does not support partition_by in Foundry-aligned dataset output semantics"
+    ]
+
+
+@pytest.mark.unit
+def test_validate_output_payload_dataset_rejects_partitioned_json() -> None:
+    errors = validate_output_payload(
+        kind="dataset",
+        payload={"output_format": "json", "partition_by": ["ds"]},
+    )
+    assert errors == [
+        "output_format=json does not support partition_by in Foundry-aligned dataset output semantics"
+    ]
+
+
+@pytest.mark.unit
 def test_validate_output_payload_dataset_accepts_full_metadata() -> None:
     assert (
         validate_output_payload(

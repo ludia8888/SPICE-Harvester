@@ -33,12 +33,15 @@ def spark() -> SparkSession:
         os.environ.setdefault("PATH", f"{java_home}/bin:" + os.environ.get("PATH", ""))
     os.environ.setdefault("PYSPARK_PYTHON", sys.executable)
     os.environ.setdefault("PYSPARK_DRIVER_PYTHON", sys.executable)
-    session = (
+    builder = (
         SparkSession.builder.master("local[1]")
         .appName("pipeline-functions-spark-tests")
         .config("spark.ui.enabled", "false")
-        .getOrCreate()
     )
+    try:
+        session = builder.getOrCreate()
+    except Exception as exc:  # pragma: no cover - environment-dependent
+        pytest.skip(f"Spark runtime is not available in this environment: {exc}")
     yield session
     session.stop()
 

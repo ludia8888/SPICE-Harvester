@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import sys
 
@@ -27,12 +28,15 @@ def spark() -> SparkSession:
         os.environ.setdefault("PATH", f"{java_home}/bin:" + os.environ.get("PATH", ""))
     os.environ.setdefault("PYSPARK_PYTHON", sys.executable)
     os.environ.setdefault("PYSPARK_DRIVER_PYTHON", sys.executable)
-    session = (
+    builder = (
         SparkSession.builder.master("local[1]")
         .appName("pipeline-worker-advanced-transform-tests")
         .config("spark.ui.enabled", "false")
-        .getOrCreate()
     )
+    try:
+        session = builder.getOrCreate()
+    except Exception as exc:  # pragma: no cover - environment-dependent
+        pytest.skip(f"Spark runtime is not available in this environment: {exc}")
     yield session
     session.stop()
 
@@ -256,6 +260,163 @@ def test_stream_join_transform_respects_cache_expiration(worker: PipelineWorker)
     assert len(rows) == 2
     assert any(row["left_val"] == "left-a" and row["right_val"] is None for row in rows)
     assert any(row["left_val"] is None and row["right_val"] == "right-a" for row in rows)
+
+
+@pytest.mark.unit
+def test_stream_join_transform_dynamic_selects_single_best_match_per_left_row(worker: PipelineWorker) -> None:
+    left = worker.spark.createDataFrame(
+        [(1, "left-a", "2026-01-01T00:00:30Z")],
+        ["id", "left_val", "left_event_time"],
+    )
+    right = worker.spark.createDataFrame(
+        [
+            (1, "right-old", "2026-01-01T00:00:10Z"),
+            (1, "right-latest", "2026-01-01T00:00:25Z"),
+        ],
+        ["id", "right_val", "right_event_time"],
+    )
+
+    out = worker._apply_transform(
+        {
+            "operation": "streamJoin",
+            "joinType": "inner",
+            "leftKeys": ["id"],
+            "rightKeys": ["id"],
+            "streamJoin": {
+                "strategy": "dynamic",
+                "timeDirection": "backward",
+                "leftEventTimeColumn": "left_event_time",
+                "rightEventTimeColumn": "right_event_time",
+                "allowedLatenessSeconds": 60,
+                "leftCacheExpirationSeconds": 300,
+                "rightCacheExpirationSeconds": 300,
+            },
+        },
+        [left, right],
+        {},
+    )
+    rows = out.collect()
+    matched_rows = [row for row in rows if row["left_val"] is not None and row["right_val"] is not None]
+    assert len(matched_rows) == 1
+    assert matched_rows[0]["right_val"] == "right-latest"
+
+
+@pytest.mark.unit
+def test_stream_join_left_lookup_selects_single_latest_right_row_without_event_time(worker: PipelineWorker) -> None:
+    left = worker.spark.createDataFrame(
+        [(1, "left-a")],
+        ["id", "left_val"],
+    )
+    right = worker.spark.createDataFrame(
+        [
+            (1, "right-old"),
+            (1, "right-latest"),
+        ],
+        ["id", "right_val"],
+    )
+
+    out = worker._apply_transform(
+        {
+            "operation": "streamJoin",
+            "joinType": "left",
+            "leftKeys": ["id"],
+            "rightKeys": ["id"],
+            "streamJoin": {"strategy": "left_lookup"},
+        },
+        [left, right],
+        {},
+    )
+    rows = out.collect()
+    matched_rows = [row for row in rows if row["left_val"] is not None]
+    assert len(matched_rows) == 1
+    assert matched_rows[0]["right_val"] == "right-latest"
+
+
+class _StorageStub:
+    def __init__(self) -> None:
+        self.created_buckets: list[str] = []
+        self.deleted_prefixes: list[tuple[str, str]] = []
+        self.saved_bytes: list[tuple[str, str, bytes, str]] = []
+
+    async def create_bucket(self, bucket_name: str) -> bool:
+        self.created_buckets.append(bucket_name)
+        return True
+
+    async def delete_prefix(self, bucket: str, prefix: str) -> bool:
+        self.deleted_prefixes.append((bucket, prefix))
+        return True
+
+    async def save_bytes(
+        self,
+        bucket: str,
+        key: str,
+        data: bytes,
+        content_type: str = "application/octet-stream",
+        metadata: dict[str, str] | None = None,
+    ) -> str:
+        _ = metadata
+        self.saved_bytes.append((bucket, key, data, content_type))
+        return "checksum"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_materialize_output_dataframe_rejects_partitioned_json(worker: PipelineWorker) -> None:
+    storage = _StorageStub()
+    worker.storage = storage  # type: ignore[assignment]
+    df = worker.spark.createDataFrame([(1, "2026-02-13")], ["id", "ds"])
+
+    with pytest.raises(ValueError) as exc_info:
+        await worker._materialize_output_dataframe(
+            df,
+            artifact_bucket="bucket-dataset",
+            prefix="pipeline/dataset-output",
+            write_mode="overwrite",
+            file_format="json",
+            partition_cols=["ds"],
+        )
+    assert "output_format=json does not support partition_by" in str(exc_info.value)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_materialize_virtual_output_writes_manifest_artifact(worker: PipelineWorker) -> None:
+    storage = _StorageStub()
+    worker.storage = storage  # type: ignore[assignment]
+    df = worker.spark.createDataFrame([(1, "a")], ["id", "name"])
+
+    artifact_key = await worker._materialize_virtual_output(
+        output_metadata={
+            "query_sql": "select id, name from source",
+            "refresh_mode": "scheduled",
+        },
+        df=df,
+        artifact_bucket="bucket-virtual",
+        prefix="pipeline/virtual-output",
+        write_mode="overwrite",
+        file_prefix=None,
+        file_format="parquet",
+        partition_cols=["id"],
+        row_count_hint=1,
+    )
+
+    assert artifact_key == "s3://bucket-virtual/pipeline/virtual-output/virtual_manifest.json"
+    assert storage.created_buckets == ["bucket-virtual"]
+    assert storage.deleted_prefixes == [("bucket-virtual", "pipeline/virtual-output")]
+    assert len(storage.saved_bytes) == 1
+    bucket, key, payload, content_type = storage.saved_bytes[0]
+    assert bucket == "bucket-virtual"
+    assert key == "pipeline/virtual-output/virtual_manifest.json"
+    assert content_type == "application/json"
+
+    manifest = json.loads(payload.decode("utf-8"))
+    assert manifest["output_kind"] == "virtual"
+    assert manifest["query_sql"] == "select id, name from source"
+    assert manifest["refresh_mode"] == "scheduled"
+    assert manifest["input_columns"] == ["id", "name"]
+    assert manifest["row_count_hint"] == 1
+    assert manifest["file_format_ignored"] == "parquet"
+    assert manifest["partition_by_ignored"] == ["id"]
 
 
 @pytest.mark.unit

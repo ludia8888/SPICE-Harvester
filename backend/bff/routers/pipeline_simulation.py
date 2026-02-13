@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from shared.errors.error_types import ErrorCode, classified_http_exception
 
-from bff.routers.pipeline_deps import get_dataset_registry
+from bff.routers.pipeline_deps import get_dataset_registry, get_pipeline_registry
 from bff.routers.pipeline_ops import (
     _augment_definition_with_canonical_contract,
     _augment_definition_with_casts,
@@ -24,6 +24,7 @@ from shared.security.auth_utils import enforce_db_scope
 from shared.security.input_sanitizer import sanitize_input, validate_db_name
 from shared.services.pipeline.pipeline_executor import PipelineExecutor
 from shared.services.registries.dataset_registry import DatasetRegistry
+from shared.services.registries.pipeline_registry import PipelineRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,7 @@ router = APIRouter(tags=["Pipeline Builder"])
 async def simulate_pipeline_definition(
     payload: Dict[str, Any],
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
+    pipeline_registry: PipelineRegistry = Depends(get_pipeline_registry),
     request: Request = None,
 ) -> ApiResponse:
     try:
@@ -81,6 +83,7 @@ async def simulate_pipeline_definition(
             db_name=db_name,
             branch=branch,
             dataset_registry=dataset_registry,
+            pipeline_registry=pipeline_registry,
         )
 
         if validation_errors:
@@ -145,4 +148,3 @@ async def simulate_pipeline_definition(
     except Exception as e:
         logger.error(f"Failed to simulate pipeline definition: {e}")
         raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(e), code=ErrorCode.INTERNAL_ERROR)
-

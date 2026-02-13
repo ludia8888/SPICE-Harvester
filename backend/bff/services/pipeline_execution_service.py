@@ -199,6 +199,7 @@ async def preview_pipeline(
             db_name=db_name,
             branch=branch or pipeline.branch,
             dataset_registry=dataset_registry,
+            pipeline_registry=pipeline_registry,
         )
 
         definition_hash = _stable_definition_hash(definition_json)
@@ -455,6 +456,7 @@ async def build_pipeline(
             db_name=db_name,
             branch=branch or pipeline.branch,
             dataset_registry=dataset_registry,
+            pipeline_registry=pipeline_registry,
         )
         if preflight.get("has_blocking_errors"):
             raise classified_http_exception(

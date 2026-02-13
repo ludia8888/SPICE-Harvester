@@ -21,6 +21,7 @@ class DatasetWriteMode(str, Enum):
 
 SUPPORTED_DATASET_WRITE_MODES: frozenset[str] = frozenset(mode.value for mode in DatasetWriteMode)
 SUPPORTED_DATASET_OUTPUT_FORMATS: frozenset[str] = frozenset({"parquet", "json", "csv", "avro", "orc"})
+_TEXTUAL_DATASET_OUTPUT_FORMATS: frozenset[str] = frozenset({"csv", "json"})
 
 
 _DATASET_WRITE_MODE_ALIASES: Dict[str, str] = {
@@ -347,6 +348,22 @@ def _runtime_write_mode(mode: DatasetWriteMode) -> str:
     return "overwrite"
 
 
+def validate_dataset_output_format_constraints(
+    *,
+    output_format: str,
+    partition_by: Iterable[str],
+) -> List[str]:
+    errors: List[str] = []
+    normalized_format = _text(output_format).lower() or "parquet"
+    normalized_partitions = [str(column).strip() for column in (partition_by or []) if str(column).strip()]
+    if normalized_format in _TEXTUAL_DATASET_OUTPUT_FORMATS and normalized_partitions:
+        errors.append(
+            "output_format="
+            f"{normalized_format} does not support partition_by in Foundry-aligned dataset output semantics"
+        )
+    return errors
+
+
 def _policy_hash_payload(policy: ResolvedDatasetWritePolicy) -> Dict[str, Any]:
     return {
         "requested_write_mode": policy.requested_write_mode,
@@ -472,6 +489,12 @@ def validate_dataset_output_metadata(
         errors.append(
             "output_format must be one of: " + "|".join(sorted(SUPPORTED_DATASET_OUTPUT_FORMATS))
         )
+    errors.extend(
+        validate_dataset_output_format_constraints(
+            output_format=policy.output_format,
+            partition_by=policy.partition_by,
+        )
+    )
 
     if _mode_requires_primary_key(policy.resolved_write_mode) and not policy.primary_key_columns:
         errors.append(

@@ -102,6 +102,98 @@ async def test_compute_pipeline_preflight_accepts_valid_dataset_write_metadata(m
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_compute_pipeline_preflight_blocks_partitioned_csv_dataset_output(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _fake_resolve_dataset_version(*args, **kwargs):
+        return SimpleNamespace(
+            dataset=SimpleNamespace(
+                schema_json={"columns": [{"name": "id", "type": "xsd:string"}, {"name": "ds", "type": "xsd:string"}]},
+                dataset_id="ds-1",
+                name="source",
+                branch="main",
+            ),
+            version=SimpleNamespace(sample_json={"rows": [{"id": "1", "ds": "2026-01-01"}]}),
+        )
+
+    monkeypatch.setattr(pipeline_preflight_utils, "resolve_dataset_version", _fake_resolve_dataset_version)
+
+    definition = {
+        "nodes": [
+            {"id": "in", "type": "input", "metadata": {"datasetName": "source", "datasetBranch": "main"}},
+            {
+                "id": "out",
+                "type": "output",
+                "metadata": {
+                    "outputName": "target",
+                    "outputKind": "dataset",
+                    "write_mode": "snapshot_replace",
+                    "output_format": "csv",
+                    "partition_by": ["ds"],
+                },
+            },
+        ],
+        "edges": [{"from": "in", "to": "out"}],
+    }
+    result = await pipeline_preflight_utils.compute_pipeline_preflight(
+        definition=definition,
+        db_name="demo",
+        dataset_registry=SimpleNamespace(),
+        branch="main",
+    )
+    assert result["has_blocking_errors"] is True
+    messages = [str(issue.get("message") or "") for issue in result["blocking_errors"]]
+    assert any("output_format=csv does not support partition_by" in message for message in messages)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_compute_pipeline_preflight_blocks_partitioned_json_dataset_output(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _fake_resolve_dataset_version(*args, **kwargs):
+        return SimpleNamespace(
+            dataset=SimpleNamespace(
+                schema_json={"columns": [{"name": "id", "type": "xsd:string"}, {"name": "ds", "type": "xsd:string"}]},
+                dataset_id="ds-1",
+                name="source",
+                branch="main",
+            ),
+            version=SimpleNamespace(sample_json={"rows": [{"id": "1", "ds": "2026-01-01"}]}),
+        )
+
+    monkeypatch.setattr(pipeline_preflight_utils, "resolve_dataset_version", _fake_resolve_dataset_version)
+
+    definition = {
+        "nodes": [
+            {"id": "in", "type": "input", "metadata": {"datasetName": "source", "datasetBranch": "main"}},
+            {
+                "id": "out",
+                "type": "output",
+                "metadata": {
+                    "outputName": "target",
+                    "outputKind": "dataset",
+                    "write_mode": "snapshot_replace",
+                    "output_format": "json",
+                    "partition_by": ["ds"],
+                },
+            },
+        ],
+        "edges": [{"from": "in", "to": "out"}],
+    }
+    result = await pipeline_preflight_utils.compute_pipeline_preflight(
+        definition=definition,
+        db_name="demo",
+        dataset_registry=SimpleNamespace(),
+        branch="main",
+    )
+    assert result["has_blocking_errors"] is True
+    messages = [str(issue.get("message") or "") for issue in result["blocking_errors"]]
+    assert any("output_format=json does not support partition_by" in message for message in messages)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_compute_pipeline_preflight_blocks_geotemporal_missing_required_columns(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -251,3 +343,64 @@ async def test_compute_pipeline_preflight_blocks_left_lookup_with_transformed_ri
     assert result["has_blocking_errors"] is True
     messages = [str(issue.get("message") or "") for issue in result["blocking_errors"]]
     assert any("streamJoin strategy=left_lookup requires right input to be a direct input node" in message for message in messages)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_compute_pipeline_preflight_blocks_left_lookup_with_streaming_right_input(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _fake_resolve_dataset_version(*args, **kwargs):
+        selection = kwargs.get("selection")
+        dataset_name = str(getattr(selection, "dataset_name", "") or "")
+        return SimpleNamespace(
+            dataset=SimpleNamespace(
+                schema_json={"columns": [{"name": "id", "type": "xsd:integer"}]},
+                dataset_id=f"ds-{dataset_name or 'x'}",
+                name=dataset_name or "source",
+                branch="main",
+            ),
+            version=SimpleNamespace(sample_json={"rows": [{"id": 1}]}),
+        )
+
+    monkeypatch.setattr(pipeline_preflight_utils, "resolve_dataset_version", _fake_resolve_dataset_version)
+
+    definition = {
+        "nodes": [
+            {"id": "left", "type": "input", "metadata": {"datasetName": "left_stream", "datasetBranch": "main"}},
+            {
+                "id": "right",
+                "type": "input",
+                "metadata": {
+                    "datasetName": "right_lookup",
+                    "datasetBranch": "main",
+                    "read": {"format": "kafka"},
+                },
+            },
+            {
+                "id": "sj",
+                "type": "transform",
+                "metadata": {
+                    "operation": "streamJoin",
+                    "leftKeys": ["id"],
+                    "rightKeys": ["id"],
+                    "streamJoin": {"strategy": "left_lookup"},
+                },
+            },
+            {"id": "out", "type": "output", "metadata": {"outputName": "joined"}},
+        ],
+        "edges": [
+            {"from": "left", "to": "sj"},
+            {"from": "right", "to": "sj"},
+            {"from": "sj", "to": "out"},
+        ],
+    }
+    result = await pipeline_preflight_utils.compute_pipeline_preflight(
+        definition=definition,
+        db_name="demo",
+        dataset_registry=SimpleNamespace(),
+        branch="main",
+    )
+    assert result["has_blocking_errors"] is True
+    messages = [str(issue.get("message") or "") for issue in result["blocking_errors"]]
+    assert any("streamJoin strategy=left_lookup requires right input to be batch lookup source" in message for message in messages)

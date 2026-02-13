@@ -59,6 +59,7 @@ async def _validate_or_warn(
     *,
     plan: PipelinePlan,
     dataset_registry: DatasetRegistry,
+    pipeline_registry: PipelineRegistry,
     db_name: str,
     branch: Optional[str],
     require_output: bool,
@@ -66,6 +67,7 @@ async def _validate_or_warn(
     validation = await validate_pipeline_plan(
         plan=plan,
         dataset_registry=dataset_registry,
+        pipeline_registry=pipeline_registry,
         db_name=db_name,
         branch=str(branch or "") or None,
         require_output=require_output,
@@ -100,6 +102,7 @@ async def preview_plan(
     validation, warning_resp = await _validate_or_warn(
         plan=plan,
         dataset_registry=dataset_registry,
+        pipeline_registry=pipeline_registry,
         db_name=db_name,
         branch=branch,
         require_output=True,
@@ -222,6 +225,7 @@ async def inspect_plan_preview(
         validation, warning_resp = await _validate_or_warn(
             plan=plan,
             dataset_registry=dataset_registry,
+            pipeline_registry=pipeline_registry,
             db_name=db_name,
             branch=branch,
             require_output=True,
@@ -285,6 +289,7 @@ async def evaluate_joins(
     validation, warning_resp = await _validate_or_warn(
         plan=plan,
         dataset_registry=dataset_registry,
+        pipeline_registry=pipeline_registry,
         db_name=db_name,
         branch=branch,
         require_output=True,

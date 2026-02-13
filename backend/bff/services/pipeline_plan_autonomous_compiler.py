@@ -21,6 +21,7 @@ from shared.services.core.audit_log_store import AuditLogStore
 from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.services.agent.llm_gateway import LLMCallMeta, LLMGateway
 from shared.services.registries.pipeline_plan_registry import PipelinePlanRegistry
+from shared.services.registries.pipeline_registry import PipelineRegistry
 from shared.services.storage.redis_service import RedisService
 from shared.observability.tracing import trace_external_call
 import logging
@@ -88,6 +89,7 @@ async def compile_pipeline_plan_mcp_autonomous(
     redis_service: Optional[RedisService],
     audit_store: Optional[AuditLogStore],
     dataset_registry: DatasetRegistry,
+    pipeline_registry: Optional[PipelineRegistry],
     plan_registry: PipelinePlanRegistry,
 ) -> PipelinePlanCompileResult:
     """
@@ -156,6 +158,7 @@ async def compile_pipeline_plan_mcp_autonomous(
         redis_service=redis_service,
         audit_store=audit_store,
         dataset_registry=dataset_registry,
+        pipeline_registry=pipeline_registry,
         plan_registry=plan_registry,
     )
 
@@ -207,4 +210,3 @@ async def compile_pipeline_plan_mcp_autonomous(
         planner_notes=planner_notes,
         preflight=preflight,
     )
-

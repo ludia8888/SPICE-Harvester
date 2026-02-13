@@ -97,6 +97,7 @@ async def create_pipeline_run(
         redis_service=redis_service,
         audit_store=audit_store,
         dataset_registry=dataset_registry,
+        pipeline_registry=pipeline_registry,
         plan_registry=plan_registry,
     )
 
@@ -145,6 +146,7 @@ async def stream_pipeline_run(
     redis_service: RedisServiceDep,
     audit_store: AuditLogStoreDep,
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
+    pipeline_registry: PipelineRegistry = Depends(get_pipeline_registry),
     plan_registry: PipelinePlanRegistry = Depends(get_pipeline_plan_registry),
 ) -> StreamingResponse:
     """
@@ -198,6 +200,7 @@ async def stream_pipeline_run(
                 redis_service=redis_service,
                 audit_store=audit_store,
                 dataset_registry=dataset_registry,
+                pipeline_registry=pipeline_registry,
                 plan_registry=plan_registry,
             ):
                 # SSE 형식으로 이벤트 전송

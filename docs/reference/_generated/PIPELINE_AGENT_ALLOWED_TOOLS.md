@@ -138,5 +138,6 @@
 - `mcp_specs_minus_allowed`:
   - `check_schema_drift`
   - `list_schema_changes`
+  - `plan_add_udf`
 
 <!-- END AUTO-GENERATED: pipeline_tooling_reference -->

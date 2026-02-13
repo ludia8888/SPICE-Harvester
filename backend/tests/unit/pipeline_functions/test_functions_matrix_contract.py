@@ -30,3 +30,12 @@ def test_functions_snapshot_has_no_unclassified_rows() -> None:
         if entry.preview not in _ALLOWED or entry.spark not in _ALLOWED
     ]
     assert not unclassified, f"unclassified functions: {unclassified}"
+
+
+@pytest.mark.unit
+def test_functions_snapshot_loader_fallback_parser_without_pyyaml(monkeypatch: pytest.MonkeyPatch) -> None:
+    from shared.tools import foundry_functions_compat as compat
+
+    monkeypatch.setattr(compat, "_yaml", None, raising=False)
+    entries = compat.load_foundry_functions_snapshot(default_snapshot_path())
+    assert entries, "fallback parser should load non-empty function snapshot"

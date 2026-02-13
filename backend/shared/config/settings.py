@@ -1127,6 +1127,14 @@ class PipelineSettings(BaseSettings):
         default=True,
         description="Require UDF metadata to use udfId(+udfVersion) without inline udfCode (PIPELINE_UDF_REQUIRE_REFERENCE)",
     )
+    udf_require_version_pinning: bool = Field(
+        default=True,
+        description="Require udfVersion pinning for UDF transforms during validation/preflight (PIPELINE_UDF_REQUIRE_VERSION_PINNING)",
+    )
+    udf_preflight_require_existence: bool = Field(
+        default=True,
+        description="Require preflight to verify UDF reference existence/version in registry (PIPELINE_UDF_PREFLIGHT_REQUIRE_EXISTENCE)",
+    )
     udf_spark_parity_enabled: bool = Field(
         default=True,
         description="Enable Spark execution parity for UDF transforms (PIPELINE_UDF_SPARK_PARITY_ENABLED)",

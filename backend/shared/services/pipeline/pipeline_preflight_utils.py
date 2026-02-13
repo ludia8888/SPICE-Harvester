@@ -18,6 +18,7 @@ from shared.services.pipeline.output_plugins import (
 )
 from shared.services.pipeline.pipeline_schema_utils import normalize_schema_contract, normalize_schema_type
 from shared.services.pipeline.pipeline_transform_spec import (
+    is_stream_like_input_node,
     normalize_operation,
     normalize_union_mode,
     resolve_join_spec,
@@ -971,6 +972,19 @@ async def compute_pipeline_preflight(
                                     "message": (
                                         "streamJoin strategy=left_lookup requires right input to be a direct input node "
                                         "(no upstream transforms)"
+                                    ),
+                                    "right_input_id": right_input_id or None,
+                                }
+                            )
+                        elif is_stream_like_input_node(right_node):
+                            issues.append(
+                                {
+                                    "kind": "stream_join_left_lookup_right_input_streaming",
+                                    "severity": "error",
+                                    "node_id": node_id,
+                                    "message": (
+                                        "streamJoin strategy=left_lookup requires right input to be batch lookup "
+                                        "source (stream read mode/format is not allowed)"
                                     ),
                                     "right_input_id": right_input_id or None,
                                 }

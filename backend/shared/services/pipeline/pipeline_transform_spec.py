@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Mapping, Optional
 
 from shared.services.pipeline.pipeline_join_keys import normalize_join_key_list
 
@@ -192,6 +192,42 @@ def resolve_stream_join_effective_join_type(*, strategy: str, requested_join_typ
         return "full"
     # Foundry stream-stream join behavior is outer by default.
     return "full"
+
+
+def resolve_input_read_mode(node: Mapping[str, Any] | None) -> str:
+    metadata = node.get("metadata") if isinstance(node, Mapping) and isinstance(node.get("metadata"), Mapping) else node
+    if not isinstance(metadata, Mapping):
+        return ""
+    read = metadata.get("read") if isinstance(metadata.get("read"), Mapping) else {}
+    for key in ("mode", "readMode", "read_mode", "inputMode", "input_mode"):
+        value = read.get(key)
+        text = str(value or "").strip().lower()
+        if text:
+            return text
+    return ""
+
+
+def resolve_input_read_format(node: Mapping[str, Any] | None) -> str:
+    metadata = node.get("metadata") if isinstance(node, Mapping) and isinstance(node.get("metadata"), Mapping) else node
+    if not isinstance(metadata, Mapping):
+        return ""
+    read = metadata.get("read") if isinstance(metadata.get("read"), Mapping) else {}
+    for key in ("format", "file_format", "fileFormat"):
+        value = read.get(key)
+        text = str(value or "").strip().lower()
+        if text:
+            return text
+    return ""
+
+
+def is_stream_like_input_node(node: Mapping[str, Any] | None) -> bool:
+    mode = resolve_input_read_mode(node)
+    fmt = resolve_input_read_format(node)
+    if mode in {"stream", "streaming"}:
+        return True
+    if fmt in {"kafka", "kinesis", "pulsar"}:
+        return True
+    return False
 
 
 def normalize_union_mode(metadata: Dict[str, Any]) -> str:

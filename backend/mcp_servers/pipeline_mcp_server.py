@@ -473,6 +473,27 @@ class PipelineMCPServer:
                     },
                 },
                 {
+                    "name": "plan_add_udf",
+                    "description": "Add a reference-only UDF transform node (udfId + pinned udfVersion).",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "plan": {"type": "object"},
+                            "input_node_id": {"type": "string"},
+                            "udf_id": {"type": "string"},
+                            "udf_version": {"type": "integer", "minimum": 1},
+                            "udfId": {"type": "string"},
+                            "udfVersion": {"type": "integer", "minimum": 1},
+                            "node_id": {"type": "string"},
+                        },
+                        "required": ["plan", "input_node_id"],
+                        "anyOf": [
+                            {"required": ["udf_id", "udf_version"]},
+                            {"required": ["udfId", "udfVersion"]},
+                        ],
+                    },
+                },
+                {
                     "name": "plan_add_compute_column",
                     "description": "Add a compute transform node that writes target_column = formula (avoids '=' ambiguity).",
                     "inputSchema": {

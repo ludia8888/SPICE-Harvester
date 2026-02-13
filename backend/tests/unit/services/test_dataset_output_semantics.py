@@ -165,6 +165,34 @@ def test_validate_dataset_output_metadata_checks_available_columns() -> None:
 
 
 @pytest.mark.unit
+def test_validate_dataset_output_metadata_rejects_csv_with_partition_by() -> None:
+    errors = validate_dataset_output_metadata(
+        definition={},
+        output_metadata={
+            "write_mode": "snapshot_replace",
+            "output_format": "csv",
+            "partition_by": ["ds"],
+        },
+        execution_semantics="snapshot",
+    )
+    assert "output_format=csv does not support partition_by in Foundry-aligned dataset output semantics" in errors
+
+
+@pytest.mark.unit
+def test_validate_dataset_output_metadata_rejects_json_with_partition_by() -> None:
+    errors = validate_dataset_output_metadata(
+        definition={},
+        output_metadata={
+            "write_mode": "snapshot_replace",
+            "output_format": "json",
+            "partition_by": ["ds"],
+        },
+        execution_semantics="snapshot",
+    )
+    assert "output_format=json does not support partition_by in Foundry-aligned dataset output semantics" in errors
+
+
+@pytest.mark.unit
 def test_dataset_write_policy_hash_stable() -> None:
     policy_a = resolve_dataset_write_policy(
         definition={},

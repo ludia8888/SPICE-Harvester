@@ -383,7 +383,7 @@
 ### `backend/bff/routers/agent_proxy.py`
 - **Functions**
   - `async create_pipeline_run(request, body, llm, redis_service, audit_store, dataset_registry, pipeline_registry, plan_registry)` (line 51): Pipeline agent runs are handled in the BFF as a single autonomous loop + MCP tools.
-  - `async stream_pipeline_run(request, body, llm, redis_service, audit_store, dataset_registry, plan_registry)` (line 141): SSE 스트리밍 버전의 Pipeline Agent API.
+  - `async stream_pipeline_run(request, body, llm, redis_service, audit_store, dataset_registry, pipeline_registry, plan_registry)` (line 142): SSE 스트리밍 버전의 Pipeline Agent API.
 
 ### `backend/bff/routers/ai.py`
 - **Functions**
@@ -869,8 +869,11 @@
 
 ### `backend/bff/routers/pipeline_ops_preflight.py`
 - **Functions**
-  - `async _run_pipeline_preflight(definition_json, db_name, branch, dataset_registry)` (line 25): no docstring
-  - `_validate_pipeline_definition(definition_json, require_output)` (line 65): no docstring
+  - `_iter_udf_nodes(definition_json)` (line 26): no docstring
+  - `_udf_issue(kind, node_id, message)` (line 50): no docstring
+  - `async _validate_udf_preflight_references(definition_json, db_name, pipeline_registry)` (line 59): no docstring
+  - `async _run_pipeline_preflight(definition_json, db_name, branch, dataset_registry, pipeline_registry)` (line 191): no docstring
+  - `_validate_pipeline_definition(definition_json, require_output)` (line 246): no docstring
 
 ### `backend/bff/routers/pipeline_ops_schema.py`
 - **Functions**
@@ -883,7 +886,7 @@
 
 ### `backend/bff/routers/pipeline_plans_compile.py`
 - **Functions**
-  - `async compile_plan(body, request, llm, redis_service, audit_store, dataset_registry, plan_registry)` (line 30): no docstring
+  - `async compile_plan(body, request, llm, redis_service, audit_store, dataset_registry, pipeline_registry, plan_registry)` (line 31): no docstring
 
 ### `backend/bff/routers/pipeline_plans_deps.py`
 - **Functions**
@@ -921,7 +924,7 @@
 
 ### `backend/bff/routers/pipeline_simulation.py`
 - **Functions**
-  - `async simulate_pipeline_definition(payload, dataset_registry, request)` (line 35): no docstring
+  - `async simulate_pipeline_definition(payload, dataset_registry, pipeline_registry, request)` (line 36): no docstring
 
 ### `backend/bff/routers/pipeline_udfs.py`
 - **Functions**
@@ -1783,9 +1786,9 @@
   - `async _call_mcp_tool(mcp_manager, server, tool, arguments)` (line 1746): Call an MCP tool on *server* ("pipeline" or "ontology") and normalise the response.
   - `_build_llm_meta_dict(llm_meta)` (line 1814): Convert an LLMCallMeta to a plain dict (or None). Used in every return block.
   - `async _execute_tool_call(tool_name, args, state, mcp_manager, allowed_tools, planner_hints, tool_errors, tool_warnings, step_idx)` (line 1830): Execute a single MCP tool call and mutate *state*.
-  - `async _run_agent_core(goal, data_scope, answers, planner_hints, task_spec, resume_plan_id, persist_plan, actor, tenant_id, user_id, data_policies, selected_model, allowed_models, llm_gateway, redis_service, audit_store, event_store, dataset_registry, plan_registry, streaming)` (line 2330): Single autonomous loop that serves both streaming and non-streaming callers.
-  - `async run_pipeline_agent_mcp_autonomous(goal, data_scope, answers, planner_hints, task_spec, resume_plan_id, persist_plan, actor, tenant_id, user_id, data_policies, selected_model, allowed_models, llm_gateway, redis_service, audit_store, event_store, dataset_registry, plan_registry)` (line 3251): Non-streaming wrapper: collects the terminal event from the unified core loop.
-  - `async run_pipeline_agent_streaming(goal, data_scope, answers, planner_hints, task_spec, resume_plan_id, persist_plan, actor, tenant_id, user_id, data_policies, selected_model, allowed_models, llm_gateway, redis_service, audit_store, event_store, dataset_registry, plan_registry)` (line 3293): SSE streaming wrapper: yields all events from the unified core loop.
+  - `async _run_agent_core(goal, data_scope, answers, planner_hints, task_spec, resume_plan_id, persist_plan, actor, tenant_id, user_id, data_policies, selected_model, allowed_models, llm_gateway, redis_service, audit_store, event_store, dataset_registry, pipeline_registry, plan_registry, streaming)` (line 2330): Single autonomous loop that serves both streaming and non-streaming callers.
+  - `async run_pipeline_agent_mcp_autonomous(goal, data_scope, answers, planner_hints, task_spec, resume_plan_id, persist_plan, actor, tenant_id, user_id, data_policies, selected_model, allowed_models, llm_gateway, redis_service, audit_store, event_store, dataset_registry, pipeline_registry, plan_registry)` (line 3254): Non-streaming wrapper: collects the terminal event from the unified core loop.
+  - `async run_pipeline_agent_streaming(goal, data_scope, answers, planner_hints, task_spec, resume_plan_id, persist_plan, actor, tenant_id, user_id, data_policies, selected_model, allowed_models, llm_gateway, redis_service, audit_store, event_store, dataset_registry, pipeline_registry, plan_registry)` (line 3297): SSE streaming wrapper: yields all events from the unified core loop.
 - **Classes**
   - `AutonomousPipelineAgentToolCall` (line 48): no docstring
     - `_coerce_args(cls, v)` (line 54): no docstring
@@ -1848,8 +1851,8 @@
   - `_parse_optional_bool(value)` (line 62): no docstring
   - `_resolve_output_contract_from_definition(definition_json, node_id, output_name)` (line 75): no docstring
   - `async preview_pipeline(pipeline_id, payload, request, audit_store, pipeline_registry, pipeline_job_queue, dataset_registry, event_store)` (line 141): no docstring
-  - `async build_pipeline(pipeline_id, payload, request, audit_store, pipeline_registry, pipeline_job_queue, dataset_registry, oms_client, emit_pipeline_control_plane_event)` (line 394): no docstring
-  - `async deploy_pipeline(pipeline_id, payload, request, pipeline_registry, dataset_registry, objectify_registry, oms_client, lineage_store, audit_store, emit_pipeline_control_plane_event, _acquire_pipeline_publish_lock, _release_pipeline_publish_lock)` (line 614): no docstring
+  - `async build_pipeline(pipeline_id, payload, request, audit_store, pipeline_registry, pipeline_job_queue, dataset_registry, oms_client, emit_pipeline_control_plane_event)` (line 395): no docstring
+  - `async deploy_pipeline(pipeline_id, payload, request, pipeline_registry, dataset_registry, objectify_registry, oms_client, lineage_store, audit_store, emit_pipeline_control_plane_event, _acquire_pipeline_publish_lock, _release_pipeline_publish_lock)` (line 616): no docstring
 
 ### `backend/bff/services/pipeline_join_evaluator.py`
 - **Functions**
@@ -1863,10 +1866,10 @@
 
 ### `backend/bff/services/pipeline_plan_autonomous_compiler.py`
 - **Functions**
-  - `_coerce_questions(raw)` (line 29): no docstring
-  - `_coerce_llm_meta(raw)` (line 43): no docstring
-  - `_coerce_planner_fields(payload)` (line 59): no docstring
-  - `async compile_pipeline_plan_mcp_autonomous(goal, data_scope, answers, planner_hints, task_spec, actor, tenant_id, user_id, data_policies, selected_model, allowed_models, llm_gateway, redis_service, audit_store, dataset_registry, plan_registry)` (line 74): Compile a pipeline plan using the single autonomous loop runtime.
+  - `_coerce_questions(raw)` (line 30): no docstring
+  - `_coerce_llm_meta(raw)` (line 44): no docstring
+  - `_coerce_planner_fields(payload)` (line 60): no docstring
+  - `async compile_pipeline_plan_mcp_autonomous(goal, data_scope, answers, planner_hints, task_spec, actor, tenant_id, user_id, data_policies, selected_model, allowed_models, llm_gateway, redis_service, audit_store, dataset_registry, pipeline_registry, plan_registry)` (line 75): Compile a pipeline plan using the single autonomous loop runtime.
 
 ### `backend/bff/services/pipeline_plan_models.py`
 - **Classes**
@@ -1877,10 +1880,10 @@
 ### `backend/bff/services/pipeline_plan_preview_service.py`
 - **Functions**
   - `async _try_get_lakefs_storage(pipeline_registry, request, purpose)` (line 47): no docstring
-  - `async _validate_or_warn(plan, dataset_registry, db_name, branch, require_output)` (line 58): no docstring
-  - `async preview_plan(plan_id, body, request, dataset_registry, pipeline_registry, plan_registry)` (line 86): no docstring
-  - `async inspect_plan_preview(plan_id, body, request, dataset_registry, pipeline_registry, plan_registry)` (line 205): no docstring
-  - `async evaluate_joins(plan_id, body, request, dataset_registry, pipeline_registry, plan_registry)` (line 271): no docstring
+  - `async _validate_or_warn(plan, dataset_registry, pipeline_registry, db_name, branch, require_output)` (line 58): no docstring
+  - `async preview_plan(plan_id, body, request, dataset_registry, pipeline_registry, plan_registry)` (line 88): no docstring
+  - `async inspect_plan_preview(plan_id, body, request, dataset_registry, pipeline_registry, plan_registry)` (line 208): no docstring
+  - `async evaluate_joins(plan_id, body, request, dataset_registry, pipeline_registry, plan_registry)` (line 275): no docstring
 
 ### `backend/bff/services/pipeline_plan_preview_utils.py`
 - **Functions**
@@ -1915,10 +1918,10 @@
 
 ### `backend/bff/services/pipeline_plan_validation.py`
 - **Functions**
-  - `_is_acyclic(nodes, edges)` (line 39): no docstring
-  - `async validate_pipeline_plan(plan, dataset_registry, db_name, branch, require_output, task_spec)` (line 45): no docstring
+  - `_is_acyclic(nodes, edges)` (line 40): no docstring
+  - `async validate_pipeline_plan(plan, dataset_registry, pipeline_registry, db_name, branch, require_output, task_spec)` (line 46): no docstring
 - **Classes**
-  - `PipelinePlanValidationResult` (line 31): no docstring
+  - `PipelinePlanValidationResult` (line 32): no docstring
 
 ### `backend/bff/services/pipeline_proposal_service.py`
 - **Functions**
@@ -3370,7 +3373,7 @@
 ### `backend/mcp_servers/pipeline_mcp_server.py`
 - **Functions**
   - `_build_tool_error_response(tool_name, error, arguments, hint)` (line 117): Enterprise Enhancement: Build a helpful error response for MCP tool failures.
-  - `async main()` (line 1531): no docstring
+  - `async main()` (line 1552): no docstring
 - **Classes**
   - `_ToolCallRateLimiter` (line 57): Simple rate limiter for MCP tool calls to prevent runaway Agent loops.
     - `__init__(self, max_calls_per_minute, max_calls_per_tool_per_minute)` (line 63): no docstring
@@ -3382,7 +3385,7 @@
     - `async _ensure_objectify_registry(self)` (line 185): no docstring
     - `async _ensure_websocket_service(self)` (line 191): Lazy-init WebSocket service for schema drift broadcasts.
     - `_setup_handlers(self)` (line 203): no docstring
-    - `async run(self)` (line 1520): no docstring
+    - `async run(self)` (line 1541): no docstring
 
 ### `backend/mcp_servers/pipeline_tools/__init__.py`
 
@@ -3450,51 +3453,52 @@
 
 ### `backend/mcp_servers/pipeline_tools/plan_tools.py`
 - **Functions**
-  - `async _plan_new(_server, arguments)` (line 68): no docstring
-  - `async _plan_reset(_server, arguments)` (line 79): no docstring
-  - `async _plan_add_input(_server, arguments)` (line 86): no docstring
-  - `async _plan_add_external_input(_server, arguments)` (line 100): no docstring
-  - `async _plan_configure_input_read(_server, arguments)` (line 115): no docstring
-  - `async _plan_add_join(_server, arguments)` (line 150): no docstring
-  - `async _plan_add_group_by(_server, arguments)` (line 217): no docstring
-  - `async _plan_add_group_by_expr(_server, arguments)` (line 241): no docstring
-  - `async _plan_add_window(_server, arguments)` (line 261): no docstring
-  - `async _plan_add_window_expr(_server, arguments)` (line 281): no docstring
-  - `async _plan_add_transform(_server, arguments)` (line 295): no docstring
-  - `async _plan_add_sort(_server, arguments)` (line 330): no docstring
-  - `async _plan_add_explode(_server, arguments)` (line 345): no docstring
-  - `async _plan_add_union(_server, arguments)` (line 359): no docstring
-  - `async _plan_add_pivot(_server, arguments)` (line 372): no docstring
-  - `async _plan_add_filter(_server, arguments)` (line 403): no docstring
-  - `async _plan_add_compute(_server, arguments)` (line 415): no docstring
-  - `async _plan_add_compute_column(_server, arguments)` (line 491): no docstring
-  - `async _plan_add_compute_assignments(_server, arguments)` (line 504): no docstring
-  - `async _plan_add_cast(_server, arguments)` (line 516): no docstring
-  - `async _plan_add_rename(_server, arguments)` (line 528): no docstring
-  - `async _plan_add_select(_server, arguments)` (line 582): no docstring
-  - `async _plan_add_select_expr(_server, arguments)` (line 594): no docstring
-  - `async _plan_add_drop(_server, arguments)` (line 606): no docstring
-  - `async _plan_add_dedupe(_server, arguments)` (line 618): no docstring
-  - `async _plan_add_normalize(_server, arguments)` (line 630): no docstring
-  - `async _plan_add_regex_replace(_server, arguments)` (line 647): no docstring
-  - `async _plan_add_split(_server, arguments)` (line 659): no docstring
-  - `async _plan_add_geospatial(_server, arguments)` (line 672): no docstring
-  - `async _plan_add_pattern_mining(_server, arguments)` (line 708): no docstring
-  - `async _plan_add_stream_join(_server, arguments)` (line 723): no docstring
-  - `async _plan_add_output(_server, arguments)` (line 756): no docstring
-  - `async _plan_add_edge(_server, arguments)` (line 797): no docstring
-  - `async _plan_delete_edge(_server, arguments)` (line 808): no docstring
-  - `async _plan_set_node_inputs(_server, arguments)` (line 819): no docstring
-  - `async _plan_update_node_metadata(_server, arguments)` (line 830): no docstring
-  - `async _plan_update_settings(_server, arguments)` (line 853): no docstring
-  - `async _plan_delete_node(_server, arguments)` (line 870): no docstring
-  - `async _plan_update_output(_server, arguments)` (line 880): no docstring
-  - `async _plan_validate_structure(_server, arguments)` (line 914): no docstring
-  - `async _plan_validate(server, arguments)` (line 921): no docstring
-  - `async _plan_preview(server, arguments)` (line 965): no docstring
-  - `async _plan_refute_claims(server, arguments)` (line 1075): no docstring
-  - `async _plan_evaluate_joins(server, arguments)` (line 1125): no docstring
-  - `build_plan_tool_handlers()` (line 1212): no docstring
+  - `async _plan_new(_server, arguments)` (line 69): no docstring
+  - `async _plan_reset(_server, arguments)` (line 80): no docstring
+  - `async _plan_add_input(_server, arguments)` (line 87): no docstring
+  - `async _plan_add_external_input(_server, arguments)` (line 101): no docstring
+  - `async _plan_configure_input_read(_server, arguments)` (line 116): no docstring
+  - `async _plan_add_join(_server, arguments)` (line 151): no docstring
+  - `async _plan_add_group_by(_server, arguments)` (line 218): no docstring
+  - `async _plan_add_group_by_expr(_server, arguments)` (line 242): no docstring
+  - `async _plan_add_window(_server, arguments)` (line 262): no docstring
+  - `async _plan_add_window_expr(_server, arguments)` (line 282): no docstring
+  - `async _plan_add_transform(_server, arguments)` (line 296): no docstring
+  - `async _plan_add_sort(_server, arguments)` (line 331): no docstring
+  - `async _plan_add_explode(_server, arguments)` (line 346): no docstring
+  - `async _plan_add_union(_server, arguments)` (line 360): no docstring
+  - `async _plan_add_pivot(_server, arguments)` (line 373): no docstring
+  - `async _plan_add_filter(_server, arguments)` (line 404): no docstring
+  - `async _plan_add_compute(_server, arguments)` (line 416): no docstring
+  - `async _plan_add_udf(_server, arguments)` (line 492): no docstring
+  - `async _plan_add_compute_column(_server, arguments)` (line 507): no docstring
+  - `async _plan_add_compute_assignments(_server, arguments)` (line 520): no docstring
+  - `async _plan_add_cast(_server, arguments)` (line 532): no docstring
+  - `async _plan_add_rename(_server, arguments)` (line 544): no docstring
+  - `async _plan_add_select(_server, arguments)` (line 598): no docstring
+  - `async _plan_add_select_expr(_server, arguments)` (line 610): no docstring
+  - `async _plan_add_drop(_server, arguments)` (line 622): no docstring
+  - `async _plan_add_dedupe(_server, arguments)` (line 634): no docstring
+  - `async _plan_add_normalize(_server, arguments)` (line 646): no docstring
+  - `async _plan_add_regex_replace(_server, arguments)` (line 663): no docstring
+  - `async _plan_add_split(_server, arguments)` (line 675): no docstring
+  - `async _plan_add_geospatial(_server, arguments)` (line 688): no docstring
+  - `async _plan_add_pattern_mining(_server, arguments)` (line 724): no docstring
+  - `async _plan_add_stream_join(_server, arguments)` (line 739): no docstring
+  - `async _plan_add_output(_server, arguments)` (line 772): no docstring
+  - `async _plan_add_edge(_server, arguments)` (line 813): no docstring
+  - `async _plan_delete_edge(_server, arguments)` (line 824): no docstring
+  - `async _plan_set_node_inputs(_server, arguments)` (line 835): no docstring
+  - `async _plan_update_node_metadata(_server, arguments)` (line 846): no docstring
+  - `async _plan_update_settings(_server, arguments)` (line 869): no docstring
+  - `async _plan_delete_node(_server, arguments)` (line 886): no docstring
+  - `async _plan_update_output(_server, arguments)` (line 896): no docstring
+  - `async _plan_validate_structure(_server, arguments)` (line 930): no docstring
+  - `async _plan_validate(server, arguments)` (line 937): no docstring
+  - `async _plan_preview(server, arguments)` (line 981): no docstring
+  - `async _plan_refute_claims(server, arguments)` (line 1091): no docstring
+  - `async _plan_evaluate_joins(server, arguments)` (line 1141): no docstring
+  - `build_plan_tool_handlers()` (line 1229): no docstring
 
 ### `backend/mcp_servers/pipeline_tools/registry.py`
 - **Functions**
@@ -4593,106 +4597,106 @@
 
 ### `backend/pipeline_worker/main.py`
 - **Functions**
-  - `_resolve_declared_output_kind(declared_outputs, output_node_id, output_name)` (line 179): no docstring
-  - `_validate_output_kind_metadata(output_kind, output_metadata, node_id)` (line 234): no docstring
-  - `async main()` (line 5228): no docstring
+  - `_resolve_declared_output_kind(declared_outputs, output_node_id, output_name)` (line 180): no docstring
+  - `_validate_output_kind_metadata(output_kind, output_metadata, node_id)` (line 235): no docstring
+  - `async main()` (line 5274): no docstring
 - **Classes**
-  - `_PipelinePayloadParseError` (line 163): no docstring
-    - `__init__(self, stage, payload_text, payload_obj, cause)` (line 164): no docstring
-  - `PipelineWorker` (line 246): no docstring
-    - `__init__(self)` (line 247): no docstring
-    - `_build_error_payload(self, message, errors, code, category, status_code, external_code, stage, job, pipeline_id, node_id, mode, context)` (line 322): no docstring
-    - `async initialize(self)` (line 368): no docstring
-    - `async close(self)` (line 469): no docstring
-    - `_create_spark_session(self)` (line 513): no docstring
-    - `_extract_job_settings(self, definition)` (line 541): no docstring
-    - `_extract_job_spark_conf(self, definition)` (line 545): no docstring
-    - `_apply_job_overrides(self, definition)` (line 561): Apply per-job Spark/cast overrides from definition.settings.
-    - `_restart_spark_session(self)` (line 601): no docstring
-    - `_is_spark_gateway_error(exc)` (line 635): no docstring
-    - `async _run_spark(self, fn, label)` (line 652): Run a blocking Spark action off the main event loop.
-    - `async run(self)` (line 671): no docstring
-    - `_service_name(self)` (line 681): no docstring
-    - `_cancel_inflight_on_revoke(self)` (line 684): no docstring
-    - `_buffer_messages(self)` (line 690): no docstring
-    - `_pending_log_thresholds(self)` (line 693): no docstring
-    - `_uses_commit_state(self)` (line 696): no docstring
-    - `_parse_payload(self, payload)` (line 699): no docstring
-    - `_registry_key(self, payload)` (line 738): no docstring
-    - `async _process_payload(self, payload)` (line 746): no docstring
-    - `_fallback_metadata(self, payload)` (line 796): no docstring
-    - `_span_name(self, payload)` (line 805): no docstring
-    - `_span_attributes(self, msg, payload, registry_key)` (line 808): no docstring
-    - `_metric_event_name(self, payload)` (line 827): no docstring
-    - `_heartbeat_options(self)` (line 830): no docstring
-    - `_is_retryable_error(self, exc, payload)` (line 835): no docstring
-    - `async _mark_retryable_failure(self, payload, registry_key, handler, error)` (line 838): no docstring
-    - `async _on_parse_error(self, msg, raw_payload, error)` (line 852): no docstring
-    - `async _on_retry_scheduled(self, payload, error, attempt_count, backoff_s, retryable)` (line 892): no docstring
-    - `async _on_terminal_failure(self, payload, error, attempt_count, retryable)` (line 909): no docstring
-    - `async _send_to_dlq(self, msg, payload, raw_payload, error, attempt_count)` (line 923): no docstring
-    - `async _publish_to_dlq(self, msg, stage, error, payload_text, payload_obj, job, attempt_count)` (line 942): no docstring
-    - `async _best_effort_record_invalid_job(self, payload, error)` (line 983): no docstring
-    - `async _resolve_pipeline_id_from_fields(self, db_name, pipeline_id, branch)` (line 1030): no docstring
-    - `async _execute_job(self, job)` (line 1048): no docstring
-    - `async _maybe_enqueue_objectify_job(self, dataset, version)` (line 2934): no docstring
-    - `async _maybe_enqueue_relationship_jobs(self, dataset, version)` (line 3067): no docstring
-    - `async _materialize_output_by_kind(self, output_kind, output_metadata, df, artifact_bucket, prefix, db_name, branch, dataset_name, execution_semantics, incremental_inputs_have_additive_updates, write_mode, file_prefix, file_format, partition_cols, base_row_count)` (line 3181): no docstring
-    - `async _materialize_dataset_output(self, output_metadata, df, artifact_bucket, prefix, db_name, branch, dataset_name, execution_semantics, incremental_inputs_have_additive_updates, write_mode, file_prefix, file_format, partition_cols, base_row_count)` (line 3278): no docstring
-    - `async _materialize_geotemporal_output(self, output_metadata, df, artifact_bucket, prefix, write_mode, file_prefix, file_format, partition_cols)` (line 3433): no docstring
-    - `async _materialize_media_output(self, output_metadata, df, artifact_bucket, prefix, write_mode, file_prefix, file_format, partition_cols)` (line 3467): no docstring
-    - `async _materialize_virtual_output(self, output_metadata, df, artifact_bucket, prefix, write_mode, file_prefix, file_format, partition_cols)` (line 3500): no docstring
-    - `async _materialize_ontology_output(self, output_metadata, df, artifact_bucket, prefix, write_mode, file_prefix, file_format, partition_cols)` (line 3549): no docstring
-    - `_ensure_output_columns_present(self, df, required_columns, output_kind)` (line 3580): no docstring
-    - `async _load_existing_output_dataset(self, db_name, branch, dataset_name)` (line 3596): no docstring
-    - `_align_columns(self, df, columns)` (line 3632): no docstring
-    - `_select_new_or_changed_rows(self, input_df, existing_df, pk_columns, dedupe_input)` (line 3642): no docstring
-    - `_post_filter_false_expr(self, post_filtering_column)` (line 3670): no docstring
-    - `async _materialize_output_dataframe(self, df, artifact_bucket, prefix, write_mode, file_prefix, file_format, partition_cols)` (line 3674): no docstring
-    - `_row_hash_expr(self, df)` (line 3780): no docstring
-    - `_apply_watermark_filter(self, df, watermark_column, watermark_after, watermark_keys)` (line 3793): no docstring
-    - `_collect_watermark_keys(self, df, watermark_column, watermark_value)` (line 3816): no docstring
-    - `async _load_input_dataframe(self, db_name, metadata, temp_dirs, branch, node_id, input_snapshots, previous_commit_id, use_lakefs_diff, watermark_column, watermark_after, watermark_keys)` (line 3843): no docstring
-    - `_preview_sampling_seed(self, job_id)` (line 4109): no docstring
-    - `_resolve_sampling_strategy(self, metadata, preview_meta)` (line 4113): no docstring
-    - `_attach_sampling_snapshot(self, input_snapshots, node_id, sampling_strategy)` (line 4129): no docstring
-    - `_normalize_sampling_fraction(self, value, field)` (line 4141): no docstring
-    - `_apply_sampling_strategy(self, df, sampling_strategy, node_id, seed)` (line 4150): no docstring
-    - `_strip_commit_prefix(self, key, commit_id)` (line 4195): no docstring
-    - `async _list_lakefs_diff_paths(self, repository, ref, since, prefix, node_id)` (line 4201): no docstring
-    - `async _load_parquet_keys_dataframe(self, bucket, keys, temp_dirs, prefix)` (line 4247): no docstring
-    - `async _load_media_prefix_dataframe(self, bucket, key, node_id)` (line 4281): Treat the artifact_key as an unstructured/media prefix.
-    - `async _resolve_pipeline_id(self, job)` (line 4332): no docstring
-    - `_collect_spark_conf(self)` (line 4351): no docstring
-    - `_build_input_commit_payload(self, input_snapshots)` (line 4367): no docstring
-    - `async _acquire_pipeline_lock(self, job)` (line 4391): no docstring
-    - `_validate_required_subgraph(self, nodes, incoming, required_node_ids)` (line 4422): no docstring
-    - `_validate_definition(self, definition, require_output)` (line 4438): no docstring
-    - `_build_table_ops(self, df)` (line 4515): no docstring
-    - `_sql_ident(self, name)` (line 4586): no docstring
-    - `_clean_string_column(self, column)` (line 4589): no docstring
-    - `_try_cast_column(self, column, spark_type)` (line 4593): no docstring
-    - `_safe_cast_column(self, column, target_type)` (line 4619): no docstring
-    - `_apply_casts(self, df, casts)` (line 4630): no docstring
-    - `_apply_schema_casts(self, df, dataset, version)` (line 4642): no docstring
-    - `_parse_fk_expectation(self, expectation, default_branch)` (line 4651): no docstring
-    - `async _load_fk_reference_dataframe(self, db_name, dataset_id, dataset_name, branch, temp_dirs)` (line 4699): no docstring
-    - `async _evaluate_fk_expectations(self, expectations, output_df, db_name, branch, temp_dirs)` (line 4730): no docstring
-    - `_normalize_read_options(self, read_config)` (line 4799): no docstring
-    - `_mask_sensitive_options(self, options)` (line 4835): no docstring
-    - `_schema_ddl_from_read_config(self, read_config)` (line 4856): no docstring
-    - `_resolve_read_format(self, path, read_config)` (line 4879): no docstring
-    - `_load_external_input_dataframe(self, read_config, node_id)` (line 4898): Load an input DataFrame directly from Spark using metadata.read (no DatasetRegistry artifact).
-    - `async _load_artifact_dataframe(self, bucket, key, temp_dirs, read_config)` (line 4978): no docstring
-    - `async _load_prefix_dataframe(self, bucket, prefix, temp_dirs, read_config)` (line 5000): no docstring
-    - `async _download_object_to_path(self, bucket, key, local_path)` (line 5090): no docstring
-    - `async _download_object(self, bucket, key, temp_dirs, temp_dir)` (line 5103): no docstring
-    - `_read_local_file(self, path, read_config)` (line 5119): no docstring
-    - `_strip_bom_headers(self, df)` (line 5146): Normalize UTF-8 BOM artifacts in CSV headers.
-    - `_load_excel_path(self, path)` (line 5186): no docstring
-    - `_load_json_path(self, path, reader)` (line 5192): no docstring
-    - `_empty_dataframe(self)` (line 5209): no docstring
-    - `_apply_transform(self, metadata, inputs, parameters)` (line 5212): no docstring
+  - `_PipelinePayloadParseError` (line 164): no docstring
+    - `__init__(self, stage, payload_text, payload_obj, cause)` (line 165): no docstring
+  - `PipelineWorker` (line 247): no docstring
+    - `__init__(self)` (line 248): no docstring
+    - `_build_error_payload(self, message, errors, code, category, status_code, external_code, stage, job, pipeline_id, node_id, mode, context)` (line 324): no docstring
+    - `async initialize(self)` (line 370): no docstring
+    - `async close(self)` (line 471): no docstring
+    - `_create_spark_session(self)` (line 515): no docstring
+    - `_extract_job_settings(self, definition)` (line 543): no docstring
+    - `_extract_job_spark_conf(self, definition)` (line 547): no docstring
+    - `_apply_job_overrides(self, definition)` (line 563): Apply per-job Spark/cast overrides from definition.settings.
+    - `_restart_spark_session(self)` (line 603): no docstring
+    - `_is_spark_gateway_error(exc)` (line 637): no docstring
+    - `async _run_spark(self, fn, label)` (line 654): Run a blocking Spark action off the main event loop.
+    - `async run(self)` (line 673): no docstring
+    - `_service_name(self)` (line 683): no docstring
+    - `_cancel_inflight_on_revoke(self)` (line 686): no docstring
+    - `_buffer_messages(self)` (line 692): no docstring
+    - `_pending_log_thresholds(self)` (line 695): no docstring
+    - `_uses_commit_state(self)` (line 698): no docstring
+    - `_parse_payload(self, payload)` (line 701): no docstring
+    - `_registry_key(self, payload)` (line 740): no docstring
+    - `async _process_payload(self, payload)` (line 748): no docstring
+    - `_fallback_metadata(self, payload)` (line 798): no docstring
+    - `_span_name(self, payload)` (line 807): no docstring
+    - `_span_attributes(self, msg, payload, registry_key)` (line 810): no docstring
+    - `_metric_event_name(self, payload)` (line 829): no docstring
+    - `_heartbeat_options(self)` (line 832): no docstring
+    - `_is_retryable_error(self, exc, payload)` (line 837): no docstring
+    - `async _mark_retryable_failure(self, payload, registry_key, handler, error)` (line 840): no docstring
+    - `async _on_parse_error(self, msg, raw_payload, error)` (line 854): no docstring
+    - `async _on_retry_scheduled(self, payload, error, attempt_count, backoff_s, retryable)` (line 894): no docstring
+    - `async _on_terminal_failure(self, payload, error, attempt_count, retryable)` (line 911): no docstring
+    - `async _send_to_dlq(self, msg, payload, raw_payload, error, attempt_count)` (line 925): no docstring
+    - `async _publish_to_dlq(self, msg, stage, error, payload_text, payload_obj, job, attempt_count)` (line 944): no docstring
+    - `async _best_effort_record_invalid_job(self, payload, error)` (line 985): no docstring
+    - `async _resolve_pipeline_id_from_fields(self, db_name, pipeline_id, branch)` (line 1032): no docstring
+    - `async _execute_job(self, job)` (line 1050): no docstring
+    - `async _maybe_enqueue_objectify_job(self, dataset, version)` (line 2936): no docstring
+    - `async _maybe_enqueue_relationship_jobs(self, dataset, version)` (line 3069): no docstring
+    - `async _materialize_output_by_kind(self, output_kind, output_metadata, df, artifact_bucket, prefix, db_name, branch, dataset_name, execution_semantics, incremental_inputs_have_additive_updates, write_mode, file_prefix, file_format, partition_cols, base_row_count)` (line 3183): no docstring
+    - `async _materialize_dataset_output(self, output_metadata, df, artifact_bucket, prefix, db_name, branch, dataset_name, execution_semantics, incremental_inputs_have_additive_updates, write_mode, file_prefix, file_format, partition_cols, base_row_count)` (line 3281): no docstring
+    - `async _materialize_geotemporal_output(self, output_metadata, df, artifact_bucket, prefix, write_mode, file_prefix, file_format, partition_cols)` (line 3436): no docstring
+    - `async _materialize_media_output(self, output_metadata, df, artifact_bucket, prefix, write_mode, file_prefix, file_format, partition_cols)` (line 3470): no docstring
+    - `async _materialize_virtual_output(self, output_metadata, df, artifact_bucket, prefix, write_mode, file_prefix, file_format, partition_cols, row_count_hint)` (line 3503): no docstring
+    - `async _materialize_ontology_output(self, output_metadata, df, artifact_bucket, prefix, write_mode, file_prefix, file_format, partition_cols)` (line 3588): no docstring
+    - `_ensure_output_columns_present(self, df, required_columns, output_kind)` (line 3619): no docstring
+    - `async _load_existing_output_dataset(self, db_name, branch, dataset_name)` (line 3635): no docstring
+    - `_align_columns(self, df, columns)` (line 3671): no docstring
+    - `_select_new_or_changed_rows(self, input_df, existing_df, pk_columns, dedupe_input)` (line 3681): no docstring
+    - `_post_filter_false_expr(self, post_filtering_column)` (line 3709): no docstring
+    - `async _materialize_output_dataframe(self, df, artifact_bucket, prefix, write_mode, file_prefix, file_format, partition_cols)` (line 3713): no docstring
+    - `_row_hash_expr(self, df)` (line 3825): no docstring
+    - `_apply_watermark_filter(self, df, watermark_column, watermark_after, watermark_keys)` (line 3838): no docstring
+    - `_collect_watermark_keys(self, df, watermark_column, watermark_value)` (line 3861): no docstring
+    - `async _load_input_dataframe(self, db_name, metadata, temp_dirs, branch, node_id, input_snapshots, previous_commit_id, use_lakefs_diff, watermark_column, watermark_after, watermark_keys)` (line 3888): no docstring
+    - `_preview_sampling_seed(self, job_id)` (line 4154): no docstring
+    - `_resolve_sampling_strategy(self, metadata, preview_meta)` (line 4158): no docstring
+    - `_attach_sampling_snapshot(self, input_snapshots, node_id, sampling_strategy)` (line 4174): no docstring
+    - `_normalize_sampling_fraction(self, value, field)` (line 4186): no docstring
+    - `_apply_sampling_strategy(self, df, sampling_strategy, node_id, seed)` (line 4195): no docstring
+    - `_strip_commit_prefix(self, key, commit_id)` (line 4240): no docstring
+    - `async _list_lakefs_diff_paths(self, repository, ref, since, prefix, node_id)` (line 4246): no docstring
+    - `async _load_parquet_keys_dataframe(self, bucket, keys, temp_dirs, prefix)` (line 4292): no docstring
+    - `async _load_media_prefix_dataframe(self, bucket, key, node_id)` (line 4326): Treat the artifact_key as an unstructured/media prefix.
+    - `async _resolve_pipeline_id(self, job)` (line 4377): no docstring
+    - `_collect_spark_conf(self)` (line 4396): no docstring
+    - `_build_input_commit_payload(self, input_snapshots)` (line 4412): no docstring
+    - `async _acquire_pipeline_lock(self, job)` (line 4436): no docstring
+    - `_validate_required_subgraph(self, nodes, incoming, required_node_ids)` (line 4467): no docstring
+    - `_validate_definition(self, definition, require_output)` (line 4483): no docstring
+    - `_build_table_ops(self, df)` (line 4561): no docstring
+    - `_sql_ident(self, name)` (line 4632): no docstring
+    - `_clean_string_column(self, column)` (line 4635): no docstring
+    - `_try_cast_column(self, column, spark_type)` (line 4639): no docstring
+    - `_safe_cast_column(self, column, target_type)` (line 4665): no docstring
+    - `_apply_casts(self, df, casts)` (line 4676): no docstring
+    - `_apply_schema_casts(self, df, dataset, version)` (line 4688): no docstring
+    - `_parse_fk_expectation(self, expectation, default_branch)` (line 4697): no docstring
+    - `async _load_fk_reference_dataframe(self, db_name, dataset_id, dataset_name, branch, temp_dirs)` (line 4745): no docstring
+    - `async _evaluate_fk_expectations(self, expectations, output_df, db_name, branch, temp_dirs)` (line 4776): no docstring
+    - `_normalize_read_options(self, read_config)` (line 4845): no docstring
+    - `_mask_sensitive_options(self, options)` (line 4881): no docstring
+    - `_schema_ddl_from_read_config(self, read_config)` (line 4902): no docstring
+    - `_resolve_read_format(self, path, read_config)` (line 4925): no docstring
+    - `_load_external_input_dataframe(self, read_config, node_id)` (line 4944): Load an input DataFrame directly from Spark using metadata.read (no DatasetRegistry artifact).
+    - `async _load_artifact_dataframe(self, bucket, key, temp_dirs, read_config)` (line 5024): no docstring
+    - `async _load_prefix_dataframe(self, bucket, prefix, temp_dirs, read_config)` (line 5046): no docstring
+    - `async _download_object_to_path(self, bucket, key, local_path)` (line 5136): no docstring
+    - `async _download_object(self, bucket, key, temp_dirs, temp_dir)` (line 5149): no docstring
+    - `_read_local_file(self, path, read_config)` (line 5165): no docstring
+    - `_strip_bom_headers(self, df)` (line 5192): Normalize UTF-8 BOM artifacts in CSV headers.
+    - `_load_excel_path(self, path)` (line 5232): no docstring
+    - `_load_json_path(self, path, reader)` (line 5238): no docstring
+    - `_empty_dataframe(self)` (line 5255): no docstring
+    - `_apply_transform(self, metadata, inputs, parameters)` (line 5258): no docstring
 
 ### `backend/pipeline_worker/spark_schema_helpers.py`
 - **Functions**
@@ -4715,26 +4719,26 @@
   - `_resolve_stream_join_right_column(joined, left_col, right_col)` (line 170): no docstring
   - `_apply_join(ctx)` (line 188): no docstring
   - `_apply_stream_join(ctx)` (line 275): no docstring
-  - `_apply_filter(ctx)` (line 448): no docstring
-  - `_apply_split(ctx)` (line 455): no docstring
-  - `_apply_compute(ctx)` (line 465): no docstring
-  - `_apply_normalize(ctx)` (line 510): no docstring
-  - `_apply_explode(ctx)` (line 545): no docstring
-  - `_apply_select(ctx)` (line 555): no docstring
-  - `_apply_drop(ctx)` (line 568): no docstring
-  - `_apply_rename(ctx)` (line 578): no docstring
-  - `_apply_cast(ctx)` (line 617): no docstring
-  - `_apply_regex_replace(ctx)` (line 624): no docstring
-  - `_apply_dedupe(ctx)` (line 660): no docstring
-  - `_parse_sort_specs(items)` (line 668): no docstring
-  - `_apply_sort(ctx)` (line 698): no docstring
-  - `_apply_union(ctx)` (line 706): no docstring
-  - `_apply_geospatial(ctx)` (line 741): no docstring
-  - `_apply_pattern_mining(ctx)` (line 794): no docstring
-  - `_apply_group_by(ctx)` (line 822): no docstring
-  - `_apply_pivot(ctx)` (line 892): no docstring
-  - `_apply_window(ctx)` (line 917): no docstring
-  - `_apply_udf(ctx)` (line 955): no docstring
+  - `_apply_filter(ctx)` (line 457): no docstring
+  - `_apply_split(ctx)` (line 464): no docstring
+  - `_apply_compute(ctx)` (line 474): no docstring
+  - `_apply_normalize(ctx)` (line 519): no docstring
+  - `_apply_explode(ctx)` (line 554): no docstring
+  - `_apply_select(ctx)` (line 564): no docstring
+  - `_apply_drop(ctx)` (line 577): no docstring
+  - `_apply_rename(ctx)` (line 587): no docstring
+  - `_apply_cast(ctx)` (line 626): no docstring
+  - `_apply_regex_replace(ctx)` (line 633): no docstring
+  - `_apply_dedupe(ctx)` (line 669): no docstring
+  - `_parse_sort_specs(items)` (line 677): no docstring
+  - `_apply_sort(ctx)` (line 707): no docstring
+  - `_apply_union(ctx)` (line 715): no docstring
+  - `_apply_geospatial(ctx)` (line 750): no docstring
+  - `_apply_pattern_mining(ctx)` (line 803): no docstring
+  - `_apply_group_by(ctx)` (line 831): no docstring
+  - `_apply_pivot(ctx)` (line 901): no docstring
+  - `_apply_window(ctx)` (line 926): no docstring
+  - `_apply_udf(ctx)` (line 964): no docstring
 - **Classes**
   - `_SparkTransformContext` (line 45): no docstring
 
@@ -5156,15 +5160,15 @@
   - `_clamp_flush_timeout_seconds(raw, default)` (line 75): no docstring
   - `_env_truthy(name)` (line 83): no docstring
   - `_should_load_dotenv()` (line 88): Whether settings should read from a local `.env` file.
-  - `get_settings()` (line 4233): Get the global settings instance
-  - `reload_settings()` (line 4247): Reload settings from environment (useful for testing)
-  - `build_client_ssl_config(settings)` (line 4259): SSL config for HTTP clients (httpx/requests/etc).
-  - `build_server_ssl_config(settings)` (line 4280): SSL config for uvicorn (server-side TLS).
-  - `_get_dev_cors_origins()` (line 4310): no docstring
-  - `_get_environment_default_origins(settings)` (line 4326): no docstring
-  - `resolve_cors_origins(settings)` (line 4336): Resolve CORS origins with production safety.
-  - `build_cors_middleware_config(settings)` (line 4378): no docstring
-  - `get_cors_debug_info(settings)` (line 4408): no docstring
+  - `get_settings()` (line 4241): Get the global settings instance
+  - `reload_settings()` (line 4255): Reload settings from environment (useful for testing)
+  - `build_client_ssl_config(settings)` (line 4267): SSL config for HTTP clients (httpx/requests/etc).
+  - `build_server_ssl_config(settings)` (line 4288): SSL config for uvicorn (server-side TLS).
+  - `_get_dev_cors_origins()` (line 4318): no docstring
+  - `_get_environment_default_origins(settings)` (line 4334): no docstring
+  - `resolve_cors_origins(settings)` (line 4344): Resolve CORS origins with production safety.
+  - `build_cors_middleware_config(settings)` (line 4386): no docstring
+  - `get_cors_debug_info(settings)` (line 4416): no docstring
 - **Classes**
   - `Environment` (line 108): Application environment types
   - `DatabaseSettings` (line 115): Database configuration settings
@@ -5220,205 +5224,205 @@
     - `clamp_max_paths(cls, v)` (line 1007): no docstring
   - `FeatureFlagsSettings` (line 1011): Feature flags / opt-in endpoints.
   - `PipelineSettings` (line 1039): Pipeline Builder + pipeline worker settings.
-    - `fallback_publish_lock_timeout(cls, v)` (line 1202): no docstring
-    - `clamp_jobs_max_retries(cls, v)` (line 1211): no docstring
-    - `clamp_job_queue_flush_timeout_seconds(cls, v)` (line 1216): no docstring
-    - `clamp_jobs_backoff_base_seconds(cls, v)` (line 1225): no docstring
-    - `clamp_jobs_backoff_max_seconds(cls, v)` (line 1230): no docstring
-    - `clamp_spark_executor_threads(cls, v)` (line 1235): no docstring
-    - `clamp_spark_shuffle_partitions(cls, v)` (line 1240): no docstring
-    - `clamp_lock_ttl_seconds(cls, v)` (line 1245): no docstring
-    - `clamp_lock_renew_seconds(cls, v)` (line 1250): no docstring
-    - `clamp_lock_retry_seconds(cls, v)` (line 1255): no docstring
-    - `clamp_lock_acquire_timeout_seconds(cls, v)` (line 1260): no docstring
-    - `clamp_publish_lock_acquire_timeout_seconds(cls, v)` (line 1265): no docstring
-    - `clamp_scheduler_poll_seconds(cls, v)` (line 1270): no docstring
-    - `protected_branches_set(self)` (line 1274): no docstring
-    - `fallback_branches_list(self)` (line 1281): no docstring
-  - `OntologySettings` (line 1289): Ontology API + linter governance settings.
-    - `strip_protected_branches(cls, v)` (line 1355): no docstring
-    - `parse_optional_bool(cls, v)` (line 1360): no docstring
-    - `protected_branches_set(self)` (line 1364): no docstring
-    - `allow_implicit_primary_key_effective(self, is_production, branch)` (line 1369): no docstring
-    - `allow_implicit_title_key_effective(self, is_production, branch)` (line 1378): no docstring
-  - `AgentRuntimeSettings` (line 1388): Agent runtime settings (agent service tool runner).
-    - `clamp_context_upload_max_bytes(cls, v)` (line 1514): no docstring
-    - `clamp_context_upload_max_text_chars(cls, v)` (line 1519): no docstring
-    - `clamp_context_upload_clamav_port(cls, v)` (line 1529): no docstring
-    - `fallback_bff_token(cls, v)` (line 1534): no docstring
-    - `fallback_command_timeout(cls, v)` (line 1542): no docstring
-  - `AgentPlanSettings` (line 1552): LLM-native control plane settings (planner + allowlist bootstrap).
-  - `PipelinePlanSettings` (line 1582): Pipeline plan planner settings (LLM-backed pipeline definition proposals).
-  - `ClientSettings` (line 1599): Internal service-to-service client settings (BFF/OMS/etc).
-    - `clamp_agent_proxy_timeout(cls, v)` (line 1632): no docstring
-    - `fallback_oms_client_token(cls, v)` (line 1641): no docstring
-    - `fallback_bff_admin_token(cls, v)` (line 1652): no docstring
-  - `MCPSettings` (line 1662): MCP integration settings (BFF/agent).
-  - `AuthSettings` (line 1684): Service auth configuration (BFF/OMS).
-    - `bff_auth_disable_allowed(self)` (line 1839): no docstring
-    - `oms_auth_disable_allowed(self)` (line 1843): no docstring
-    - `_split_tokens(raw)` (line 1847): no docstring
-    - `_tokens_from_values(cls, *values)` (line 1854): no docstring
-    - `bff_expected_tokens(self)` (line 1861): no docstring
-    - `bff_agent_tokens(self)` (line 1865): no docstring
-    - `oms_expected_tokens(self)` (line 1869): no docstring
-    - `bff_expected_token(self)` (line 1873): no docstring
-    - `bff_admin_only_token(self)` (line 1883): no docstring
-    - `oms_expected_token(self)` (line 1888): no docstring
-    - `admin_bypass_tokens(self)` (line 1893): no docstring
-    - `is_bff_auth_required(self, allow_pytest, default_required)` (line 1904): no docstring
-    - `is_oms_auth_required(self, default_required)` (line 1913): no docstring
-    - `_parse_exempt_paths(raw, defaults)` (line 1921): no docstring
-    - `resolve_bff_exempt_paths(self, defaults)` (line 1928): no docstring
-    - `resolve_oms_exempt_paths(self, defaults)` (line 1931): no docstring
-    - `dev_master_role_set(self)` (line 1935): no docstring
-  - `RateLimitSettings` (line 1939): Rate limiter runtime configuration.
-    - `clamp_local_max_entries(cls, v)` (line 1961): no docstring
-  - `MessagingSettings` (line 1965): Kafka topic/group configuration settings
-  - `StorageSettings` (line 2081): Storage configuration settings
-    - `normalize_minio_endpoint_url(cls, v)` (line 2136): no docstring
-    - `clamp_lakefs_client_timeout(cls, v)` (line 2206): no docstring
-    - `normalize_lakefs_credentials_source(cls, v)` (line 2214): no docstring
-    - `use_ssl(self)` (line 2225): Determine if SSL should be used based on endpoint URL
-    - `lakefs_api_url_effective(self)` (line 2230): Return lakeFS API base URL (without /api/v1).
-    - `lakefs_s3_endpoint_effective(self)` (line 2238): Return lakeFS S3 Gateway endpoint URL.
-  - `CacheSettings` (line 2245): Cache and TTL configuration settings
-    - `clamp_command_status_ttl_seconds(cls, v)` (line 2283): no docstring
-  - `SecuritySettings` (line 2287): Security configuration settings
-  - `PerformanceSettings` (line 2354): Performance and optimization settings
-    - `clamp_pg_pool_min(cls, v)` (line 2482): no docstring
-    - `clamp_pg_pool_max(cls, v)` (line 2497): no docstring
-    - `clamp_pg_command_timeout_seconds(cls, v)` (line 2512): no docstring
-    - `clamp_lineage_latest_edges_max_ids(cls, v)` (line 2517): no docstring
-  - `EventSourcingSettings` (line 2521): Event sourcing / CQRS tuning settings
-    - `normalize_event_store_strings(cls, v)` (line 2623): no docstring
-  - `BranchVirtualizationSettings` (line 2629): Branch virtualization defaults (OCC seeding).
-  - `InstanceWorkerSettings` (line 2647): Instance worker runtime settings.
-    - `fallback_allow_pk_generation(cls, v)` (line 2685): no docstring
-    - `fallback_relationship_strict(cls, v)` (line 2691): no docstring
-    - `clamp_max_retry_attempts(cls, v)` (line 2697): no docstring
-    - `clamp_untyped_ref_max_retry_attempts(cls, v)` (line 2702): no docstring
-    - `clamp_untyped_ref_backoff_max_seconds(cls, v)` (line 2707): no docstring
-  - `OntologyWorkerSettings` (line 2715): Ontology worker runtime settings.
-    - `clamp_max_retry_attempts(cls, v)` (line 2741): no docstring
-  - `ProjectionWorkerSettings` (line 2745): Projection worker runtime settings.
-    - `clamp_max_retries(cls, v)` (line 2767): no docstring
-  - `ActionWorkerSettings` (line 2771): Action worker runtime settings.
-    - `clamp_dlq_retries(cls, v)` (line 2797): no docstring
-    - `clamp_max_retry_attempts(cls, v)` (line 2802): no docstring
-  - `ActionOutboxSettings` (line 2806): Action outbox worker settings.
-    - `clamp_batch_size(cls, v)` (line 2828): no docstring
-  - `OntologyDeployOutboxSettings` (line 2832): Ontology deployment outbox worker settings (OMS embedded worker).
-    - `clamp_poll_seconds(cls, v)` (line 2900): no docstring
-    - `clamp_batch_size(cls, v)` (line 2905): no docstring
-    - `clamp_claim_timeout_seconds(cls, v)` (line 2910): no docstring
-    - `clamp_backoff_base_seconds(cls, v)` (line 2915): no docstring
-    - `clamp_backoff_max_seconds(cls, v)` (line 2920): no docstring
-    - `clamp_retention_days(cls, v)` (line 2925): no docstring
-    - `clamp_purge_interval_seconds(cls, v)` (line 2930): no docstring
-    - `clamp_purge_limit(cls, v)` (line 2935): no docstring
-  - `ConnectorSyncSettings` (line 2939): Connector sync worker settings.
-    - `clamp_max_retries(cls, v)` (line 2979): no docstring
-    - `clamp_backoff_base_seconds(cls, v)` (line 2984): no docstring
-    - `clamp_backoff_max_seconds(cls, v)` (line 2989): no docstring
-  - `ConnectorTriggerSettings` (line 2993): Connector trigger service settings.
-    - `strip_source_type(cls, v)` (line 3023): no docstring
-    - `clamp_tick_seconds(cls, v)` (line 3028): no docstring
-    - `clamp_poll_concurrency(cls, v)` (line 3033): no docstring
-    - `clamp_outbox_batch(cls, v)` (line 3038): no docstring
-  - `ObjectifySettings` (line 3042): Objectify worker settings.
-    - `strip_worker_handler(cls, v)` (line 3118): no docstring
-    - `clamp_batch_size(cls, v)` (line 3123): no docstring
-    - `clamp_row_batch_size(cls, v)` (line 3128): no docstring
-    - `clamp_bulk_update_batch_size(cls, v)` (line 3133): no docstring
-    - `clamp_list_page_size(cls, v)` (line 3140): no docstring
-    - `clamp_max_rows(cls, v)` (line 3145): no docstring
-    - `clamp_lineage_max_links(cls, v)` (line 3150): no docstring
-    - `clamp_max_retries(cls, v)` (line 3155): no docstring
-    - `clamp_backoff_base_seconds(cls, v)` (line 3160): no docstring
-    - `clamp_backoff_max_seconds(cls, v)` (line 3165): no docstring
-    - `normalize_ontology_pk_validation_mode(cls, v)` (line 3170): no docstring
-    - `clamp_dataset_primary_index_chunk_size(cls, v)` (line 3184): no docstring
-    - `bulk_update_batch_size_effective(self)` (line 3188): no docstring
-  - `IngestReconcilerSettings` (line 3192): Dataset ingest reconciler worker settings.
-    - `fallback_alert_webhook_url(cls, v)` (line 3255): no docstring
-    - `clamp_poll_seconds(cls, v)` (line 3264): no docstring
-    - `clamp_stale_seconds(cls, v)` (line 3269): no docstring
-    - `clamp_limit(cls, v)` (line 3274): no docstring
-    - `clamp_lock_key(cls, v)` (line 3279): no docstring
-    - `clamp_alert_published_threshold(cls, v)` (line 3284): no docstring
-    - `clamp_alert_aborted_threshold(cls, v)` (line 3289): no docstring
-    - `clamp_alert_cooldown_seconds(cls, v)` (line 3294): no docstring
-  - `DatasetIngestOutboxSettings` (line 3298): Dataset ingest outbox worker settings (BFF embedded worker).
-    - `clamp_poll_seconds(cls, v)` (line 3391): no docstring
-    - `clamp_backoff_base_seconds(cls, v)` (line 3401): no docstring
-    - `clamp_backoff_max_seconds(cls, v)` (line 3406): no docstring
-    - `clamp_max_retries(cls, v)` (line 3411): no docstring
-    - `clamp_claim_timeout_seconds(cls, v)` (line 3416): no docstring
-    - `clamp_purge_interval_seconds(cls, v)` (line 3421): no docstring
-    - `clamp_retention_days(cls, v)` (line 3426): no docstring
-    - `clamp_purge_limit(cls, v)` (line 3431): no docstring
-    - `clamp_dlq_max_in_flight(cls, v)` (line 3436): no docstring
-    - `clamp_dlq_delivery_timeout_ms(cls, v)` (line 3441): no docstring
-    - `clamp_dlq_request_timeout_ms(cls, v)` (line 3446): no docstring
-    - `clamp_dlq_retries(cls, v)` (line 3451): no docstring
-  - `ObjectifyOutboxWorkerSettings` (line 3455): Objectify outbox worker settings (BFF embedded worker).
-    - `clamp_poll_seconds(cls, v)` (line 3543): no docstring
-    - `clamp_batch_size(cls, v)` (line 3548): no docstring
-    - `clamp_backoff_base_seconds(cls, v)` (line 3558): no docstring
-    - `clamp_backoff_max_seconds(cls, v)` (line 3563): no docstring
-    - `clamp_claim_timeout_seconds(cls, v)` (line 3568): no docstring
-    - `clamp_purge_interval_seconds(cls, v)` (line 3573): no docstring
-    - `clamp_retention_days(cls, v)` (line 3578): no docstring
-    - `clamp_purge_limit(cls, v)` (line 3583): no docstring
-    - `clamp_producer_max_in_flight(cls, v)` (line 3588): no docstring
-    - `clamp_producer_delivery_timeout_ms(cls, v)` (line 3593): no docstring
-    - `clamp_producer_request_timeout_ms(cls, v)` (line 3598): no docstring
-    - `clamp_producer_retries(cls, v)` (line 3603): no docstring
-  - `ObjectifyReconcilerSettings` (line 3607): Objectify reconciler worker settings (BFF embedded worker).
-    - `clamp_poll_seconds(cls, v)` (line 3645): no docstring
-    - `clamp_stale_after_seconds(cls, v)` (line 3650): no docstring
-    - `clamp_enqueued_stale_seconds(cls, v)` (line 3655): no docstring
-    - `clamp_lock_key(cls, v)` (line 3660): no docstring
-    - `enqueued_stale_seconds_effective(self)` (line 3664): no docstring
-  - `WritebackMaterializerSettings` (line 3669): Writeback materializer worker settings.
-    - `db_names_list(self)` (line 3701): no docstring
-  - `EventPublisherSettings` (line 3708): Event publisher (message relay) settings.
-    - `fallback_poll_interval(cls, v)` (line 3770): no docstring
-    - `fallback_batch_size(cls, v)` (line 3778): no docstring
-    - `fallback_topic_bootstrap_timeout(cls, v)` (line 3786): no docstring
-    - `clamp_poll_interval_seconds(cls, v)` (line 3792): no docstring
-    - `clamp_batch_size(cls, v)` (line 3797): no docstring
-    - `clamp_kafka_flush_batch_size(cls, v)` (line 3802): no docstring
-    - `clamp_metrics_log_interval_seconds(cls, v)` (line 3809): no docstring
-    - `clamp_lookback_seconds(cls, v)` (line 3814): no docstring
-    - `clamp_lookback_max_keys(cls, v)` (line 3819): no docstring
-    - `clamp_dedup_max_events(cls, v)` (line 3824): no docstring
-    - `clamp_dedup_checkpoint_max_events(cls, v)` (line 3829): no docstring
-    - `clamp_topic_bootstrap_timeout_seconds(cls, v)` (line 3834): no docstring
-    - `kafka_flush_batch_size_effective(self)` (line 3838): no docstring
-  - `AgentRetentionWorkerSettings` (line 3842): Agent session retention worker settings (SEC-005).
-    - `clamp_poll_seconds(cls, v)` (line 3864): no docstring
-    - `clamp_retention_days(cls, v)` (line 3869): no docstring
-    - `normalize_action(cls, v)` (line 3874): no docstring
-  - `SchemaChangeMonitorSettings` (line 3885): Schema change monitor settings for proactive drift detection.
-    - `clamp_check_interval(cls, v)` (line 3911): no docstring
-    - `clamp_cooldown(cls, v)` (line 3916): no docstring
-  - `ChaosSettings` (line 3920): Chaos/fault injection settings (test-only).
-    - `coerce_enabled(cls, v)` (line 3951): no docstring
-    - `coerce_crash_once(cls, v)` (line 3962): no docstring
-    - `clamp_crash_exit_code(cls, v)` (line 3973): no docstring
-  - `WorkersSettings` (line 3977): Workers/services runtime settings.
-  - `WritebackSettings` (line 4007): Ontology writeback + read overlay settings
-  - `TestSettings` (line 4070): Test environment configuration
-  - `GoogleSheetsSettings` (line 4094): Google Sheets integration settings
-    - `fallback_google_api_key(cls, v)` (line 4130): no docstring
-  - `ApplicationSettings` (line 4137): Main application settings - aggregates all other settings
-    - `normalize_environment(cls, v)` (line 4189): no docstring
-    - `is_development(self)` (line 4210): Check if running in development mode
-    - `is_production(self)` (line 4215): Check if running in production mode
-    - `is_test(self)` (line 4220): Check if running in test mode
-    - `is_pytest(self)` (line 4225): Check if running under pytest (PYTEST_CURRENT_TEST set).
+    - `fallback_publish_lock_timeout(cls, v)` (line 1210): no docstring
+    - `clamp_jobs_max_retries(cls, v)` (line 1219): no docstring
+    - `clamp_job_queue_flush_timeout_seconds(cls, v)` (line 1224): no docstring
+    - `clamp_jobs_backoff_base_seconds(cls, v)` (line 1233): no docstring
+    - `clamp_jobs_backoff_max_seconds(cls, v)` (line 1238): no docstring
+    - `clamp_spark_executor_threads(cls, v)` (line 1243): no docstring
+    - `clamp_spark_shuffle_partitions(cls, v)` (line 1248): no docstring
+    - `clamp_lock_ttl_seconds(cls, v)` (line 1253): no docstring
+    - `clamp_lock_renew_seconds(cls, v)` (line 1258): no docstring
+    - `clamp_lock_retry_seconds(cls, v)` (line 1263): no docstring
+    - `clamp_lock_acquire_timeout_seconds(cls, v)` (line 1268): no docstring
+    - `clamp_publish_lock_acquire_timeout_seconds(cls, v)` (line 1273): no docstring
+    - `clamp_scheduler_poll_seconds(cls, v)` (line 1278): no docstring
+    - `protected_branches_set(self)` (line 1282): no docstring
+    - `fallback_branches_list(self)` (line 1289): no docstring
+  - `OntologySettings` (line 1297): Ontology API + linter governance settings.
+    - `strip_protected_branches(cls, v)` (line 1363): no docstring
+    - `parse_optional_bool(cls, v)` (line 1368): no docstring
+    - `protected_branches_set(self)` (line 1372): no docstring
+    - `allow_implicit_primary_key_effective(self, is_production, branch)` (line 1377): no docstring
+    - `allow_implicit_title_key_effective(self, is_production, branch)` (line 1386): no docstring
+  - `AgentRuntimeSettings` (line 1396): Agent runtime settings (agent service tool runner).
+    - `clamp_context_upload_max_bytes(cls, v)` (line 1522): no docstring
+    - `clamp_context_upload_max_text_chars(cls, v)` (line 1527): no docstring
+    - `clamp_context_upload_clamav_port(cls, v)` (line 1537): no docstring
+    - `fallback_bff_token(cls, v)` (line 1542): no docstring
+    - `fallback_command_timeout(cls, v)` (line 1550): no docstring
+  - `AgentPlanSettings` (line 1560): LLM-native control plane settings (planner + allowlist bootstrap).
+  - `PipelinePlanSettings` (line 1590): Pipeline plan planner settings (LLM-backed pipeline definition proposals).
+  - `ClientSettings` (line 1607): Internal service-to-service client settings (BFF/OMS/etc).
+    - `clamp_agent_proxy_timeout(cls, v)` (line 1640): no docstring
+    - `fallback_oms_client_token(cls, v)` (line 1649): no docstring
+    - `fallback_bff_admin_token(cls, v)` (line 1660): no docstring
+  - `MCPSettings` (line 1670): MCP integration settings (BFF/agent).
+  - `AuthSettings` (line 1692): Service auth configuration (BFF/OMS).
+    - `bff_auth_disable_allowed(self)` (line 1847): no docstring
+    - `oms_auth_disable_allowed(self)` (line 1851): no docstring
+    - `_split_tokens(raw)` (line 1855): no docstring
+    - `_tokens_from_values(cls, *values)` (line 1862): no docstring
+    - `bff_expected_tokens(self)` (line 1869): no docstring
+    - `bff_agent_tokens(self)` (line 1873): no docstring
+    - `oms_expected_tokens(self)` (line 1877): no docstring
+    - `bff_expected_token(self)` (line 1881): no docstring
+    - `bff_admin_only_token(self)` (line 1891): no docstring
+    - `oms_expected_token(self)` (line 1896): no docstring
+    - `admin_bypass_tokens(self)` (line 1901): no docstring
+    - `is_bff_auth_required(self, allow_pytest, default_required)` (line 1912): no docstring
+    - `is_oms_auth_required(self, default_required)` (line 1921): no docstring
+    - `_parse_exempt_paths(raw, defaults)` (line 1929): no docstring
+    - `resolve_bff_exempt_paths(self, defaults)` (line 1936): no docstring
+    - `resolve_oms_exempt_paths(self, defaults)` (line 1939): no docstring
+    - `dev_master_role_set(self)` (line 1943): no docstring
+  - `RateLimitSettings` (line 1947): Rate limiter runtime configuration.
+    - `clamp_local_max_entries(cls, v)` (line 1969): no docstring
+  - `MessagingSettings` (line 1973): Kafka topic/group configuration settings
+  - `StorageSettings` (line 2089): Storage configuration settings
+    - `normalize_minio_endpoint_url(cls, v)` (line 2144): no docstring
+    - `clamp_lakefs_client_timeout(cls, v)` (line 2214): no docstring
+    - `normalize_lakefs_credentials_source(cls, v)` (line 2222): no docstring
+    - `use_ssl(self)` (line 2233): Determine if SSL should be used based on endpoint URL
+    - `lakefs_api_url_effective(self)` (line 2238): Return lakeFS API base URL (without /api/v1).
+    - `lakefs_s3_endpoint_effective(self)` (line 2246): Return lakeFS S3 Gateway endpoint URL.
+  - `CacheSettings` (line 2253): Cache and TTL configuration settings
+    - `clamp_command_status_ttl_seconds(cls, v)` (line 2291): no docstring
+  - `SecuritySettings` (line 2295): Security configuration settings
+  - `PerformanceSettings` (line 2362): Performance and optimization settings
+    - `clamp_pg_pool_min(cls, v)` (line 2490): no docstring
+    - `clamp_pg_pool_max(cls, v)` (line 2505): no docstring
+    - `clamp_pg_command_timeout_seconds(cls, v)` (line 2520): no docstring
+    - `clamp_lineage_latest_edges_max_ids(cls, v)` (line 2525): no docstring
+  - `EventSourcingSettings` (line 2529): Event sourcing / CQRS tuning settings
+    - `normalize_event_store_strings(cls, v)` (line 2631): no docstring
+  - `BranchVirtualizationSettings` (line 2637): Branch virtualization defaults (OCC seeding).
+  - `InstanceWorkerSettings` (line 2655): Instance worker runtime settings.
+    - `fallback_allow_pk_generation(cls, v)` (line 2693): no docstring
+    - `fallback_relationship_strict(cls, v)` (line 2699): no docstring
+    - `clamp_max_retry_attempts(cls, v)` (line 2705): no docstring
+    - `clamp_untyped_ref_max_retry_attempts(cls, v)` (line 2710): no docstring
+    - `clamp_untyped_ref_backoff_max_seconds(cls, v)` (line 2715): no docstring
+  - `OntologyWorkerSettings` (line 2723): Ontology worker runtime settings.
+    - `clamp_max_retry_attempts(cls, v)` (line 2749): no docstring
+  - `ProjectionWorkerSettings` (line 2753): Projection worker runtime settings.
+    - `clamp_max_retries(cls, v)` (line 2775): no docstring
+  - `ActionWorkerSettings` (line 2779): Action worker runtime settings.
+    - `clamp_dlq_retries(cls, v)` (line 2805): no docstring
+    - `clamp_max_retry_attempts(cls, v)` (line 2810): no docstring
+  - `ActionOutboxSettings` (line 2814): Action outbox worker settings.
+    - `clamp_batch_size(cls, v)` (line 2836): no docstring
+  - `OntologyDeployOutboxSettings` (line 2840): Ontology deployment outbox worker settings (OMS embedded worker).
+    - `clamp_poll_seconds(cls, v)` (line 2908): no docstring
+    - `clamp_batch_size(cls, v)` (line 2913): no docstring
+    - `clamp_claim_timeout_seconds(cls, v)` (line 2918): no docstring
+    - `clamp_backoff_base_seconds(cls, v)` (line 2923): no docstring
+    - `clamp_backoff_max_seconds(cls, v)` (line 2928): no docstring
+    - `clamp_retention_days(cls, v)` (line 2933): no docstring
+    - `clamp_purge_interval_seconds(cls, v)` (line 2938): no docstring
+    - `clamp_purge_limit(cls, v)` (line 2943): no docstring
+  - `ConnectorSyncSettings` (line 2947): Connector sync worker settings.
+    - `clamp_max_retries(cls, v)` (line 2987): no docstring
+    - `clamp_backoff_base_seconds(cls, v)` (line 2992): no docstring
+    - `clamp_backoff_max_seconds(cls, v)` (line 2997): no docstring
+  - `ConnectorTriggerSettings` (line 3001): Connector trigger service settings.
+    - `strip_source_type(cls, v)` (line 3031): no docstring
+    - `clamp_tick_seconds(cls, v)` (line 3036): no docstring
+    - `clamp_poll_concurrency(cls, v)` (line 3041): no docstring
+    - `clamp_outbox_batch(cls, v)` (line 3046): no docstring
+  - `ObjectifySettings` (line 3050): Objectify worker settings.
+    - `strip_worker_handler(cls, v)` (line 3126): no docstring
+    - `clamp_batch_size(cls, v)` (line 3131): no docstring
+    - `clamp_row_batch_size(cls, v)` (line 3136): no docstring
+    - `clamp_bulk_update_batch_size(cls, v)` (line 3141): no docstring
+    - `clamp_list_page_size(cls, v)` (line 3148): no docstring
+    - `clamp_max_rows(cls, v)` (line 3153): no docstring
+    - `clamp_lineage_max_links(cls, v)` (line 3158): no docstring
+    - `clamp_max_retries(cls, v)` (line 3163): no docstring
+    - `clamp_backoff_base_seconds(cls, v)` (line 3168): no docstring
+    - `clamp_backoff_max_seconds(cls, v)` (line 3173): no docstring
+    - `normalize_ontology_pk_validation_mode(cls, v)` (line 3178): no docstring
+    - `clamp_dataset_primary_index_chunk_size(cls, v)` (line 3192): no docstring
+    - `bulk_update_batch_size_effective(self)` (line 3196): no docstring
+  - `IngestReconcilerSettings` (line 3200): Dataset ingest reconciler worker settings.
+    - `fallback_alert_webhook_url(cls, v)` (line 3263): no docstring
+    - `clamp_poll_seconds(cls, v)` (line 3272): no docstring
+    - `clamp_stale_seconds(cls, v)` (line 3277): no docstring
+    - `clamp_limit(cls, v)` (line 3282): no docstring
+    - `clamp_lock_key(cls, v)` (line 3287): no docstring
+    - `clamp_alert_published_threshold(cls, v)` (line 3292): no docstring
+    - `clamp_alert_aborted_threshold(cls, v)` (line 3297): no docstring
+    - `clamp_alert_cooldown_seconds(cls, v)` (line 3302): no docstring
+  - `DatasetIngestOutboxSettings` (line 3306): Dataset ingest outbox worker settings (BFF embedded worker).
+    - `clamp_poll_seconds(cls, v)` (line 3399): no docstring
+    - `clamp_backoff_base_seconds(cls, v)` (line 3409): no docstring
+    - `clamp_backoff_max_seconds(cls, v)` (line 3414): no docstring
+    - `clamp_max_retries(cls, v)` (line 3419): no docstring
+    - `clamp_claim_timeout_seconds(cls, v)` (line 3424): no docstring
+    - `clamp_purge_interval_seconds(cls, v)` (line 3429): no docstring
+    - `clamp_retention_days(cls, v)` (line 3434): no docstring
+    - `clamp_purge_limit(cls, v)` (line 3439): no docstring
+    - `clamp_dlq_max_in_flight(cls, v)` (line 3444): no docstring
+    - `clamp_dlq_delivery_timeout_ms(cls, v)` (line 3449): no docstring
+    - `clamp_dlq_request_timeout_ms(cls, v)` (line 3454): no docstring
+    - `clamp_dlq_retries(cls, v)` (line 3459): no docstring
+  - `ObjectifyOutboxWorkerSettings` (line 3463): Objectify outbox worker settings (BFF embedded worker).
+    - `clamp_poll_seconds(cls, v)` (line 3551): no docstring
+    - `clamp_batch_size(cls, v)` (line 3556): no docstring
+    - `clamp_backoff_base_seconds(cls, v)` (line 3566): no docstring
+    - `clamp_backoff_max_seconds(cls, v)` (line 3571): no docstring
+    - `clamp_claim_timeout_seconds(cls, v)` (line 3576): no docstring
+    - `clamp_purge_interval_seconds(cls, v)` (line 3581): no docstring
+    - `clamp_retention_days(cls, v)` (line 3586): no docstring
+    - `clamp_purge_limit(cls, v)` (line 3591): no docstring
+    - `clamp_producer_max_in_flight(cls, v)` (line 3596): no docstring
+    - `clamp_producer_delivery_timeout_ms(cls, v)` (line 3601): no docstring
+    - `clamp_producer_request_timeout_ms(cls, v)` (line 3606): no docstring
+    - `clamp_producer_retries(cls, v)` (line 3611): no docstring
+  - `ObjectifyReconcilerSettings` (line 3615): Objectify reconciler worker settings (BFF embedded worker).
+    - `clamp_poll_seconds(cls, v)` (line 3653): no docstring
+    - `clamp_stale_after_seconds(cls, v)` (line 3658): no docstring
+    - `clamp_enqueued_stale_seconds(cls, v)` (line 3663): no docstring
+    - `clamp_lock_key(cls, v)` (line 3668): no docstring
+    - `enqueued_stale_seconds_effective(self)` (line 3672): no docstring
+  - `WritebackMaterializerSettings` (line 3677): Writeback materializer worker settings.
+    - `db_names_list(self)` (line 3709): no docstring
+  - `EventPublisherSettings` (line 3716): Event publisher (message relay) settings.
+    - `fallback_poll_interval(cls, v)` (line 3778): no docstring
+    - `fallback_batch_size(cls, v)` (line 3786): no docstring
+    - `fallback_topic_bootstrap_timeout(cls, v)` (line 3794): no docstring
+    - `clamp_poll_interval_seconds(cls, v)` (line 3800): no docstring
+    - `clamp_batch_size(cls, v)` (line 3805): no docstring
+    - `clamp_kafka_flush_batch_size(cls, v)` (line 3810): no docstring
+    - `clamp_metrics_log_interval_seconds(cls, v)` (line 3817): no docstring
+    - `clamp_lookback_seconds(cls, v)` (line 3822): no docstring
+    - `clamp_lookback_max_keys(cls, v)` (line 3827): no docstring
+    - `clamp_dedup_max_events(cls, v)` (line 3832): no docstring
+    - `clamp_dedup_checkpoint_max_events(cls, v)` (line 3837): no docstring
+    - `clamp_topic_bootstrap_timeout_seconds(cls, v)` (line 3842): no docstring
+    - `kafka_flush_batch_size_effective(self)` (line 3846): no docstring
+  - `AgentRetentionWorkerSettings` (line 3850): Agent session retention worker settings (SEC-005).
+    - `clamp_poll_seconds(cls, v)` (line 3872): no docstring
+    - `clamp_retention_days(cls, v)` (line 3877): no docstring
+    - `normalize_action(cls, v)` (line 3882): no docstring
+  - `SchemaChangeMonitorSettings` (line 3893): Schema change monitor settings for proactive drift detection.
+    - `clamp_check_interval(cls, v)` (line 3919): no docstring
+    - `clamp_cooldown(cls, v)` (line 3924): no docstring
+  - `ChaosSettings` (line 3928): Chaos/fault injection settings (test-only).
+    - `coerce_enabled(cls, v)` (line 3959): no docstring
+    - `coerce_crash_once(cls, v)` (line 3970): no docstring
+    - `clamp_crash_exit_code(cls, v)` (line 3981): no docstring
+  - `WorkersSettings` (line 3985): Workers/services runtime settings.
+  - `WritebackSettings` (line 4015): Ontology writeback + read overlay settings
+  - `TestSettings` (line 4078): Test environment configuration
+  - `GoogleSheetsSettings` (line 4102): Google Sheets integration settings
+    - `fallback_google_api_key(cls, v)` (line 4138): no docstring
+  - `ApplicationSettings` (line 4145): Main application settings - aggregates all other settings
+    - `normalize_environment(cls, v)` (line 4197): no docstring
+    - `is_development(self)` (line 4218): Check if running in development mode
+    - `is_production(self)` (line 4223): Check if running in production mode
+    - `is_test(self)` (line 4228): Check if running in test mode
+    - `is_pytest(self)` (line 4233): Check if running under pytest (PYTEST_CURRENT_TEST set).
 
 ### `backend/shared/dependencies/__init__.py`
 
@@ -7152,27 +7156,28 @@
 
 ### `backend/shared/services/pipeline/dataset_output_semantics.py`
 - **Functions**
-  - `_text(value)` (line 142): no docstring
-  - `_first_text(output_metadata, settings, definition, keys)` (line 146): no docstring
-  - `_first_raw(output_metadata, settings, definition, keys)` (line 161): no docstring
-  - `_normalize_partition_by(value)` (line 175): no docstring
-  - `_normalize_primary_key_columns(value)` (line 194): no docstring
-  - `_normalize_write_mode(value)` (line 209): no docstring
-  - `_mode_requires_primary_key(mode)` (line 216): no docstring
-  - `normalize_dataset_output_metadata(definition, output_metadata)` (line 225): no docstring
-  - `_resolve_default_mode(execution_semantics, has_incremental_input, primary_key_columns, incremental_inputs_have_additive_updates, warnings)` (line 301): no docstring
-  - `_normalize_bool(value)` (line 327): no docstring
-  - `_runtime_write_mode(mode)` (line 340): no docstring
-  - `_policy_hash_payload(policy)` (line 350): no docstring
-  - `_compute_policy_hash(payload)` (line 365): no docstring
-  - `resolve_dataset_write_policy(definition, output_metadata, execution_semantics, has_incremental_input, incremental_inputs_have_additive_updates)` (line 370): no docstring
-  - `validate_dataset_output_metadata(definition, output_metadata, execution_semantics, has_incremental_input, incremental_inputs_have_additive_updates, available_columns)` (line 447): no docstring
+  - `_text(value)` (line 143): no docstring
+  - `_first_text(output_metadata, settings, definition, keys)` (line 147): no docstring
+  - `_first_raw(output_metadata, settings, definition, keys)` (line 162): no docstring
+  - `_normalize_partition_by(value)` (line 176): no docstring
+  - `_normalize_primary_key_columns(value)` (line 195): no docstring
+  - `_normalize_write_mode(value)` (line 210): no docstring
+  - `_mode_requires_primary_key(mode)` (line 217): no docstring
+  - `normalize_dataset_output_metadata(definition, output_metadata)` (line 226): no docstring
+  - `_resolve_default_mode(execution_semantics, has_incremental_input, primary_key_columns, incremental_inputs_have_additive_updates, warnings)` (line 302): no docstring
+  - `_normalize_bool(value)` (line 328): no docstring
+  - `_runtime_write_mode(mode)` (line 341): no docstring
+  - `validate_dataset_output_format_constraints(output_format, partition_by)` (line 351): no docstring
+  - `_policy_hash_payload(policy)` (line 367): no docstring
+  - `_compute_policy_hash(payload)` (line 382): no docstring
+  - `resolve_dataset_write_policy(definition, output_metadata, execution_semantics, has_incremental_input, incremental_inputs_have_additive_updates)` (line 387): no docstring
+  - `validate_dataset_output_metadata(definition, output_metadata, execution_semantics, has_incremental_input, incremental_inputs_have_additive_updates, available_columns)` (line 464): no docstring
 - **Classes**
   - `DatasetWriteMode` (line 12): no docstring
-  - `NormalizedDatasetOutputMetadata` (line 105): no docstring
-  - `ResolvedDatasetWritePolicy` (line 112): no docstring
-    - `requires_primary_key(self)` (line 129): no docstring
-    - `append_mode(self)` (line 138): no docstring
+  - `NormalizedDatasetOutputMetadata` (line 106): no docstring
+  - `ResolvedDatasetWritePolicy` (line 113): no docstring
+    - `requires_primary_key(self)` (line 130): no docstring
+    - `append_mode(self)` (line 139): no docstring
 
 ### `backend/shared/services/pipeline/fk_pattern_detector.py`
 - **Classes**
@@ -7328,13 +7333,13 @@
 
 ### `backend/shared/services/pipeline/pipeline_definition_validator.py`
 - **Functions**
-  - `_resolve_output_kind_for_node(definition_json, node_id, output_name, metadata)` (line 18): no docstring
-  - `_merged_output_payload_for_node(definition_json, node_id, output_name, metadata)` (line 51): no docstring
-  - `normalize_transform_metadata(metadata)` (line 83): no docstring
-  - `validate_pipeline_definition(definition_json, policy)` (line 144): no docstring
+  - `_resolve_output_kind_for_node(definition_json, node_id, output_name, metadata)` (line 19): no docstring
+  - `_merged_output_payload_for_node(definition_json, node_id, output_name, metadata)` (line 52): no docstring
+  - `normalize_transform_metadata(metadata)` (line 84): no docstring
+  - `validate_pipeline_definition(definition_json, policy)` (line 146): no docstring
 - **Classes**
-  - `PipelineDefinitionValidationPolicy` (line 128): no docstring
-  - `PipelineDefinitionValidationResult` (line 137): no docstring
+  - `PipelineDefinitionValidationPolicy` (line 129): no docstring
+  - `PipelineDefinitionValidationResult` (line 139): no docstring
 
 ### `backend/shared/services/pipeline/pipeline_dependency_utils.py`
 - **Functions**
@@ -7365,35 +7370,35 @@
   - `_join_tables(left, right, join_type, left_key, right_key, join_key, left_keys, right_keys, allow_cross_join, max_output_rows)` (line 1267): no docstring
   - `_build_join_output_layout(left_columns, right_columns)` (line 1379): no docstring
   - `_stream_join_tables(left, right, metadata, max_output_rows)` (line 1406): no docstring
-  - `_right_latest_snapshot_table(table, right_keys, right_event_time_column)` (line 1567): no docstring
-  - `_resolve_stream_join_right_column(columns, left_col, right_col)` (line 1589): no docstring
-  - `_to_epoch_seconds(value)` (line 1606): no docstring
-  - `_merge_rows(left, right, right_column_map)` (line 1629): no docstring
-  - `_find_similar_columns(target, available, cutoff)` (line 1646): Enterprise Enhancement (2026-01):
-  - `_filter_table(table, expression, parameters)` (line 1674): Filter table rows based on expression.
-  - `_parse_filter(expression, parameters)` (line 1722): no docstring
-  - `_compare(left, op, right)` (line 1738): no docstring
-  - `_compute_assignment_table(table, target, expression, parameters)` (line 1762): no docstring
-  - `_compute_table(table, expression, parameters)` (line 1784): no docstring
-  - `_explode_table(table, column)` (line 1814): no docstring
-  - `_parse_assignment(expression)` (line 1837): no docstring
-  - `_safe_eval(expression, row, parameters)` (line 1844): no docstring
-  - `_is_safe_ast(node)` (line 1880): no docstring
-  - `_eval_ast(node, variables)` (line 1896): no docstring
-  - `_parse_literal(raw)` (line 1979): no docstring
-  - `_parse_timestamp_literal(raw)` (line 1997): no docstring
-  - `_normalize_table(table, columns, trim, empty_to_null, whitespace_to_null, lowercase, uppercase)` (line 2016): no docstring
-  - `_geospatial_table(table, metadata, parameters)` (line 2054): no docstring
-  - `_pattern_mining_table(table, metadata, parameters)` (line 2112): no docstring
-  - `_encode_geohash_text(lat, lon, precision)` (line 2146): no docstring
-  - `_regex_flags(raw)` (line 2182): no docstring
-  - `_normalize_regex_rules(metadata)` (line 2196): no docstring
-  - `_regex_replace_table(table, rules)` (line 2235): no docstring
-  - `_parse_csv_bytes(raw_bytes, max_rows)` (line 2263): Parse a CSV payload into row dicts.
-  - `_parse_excel_bytes(raw_bytes, max_rows)` (line 2314): no docstring
-  - `_parse_json_bytes(raw_bytes, max_rows)` (line 2326): no docstring
-  - `_infer_column_types(table)` (line 2361): no docstring
-  - `_build_table_ops(table)` (line 2370): no docstring
+  - `_right_latest_snapshot_table(table, right_keys, right_event_time_column)` (line 1594): no docstring
+  - `_resolve_stream_join_right_column(columns, left_col, right_col)` (line 1616): no docstring
+  - `_to_epoch_seconds(value)` (line 1633): no docstring
+  - `_merge_rows(left, right, right_column_map)` (line 1656): no docstring
+  - `_find_similar_columns(target, available, cutoff)` (line 1673): Enterprise Enhancement (2026-01):
+  - `_filter_table(table, expression, parameters)` (line 1701): Filter table rows based on expression.
+  - `_parse_filter(expression, parameters)` (line 1749): no docstring
+  - `_compare(left, op, right)` (line 1765): no docstring
+  - `_compute_assignment_table(table, target, expression, parameters)` (line 1789): no docstring
+  - `_compute_table(table, expression, parameters)` (line 1811): no docstring
+  - `_explode_table(table, column)` (line 1841): no docstring
+  - `_parse_assignment(expression)` (line 1864): no docstring
+  - `_safe_eval(expression, row, parameters)` (line 1871): no docstring
+  - `_is_safe_ast(node)` (line 1907): no docstring
+  - `_eval_ast(node, variables)` (line 1923): no docstring
+  - `_parse_literal(raw)` (line 2006): no docstring
+  - `_parse_timestamp_literal(raw)` (line 2024): no docstring
+  - `_normalize_table(table, columns, trim, empty_to_null, whitespace_to_null, lowercase, uppercase)` (line 2043): no docstring
+  - `_geospatial_table(table, metadata, parameters)` (line 2081): no docstring
+  - `_pattern_mining_table(table, metadata, parameters)` (line 2139): no docstring
+  - `_encode_geohash_text(lat, lon, precision)` (line 2173): no docstring
+  - `_regex_flags(raw)` (line 2209): no docstring
+  - `_normalize_regex_rules(metadata)` (line 2223): no docstring
+  - `_regex_replace_table(table, rules)` (line 2262): no docstring
+  - `_parse_csv_bytes(raw_bytes, max_rows)` (line 2290): Parse a CSV payload into row dicts.
+  - `_parse_excel_bytes(raw_bytes, max_rows)` (line 2341): no docstring
+  - `_parse_json_bytes(raw_bytes, max_rows)` (line 2353): no docstring
+  - `_infer_column_types(table)` (line 2388): no docstring
+  - `_build_table_ops(table)` (line 2397): no docstring
 - **Classes**
   - `PipelineExpectationError` (line 69): no docstring
   - `PipelineTable` (line 74): no docstring
@@ -7491,67 +7496,68 @@
   - `add_join(plan, left_node_id, right_node_id, left_keys, right_keys, join_type, join_hints, broadcast_left, broadcast_right, node_id)` (line 452): no docstring
   - `add_filter(plan, input_node_id, expression, node_id)` (line 515): no docstring
   - `add_compute(plan, input_node_id, expression, node_id)` (line 527): no docstring
-  - `add_compute_column(plan, input_node_id, target_column, formula, node_id)` (line 539): Add a compute transform that writes a single column.
-  - `add_compute_assignments(plan, input_node_id, assignments, node_id)` (line 564): Add a compute transform that writes multiple columns (assignments).
-  - `add_sort(plan, input_node_id, columns, node_id)` (line 593): Add a sort transform node.
-  - `add_explode(plan, input_node_id, column, node_id)` (line 636): Add an explode transform node for an array/map-like column.
-  - `add_union(plan, left_node_id, right_node_id, union_mode, node_id)` (line 655): Add a union transform node for two inputs.
-  - `add_pivot(plan, input_node_id, index, columns, values, agg, node_id)` (line 687): Add a pivot transform node.
-  - `add_cast(plan, input_node_id, casts, node_id)` (line 718): no docstring
-  - `add_rename(plan, input_node_id, rename, node_id)` (line 747): no docstring
-  - `add_select(plan, input_node_id, columns, node_id)` (line 773): no docstring
-  - `add_select_expr(plan, input_node_id, expressions, node_id)` (line 797): Add a select transform using Spark SQL selectExpr-style expressions.
-  - `add_drop(plan, input_node_id, columns, node_id)` (line 815): no docstring
-  - `add_dedupe(plan, input_node_id, columns, node_id)` (line 833): no docstring
-  - `add_group_by_expr(plan, input_node_id, group_by, aggregate_expressions, operation, node_id)` (line 851): Add a groupBy/aggregate node using Spark SQL aggregate expressions.
-  - `add_window_expr(plan, input_node_id, expressions, node_id)` (line 900): Add a window transform that computes one or more Spark SQL window expressions.
-  - `add_normalize(plan, input_node_id, columns, trim, empty_to_null, whitespace_to_null, lowercase, uppercase, node_id)` (line 929): no docstring
-  - `add_regex_replace(plan, input_node_id, rules, node_id)` (line 959): no docstring
-  - `add_split(plan, input_node_id, expression, true_node_id, false_node_id)` (line 995): Macro expansion for split semantics.
-  - `add_geospatial(plan, input_node_id, mode, config, node_id)` (line 1052): no docstring
-  - `add_pattern_mining(plan, input_node_id, source_column, pattern, output_column, match_mode, node_id)` (line 1073): no docstring
-  - `add_stream_join(plan, left_node_id, right_node_id, left_keys, right_keys, join_type, strategy, left_event_time_column, right_event_time_column, allowed_lateness_seconds, left_cache_expiration_seconds, right_cache_expiration_seconds, time_direction, stream_join_metadata, node_id)` (line 1106): no docstring
-  - `add_output(plan, input_node_id, output_name, output_kind, node_id, output_metadata)` (line 1275): no docstring
-  - `validate_structure(plan)` (line 1339): Lightweight structural validation for plan.definition_json.
-  - `add_edge(plan, from_node_id, to_node_id)` (line 1542): Add a graph edge (idempotent).
-  - `delete_edge(plan, from_node_id, to_node_id)` (line 1572): Delete all matching edges from->to (no-op if not found).
-  - `set_node_inputs(plan, node_id, input_node_ids)` (line 1600): Replace all incoming edges to node_id with input_node_ids (in order).
-  - `update_node_metadata(plan, node_id, set_fields, unset_fields, replace)` (line 1638): Patch node.metadata (merge by default, replace if requested).
-  - `delete_node(plan, node_id)` (line 1685): Delete a node and any incident edges; also removes outputs[] entry for output nodes.
-  - `update_output(plan, output_name, set_fields, unset_fields, replace)` (line 1719): Patch an outputs[] entry by output_name; keeps output node metadata.outputName in sync if renamed.
+  - `add_udf(plan, input_node_id, udf_id, udf_version, node_id)` (line 539): no docstring
+  - `add_compute_column(plan, input_node_id, target_column, formula, node_id)` (line 570): Add a compute transform that writes a single column.
+  - `add_compute_assignments(plan, input_node_id, assignments, node_id)` (line 595): Add a compute transform that writes multiple columns (assignments).
+  - `add_sort(plan, input_node_id, columns, node_id)` (line 624): Add a sort transform node.
+  - `add_explode(plan, input_node_id, column, node_id)` (line 667): Add an explode transform node for an array/map-like column.
+  - `add_union(plan, left_node_id, right_node_id, union_mode, node_id)` (line 686): Add a union transform node for two inputs.
+  - `add_pivot(plan, input_node_id, index, columns, values, agg, node_id)` (line 718): Add a pivot transform node.
+  - `add_cast(plan, input_node_id, casts, node_id)` (line 749): no docstring
+  - `add_rename(plan, input_node_id, rename, node_id)` (line 778): no docstring
+  - `add_select(plan, input_node_id, columns, node_id)` (line 804): no docstring
+  - `add_select_expr(plan, input_node_id, expressions, node_id)` (line 828): Add a select transform using Spark SQL selectExpr-style expressions.
+  - `add_drop(plan, input_node_id, columns, node_id)` (line 846): no docstring
+  - `add_dedupe(plan, input_node_id, columns, node_id)` (line 864): no docstring
+  - `add_group_by_expr(plan, input_node_id, group_by, aggregate_expressions, operation, node_id)` (line 882): Add a groupBy/aggregate node using Spark SQL aggregate expressions.
+  - `add_window_expr(plan, input_node_id, expressions, node_id)` (line 931): Add a window transform that computes one or more Spark SQL window expressions.
+  - `add_normalize(plan, input_node_id, columns, trim, empty_to_null, whitespace_to_null, lowercase, uppercase, node_id)` (line 960): no docstring
+  - `add_regex_replace(plan, input_node_id, rules, node_id)` (line 990): no docstring
+  - `add_split(plan, input_node_id, expression, true_node_id, false_node_id)` (line 1026): Macro expansion for split semantics.
+  - `add_geospatial(plan, input_node_id, mode, config, node_id)` (line 1083): no docstring
+  - `add_pattern_mining(plan, input_node_id, source_column, pattern, output_column, match_mode, node_id)` (line 1104): no docstring
+  - `add_stream_join(plan, left_node_id, right_node_id, left_keys, right_keys, join_type, strategy, left_event_time_column, right_event_time_column, allowed_lateness_seconds, left_cache_expiration_seconds, right_cache_expiration_seconds, time_direction, stream_join_metadata, node_id)` (line 1137): no docstring
+  - `add_output(plan, input_node_id, output_name, output_kind, node_id, output_metadata)` (line 1325): no docstring
+  - `validate_structure(plan)` (line 1389): Lightweight structural validation for plan.definition_json.
+  - `add_edge(plan, from_node_id, to_node_id)` (line 1597): Add a graph edge (idempotent).
+  - `delete_edge(plan, from_node_id, to_node_id)` (line 1627): Delete all matching edges from->to (no-op if not found).
+  - `set_node_inputs(plan, node_id, input_node_ids)` (line 1655): Replace all incoming edges to node_id with input_node_ids (in order).
+  - `update_node_metadata(plan, node_id, set_fields, unset_fields, replace)` (line 1693): Patch node.metadata (merge by default, replace if requested).
+  - `delete_node(plan, node_id)` (line 1740): Delete a node and any incident edges; also removes outputs[] entry for output nodes.
+  - `update_output(plan, output_name, set_fields, unset_fields, replace)` (line 1774): Patch an outputs[] entry by output_name; keeps output node metadata.outputName in sync if renamed.
 - **Classes**
   - `PipelinePlanBuilderError` (line 20): no docstring
   - `PlanMutation` (line 25): no docstring
 
 ### `backend/shared/services/pipeline/pipeline_preflight_utils.py`
 - **Functions**
-  - `_normalize_column_list(raw)` (line 37): no docstring
-  - `_extract_schema_columns(schema)` (line 54): no docstring
-  - `_extract_sample_rows(sample)` (line 68): no docstring
-  - `_output_metadata_text(payload, *keys)` (line 123): no docstring
-  - `_infer_types_from_rows(rows, columns)` (line 134): no docstring
-  - `_merge_types(base, extra)` (line 144): no docstring
-  - `_schema_for_input(dataset, version)` (line 155): no docstring
-  - `_apply_select(schema, columns)` (line 180): no docstring
-  - `_apply_drop(schema, columns)` (line 186): no docstring
-  - `_apply_rename(schema, rename_map)` (line 193): no docstring
-  - `_apply_cast(schema, casts)` (line 205): no docstring
-  - `_apply_compute(schema, metadata)` (line 217): Compute transforms can be represented in a few deterministic forms:
-  - `_apply_geospatial(schema, metadata)` (line 279): no docstring
-  - `_apply_pattern_mining(schema, metadata)` (line 301): no docstring
-  - `_apply_group_by(schema, group_by, aggregates)` (line 320): no docstring
-  - `_parse_sql_alias(expr)` (line 344): Best-effort alias extraction for Spark SQL expressions.
-  - `_apply_group_by_expr(schema, group_by, expressions)` (line 364): Schema propagation for Spark `groupBy(...).agg(expr(...).alias(...))` via `aggregateExpressions`.
-  - `_apply_window(schema, metadata)` (line 404): Window transforms can either be declarative metadata (partition/order + row_number)
-  - `_apply_join(left, right, left_keys, right_keys)` (line 447): Apply the deterministic join output naming policy.
-  - `_apply_select_expr(schema, expressions)` (line 504): Best-effort schema propagation for Spark `selectExpr`.
-  - `_apply_union(left, right, mode)` (line 605): no docstring
-  - `_schema_empty(schema)` (line 631): no docstring
-  - `_column_type(schema, column)` (line 635): no docstring
-  - `async compute_pipeline_preflight(definition, db_name, dataset_registry, branch)` (line 648): no docstring
-  - `async compute_schema_by_node(definition, db_name, dataset_registry, branch)` (line 1495): no docstring
+  - `_normalize_column_list(raw)` (line 38): no docstring
+  - `_extract_schema_columns(schema)` (line 55): no docstring
+  - `_extract_sample_rows(sample)` (line 69): no docstring
+  - `_output_metadata_text(payload, *keys)` (line 124): no docstring
+  - `_infer_types_from_rows(rows, columns)` (line 135): no docstring
+  - `_merge_types(base, extra)` (line 145): no docstring
+  - `_schema_for_input(dataset, version)` (line 156): no docstring
+  - `_apply_select(schema, columns)` (line 181): no docstring
+  - `_apply_drop(schema, columns)` (line 187): no docstring
+  - `_apply_rename(schema, rename_map)` (line 194): no docstring
+  - `_apply_cast(schema, casts)` (line 206): no docstring
+  - `_apply_compute(schema, metadata)` (line 218): Compute transforms can be represented in a few deterministic forms:
+  - `_apply_geospatial(schema, metadata)` (line 280): no docstring
+  - `_apply_pattern_mining(schema, metadata)` (line 302): no docstring
+  - `_apply_group_by(schema, group_by, aggregates)` (line 321): no docstring
+  - `_parse_sql_alias(expr)` (line 345): Best-effort alias extraction for Spark SQL expressions.
+  - `_apply_group_by_expr(schema, group_by, expressions)` (line 365): Schema propagation for Spark `groupBy(...).agg(expr(...).alias(...))` via `aggregateExpressions`.
+  - `_apply_window(schema, metadata)` (line 405): Window transforms can either be declarative metadata (partition/order + row_number)
+  - `_apply_join(left, right, left_keys, right_keys)` (line 448): Apply the deterministic join output naming policy.
+  - `_apply_select_expr(schema, expressions)` (line 505): Best-effort schema propagation for Spark `selectExpr`.
+  - `_apply_union(left, right, mode)` (line 606): no docstring
+  - `_schema_empty(schema)` (line 632): no docstring
+  - `_column_type(schema, column)` (line 636): no docstring
+  - `async compute_pipeline_preflight(definition, db_name, dataset_registry, branch)` (line 649): no docstring
+  - `async compute_schema_by_node(definition, db_name, dataset_registry, branch)` (line 1509): no docstring
 - **Classes**
-  - `SchemaInfo` (line 31): no docstring
+  - `SchemaInfo` (line 32): no docstring
 
 ### `backend/shared/services/pipeline/pipeline_preview_inspector.py`
 - **Functions**
@@ -7643,7 +7649,10 @@
   - `resolve_join_spec(metadata)` (line 61): no docstring
   - `resolve_stream_join_spec(metadata)` (line 102): no docstring
   - `resolve_stream_join_effective_join_type(strategy, requested_join_type)` (line 186): no docstring
-  - `normalize_union_mode(metadata)` (line 197): no docstring
+  - `resolve_input_read_mode(node)` (line 197): no docstring
+  - `resolve_input_read_format(node)` (line 210): no docstring
+  - `is_stream_like_input_node(node)` (line 223): no docstring
+  - `normalize_union_mode(metadata)` (line 233): no docstring
 - **Classes**
   - `JoinSpec` (line 37): no docstring
   - `StreamJoinSpec` (line 47): no docstring
@@ -8529,14 +8538,16 @@
 
 ### `backend/shared/tools/foundry_functions_compat.py`
 - **Functions**
-  - `default_snapshot_path()` (line 32): no docstring
-  - `_parse_status(raw, field, fn_name)` (line 36): no docstring
-  - `load_foundry_functions_snapshot(snapshot_path)` (line 46): no docstring
-  - `load_default_foundry_functions_snapshot()` (line 96): no docstring
-  - `filter_functions(entries, engine, status)` (line 100): no docstring
+  - `_parse_scalar(value)` (line 18): no docstring
+  - `_load_yaml_payload(path)` (line 27): no docstring
+  - `default_snapshot_path()` (line 103): no docstring
+  - `_parse_status(raw, field, fn_name)` (line 107): no docstring
+  - `load_foundry_functions_snapshot(snapshot_path)` (line 117): no docstring
+  - `load_default_foundry_functions_snapshot()` (line 167): no docstring
+  - `filter_functions(entries, engine, status)` (line 171): no docstring
 - **Classes**
-  - `FunctionCompatibility` (line 16): no docstring
-    - `status_for_engine(self, engine)` (line 23): no docstring
+  - `FunctionCompatibility` (line 87): no docstring
+    - `status_for_engine(self, engine)` (line 94): no docstring
 
 ### `backend/shared/tools/registry_cleanup.py`
 - **Functions**
@@ -10173,6 +10184,12 @@
   - `async test_plan_add_output_accepts_dataset_canonical_fields()` (line 11): no docstring
   - `async test_plan_add_output_normalizes_dataset_camel_case_aliases()` (line 39): no docstring
 
+### `backend/tests/unit/mcp/test_pipeline_plan_add_udf_contract.py`
+- **Functions**
+  - `async test_plan_add_udf_accepts_reference_fields()` (line 11): no docstring
+  - `async test_plan_add_udf_accepts_camel_case_aliases()` (line 35): no docstring
+  - `async test_plan_add_udf_requires_pinned_version()` (line 59): no docstring
+
 ### `backend/tests/unit/middleware/test_middleware_fixes.py`
 - **Functions**
   - `_set_env(**updates)` (line 20): no docstring
@@ -10255,6 +10272,7 @@
 - **Functions**
   - `test_functions_snapshot_entries_have_valid_classification()` (line 14): no docstring
   - `test_functions_snapshot_has_no_unclassified_rows()` (line 25): no docstring
+  - `test_functions_snapshot_loader_fallback_parser_without_pyyaml(monkeypatch)` (line 36): no docstring
 
 ### `backend/tests/unit/pipeline_functions/test_functions_preview_compat.py`
 - **Functions**
@@ -10273,9 +10291,9 @@
 ### `backend/tests/unit/pipeline_functions/test_functions_spark_compat.py`
 - **Functions**
   - `spark()` (line 29): no docstring
-  - `worker(spark)` (line 47): no docstring
-  - `_run_group_aggregate(worker, op)` (line 53): no docstring
-  - `test_functions_spark_supported_matrix_contract(worker)` (line 73): no docstring
+  - `worker(spark)` (line 50): no docstring
+  - `_run_group_aggregate(worker, op)` (line 56): no docstring
+  - `test_functions_spark_supported_matrix_contract(worker)` (line 76): no docstring
 
 ### `backend/tests/unit/routers/test_monitoring_router_deprecation_headers.py`
 - **Functions**
@@ -10584,7 +10602,9 @@
   - `test_resolve_dataset_write_policy_changelog_uses_append_runtime()` (line 130): no docstring
   - `test_validate_dataset_output_metadata_requires_pk_and_post_filtering()` (line 141): no docstring
   - `test_validate_dataset_output_metadata_checks_available_columns()` (line 152): no docstring
-  - `test_dataset_write_policy_hash_stable()` (line 168): no docstring
+  - `test_validate_dataset_output_metadata_rejects_csv_with_partition_by()` (line 168): no docstring
+  - `test_validate_dataset_output_metadata_rejects_json_with_partition_by()` (line 182): no docstring
+  - `test_dataset_write_policy_hash_stable()` (line 196): no docstring
 
 ### `backend/tests/unit/services/test_dlq_handler_fixed.py`
 - **Functions**
@@ -11022,14 +11042,16 @@
   - `test_validate_output_payload_dataset_requires_pk_for_append_only_new_rows()` (line 59): no docstring
   - `test_validate_output_payload_dataset_requires_post_filtering_for_snapshot_remove()` (line 68): no docstring
   - `test_validate_output_payload_dataset_rejects_unsupported_output_format()` (line 80): no docstring
-  - `test_validate_output_payload_dataset_accepts_full_metadata()` (line 89): no docstring
-  - `test_validate_output_payload_geotemporal_requires_metadata()` (line 106): no docstring
-  - `test_validate_output_payload_geotemporal_accepts_camel_case()` (line 113): no docstring
-  - `test_validate_output_payload_media_requires_type_enum()` (line 128): no docstring
-  - `test_validate_output_payload_virtual_requires_refresh_mode_enum()` (line 140): no docstring
-  - `test_validate_output_payload_virtual_accepts_required_values()` (line 152): no docstring
-  - `test_validate_output_payload_virtual_rejects_dataset_write_settings()` (line 166): no docstring
-  - `test_normalize_output_kind_rejects_unknown_kind()` (line 182): no docstring
+  - `test_validate_output_payload_dataset_rejects_partitioned_csv()` (line 89): no docstring
+  - `test_validate_output_payload_dataset_rejects_partitioned_json()` (line 100): no docstring
+  - `test_validate_output_payload_dataset_accepts_full_metadata()` (line 111): no docstring
+  - `test_validate_output_payload_geotemporal_requires_metadata()` (line 128): no docstring
+  - `test_validate_output_payload_geotemporal_accepts_camel_case()` (line 135): no docstring
+  - `test_validate_output_payload_media_requires_type_enum()` (line 150): no docstring
+  - `test_validate_output_payload_virtual_requires_refresh_mode_enum()` (line 162): no docstring
+  - `test_validate_output_payload_virtual_accepts_required_values()` (line 174): no docstring
+  - `test_validate_output_payload_virtual_rejects_dataset_write_settings()` (line 188): no docstring
+  - `test_normalize_output_kind_rejects_unknown_kind()` (line 204): no docstring
 
 ### `backend/tests/unit/services/test_pipeline_advanced_transforms.py`
 - **Functions**
@@ -11039,7 +11061,8 @@
   - `test_validate_pipeline_definition_rejects_invalid_stream_join_time_direction()` (line 161): no docstring
   - `test_validate_pipeline_definition_rejects_dynamic_stream_join_without_event_time_fields()` (line 202): no docstring
   - `test_validate_pipeline_definition_rejects_left_lookup_with_transformed_right_input()` (line 239): no docstring
-  - `test_builder_helpers_add_geospatial_pattern_mining_stream_join()` (line 278): no docstring
+  - `test_validate_pipeline_definition_rejects_left_lookup_with_streaming_right_input()` (line 278): no docstring
+  - `test_builder_helpers_add_geospatial_pattern_mining_stream_join()` (line 315): no docstring
 
 ### `backend/tests/unit/services/test_pipeline_agent_allowed_tools.py`
 - **Functions**
@@ -11087,7 +11110,8 @@
   - `test_validate_pipeline_definition_uses_custom_udf_message()` (line 74): no docstring
   - `test_validate_pipeline_definition_udf_requires_udf_id_when_reference_policy_enabled()` (line 93): no docstring
   - `test_validate_pipeline_definition_udf_rejects_inline_code_when_reference_policy_enabled()` (line 106): no docstring
-  - `test_validate_pipeline_definition_rejects_invalid_dataset_output_metadata()` (line 123): no docstring
+  - `test_validate_pipeline_definition_udf_requires_version_when_pinning_enabled()` (line 123): no docstring
+  - `test_validate_pipeline_definition_rejects_invalid_dataset_output_metadata()` (line 147): no docstring
 
 ### `backend/tests/unit/services/test_pipeline_execution_service_dataset_policy.py`
 - **Functions**
@@ -11143,8 +11167,10 @@
   - `async test_executor_stream_join_dynamic_uses_backward_time_direction_by_default()` (line 175): no docstring
   - `async test_executor_stream_join_dynamic_supports_forward_direction()` (line 248): no docstring
   - `async test_executor_stream_join_dynamic_applies_cache_expiration_window()` (line 319): no docstring
-  - `async test_executor_stream_join_dynamic_emits_unmatched_rows_as_outer_join()` (line 392): no docstring
-  - `async test_executor_stream_join_left_lookup_forces_left_join_semantics()` (line 464): no docstring
+  - `async test_executor_stream_join_dynamic_selects_single_best_match_per_left_row()` (line 392): no docstring
+  - `async test_executor_stream_join_dynamic_emits_unmatched_rows_as_outer_join()` (line 478): no docstring
+  - `async test_executor_stream_join_left_lookup_forces_left_join_semantics()` (line 550): no docstring
+  - `async test_executor_stream_join_left_lookup_picks_latest_right_row_per_key_without_event_time()` (line 619): no docstring
 - **Classes**
   - `_Dataset` (line 12): no docstring
   - `_Version` (line 21): no docstring
@@ -11188,43 +11214,51 @@
 - **Functions**
   - `async test_run_pipeline_preflight_fail_closed_raises_http_exception(monkeypatch)` (line 13): no docstring
   - `async test_run_pipeline_preflight_fail_open_returns_warning_payload(monkeypatch)` (line 43): no docstring
+  - `async test_run_pipeline_preflight_blocks_unpinned_udf_version(monkeypatch)` (line 72): no docstring
+  - `async test_run_pipeline_preflight_blocks_missing_udf_reference(monkeypatch)` (line 111): no docstring
 
 ### `backend/tests/unit/services/test_pipeline_plan_builder.py`
 - **Functions**
-  - `test_new_plan_has_minimum_shape()` (line 34): no docstring
-  - `test_add_input_and_output_wires_edges()` (line 42): no docstring
-  - `test_add_output_persists_output_metadata_into_outputs_entry()` (line 61): no docstring
-  - `test_add_output_warns_when_legacy_alias_kind_used()` (line 77): no docstring
-  - `test_add_output_normalizes_dataset_write_metadata_aliases()` (line 85): no docstring
-  - `test_add_input_supports_read_config()` (line 109): no docstring
-  - `test_add_external_input_creates_input_node_without_dataset_selection()` (line 122): no docstring
-  - `test_configure_input_read_patches_input_nodes_only()` (line 138): no docstring
-  - `test_add_join_requires_two_inputs_and_keys()` (line 151): no docstring
-  - `test_add_join_accepts_hints_and_broadcast_flags()` (line 170): no docstring
-  - `test_add_join_rejects_cross_join()` (line 188): no docstring
-  - `test_add_cast_requires_column_and_type()` (line 204): no docstring
-  - `test_compute_column_and_assignments_build_metadata()` (line 216): no docstring
-  - `test_select_expr_builds_metadata()` (line 235): no docstring
-  - `test_add_sort_supports_desc_prefix_and_dict_form()` (line 244): no docstring
-  - `test_add_explode_builds_metadata()` (line 258): no docstring
-  - `test_add_union_builds_metadata()` (line 267): no docstring
-  - `test_validate_structure_rejects_left_lookup_with_transformed_right_input()` (line 277): no docstring
-  - `test_add_pivot_builds_metadata()` (line 297): no docstring
-  - `test_add_edge_is_idempotent()` (line 316): no docstring
-  - `test_delete_edge_is_noop_if_missing_but_warns()` (line 328): no docstring
-  - `test_set_node_inputs_replaces_incoming_edges_ordered()` (line 341): no docstring
-  - `test_update_node_metadata_merges_and_unsets()` (line 356): no docstring
-  - `test_update_settings_patches_definition_settings()` (line 374): no docstring
-  - `test_delete_node_removes_outputs_entry()` (line 386): no docstring
-  - `test_update_output_renames_and_syncs_output_node_metadata()` (line 398): no docstring
+  - `test_new_plan_has_minimum_shape()` (line 35): no docstring
+  - `test_add_input_and_output_wires_edges()` (line 43): no docstring
+  - `test_add_output_persists_output_metadata_into_outputs_entry()` (line 62): no docstring
+  - `test_add_output_warns_when_legacy_alias_kind_used()` (line 78): no docstring
+  - `test_add_output_normalizes_dataset_write_metadata_aliases()` (line 86): no docstring
+  - `test_add_input_supports_read_config()` (line 110): no docstring
+  - `test_add_external_input_creates_input_node_without_dataset_selection()` (line 123): no docstring
+  - `test_configure_input_read_patches_input_nodes_only()` (line 139): no docstring
+  - `test_add_join_requires_two_inputs_and_keys()` (line 152): no docstring
+  - `test_add_join_accepts_hints_and_broadcast_flags()` (line 171): no docstring
+  - `test_add_join_rejects_cross_join()` (line 189): no docstring
+  - `test_add_cast_requires_column_and_type()` (line 205): no docstring
+  - `test_compute_column_and_assignments_build_metadata()` (line 217): no docstring
+  - `test_add_udf_builds_reference_metadata()` (line 236): no docstring
+  - `test_add_udf_rejects_invalid_version()` (line 251): no docstring
+  - `test_select_expr_builds_metadata()` (line 258): no docstring
+  - `test_add_sort_supports_desc_prefix_and_dict_form()` (line 267): no docstring
+  - `test_add_explode_builds_metadata()` (line 281): no docstring
+  - `test_add_union_builds_metadata()` (line 290): no docstring
+  - `test_add_stream_join_rejects_left_lookup_with_transformed_right_input()` (line 300): no docstring
+  - `test_add_stream_join_rejects_left_lookup_with_streaming_right_input()` (line 317): no docstring
+  - `test_add_pivot_builds_metadata()` (line 338): no docstring
+  - `test_add_edge_is_idempotent()` (line 357): no docstring
+  - `test_delete_edge_is_noop_if_missing_but_warns()` (line 369): no docstring
+  - `test_set_node_inputs_replaces_incoming_edges_ordered()` (line 382): no docstring
+  - `test_update_node_metadata_merges_and_unsets()` (line 397): no docstring
+  - `test_update_settings_patches_definition_settings()` (line 415): no docstring
+  - `test_delete_node_removes_outputs_entry()` (line 427): no docstring
+  - `test_update_output_renames_and_syncs_output_node_metadata()` (line 439): no docstring
 
 ### `backend/tests/unit/services/test_pipeline_preflight_dataset_output.py`
 - **Functions**
   - `async test_compute_pipeline_preflight_blocks_when_dataset_pk_columns_missing(monkeypatch)` (line 12): no docstring
   - `async test_compute_pipeline_preflight_accepts_valid_dataset_write_metadata(monkeypatch)` (line 59): no docstring
-  - `async test_compute_pipeline_preflight_blocks_geotemporal_missing_required_columns(monkeypatch)` (line 105): no docstring
-  - `async test_compute_pipeline_preflight_blocks_virtual_dataset_write_settings(monkeypatch)` (line 151): no docstring
-  - `async test_compute_pipeline_preflight_blocks_left_lookup_with_transformed_right_input(monkeypatch)` (line 197): no docstring
+  - `async test_compute_pipeline_preflight_blocks_partitioned_csv_dataset_output(monkeypatch)` (line 105): no docstring
+  - `async test_compute_pipeline_preflight_blocks_partitioned_json_dataset_output(monkeypatch)` (line 151): no docstring
+  - `async test_compute_pipeline_preflight_blocks_geotemporal_missing_required_columns(monkeypatch)` (line 197): no docstring
+  - `async test_compute_pipeline_preflight_blocks_virtual_dataset_write_settings(monkeypatch)` (line 243): no docstring
+  - `async test_compute_pipeline_preflight_blocks_left_lookup_with_transformed_right_input(monkeypatch)` (line 289): no docstring
+  - `async test_compute_pipeline_preflight_blocks_left_lookup_with_streaming_right_input(monkeypatch)` (line 350): no docstring
 
 ### `backend/tests/unit/services/test_pipeline_preview_inspector.py`
 - **Functions**
@@ -12115,27 +12149,37 @@
 ### `backend/tests/unit/workers/test_pipeline_worker_transforms.py`
 - **Functions**
   - `spark()` (line 30): no docstring
-  - `worker(spark)` (line 48): no docstring
-  - `test_apply_transform_basic_ops(worker)` (line 54): no docstring
-  - `test_apply_transform_join_union_groupby_pivot_window(worker)` (line 123): no docstring
-  - `test_watermark_helpers(worker)` (line 165): no docstring
-  - `test_pipeline_worker_file_helpers(worker, tmp_path)` (line 178): no docstring
+  - `worker(spark)` (line 51): no docstring
+  - `test_apply_transform_basic_ops(worker)` (line 57): no docstring
+  - `test_apply_transform_join_union_groupby_pivot_window(worker)` (line 126): no docstring
+  - `test_watermark_helpers(worker)` (line 168): no docstring
+  - `test_pipeline_worker_file_helpers(worker, tmp_path)` (line 181): no docstring
 
 ### `backend/tests/unit/workers/test_spark_advanced_transforms.py`
 - **Functions**
-  - `spark()` (line 23): no docstring
-  - `worker(spark)` (line 41): no docstring
-  - `test_split_transform(worker)` (line 48): no docstring
-  - `test_geospatial_point_and_distance(worker)` (line 62): no docstring
-  - `test_geospatial_geohash(worker)` (line 110): no docstring
-  - `test_pattern_mining_contains_and_extract(worker)` (line 132): no docstring
-  - `test_stream_join_transform(worker)` (line 191): no docstring
-  - `test_stream_join_transform_respects_cache_expiration(worker)` (line 227): no docstring
-  - `test_select_new_or_changed_rows_returns_new_and_changed(worker)` (line 262): no docstring
-  - `test_select_new_or_changed_rows_without_pk_returns_input(worker)` (line 289): no docstring
-  - `test_select_new_or_changed_rows_can_preserve_input_duplicates_for_changelog(worker)` (line 313): no docstring
-  - `test_udf_transform_applies_resolved_code(worker)` (line 341): no docstring
-  - `test_udf_transform_rejects_schema_drift(worker)` (line 365): no docstring
+  - `spark()` (line 24): no docstring
+  - `worker(spark)` (line 45): no docstring
+  - `test_split_transform(worker)` (line 52): no docstring
+  - `test_geospatial_point_and_distance(worker)` (line 66): no docstring
+  - `test_geospatial_geohash(worker)` (line 114): no docstring
+  - `test_pattern_mining_contains_and_extract(worker)` (line 136): no docstring
+  - `test_stream_join_transform(worker)` (line 195): no docstring
+  - `test_stream_join_transform_respects_cache_expiration(worker)` (line 231): no docstring
+  - `test_stream_join_transform_dynamic_selects_single_best_match_per_left_row(worker)` (line 266): no docstring
+  - `test_stream_join_left_lookup_selects_single_latest_right_row_without_event_time(worker)` (line 305): no docstring
+  - `async test_materialize_output_dataframe_rejects_partitioned_json(worker)` (line 364): no docstring
+  - `async test_materialize_virtual_output_writes_manifest_artifact(worker)` (line 383): no docstring
+  - `test_select_new_or_changed_rows_returns_new_and_changed(worker)` (line 423): no docstring
+  - `test_select_new_or_changed_rows_without_pk_returns_input(worker)` (line 450): no docstring
+  - `test_select_new_or_changed_rows_can_preserve_input_duplicates_for_changelog(worker)` (line 474): no docstring
+  - `test_udf_transform_applies_resolved_code(worker)` (line 502): no docstring
+  - `test_udf_transform_rejects_schema_drift(worker)` (line 526): no docstring
+- **Classes**
+  - `_StorageStub` (line 335): no docstring
+    - `__init__(self)` (line 336): no docstring
+    - `async create_bucket(self, bucket_name)` (line 341): no docstring
+    - `async delete_prefix(self, bucket, prefix)` (line 345): no docstring
+    - `async save_bytes(self, bucket, key, data, content_type, metadata)` (line 349): no docstring
 
 ### `backend/tests/utils/__init__.py`
 

@@ -18,6 +18,7 @@ from shared.models.agent_plan_report import PlanCompilationReport, PlanDiagnosti
 from shared.models.pipeline_plan import PipelinePlan
 from shared.models.pipeline_task_spec import PipelineTaskSpec
 from shared.services.registries.dataset_registry import DatasetRegistry
+from shared.services.registries.pipeline_registry import PipelineRegistry
 from shared.services.pipeline.pipeline_graph_utils import normalize_edges, normalize_nodes, topological_sort
 from shared.services.pipeline.output_plugins import OUTPUT_KIND_ONTOLOGY, normalize_output_kind, validate_output_payload
 from shared.services.pipeline.pipeline_task_spec_policy import clamp_task_spec, validate_plan_against_task_spec
@@ -46,6 +47,7 @@ async def validate_pipeline_plan(
     *,
     plan: PipelinePlan,
     dataset_registry: DatasetRegistry,
+    pipeline_registry: Optional[PipelineRegistry] = None,
     db_name: str,
     branch: Optional[str],
     require_output: bool = True,
@@ -123,6 +125,7 @@ async def validate_pipeline_plan(
         db_name=db_name,
         branch=branch,
         dataset_registry=dataset_registry,
+        pipeline_registry=pipeline_registry,
     )
     if preflight.get("has_blocking_errors"):
         errors.append("pipeline preflight has blocking errors")

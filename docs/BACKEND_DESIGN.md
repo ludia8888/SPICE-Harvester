@@ -6,9 +6,9 @@
 
 ## Coverage Summary
 
-- Modules scanned: **965**
-- Modules with module docstring: **593/965**
-- Modules with broad `except Exception`: **308**
+- Modules scanned: **966**
+- Modules with module docstring: **593/966**
+- Modules with broad `except Exception`: **311**
 - Modules with bare `except:`: **0**
 - Modules with `return` inside `finally`: **0**
 
@@ -1639,10 +1639,10 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
-- API surface: public=0 | top-level functions=2 | classes=0 | methods=0
-- Runtime signals: async_functions=1 | try=1 | raise=1 | broad_except=1 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
-- Internal imports (6): shared.config.settings; shared.errors.error_types; shared.services.pipeline.pipeline_definition_validator; shared.services.pipeline.pipeline_preflight_utils; shared.services.pipeline.pipeline_transform_spec; shared.services.registries.dataset_registry
+- API surface: public=0 | top-level functions=5 | classes=0 | methods=0
+- Runtime signals: async_functions=2 | try=2 | raise=1 | broad_except=1 | bare_except=0 | finally_return=0
+- Doc coverage: module=yes | top-level functions=0/5 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Internal imports (7): shared.config.settings; shared.errors.error_types; shared.services.pipeline.pipeline_definition_validator; shared.services.pipeline.pipeline_preflight_utils; shared.services.pipeline.pipeline_transform_spec; shared.services.registries.dataset_registry; shared.services.registries.pipeline_registry
 - External imports (3): fastapi; logging; typing
 - Public API names: not documented
 
@@ -1684,7 +1684,7 @@
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=1 | try=2 | raise=5 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
-- Internal imports (16): bff.routers.pipeline_deps; bff.routers.pipeline_plans_deps; bff.routers.pipeline_plans_ops; bff.schemas.pipeline_plans_requests; bff.services.pipeline_plan_autonomous_compiler; bff.services.pipeline_plan_models; shared.config.settings; shared.dependencies.providers (+8 more)
+- Internal imports (17): bff.routers.pipeline_deps; bff.routers.pipeline_plans_deps; bff.routers.pipeline_plans_ops; bff.schemas.pipeline_plans_requests; bff.services.pipeline_plan_autonomous_compiler; bff.services.pipeline_plan_models; shared.config.settings; shared.dependencies.providers (+9 more)
 - External imports (2): fastapi; logging
 - Public API names: compile_plan
 
@@ -1782,7 +1782,7 @@
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=1 | try=3 | raise=5 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
-- Internal imports (9): bff.routers.pipeline_deps; bff.routers.pipeline_ops; shared.errors.error_types; shared.models.requests; shared.observability.tracing; shared.security.auth_utils; shared.security.input_sanitizer; shared.services.pipeline.pipeline_executor (+1 more)
+- Internal imports (10): bff.routers.pipeline_deps; bff.routers.pipeline_ops; shared.errors.error_types; shared.models.requests; shared.observability.tracing; shared.security.auth_utils; shared.security.input_sanitizer; shared.services.pipeline.pipeline_executor (+2 more)
 - External imports (3): fastapi; logging; typing
 - Public API names: simulate_pipeline_definition
 
@@ -2944,7 +2944,7 @@
 - API surface: public=1 | top-level functions=4 | classes=0 | methods=0
 - Runtime signals: async_functions=1 | try=4 | raise=0 | broad_except=3 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=1/4 (25%) | classes=0/0 (n/a) | methods=0/0 (n/a)
-- Internal imports (9): bff.services.pipeline_agent_autonomous_loop; bff.services.pipeline_plan_models; shared.models.pipeline_plan; shared.observability.tracing; shared.services.agent.llm_gateway; shared.services.core.audit_log_store; shared.services.registries.dataset_registry; shared.services.registries.pipeline_plan_registry (+1 more)
+- Internal imports (10): bff.services.pipeline_agent_autonomous_loop; bff.services.pipeline_plan_models; shared.models.pipeline_plan; shared.observability.tracing; shared.services.agent.llm_gateway; shared.services.core.audit_log_store; shared.services.registries.dataset_registry; shared.services.registries.pipeline_plan_registry (+2 more)
 - External imports (4): __future__; logging; typing; uuid
 - Public API names: compile_pipeline_plan_mcp_autonomous
 
@@ -3028,7 +3028,7 @@
 - API surface: public=2 | top-level functions=2 | classes=1 | methods=0
 - Runtime signals: async_functions=1 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/2 (0%) | classes=0/1 (0%) | methods=0/0 (n/a)
-- Internal imports (10): bff.routers; shared.models.agent_plan_report; shared.models.pipeline_plan; shared.models.pipeline_task_spec; shared.observability.tracing; shared.services.pipeline.output_plugins; shared.services.pipeline.pipeline_graph_utils; shared.services.pipeline.pipeline_task_spec_policy (+2 more)
+- Internal imports (11): bff.routers; shared.models.agent_plan_report; shared.models.pipeline_plan; shared.models.pipeline_task_spec; shared.observability.tracing; shared.services.pipeline.output_plugins; shared.services.pipeline.pipeline_graph_utils; shared.services.pipeline.pipeline_task_spec_policy (+3 more)
 - External imports (3): __future__; dataclasses; typing
 - Public API names: PipelinePlanValidationResult; validate_pipeline_plan
 
@@ -4569,9 +4569,9 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
-- API surface: public=1 | top-level functions=45 | classes=0 | methods=0
-- Runtime signals: async_functions=44 | try=6 | raise=2 | broad_except=6 | bare_except=0 | finally_return=0
-- Doc coverage: module=no | top-level functions=0/45 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- API surface: public=1 | top-level functions=46 | classes=0 | methods=0
+- Runtime signals: async_functions=45 | try=6 | raise=2 | broad_except=6 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/46 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
 - Internal imports (12): ..pipeline_mcp_errors; ..pipeline_mcp_helpers; bff.services.pipeline_join_evaluator; bff.services.pipeline_plan_validation; shared.errors.error_types; shared.models.pipeline_plan; shared.observability.tracing; shared.services.pipeline.pipeline_claim_refuter (+4 more)
 - External imports (4): __future__; dataclasses; logging; typing
 - Public API names: build_plan_tool_handlers
@@ -5734,7 +5734,7 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - API surface: public=2 | top-level functions=3 | classes=2 | methods=94
-- Runtime signals: async_functions=44 | try=56 | raise=66 | broad_except=41 | bare_except=0 | finally_return=0
+- Runtime signals: async_functions=44 | try=56 | raise=70 | broad_except=41 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/3 (0%) | classes=0/2 (0%) | methods=5/94 (5%)
 - Internal imports (52): data_connector.google_sheets.service; pipeline_worker.spark_schema_helpers; pipeline_worker.spark_transform_engine; pipeline_worker.worker_helpers; shared.config.app_config; shared.config.settings; shared.errors.error_envelope; shared.errors.error_types (+44 more)
 - External imports (18): __future__; asyncio; concurrent; confluent_kafka; contextlib; datetime; functools; hashlib (+10 more)
@@ -8035,12 +8035,12 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
-- API surface: public=6 | top-level functions=15 | classes=3 | methods=2
+- API surface: public=7 | top-level functions=16 | classes=3 | methods=2
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=no | top-level functions=0/15 (0%) | classes=0/3 (0%) | methods=0/2 (0%)
+- Doc coverage: module=no | top-level functions=0/16 (0%) | classes=0/3 (0%) | methods=0/2 (0%)
 - Internal imports (1): shared.services.pipeline.pipeline_definition_utils
 - External imports (6): __future__; dataclasses; enum; hashlib; json; typing
-- Public API names: DatasetWriteMode; NormalizedDatasetOutputMetadata; ResolvedDatasetWritePolicy; normalize_dataset_output_metadata; resolve_dataset_write_policy; validate_dataset_output_metadata
+- Public API names: DatasetWriteMode; NormalizedDatasetOutputMetadata; ResolvedDatasetWritePolicy; normalize_dataset_output_metadata; resolve_dataset_write_policy; validate_dataset_output_format_constraints; validate_dataset_output_metadata
 
 ### `backend/shared/services/pipeline/fk_pattern_detector.py`
 - Module summary: Foreign Key Pattern Detector Service
@@ -8204,7 +8204,7 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - API surface: public=5 | top-level functions=52 | classes=5 | methods=16
-- Runtime signals: async_functions=9 | try=25 | raise=33 | broad_except=4 | bare_except=0 | finally_return=0
+- Runtime signals: async_functions=9 | try=26 | raise=33 | broad_except=4 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=3/52 (5%) | classes=0/5 (0%) | methods=0/16 (0%)
 - Internal imports (16): shared.config.settings; shared.services.pipeline.pipeline_dataset_utils; shared.services.pipeline.pipeline_definition_utils; shared.services.pipeline.pipeline_graph_utils; shared.services.pipeline.pipeline_join_keys; shared.services.pipeline.pipeline_parameter_utils; shared.services.pipeline.pipeline_profiler; shared.services.pipeline.pipeline_schema_utils (+8 more)
 - External imports (14): __future__; ast; csv; dataclasses; datetime; difflib; io; json (+6 more)
@@ -8315,12 +8315,12 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
-- API surface: public=40 | top-level functions=48 | classes=2 | methods=0
-- Runtime signals: async_functions=0 | try=5 | raise=60 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=24/48 (50%) | classes=0/2 (0%) | methods=0/0 (n/a)
+- API surface: public=41 | top-level functions=49 | classes=2 | methods=0
+- Runtime signals: async_functions=0 | try=6 | raise=65 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=yes | top-level functions=24/49 (48%) | classes=0/2 (0%) | methods=0/0 (n/a)
 - Internal imports (4): shared.services.pipeline.dataset_output_semantics; shared.services.pipeline.output_plugins; shared.services.pipeline.pipeline_graph_utils; shared.services.pipeline.pipeline_transform_spec
 - External imports (4): __future__; dataclasses; re; typing
-- Public API names: PipelinePlanBuilderError; PlanMutation; add_cast; add_compute; add_compute_assignments; add_compute_column; add_dedupe; add_drop; add_edge; add_explode; add_external_input; add_filter (+28 more)
+- Public API names: PipelinePlanBuilderError; PlanMutation; add_cast; add_compute; add_compute_assignments; add_compute_column; add_dedupe; add_drop; add_edge; add_explode; add_external_input; add_filter (+29 more)
 
 ### `backend/shared/services/pipeline/pipeline_preflight_utils.py`
 - Module summary: no docstring
@@ -8441,12 +8441,12 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
-- API surface: public=7 | top-level functions=5 | classes=2 | methods=0
+- API surface: public=10 | top-level functions=8 | classes=2 | methods=0
 - Runtime signals: async_functions=0 | try=2 | raise=2 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=no | top-level functions=0/5 (0%) | classes=0/2 (0%) | methods=0/0 (n/a)
+- Doc coverage: module=no | top-level functions=0/8 (0%) | classes=0/2 (0%) | methods=0/0 (n/a)
 - Internal imports (1): shared.services.pipeline.pipeline_join_keys
 - External imports (3): __future__; dataclasses; typing
-- Public API names: JoinSpec; StreamJoinSpec; normalize_operation; normalize_union_mode; resolve_join_spec; resolve_stream_join_effective_join_type; resolve_stream_join_spec
+- Public API names: JoinSpec; StreamJoinSpec; is_stream_like_input_node; normalize_operation; normalize_union_mode; resolve_input_read_format; resolve_input_read_mode; resolve_join_spec; resolve_stream_join_effective_join_type; resolve_stream_join_spec
 
 ### `backend/shared/services/pipeline/pipeline_type_inference.py`
 - Module summary: no docstring
@@ -9085,11 +9085,11 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
-- API surface: public=5 | top-level functions=5 | classes=1 | methods=1
-- Runtime signals: async_functions=0 | try=0 | raise=11 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=no | top-level functions=0/5 (0%) | classes=0/1 (0%) | methods=0/1 (0%)
+- API surface: public=5 | top-level functions=7 | classes=1 | methods=1
+- Runtime signals: async_functions=0 | try=1 | raise=11 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/7 (0%) | classes=0/1 (0%) | methods=0/1 (0%)
 - Internal imports (0): not documented
-- External imports (5): __future__; dataclasses; pathlib; typing; yaml
+- External imports (4): __future__; dataclasses; pathlib; typing
 - Public API names: FunctionCompatibility; default_snapshot_path; filter_functions; load_default_foundry_functions_snapshot; load_foundry_functions_snapshot
 
 ### `backend/shared/tools/registry_cleanup.py`
@@ -11068,6 +11068,20 @@
 - External imports (2): __future__; pytest
 - Public API names: test_plan_add_output_accepts_dataset_canonical_fields; test_plan_add_output_normalizes_dataset_camel_case_aliases
 
+### `backend/tests/unit/mcp/test_pipeline_plan_add_udf_contract.py`
+- Module summary: no docstring
+- Responsibilities: not documented
+- Invariants: not documented
+- Failure modes: not documented
+- Extension points: not documented
+- Dependencies (doc): not documented
+- API surface: public=3 | top-level functions=3 | classes=0 | methods=0
+- Runtime signals: async_functions=3 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Internal imports (2): mcp_servers.pipeline_tools.plan_tools; shared.services.pipeline.pipeline_plan_builder
+- External imports (2): __future__; pytest
+- Public API names: test_plan_add_udf_accepts_camel_case_aliases; test_plan_add_udf_accepts_reference_fields; test_plan_add_udf_requires_pinned_version
+
 ### `backend/tests/unit/middleware/test_middleware_fixes.py`
 - Module summary: no docstring
 - Responsibilities: not documented
@@ -11201,12 +11215,12 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
-- API surface: public=2 | top-level functions=2 | classes=0 | methods=0
+- API surface: public=3 | top-level functions=3 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
 - Internal imports (1): shared.tools.foundry_functions_compat
 - External imports (2): __future__; pytest
-- Public API names: test_functions_snapshot_entries_have_valid_classification; test_functions_snapshot_has_no_unclassified_rows
+- Public API names: test_functions_snapshot_entries_have_valid_classification; test_functions_snapshot_has_no_unclassified_rows; test_functions_snapshot_loader_fallback_parser_without_pyyaml
 
 ### `backend/tests/unit/pipeline_functions/test_functions_preview_compat.py`
 - Module summary: no docstring
@@ -11230,7 +11244,7 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - API surface: public=3 | top-level functions=4 | classes=0 | methods=0
-- Runtime signals: async_functions=0 | try=1 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
+- Runtime signals: async_functions=0 | try=2 | raise=0 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/4 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
 - Internal imports (2): pipeline_worker.main; shared.tools.foundry_functions_compat
 - External imports (6): __future__; importlib; os; pyspark; pytest; sys
@@ -11677,12 +11691,12 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
-- API surface: public=13 | top-level functions=13 | classes=0 | methods=0
+- API surface: public=15 | top-level functions=15 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=no | top-level functions=0/13 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Doc coverage: module=no | top-level functions=0/15 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
 - Internal imports (1): shared.services.pipeline.dataset_output_semantics
 - External imports (2): __future__; pytest
-- Public API names: test_dataset_write_policy_hash_stable; test_normalize_dataset_output_metadata_legacy_aliases; test_resolve_dataset_write_policy_changelog_uses_append_runtime; test_resolve_dataset_write_policy_default_incremental_additive_without_pk; test_resolve_dataset_write_policy_default_incremental_with_additive_updates_false; test_resolve_dataset_write_policy_default_incremental_with_additive_updates_true; test_resolve_dataset_write_policy_default_incremental_with_pk_without_additive_signal; test_resolve_dataset_write_policy_default_incremental_without_pk; test_resolve_dataset_write_policy_default_snapshot; test_resolve_dataset_write_policy_default_without_incremental_inputs; test_resolve_dataset_write_policy_snapshot_difference_uses_overwrite_runtime; test_validate_dataset_output_metadata_checks_available_columns (+1 more)
+- Public API names: test_dataset_write_policy_hash_stable; test_normalize_dataset_output_metadata_legacy_aliases; test_resolve_dataset_write_policy_changelog_uses_append_runtime; test_resolve_dataset_write_policy_default_incremental_additive_without_pk; test_resolve_dataset_write_policy_default_incremental_with_additive_updates_false; test_resolve_dataset_write_policy_default_incremental_with_additive_updates_true; test_resolve_dataset_write_policy_default_incremental_with_pk_without_additive_signal; test_resolve_dataset_write_policy_default_incremental_without_pk; test_resolve_dataset_write_policy_default_snapshot; test_resolve_dataset_write_policy_default_without_incremental_inputs; test_resolve_dataset_write_policy_snapshot_difference_uses_overwrite_runtime; test_validate_dataset_output_metadata_checks_available_columns (+3 more)
 
 ### `backend/tests/unit/services/test_dlq_handler_fixed.py`
 - Module summary: no docstring
@@ -12139,12 +12153,12 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
-- API surface: public=16 | top-level functions=16 | classes=0 | methods=0
+- API surface: public=18 | top-level functions=18 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=no | top-level functions=0/16 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Doc coverage: module=no | top-level functions=0/18 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
 - Internal imports (1): shared.services.pipeline.output_plugins
 - External imports (2): __future__; pytest
-- Public API names: test_normalize_output_kind_rejects_unknown_kind; test_normalize_output_kind_supports_legacy_aliases; test_resolve_output_kind_reports_alias_usage; test_validate_output_payload_dataset_accepts_full_metadata; test_validate_output_payload_dataset_has_no_required_fields; test_validate_output_payload_dataset_rejects_unsupported_output_format; test_validate_output_payload_dataset_requires_pk_for_append_only_new_rows; test_validate_output_payload_dataset_requires_post_filtering_for_snapshot_remove; test_validate_output_payload_geotemporal_accepts_camel_case; test_validate_output_payload_geotemporal_requires_metadata; test_validate_output_payload_media_requires_type_enum; test_validate_output_payload_ontology_link_requires_full_metadata (+4 more)
+- Public API names: test_normalize_output_kind_rejects_unknown_kind; test_normalize_output_kind_supports_legacy_aliases; test_resolve_output_kind_reports_alias_usage; test_validate_output_payload_dataset_accepts_full_metadata; test_validate_output_payload_dataset_has_no_required_fields; test_validate_output_payload_dataset_rejects_partitioned_csv; test_validate_output_payload_dataset_rejects_partitioned_json; test_validate_output_payload_dataset_rejects_unsupported_output_format; test_validate_output_payload_dataset_requires_pk_for_append_only_new_rows; test_validate_output_payload_dataset_requires_post_filtering_for_snapshot_remove; test_validate_output_payload_geotemporal_accepts_camel_case; test_validate_output_payload_geotemporal_requires_metadata (+6 more)
 
 ### `backend/tests/unit/services/test_pipeline_advanced_transforms.py`
 - Module summary: no docstring
@@ -12153,12 +12167,12 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
-- API surface: public=7 | top-level functions=7 | classes=0 | methods=0
+- API surface: public=8 | top-level functions=8 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=no | top-level functions=0/7 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Doc coverage: module=no | top-level functions=0/8 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
 - Internal imports (3): shared.services.pipeline.pipeline_definition_validator; shared.services.pipeline.pipeline_plan_builder; shared.services.pipeline.pipeline_transform_spec
 - External imports (2): __future__; pytest
-- Public API names: test_add_split_expands_to_true_false_filter_nodes; test_builder_helpers_add_geospatial_pattern_mining_stream_join; test_validate_pipeline_definition_accepts_advanced_transforms; test_validate_pipeline_definition_rejects_dynamic_stream_join_without_event_time_fields; test_validate_pipeline_definition_rejects_invalid_stream_join_strategy; test_validate_pipeline_definition_rejects_invalid_stream_join_time_direction; test_validate_pipeline_definition_rejects_left_lookup_with_transformed_right_input
+- Public API names: test_add_split_expands_to_true_false_filter_nodes; test_builder_helpers_add_geospatial_pattern_mining_stream_join; test_validate_pipeline_definition_accepts_advanced_transforms; test_validate_pipeline_definition_rejects_dynamic_stream_join_without_event_time_fields; test_validate_pipeline_definition_rejects_invalid_stream_join_strategy; test_validate_pipeline_definition_rejects_invalid_stream_join_time_direction; test_validate_pipeline_definition_rejects_left_lookup_with_streaming_right_input; test_validate_pipeline_definition_rejects_left_lookup_with_transformed_right_input
 
 ### `backend/tests/unit/services/test_pipeline_agent_allowed_tools.py`
 - Module summary: no docstring
@@ -12237,12 +12251,12 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
-- API surface: public=9 | top-level functions=10 | classes=0 | methods=0
+- API surface: public=10 | top-level functions=11 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=no | top-level functions=0/10 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Doc coverage: module=no | top-level functions=0/11 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
 - Internal imports (2): shared.services.pipeline.pipeline_definition_validator; shared.services.pipeline.pipeline_transform_spec
 - External imports (1): __future__
-- Public API names: test_validate_pipeline_definition_detects_missing_edge_nodes; test_validate_pipeline_definition_normalizes_metadata_fields_to_columns; test_validate_pipeline_definition_rejects_invalid_dataset_output_metadata; test_validate_pipeline_definition_reports_missing_columns_for_normalize; test_validate_pipeline_definition_requires_nodes; test_validate_pipeline_definition_requires_output_node_when_configured; test_validate_pipeline_definition_udf_rejects_inline_code_when_reference_policy_enabled; test_validate_pipeline_definition_udf_requires_udf_id_when_reference_policy_enabled; test_validate_pipeline_definition_uses_custom_udf_message
+- Public API names: test_validate_pipeline_definition_detects_missing_edge_nodes; test_validate_pipeline_definition_normalizes_metadata_fields_to_columns; test_validate_pipeline_definition_rejects_invalid_dataset_output_metadata; test_validate_pipeline_definition_reports_missing_columns_for_normalize; test_validate_pipeline_definition_requires_nodes; test_validate_pipeline_definition_requires_output_node_when_configured; test_validate_pipeline_definition_udf_rejects_inline_code_when_reference_policy_enabled; test_validate_pipeline_definition_udf_requires_udf_id_when_reference_policy_enabled; test_validate_pipeline_definition_udf_requires_version_when_pinning_enabled; test_validate_pipeline_definition_uses_custom_udf_message
 
 ### `backend/tests/unit/services/test_pipeline_execution_service_dataset_policy.py`
 - Module summary: no docstring
@@ -12307,12 +12321,12 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
-- API surface: public=8 | top-level functions=8 | classes=3 | methods=4
-- Runtime signals: async_functions=11 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=no | top-level functions=0/8 (0%) | classes=0/3 (0%) | methods=0/4 (0%)
+- API surface: public=10 | top-level functions=10 | classes=3 | methods=4
+- Runtime signals: async_functions=13 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/10 (0%) | classes=0/3 (0%) | methods=0/4 (0%)
 - Internal imports (1): shared.services.pipeline.pipeline_executor
 - External imports (4): __future__; dataclasses; pytest; typing
-- Public API names: test_executor_compute_equals_is_treated_as_comparison_when_lhs_exists; test_executor_compute_structured_target_column_overwrites_existing; test_executor_preview_supports_node_level_preview_and_row_count; test_executor_stream_join_dynamic_applies_cache_expiration_window; test_executor_stream_join_dynamic_emits_unmatched_rows_as_outer_join; test_executor_stream_join_dynamic_supports_forward_direction; test_executor_stream_join_dynamic_uses_backward_time_direction_by_default; test_executor_stream_join_left_lookup_forces_left_join_semantics
+- Public API names: test_executor_compute_equals_is_treated_as_comparison_when_lhs_exists; test_executor_compute_structured_target_column_overwrites_existing; test_executor_preview_supports_node_level_preview_and_row_count; test_executor_stream_join_dynamic_applies_cache_expiration_window; test_executor_stream_join_dynamic_emits_unmatched_rows_as_outer_join; test_executor_stream_join_dynamic_selects_single_best_match_per_left_row; test_executor_stream_join_dynamic_supports_forward_direction; test_executor_stream_join_dynamic_uses_backward_time_direction_by_default; test_executor_stream_join_left_lookup_forces_left_join_semantics; test_executor_stream_join_left_lookup_picks_latest_right_row_per_key_without_event_time
 
 ### `backend/tests/unit/services/test_pipeline_executor_transform_safety.py`
 - Module summary: no docstring
@@ -12363,12 +12377,12 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
-- API surface: public=2 | top-level functions=2 | classes=0 | methods=0
-- Runtime signals: async_functions=4 | try=0 | raise=2 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- API surface: public=4 | top-level functions=4 | classes=0 | methods=0
+- Runtime signals: async_functions=11 | try=0 | raise=2 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/4 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
 - Internal imports (1): bff.routers
 - External imports (4): __future__; fastapi; pytest; types
-- Public API names: test_run_pipeline_preflight_fail_closed_raises_http_exception; test_run_pipeline_preflight_fail_open_returns_warning_payload
+- Public API names: test_run_pipeline_preflight_blocks_missing_udf_reference; test_run_pipeline_preflight_blocks_unpinned_udf_version; test_run_pipeline_preflight_fail_closed_raises_http_exception; test_run_pipeline_preflight_fail_open_returns_warning_payload
 
 ### `backend/tests/unit/services/test_pipeline_plan_builder.py`
 - Module summary: no docstring
@@ -12377,12 +12391,12 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
-- API surface: public=26 | top-level functions=26 | classes=0 | methods=0
+- API surface: public=29 | top-level functions=29 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=no | top-level functions=0/26 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Doc coverage: module=no | top-level functions=0/29 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
 - Internal imports (1): shared.services.pipeline.pipeline_plan_builder
 - External imports (2): __future__; pytest
-- Public API names: test_add_cast_requires_column_and_type; test_add_edge_is_idempotent; test_add_explode_builds_metadata; test_add_external_input_creates_input_node_without_dataset_selection; test_add_input_and_output_wires_edges; test_add_input_supports_read_config; test_add_join_accepts_hints_and_broadcast_flags; test_add_join_rejects_cross_join; test_add_join_requires_two_inputs_and_keys; test_add_output_normalizes_dataset_write_metadata_aliases; test_add_output_persists_output_metadata_into_outputs_entry; test_add_output_warns_when_legacy_alias_kind_used (+14 more)
+- Public API names: test_add_cast_requires_column_and_type; test_add_edge_is_idempotent; test_add_explode_builds_metadata; test_add_external_input_creates_input_node_without_dataset_selection; test_add_input_and_output_wires_edges; test_add_input_supports_read_config; test_add_join_accepts_hints_and_broadcast_flags; test_add_join_rejects_cross_join; test_add_join_requires_two_inputs_and_keys; test_add_output_normalizes_dataset_write_metadata_aliases; test_add_output_persists_output_metadata_into_outputs_entry; test_add_output_warns_when_legacy_alias_kind_used (+17 more)
 
 ### `backend/tests/unit/services/test_pipeline_preflight_dataset_output.py`
 - Module summary: no docstring
@@ -12391,12 +12405,12 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
-- API surface: public=5 | top-level functions=5 | classes=0 | methods=0
-- Runtime signals: async_functions=10 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=no | top-level functions=0/5 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- API surface: public=8 | top-level functions=8 | classes=0 | methods=0
+- Runtime signals: async_functions=16 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/8 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
 - Internal imports (1): shared.services.pipeline
 - External imports (3): __future__; pytest; types
-- Public API names: test_compute_pipeline_preflight_accepts_valid_dataset_write_metadata; test_compute_pipeline_preflight_blocks_geotemporal_missing_required_columns; test_compute_pipeline_preflight_blocks_left_lookup_with_transformed_right_input; test_compute_pipeline_preflight_blocks_virtual_dataset_write_settings; test_compute_pipeline_preflight_blocks_when_dataset_pk_columns_missing
+- Public API names: test_compute_pipeline_preflight_accepts_valid_dataset_write_metadata; test_compute_pipeline_preflight_blocks_geotemporal_missing_required_columns; test_compute_pipeline_preflight_blocks_left_lookup_with_streaming_right_input; test_compute_pipeline_preflight_blocks_left_lookup_with_transformed_right_input; test_compute_pipeline_preflight_blocks_partitioned_csv_dataset_output; test_compute_pipeline_preflight_blocks_partitioned_json_dataset_output; test_compute_pipeline_preflight_blocks_virtual_dataset_write_settings; test_compute_pipeline_preflight_blocks_when_dataset_pk_columns_missing
 
 ### `backend/tests/unit/services/test_pipeline_preview_inspector.py`
 - Module summary: no docstring
@@ -13498,7 +13512,7 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - API surface: public=6 | top-level functions=6 | classes=0 | methods=0
-- Runtime signals: async_functions=0 | try=1 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
+- Runtime signals: async_functions=0 | try=2 | raise=0 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/6 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
 - Internal imports (1): pipeline_worker.main
 - External imports (6): __future__; importlib; os; pyspark; pytest; sys
@@ -13511,12 +13525,12 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
-- API surface: public=13 | top-level functions=13 | classes=0 | methods=0
-- Runtime signals: async_functions=0 | try=1 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=no | top-level functions=0/13 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- API surface: public=17 | top-level functions=17 | classes=1 | methods=4
+- Runtime signals: async_functions=5 | try=2 | raise=0 | broad_except=1 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/17 (0%) | classes=0/1 (0%) | methods=0/4 (0%)
 - Internal imports (1): pipeline_worker.main
-- External imports (6): __future__; importlib; os; pyspark; pytest; sys
-- Public API names: spark; test_geospatial_geohash; test_geospatial_point_and_distance; test_pattern_mining_contains_and_extract; test_select_new_or_changed_rows_can_preserve_input_duplicates_for_changelog; test_select_new_or_changed_rows_returns_new_and_changed; test_select_new_or_changed_rows_without_pk_returns_input; test_split_transform; test_stream_join_transform; test_stream_join_transform_respects_cache_expiration; test_udf_transform_applies_resolved_code; test_udf_transform_rejects_schema_drift (+1 more)
+- External imports (7): __future__; importlib; json; os; pyspark; pytest; sys
+- Public API names: spark; test_geospatial_geohash; test_geospatial_point_and_distance; test_materialize_output_dataframe_rejects_partitioned_json; test_materialize_virtual_output_writes_manifest_artifact; test_pattern_mining_contains_and_extract; test_select_new_or_changed_rows_can_preserve_input_duplicates_for_changelog; test_select_new_or_changed_rows_returns_new_and_changed; test_select_new_or_changed_rows_without_pk_returns_input; test_split_transform; test_stream_join_left_lookup_selects_single_latest_right_row_without_event_time; test_stream_join_transform (+5 more)
 
 ### `backend/tests/utils/__init__.py`
 - Module summary: Test utilities for SPICE HARVESTER.

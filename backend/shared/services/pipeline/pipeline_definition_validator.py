@@ -6,6 +6,7 @@ from typing import AbstractSet, Any, Dict, List, Optional
 from shared.services.pipeline.output_plugins import OUTPUT_KIND_DATASET, normalize_output_kind, validate_output_payload
 from shared.services.pipeline.pipeline_graph_utils import build_incoming, normalize_edges, normalize_nodes
 from shared.services.pipeline.pipeline_transform_spec import (
+    is_stream_like_input_node,
     normalize_operation,
     normalize_union_mode,
     resolve_join_spec,
@@ -131,6 +132,7 @@ class PipelineDefinitionValidationPolicy:
     normalize_metadata: bool = True
     udf_error_message_template: Optional[str] = None
     require_udf_reference: bool = False
+    require_udf_version_pinning: bool = False
 
 
 @dataclass
@@ -220,6 +222,8 @@ def validate_pipeline_definition(
                 errors.append(f"udfCode is not allowed on node {node_id}; use udfId (+udfVersion)")
             if not udf_id:
                 errors.append(f"udf requires udfId on node {node_id}")
+            if policy.require_udf_version_pinning and (udf_version_raw is None or not str(udf_version_raw).strip()):
+                errors.append(f"udfVersion is required on node {node_id}")
 
             if udf_version_raw is not None and str(udf_version_raw).strip():
                 try:
@@ -380,6 +384,11 @@ def validate_pipeline_definition(
                         errors.append(
                             "streamJoin strategy=left_lookup requires right input to be a direct input node "
                             f"(no upstream transforms) on node {node_id}"
+                        )
+                    elif is_stream_like_input_node(right_node):
+                        errors.append(
+                            "streamJoin strategy=left_lookup requires right input to be batch lookup source "
+                            f"(stream read mode/format is not allowed) on node {node_id}"
                         )
                 if stream_spec.strategy == "dynamic":
                     if not str(stream_spec.left_event_time_column or "").strip():

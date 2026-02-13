@@ -2347,6 +2347,7 @@ async def _run_agent_core(
     audit_store: Optional["AuditLogStore"],
     event_store: Optional["EventStore"] = None,
     dataset_registry: "DatasetRegistry",
+    pipeline_registry: Optional["PipelineRegistry"] = None,
     plan_registry: "PipelinePlanRegistry",
     streaming: bool = False,
 ) -> "AsyncGenerator[StreamEvent, None]":
@@ -2721,6 +2722,7 @@ async def _run_agent_core(
                 validation = await validate_pipeline_plan(
                     plan=plan_model,
                     dataset_registry=dataset_registry,
+                    pipeline_registry=pipeline_registry,
                     db_name=str(plan_model.data_scope.db_name or ""),
                     branch=str(plan_model.data_scope.branch or "") or None,
                     require_output=True,
@@ -3170,6 +3172,7 @@ async def _run_agent_core(
 
         validation = await validate_pipeline_plan(
             plan=plan_model, dataset_registry=dataset_registry,
+            pipeline_registry=pipeline_registry,
             db_name=str(plan_model.data_scope.db_name or ""),
             branch=str(plan_model.data_scope.branch or "") or None,
             require_output=True,
@@ -3268,6 +3271,7 @@ async def run_pipeline_agent_mcp_autonomous(
     audit_store: Optional[AuditLogStore],
     event_store: Optional[EventStore] = None,
     dataset_registry: DatasetRegistry,
+    pipeline_registry: Optional[PipelineRegistry] = None,
     plan_registry: PipelinePlanRegistry,
 ) -> Dict[str, Any]:
     """Non-streaming wrapper: collects the terminal event from the unified core loop."""
@@ -3281,7 +3285,7 @@ async def run_pipeline_agent_mcp_autonomous(
         selected_model=selected_model, allowed_models=allowed_models,
         llm_gateway=llm_gateway, redis_service=redis_service,
         audit_store=audit_store, event_store=event_store,
-        dataset_registry=dataset_registry, plan_registry=plan_registry,
+        dataset_registry=dataset_registry, pipeline_registry=pipeline_registry, plan_registry=plan_registry,
         streaming=False,
     ):
         if event.event_type in ("complete", "clarification", "error"):
@@ -3310,6 +3314,7 @@ async def run_pipeline_agent_streaming(
     audit_store: Optional[AuditLogStore],
     event_store: Optional[EventStore] = None,
     dataset_registry: DatasetRegistry,
+    pipeline_registry: Optional[PipelineRegistry] = None,
     plan_registry: PipelinePlanRegistry,
 ):
     """SSE streaming wrapper: yields all events from the unified core loop."""
@@ -3322,7 +3327,7 @@ async def run_pipeline_agent_streaming(
         selected_model=selected_model, allowed_models=allowed_models,
         llm_gateway=llm_gateway, redis_service=redis_service,
         audit_store=audit_store, event_store=event_store,
-        dataset_registry=dataset_registry, plan_registry=plan_registry,
+        dataset_registry=dataset_registry, pipeline_registry=pipeline_registry, plan_registry=plan_registry,
         streaming=True,
     ):
         yield event

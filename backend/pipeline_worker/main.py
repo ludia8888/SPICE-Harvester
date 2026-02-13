@@ -67,6 +67,7 @@ from shared.services.pipeline.pipeline_profiler import compute_column_stats
 from shared.services.pipeline.dataset_output_semantics import (
     DatasetWriteMode,
     resolve_dataset_write_policy,
+    validate_dataset_output_format_constraints,
     validate_dataset_output_metadata,
 )
 from shared.services.pipeline.output_plugins import (
@@ -296,6 +297,7 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
         self.spark_console_progress = pipeline_settings.spark_console_progress
         self.cast_mode = normalize_cast_mode(pipeline_settings.cast_mode)
         self._udf_require_reference = bool(pipeline_settings.udf_require_reference)
+        self._udf_require_version_pinning = bool(pipeline_settings.udf_require_version_pinning)
         self._udf_spark_parity_enabled = bool(pipeline_settings.udf_spark_parity_enabled)
         self._udf_code_cache: Dict[str, str] = {}
         self.use_lakefs_diff = pipeline_settings.lakefs_diff_enabled
@@ -3248,6 +3250,7 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                 file_prefix=file_prefix,
                 file_format=file_format,
                 partition_cols=partition_cols,
+                row_count_hint=base_row_count,
             )
         elif normalized_kind == OUTPUT_KIND_ONTOLOGY:
             artifact_key = await self._materialize_ontology_output(
@@ -3508,6 +3511,7 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
         file_prefix: Optional[str],
         file_format: str,
         partition_cols: Optional[List[str]],
+        row_count_hint: Optional[int],
     ) -> str:
         query_sql = str(output_metadata.get("query_sql") or output_metadata.get("querySql") or "").strip()
         refresh_mode = str(output_metadata.get("refresh_mode") or output_metadata.get("refreshMode") or "").strip().lower()
@@ -3536,15 +3540,50 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                 "virtual output does not support dataset write settings: "
                 + ", ".join(sorted(set(dataset_style_keys)))
             )
-        return await self._materialize_output_dataframe(
-            df,
-            artifact_bucket=artifact_bucket,
-            prefix=prefix,
-            write_mode=write_mode,
-            file_prefix=file_prefix,
-            file_format=file_format,
-            partition_cols=partition_cols,
+        if not self.storage:
+            raise RuntimeError("Storage service not available")
+        await self.storage.create_bucket(artifact_bucket)
+
+        normalized_prefix = (prefix or "").lstrip("/").rstrip("/")
+        if not normalized_prefix:
+            raise ValueError("prefix is required")
+
+        resolved_write_mode = str(write_mode or "overwrite").strip().lower() or "overwrite"
+        if resolved_write_mode not in {"overwrite", "append"}:
+            raise ValueError("write_mode must be overwrite or append")
+
+        if resolved_write_mode == "overwrite":
+            await self.storage.delete_prefix(artifact_bucket, normalized_prefix)
+
+        manifest_name = "virtual_manifest.json"
+        if resolved_write_mode == "append":
+            unique_prefix = str(file_prefix or "").strip().replace("/", "_") or uuid4().hex[:12]
+            manifest_name = f"{unique_prefix}_virtual_manifest.json"
+
+        manifest_key = f"{normalized_prefix}/{manifest_name}"
+        resolved_row_count_hint = (
+            int(row_count_hint)
+            if row_count_hint is not None
+            else int(await self._run_spark(lambda: df.count(), label=f"count:virtual:{normalized_prefix}"))
         )
+        manifest = {
+            "output_kind": OUTPUT_KIND_VIRTUAL,
+            "query_sql": query_sql,
+            "refresh_mode": refresh_mode,
+            "generated_at": utcnow().isoformat(),
+            "input_columns": list(df.columns or []),
+            "row_count_hint": resolved_row_count_hint,
+            "file_format_ignored": str(file_format or "parquet").strip().lower() or "parquet",
+            "partition_by_ignored": [str(col).strip() for col in (partition_cols or []) if str(col).strip()],
+        }
+        payload = json.dumps(manifest, ensure_ascii=False, separators=(",", ":"), default=str).encode("utf-8")
+        await self.storage.save_bytes(
+            artifact_bucket,
+            manifest_key,
+            payload,
+            content_type="application/json",
+        )
+        return build_s3_uri(artifact_bucket, manifest_key)
 
     async def _materialize_ontology_output(
         self,
@@ -3695,6 +3734,12 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
         if resolved_format not in {"parquet", "json", "csv", "avro", "orc"}:
             raise ValueError("file_format must be parquet|json|csv|avro|orc")
         resolved_partition_cols = [col for col in (partition_cols or []) if str(col).strip()]
+        format_constraint_errors = validate_dataset_output_format_constraints(
+            output_format=resolved_format,
+            partition_by=resolved_partition_cols,
+        )
+        if format_constraint_errors:
+            raise ValueError("; ".join(format_constraint_errors))
         if resolved_partition_cols:
             missing = [col for col in resolved_partition_cols if col not in df.columns]
             if missing:
@@ -4441,6 +4486,7 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
             require_output=require_output,
             normalize_metadata=True,
             require_udf_reference=self._udf_require_reference,
+            require_udf_version_pinning=self._udf_require_version_pinning,
         )
         validation = validate_pipeline_definition(definition, policy=policy)
         errors: List[str] = list(validation.errors)

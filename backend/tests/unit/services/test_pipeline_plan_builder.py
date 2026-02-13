@@ -8,6 +8,7 @@ from shared.services.pipeline.pipeline_plan_builder import (
     add_cast,
     add_compute_assignments,
     add_compute_column,
+    add_udf,
     add_explode,
     add_filter,
     add_input,
@@ -232,6 +233,28 @@ def test_compute_column_and_assignments_build_metadata():
     assert isinstance(node2["metadata"]["assignments"], list)
 
 
+def test_add_udf_builds_reference_metadata() -> None:
+    plan = new_plan(goal="udf", db_name="demo")
+    plan = add_input(plan, dataset_id="ds", node_id="inp").plan
+    result = add_udf(
+        plan,
+        input_node_id="inp",
+        udf_id="udf-order-normalize",
+        udf_version=3,
+    )
+    node = next(node for node in result.plan["definition_json"]["nodes"] if node["id"] == result.node_id)
+    assert node["metadata"]["operation"] == "udf"
+    assert node["metadata"]["udfId"] == "udf-order-normalize"
+    assert node["metadata"]["udfVersion"] == 3
+
+
+def test_add_udf_rejects_invalid_version() -> None:
+    plan = new_plan(goal="udf", db_name="demo")
+    plan = add_input(plan, dataset_id="ds", node_id="inp").plan
+    with pytest.raises(PipelinePlanBuilderError):
+        add_udf(plan, input_node_id="inp", udf_id="udf-order-normalize", udf_version=0)
+
+
 def test_select_expr_builds_metadata():
     plan = new_plan(goal="select expr", db_name="demo")
     plan = add_input(plan, dataset_id="ds", node_id="inp").plan
@@ -274,24 +297,42 @@ def test_add_union_builds_metadata():
     assert node["metadata"]["unionMode"] == "pad"
 
 
-def test_validate_structure_rejects_left_lookup_with_transformed_right_input():
+def test_add_stream_join_rejects_left_lookup_with_transformed_right_input():
     plan = new_plan(goal="stream join validation", db_name="demo")
     plan = add_input(plan, dataset_id="left", node_id="left").plan
     plan = add_input(plan, dataset_id="right", node_id="right").plan
     right_filtered = add_filter(plan, input_node_id="right", expression="id > 0", node_id="right_filter").plan
-    stream_joined = add_stream_join(
-        right_filtered,
-        left_node_id="left",
-        right_node_id="right_filter",
-        left_keys=["id"],
-        right_keys=["id"],
-        strategy="left_lookup",
-        node_id="sj1",
-    ).plan
-    with_output = add_output(stream_joined, input_node_id="sj1", output_name="joined").plan
+    with pytest.raises(PipelinePlanBuilderError, match="requires right input to be a direct input node"):
+        add_stream_join(
+            right_filtered,
+            left_node_id="left",
+            right_node_id="right_filter",
+            left_keys=["id"],
+            right_keys=["id"],
+            strategy="left_lookup",
+            node_id="sj1",
+        )
 
-    errors, _ = validate_structure(with_output)
-    assert any("requires right input to be a direct input node" in err for err in errors)
+
+def test_add_stream_join_rejects_left_lookup_with_streaming_right_input():
+    plan = new_plan(goal="stream join validation", db_name="demo")
+    plan = add_input(plan, dataset_id="left", node_id="left").plan
+    plan = add_input(
+        plan,
+        dataset_id="right",
+        node_id="right",
+        read={"format": "kafka"},
+    ).plan
+    with pytest.raises(PipelinePlanBuilderError, match="requires right input to be batch lookup source"):
+        add_stream_join(
+            plan,
+            left_node_id="left",
+            right_node_id="right",
+            left_keys=["id"],
+            right_keys=["id"],
+            strategy="left_lookup",
+            node_id="sj1",
+        )
 
 
 def test_add_pivot_builds_metadata():
