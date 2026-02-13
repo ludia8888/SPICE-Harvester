@@ -249,6 +249,42 @@ def _apply_compute(schema: SchemaInfo, metadata: Any) -> SchemaInfo:
     return SchemaInfo(columns=columns, type_map=type_map, dynamic_columns=schema.dynamic_columns)
 
 
+def _apply_geospatial(schema: SchemaInfo, metadata: Dict[str, Any]) -> SchemaInfo:
+    geo = metadata.get("geospatial") if isinstance(metadata.get("geospatial"), dict) else metadata
+    mode = str(geo.get("mode") or "").strip().lower()
+    output_col = str(geo.get("outputColumn") or geo.get("output_column") or "").strip()
+    if not output_col:
+        if mode == "distance":
+            output_col = "distance_km"
+        elif mode == "geohash":
+            output_col = "geohash"
+        else:
+            output_col = "point"
+    columns = list(schema.columns)
+    if output_col not in columns:
+        columns.append(output_col)
+    type_map = dict(schema.type_map)
+    if mode == "distance":
+        type_map[output_col] = "xsd:decimal"
+    else:
+        type_map[output_col] = "xsd:string"
+    return SchemaInfo(columns=columns, type_map=type_map, dynamic_columns=schema.dynamic_columns)
+
+
+def _apply_pattern_mining(schema: SchemaInfo, metadata: Dict[str, Any]) -> SchemaInfo:
+    pattern_meta = metadata.get("patternMining") if isinstance(metadata.get("patternMining"), dict) else metadata
+    output_col = str(pattern_meta.get("outputColumn") or pattern_meta.get("output_column") or "").strip()
+    if not output_col:
+        output_col = "pattern_match"
+    mode = str(pattern_meta.get("matchMode") or pattern_meta.get("match_mode") or "contains").strip().lower()
+    columns = list(schema.columns)
+    if output_col not in columns:
+        columns.append(output_col)
+    type_map = dict(schema.type_map)
+    type_map[output_col] = "xsd:string" if mode == "extract" else "xsd:boolean"
+    return SchemaInfo(columns=columns, type_map=type_map, dynamic_columns=schema.dynamic_columns)
+
+
 def _apply_group_by(schema: SchemaInfo, group_by: List[str], aggregates: List[Dict[str, Any]]) -> SchemaInfo:
     grouped = [col for col in group_by if col in schema.columns]
     type_map: Dict[str, Optional[str]] = {col: schema.type_map.get(col) for col in grouped}
@@ -615,7 +651,7 @@ async def compute_pipeline_preflight(
 
         operation = normalize_operation(metadata.get("operation"))
 
-        if operation == "join" and len(inputs) >= 2:
+        if operation in {"join", "streamJoin"} and len(inputs) >= 2:
             join_spec = resolve_join_spec(metadata)
             if join_spec.allow_cross_join and join_spec.join_type == "cross":
                 schema_by_node[node_id] = _apply_join(inputs[0], inputs[1])
@@ -634,7 +670,7 @@ async def compute_pipeline_preflight(
                         "kind": "join_key_missing",
                         "severity": "error",
                         "node_id": node_id,
-                        "message": "join requires leftKey/rightKey or leftKeys/rightKeys (or joinKey)",
+                        "message": f"{operation} requires leftKey/rightKey or leftKeys/rightKeys (or joinKey)",
                     }
                 )
             elif len(left_keys) != len(right_keys):
@@ -643,7 +679,7 @@ async def compute_pipeline_preflight(
                         "kind": "join_key_count_mismatch",
                         "severity": "error",
                         "node_id": node_id,
-                        "message": "join requires leftKeys/rightKeys of the same length",
+                        "message": f"{operation} requires leftKeys/rightKeys of the same length",
                         "left_keys": left_keys,
                         "right_keys": right_keys,
                     }
@@ -959,6 +995,12 @@ async def compute_pipeline_preflight(
             schema_by_node[node_id] = _apply_cast(base, casts if isinstance(casts, list) else [])
         elif operation == "compute":
             schema_by_node[node_id] = _apply_compute(base, metadata)
+        elif operation == "split":
+            schema_by_node[node_id] = base
+        elif operation == "geospatial":
+            schema_by_node[node_id] = _apply_geospatial(base, metadata)
+        elif operation == "patternMining":
+            schema_by_node[node_id] = _apply_pattern_mining(base, metadata)
         elif operation == "regexReplace":
             schema_by_node[node_id] = base
         elif operation in {"groupBy", "aggregate"}:
@@ -1106,7 +1148,7 @@ async def compute_schema_by_node(
 
         operation = normalize_operation(metadata.get("operation"))
 
-        if operation == "join" and len(inputs) >= 2:
+        if operation in {"join", "streamJoin"} and len(inputs) >= 2:
             join_spec = resolve_join_spec(metadata)
             left_keys = list(join_spec.left_keys or [])
             right_keys = list(join_spec.right_keys or [])
@@ -1145,6 +1187,12 @@ async def compute_schema_by_node(
             schema_by_node[node_id] = _apply_cast(base, casts if isinstance(casts, list) else [])
         elif operation == "compute":
             schema_by_node[node_id] = _apply_compute(base, metadata)
+        elif operation == "split":
+            schema_by_node[node_id] = base
+        elif operation == "geospatial":
+            schema_by_node[node_id] = _apply_geospatial(base, metadata)
+        elif operation == "patternMining":
+            schema_by_node[node_id] = _apply_pattern_mining(base, metadata)
         elif operation == "regexReplace":
             schema_by_node[node_id] = base
         elif operation in {"groupBy", "aggregate"}:

@@ -19,6 +19,7 @@ from shared.models.pipeline_plan import PipelinePlan
 from shared.models.pipeline_task_spec import PipelineTaskSpec
 from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.services.pipeline.pipeline_graph_utils import normalize_edges, normalize_nodes, topological_sort
+from shared.services.pipeline.output_plugins import OUTPUT_KIND_ONTOLOGY, normalize_output_kind, validate_output_payload
 from shared.services.pipeline.pipeline_task_spec_policy import clamp_task_spec, validate_plan_against_task_spec
 from shared.utils.canonical_json import sha256_canonical_json_prefixed
 
@@ -65,46 +66,24 @@ async def validate_pipeline_plan(
 
     # Validate output metadata.
     for output in plan.outputs or []:
-        kind = str(getattr(output.output_kind, "value", output.output_kind) or "unknown").strip().lower()
-        if kind == "object":
-            if not output.target_class_id:
-                errors.append(f"output {output.output_name}: target_class_id is required for object outputs")
-        elif kind == "link":
-            missing: List[str] = []
-            if not output.link_type_id:
-                missing.append("link_type_id")
-            if not output.source_class_id:
-                missing.append("source_class_id")
-            if not output.target_class_id:
-                missing.append("target_class_id")
-            if not output.predicate:
-                missing.append("predicate")
-            if not output.cardinality:
-                missing.append("cardinality")
-            if not output.source_key_column:
-                missing.append("source_key_column")
-            if not output.target_key_column:
-                missing.append("target_key_column")
-            if not output.relationship_spec_type:
-                missing.append("relationship_spec_type")
-            if missing:
-                errors.append(f"output {output.output_name}: missing required link metadata ({', '.join(missing)})")
-        else:
-            # output_kind=unknown is normal for dataset outputs. Only warn if ontology-like
-            # metadata is present (likely a missing kind selection).
-            if any(
-                [
-                    output.target_class_id,
-                    output.source_class_id,
-                    output.link_type_id,
-                    output.predicate,
-                    output.cardinality,
-                    output.source_key_column,
-                    output.target_key_column,
-                    output.relationship_spec_type,
-                ]
-            ):
-                warnings.append(f"output {output.output_name}: output_kind is unknown but ontology metadata is set")
+        kind = normalize_output_kind(getattr(output.output_kind, "value", output.output_kind))
+        payload = {
+            "target_class_id": output.target_class_id,
+            "source_class_id": output.source_class_id,
+            "link_type_id": output.link_type_id,
+            "predicate": output.predicate,
+            "cardinality": output.cardinality,
+            "source_key_column": output.source_key_column,
+            "target_key_column": output.target_key_column,
+            "relationship_spec_type": output.relationship_spec_type,
+        }
+        for detail in validate_output_payload(kind=kind, payload=payload):
+            errors.append(f"output {output.output_name}: {detail}")
+
+        if kind != OUTPUT_KIND_ONTOLOGY and any(payload.values()):
+            warnings.append(
+                f"output {output.output_name}: output_kind={kind} but ontology metadata is set"
+            )
 
     definition_json = dict(plan.definition_json or {})
 

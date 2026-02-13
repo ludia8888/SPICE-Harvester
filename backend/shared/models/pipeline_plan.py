@@ -15,13 +15,23 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from uuid import UUID
 
 from shared.models.pipeline_task_spec import PipelineTaskSpec
+from shared.services.pipeline.output_plugins import (
+    OUTPUT_KIND_DATASET,
+    OUTPUT_KIND_GEOTEMPORAL,
+    OUTPUT_KIND_MEDIA,
+    OUTPUT_KIND_ONTOLOGY,
+    OUTPUT_KIND_VIRTUAL,
+    normalize_output_kind,
+)
 import logging
 
 
 class PipelinePlanOutputKind(str, Enum):
-    object = "object"
-    link = "link"
-    unknown = "unknown"
+    dataset = OUTPUT_KIND_DATASET
+    geotemporal = OUTPUT_KIND_GEOTEMPORAL
+    media = OUTPUT_KIND_MEDIA
+    virtual = OUTPUT_KIND_VIRTUAL
+    ontology = OUTPUT_KIND_ONTOLOGY
 
 
 class PipelinePlanDataScope(BaseModel):
@@ -34,7 +44,7 @@ class PipelinePlanDataScope(BaseModel):
 
 class PipelinePlanOutput(BaseModel):
     output_name: str = Field(..., min_length=1, max_length=200)
-    output_kind: PipelinePlanOutputKind = Field(default=PipelinePlanOutputKind.unknown)
+    output_kind: PipelinePlanOutputKind = Field(default=PipelinePlanOutputKind.dataset)
     target_class_id: Optional[str] = Field(default=None, max_length=200)
     source_class_id: Optional[str] = Field(default=None, max_length=200)
     link_type_id: Optional[str] = Field(default=None, max_length=200)
@@ -44,6 +54,11 @@ class PipelinePlanOutput(BaseModel):
     target_key_column: Optional[str] = Field(default=None, max_length=200)
     relationship_spec_type: Optional[str] = Field(default=None, max_length=40)
     notes: Optional[str] = Field(default=None, max_length=2000)
+
+    @field_validator("output_kind", mode="before")
+    @classmethod
+    def _normalize_output_kind(cls, value: Any) -> Any:
+        return normalize_output_kind(value)
 
 
 class PipelinePlanAssociation(BaseModel):

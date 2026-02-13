@@ -27,13 +27,17 @@ from shared.services.pipeline.pipeline_plan_builder import (
     add_filter,
     add_group_by_expr,
     add_join,
+    add_geospatial,
     add_normalize,
     add_output,
+    add_pattern_mining,
     add_pivot,
     add_regex_replace,
     add_rename,
     add_select,
     add_select_expr,
+    add_split,
+    add_stream_join,
     add_sort,
     add_transform,
     add_union,
@@ -651,6 +655,86 @@ async def _plan_add_regex_replace(_server: Any, arguments: Dict[str, Any]) -> An
     return {"plan": result.plan, "node_id": result.node_id, "warnings": list(result.warnings)}
 
 
+@trace_external_call("mcp.plan_add_split")
+async def _plan_add_split(_server: Any, arguments: Dict[str, Any]) -> Any:
+    plan = arguments.get("plan") or {}
+    result = add_split(
+        plan,
+        input_node_id=str(arguments.get("input_node_id") or ""),
+        expression=str(arguments.get("expression") or arguments.get("condition") or ""),
+        true_node_id=arguments.get("true_node_id") or arguments.get("trueNodeId"),
+        false_node_id=arguments.get("false_node_id") or arguments.get("falseNodeId"),
+    )
+    return {"plan": result.plan, "node_id": result.node_id, "warnings": list(result.warnings)}
+
+
+@trace_external_call("mcp.plan_add_geospatial")
+async def _plan_add_geospatial(_server: Any, arguments: Dict[str, Any]) -> Any:
+    plan = arguments.get("plan") or {}
+    config = arguments.get("config")
+    if not isinstance(config, dict):
+        config = {}
+    # Accept both nested `config` and flat args.
+    for key in (
+        "outputColumn",
+        "latColumn",
+        "lonColumn",
+        "precision",
+        "lat1Column",
+        "lon1Column",
+        "lat2Column",
+        "lon2Column",
+        "output_column",
+        "lat_column",
+        "lon_column",
+        "lat1_column",
+        "lon1_column",
+        "lat2_column",
+        "lon2_column",
+    ):
+        if key in arguments and key not in config:
+            config[key] = arguments.get(key)
+    result = add_geospatial(
+        plan,
+        input_node_id=str(arguments.get("input_node_id") or ""),
+        mode=str(arguments.get("mode") or ""),
+        config=config,
+        node_id=arguments.get("node_id"),
+    )
+    return {"plan": result.plan, "node_id": result.node_id, "warnings": list(result.warnings)}
+
+
+@trace_external_call("mcp.plan_add_pattern_mining")
+async def _plan_add_pattern_mining(_server: Any, arguments: Dict[str, Any]) -> Any:
+    plan = arguments.get("plan") or {}
+    result = add_pattern_mining(
+        plan,
+        input_node_id=str(arguments.get("input_node_id") or ""),
+        source_column=str(arguments.get("source_column") or arguments.get("sourceColumn") or ""),
+        pattern=str(arguments.get("pattern") or ""),
+        output_column=str(arguments.get("output_column") or arguments.get("outputColumn") or ""),
+        match_mode=str(arguments.get("match_mode") or arguments.get("matchMode") or "contains"),
+        node_id=arguments.get("node_id"),
+    )
+    return {"plan": result.plan, "node_id": result.node_id, "warnings": list(result.warnings)}
+
+
+@trace_external_call("mcp.plan_add_stream_join")
+async def _plan_add_stream_join(_server: Any, arguments: Dict[str, Any]) -> Any:
+    plan = arguments.get("plan") or {}
+    result = add_stream_join(
+        plan,
+        left_node_id=str(arguments.get("left_node_id") or ""),
+        right_node_id=str(arguments.get("right_node_id") or ""),
+        left_keys=normalize_string_list(arguments.get("left_keys") or arguments.get("leftKeys") or []),
+        right_keys=normalize_string_list(arguments.get("right_keys") or arguments.get("rightKeys") or []),
+        join_type=str(arguments.get("join_type") or arguments.get("joinType") or "inner"),
+        strategy=str(arguments.get("strategy") or "dynamic"),
+        node_id=arguments.get("node_id"),
+    )
+    return {"plan": result.plan, "node_id": result.node_id, "warnings": list(result.warnings)}
+
+
 @trace_external_call("mcp.plan_add_output")
 async def _plan_add_output(_server: Any, arguments: Dict[str, Any]) -> Any:
     plan = arguments.get("plan") or {}
@@ -658,7 +742,7 @@ async def _plan_add_output(_server: Any, arguments: Dict[str, Any]) -> Any:
         plan,
         input_node_id=str(arguments.get("input_node_id") or ""),
         output_name=str(arguments.get("output_name") or ""),
-        output_kind=str(arguments.get("output_kind") or "unknown"),
+        output_kind=str(arguments.get("output_kind") or "dataset"),
         node_id=arguments.get("node_id"),
         output_metadata=arguments.get("output_metadata"),
     )
@@ -1061,6 +1145,10 @@ PLAN_TOOL_HANDLERS: Dict[str, ToolHandler] = {
     "plan_add_dedupe": _plan_add_dedupe,
     "plan_add_normalize": _plan_add_normalize,
     "plan_add_regex_replace": _plan_add_regex_replace,
+    "plan_add_split": _plan_add_split,
+    "plan_add_geospatial": _plan_add_geospatial,
+    "plan_add_pattern_mining": _plan_add_pattern_mining,
+    "plan_add_stream_join": _plan_add_stream_join,
     "plan_add_output": _plan_add_output,
     "plan_add_edge": _plan_add_edge,
     "plan_delete_edge": _plan_delete_edge,

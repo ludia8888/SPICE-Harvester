@@ -220,15 +220,8 @@ def evaluate_preview_policy(definition_json: Dict[str, Any]) -> Dict[str, Any]:
             continue
 
         if op_lower == "udf":
-            issues.append(
-                PreviewPolicyIssue(
-                    severity="deny",
-                    code="UDF_NOT_SUPPORTED_IN_SPARK_EXECUTION",
-                    message="udf transform is not supported by Spark execution in this environment; preview would diverge from build/deploy.",
-                    node_id=node_id,
-                    operation=operation,
-                )
-            )
+            # UDF is supported in Spark parity mode. Preflight/definition validator enforces
+            # reference-only metadata (udfId + optional udfVersion).
             continue
 
         if op_lower == "filter":
@@ -337,6 +330,18 @@ def evaluate_preview_policy(definition_json: Dict[str, Any]) -> Dict[str, Any]:
             )
             continue
 
+        if op_lower in {"split", "geospatial", "patternmining", "streamjoin"}:
+            issues.append(
+                PreviewPolicyIssue(
+                    severity="require_spark",
+                    code="ADVANCED_TRANSFORM_REQUIRES_SPARK",
+                    message=f"{op_lower} requires Spark-backed preview for engine parity.",
+                    node_id=node_id,
+                    operation=operation,
+                )
+            )
+            continue
+
         if op_lower == "pivot":
             pivot_meta = metadata.get("pivot") if isinstance(metadata.get("pivot"), dict) else {}
             agg = str(pivot_meta.get("agg") or "sum").strip().lower()
@@ -430,4 +435,3 @@ def evaluate_preview_policy(definition_json: Dict[str, Any]) -> Dict[str, Any]:
         "suggested_tool": suggested_tool,
         "issues": [issue.to_dict() for issue in issues],
     }
-

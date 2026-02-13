@@ -636,6 +636,71 @@ class PipelineMCPServer:
                     },
                 },
                 {
+                    "name": "plan_add_split",
+                    "description": "Add split semantics as macro-expanded true/false filter branches.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "plan": {"type": "object"},
+                            "input_node_id": {"type": "string"},
+                            "expression": {"type": "string", "description": "Boolean expression for true branch."},
+                            "true_node_id": {"type": "string"},
+                            "false_node_id": {"type": "string"},
+                        },
+                        "required": ["plan", "input_node_id", "expression"],
+                    },
+                },
+                {
+                    "name": "plan_add_geospatial",
+                    "description": "Add geospatial transform (mode=point|geohash|distance).",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "plan": {"type": "object"},
+                            "input_node_id": {"type": "string"},
+                            "mode": {"type": "string", "enum": ["point", "geohash", "distance"]},
+                            "config": {"type": "object", "description": "Mode-specific geospatial config."},
+                            "node_id": {"type": "string"},
+                        },
+                        "required": ["plan", "input_node_id", "mode"],
+                    },
+                },
+                {
+                    "name": "plan_add_pattern_mining",
+                    "description": "Add patternMining transform (contains/extract regex semantics).",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "plan": {"type": "object"},
+                            "input_node_id": {"type": "string"},
+                            "source_column": {"type": "string"},
+                            "pattern": {"type": "string"},
+                            "output_column": {"type": "string"},
+                            "match_mode": {"type": "string", "enum": ["contains", "extract"]},
+                            "node_id": {"type": "string"},
+                        },
+                        "required": ["plan", "input_node_id", "source_column", "pattern", "output_column"],
+                    },
+                },
+                {
+                    "name": "plan_add_stream_join",
+                    "description": "Add streamJoin transform with strategy metadata (dynamic|left_lookup|static).",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "plan": {"type": "object"},
+                            "left_node_id": {"type": "string"},
+                            "right_node_id": {"type": "string"},
+                            "left_keys": {"type": "array", "items": {"type": "string"}},
+                            "right_keys": {"type": "array", "items": {"type": "string"}},
+                            "join_type": {"type": "string"},
+                            "strategy": {"type": "string", "enum": ["dynamic", "left_lookup", "static"]},
+                            "node_id": {"type": "string"},
+                        },
+                        "required": ["plan", "left_node_id", "right_node_id", "left_keys", "right_keys"],
+                    },
+                },
+                {
                     "name": "plan_add_output",
                     "description": "Add an output node + outputs[] entry.",
                     "inputSchema": {
@@ -644,7 +709,11 @@ class PipelineMCPServer:
                             "plan": {"type": "object"},
                             "input_node_id": {"type": "string"},
                             "output_name": {"type": "string"},
-                            "output_kind": {"type": "string"},
+                            "output_kind": {
+                                "type": "string",
+                                "enum": ["dataset", "geotemporal", "media", "virtual", "ontology"],
+                                "description": "Canonical output kind. Legacy aliases unknown/object/link are still accepted for compatibility.",
+                            },
                             "node_id": {"type": "string"},
                             "output_metadata": {"type": "object"},
                         },

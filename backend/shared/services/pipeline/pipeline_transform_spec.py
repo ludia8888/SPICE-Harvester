@@ -25,6 +25,10 @@ SUPPORTED_TRANSFORMS = frozenset(
         "sort",
         "union",
         "udf",
+        "split",
+        "geospatial",
+        "patternMining",
+        "streamJoin",
     }
 )
 

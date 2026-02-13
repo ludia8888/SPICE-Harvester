@@ -64,6 +64,11 @@ from shared.services.storage.lakefs_client import LakeFSClient, LakeFSConflictEr
 from shared.services.storage.lakefs_storage_service import LakeFSStorageService
 from shared.services.registries.lineage_store import LineageStore
 from shared.services.pipeline.pipeline_profiler import compute_column_stats
+from shared.services.pipeline.output_plugins import (
+    OUTPUT_KIND_DATASET,
+    normalize_output_kind,
+    validate_output_payload,
+)
 from shared.services.registries.pipeline_registry import PipelineRegistry
 from shared.services.pipeline.pipeline_control_plane_events import emit_pipeline_control_plane_event
 from shared.services.pipeline.pipeline_definition_validator import (
@@ -90,6 +95,7 @@ from shared.services.pipeline.pipeline_validation_utils import (
     validate_schema_checks,
     validate_schema_contract,
 )
+from shared.services.pipeline.pipeline_udf_runtime import resolve_udf_reference
 from shared.services.pipeline.pipeline_schema_casts import extract_schema_casts
 from shared.services.pipeline.pipeline_schema_utils import normalize_schema_type
 from shared.services.pipeline.pipeline_type_utils import normalize_cast_mode, spark_type_to_xsd, xsd_to_spark_type
@@ -139,7 +145,7 @@ from pipeline_worker.spark_schema_helpers import (
 
 logger = logging.getLogger(__name__)
 
-SUPPORTED_TRANSFORMS_SPARK = frozenset(set(SUPPORTED_TRANSFORMS) - {"udf"})
+SUPPORTED_TRANSFORMS_SPARK = SUPPORTED_TRANSFORMS
 
 T = TypeVar("T")
 
@@ -158,6 +164,50 @@ class _PipelinePayloadParseError(ValueError):
         self.payload_text = payload_text
         self.payload_obj = payload_obj
         self.cause = cause
+
+
+def _resolve_declared_output_kind(
+    *,
+    declared_outputs: List[Dict[str, Any]],
+    output_node_id: Optional[str],
+    output_name: Optional[str],
+) -> str:
+    node_id = str(output_node_id or "").strip()
+    name = str(output_name or "").strip()
+    for item in declared_outputs:
+        if not isinstance(item, dict):
+            continue
+        declared_node_id = str(item.get("node_id") or item.get("nodeId") or "").strip()
+        declared_name = str(
+            item.get("output_name")
+            or item.get("outputName")
+            or item.get("dataset_name")
+            or item.get("datasetName")
+            or ""
+        ).strip()
+        if node_id and declared_node_id == node_id:
+            try:
+                return normalize_output_kind(item.get("output_kind") or item.get("outputKind") or OUTPUT_KIND_DATASET)
+            except ValueError:
+                return OUTPUT_KIND_DATASET
+        if name and declared_name and declared_name == name:
+            try:
+                return normalize_output_kind(item.get("output_kind") or item.get("outputKind") or OUTPUT_KIND_DATASET)
+            except ValueError:
+                return OUTPUT_KIND_DATASET
+    return OUTPUT_KIND_DATASET
+
+
+def _validate_output_kind_metadata(
+    *,
+    output_kind: str,
+    output_metadata: Dict[str, Any],
+    node_id: str,
+) -> None:
+    errors = validate_output_payload(kind=output_kind, payload=output_metadata)
+    if errors:
+        details = "; ".join(str(item) for item in errors)
+        raise ValueError(f"Invalid output metadata for node {node_id} ({output_kind}): {details}")
 
 
 class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
@@ -212,6 +262,9 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
         self.spark_shuffle_partitions = int(pipeline_settings.spark_shuffle_partitions)
         self.spark_console_progress = pipeline_settings.spark_console_progress
         self.cast_mode = normalize_cast_mode(pipeline_settings.cast_mode)
+        self._udf_require_reference = bool(pipeline_settings.udf_require_reference)
+        self._udf_spark_parity_enabled = bool(pipeline_settings.udf_spark_parity_enabled)
+        self._udf_code_cache: Dict[str, str] = {}
         self.use_lakefs_diff = pipeline_settings.lakefs_diff_enabled
         self.processed_event_heartbeat_interval_seconds = settings.event_sourcing.processed_event_heartbeat_interval_seconds
         self.service_name = (settings.observability.service_name or "").strip() or None
@@ -1342,7 +1395,17 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                 elif node_type == "output":
                     df = inputs[0] if inputs else self._empty_dataframe()
                 else:
-                    df = self._apply_transform(metadata, inputs, parameters)
+                    transform_metadata = dict(metadata)
+                    operation = normalize_operation(transform_metadata.get("operation"))
+                    if operation == "udf" and self._udf_spark_parity_enabled:
+                        resolved = await resolve_udf_reference(
+                            metadata=transform_metadata,
+                            pipeline_registry=self.pipeline_registry,
+                            require_reference=self._udf_require_reference,
+                            code_cache=self._udf_code_cache,
+                        )
+                        transform_metadata["__resolved_udf_code"] = resolved.code
+                    df = self._apply_transform(transform_metadata, inputs, parameters)
 
                 table_ops = self._build_table_ops(df)
                 schema_errors = await self._run_spark(
@@ -1461,6 +1524,16 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                     or output_meta.get("title")
                     or (primary_id or "preview_output")
                 )
+                output_kind = _resolve_declared_output_kind(
+                    declared_outputs=declared_outputs,
+                    output_node_id=primary_id,
+                    output_name=str(output_name or ""),
+                )
+                _validate_output_kind_metadata(
+                    output_kind=output_kind,
+                    output_metadata=output_metadata,
+                    node_id=str(primary_id or "preview_output"),
+                )
                 pk_semantics = resolve_pk_semantics(
                     execution_semantics=execution_semantics,
                     definition=definition,
@@ -1541,6 +1614,7 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                     {
                         "node_id": primary_id,
                         "output_name": output_name,
+                        "output_kind": output_kind,
                         "dataset_name": output_name,
                         "row_count": row_count,
                         "columns": schema_columns,
@@ -1667,6 +1741,16 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                         or output_meta.get("title")
                         or job.output_dataset_name
                     )
+                    output_kind = _resolve_declared_output_kind(
+                        declared_outputs=declared_outputs,
+                        output_node_id=node_id,
+                        output_name=str(output_name or ""),
+                    )
+                    _validate_output_kind_metadata(
+                        output_kind=output_kind,
+                        output_metadata=metadata,
+                        node_id=str(node_id),
+                    )
                     pk_semantics = resolve_pk_semantics(
                         execution_semantics=execution_semantics,
                         definition=definition,
@@ -1765,6 +1849,7 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                         {
                             "node_id": node_id,
                             "output_name": output_name,
+                            "output_kind": output_kind,
                             "dataset_name": dataset_name,
                             "output_df": output_df,
                             "output_format": output_format,
@@ -1859,6 +1944,7 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                         {
                             "node_id": item["node_id"],
                             "output_name": item["output_name"],
+                            "output_kind": item.get("output_kind", OUTPUT_KIND_DATASET),
                             "dataset_name": item["dataset_name"],
                             "artifact_key": artifact_key,
                             "artifact_prefix": item["artifact_prefix"],
@@ -2027,6 +2113,16 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                     or output_meta.get("title")
                     or job.output_dataset_name
                 )
+                output_kind = _resolve_declared_output_kind(
+                    declared_outputs=declared_outputs,
+                    output_node_id=node_id,
+                    output_name=str(output_name or ""),
+                )
+                _validate_output_kind_metadata(
+                    output_kind=output_kind,
+                    output_metadata=metadata,
+                    node_id=str(node_id),
+                )
                 pk_semantics = resolve_pk_semantics(
                     execution_semantics=execution_semantics,
                     definition=definition,
@@ -2127,6 +2223,8 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                 output_work.append(
                     {
                         "node_id": node_id,
+                        "output_name": output_name,
+                        "output_kind": output_kind,
                         "dataset_name": dataset_name,
                         "output_df": output_df,
                         "artifact_prefix": artifact_prefix,
@@ -2199,6 +2297,8 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                 staged_outputs.append(
                     {
                         "node_id": item["node_id"],
+                        "output_name": item.get("output_name"),
+                        "output_kind": item.get("output_kind", OUTPUT_KIND_DATASET),
                         "dataset_name": item["dataset_name"],
                         "artifact_prefix": item["artifact_prefix"],
                         "output_format": item["output_format"],
@@ -3532,6 +3632,7 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
             supported_ops=SUPPORTED_TRANSFORMS_SPARK,
             require_output=require_output,
             normalize_metadata=True,
+            require_udf_reference=self._udf_require_reference,
         )
         validation = validate_pipeline_definition(definition, policy=policy)
         errors: List[str] = list(validation.errors)

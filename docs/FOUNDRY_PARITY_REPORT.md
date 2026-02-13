@@ -96,7 +96,26 @@ These are high-signal but can be slow. Run on a warmed stack.
 - `backend/tests/test_pipeline_type_mismatch_guard_e2e.py`
 - `backend/tests/test_access_policy_link_indexing_e2e.py`
 
-## 5) Known limitations vs “real Foundry”
+## 5) Functions Matrix (Foundry Index Snapshot)
+
+Pipeline function compatibility is now tracked from a single snapshot source:
+
+- Snapshot: `backend/tests/fixtures/foundry_functions_index_snapshot_2026_02_13.yaml`
+- Adapter: `backend/shared/tools/foundry_functions_compat.py`
+- Contract gate: `backend/tests/unit/pipeline_functions/test_functions_matrix_contract.py`
+- Preview gate: `backend/tests/unit/pipeline_functions/test_functions_preview_compat.py`
+- Spark gate: `backend/tests/unit/pipeline_functions/test_functions_spark_compat.py`
+
+Compatibility status taxonomy is fixed to:
+
+- `supported`: expected to work and has executable regression tests.
+- `partial`: supported only in limited paths/semantics (documented in snapshot notes).
+- `unsupported`: intentionally unsupported in current engine path.
+
+This gives a deterministic, updateable matrix that can be re-baselined by updating
+the snapshot file and corresponding tests together.
+
+## 6) Known limitations vs “real Foundry”
 
 Even with all tests passing, these items are typically Foundry-specific and may not be
 implemented 1:1 in an open repo:

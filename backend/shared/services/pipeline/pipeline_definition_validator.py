@@ -59,6 +59,7 @@ class PipelineDefinitionValidationPolicy:
     require_output: bool = True
     normalize_metadata: bool = True
     udf_error_message_template: Optional[str] = None
+    require_udf_reference: bool = False
 
 
 @dataclass
@@ -107,9 +108,30 @@ def validate_pipeline_definition(
                 errors.append(f"transform node {node_id} has multiple inputs but no operation")
             continue
 
-        if operation == "udf" and policy.udf_error_message_template:
-            errors.append(policy.udf_error_message_template.format(operation=operation, node_id=node_id))
-            continue
+        if operation == "udf":
+            if policy.udf_error_message_template:
+                errors.append(policy.udf_error_message_template.format(operation=operation, node_id=node_id))
+                continue
+            udf_id = str(metadata.get("udfId") or metadata.get("udf_id") or "").strip()
+            udf_code = str(metadata.get("udfCode") or metadata.get("udf_code") or "").strip()
+            udf_version_raw = metadata.get("udfVersion") or metadata.get("udf_version")
+
+            if policy.require_udf_reference:
+                if udf_code:
+                    errors.append(f"udfCode is not allowed on node {node_id}; use udfId (+udfVersion)")
+                if not udf_id:
+                    errors.append(f"udf requires udfId on node {node_id}")
+            elif not udf_id and not udf_code:
+                errors.append(f"udf requires udfId or udfCode on node {node_id}")
+
+            if udf_version_raw is not None and str(udf_version_raw).strip():
+                try:
+                    parsed_version = int(str(udf_version_raw).strip())
+                except (TypeError, ValueError):
+                    errors.append(f"udfVersion must be an integer on node {node_id}")
+                else:
+                    if parsed_version <= 0:
+                        errors.append(f"udfVersion must be >= 1 on node {node_id}")
 
         if operation not in policy.supported_ops:
             errors.append(f"Unsupported operation '{operation}' on node {node_id}")
@@ -181,6 +203,55 @@ def validate_pipeline_definition(
                 if join_spec.join_type != "cross":
                     errors.append(f"join allowCrossJoin requires joinType='cross' on node {node_id}")
 
+        if operation == "split":
+            condition = metadata.get("condition") or metadata.get("expression")
+            if not str(condition or "").strip():
+                errors.append(f"split missing condition/expression on node {node_id}")
+
+        if operation == "geospatial":
+            geospatial = metadata.get("geospatial") if isinstance(metadata.get("geospatial"), dict) else metadata
+            mode = str(geospatial.get("mode") or "").strip().lower()
+            if mode not in {"point", "geohash", "distance"}:
+                errors.append(f"geospatial mode must be point|geohash|distance on node {node_id}")
+            if mode in {"point", "geohash"}:
+                if not str(geospatial.get("latColumn") or geospatial.get("lat_column") or "").strip():
+                    errors.append(f"geospatial missing latColumn on node {node_id}")
+                if not str(geospatial.get("lonColumn") or geospatial.get("lon_column") or "").strip():
+                    errors.append(f"geospatial missing lonColumn on node {node_id}")
+            if mode == "distance":
+                required = (
+                    ("lat1Column", "lat1_column"),
+                    ("lon1Column", "lon1_column"),
+                    ("lat2Column", "lat2_column"),
+                    ("lon2Column", "lon2_column"),
+                )
+                for canonical, legacy in required:
+                    if not str(geospatial.get(canonical) or geospatial.get(legacy) or "").strip():
+                        errors.append(f"geospatial missing {canonical} on node {node_id}")
+
+        if operation == "patternMining":
+            pattern_meta = metadata.get("patternMining") if isinstance(metadata.get("patternMining"), dict) else metadata
+            if not str(pattern_meta.get("sourceColumn") or pattern_meta.get("source_column") or "").strip():
+                errors.append(f"patternMining missing sourceColumn on node {node_id}")
+            if not str(pattern_meta.get("pattern") or "").strip():
+                errors.append(f"patternMining missing pattern on node {node_id}")
+            if not str(pattern_meta.get("outputColumn") or pattern_meta.get("output_column") or "").strip():
+                errors.append(f"patternMining missing outputColumn on node {node_id}")
+
+        if operation == "streamJoin":
+            if len(incoming.get(node_id, [])) < 2:
+                errors.append(f"streamJoin requires two inputs on node {node_id}")
+            left_keys = metadata.get("leftKeys") or metadata.get("left_keys") or []
+            right_keys = metadata.get("rightKeys") or metadata.get("right_keys") or []
+            if not left_keys or not right_keys:
+                errors.append(f"streamJoin requires leftKeys/rightKeys on node {node_id}")
+            elif len(left_keys) != len(right_keys):
+                errors.append(f"streamJoin requires leftKeys/rightKeys of the same length on node {node_id}")
+            stream_meta = metadata.get("streamJoin") if isinstance(metadata.get("streamJoin"), dict) else {}
+            strategy = str(stream_meta.get("strategy") or "").strip().lower() or "dynamic"
+            if strategy not in {"dynamic", "left_lookup", "static"}:
+                errors.append(f"streamJoin has invalid strategy '{strategy}' on node {node_id}")
+
         if operation == "union":
             if len(incoming.get(node_id, [])) < 2:
                 errors.append(f"union requires two inputs on node {node_id}")
@@ -204,4 +275,3 @@ def validate_pipeline_definition(
                 errors.append(f"window missing orderBy/expressions on node {node_id}")
 
     return PipelineDefinitionValidationResult(errors=errors, nodes=nodes, edges=edges, incoming=incoming)
-

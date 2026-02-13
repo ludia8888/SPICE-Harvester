@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, Optional
 
+from shared.config.settings import get_settings
 from shared.services.pipeline.pipeline_definition_validator import (
     PipelineDefinitionValidationPolicy,
     validate_pipeline_definition,
@@ -49,12 +50,11 @@ async def _run_pipeline_preflight(
 
 
 def _validate_pipeline_definition(*, definition_json: Dict[str, Any], require_output: bool = True) -> list[str]:
+    settings = get_settings()
     policy = PipelineDefinitionValidationPolicy(
-        supported_ops=SUPPORTED_TRANSFORMS - {"udf"},
+        supported_ops=SUPPORTED_TRANSFORMS,
         require_output=require_output,
         normalize_metadata=True,
-        udf_error_message_template=(
-            "Unsupported operation '{operation}' on node {node_id} (Spark execution does not support udf yet)."
-        ),
+        require_udf_reference=bool(settings.pipeline.udf_require_reference),
     )
     return validate_pipeline_definition(definition_json, policy=policy).errors

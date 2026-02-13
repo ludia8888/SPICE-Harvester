@@ -12,6 +12,7 @@ import difflib
 import io
 import json
 import logging
+import math
 import os
 import re
 from dataclasses import dataclass
@@ -26,7 +27,7 @@ from shared.services.pipeline.pipeline_profiler import compute_column_stats
 from shared.services.pipeline.pipeline_graph_utils import build_incoming, normalize_edges, normalize_nodes, topological_sort
 from shared.services.pipeline.pipeline_parameter_utils import apply_parameters, normalize_parameters
 from shared.services.storage.storage_service import StorageService
-from shared.services.pipeline.pipeline_udf_runtime import compile_row_udf
+from shared.services.pipeline.pipeline_udf_runtime import compile_udf, resolve_udf_reference
 from shared.services.pipeline.pipeline_definition_utils import (
     build_expectations_with_pk,
     resolve_delete_column,
@@ -115,7 +116,10 @@ class PipelineExecutor:
         self._artifact_store = artifact_store
         self._storage_service = storage_service
         self._cast_mode = normalize_cast_mode(get_settings().pipeline.cast_mode)
+        self._udf_require_reference = bool(get_settings().pipeline.udf_require_reference)
         self._cast_stats: Dict[str, Dict[str, int]] = {}
+        self._udf_code_cache: Dict[str, str] = {}
+        self._udf_callable_cache: Dict[str, Any] = {}
         # Preview settings are derived from definition["__preview_meta__"] per-run.
         self._preview_mode: bool = False
         self._preview_max_output_rows: Optional[int] = None
@@ -569,6 +573,22 @@ class PipelineExecutor:
                 allow_cross_join=join_spec.allow_cross_join,
                 max_output_rows=self._preview_max_output_rows if self._preview_mode else None,
             )
+        if operation == "streamJoin" and len(inputs) >= 2:
+            join_spec = resolve_join_spec(metadata)
+            return _join_tables(
+                inputs[0],
+                inputs[1],
+                join_type=join_spec.join_type,
+                left_key=join_spec.left_key,
+                right_key=join_spec.right_key,
+                left_keys=join_spec.left_keys,
+                right_keys=join_spec.right_keys,
+                allow_cross_join=join_spec.allow_cross_join,
+                max_output_rows=self._preview_max_output_rows if self._preview_mode else None,
+            )
+        if operation == "split":
+            condition = str(metadata.get("condition") or metadata.get("expression") or "")
+            return _filter_table(inputs[0], condition, parameters)
         if operation == "filter":
             return _filter_table(inputs[0], str(metadata.get("expression") or ""), parameters)
         if operation == "compute":
@@ -669,6 +689,10 @@ class PipelineExecutor:
                     cast_mode=self._cast_mode,
                     cast_stats=self._cast_stats,
                 )
+        if operation == "geospatial":
+            return _geospatial_table(inputs[0], metadata, parameters)
+        if operation == "patternMining":
+            return _pattern_mining_table(inputs[0], metadata, parameters)
         if operation == "udf":
             return await self._apply_udf_transform(inputs[0], metadata)
         if operation == "dedupe":
@@ -690,34 +714,17 @@ class PipelineExecutor:
         return inputs[0]
 
     async def _apply_udf_transform(self, table: PipelineTable, metadata: Dict[str, Any]) -> PipelineTable:
-        udf_code = (metadata.get("udfCode") or metadata.get("udf_code") or "").strip() or None
-        udf_id = (metadata.get("udfId") or metadata.get("udf_id") or "").strip() or None
-        udf_version = metadata.get("udfVersion") or metadata.get("udf_version")
+        resolved = await resolve_udf_reference(
+            metadata=metadata,
+            pipeline_registry=self._pipeline_registry,
+            require_reference=self._udf_require_reference,
+            code_cache=self._udf_code_cache,
+        )
+        fn = self._udf_callable_cache.get(resolved.cache_key)
+        if fn is None:
+            fn = compile_udf(resolved.code)
+            self._udf_callable_cache[resolved.cache_key] = fn
 
-        if not udf_code and udf_id:
-            if not self._pipeline_registry:
-                raise ValueError("udf requires pipeline_registry to resolve udfId")
-            resolved_version: Optional[int] = None
-            if udf_version is not None and str(udf_version).strip():
-                try:
-                    resolved_version = int(udf_version)
-                except Exception as exc:
-                    raise ValueError(f"Invalid udfVersion: {udf_version}") from exc
-            if resolved_version is None:
-                latest = await self._pipeline_registry.get_udf_latest_version(udf_id=udf_id)
-                if not latest:
-                    raise ValueError("udf not found")
-                udf_code = latest.code
-            else:
-                version_row = await self._pipeline_registry.get_udf_version(udf_id=udf_id, version=resolved_version)
-                if not version_row:
-                    raise ValueError("udf version not found")
-                udf_code = version_row.code
-
-        if not udf_code:
-            raise ValueError("udf missing code (udfCode or udfId)")
-
-        fn = compile_row_udf(udf_code)
         out_rows: List[Dict[str, Any]] = []
         for row in table.rows:
             out_rows.append(fn(dict(row)))
@@ -1817,6 +1824,92 @@ def _normalize_table(
                 next_row[col] = text
         rows.append(next_row)
     return PipelineTable(columns=table.columns, rows=rows)
+
+
+def _geospatial_table(table: PipelineTable, metadata: Dict[str, Any], parameters: Dict[str, Any]) -> PipelineTable:
+    geo = metadata.get("geospatial") if isinstance(metadata.get("geospatial"), dict) else metadata
+    mode = str(geo.get("mode") or "").strip().lower()
+    output_col = str(geo.get("outputColumn") or geo.get("output_column") or "").strip()
+    if not output_col:
+        output_col = "distance_km" if mode == "distance" else "geohash" if mode == "geohash" else "point"
+
+    def _as_float(value: Any) -> Optional[float]:
+        if value is None:
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    rows: List[Dict[str, Any]] = []
+    for row in table.rows:
+        next_row = dict(row)
+        if mode in {"point", "geohash"}:
+            lat_col = str(geo.get("latColumn") or geo.get("lat_column") or "").strip()
+            lon_col = str(geo.get("lonColumn") or geo.get("lon_column") or "").strip()
+            lat = _as_float(next_row.get(lat_col))
+            lon = _as_float(next_row.get(lon_col))
+            if lat is None or lon is None:
+                next_row[output_col] = None
+            elif mode == "point":
+                next_row[output_col] = f"POINT({lon} {lat})"
+            else:
+                precision = int(geo.get("precision") or 7)
+                next_row[output_col] = f"{round(lat, precision)}:{round(lon, precision)}"
+        elif mode == "distance":
+            lat1_col = str(geo.get("lat1Column") or geo.get("lat1_column") or "").strip()
+            lon1_col = str(geo.get("lon1Column") or geo.get("lon1_column") or "").strip()
+            lat2_col = str(geo.get("lat2Column") or geo.get("lat2_column") or "").strip()
+            lon2_col = str(geo.get("lon2Column") or geo.get("lon2_column") or "").strip()
+            lat1 = _as_float(next_row.get(lat1_col))
+            lon1 = _as_float(next_row.get(lon1_col))
+            lat2 = _as_float(next_row.get(lat2_col))
+            lon2 = _as_float(next_row.get(lon2_col))
+            if None in {lat1, lon1, lat2, lon2}:
+                next_row[output_col] = None
+            else:
+                phi1 = math.radians(float(lat1))
+                phi2 = math.radians(float(lat2))
+                dphi = math.radians(float(lat2) - float(lat1))
+                dlambda = math.radians(float(lon2) - float(lon1))
+                a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
+                c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+                next_row[output_col] = 6371.0 * c
+        rows.append(next_row)
+    columns = list(table.columns)
+    if output_col not in columns:
+        columns.append(output_col)
+    return PipelineTable(columns=columns, rows=rows)
+
+
+def _pattern_mining_table(table: PipelineTable, metadata: Dict[str, Any], parameters: Dict[str, Any]) -> PipelineTable:
+    pattern_meta = metadata.get("patternMining") if isinstance(metadata.get("patternMining"), dict) else metadata
+    source_col = str(pattern_meta.get("sourceColumn") or pattern_meta.get("source_column") or "").strip()
+    output_col = str(pattern_meta.get("outputColumn") or pattern_meta.get("output_column") or "").strip() or "pattern_match"
+    pattern = apply_parameters(str(pattern_meta.get("pattern") or "").strip(), parameters)
+    mode = str(pattern_meta.get("matchMode") or pattern_meta.get("match_mode") or "contains").strip().lower()
+    if not source_col or not pattern:
+        return table
+    regex = re.compile(pattern)
+    rows: List[Dict[str, Any]] = []
+    for row in table.rows:
+        next_row = dict(row)
+        source_value = str(next_row.get(source_col) or "")
+        match = regex.search(source_value)
+        if mode == "extract":
+            if not match:
+                next_row[output_col] = None
+            elif match.groups():
+                next_row[output_col] = match.group(1)
+            else:
+                next_row[output_col] = match.group(0)
+        else:
+            next_row[output_col] = bool(match)
+        rows.append(next_row)
+    columns = list(table.columns)
+    if output_col not in columns:
+        columns.append(output_col)
+    return PipelineTable(columns=columns, rows=rows)
 
 
 def _regex_flags(raw: Any) -> int:

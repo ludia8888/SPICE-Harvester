@@ -1123,6 +1123,14 @@ class PipelineSettings(BaseSettings):
         default="SAFE_NULL",
         description="Casting policy: SAFE_NULL or STRICT (PIPELINE_CAST_MODE)",
     )
+    udf_require_reference: bool = Field(
+        default=True,
+        description="Require UDF metadata to use udfId(+udfVersion) without inline udfCode (PIPELINE_UDF_REQUIRE_REFERENCE)",
+    )
+    udf_spark_parity_enabled: bool = Field(
+        default=True,
+        description="Enable Spark execution parity for UDF transforms (PIPELINE_UDF_SPARK_PARITY_ENABLED)",
+    )
     artifact_path: str = Field(
         default="data/pipeline_artifacts",
         description="Local pipeline artifact path root (PIPELINE_ARTIFACT_PATH)",

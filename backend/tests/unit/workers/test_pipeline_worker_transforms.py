@@ -109,6 +109,16 @@ def test_apply_transform_basic_ops(worker: PipelineWorker) -> None:
     )
     assert [row["code"] for row in regexed.collect()] == ["a1", "b2"]
 
+    udfed = worker._apply_transform(
+        {
+            "operation": "udf",
+            "__resolved_udf_code": "def transform(row):\\n    row['a_plus_1'] = int(row.get('a') or 0) + 1\\n    return row",
+        },
+        [df],
+        {},
+    )
+    assert "a_plus_1" in udfed.columns
+
 
 def test_apply_transform_join_union_groupby_pivot_window(worker: PipelineWorker) -> None:
     left = worker.spark.createDataFrame([(1, "x"), (2, "y")], ["id", "val"])

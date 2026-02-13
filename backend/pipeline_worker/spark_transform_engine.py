@@ -25,6 +25,7 @@ except ModuleNotFoundError:  # pragma: no cover
 
 from shared.services.pipeline.pipeline_parameter_utils import apply_parameters
 from shared.services.pipeline.pipeline_transform_spec import normalize_operation, normalize_union_mode, resolve_join_spec
+from shared.services.pipeline.pipeline_udf_runtime import compile_udf
 
 logger = logging.getLogger(__name__)
 
@@ -52,10 +53,6 @@ def apply_spark_transform(
     if not inputs:
         raise ValueError("Spark transform requires at least one input.")
     operation = normalize_operation(metadata.get("operation"))
-    if operation == "udf":
-        raise ValueError(
-            "udf operation is not supported in Spark execution. Remove this transform or replace it with built-in expressions."
-        )
 
     if not _PYSPARK_AVAILABLE or F is None:
         raise RuntimeError("pyspark is required to execute Spark transforms.")
@@ -193,11 +190,34 @@ def _apply_join(ctx: _SparkTransformContext) -> DataFrame:
     )
 
 
+def _apply_stream_join(ctx: _SparkTransformContext) -> DataFrame:
+    strategy_meta = (
+        ctx.metadata.get("streamJoin")
+        if isinstance(ctx.metadata.get("streamJoin"), dict)
+        else {}
+    )
+    strategy = str(strategy_meta.get("strategy") or "dynamic").strip().lower() or "dynamic"
+    if strategy not in {"dynamic", "left_lookup", "static"}:
+        raise ValueError(f"Invalid streamJoin strategy: {strategy}")
+    # Runtime join semantics align with standard join while preserving strategy metadata.
+    return _apply_join(ctx)
+
+
 def _apply_filter(ctx: _SparkTransformContext) -> DataFrame:
     expr = _clean_expr(ctx.metadata.get("expression"), ctx.parameters)
     if expr:
         return ctx.inputs[0].filter(expr)
     return ctx.inputs[0]
+
+
+def _apply_split(ctx: _SparkTransformContext) -> DataFrame:
+    expr = _clean_expr(
+        ctx.metadata.get("condition") or ctx.metadata.get("expression"),
+        ctx.parameters,
+    )
+    if not expr:
+        return ctx.inputs[0]
+    return ctx.inputs[0].filter(expr)
 
 
 def _apply_compute(ctx: _SparkTransformContext) -> DataFrame:
@@ -476,6 +496,79 @@ def _apply_union(ctx: _SparkTransformContext) -> DataFrame:
     raise ValueError(f"Invalid unionMode: {union_mode}")
 
 
+def _apply_geospatial(ctx: _SparkTransformContext) -> DataFrame:
+    geo = ctx.metadata.get("geospatial") if isinstance(ctx.metadata.get("geospatial"), dict) else ctx.metadata
+    mode = str(geo.get("mode") or "").strip().lower()
+    output_col = _clean_col_name(geo.get("outputColumn") or geo.get("output_column"))
+    if not output_col:
+        output_col = "distance_km" if mode == "distance" else "geohash" if mode == "geohash" else "point"
+
+    if mode in {"point", "geohash"}:
+        lat_col = _clean_col_name(geo.get("latColumn") or geo.get("lat_column"))
+        lon_col = _clean_col_name(geo.get("lonColumn") or geo.get("lon_column"))
+        if not lat_col or not lon_col:
+            raise ValueError("geospatial point/geohash requires latColumn and lonColumn")
+        lat_expr = F.col(lat_col).cast("double")
+        lon_expr = F.col(lon_col).cast("double")
+        missing_expr = lat_expr.isNull() | lon_expr.isNull()
+        if mode == "point":
+            point_expr = F.concat(F.lit("POINT("), lon_expr, F.lit(" "), lat_expr, F.lit(")"))
+            return ctx.inputs[0].withColumn(output_col, F.when(missing_expr, F.lit(None)).otherwise(point_expr))
+        precision = int(geo.get("precision") or 7)
+        geohash_expr = F.concat_ws(":", F.round(lat_expr, precision), F.round(lon_expr, precision))
+        return ctx.inputs[0].withColumn(output_col, F.when(missing_expr, F.lit(None)).otherwise(geohash_expr))
+
+    if mode == "distance":
+        lat1_col = _clean_col_name(geo.get("lat1Column") or geo.get("lat1_column"))
+        lon1_col = _clean_col_name(geo.get("lon1Column") or geo.get("lon1_column"))
+        lat2_col = _clean_col_name(geo.get("lat2Column") or geo.get("lat2_column"))
+        lon2_col = _clean_col_name(geo.get("lon2Column") or geo.get("lon2_column"))
+        if not lat1_col or not lon1_col or not lat2_col or not lon2_col:
+            raise ValueError("geospatial distance requires lat1/lon1/lat2/lon2 columns")
+
+        lat1 = F.col(lat1_col).cast("double")
+        lon1 = F.col(lon1_col).cast("double")
+        lat2 = F.col(lat2_col).cast("double")
+        lon2 = F.col(lon2_col).cast("double")
+        missing_expr = lat1.isNull() | lon1.isNull() | lat2.isNull() | lon2.isNull()
+
+        phi1 = F.radians(lat1)
+        phi2 = F.radians(lat2)
+        dphi = F.radians(lat2 - lat1)
+        dlambda = F.radians(lon2 - lon1)
+        sin_dphi = F.sin(dphi / F.lit(2.0))
+        sin_dlambda = F.sin(dlambda / F.lit(2.0))
+        a = (sin_dphi * sin_dphi) + (F.cos(phi1) * F.cos(phi2) * sin_dlambda * sin_dlambda)
+        c = F.lit(2.0) * F.atan2(F.sqrt(a), F.sqrt(F.lit(1.0) - a))
+        distance_km = F.lit(6371.0) * c
+        return ctx.inputs[0].withColumn(output_col, F.when(missing_expr, F.lit(None)).otherwise(distance_km))
+
+    raise ValueError(f"Invalid geospatial mode: {mode}")
+
+
+def _apply_pattern_mining(ctx: _SparkTransformContext) -> DataFrame:
+    pattern_meta = (
+        ctx.metadata.get("patternMining")
+        if isinstance(ctx.metadata.get("patternMining"), dict)
+        else ctx.metadata
+    )
+    source_col = _clean_col_name(pattern_meta.get("sourceColumn") or pattern_meta.get("source_column"))
+    output_col = _clean_col_name(pattern_meta.get("outputColumn") or pattern_meta.get("output_column")) or "pattern_match"
+    pattern = _clean_expr(pattern_meta.get("pattern"), ctx.parameters).strip()
+    mode = str(pattern_meta.get("matchMode") or pattern_meta.get("match_mode") or "contains").strip().lower()
+    if not source_col or not pattern:
+        return ctx.inputs[0]
+    source = F.col(source_col).cast("string")
+    if mode == "extract":
+        extracted = F.regexp_extract(source, pattern, 1)
+        result = F.when(extracted == "", F.lit(None)).otherwise(extracted)
+        return ctx.inputs[0].withColumn(output_col, result)
+    return ctx.inputs[0].withColumn(
+        output_col,
+        F.when(source.isNull(), F.lit(False)).otherwise(source.rlike(pattern)),
+    )
+
+
 def _apply_group_by(ctx: _SparkTransformContext) -> DataFrame:
     group_by_raw = ctx.metadata.get("groupBy") or []
     group_by = [
@@ -609,9 +702,29 @@ def _apply_window(ctx: _SparkTransformContext) -> DataFrame:
     return ctx.inputs[0].withColumn(output_column, F.row_number().over(window_spec))
 
 
+def _apply_udf(ctx: _SparkTransformContext) -> DataFrame:
+    source = ctx.inputs[0]
+    code = str(
+        ctx.metadata.get("__resolved_udf_code")
+        or ctx.metadata.get("udfCode")
+        or ctx.metadata.get("udf_code")
+        or ""
+    ).strip()
+    if not code:
+        raise ValueError("udf requires resolved code (__resolved_udf_code)")
+
+    fn = compile_udf(code)
+    rows = [fn(row.asDict(recursive=True)) for row in source.collect()]
+    if not rows:
+        return source.limit(0)
+    return source.sparkSession.createDataFrame(rows)
+
+
 _HANDLERS: Dict[str, SparkTransformHandler] = {
     "join": _apply_join,
+    "streamJoin": _apply_stream_join,
     "filter": _apply_filter,
+    "split": _apply_split,
     "compute": _apply_compute,
     "normalize": _apply_normalize,
     "explode": _apply_explode,
@@ -625,7 +738,9 @@ _HANDLERS: Dict[str, SparkTransformHandler] = {
     "union": _apply_union,
     "groupBy": _apply_group_by,
     "aggregate": _apply_group_by,
+    "geospatial": _apply_geospatial,
+    "patternMining": _apply_pattern_mining,
     "pivot": _apply_pivot,
     "window": _apply_window,
+    "udf": _apply_udf,
 }
-

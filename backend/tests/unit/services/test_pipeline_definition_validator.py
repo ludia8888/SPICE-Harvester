@@ -9,9 +9,10 @@ from shared.services.pipeline.pipeline_transform_spec import SUPPORTED_TRANSFORM
 
 def _spark_policy(*, require_output: bool = True) -> PipelineDefinitionValidationPolicy:
     return PipelineDefinitionValidationPolicy(
-        supported_ops=SUPPORTED_TRANSFORMS - {"udf"},
+        supported_ops=SUPPORTED_TRANSFORMS,
         require_output=require_output,
         normalize_metadata=True,
+        require_udf_reference=True,
     )
 
 
@@ -80,7 +81,7 @@ def test_validate_pipeline_definition_uses_custom_udf_message() -> None:
         "edges": [{"from": "in", "to": "t"}, {"from": "t", "to": "out"}],
     }
     policy = PipelineDefinitionValidationPolicy(
-        supported_ops=SUPPORTED_TRANSFORMS - {"udf"},
+        supported_ops=SUPPORTED_TRANSFORMS,
         require_output=True,
         normalize_metadata=True,
         udf_error_message_template="udf not allowed on {node_id}",
@@ -88,3 +89,32 @@ def test_validate_pipeline_definition_uses_custom_udf_message() -> None:
     result = validate_pipeline_definition(definition, policy=policy)
     assert "udf not allowed on t" in result.errors
 
+
+def test_validate_pipeline_definition_udf_requires_udf_id_when_reference_policy_enabled() -> None:
+    definition = {
+        "nodes": [
+            {"id": "in", "type": "input"},
+            {"id": "t", "type": "transform", "metadata": {"operation": "udf"}},
+            {"id": "out", "type": "output"},
+        ],
+        "edges": [{"from": "in", "to": "t"}, {"from": "t", "to": "out"}],
+    }
+    result = validate_pipeline_definition(definition, policy=_spark_policy())
+    assert "udf requires udfId on node t" in result.errors
+
+
+def test_validate_pipeline_definition_udf_rejects_inline_code_when_reference_policy_enabled() -> None:
+    definition = {
+        "nodes": [
+            {"id": "in", "type": "input"},
+            {
+                "id": "t",
+                "type": "transform",
+                "metadata": {"operation": "udf", "udfCode": "def transform(row): return row"},
+            },
+            {"id": "out", "type": "output"},
+        ],
+        "edges": [{"from": "in", "to": "t"}, {"from": "t", "to": "out"}],
+    }
+    result = validate_pipeline_definition(definition, policy=_spark_policy())
+    assert "udfCode is not allowed on node t; use udfId (+udfVersion)" in result.errors

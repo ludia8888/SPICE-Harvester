@@ -1,11 +1,27 @@
 from __future__ import annotations
 
 import ast
-from typing import Any, Callable, Dict
+import hashlib
+from dataclasses import dataclass
+from typing import Any, Callable, Dict, Mapping, MutableMapping, Optional, Protocol
 
 
 class PipelineUdfError(ValueError):
     pass
+
+
+class PipelineUdfRegistry(Protocol):
+    async def get_udf_latest_version(self, *, udf_id: str) -> Any: ...
+
+    async def get_udf_version(self, *, udf_id: str, version: int) -> Any: ...
+
+
+@dataclass(frozen=True)
+class ResolvedPipelineUdf:
+    udf_id: Optional[str]
+    version: Optional[int]
+    code: str
+    cache_key: str
 
 
 _SAFE_BUILTINS: Dict[str, Any] = {
@@ -105,6 +121,109 @@ def _validate_udf_ast(tree: ast.AST) -> None:
     _UdfAstValidator().visit(tree)
 
 
+def _code_hash(code: str) -> str:
+    return hashlib.sha256(str(code).encode("utf-8")).hexdigest()[:12]
+
+
+def build_udf_cache_key(*, udf_id: Optional[str], version: Optional[int], code: str) -> str:
+    return f"{udf_id or 'inline'}:{version if version is not None else 'inline'}:{_code_hash(code)}"
+
+
+def _parse_udf_version(value: Any) -> Optional[int]:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        parsed = int(text)
+    except Exception as exc:
+        raise PipelineUdfError(f"Invalid udfVersion: {value}") from exc
+    if parsed <= 0:
+        raise PipelineUdfError(f"Invalid udfVersion: {value}")
+    return parsed
+
+
+async def resolve_udf_reference(
+    *,
+    metadata: Mapping[str, Any],
+    pipeline_registry: Optional[PipelineUdfRegistry],
+    require_reference: bool,
+    code_cache: Optional[MutableMapping[str, str]] = None,
+) -> ResolvedPipelineUdf:
+    udf_id = str(metadata.get("udfId") or metadata.get("udf_id") or "").strip() or None
+    udf_code = str(metadata.get("udfCode") or metadata.get("udf_code") or "").strip() or None
+    udf_version = _parse_udf_version(metadata.get("udfVersion") or metadata.get("udf_version"))
+
+    if require_reference:
+        if udf_code:
+            raise PipelineUdfError("udfCode is not allowed; use udfId (+udfVersion)")
+        if not udf_id:
+            raise PipelineUdfError("udf requires udfId")
+
+    if not udf_id and not udf_code:
+        raise PipelineUdfError("udf missing udfId")
+
+    if udf_id:
+        if not pipeline_registry:
+            raise PipelineUdfError("udf requires pipeline_registry to resolve udfId")
+
+        resolved_version = udf_version
+        if resolved_version is None:
+            latest = await pipeline_registry.get_udf_latest_version(udf_id=udf_id)
+            if not latest:
+                raise PipelineUdfError("udf not found")
+            resolved_version = int(getattr(latest, "version", 0) or 0)
+            if resolved_version <= 0:
+                raise PipelineUdfError("udf version not found")
+
+        lookup_key = f"{udf_id}:{resolved_version}"
+        resolved_code = (code_cache or {}).get(lookup_key)
+        if not resolved_code:
+            version_row = await pipeline_registry.get_udf_version(udf_id=udf_id, version=resolved_version)
+            if not version_row:
+                raise PipelineUdfError("udf version not found")
+            resolved_code = str(getattr(version_row, "code", "") or "").strip()
+            if not resolved_code:
+                raise PipelineUdfError("udf version code is empty")
+            if code_cache is not None:
+                code_cache[lookup_key] = resolved_code
+
+        return ResolvedPipelineUdf(
+            udf_id=udf_id,
+            version=resolved_version,
+            code=resolved_code,
+            cache_key=build_udf_cache_key(udf_id=udf_id, version=resolved_version, code=resolved_code),
+        )
+
+    # Legacy compatibility path (reference policy disabled).
+    legacy_code = str(udf_code or "").strip()
+    if not legacy_code:
+        raise PipelineUdfError("udf missing udfCode")
+    return ResolvedPipelineUdf(
+        udf_id=None,
+        version=None,
+        code=legacy_code,
+        cache_key=build_udf_cache_key(udf_id=None, version=None, code=legacy_code),
+    )
+
+
+def validate_udf_output_schema(payload: Any) -> Dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise PipelineUdfError("UDF transform(row) must return a dict")
+    normalized: Dict[str, Any] = {}
+    for key, value in payload.items():
+        name = str(key or "").strip()
+        if not name:
+            raise PipelineUdfError("UDF output keys must be non-empty strings")
+        normalized[name] = value
+    return normalized
+
+
+def compile_udf(code: str) -> Callable[[Dict[str, Any]], Dict[str, Any]]:
+    return compile_row_udf(code)
+
+
 def compile_row_udf(code: str) -> Callable[[Dict[str, Any]], Dict[str, Any]]:
     """
     Compile a Python UDF for row-level transforms.
@@ -135,8 +254,6 @@ def compile_row_udf(code: str) -> Callable[[Dict[str, Any]], Dict[str, Any]]:
 
     def _wrapped(row: Dict[str, Any]) -> Dict[str, Any]:
         out = fn(dict(row))
-        if not isinstance(out, dict):
-            raise PipelineUdfError("UDF transform(row) must return a dict")
-        return out
+        return validate_udf_output_schema(out)
 
     return _wrapped

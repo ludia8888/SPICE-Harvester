@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
 from shared.services.pipeline.pipeline_graph_utils import unique_node_id
+from shared.services.pipeline.output_plugins import normalize_output_kind
 from shared.services.pipeline.pipeline_transform_spec import SUPPORTED_TRANSFORMS
 
 
@@ -990,12 +991,162 @@ def add_regex_replace(
     )
 
 
+def add_split(
+    plan: Dict[str, Any],
+    *,
+    input_node_id: str,
+    expression: str,
+    true_node_id: Optional[str] = None,
+    false_node_id: Optional[str] = None,
+) -> PlanMutation:
+    """
+    Macro expansion for split semantics.
+
+    Instead of introducing a runtime multi-port split node, generate deterministic
+    true/false filter branches:
+    - true branch:  filter(expression)
+    - false branch: filter(not (expression))
+    """
+    src = _ensure_str(input_node_id, name="input_node_id")
+    expr = _ensure_str(expression, name="expression")
+    definition = _definition(plan)
+    existing = _node_ids(definition)
+    split_base = unique_node_id("split", existing, start_index=2)
+    true_id = str(true_node_id or "").strip() or unique_node_id(f"{split_base}_true", existing, start_index=1)
+    first = add_transform(
+        plan,
+        operation="filter",
+        input_node_ids=[src],
+        node_id=true_id,
+        metadata={
+            "expression": expr,
+            "splitBranch": "true",
+            "splitExpression": expr,
+        },
+    )
+    existing_after_true = _node_ids(_definition(first.plan))
+    false_id = str(false_node_id or "").strip() or unique_node_id(
+        f"{split_base}_false",
+        existing_after_true,
+        start_index=1,
+    )
+    second = add_transform(
+        first.plan,
+        operation="filter",
+        input_node_ids=[src],
+        node_id=false_id,
+        metadata={
+            "expression": f"not ({expr})",
+            "splitBranch": "false",
+            "splitExpression": expr,
+        },
+    )
+    return PlanMutation(
+        plan=second.plan,
+        node_id=first.node_id,
+        warnings=(f"split false branch node_id={second.node_id}",),
+    )
+
+
+def add_geospatial(
+    plan: Dict[str, Any],
+    *,
+    input_node_id: str,
+    mode: str,
+    config: Optional[Dict[str, Any]] = None,
+    node_id: Optional[str] = None,
+) -> PlanMutation:
+    src = _ensure_str(input_node_id, name="input_node_id")
+    mode_value = _ensure_str(mode, name="mode")
+    cfg = dict(config or {})
+    cfg["mode"] = mode_value
+    return add_transform(
+        plan,
+        operation="geospatial",
+        input_node_ids=[src],
+        node_id=node_id,
+        metadata={"geospatial": cfg},
+    )
+
+
+def add_pattern_mining(
+    plan: Dict[str, Any],
+    *,
+    input_node_id: str,
+    source_column: str,
+    pattern: str,
+    output_column: str,
+    match_mode: str = "contains",
+    node_id: Optional[str] = None,
+) -> PlanMutation:
+    src = _ensure_str(input_node_id, name="input_node_id")
+    source = _ensure_str(source_column, name="source_column")
+    pattern_text = _ensure_str(pattern, name="pattern")
+    output = _ensure_str(output_column, name="output_column")
+    mode = str(match_mode or "contains").strip().lower() or "contains"
+    if mode not in {"contains", "extract"}:
+        raise PipelinePlanBuilderError("match_mode must be one of: contains|extract")
+    return add_transform(
+        plan,
+        operation="patternMining",
+        input_node_ids=[src],
+        node_id=node_id,
+        metadata={
+            "patternMining": {
+                "sourceColumn": source,
+                "pattern": pattern_text,
+                "outputColumn": output,
+                "matchMode": mode,
+            }
+        },
+    )
+
+
+def add_stream_join(
+    plan: Dict[str, Any],
+    *,
+    left_node_id: str,
+    right_node_id: str,
+    left_keys: List[str],
+    right_keys: List[str],
+    join_type: str = "inner",
+    strategy: str = "dynamic",
+    node_id: Optional[str] = None,
+) -> PlanMutation:
+    left = _ensure_str(left_node_id, name="left_node_id")
+    right = _ensure_str(right_node_id, name="right_node_id")
+    if left == right:
+        raise PipelinePlanBuilderError("left_node_id and right_node_id must be different")
+    lk = _ensure_string_list(left_keys, name="left_keys")
+    rk = _ensure_string_list(right_keys, name="right_keys")
+    if len(lk) != len(rk):
+        raise PipelinePlanBuilderError("left_keys/right_keys must have the same length")
+    join_type_norm = str(join_type or "inner").strip().lower() or "inner"
+    strategy_norm = str(strategy or "dynamic").strip().lower() or "dynamic"
+    if strategy_norm not in {"dynamic", "left_lookup", "static"}:
+        raise PipelinePlanBuilderError("strategy must be one of: dynamic|left_lookup|static")
+    return add_transform(
+        plan,
+        operation="streamJoin",
+        input_node_ids=[left, right],
+        node_id=node_id,
+        metadata={
+            "joinType": join_type_norm,
+            "leftKeys": lk,
+            "rightKeys": rk,
+            "streamJoin": {
+                "strategy": strategy_norm,
+            },
+        },
+    )
+
+
 def add_output(
     plan: Dict[str, Any],
     *,
     input_node_id: str,
     output_name: str,
-    output_kind: str = "unknown",
+    output_kind: str = "dataset",
     node_id: Optional[str] = None,
     output_metadata: Optional[Dict[str, Any]] = None,
 ) -> PlanMutation:
@@ -1007,9 +1158,10 @@ def add_output(
         raise PipelinePlanBuilderError(f"input_node_id missing node: {src}")
 
     name = _ensure_str(output_name, name="output_name")
-    kind = str(output_kind or "unknown").strip().lower() or "unknown"
-    if kind not in {"unknown", "object", "link"}:
-        raise PipelinePlanBuilderError("output_kind must be one of: unknown|object|link")
+    try:
+        kind = normalize_output_kind(output_kind)
+    except ValueError as exc:
+        raise PipelinePlanBuilderError(str(exc)) from exc
 
     resolved_id = str(node_id or "").strip() or None
     if not resolved_id:
@@ -1183,6 +1335,22 @@ def validate_structure(plan: Dict[str, Any]) -> Tuple[List[str], List[str]]:
                 )
                 if not (has_aggs or has_exprs):
                     errors.append(f"{op} missing aggregates/aggregateExpressions on node {node_id}")
+            if op == "split":
+                if not str(metadata.get("expression") or metadata.get("condition") or "").strip():
+                    errors.append(f"split missing expression/condition on node {node_id}")
+            if op == "geospatial":
+                geo = metadata.get("geospatial") if isinstance(metadata.get("geospatial"), dict) else metadata
+                mode = str(geo.get("mode") or "").strip().lower()
+                if mode not in {"point", "geohash", "distance"}:
+                    errors.append(f"geospatial mode must be point|geohash|distance on node {node_id}")
+            if op == "patternMining":
+                pattern_cfg = metadata.get("patternMining") if isinstance(metadata.get("patternMining"), dict) else metadata
+                if not str(pattern_cfg.get("sourceColumn") or pattern_cfg.get("source_column") or "").strip():
+                    errors.append(f"patternMining missing sourceColumn on node {node_id}")
+                if not str(pattern_cfg.get("pattern") or "").strip():
+                    errors.append(f"patternMining missing pattern on node {node_id}")
+                if not str(pattern_cfg.get("outputColumn") or pattern_cfg.get("output_column") or "").strip():
+                    errors.append(f"patternMining missing outputColumn on node {node_id}")
             if op == "join":
                 inc = incoming.get(node_id, [])
                 if len(inc) < 2:
@@ -1200,6 +1368,19 @@ def validate_structure(plan: Dict[str, Any]) -> Tuple[List[str], List[str]]:
                         errors.append(f"join leftKeys/rightKeys length mismatch on node {node_id}")
                 if allow_cross:
                     warnings.append(f"join allowCrossJoin=true on node {node_id}")
+            if op == "streamJoin":
+                if len(incoming.get(node_id, [])) < 2:
+                    errors.append(f"streamJoin requires two inputs on node {node_id}")
+                left_keys = metadata.get("leftKeys") or metadata.get("left_keys") or []
+                right_keys = metadata.get("rightKeys") or metadata.get("right_keys") or []
+                if not left_keys or not right_keys:
+                    errors.append(f"streamJoin requires leftKeys/rightKeys on node {node_id}")
+                elif len(left_keys) != len(right_keys):
+                    errors.append(f"streamJoin leftKeys/rightKeys length mismatch on node {node_id}")
+                stream_meta = metadata.get("streamJoin") if isinstance(metadata.get("streamJoin"), dict) else {}
+                strategy = str(stream_meta.get("strategy") or "").strip().lower() or "dynamic"
+                if strategy not in {"dynamic", "left_lookup", "static"}:
+                    errors.append(f"streamJoin strategy must be dynamic|left_lookup|static on node {node_id}")
             if op == "union":
                 if len(incoming.get(node_id, [])) < 2:
                     errors.append(f"union requires two inputs on node {node_id}")

@@ -1,0 +1,121 @@
+version: "2026-02-13"
+source: "Foundry Functions Index"
+functions:
+  - name: sum
+    category: aggregation
+    engines:
+      preview: supported
+      spark: supported
+    notes: "groupBy aggregate sum"
+
+  - name: count
+    category: aggregation
+    engines:
+      preview: supported
+      spark: supported
+    notes: "groupBy aggregate count"
+
+  - name: avg
+    category: aggregation
+    engines:
+      preview: supported
+      spark: supported
+    notes: "groupBy aggregate avg"
+
+  - name: min
+    category: aggregation
+    engines:
+      preview: supported
+      spark: supported
+    notes: "groupBy aggregate min"
+
+  - name: max
+    category: aggregation
+    engines:
+      preview: supported
+      spark: supported
+    notes: "groupBy aggregate max"
+
+  - name: to_timestamp
+    category: datetime
+    engines:
+      preview: partial
+      spark: supported
+    notes: "preview supports literal-only parsing"
+
+  - name: date_trunc
+    category: datetime
+    engines:
+      preview: unsupported
+      spark: partial
+    notes: "not fully aligned in lightweight preview"
+
+  - name: regexp_extract
+    category: string
+    engines:
+      preview: unsupported
+      spark: partial
+    notes: "requires Spark SQL expression runtime"
+
+  - name: regexp_replace
+    category: string
+    engines:
+      preview: unsupported
+      spark: partial
+    notes: "requires Spark SQL expression runtime"
+
+  - name: upper
+    category: string
+    engines:
+      preview: unsupported
+      spark: partial
+    notes: "preview expression evaluator excludes function calls"
+
+  - name: lower
+    category: string
+    engines:
+      preview: unsupported
+      spark: partial
+    notes: "preview expression evaluator excludes function calls"
+
+  - name: trim
+    category: string
+    engines:
+      preview: unsupported
+      spark: partial
+    notes: "available via normalize transform rather than expression call"
+
+  - name: row_number
+    category: window
+    engines:
+      preview: unsupported
+      spark: partial
+    notes: "window transform exists, but full SQL function parity is partial"
+
+  - name: lag
+    category: window
+    engines:
+      preview: unsupported
+      spark: partial
+    notes: "not first-class in preview evaluator"
+
+  - name: lead
+    category: window
+    engines:
+      preview: unsupported
+      spark: partial
+    notes: "not first-class in preview evaluator"
+
+  - name: approx_percentile
+    category: aggregation
+    engines:
+      preview: unsupported
+      spark: partial
+    notes: "available through aggregateExpressions only"
+
+  - name: split
+    category: string
+    engines:
+      preview: unsupported
+      spark: partial
+    notes: "implemented as transform macro, not expression function"
