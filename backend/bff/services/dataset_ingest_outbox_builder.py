@@ -10,6 +10,7 @@ invoking intent-revealing methods rather than re-assembling dicts inline.
 from dataclasses import dataclass
 from typing import Any, Optional
 
+from shared.config.settings import get_settings
 from shared.utils.s3_uri import parse_s3_uri
 from shared.utils.time_utils import utcnow
 
@@ -92,7 +93,11 @@ class DatasetIngestOutboxBuilder:
         edge_metadata: dict[str, Any],
         to_label: Optional[str] = None,
     ) -> Optional[dict[str, Any]]:
-        if not self.lineage_store or not artifact_key:
+        if not artifact_key:
+            return None
+        if not self.lineage_store:
+            if get_settings().observability.lineage_required_effective:
+                raise RuntimeError("LineageStore unavailable")
             return None
         parsed = parse_s3_uri(artifact_key)
         if not parsed:

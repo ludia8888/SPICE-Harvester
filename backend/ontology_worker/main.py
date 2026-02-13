@@ -46,7 +46,7 @@ from shared.services.registries.processed_event_registry import (
 from shared.services.registries.lineage_store import LineageStore
 from shared.services.core.audit_log_store import AuditLogStore
 from shared.services.registries.ontology_key_spec_registry import OntologyKeySpecRegistry
-from shared.services.core.worker_stores import initialize_worker_stores
+from shared.services.core.worker_stores import WorkerObservability, initialize_worker_stores
 from shared.security.input_sanitizer import validate_branch_name
 from shared.utils.spice_event_ids import spice_event_id
 from shared.utils.ontology_version import resolve_ontology_version
@@ -100,6 +100,7 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
         self.enable_event_sourcing = bool(settings.event_sourcing.enable_event_sourcing)
         self.enable_processed_event_registry = bool(settings.event_sourcing.enable_processed_event_registry)
         self.enable_lineage = bool(settings.observability.enable_lineage)
+        self.lineage_required = bool(settings.observability.lineage_required_effective and self.enable_lineage)
         self.enable_audit_logs = bool(settings.observability.enable_audit_logs)
         self.producer: Optional[Producer] = None
         self._dlq_spec = DlqPublishSpec(
@@ -118,6 +119,12 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
         self.processed: Optional[ProcessedEventRegistry] = None
         self.lineage_store: Optional[LineageStore] = None
         self.audit_store: Optional[AuditLogStore] = None
+        self.observability = WorkerObservability(
+            lineage_store=None,
+            audit_store=None,
+            logger=logger,
+            lineage_required=self.lineage_required,
+        )
         self.key_spec_registry: Optional[OntologyKeySpecRegistry] = OntologyKeySpecRegistry()
         self.tracing_service = None
         self.metrics_collector = None
@@ -240,6 +247,12 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
         self.processed = stores.processed
         self.lineage_store = stores.lineage_store
         self.audit_store = stores.audit_store
+        self.observability = WorkerObservability(
+            lineage_store=self.lineage_store,
+            audit_store=self.audit_store,
+            logger=logger,
+            lineage_required=stores.lineage_required,
+        )
         
         # Initialize OpenTelemetry
         self.tracing_service = get_tracing_service("ontology-worker")
@@ -428,31 +441,21 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
             ontology_version = await resolve_ontology_version(
                 self.terminus_service, db_name=db_name, branch=branch, logger=logger
             )
-            if command_id and class_id and self.lineage_store:
-                try:
-                    await self.lineage_store.record_link(
-                        from_node_id=self.lineage_store.node_event(str(command_id)),
-                        to_node_id=self.lineage_store.node_artifact("terminus", db_name, branch, f"ontology:{class_id}"),
-                        edge_type="event_wrote_terminus_document",
-                        occurred_at=datetime.now(timezone.utc),
-                        to_label=f"terminus:{db_name}:{branch}:ontology:{class_id}",
-                        edge_metadata={
-                            "db_name": db_name,
-                            "branch": branch,
-                            "class_id": class_id,
-                            "artifact": "ontology_class",
-                            "ontology": ontology_version,
-                        },
-                    )
-                except Exception as exc:
-                    logger.warning(
-                        "Lineage record_link failed (operation=create db=%s branch=%s class_id=%s): %s",
-                        db_name,
-                        branch,
-                        class_id,
-                        exc,
-                        exc_info=True,
-                    )
+            if command_id and class_id:
+                await self.observability.record_link(
+                    from_node_id=LineageStore.node_event(str(command_id)),
+                    to_node_id=LineageStore.node_artifact("terminus", db_name, branch, f"ontology:{class_id}"),
+                    edge_type="event_wrote_terminus_document",
+                    occurred_at=datetime.now(timezone.utc),
+                    to_label=f"terminus:{db_name}:{branch}:ontology:{class_id}",
+                    edge_metadata={
+                        "db_name": db_name,
+                        "branch": branch,
+                        "class_id": class_id,
+                        "artifact": "ontology_class",
+                        "ontology": ontology_version,
+                    },
+                )
 
             if command_id and class_id and self.audit_store:
                 try:
@@ -628,31 +631,21 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
                         exc_info=True,
                     )
                     raise RuntimeError("ontology_key_spec_upsert_failed") from exc
-            if command_id and class_id and self.lineage_store:
-                try:
-                    await self.lineage_store.record_link(
-                        from_node_id=self.lineage_store.node_event(str(command_id)),
-                        to_node_id=self.lineage_store.node_artifact("terminus", db_name, branch, f"ontology:{class_id}"),
-                        edge_type="event_wrote_terminus_document",
-                        occurred_at=datetime.now(timezone.utc),
-                        to_label=f"terminus:{db_name}:{branch}:ontology:{class_id}",
-                        edge_metadata={
-                            "db_name": db_name,
-                            "branch": branch,
-                            "class_id": class_id,
-                            "artifact": "ontology_class",
-                            "ontology": ontology_version,
-                        },
-                    )
-                except Exception as exc:
-                    logger.warning(
-                        "Lineage record_link failed (operation=update db=%s branch=%s class_id=%s): %s",
-                        db_name,
-                        branch,
-                        class_id,
-                        exc,
-                        exc_info=True,
-                    )
+            if command_id and class_id:
+                await self.observability.record_link(
+                    from_node_id=LineageStore.node_event(str(command_id)),
+                    to_node_id=LineageStore.node_artifact("terminus", db_name, branch, f"ontology:{class_id}"),
+                    edge_type="event_wrote_terminus_document",
+                    occurred_at=datetime.now(timezone.utc),
+                    to_label=f"terminus:{db_name}:{branch}:ontology:{class_id}",
+                    edge_metadata={
+                        "db_name": db_name,
+                        "branch": branch,
+                        "class_id": class_id,
+                        "artifact": "ontology_class",
+                        "ontology": ontology_version,
+                    },
+                )
 
             if command_id and class_id and self.audit_store:
                 try:
@@ -802,31 +795,21 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
                     )
                     raise RuntimeError("ontology_key_spec_delete_failed") from exc
 
-            if command_id and class_id and self.lineage_store:
-                try:
-                    await self.lineage_store.record_link(
-                        from_node_id=self.lineage_store.node_event(str(command_id)),
-                        to_node_id=self.lineage_store.node_artifact("terminus", db_name, branch, f"ontology:{class_id}"),
-                        edge_type="event_deleted_terminus_document",
-                        occurred_at=datetime.now(timezone.utc),
-                        to_label=f"terminus:{db_name}:{branch}:ontology:{class_id}",
-                        edge_metadata={
-                            "db_name": db_name,
-                            "branch": branch,
-                            "class_id": class_id,
-                            "artifact": "ontology_class",
-                            "ontology": ontology_version,
-                        },
-                    )
-                except Exception as exc:
-                    logger.warning(
-                        "Lineage record_link failed (operation=delete db=%s branch=%s class_id=%s): %s",
-                        db_name,
-                        branch,
-                        class_id,
-                        exc,
-                        exc_info=True,
-                    )
+            if command_id and class_id:
+                await self.observability.record_link(
+                    from_node_id=LineageStore.node_event(str(command_id)),
+                    to_node_id=LineageStore.node_artifact("terminus", db_name, branch, f"ontology:{class_id}"),
+                    edge_type="event_deleted_terminus_document",
+                    occurred_at=datetime.now(timezone.utc),
+                    to_label=f"terminus:{db_name}:{branch}:ontology:{class_id}",
+                    edge_metadata={
+                        "db_name": db_name,
+                        "branch": branch,
+                        "class_id": class_id,
+                        "artifact": "ontology_class",
+                        "ontology": ontology_version,
+                    },
+                )
 
             if command_id and class_id and self.audit_store:
                 try:

@@ -25,6 +25,14 @@ import aioboto3
 from botocore.exceptions import ClientError
 
 from shared.config.settings import get_settings
+from shared.errors.error_types import ErrorCategory, ErrorCode
+from shared.errors.runtime_exception_policy import (
+    RuntimeZone,
+    LineageRecordError,
+    LineageUnavailableError,
+    log_exception_rate_limited,
+    preserve_primary_exception,
+)
 from shared.models.event_envelope import EventEnvelope
 from shared.observability.context_propagation import enrich_metadata_with_current_trace
 from shared.observability.tracing import trace_storage_operation
@@ -144,7 +152,8 @@ class EventStore:
                         )
                         logger.info("✅ Enabled versioning for immutability")
 
-                # Best-effort: initialize lineage/audit stores (Postgres-backed).
+                # Initialize lineage/audit stores (Postgres-backed).
+                # Lineage may fail-closed depending on observability policy.
                 await self._initialize_lineage_and_audit()
                 self._connected = True
 
@@ -159,7 +168,16 @@ class EventStore:
                 await self._lineage_store.initialize()
                 logger.info("✅ LineageStore connected (Postgres)")
             except Exception as e:
-                logger.warning(f"⚠️ LineageStore unavailable (continuing without lineage): {e}")
+                if get_settings().observability.lineage_required_effective:
+                    raise LineageUnavailableError("LineageStore unavailable") from e
+                log_exception_rate_limited(
+                    logger,
+                    zone=RuntimeZone.OBSERVABILITY,
+                    operation="event_store.initialize_lineage_store",
+                    exc=e,
+                    code=ErrorCode.LINEAGE_UNAVAILABLE,
+                    category=ErrorCategory.UPSTREAM,
+                )
                 self._lineage_store = None
 
         if self._audit_enabled and AuditLogStore:
@@ -188,6 +206,11 @@ class EventStore:
         s3_key: Optional[str],
         audit_action: str = "EVENT_APPENDED",
     ) -> None:
+        lineage_required = bool(get_settings().observability.lineage_required_effective and self._lineage_enabled)
+
+        if lineage_required and self._lineage_store is None:
+            raise LineageUnavailableError("LineageStore unavailable")
+
         # Lineage graph
         if self._lineage_store and self._lineage_enabled:
             try:
@@ -196,18 +219,61 @@ class EventStore:
                     s3_bucket=self.bucket_name,
                     s3_key=s3_key,
                 )
-            except Exception as e:
-                logger.debug(f"LineageStore record failed (non-fatal): {e}")
-                # Best-effort: enqueue for eventual backfill
+            except Exception as record_exc:
                 try:
                     await self._lineage_store.enqueue_backfill(
                         envelope=envelope,
                         s3_bucket=self.bucket_name,
                         s3_key=s3_key,
-                        error=str(e),
+                        error=str(record_exc),
                     )
                 except Exception as enqueue_err:
-                    logger.debug(f"Lineage backfill enqueue failed (non-fatal): {enqueue_err}")
+                    if lineage_required:
+                        preserve_primary_exception(
+                            primary_exc=record_exc,
+                            cleanup_exc=enqueue_err,
+                            logger=logger,
+                            operation="event_store.enqueue_backfill_after_lineage_failure",
+                            zone=RuntimeZone.CORE,
+                            code=ErrorCode.LINEAGE_RECORD_FAILED,
+                            category=ErrorCategory.INTERNAL,
+                            context={
+                                "event_id": str(envelope.event_id),
+                                "aggregate_type": envelope.aggregate_type,
+                                "aggregate_id": envelope.aggregate_id,
+                            },
+                        )
+                    else:
+                        log_exception_rate_limited(
+                            logger,
+                            zone=RuntimeZone.OBSERVABILITY,
+                            operation="event_store.enqueue_backfill_after_lineage_failure",
+                            exc=enqueue_err,
+                            code=ErrorCode.LINEAGE_RECORD_FAILED,
+                            category=ErrorCategory.INTERNAL,
+                            context={
+                                "event_id": str(envelope.event_id),
+                                "aggregate_type": envelope.aggregate_type,
+                                "aggregate_id": envelope.aggregate_id,
+                            },
+                        )
+
+                if lineage_required:
+                    raise LineageRecordError("lineage_record_failed") from record_exc
+
+                log_exception_rate_limited(
+                    logger,
+                    zone=RuntimeZone.OBSERVABILITY,
+                    operation="event_store.record_event_envelope",
+                    exc=record_exc,
+                    code=ErrorCode.LINEAGE_RECORD_FAILED,
+                    category=ErrorCategory.INTERNAL,
+                    context={
+                        "event_id": str(envelope.event_id),
+                        "aggregate_type": envelope.aggregate_type,
+                        "aggregate_id": envelope.aggregate_id,
+                    },
+                )
 
         # Audit logs
         if self._audit_store and self._audit_enabled:

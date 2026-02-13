@@ -59,7 +59,7 @@ async def register_google_sheet(
     google_sheets_service: GoogleSheetsService,
     connector_registry: ConnectorRegistry,
     dataset_registry: DatasetRegistry,
-    lineage_store: Optional[LineageStore],
+    lineage_store: LineageStore,
 ) -> Dict[str, Any]:
     try:
         sheet_url = sheet_data.get("sheet_url")
@@ -175,22 +175,18 @@ async def register_google_sheet(
                 )
 
             dataset_payload = {"dataset_id": dataset.dataset_id, "name": dataset.name, "db_name": dataset.db_name}
-            if lineage_store:
-                try:
-                    await lineage_store.record_link(
-                        from_node_id=lineage_store.node_artifact("connector", "google_sheets", str(sheet_id)),
-                        to_node_id=lineage_store.node_aggregate("Dataset", dataset.dataset_id),
-                        edge_type="connector_registered_dataset",
-                        db_name=db_name,
-                        edge_metadata={
-                            "db_name": db_name,
-                            "source_type": "google_sheets",
-                            "source_id": str(sheet_id),
-                            "dataset_id": dataset.dataset_id,
-                        },
-                    )
-                except Exception as e:
-                    logger.warning("Failed to record lineage for connector dataset: %s", e)
+            await lineage_store.record_link(
+                from_node_id=lineage_store.node_artifact("connector", "google_sheets", str(sheet_id)),
+                to_node_id=lineage_store.node_aggregate("Dataset", dataset.dataset_id),
+                edge_type="connector_registered_dataset",
+                db_name=db_name,
+                edge_metadata={
+                    "db_name": db_name,
+                    "source_type": "google_sheets",
+                    "source_id": str(sheet_id),
+                    "dataset_id": dataset.dataset_id,
+                },
+            )
 
         logger.info("Successfully registered Google Sheet: %s (postgres registry)", registration_result.sheet_id)
 

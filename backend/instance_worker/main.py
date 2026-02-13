@@ -59,6 +59,7 @@ from shared.services.core.worker_stores import WorkerObservability, initialize_w
 from shared.services.registries.lineage_store import LineageStore
 from shared.services.core.audit_log_store import AuditLogStore
 from shared.services.registries.dataset_registry import DatasetRegistry
+from shared.errors.runtime_exception_policy import LineageRecordError, LineageUnavailableError
 from shared.utils.chaos import maybe_crash
 from shared.utils.ontology_version import normalize_ontology_version, resolve_ontology_version
 from shared.utils.app_logger import configure_logging
@@ -143,8 +144,9 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
         self.processed: Optional[ProcessedEventRegistry] = None
         self.event_store: Optional[EventStore] = None
 
-        # First-class provenance/audit (fail-open by default)
+        # First-class provenance/audit (lineage fail-closed by default)
         self.enable_lineage = bool(settings.observability.enable_lineage)
+        self.lineage_required = bool(settings.observability.lineage_required_effective and self.enable_lineage)
         self.enable_audit_logs = bool(settings.observability.enable_audit_logs)
         self.allow_pk_generation = bool(worker_cfg.allow_pk_generation)
         self.strict_relationship_schema = bool(worker_cfg.relationship_strict)
@@ -154,6 +156,7 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
             lineage_store=None,
             audit_store=None,
             logger=logger,
+            lineage_required=self.lineage_required,
         )
         self.dataset_registry: Optional[DatasetRegistry] = None
         self.bff_http: Optional[httpx.AsyncClient] = None
@@ -288,6 +291,7 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
             lineage_store=self.lineage_store,
             audit_store=self.audit_store,
             logger=logger,
+            lineage_required=stores.lineage_required,
         )
 
         # Dataset registry for edit tracking (best-effort)
@@ -1525,6 +1529,8 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
                     },
                 )
         except Exception as e:
+            if isinstance(e, (LineageRecordError, LineageUnavailableError)):
+                raise
             # Blob snapshot is best-effort; continue (Event Store is SSoT for events).
             logger.warning(f"Failed to store update snapshot to S3 (continuing): {e}")
             if command_id:

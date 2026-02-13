@@ -11,7 +11,7 @@ from typing import Any, Callable, Dict, Optional
 
 import bff.routers.pipeline_datasets_ops as ops
 from shared.utils.s3_uri import build_s3_uri
-from shared.observability.tracing import trace_external_call
+from shared.observability.tracing import trace_db_operation, trace_external_call
 
 
 @dataclass(frozen=True)

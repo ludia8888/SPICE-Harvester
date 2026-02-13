@@ -1393,36 +1393,32 @@ async def deploy_pipeline(
                 },
             )
 
-            if lineage_store:
-                for item in build_outputs:
-                    promoted_artifact_key = str(item.get("artifact_key") or "")
-                    parsed = parse_s3_uri(promoted_artifact_key)
-                    if not parsed:
-                        continue
-                    bucket, key = parsed
-                    try:
-                        await lineage_store.record_link(
-                            from_node_id=lineage_store.node_aggregate("Pipeline", str(pipeline_id)),
-                            to_node_id=lineage_store.node_artifact("s3", bucket, key),
-                            edge_type="pipeline_output_stored",
-                            occurred_at=utcnow(),
-                            db_name=db_name,
-                                edge_metadata={
-                                    "db_name": db_name,
-                                    "pipeline_id": str(pipeline_id),
-                                    "artifact_key": promoted_artifact_key,
-                                    "dataset_name": item.get("dataset_name"),
-                                    "node_id": item.get("node_id"),
-                                    "promoted_from_build_job_id": build_job_id,
-                                    "promoted_from_artifact_id": (artifact_record.artifact_id if artifact_record else None),
-                                    "build_artifact_key": item.get("build_artifact_key"),
-                                    "build_ref": build_ref,
-                                    "artifact_path": item.get("artifact_path"),
-                                    "merge_commit_id": merge_commit_id,
-                                },
-                        )
-                    except Exception as exc:
-                        logger.warning("Lineage record_link failed (promotion deploy): %s", exc)
+            for item in build_outputs:
+                promoted_artifact_key = str(item.get("artifact_key") or "")
+                parsed = parse_s3_uri(promoted_artifact_key)
+                if not parsed:
+                    continue
+                bucket, key = parsed
+                await lineage_store.record_link(
+                    from_node_id=lineage_store.node_aggregate("Pipeline", str(pipeline_id)),
+                    to_node_id=lineage_store.node_artifact("s3", bucket, key),
+                    edge_type="pipeline_output_stored",
+                    occurred_at=utcnow(),
+                    db_name=db_name,
+                    edge_metadata={
+                        "db_name": db_name,
+                        "pipeline_id": str(pipeline_id),
+                        "artifact_key": promoted_artifact_key,
+                        "dataset_name": item.get("dataset_name"),
+                        "node_id": item.get("node_id"),
+                        "promoted_from_build_job_id": build_job_id,
+                        "promoted_from_artifact_id": (artifact_record.artifact_id if artifact_record else None),
+                        "build_artifact_key": item.get("build_artifact_key"),
+                        "build_ref": build_ref,
+                        "artifact_path": item.get("artifact_path"),
+                        "merge_commit_id": merge_commit_id,
+                    },
+                )
 
             if schedule_interval_seconds or schedule_cron or branch or proposal_status or proposal_title or proposal_description:
                 await pipeline_registry.update_pipeline(

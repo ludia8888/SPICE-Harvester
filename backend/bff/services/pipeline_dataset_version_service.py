@@ -40,6 +40,7 @@ async def create_dataset_version(
     dataset_registry: Any,
     objectify_registry: Any,
     objectify_job_queue: Any,
+    lineage_store: Any,
     flush_dataset_ingest_outbox: Any,
     build_dataset_event_payload: Any,
 ) -> Dict[str, Any]:
@@ -173,7 +174,7 @@ async def create_dataset_version(
         if existing_version:
             await maybe_flush_dataset_ingest_outbox_inline(
                 dataset_registry=dataset_registry,
-                lineage_store=None,
+                lineage_store=lineage_store,
                 flush_dataset_ingest_outbox=flush_dataset_ingest_outbox,
             )
             return ApiResponse.success(
@@ -248,7 +249,7 @@ async def create_dataset_version(
         transaction_id = ingest_transaction.transaction_id if ingest_transaction else None
         outbox_builder = DatasetIngestOutboxBuilder(
             build_dataset_event_payload=build_dataset_event_payload,
-            lineage_store=None,
+            lineage_store=lineage_store,
         )
         outbox_entries = [
             outbox_builder.version_created(
@@ -288,7 +289,7 @@ async def create_dataset_version(
 
         await maybe_flush_dataset_ingest_outbox_inline(
             dataset_registry=dataset_registry,
-            lineage_store=None,
+            lineage_store=lineage_store,
             flush_dataset_ingest_outbox=flush_dataset_ingest_outbox,
         )
 

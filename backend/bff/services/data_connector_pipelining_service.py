@@ -45,7 +45,7 @@ async def start_pipelining_google_sheet(
     dataset_registry: DatasetRegistry,
     objectify_registry: ObjectifyRegistry,
     objectify_job_queue: ObjectifyJobQueue,
-    lineage_store: Optional[LineageStore],
+    lineage_store: LineageStore,
 ) -> Dict[str, Any]:
     try:
         actor_user_id = (http_request.headers.get("X-User-ID") or "").strip() or None
@@ -240,23 +240,19 @@ async def start_pipelining_google_sheet(
             except Exception as e:
                 logger.warning("Failed to append gsheet dataset version event: %s", e)
 
-        if lineage_store:
-            try:
-                await lineage_store.record_link(
-                    from_node_id=lineage_store.node_artifact("connector", "google_sheets", str(sheet_id_resolved)),
-                    to_node_id=lineage_store.node_aggregate("Dataset", dataset.dataset_id),
-                    edge_type="connector_start_pipelining",
-                    db_name=db_name,
-                    edge_metadata={
-                        "db_name": db_name,
-                        "source_type": "google_sheets",
-                        "source_id": str(sheet_id_resolved),
-                        "dataset_id": dataset.dataset_id,
-                        "preview": preview,
-                    },
-                )
-            except Exception as e:
-                logger.warning("Failed to record start-pipelining lineage: %s", e)
+        await lineage_store.record_link(
+            from_node_id=lineage_store.node_artifact("connector", "google_sheets", str(sheet_id_resolved)),
+            to_node_id=lineage_store.node_aggregate("Dataset", dataset.dataset_id),
+            edge_type="connector_start_pipelining",
+            db_name=db_name,
+            edge_metadata={
+                "db_name": db_name,
+                "source_type": "google_sheets",
+                "source_id": str(sheet_id_resolved),
+                "dataset_id": dataset.dataset_id,
+                "preview": preview,
+            },
+        )
 
         return {
             "status": "success",

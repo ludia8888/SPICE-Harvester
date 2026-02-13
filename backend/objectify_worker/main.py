@@ -57,6 +57,8 @@ from shared.utils.s3_uri import parse_s3_uri
 from shared.utils.blank_utils import is_blank_value
 from shared.utils.string_list_utils import normalize_string_list
 from shared.errors.error_envelope import build_error_envelope
+from shared.errors.error_types import ErrorCategory, ErrorCode
+from shared.errors.runtime_exception_policy import RuntimeZone, log_exception_rate_limited, record_lineage_or_raise
 from shared.security.auth_utils import get_expected_token
 from shared.validators import get_validator
 from shared.validators.constraint_validator import ConstraintValidator
@@ -241,6 +243,8 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
         self.pipeline_registry: Optional[PipelineRegistry] = None
         self.processed: Optional[ProcessedEventRegistry] = None
         self.lineage_store: Optional[LineageStore] = None
+        self.enable_lineage = bool(settings.observability.enable_lineage)
+        self.lineage_required = bool(settings.observability.lineage_required_effective and self.enable_lineage)
         self.storage = None
         self.instance_storage = None  # MinIO/S3 StorageService for instance-events
         self.http: Optional[httpx.AsyncClient] = None
@@ -671,12 +675,23 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
 
         self.processed = await create_processed_event_registry()
 
-        try:
-            self.lineage_store = LineageStore()
-            await self.lineage_store.initialize()
-        except Exception as exc:
-            logger.warning("LineageStore unavailable: %s", exc)
-            self.lineage_store = None
+        self.lineage_store = None
+        if self.enable_lineage:
+            try:
+                self.lineage_store = LineageStore()
+                await self.lineage_store.initialize()
+            except Exception as exc:
+                if self.lineage_required:
+                    raise RuntimeError("LineageStore unavailable") from exc
+                log_exception_rate_limited(
+                    logger,
+                    zone=RuntimeZone.OBSERVABILITY,
+                    operation="objectify_worker.initialize.lineage",
+                    exc=exc,
+                    code=ErrorCode.LINEAGE_UNAVAILABLE,
+                    category=ErrorCategory.UPSTREAM,
+                )
+                self.lineage_store = None
 
         settings = get_settings()
         self.storage = create_lakefs_storage_service(settings)
@@ -3797,11 +3812,14 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
         artifact_output_name: Optional[str] = None,
     ) -> Optional[str]:
         if not self.lineage_store:
+            if self.lineage_required:
+                raise RuntimeError("LineageStore unavailable")
             return None
-        try:
-            job_node = self.lineage_store.node_aggregate("ObjectifyJob", job.job_id)
+
+        async def _record_header_links() -> str:
+            job_node = LineageStore.node_aggregate("ObjectifyJob", job.job_id)
             if input_type == "artifact":
-                source_node = self.lineage_store.node_aggregate("PipelineArtifact", str(job.artifact_id))
+                source_node = LineageStore.node_aggregate("PipelineArtifact", str(job.artifact_id))
                 edge_type = "pipeline_artifact_objectify_job"
                 edge_metadata = {
                     "db_name": job.db_name,
@@ -3813,7 +3831,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                     "target_class_id": job.target_class_id,
                 }
             else:
-                source_node = self.lineage_store.node_aggregate("DatasetVersion", str(job.dataset_version_id))
+                source_node = LineageStore.node_aggregate("DatasetVersion", str(job.dataset_version_id))
                 edge_type = "dataset_version_objectify_job"
                 edge_metadata = {
                     "db_name": job.db_name,
@@ -3823,7 +3841,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                     "mapping_spec_version": job.mapping_spec_version,
                     "target_class_id": job.target_class_id,
                 }
-            await self.lineage_store.record_link(
+            await self.lineage_store.record_link(  # type: ignore[union-attr]
                 from_node_id=source_node,
                 to_node_id=job_node,
                 edge_type=edge_type,
@@ -3833,8 +3851,8 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
             )
 
             mapping_version_id = f"{mapping_spec.mapping_spec_id}:v{mapping_spec.version}"
-            mapping_node = self.lineage_store.node_aggregate("MappingSpecVersion", mapping_version_id)
-            await self.lineage_store.record_link(
+            mapping_node = LineageStore.node_aggregate("MappingSpecVersion", mapping_version_id)
+            await self.lineage_store.record_link(  # type: ignore[union-attr]
                 from_node_id=job_node,
                 to_node_id=mapping_node,
                 edge_type="objectify_job_mapping_spec",
@@ -3851,8 +3869,8 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
             if ontology_version:
                 branch = job.ontology_branch or job.dataset_branch or "main"
                 ont_id = f"{job.db_name}:{branch}:{ontology_version.get('commit') or 'head'}"
-                ont_node = self.lineage_store.node_aggregate("OntologyVersion", ont_id)
-                await self.lineage_store.record_link(
+                ont_node = LineageStore.node_aggregate("OntologyVersion", ont_id)
+                await self.lineage_store.record_link(  # type: ignore[union-attr]
                     from_node_id=job_node,
                     to_node_id=ont_node,
                     edge_type="objectify_job_ontology_version",
@@ -3865,9 +3883,24 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                     },
                 )
             return job_node
-        except Exception as exc:
-            logger.warning("Failed to record objectify job lineage header: %s", exc)
-            return None
+
+        return await record_lineage_or_raise(
+            lineage_store=self.lineage_store,
+            required=self.lineage_required,
+            record_call=_record_header_links,
+            logger=logger,
+            operation="objectify_worker.record_lineage_header",
+            zone=RuntimeZone.CORE,
+            context={
+                "job_id": job.job_id,
+                "db_name": job.db_name,
+                "dataset_id": job.dataset_id,
+                "mapping_spec_id": job.mapping_spec_id,
+                "mapping_spec_version": job.mapping_spec_version,
+                "target_class_id": job.target_class_id,
+                "input_type": input_type,
+            },
+        )
 
     async def _record_instance_lineage(
         self,
@@ -3883,11 +3916,13 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
         artifact_output_name: Optional[str] = None,
     ) -> int:
         if not self.lineage_store:
+            if self.lineage_required:
+                raise RuntimeError("LineageStore unavailable")
             return limit_remaining
         if limit_remaining <= 0:
             return limit_remaining
         if input_type == "artifact":
-            source_node = self.lineage_store.node_aggregate("PipelineArtifact", str(job.artifact_id))
+            source_node = LineageStore.node_aggregate("PipelineArtifact", str(job.artifact_id))
             edge_type = "pipeline_artifact_objectified"
             edge_metadata = {
                 "db_name": job.db_name,
@@ -3900,7 +3935,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                 "ontology": ontology_version or {},
             }
         else:
-            source_node = self.lineage_store.node_aggregate("DatasetVersion", str(job.dataset_version_id))
+            source_node = LineageStore.node_aggregate("DatasetVersion", str(job.dataset_version_id))
             edge_type = "dataset_version_objectified"
             edge_metadata = {
                 "db_name": job.db_name,
@@ -3915,9 +3950,10 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
             if limit_remaining <= 0:
                 break
             aggregate_id = f"{job.db_name}:{job.dataset_branch}:{job.target_class_id}:{instance_id}"
-            instance_node = self.lineage_store.node_aggregate("Instance", aggregate_id)
-            try:
-                await self.lineage_store.record_link(
+            instance_node = LineageStore.node_aggregate("Instance", aggregate_id)
+
+            async def _record_instance_links() -> bool:
+                await self.lineage_store.record_link(  # type: ignore[union-attr]
                     from_node_id=source_node,
                     to_node_id=instance_node,
                     edge_type=edge_type,
@@ -3926,7 +3962,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                     edge_metadata=edge_metadata,
                 )
                 if job_node_id:
-                    await self.lineage_store.record_link(
+                    await self.lineage_store.record_link(  # type: ignore[union-attr]
                         from_node_id=job_node_id,
                         to_node_id=instance_node,
                         edge_type="objectify_job_created_instance",
@@ -3944,9 +3980,26 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                             "ontology": ontology_version or {},
                         },
                     )
+                return True
+
+            recorded = await record_lineage_or_raise(
+                lineage_store=self.lineage_store,
+                required=self.lineage_required,
+                record_call=_record_instance_links,
+                logger=logger,
+                operation="objectify_worker.record_instance_lineage",
+                zone=RuntimeZone.CORE,
+                context={
+                    "job_id": job.job_id,
+                    "db_name": job.db_name,
+                    "dataset_id": job.dataset_id,
+                    "instance_id": instance_id,
+                    "target_class_id": job.target_class_id,
+                    "input_type": input_type,
+                },
+            )
+            if recorded:
                 limit_remaining -= 1
-            except Exception as exc:
-                logger.warning("Failed to record lineage for instance %s: %s", instance_id, exc)
         return limit_remaining
 
     async def _send_to_dlq(  # type: ignore[override]

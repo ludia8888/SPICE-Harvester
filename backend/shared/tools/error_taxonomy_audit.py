@@ -150,6 +150,36 @@ def _handler_contains_raise(handler: ast.ExceptHandler) -> bool:
     return False
 
 
+def _handler_contains_runtime_policy_call(handler: ast.ExceptHandler) -> bool:
+    allowed_calls = {
+        "log_exception_rate_limited",
+        "preserve_primary_exception",
+        "fallback_value",
+        "record_lineage_or_raise",
+    }
+    for node in ast.walk(handler):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if isinstance(func, ast.Name) and func.id in allowed_calls:
+            return True
+        if isinstance(func, ast.Attribute) and func.attr in allowed_calls:
+            return True
+    return False
+
+
+def _try_contains_lineage_calls(try_node: ast.Try) -> bool:
+    lineage_call_attrs = {"record_link", "record_event_envelope", "enqueue_backfill"}
+    for stmt in try_node.body:
+        for node in ast.walk(stmt):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            if isinstance(func, ast.Attribute) and func.attr in lineage_call_attrs:
+                return True
+    return False
+
+
 def _count_runtime_guard_patterns(
     root: Path,
     *,
@@ -161,6 +191,7 @@ def _count_runtime_guard_patterns(
         "suppress_exception": [],
         "silent_broad_except": [],
         "broad_except_no_log": [],
+        "lineage_fail_open": [],
     }
     for path in _iter_runtime_files(root, runtime_scope_glob=runtime_scope_glob):
         try:
@@ -170,6 +201,7 @@ def _count_runtime_guard_patterns(
 
         for node in ast.walk(tree):
             if isinstance(node, ast.Try):
+                contains_lineage_calls = _try_contains_lineage_calls(node)
                 for stmt in node.finalbody:
                     for sub in ast.walk(stmt):
                         if isinstance(sub, ast.Return):
@@ -183,8 +215,18 @@ def _count_runtime_guard_patterns(
                     body = handler.body
                     if len(body) == 1 and isinstance(body[0], (ast.Pass, ast.Return, ast.Continue, ast.Break)):
                         issues["silent_broad_except"].append((str(path), handler.lineno))
-                    if (not _handler_contains_log_call(handler)) and (not _handler_contains_raise(handler)):
+                    if (
+                        (not _handler_contains_log_call(handler))
+                        and (not _handler_contains_raise(handler))
+                        and (not _handler_contains_runtime_policy_call(handler))
+                    ):
                         issues["broad_except_no_log"].append((str(path), handler.lineno))
+                    if (
+                        contains_lineage_calls
+                        and (not _handler_contains_raise(handler))
+                        and (not _handler_contains_runtime_policy_call(handler))
+                    ):
+                        issues["lineage_fail_open"].append((str(path), handler.lineno))
             elif isinstance(node, ast.With):
                 for item in node.items:
                     expr = item.context_expr
@@ -551,6 +593,11 @@ def main() -> int:
         help="Fail on runtime `except Exception` handlers that are pass/return/continue/break or no-log/no-raise",
     )
     parser.add_argument(
+        "--fail-on-lineage-fail-open",
+        action="store_true",
+        help="Fail when lineage write calls are wrapped by broad exception handlers that do not re-raise",
+    )
+    parser.add_argument(
         "--runtime-scope-glob",
         action="append",
         default=[],
@@ -609,6 +656,7 @@ def main() -> int:
     print(f"Runtime suppress(Exception): {len(runtime_issues['suppress_exception'])}")
     print(f"Runtime silent broad except: {len(runtime_issues['silent_broad_except'])}")
     print(f"Runtime broad except without log/raise: {len(runtime_issues['broad_except_no_log'])}")
+    print(f"Runtime lineage fail-open handlers: {len(runtime_issues['lineage_fail_open'])}")
     print(f"Runtime commented exports in __init__.py: {len(commented_exports)}")
     print(f"Runtime doc-only modules: {len(doc_only_modules)}")
 
@@ -662,6 +710,10 @@ def main() -> int:
         print("\\nRuntime broad except no-log/no-raise hits:")
         for path, line in runtime_issues["broad_except_no_log"][:120]:
             print(f"  {path}:{line}")
+    if runtime_issues["lineage_fail_open"]:
+        print("\\nRuntime lineage fail-open hits:")
+        for path, line in runtime_issues["lineage_fail_open"][:120]:
+            print(f"  {path}:{line}")
     if commented_exports:
         print("\\nRuntime commented export hits (__init__.py):")
         for path, line in commented_exports[:120]:
@@ -687,6 +739,8 @@ def main() -> int:
     if args.fail_on_silent_broad_except and (
         runtime_issues["silent_broad_except"] or runtime_issues["broad_except_no_log"]
     ):
+        exit_code = 1
+    if args.fail_on_lineage_fail_open and runtime_issues["lineage_fail_open"]:
         exit_code = 1
     if args.fail_on_commented_export and commented_exports:
         exit_code = 1

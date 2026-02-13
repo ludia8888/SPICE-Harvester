@@ -97,6 +97,7 @@ def test_runtime_scope_disallows_silent_failures() -> None:
         "--fail-on-bare-except",
         "--fail-on-suppress-exception",
         "--fail-on-silent-broad-except",
+        "--fail-on-lineage-fail-open",
         "--fail-on-commented-export",
         "--fail-on-doc-only-module",
     ]

@@ -54,7 +54,7 @@ async def test_start_recompute_projection_blocks_instances_in_dataset_primary_mo
             task_manager=task_manager,  # type: ignore[arg-type]
             redis_service=SimpleNamespace(),
             audit_store=SimpleNamespace(),
-            lineage_store=None,
+            lineage_store=SimpleNamespace(),
             elasticsearch_service=SimpleNamespace(),
         )
 
@@ -75,7 +75,7 @@ async def test_start_recompute_projection_allows_ontologies_in_dataset_primary_m
         task_manager=task_manager,  # type: ignore[arg-type]
         redis_service=SimpleNamespace(),
         audit_store=SimpleNamespace(),
-        lineage_store=None,
+        lineage_store=SimpleNamespace(),
         elasticsearch_service=SimpleNamespace(),
     )
 
@@ -93,7 +93,7 @@ async def test_recompute_projection_task_blocks_instances_in_dataset_primary_mod
             elasticsearch_service=SimpleNamespace(),
             redis_service=SimpleNamespace(),
             audit_store=SimpleNamespace(),
-            lineage_store=None,
+            lineage_store=SimpleNamespace(),
             requested_by=None,
             request_ip=None,
         )

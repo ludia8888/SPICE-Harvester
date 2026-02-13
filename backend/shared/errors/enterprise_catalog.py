@@ -581,6 +581,23 @@ _ERROR_CODE_SPECS: Dict[ErrorCode, EnterpriseErrorSpec] = {
         title="Elasticsearch index not found",
         severity=EnterpriseSeverity.ERROR,
     ),
+    # ── Lineage ──
+    ErrorCode.LINEAGE_UNAVAILABLE: EnterpriseErrorSpec(
+        code_template="SHV-{subsystem}-LIN-UNA-0001",
+        domain=EnterpriseDomain.UPSTREAM,
+        error_class=EnterpriseClass.UNAVAILABLE,
+        title="Lineage store unavailable",
+        severity=EnterpriseSeverity.CRITICAL,
+        default_http_status=503,
+    ),
+    ErrorCode.LINEAGE_RECORD_FAILED: EnterpriseErrorSpec(
+        code_template="SHV-{subsystem}-LIN-INT-0002",
+        domain=EnterpriseDomain.DATA,
+        error_class=EnterpriseClass.INTERNAL,
+        title="Lineage record failed",
+        severity=EnterpriseSeverity.ERROR,
+        default_http_status=500,
+    ),
     # ── Ontology ──
     ErrorCode.ONTOLOGY_NOT_FOUND: EnterpriseErrorSpec(
         code_template="SHV-{subsystem}-ONT-NOT-0001",

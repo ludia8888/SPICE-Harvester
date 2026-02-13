@@ -54,6 +54,7 @@ def test_error_taxonomy_audit_guard() -> None:
         "--fail-on-bare-except",
         "--fail-on-suppress-exception",
         "--fail-on-silent-broad-except",
+        "--fail-on-lineage-fail-open",
         "--fail-on-commented-export",
         "--fail-on-doc-only-module",
     ]

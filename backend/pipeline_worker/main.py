@@ -50,6 +50,7 @@ from shared.config.app_config import AppConfig
 from shared.config.settings import get_settings
 from shared.errors.error_envelope import build_error_envelope
 from shared.errors.error_types import ErrorCategory, ErrorCode
+from shared.errors.runtime_exception_policy import RuntimeZone, log_exception_rate_limited, record_lineage_or_raise
 from shared.models.event_envelope import EventEnvelope
 from shared.models.pipeline_job import PipelineJob
 from shared.observability.metrics import get_metrics_collector
@@ -214,6 +215,8 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
         self.use_lakefs_diff = pipeline_settings.lakefs_diff_enabled
         self.processed_event_heartbeat_interval_seconds = settings.event_sourcing.processed_event_heartbeat_interval_seconds
         self.service_name = (settings.observability.service_name or "").strip() or None
+        self.enable_lineage = bool(settings.observability.enable_lineage)
+        self.lineage_required = bool(settings.observability.lineage_required_effective and self.enable_lineage)
         self.bff_admin_token = (settings.clients.bff_admin_token or "").strip() or None
 
         # Consumer safety (enterprise):
@@ -312,12 +315,23 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
             lease_timeout_seconds=int(self.processed_event_lease_timeout_seconds),
         )
 
-        self.lineage = LineageStore()
-        try:
-            await self.lineage.initialize()
-        except Exception as exc:
-            logger.warning("LineageStore unavailable: %s", exc)
-            self.lineage = None
+        self.lineage = None
+        if self.enable_lineage:
+            self.lineage = LineageStore()
+            try:
+                await self.lineage.initialize()
+            except Exception as exc:
+                if self.lineage_required:
+                    raise RuntimeError("LineageStore unavailable") from exc
+                log_exception_rate_limited(
+                    logger,
+                    zone=RuntimeZone.OBSERVABILITY,
+                    operation="pipeline_worker.initialize.lineage",
+                    exc=exc,
+                    code=ErrorCode.LINEAGE_UNAVAILABLE,
+                    category=ErrorCategory.UPSTREAM,
+                )
+                self.lineage = None
 
         self.storage = await self.pipeline_registry.get_lakefs_storage()
         self.lakefs_client = await self.pipeline_registry.get_lakefs_client()
@@ -2301,29 +2315,43 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                     }
                 )
 
-                if self.lineage:
-                    parsed = parse_s3_uri(artifact_key)
-                    if parsed:
-                        bucket, key = parsed
-                        try:
-                            await self.lineage.record_link(
-                                from_node_id=self.lineage.node_aggregate("Pipeline", pipeline_ref),
-                                to_node_id=self.lineage.node_artifact("s3", bucket, key),
-                                edge_type="pipeline_output_stored",
-                                occurred_at=utcnow(),
-                                db_name=job.db_name,
-                                edge_metadata={
-                                    "db_name": job.db_name,
-                                    "pipeline_id": pipeline_ref,
-                                    "artifact_key": artifact_key,
-                                    "dataset_name": dataset_name,
-                                    "node_id": item.get("node_id"),
-                                    "lakefs_commit_id": merge_commit_id,
-                                    "lakefs_branch": base_branch,
-                                },
-                            )
-                        except Exception as exc:
-                            logger.warning("Lineage record_link failed (deploy): %s", exc)
+                parsed = parse_s3_uri(artifact_key)
+                if parsed:
+                    bucket, key = parsed
+
+                    async def _record_pipeline_output_lineage() -> None:
+                        await self.lineage.record_link(  # type: ignore[union-attr]
+                            from_node_id=LineageStore.node_aggregate("Pipeline", pipeline_ref),
+                            to_node_id=LineageStore.node_artifact("s3", bucket, key),
+                            edge_type="pipeline_output_stored",
+                            occurred_at=utcnow(),
+                            db_name=job.db_name,
+                            edge_metadata={
+                                "db_name": job.db_name,
+                                "pipeline_id": pipeline_ref,
+                                "artifact_key": artifact_key,
+                                "dataset_name": dataset_name,
+                                "node_id": item.get("node_id"),
+                                "lakefs_commit_id": merge_commit_id,
+                                "lakefs_branch": base_branch,
+                            },
+                        )
+
+                    await record_lineage_or_raise(
+                        lineage_store=self.lineage,
+                        required=self.lineage_required,
+                        record_call=_record_pipeline_output_lineage,
+                        logger=logger,
+                        operation="pipeline_worker.deploy.pipeline_output_stored",
+                        zone=RuntimeZone.CORE,
+                        context={
+                            "db_name": job.db_name,
+                            "pipeline_id": pipeline_ref,
+                            "artifact_key": artifact_key,
+                            "dataset_name": dataset_name,
+                            "node_id": item.get("node_id"),
+                        },
+                    )
 
             await record_build(
                 status="DEPLOYED",

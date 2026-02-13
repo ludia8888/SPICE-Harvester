@@ -88,6 +88,19 @@ class _PipelineRegistry:
         return self._client
 
 
+class _LineageStore:
+    @staticmethod
+    def node_event(event_id: str) -> str:
+        return f"event:{event_id}"
+
+    @staticmethod
+    def node_artifact(kind: str, *parts: str) -> str:
+        return "artifact:" + ":".join([kind, *parts])
+
+    async def record_link(self, **kwargs: Any) -> None:  # noqa: ARG002
+        return None
+
+
 @pytest.mark.asyncio
 async def test_create_dataset_version_materializes_manual_sample_to_artifact(monkeypatch: pytest.MonkeyPatch) -> None:
     class _EventStore:
@@ -128,6 +141,7 @@ async def test_create_dataset_version_materializes_manual_sample_to_artifact(mon
         request=_Request(headers={"X-DB-Name": "testdb"}),
         pipeline_registry=pipeline_registry,  # type: ignore[arg-type]
         dataset_registry=registry,
+        lineage_store=_LineageStore(),  # type: ignore[arg-type]
     )
 
     assert response["status"] == "success"

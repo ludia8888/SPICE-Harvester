@@ -5,6 +5,8 @@ from typing import Any
 
 import pytest
 
+from shared.errors.runtime_exception_policy import LineageRecordError, LineageUnavailableError
+from shared.models.event_envelope import EventEnvelope
 from shared.services.storage import event_store as event_store_module
 from shared.services.storage.event_store import EventStore
 
@@ -70,3 +72,58 @@ async def test_event_store_connect_is_idempotent_under_concurrency(monkeypatch: 
 
     await store.connect()
     assert counters["head_bucket"] == 1
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_event_store_connect_fails_when_lineage_required_and_store_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    counters = {"head_bucket": 0}
+    dummy_s3 = _DummyS3(counters)
+
+    class _FailingLineageStore:
+        async def initialize(self) -> None:
+            raise RuntimeError("lineage unavailable")
+
+    monkeypatch.setenv("ENABLE_LINEAGE", "true")
+    monkeypatch.setenv("LINEAGE_FAIL_CLOSED", "true")
+    monkeypatch.setenv("LINEAGE_FAIL_OPEN_OVERRIDE", "false")
+    monkeypatch.setattr(event_store_module.aioboto3, "Session", lambda: _DummySession(dummy_s3))
+    monkeypatch.setattr(event_store_module, "LineageStore", _FailingLineageStore)
+
+    store = EventStore()
+    with pytest.raises(LineageUnavailableError):
+        await store.connect()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_event_store_lineage_record_failure_propagates_when_required(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _FailingLineageStore:
+        async def record_event_envelope(self, *args: Any, **kwargs: Any) -> None:  # noqa: ANN401
+            raise RuntimeError("lineage write failed")
+
+        async def enqueue_backfill(self, *args: Any, **kwargs: Any) -> None:  # noqa: ANN401
+            return None
+
+    monkeypatch.setenv("ENABLE_LINEAGE", "true")
+    monkeypatch.setenv("LINEAGE_FAIL_CLOSED", "true")
+    monkeypatch.setenv("LINEAGE_FAIL_OPEN_OVERRIDE", "false")
+
+    store = EventStore()
+    store._lineage_store = _FailingLineageStore()
+
+    envelope = EventEnvelope(
+        event_id="evt-1",
+        event_type="TEST_EVENT",
+        aggregate_type="TestAggregate",
+        aggregate_id="agg-1",
+        data={},
+        metadata={},
+    )
+
+    with pytest.raises(LineageRecordError):
+        await store._record_lineage_and_audit(envelope, s3_key="events/test.json")

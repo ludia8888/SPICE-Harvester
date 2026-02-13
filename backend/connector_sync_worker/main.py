@@ -10,7 +10,7 @@ Core policies (operational tradeoffs):
 - At-least-once + idempotent: ProcessedEventRegistry claims side-effects.
 - Mapping-gated: no mapping → no writes.
 - Queueing + backoff + DLQ: defaults to safe operational behavior.
-- Lineage: connector event → submitted command_id edge is recorded (best-effort).
+- Lineage: connector event → submitted command_id edge is recorded (fail-closed by default).
 """
 
 from __future__ import annotations
@@ -28,6 +28,8 @@ from data_connector.google_sheets.service import GoogleSheetsService
 from data_connector.google_sheets.utils import normalize_sheet_data
 from shared.config.app_config import AppConfig
 from shared.config.settings import get_settings
+from shared.errors.error_types import ErrorCategory, ErrorCode
+from shared.errors.runtime_exception_policy import RuntimeZone, log_exception_rate_limited, record_lineage_or_raise
 from shared.models.event_envelope import EventEnvelope
 from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
@@ -85,6 +87,8 @@ class ConnectorSyncWorker(StrictHeartbeatEventEnvelopeKafkaWorker[Optional[str]]
         self.registry: Optional[ConnectorRegistry] = None
         self.processed: Optional[ProcessedEventRegistry] = None
         self.lineage: Optional[LineageStore] = None
+        self.enable_lineage = bool(settings.observability.enable_lineage)
+        self.lineage_required = bool(settings.observability.lineage_required_effective and self.enable_lineage)
         self.sheets: Optional[GoogleSheetsService] = None
         self.http: Optional[httpx.AsyncClient] = None
 
@@ -95,13 +99,23 @@ class ConnectorSyncWorker(StrictHeartbeatEventEnvelopeKafkaWorker[Optional[str]]
 
         self.processed = await create_processed_event_registry()
 
-        # Lineage is best-effort; do not fail worker startup if it's unavailable.
-        self.lineage = LineageStore()
-        try:
-            await self.lineage.initialize()
-        except Exception as e:
-            logger.warning(f"LineageStore unavailable (continuing without lineage): {e}")
-            self.lineage = None
+        self.lineage = None
+        if self.enable_lineage:
+            self.lineage = LineageStore()
+            try:
+                await self.lineage.initialize()
+            except Exception as e:
+                if self.lineage_required:
+                    raise RuntimeError("LineageStore unavailable") from e
+                log_exception_rate_limited(
+                    logger,
+                    zone=RuntimeZone.OBSERVABILITY,
+                    operation="connector_sync_worker.initialize.lineage",
+                    exc=e,
+                    code=ErrorCode.LINEAGE_UNAVAILABLE,
+                    category=ErrorCategory.UPSTREAM,
+                )
+                self.lineage = None
 
         # Connector adapter (v1: google sheets)
         api_key = settings.google_sheets.google_sheets_api_key
@@ -447,11 +461,11 @@ class ConnectorSyncWorker(StrictHeartbeatEventEnvelopeKafkaWorker[Optional[str]]
                 if data_obj:
                     command_id = str(data_obj.get("command_id") or data_obj.get("commandId") or "").strip() or None
 
-        if command_id and self.lineage:
-            try:
-                await self.lineage.record_link(
-                    from_node_id=self.lineage.node_event(str(envelope.event_id)),
-                    to_node_id=self.lineage.node_event(str(command_id)),
+        if command_id:
+            async def _record_connector_command_lineage() -> None:
+                await self.lineage.record_link(  # type: ignore[union-attr]
+                    from_node_id=LineageStore.node_event(str(envelope.event_id)),
+                    to_node_id=LineageStore.node_event(str(command_id)),
                     edge_type="connector_triggered_command",
                     occurred_at=envelope.occurred_at,
                     db_name=db_name,
@@ -463,8 +477,21 @@ class ConnectorSyncWorker(StrictHeartbeatEventEnvelopeKafkaWorker[Optional[str]]
                         "command_id": str(command_id),
                     },
                 )
-            except Exception as e:
-                logger.warning(f"Failed to record lineage edge: {e}")
+
+            await record_lineage_or_raise(
+                lineage_store=self.lineage,
+                required=self.lineage_required,
+                record_call=_record_connector_command_lineage,
+                logger=logger,
+                operation="connector_sync_worker.record_connector_command_lineage",
+                zone=RuntimeZone.CORE,
+                context={
+                    "db_name": db_name,
+                    "source_id": source_id,
+                    "event_id": str(envelope.event_id),
+                    "command_id": str(command_id),
+                },
+            )
 
         logger.info(
             "✅ Auto-import submitted (source=google_sheets:%s, db=%s, class=%s, instances=%s, command_id=%s)",

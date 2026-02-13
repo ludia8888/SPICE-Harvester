@@ -304,7 +304,7 @@ async def start_recompute_projection(
     task_manager: BackgroundTaskManagerDep,
     redis_service: RedisService,
     audit_store: Any,
-    lineage_store: Optional[LineageStore],
+    lineage_store: LineageStore,
     elasticsearch_service: ElasticsearchService,
 ) -> RecomputeProjectionResponse:
     _validate_recompute_projection_mode(projection=str(request.projection))
@@ -397,7 +397,7 @@ async def _log_audit_safe(*, audit_store: Any, action: str, db_name: str, resour
 
 async def _maybe_record_lineage(
     *,
-    lineage_store: Optional[LineageStore],
+    lineage_store: LineageStore,
     envelope: Any,
     db_name: str,
     index_name: str,
@@ -407,34 +407,22 @@ async def _maybe_record_lineage(
     ontology_ref: Optional[str],
     ontology_commit: Optional[str],
 ) -> None:
-    if not lineage_store:
-        return
-    try:
-        await lineage_store.record_link(
-            from_node_id=lineage_store.node_event(str(envelope.event_id)),
-            to_node_id=lineage_store.node_artifact("es", index_name, doc_id),
-            edge_type="event_materialized_es_document",
-            occurred_at=event_ts,
-            db_name=db_name,
-            edge_metadata={
-                "projection_name": "recompute",
-                "db_name": db_name,
-                "index": index_name,
-                "doc_id": doc_id,
-                "sequence_number": seq,
-                "ontology_ref": ontology_ref,
-                "ontology_commit": ontology_commit,
-            },
-        )
-    except Exception as exc:
-        logger.warning(
-            "Lineage record_link failed (recompute projection, event_id=%s index=%s doc_id=%s): %s",
-            str(envelope.event_id),
-            index_name,
-            doc_id,
-            exc,
-            exc_info=True,
-        )
+    await lineage_store.record_link(
+        from_node_id=lineage_store.node_event(str(envelope.event_id)),
+        to_node_id=lineage_store.node_artifact("es", index_name, doc_id),
+        edge_type="event_materialized_es_document",
+        occurred_at=event_ts,
+        db_name=db_name,
+        edge_metadata={
+            "projection_name": "recompute",
+            "db_name": db_name,
+            "index": index_name,
+            "doc_id": doc_id,
+            "sequence_number": seq,
+            "ontology_ref": ontology_ref,
+            "ontology_commit": ontology_commit,
+        },
+    )
 
 
 async def _promote_alias_to_index(
@@ -460,7 +448,7 @@ async def recompute_projection_task(  # noqa: PLR0915
     elasticsearch_service: ElasticsearchService,
     redis_service: RedisService,
     audit_store: Any,
-    lineage_store: Optional[LineageStore],
+    lineage_store: LineageStore,
     requested_by: Optional[str] = None,
     request_ip: Optional[str] = None,
 ) -> None:

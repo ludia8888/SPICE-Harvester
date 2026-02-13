@@ -82,8 +82,11 @@ Lineage는 Postgres에 저장됩니다.
 
 ## 5) 원자성(Atomicity) & 복구(Backfill)
 
-Lineage는 `fail-open`(서비스는 계속 동작)일 수 있습니다.  
-대신 “나중에 반드시 복구된다”를 보장하기 위해 다음 2가지 경로를 제공합니다.
+Lineage는 기본적으로 `fail-closed` 정책입니다.  
+즉, 핵심 write 경로에서 lineage 기록이 실패하면 요청/워커는 실패로 표면화됩니다.
+운영상 비상시에만 `LINEAGE_FAIL_OPEN_OVERRIDE=true`로 임시 완화할 수 있습니다.
+
+fail-open 완화 모드에서도 “나중에 반드시 복구된다”를 보장하기 위해 다음 2가지 경로를 제공합니다.
 
 1) **Queue 기반 복구**
 - EventStore가 lineage 기록에 실패하면 `lineage_backfill_queue`에 enqueue(가능한 경우)합니다.
@@ -119,4 +122,10 @@ Lineage는 `fail-open`(서비스는 계속 동작)일 수 있습니다.
 
 - `ENABLE_LINEAGE=true|false`  
   - 기본값 `true`
-  - 비활성화 시, 이벤트 처리/저장은 계속되지만 lineage 기록은 생략됩니다(Fail-open).
+  - `false`면 lineage 기능을 명시적으로 비활성화합니다.
+- `LINEAGE_FAIL_CLOSED=true|false`
+  - 기본값 `true`
+  - `true`면 lineage store unavailable/record 실패를 실패로 전파합니다.
+- `LINEAGE_FAIL_OPEN_OVERRIDE=true|false`
+  - 기본값 `false`
+  - `true`면 fail-closed를 비상 완화하고 lineage 실패를 warning + 복구 경로로 처리합니다.

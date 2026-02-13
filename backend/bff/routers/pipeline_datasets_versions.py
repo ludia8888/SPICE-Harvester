@@ -18,6 +18,7 @@ from bff.routers.pipeline_deps import get_dataset_registry, get_objectify_regist
 from bff.schemas.pipeline_datasets import FunnelAnalysisApiResponse
 from bff.services import pipeline_dataset_version_service
 from shared.config.app_config import AppConfig
+from shared.dependencies.providers import get_lineage_store
 from shared.errors.error_types import ErrorCode, classified_http_exception
 from shared.models.requests import ApiResponse
 from shared.observability.tracing import trace_endpoint
@@ -25,6 +26,7 @@ from shared.security.auth_utils import enforce_db_scope
 from shared.security.input_sanitizer import sanitize_input, validate_db_name
 from shared.services.events.objectify_job_queue import ObjectifyJobQueue
 from shared.services.registries.dataset_registry import DatasetRegistry
+from shared.services.registries.lineage_store import LineageStore
 from shared.services.registries.objectify_registry import ObjectifyRegistry
 from shared.services.registries.pipeline_registry import PipelineRegistry
 from shared.utils.event_utils import build_command_event
@@ -106,6 +108,7 @@ async def create_dataset_version(
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
     objectify_registry: ObjectifyRegistry = Depends(get_objectify_registry),
     objectify_job_queue: ObjectifyJobQueue = Depends(get_objectify_job_queue),
+    lineage_store: LineageStore = Depends(get_lineage_store),
 ) -> ApiResponse:
     return await pipeline_dataset_version_service.create_dataset_version(
         dataset_id=dataset_id,
@@ -115,6 +118,7 @@ async def create_dataset_version(
         dataset_registry=dataset_registry,
         objectify_registry=objectify_registry,
         objectify_job_queue=objectify_job_queue,
+        lineage_store=lineage_store,
         flush_dataset_ingest_outbox=ops.flush_dataset_ingest_outbox,
         build_dataset_event_payload=ops.build_dataset_event_payload,
     )

@@ -6,12 +6,13 @@ import threading
 import time
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Callable, Dict, Generic, Mapping, Optional, Tuple, TypeVar
+from typing import Any, Awaitable, Callable, Dict, Generic, Mapping, Optional, Tuple, TypeVar
 
 from shared.errors.error_types import ErrorCategory, ErrorCode
 from shared.observability.request_context import get_correlation_id, get_request_id
 
 T = TypeVar("T")
+R = TypeVar("R")
 
 
 class RuntimeZone(str, Enum):
@@ -212,3 +213,82 @@ def preserve_primary_exception(
         warn_interval_seconds=warn_interval_seconds,
         context=context,
     )
+
+
+class LineageUnavailableError(RuntimeError):
+    """Raised when lineage is required but no lineage store is available."""
+
+
+class LineageRecordError(RuntimeError):
+    """Raised when lineage recording fails in fail-closed mode."""
+
+
+def assert_lineage_available(
+    *,
+    lineage_store: Any,
+    required: bool,
+    logger: logging.Logger,
+    operation: str,
+    zone: RuntimeZone = RuntimeZone.OBSERVABILITY,
+    context: Optional[Mapping[str, Any]] = None,
+    warn_interval_seconds: float = 60.0,
+) -> bool:
+    if lineage_store is not None:
+        return True
+
+    unavailable_exc = LineageUnavailableError("LineageStore unavailable")
+    if required:
+        raise unavailable_exc
+
+    log_exception_rate_limited(
+        logger,
+        zone=zone,
+        operation=operation,
+        exc=unavailable_exc,
+        code=ErrorCode.LINEAGE_UNAVAILABLE,
+        category=ErrorCategory.UPSTREAM,
+        warn_interval_seconds=warn_interval_seconds,
+        context=context,
+    )
+    return False
+
+
+async def record_lineage_or_raise(
+    *,
+    lineage_store: Any,
+    required: bool,
+    record_call: Callable[[], Awaitable[R]],
+    logger: logging.Logger,
+    operation: str,
+    zone: RuntimeZone = RuntimeZone.CORE,
+    context: Optional[Mapping[str, Any]] = None,
+    warn_interval_seconds: float = 60.0,
+) -> Optional[R]:
+    if not assert_lineage_available(
+        lineage_store=lineage_store,
+        required=required,
+        logger=logger,
+        operation=f"{operation}.availability",
+        zone=zone,
+        context=context,
+        warn_interval_seconds=warn_interval_seconds,
+    ):
+        return None
+
+    try:
+        return await record_call()
+    except Exception as exc:
+        if required:
+            raise LineageRecordError("lineage_record_failed") from exc
+
+        log_exception_rate_limited(
+            logger,
+            zone=zone,
+            operation=operation,
+            exc=exc,
+            code=ErrorCode.LINEAGE_RECORD_FAILED,
+            category=ErrorCategory.INTERNAL,
+            warn_interval_seconds=warn_interval_seconds,
+            context=context,
+        )
+        return None

@@ -779,6 +779,14 @@ class ObservabilitySettings(BaseSettings):
         default=True,
         description="Enable lineage store integration (ENABLE_LINEAGE)",
     )
+    lineage_fail_closed: bool = Field(
+        default=True,
+        description="Fail closed when lineage is unavailable/recording fails (LINEAGE_FAIL_CLOSED)",
+    )
+    lineage_fail_open_override: bool = Field(
+        default=False,
+        description="Emergency override to disable lineage fail-closed behavior (LINEAGE_FAIL_OPEN_OVERRIDE)",
+    )
     enable_audit_logs: bool = Field(
         default=True,
         description="Enable audit log store integration (ENABLE_AUDIT_LOGS)",
@@ -941,6 +949,14 @@ class ObservabilitySettings(BaseSettings):
             (self.service_name or "").strip()
             or (self.otel_service_name or "").strip()
             or "spice-harvester"
+        )
+
+    @property
+    def lineage_required_effective(self) -> bool:
+        return bool(
+            self.enable_lineage
+            and self.lineage_fail_closed
+            and (not self.lineage_fail_open_override)
         )
 
     @property

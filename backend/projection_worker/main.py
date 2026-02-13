@@ -90,8 +90,9 @@ class ProjectionWorker(StrictHeartbeatEventEnvelopeKafkaWorker[None]):
         self.enable_processed_event_registry = bool(settings.event_sourcing.enable_processed_event_registry)
         self.processed_event_registry: Optional[ProcessedEventRegistry] = None
 
-        # First-class provenance/audit (fail-open by default)
+        # First-class provenance/audit (lineage fail-closed by default)
         self.enable_lineage = bool(settings.observability.enable_lineage)
+        self.lineage_required = bool(settings.observability.lineage_required_effective and self.enable_lineage)
         self.enable_audit_logs = bool(settings.observability.enable_audit_logs)
         self.lineage_store: Optional[LineageStore] = None
         self.audit_store: Optional[AuditLogStore] = None
@@ -99,6 +100,7 @@ class ProjectionWorker(StrictHeartbeatEventEnvelopeKafkaWorker[None]):
             lineage_store=None,
             audit_store=None,
             logger=logger,
+            lineage_required=self.lineage_required,
         )
 
         # 생성된 인덱스 캐시 (중복 생성 방지)
@@ -406,6 +408,7 @@ class ProjectionWorker(StrictHeartbeatEventEnvelopeKafkaWorker[None]):
             lineage_store=self.lineage_store,
             audit_store=self.audit_store,
             logger=logger,
+            lineage_required=stores.lineage_required,
         )
         
         # 인덱스 생성 및 매핑 설정

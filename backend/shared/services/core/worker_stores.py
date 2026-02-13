@@ -16,6 +16,13 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 from shared.config.settings import get_settings
+from shared.errors.error_types import ErrorCategory, ErrorCode
+from shared.errors.runtime_exception_policy import (
+    RuntimeZone,
+    assert_lineage_available,
+    log_exception_rate_limited,
+    record_lineage_or_raise,
+)
 from shared.services.core.audit_log_store import AuditLogStore, create_audit_log_store
 from shared.services.registries.lineage_store import LineageStore, create_lineage_store
 from shared.services.registries.processed_event_registry import ProcessedEventRegistry
@@ -27,6 +34,7 @@ class WorkerStores:
     processed: ProcessedEventRegistry
     lineage_store: Optional[LineageStore]
     audit_store: Optional[AuditLogStore]
+    lineage_required: bool
 
 
 @dataclass(slots=True)
@@ -34,21 +42,33 @@ class WorkerObservability:
     """
     Facade over optional provenance stores used by many workers.
 
-    These stores are "fail-open" by design: observability failures should not
-    block the primary side-effect (Terminus/ES/S3 writes).
+    Lineage is fail-closed by default (`LINEAGE_FAIL_CLOSED=true`) and can be
+    temporarily relaxed via `LINEAGE_FAIL_OPEN_OVERRIDE=true`.
+    Audit logging remains best-effort.
     """
 
     lineage_store: Optional[LineageStore]
     audit_store: Optional[AuditLogStore]
     logger: logging.Logger
+    lineage_required: bool = False
 
     async def record_link(self, **kwargs: Any) -> None:
-        if not self.lineage_store:
-            return
-        try:
-            await self.lineage_store.record_link(**kwargs)
-        except Exception as exc:
-            self.logger.debug("Lineage record failed (non-fatal): %s", exc)
+        async def _record() -> None:
+            await self.lineage_store.record_link(**kwargs)  # type: ignore[union-attr]
+
+        await record_lineage_or_raise(
+            lineage_store=self.lineage_store,
+            required=self.lineage_required,
+            record_call=_record,
+            logger=self.logger,
+            operation="worker_observability.record_link",
+            zone=RuntimeZone.OBSERVABILITY,
+            context={
+                "edge_type": kwargs.get("edge_type"),
+                "from_node_id": kwargs.get("from_node_id"),
+                "to_node_id": kwargs.get("to_node_id"),
+            },
+        )
 
     async def audit_log(self, **kwargs: Any) -> None:
         if not self.audit_store:
@@ -65,23 +85,45 @@ async def initialize_worker_stores(
     enable_audit_logs: bool,
     logger: logging.Logger,
 ) -> WorkerStores:
+    settings = get_settings()
+    observability = settings.observability
+    lineage_required = bool(observability.lineage_required_effective and enable_lineage)
+
     processed = await create_processed_event_registry()
     logger.info("ProcessedEventRegistry connected (Postgres)")
 
     lineage_store: Optional[LineageStore] = None
     if enable_lineage:
         try:
-            lineage_store = create_lineage_store(get_settings())
+            lineage_store = create_lineage_store(settings)
             await lineage_store.initialize()
             logger.info("LineageStore connected (Postgres)")
         except Exception as exc:
-            logger.warning("LineageStore unavailable (continuing without lineage): %s", exc)
+            if lineage_required:
+                raise
+            log_exception_rate_limited(
+                logger,
+                zone=RuntimeZone.OBSERVABILITY,
+                operation="initialize_worker_stores.lineage",
+                exc=exc,
+                code=ErrorCode.LINEAGE_UNAVAILABLE,
+                category=ErrorCategory.UPSTREAM,
+            )
             lineage_store = None
+
+    if lineage_required:
+        assert_lineage_available(
+            lineage_store=lineage_store,
+            required=True,
+            logger=logger,
+            operation="initialize_worker_stores.lineage_required",
+            zone=RuntimeZone.OBSERVABILITY,
+        )
 
     audit_store: Optional[AuditLogStore] = None
     if enable_audit_logs:
         try:
-            audit_store = create_audit_log_store(get_settings())
+            audit_store = create_audit_log_store(settings)
             await audit_store.initialize()
             logger.info("AuditLogStore connected (Postgres)")
         except Exception as exc:
@@ -92,4 +134,5 @@ async def initialize_worker_stores(
         processed=processed,
         lineage_store=lineage_store,
         audit_store=audit_store,
+        lineage_required=lineage_required,
     )
