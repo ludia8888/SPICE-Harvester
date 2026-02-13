@@ -16,6 +16,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 GENERATORS = [
+    "scripts/generate_docs_index.py",
     "scripts/generate_api_reference.py",
     "scripts/generate_architecture_reference.py",
     "scripts/generate_backend_methods.py",

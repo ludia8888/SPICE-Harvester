@@ -52,6 +52,7 @@ def main() -> int:
     args = parse_args()
 
     generators = [
+        ["scripts/generate_docs_index.py", "--check"],
         ["scripts/generate_api_reference.py", "--check"],
         ["scripts/generate_architecture_reference.py", "--check"],
         ["scripts/generate_backend_methods.py", "--check"],

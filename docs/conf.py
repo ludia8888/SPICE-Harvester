@@ -46,6 +46,7 @@ logging.getLogger("sphinx.autoapi._mapper").addFilter(_AutoAPILogNoiseFilter())
 _LINKCODE_REPO_URL: str | None = None
 _LINKCODE_REV: str = "main"
 _LINKCODE_LOOKUP: dict[str, tuple[str, int, int]] = {}
+ENABLE_AUTOAPI = os.environ.get("SPICE_DOCS_ENABLE_AUTOAPI", "0").strip() in {"1", "true", "TRUE", "yes", "YES"}
 
 
 project = "SPICE Harvester"
@@ -64,8 +65,6 @@ extensions = [
     # Source links / in-doc code browsing (must be loaded before AutoAPI so AutoAPI can
     # register the viewcode hooks and avoid importing modules with side effects).
     "sphinx.ext.viewcode",
-    # Full-code API docs without importing modules (AST-based).
-    "autoapi.extension",
     # Cross-references and usability
     "sphinx.ext.intersphinx",
     "sphinx.ext.autosectionlabel",
@@ -82,6 +81,10 @@ extensions = [
     "sphinx_copybutton",
     "sphinx_design",
 ]
+
+if ENABLE_AUTOAPI:
+    # Full-code API docs without importing modules (AST-based).
+    extensions.append("autoapi.extension")
 
 
 source_suffix = {
@@ -119,43 +122,44 @@ autodoc_typehints = "description"
 napoleon_google_docstring = True
 napoleon_numpy_docstring = True
 
-# AutoAPI configuration: index backend Python packages with proper structure.
-#
-# We target the backend directory specifically to preserve package hierarchy
-# (e.g., bff.services.ontology_agent_models instead of flat ontology_agent_models).
-autoapi_type = "python"
-autoapi_dirs = [str(BACKEND_ROOT)]
-autoapi_root = "reference/autoapi"
-# Disable root toctree injection from AutoAPI to avoid transient "not_readable"
-# races during strict builds; API pages remain accessible via direct URLs/search.
-autoapi_add_toctree_entry = False
-autoapi_file_patterns = ["*.py"]
-autoapi_ignore = [
-    "*/.git/*",
-    "*/__pycache__/*",
-    "*/.pytest_cache/*",
-    "*/.mypy_cache/*",
-    "*/.venv*/*",
-    "*/venv/*",
-    "*/env/*",
-    "*/node_modules/*",
-    "*/docs/_build/*",
-    "*/tests/*",
-    "*_test.py",
-    "*/test_*.py",
-    "*/conftest.py",
-]
-autoapi_options = [
-    "members",
-    "undoc-members",
-    "show-inheritance",
-    "show-module-summary",
-    "imported-members",
-]
-# Include class __init__ docstrings and show class content from both class and __init__
-autoapi_python_class_content = "both"
-# Keep the original module names without flattening
-autoapi_keep_files = True
+if ENABLE_AUTOAPI:
+    # AutoAPI configuration: index backend Python packages with proper structure.
+    #
+    # We target the backend directory specifically to preserve package hierarchy
+    # (e.g., bff.services.ontology_agent_models instead of flat ontology_agent_models).
+    autoapi_type = "python"
+    autoapi_dirs = [str(BACKEND_ROOT)]
+    autoapi_root = "reference/autoapi"
+    # Disable root toctree injection from AutoAPI to avoid transient "not_readable"
+    # races during strict builds; API pages remain accessible via direct URLs/search.
+    autoapi_add_toctree_entry = False
+    autoapi_file_patterns = ["*.py"]
+    autoapi_ignore = [
+        "*/.git/*",
+        "*/__pycache__/*",
+        "*/.pytest_cache/*",
+        "*/.mypy_cache/*",
+        "*/.venv*/*",
+        "*/venv/*",
+        "*/env/*",
+        "*/node_modules/*",
+        "*/docs/_build/*",
+        "*/tests/*",
+        "*_test.py",
+        "*/test_*.py",
+        "*/conftest.py",
+    ]
+    autoapi_options = [
+        "members",
+        "undoc-members",
+        "show-inheritance",
+        "show-module-summary",
+        "imported-members",
+    ]
+    # Include class __init__ docstrings and show class content from both class and __init__
+    autoapi_python_class_content = "both"
+    # Keep the original module names without flattening
+    autoapi_keep_files = True
 
 intersphinx_mapping = {
     "python": ("https://docs.python.org/3", None),
@@ -201,6 +205,7 @@ def _run_repo_generators() -> None:
 
     python = sys.executable
     generators = [
+        ["python", "scripts/generate_docs_index.py"],
         ["python", "scripts/generate_api_reference.py"],
         ["python", "scripts/generate_architecture_reference.py"],
         ["python", "scripts/generate_backend_methods.py"],
@@ -377,11 +382,13 @@ def _viewcode_find_source_clamped(app, modname: str):  # noqa: ANN001
 
 def setup(app) -> None:  # noqa: D401
     """Sphinx entrypoint."""
-    # Ensure viewcode can always render modules without importing them (side-effect safety).
-    app.connect("viewcode-find-source", _viewcode_find_source_clamped, priority=0)
+    if ENABLE_AUTOAPI:
+        # Ensure viewcode can always render modules without importing them (side-effect safety).
+        app.connect("viewcode-find-source", _viewcode_find_source_clamped, priority=0)
     # Run repo generators early so doc sources stay code-backed.
     app.connect("builder-inited", _on_builder_inited, priority=300)
-    # Make AutoAPI docstrings robust to Markdown-ish formatting.
-    app.connect("autodoc-process-docstring", _autodoc_process_docstring, priority=400)
+    if ENABLE_AUTOAPI:
+        # Make AutoAPI docstrings robust to Markdown-ish formatting.
+        app.connect("autodoc-process-docstring", _autodoc_process_docstring, priority=400)
     # Build the linkcode lookup after AutoAPI has populated env.autoapi_all_objects.
     app.connect("builder-inited", _init_linkcode, priority=700)
