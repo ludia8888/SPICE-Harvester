@@ -90,6 +90,20 @@ async def validate_pipeline_plan(
             )
 
     definition_json = dict(plan.definition_json or {})
+    if plan.outputs:
+        declared_outputs: list[dict[str, Any]] = []
+        for output in plan.outputs:
+            payload = dict(output.output_metadata or {})
+            payload.setdefault("outputName", output.output_name)
+            payload.setdefault("outputKind", normalize_output_kind(getattr(output.output_kind, "value", output.output_kind)))
+            declared_outputs.append(
+                {
+                    "output_name": output.output_name,
+                    "output_kind": normalize_output_kind(getattr(output.output_kind, "value", output.output_kind)),
+                    "output_metadata": payload,
+                }
+            )
+        definition_json["outputs"] = declared_outputs
 
     # Graph sanity + structural validation.
     nodes = normalize_nodes(definition_json.get("nodes"))

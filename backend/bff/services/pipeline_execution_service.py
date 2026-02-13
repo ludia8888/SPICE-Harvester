@@ -42,6 +42,8 @@ from shared.security.input_sanitizer import sanitize_input, validate_db_name
 from shared.services.pipeline.pipeline_job_queue import PipelineJobQueue
 from shared.services.pipeline.pipeline_profiler import compute_column_stats
 from shared.services.pipeline.pipeline_scheduler import _is_valid_cron_expression
+from shared.services.pipeline.dataset_output_semantics import resolve_dataset_write_policy
+from shared.services.pipeline.output_plugins import OUTPUT_KIND_DATASET, normalize_output_kind
 from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.services.registries.objectify_registry import ObjectifyRegistry
 from shared.services.registries.pipeline_registry import PipelineRegistry
@@ -55,6 +57,71 @@ from shared.utils.time_utils import utcnow
 from shared.observability.tracing import trace_external_call
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_output_contract_from_definition(
+    *,
+    definition_json: Dict[str, Any],
+    node_id: Optional[str],
+    output_name: Optional[str],
+) -> Dict[str, Any]:
+    resolved_node_id = str(node_id or "").strip()
+    resolved_output_name = str(output_name or "").strip()
+    metadata: Dict[str, Any] = {}
+    raw_kind = ""
+
+    nodes = definition_json.get("nodes") if isinstance(definition_json.get("nodes"), list) else []
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        if str(node.get("type") or "").strip().lower() != "output":
+            continue
+        candidate_node_id = str(node.get("id") or "").strip()
+        node_meta = node.get("metadata") if isinstance(node.get("metadata"), dict) else {}
+        node_name = str(
+            node_meta.get("outputName")
+            or node_meta.get("datasetName")
+            or node.get("title")
+            or ""
+        ).strip()
+        if (resolved_node_id and candidate_node_id == resolved_node_id) or (
+            resolved_output_name and node_name and node_name == resolved_output_name
+        ):
+            metadata = dict(node_meta)
+            raw_kind = str(node_meta.get("outputKind") or node_meta.get("output_kind") or "").strip()
+            if not resolved_output_name and node_name:
+                resolved_output_name = node_name
+            break
+
+    declared_outputs = definition_json.get("outputs") if isinstance(definition_json.get("outputs"), list) else []
+    for item in declared_outputs:
+        if not isinstance(item, dict):
+            continue
+        declared_node_id = str(item.get("node_id") or item.get("nodeId") or "").strip()
+        declared_name = str(
+            item.get("output_name")
+            or item.get("outputName")
+            or item.get("dataset_name")
+            or item.get("datasetName")
+            or ""
+        ).strip()
+        if (resolved_node_id and declared_node_id and declared_node_id == resolved_node_id) or (
+            resolved_output_name and declared_name and declared_name == resolved_output_name
+        ):
+            declared_meta = item.get("output_metadata")
+            if isinstance(declared_meta, dict):
+                metadata = {**declared_meta, **metadata}
+            if not raw_kind:
+                raw_kind = str(item.get("output_kind") or item.get("outputKind") or "").strip()
+            break
+
+    normalized_kind = normalize_output_kind(raw_kind or OUTPUT_KIND_DATASET)
+    return {
+        "output_kind": normalized_kind,
+        "output_metadata": metadata,
+        "output_name": resolved_output_name,
+        "node_id": resolved_node_id,
+    }
 
 
 @trace_external_call("bff.pipeline_execution.preview_pipeline")
@@ -1028,6 +1095,34 @@ async def deploy_pipeline(
                 except Exception:
                     logging.getLogger(__name__).warning("Broad exception fallback at bff/services/pipeline_execution_service.py:1026", exc_info=True)
                     delta_row_count_int = None
+                try:
+                    output_kind = normalize_output_kind(
+                        item.get("output_kind") or item.get("outputKind") or OUTPUT_KIND_DATASET
+                    )
+                except ValueError as exc:
+                    raise classified_http_exception(
+                        status.HTTP_409_CONFLICT,
+                        "Build output has invalid output_kind",
+                        code=ErrorCode.PIPELINE_BUILD_FAILED,
+                        category=ErrorCategory.CONFLICT,
+                        extra={"output_kind": item.get("output_kind"), "reason": str(exc)},
+                    ) from exc
+                output_metadata = item.get("output_metadata") if isinstance(item.get("output_metadata"), dict) else {}
+                write_mode_requested = str(
+                    item.get("write_mode_requested") or item.get("writeModeRequested") or ""
+                ).strip()
+                write_mode_resolved = str(
+                    item.get("write_mode_resolved") or item.get("writeModeResolved") or ""
+                ).strip()
+                runtime_write_mode = str(
+                    item.get("runtime_write_mode") or item.get("runtimeWriteMode") or ""
+                ).strip()
+                write_policy_hash = str(item.get("write_policy_hash") or item.get("writePolicyHash") or "").strip() or None
+                pk_columns_raw = item.get("pk_columns") if isinstance(item.get("pk_columns"), list) else item.get("pkColumns")
+                pk_columns = [str(col).strip() for col in (pk_columns_raw or []) if str(col).strip()]
+                post_filtering_column = str(
+                    item.get("post_filtering_column") or item.get("postFilteringColumn") or ""
+                ).strip() or None
 
                 dataset = await dataset_registry.get_dataset_by_name(
                     db_name=db_name,
@@ -1052,6 +1147,9 @@ async def deploy_pipeline(
                 normalized_outputs.append(
                     {
                         "node_id": item.get("node_id"),
+                        "output_name": item.get("output_name") or item.get("outputName") or staged_dataset_name,
+                        "output_kind": output_kind,
+                        "output_metadata": output_metadata,
                         "dataset_name": staged_dataset_name,
                         "build_artifact_key": staged_artifact_key,
                         "artifact_path": artifact_path,
@@ -1059,8 +1157,83 @@ async def deploy_pipeline(
                         "rows": normalized_sample_rows,
                         "row_count": row_count_int,
                         "delta_row_count": delta_row_count_int,
+                        "write_mode_requested": write_mode_requested or None,
+                        "write_mode_resolved": write_mode_resolved or None,
+                        "runtime_write_mode": runtime_write_mode or None,
+                        "pk_columns": pk_columns,
+                        "post_filtering_column": post_filtering_column,
+                        "write_policy_hash": write_policy_hash,
                         "breaking_changes": breaking_changes,
                     }
+                )
+
+            policy_mismatches: list[dict[str, Any]] = []
+            for item in normalized_outputs:
+                if str(item.get("output_kind") or "").strip().lower() != OUTPUT_KIND_DATASET:
+                    continue
+                try:
+                    output_contract = _resolve_output_contract_from_definition(
+                        definition_json=definition_json or {},
+                        node_id=str(item.get("node_id") or "").strip() or None,
+                        output_name=str(item.get("output_name") or "").strip() or None,
+                    )
+                except ValueError as exc:
+                    raise classified_http_exception(
+                        status.HTTP_409_CONFLICT,
+                        "Deploy definition has invalid output kind",
+                        code=ErrorCode.CONFLICT,
+                        category=ErrorCategory.CONFLICT,
+                        extra={"reason": str(exc), "node_id": item.get("node_id")},
+                    ) from exc
+                if str(output_contract.get("output_kind") or "").strip().lower() != OUTPUT_KIND_DATASET:
+                    continue
+                expected_policy = resolve_dataset_write_policy(
+                    definition=definition_json or {},
+                    output_metadata=output_contract.get("output_metadata") if isinstance(output_contract.get("output_metadata"), dict) else {},
+                    execution_semantics=execution_semantics,
+                )
+                observed_hash = str(item.get("write_policy_hash") or "").strip()
+                observed_resolved = str(item.get("write_mode_resolved") or "").strip()
+                observed_runtime = str(item.get("runtime_write_mode") or "").strip()
+                observed_pk = [str(col).strip() for col in (item.get("pk_columns") or []) if str(col).strip()]
+
+                mismatch: Dict[str, Any] = {}
+                if observed_hash and observed_hash != expected_policy.policy_hash:
+                    mismatch["write_policy_hash"] = {
+                        "observed": observed_hash,
+                        "expected": expected_policy.policy_hash,
+                    }
+                if observed_resolved and observed_resolved != expected_policy.resolved_write_mode.value:
+                    mismatch["write_mode_resolved"] = {
+                        "observed": observed_resolved,
+                        "expected": expected_policy.resolved_write_mode.value,
+                    }
+                if observed_runtime and observed_runtime != expected_policy.runtime_write_mode:
+                    mismatch["runtime_write_mode"] = {
+                        "observed": observed_runtime,
+                        "expected": expected_policy.runtime_write_mode,
+                    }
+                if observed_pk and observed_pk != list(expected_policy.primary_key_columns):
+                    mismatch["pk_columns"] = {
+                        "observed": observed_pk,
+                        "expected": list(expected_policy.primary_key_columns),
+                    }
+                if mismatch:
+                    policy_mismatches.append(
+                        {
+                            "dataset_name": item.get("dataset_name"),
+                            "node_id": item.get("node_id"),
+                            "mismatch": mismatch,
+                        }
+                    )
+
+            if policy_mismatches:
+                raise classified_http_exception(
+                    status.HTTP_409_CONFLICT,
+                    "Build output write policy does not match deploy definition",
+                    code=ErrorCode.CONFLICT,
+                    category=ErrorCategory.CONFLICT,
+                    extra={"policy_mismatches": policy_mismatches},
                 )
 
             if any_breaking_changes and not replay_on_deploy:
@@ -1187,6 +1360,12 @@ async def deploy_pipeline(
                     "row_count": row_count_int,
                     "sample_row_count": len(normalized_sample_rows),
                     "column_stats": compute_column_stats(rows=normalized_sample_rows, columns=schema_columns),
+                    "write_mode_requested": item.get("write_mode_requested"),
+                    "write_mode_resolved": item.get("write_mode_resolved"),
+                    "runtime_write_mode": item.get("runtime_write_mode"),
+                    "pk_columns": item.get("pk_columns") or [],
+                    "post_filtering_column": item.get("post_filtering_column"),
+                    "write_policy_hash": item.get("write_policy_hash"),
                 }
                 if delta_row_count_int is not None:
                     sample_json["delta_row_count"] = delta_row_count_int
@@ -1306,6 +1485,12 @@ async def deploy_pipeline(
                     metadata={
                         "node_id": item.get("node_id"),
                         "build_artifact_key": item.get("build_artifact_key"),
+                        "write_mode_requested": item.get("write_mode_requested"),
+                        "write_mode_resolved": item.get("write_mode_resolved"),
+                        "runtime_write_mode": item.get("runtime_write_mode"),
+                        "pk_columns": item.get("pk_columns") or [],
+                        "post_filtering_column": item.get("post_filtering_column"),
+                        "write_policy_hash": item.get("write_policy_hash"),
                     },
                 )
 
@@ -1318,6 +1503,12 @@ async def deploy_pipeline(
                         "artifact_key": promoted_artifact_key,
                         "row_count": row_count_int,
                         "delta_row_count": delta_row_count_int,
+                        "write_mode_requested": item.get("write_mode_requested"),
+                        "write_mode_resolved": item.get("write_mode_resolved"),
+                        "runtime_write_mode": item.get("runtime_write_mode"),
+                        "pk_columns": item.get("pk_columns") or [],
+                        "post_filtering_column": item.get("post_filtering_column"),
+                        "write_policy_hash": item.get("write_policy_hash"),
                         "build_artifact_key": item.get("build_artifact_key"),
                         "build_ref": build_ref,
                         "artifact_path": artifact_path,

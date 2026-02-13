@@ -115,7 +115,42 @@ Compatibility status taxonomy is fixed to:
 This gives a deterministic, updateable matrix that can be re-baselined by updating
 the snapshot file and corresponding tests together.
 
-## 6) Known limitations vs “real Foundry”
+## 6) Dataset Output Parity (Foundry-aligned)
+
+Dataset outputs now run through a single policy layer:
+
+- Source of truth: `backend/shared/services/pipeline/dataset_output_semantics.py`
+- Enforced in:
+  - `backend/shared/services/pipeline/output_plugins.py`
+  - `backend/shared/services/pipeline/pipeline_definition_validator.py`
+  - `backend/shared/services/pipeline/pipeline_preflight_utils.py`
+  - `backend/pipeline_worker/main.py`
+  - `backend/bff/services/pipeline_execution_service.py`
+  - MCP input normalization (`plan_add_output`)
+
+Implemented write modes:
+
+- `default`
+- `always_append`
+- `append_only_new_rows`
+- `changelog`
+- `snapshot_difference`
+- `snapshot_replace`
+- `snapshot_replace_and_remove`
+
+Required metadata semantics:
+
+- `append_only_new_rows/changelog/snapshot_difference/snapshot_replace_and_remove` require `primary_key_columns`
+- `snapshot_replace_and_remove` requires `post_filtering_column`
+- Output formats are constrained to `parquet|json|csv|avro|orc`
+
+Build/deploy consistency:
+
+- build artifacts include resolved write policy metadata and policy hash
+- deploy promotion verifies policy mismatch and blocks on conflict (fail-closed)
+- dataset version `sample_json` includes resolved mode/pk/hash context for debugging
+
+## 7) Known limitations vs “real Foundry”
 
 Even with all tests passing, these items are typically Foundry-specific and may not be
 implemented 1:1 in an open repo:

@@ -748,13 +748,40 @@ async def _plan_add_stream_join(_server: Any, arguments: Dict[str, Any]) -> Any:
 @trace_external_call("mcp.plan_add_output")
 async def _plan_add_output(_server: Any, arguments: Dict[str, Any]) -> Any:
     plan = arguments.get("plan") or {}
+    output_metadata = arguments.get("output_metadata")
+    if isinstance(output_metadata, dict):
+        merged_output_metadata = dict(output_metadata)
+    else:
+        merged_output_metadata = {}
+
+    for key in ("write_mode", "writeMode"):
+        if arguments.get(key) is not None:
+            merged_output_metadata["write_mode"] = arguments.get(key)
+            break
+    for key in ("primary_key_columns", "primaryKeyColumns", "pk_columns", "pkColumns"):
+        if arguments.get(key) is not None:
+            merged_output_metadata["primary_key_columns"] = arguments.get(key)
+            break
+    for key in ("post_filtering_column", "postFilteringColumn", "removeColumn", "deleteColumn"):
+        if arguments.get(key) is not None:
+            merged_output_metadata["post_filtering_column"] = arguments.get(key)
+            break
+    for key in ("output_format", "outputFormat", "format"):
+        if arguments.get(key) is not None:
+            merged_output_metadata["output_format"] = arguments.get(key)
+            break
+    for key in ("partition_by", "partitionBy"):
+        if arguments.get(key) is not None:
+            merged_output_metadata["partition_by"] = arguments.get(key)
+            break
+
     result = add_output(
         plan,
         input_node_id=str(arguments.get("input_node_id") or ""),
         output_name=str(arguments.get("output_name") or ""),
         output_kind=str(arguments.get("output_kind") or "dataset"),
         node_id=arguments.get("node_id"),
-        output_metadata=arguments.get("output_metadata"),
+        output_metadata=merged_output_metadata,
     )
     return {"plan": result.plan, "node_id": result.node_id, "warnings": list(result.warnings)}
 

@@ -56,6 +56,53 @@ def test_validate_output_payload_dataset_has_no_required_fields() -> None:
 
 
 @pytest.mark.unit
+def test_validate_output_payload_dataset_requires_pk_for_append_only_new_rows() -> None:
+    errors = validate_output_payload(
+        kind="dataset",
+        payload={"write_mode": "append_only_new_rows"},
+    )
+    assert errors == ["write_mode=append_only_new_rows requires primary_key_columns"]
+
+
+@pytest.mark.unit
+def test_validate_output_payload_dataset_requires_post_filtering_for_snapshot_remove() -> None:
+    errors = validate_output_payload(
+        kind="dataset",
+        payload={
+            "write_mode": "snapshot_replace_and_remove",
+            "primary_key_columns": ["id"],
+        },
+    )
+    assert errors == ["write_mode=snapshot_replace_and_remove requires post_filtering_column"]
+
+
+@pytest.mark.unit
+def test_validate_output_payload_dataset_rejects_unsupported_output_format() -> None:
+    errors = validate_output_payload(
+        kind="dataset",
+        payload={"output_format": "xml"},
+    )
+    assert errors == ["output_format must be one of: avro|csv|json|orc|parquet"]
+
+
+@pytest.mark.unit
+def test_validate_output_payload_dataset_accepts_full_metadata() -> None:
+    assert (
+        validate_output_payload(
+            kind="dataset",
+            payload={
+                "write_mode": "snapshot_replace_and_remove",
+                "primary_key_columns": ["id"],
+                "post_filtering_column": "is_deleted",
+                "output_format": "avro",
+                "partition_by": ["ds"],
+            },
+        )
+        == []
+    )
+
+
+@pytest.mark.unit
 def test_validate_output_payload_geotemporal_requires_metadata() -> None:
     errors = validate_output_payload(kind=OUTPUT_KIND_GEOTEMPORAL, payload={})
     assert errors

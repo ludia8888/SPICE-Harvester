@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import AbstractSet, Any, Dict, List, Optional
 
+from shared.services.pipeline.output_plugins import OUTPUT_KIND_DATASET, normalize_output_kind, validate_output_payload
 from shared.services.pipeline.pipeline_graph_utils import build_incoming, normalize_edges, normalize_nodes
 from shared.services.pipeline.pipeline_transform_spec import (
     normalize_operation,
@@ -12,6 +13,71 @@ from shared.services.pipeline.pipeline_transform_spec import (
 )
 
 _ALLOWED_UNION_MODES: frozenset[str] = frozenset({"strict", "common_only", "pad_missing_nulls", "pad"})
+
+
+def _resolve_output_kind_for_node(
+    *,
+    definition_json: Dict[str, Any],
+    node_id: str,
+    output_name: str,
+    metadata: Dict[str, Any],
+) -> str:
+    raw_kind = str(metadata.get("outputKind") or metadata.get("output_kind") or "").strip()
+    declared_outputs = definition_json.get("outputs") if isinstance(definition_json.get("outputs"), list) else []
+    if not raw_kind:
+        for item in declared_outputs:
+            if not isinstance(item, dict):
+                continue
+            declared_node_id = str(item.get("node_id") or item.get("nodeId") or "").strip()
+            declared_name = str(
+                item.get("output_name")
+                or item.get("outputName")
+                or item.get("dataset_name")
+                or item.get("datasetName")
+                or ""
+            ).strip()
+            if declared_node_id and declared_node_id == node_id:
+                raw_kind = str(item.get("output_kind") or item.get("outputKind") or "").strip()
+                break
+            if output_name and declared_name and declared_name == output_name:
+                raw_kind = str(item.get("output_kind") or item.get("outputKind") or "").strip()
+                break
+
+    if not raw_kind:
+        return OUTPUT_KIND_DATASET
+    return normalize_output_kind(raw_kind)
+
+
+def _merged_output_payload_for_node(
+    *,
+    definition_json: Dict[str, Any],
+    node_id: str,
+    output_name: str,
+    metadata: Dict[str, Any],
+) -> Dict[str, Any]:
+    payload: Dict[str, Any] = {}
+    declared_outputs = definition_json.get("outputs") if isinstance(definition_json.get("outputs"), list) else []
+    for item in declared_outputs:
+        if not isinstance(item, dict):
+            continue
+        declared_node_id = str(item.get("node_id") or item.get("nodeId") or "").strip()
+        declared_name = str(
+            item.get("output_name")
+            or item.get("outputName")
+            or item.get("dataset_name")
+            or item.get("datasetName")
+            or ""
+        ).strip()
+        if (declared_node_id and declared_node_id == node_id) or (
+            output_name and declared_name and declared_name == output_name
+        ):
+            declared_meta = item.get("output_metadata")
+            if isinstance(declared_meta, dict):
+                payload.update(dict(declared_meta))
+            break
+    payload.update(dict(metadata))
+    payload.setdefault("outputName", output_name)
+    return payload
 
 
 def normalize_transform_metadata(metadata: Any) -> Dict[str, Any]:
@@ -104,6 +170,35 @@ def validate_pipeline_definition(
     incoming = build_incoming(edges)
 
     for node_id, node in nodes.items():
+        node_type = str(node.get("type") or "").strip().lower()
+        if node_type == "output":
+            metadata = node.get("metadata") if isinstance(node.get("metadata"), dict) else {}
+            output_name = str(
+                metadata.get("outputName")
+                or metadata.get("datasetName")
+                or node.get("title")
+                or node_id
+            ).strip() or node_id
+            try:
+                output_kind = _resolve_output_kind_for_node(
+                    definition_json=definition_json,
+                    node_id=node_id,
+                    output_name=output_name,
+                    metadata=metadata,
+                )
+            except ValueError as exc:
+                errors.append(f"output {output_name} has invalid output_kind on node {node_id}: {exc}")
+                continue
+            payload = _merged_output_payload_for_node(
+                definition_json=definition_json,
+                node_id=node_id,
+                output_name=output_name,
+                metadata=metadata,
+            )
+            for detail in validate_output_payload(kind=output_kind, payload=payload):
+                errors.append(f"output {output_name} invalid metadata on node {node_id}: {detail}")
+            continue
+
         if node.get("type") != "transform":
             continue
         metadata = node.get("metadata") or {}

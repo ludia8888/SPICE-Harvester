@@ -260,6 +260,21 @@ OBJECTIFY_DATASET_PRIMARY_REFRESH=false
 OBJECTIFY_DATASET_PRIMARY_PRUNE_STALE_ON_FULL=true
 ```
 
+## Pipeline Dataset Output Metadata (Builder/Plan)
+
+These are not environment variables. They are canonical `output_metadata` keys
+for `output_kind=dataset`, enforced consistently in validator/preflight/runtime.
+
+```json
+{
+  "write_mode": "default|always_append|append_only_new_rows|changelog|snapshot_difference|snapshot_replace|snapshot_replace_and_remove",
+  "primary_key_columns": ["..."],
+  "post_filtering_column": "is_deleted",
+  "output_format": "parquet|json|csv|avro|orc",
+  "partition_by": ["..."]
+}
+```
+
 ## Commands (Instance/Ontology/Action)
 
 ```bash

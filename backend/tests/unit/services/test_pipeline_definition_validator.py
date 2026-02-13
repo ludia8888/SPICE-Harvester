@@ -118,3 +118,19 @@ def test_validate_pipeline_definition_udf_rejects_inline_code_when_reference_pol
     }
     result = validate_pipeline_definition(definition, policy=_spark_policy())
     assert "udfCode is not allowed on node t; use udfId (+udfVersion)" in result.errors
+
+
+def test_validate_pipeline_definition_rejects_invalid_dataset_output_metadata() -> None:
+    definition = {
+        "nodes": [
+            {"id": "in", "type": "input"},
+            {
+                "id": "out",
+                "type": "output",
+                "metadata": {"outputName": "orders", "write_mode": "append_only_new_rows"},
+            },
+        ],
+        "edges": [{"from": "in", "to": "out"}],
+    }
+    result = validate_pipeline_definition(definition, policy=_spark_policy())
+    assert "output orders invalid metadata on node out: write_mode=append_only_new_rows requires primary_key_columns" in result.errors

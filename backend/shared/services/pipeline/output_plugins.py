@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, Mapping, Protocol, Sequence
 
+from shared.services.pipeline.dataset_output_semantics import validate_dataset_output_metadata
+
 
 OUTPUT_KIND_DATASET = "dataset"
 OUTPUT_KIND_GEOTEMPORAL = "geotemporal"
@@ -62,7 +64,10 @@ class _DatasetPlugin:
     kind = OUTPUT_KIND_DATASET
 
     def validate(self, payload: Mapping[str, Any]) -> list[str]:
-        return []
+        return validate_dataset_output_metadata(
+            definition={},
+            output_metadata=payload,
+        )
 
 
 @dataclass(frozen=True)

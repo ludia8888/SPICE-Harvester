@@ -11,8 +11,9 @@ import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
+from shared.services.pipeline.dataset_output_semantics import normalize_dataset_output_metadata
 from shared.services.pipeline.pipeline_graph_utils import unique_node_id
-from shared.services.pipeline.output_plugins import resolve_output_kind
+from shared.services.pipeline.output_plugins import OUTPUT_KIND_DATASET, resolve_output_kind
 from shared.services.pipeline.pipeline_transform_spec import SUPPORTED_TRANSFORMS
 
 
@@ -1225,6 +1226,11 @@ def add_output(
         warnings.append(
             f"output_kind alias '{resolved_kind.raw_kind}' normalized to '{resolved_kind.normalized_kind}'"
         )
+    if kind == OUTPUT_KIND_DATASET:
+        normalized = normalize_dataset_output_metadata(definition=definition, output_metadata=metadata)
+        metadata = dict(normalized.metadata)
+        warnings.extend(normalized.warnings)
+    metadata["outputKind"] = kind
 
     if resolved_id in existing:
         if str(node_id or "").strip():
@@ -1657,13 +1663,27 @@ def update_output(
 
     new_name = str(next_item.get("output_name") or "").strip()
     output_meta = next_item.get("output_metadata")
+    warnings: List[str] = []
+    output_kind = str(next_item.get("output_kind") or "").strip().lower()
+    if output_kind:
+        try:
+            output_kind = resolve_output_kind(output_kind).normalized_kind
+            next_item["output_kind"] = output_kind
+        except ValueError as exc:
+            raise PipelinePlanBuilderError(str(exc)) from exc
     if isinstance(output_meta, dict):
         updated_output_meta = dict(output_meta)
+        if output_kind == OUTPUT_KIND_DATASET:
+            normalized = normalize_dataset_output_metadata(definition=_definition(plan), output_metadata=updated_output_meta)
+            updated_output_meta = dict(normalized.metadata)
+            warnings.extend(normalized.warnings)
         if str(updated_output_meta.get("outputName") or "").strip() in {"", name}:
             updated_output_meta["outputName"] = new_name
-            next_item["output_metadata"] = updated_output_meta
-            outputs[idx] = next_item
-            plan["outputs"] = outputs
+        if output_kind:
+            updated_output_meta["outputKind"] = output_kind
+        next_item["output_metadata"] = updated_output_meta
+        outputs[idx] = next_item
+        plan["outputs"] = outputs
     if new_name != name:
         definition = _definition(plan)
         for node in _ensure_list(definition.get("nodes"), name="definition_json.nodes"):
@@ -1677,4 +1697,4 @@ def update_output(
             updated_meta = dict(metadata)
             updated_meta["outputName"] = new_name
             node["metadata"] = updated_meta
-    return PlanMutation(plan=plan)
+    return PlanMutation(plan=plan, warnings=tuple(warnings))

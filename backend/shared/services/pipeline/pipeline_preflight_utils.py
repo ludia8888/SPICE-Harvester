@@ -3,8 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
+from shared.services.pipeline.dataset_output_semantics import validate_dataset_output_metadata
 from shared.services.pipeline.pipeline_dataset_utils import normalize_dataset_selection, resolve_dataset_version
+from shared.services.pipeline.pipeline_definition_utils import resolve_execution_semantics
 from shared.services.pipeline.pipeline_graph_utils import build_incoming, normalize_edges, normalize_nodes, topological_sort
+from shared.services.pipeline.output_plugins import OUTPUT_KIND_DATASET, normalize_output_kind, validate_output_payload
 from shared.services.pipeline.pipeline_schema_utils import normalize_schema_contract, normalize_schema_type
 from shared.services.pipeline.pipeline_transform_spec import (
     normalize_operation,
@@ -634,6 +637,7 @@ async def compute_pipeline_preflight(
     edges = normalize_edges(definition.get("edges"))
     incoming = build_incoming(edges)
     order = topological_sort(nodes, edges, include_unordered=True)
+    execution_semantics = resolve_execution_semantics(definition)
 
     schema_by_node: Dict[str, SchemaInfo] = {}
     issues: List[Dict[str, Any]] = []
@@ -657,6 +661,107 @@ async def compute_pipeline_preflight(
 
         if node_type == "output":
             schema_by_node[node_id] = inputs[0] if inputs else SchemaInfo(columns=[], type_map={})
+            output_schema = schema_by_node[node_id]
+            output_name = str(
+                metadata.get("outputName")
+                or metadata.get("datasetName")
+                or node.get("title")
+                or node_id
+            ).strip() or node_id
+
+            declared_outputs = definition.get("outputs") if isinstance(definition.get("outputs"), list) else []
+            resolved_output_kind = OUTPUT_KIND_DATASET
+            merged_output_payload: Dict[str, Any] = dict(metadata)
+            for item in declared_outputs:
+                if not isinstance(item, dict):
+                    continue
+                declared_node_id = str(item.get("node_id") or item.get("nodeId") or "").strip()
+                declared_name = str(
+                    item.get("output_name")
+                    or item.get("outputName")
+                    or item.get("dataset_name")
+                    or item.get("datasetName")
+                    or ""
+                ).strip()
+                if (declared_node_id and declared_node_id == node_id) or (
+                    output_name and declared_name and declared_name == output_name
+                ):
+                    raw_kind = str(item.get("output_kind") or item.get("outputKind") or "").strip()
+                    if raw_kind:
+                        try:
+                            resolved_output_kind = normalize_output_kind(raw_kind)
+                        except ValueError as exc:
+                            issues.append(
+                                {
+                                    "kind": "output_kind_invalid",
+                                    "severity": "error",
+                                    "node_id": node_id,
+                                    "message": str(exc),
+                                }
+                            )
+                    declared_meta = item.get("output_metadata")
+                    if isinstance(declared_meta, dict):
+                        merged_output_payload = {**declared_meta, **merged_output_payload}
+                    break
+
+            try:
+                resolved_output_kind = normalize_output_kind(
+                    metadata.get("outputKind") or metadata.get("output_kind") or resolved_output_kind
+                )
+            except ValueError as exc:
+                issues.append(
+                    {
+                        "kind": "output_kind_invalid",
+                        "severity": "error",
+                        "node_id": node_id,
+                        "message": str(exc),
+                    }
+                )
+                continue
+
+            merged_output_payload["outputName"] = output_name
+            for detail in validate_output_payload(kind=resolved_output_kind, payload=merged_output_payload):
+                issues.append(
+                    {
+                        "kind": "output_metadata_invalid",
+                        "severity": "error",
+                        "node_id": node_id,
+                        "message": detail,
+                        "output_kind": resolved_output_kind,
+                    }
+                )
+
+            if resolved_output_kind == OUTPUT_KIND_DATASET:
+                available_columns = (
+                    set(output_schema.columns or [])
+                    if output_schema and output_schema.columns and (not output_schema.dynamic_columns)
+                    else None
+                )
+                dataset_errors = validate_dataset_output_metadata(
+                    definition=definition,
+                    output_metadata=merged_output_payload,
+                    execution_semantics=execution_semantics,
+                    available_columns=available_columns,
+                )
+                for detail in dataset_errors:
+                    issues.append(
+                        {
+                            "kind": "dataset_output_policy_invalid",
+                            "severity": "error",
+                            "node_id": node_id,
+                            "message": detail,
+                            "output_kind": resolved_output_kind,
+                        }
+                    )
+                if available_columns is None:
+                    issues.append(
+                        {
+                            "kind": "dataset_output_preflight_schema_skipped",
+                            "severity": "warning",
+                            "node_id": node_id,
+                            "message": "dataset required-column checks skipped (missing output schema metadata)",
+                        }
+                    )
             continue
 
         operation = normalize_operation(metadata.get("operation"))

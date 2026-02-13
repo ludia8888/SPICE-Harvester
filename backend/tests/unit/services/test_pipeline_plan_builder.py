@@ -81,6 +81,30 @@ def test_add_output_warns_when_legacy_alias_kind_used():
     assert any("output_kind alias" in warning for warning in out.warnings)
 
 
+def test_add_output_normalizes_dataset_write_metadata_aliases():
+    plan = new_plan(goal="dataset output semantics", db_name="demo")
+    plan = add_input(plan, dataset_id="ds-1", node_id="in_1").plan
+    out = add_output(
+        plan,
+        input_node_id="in_1",
+        output_name="out_1",
+        output_kind="dataset",
+        output_metadata={
+            "pkSemantics": "append_state",
+            "pkColumns": ["id"],
+            "outputFormat": "json",
+            "partitionBy": "ds",
+        },
+    )
+    output_entry = out.plan["outputs"][0]
+    metadata = output_entry["output_metadata"]
+    assert metadata["write_mode"] == "append_only_new_rows"
+    assert metadata["primary_key_columns"] == ["id"]
+    assert metadata["output_format"] == "json"
+    assert metadata["partition_by"] == ["ds"]
+    assert any("legacy write-mode key" in warning for warning in out.warnings)
+
+
 def test_add_input_supports_read_config():
     plan = new_plan(goal="read permissive", db_name="demo")
     res = add_input(

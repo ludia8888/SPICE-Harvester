@@ -22,6 +22,7 @@ _STRICT_RUNTIME_GLOBS = (
     "shared/services/pipeline/pipeline_executor.py",
     "shared/services/pipeline/pipeline_preflight_utils.py",
     "shared/services/pipeline/pipeline_definition_validator.py",
+    "shared/services/pipeline/dataset_output_semantics.py",
     "shared/services/pipeline/output_plugins.py",
     "shared/config/settings.py",
     "shared/errors/runtime_exception_policy.py",
@@ -63,6 +64,9 @@ def test_error_taxonomy_audit_guard() -> None:
         "--fail-on-streamjoin-strategy-ignored",
         "--fail-on-output-kind-metadata-gap",
         "--fail-on-preflight-swallowed",
+        "--fail-on-dataset-write-mode-gap",
+        "--fail-on-dataset-required-columns-gap",
+        "--fail-on-dataset-write-format-gap",
         "--fail-on-commented-export",
         "--fail-on-doc-only-module",
     ]

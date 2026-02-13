@@ -125,7 +125,16 @@ def resolve_delete_column(
 ) -> Optional[str]:
     settings = definition.get("settings") if isinstance(definition.get("settings"), dict) else {}
     incremental = resolve_incremental_config(definition)
-    for key in ("deleteColumn", "delete_column", "removeColumn", "remove_column", "is_deleted", "isDeleted"):
+    for key in (
+        "post_filtering_column",
+        "postFilteringColumn",
+        "deleteColumn",
+        "delete_column",
+        "removeColumn",
+        "remove_column",
+        "is_deleted",
+        "isDeleted",
+    ):
         value = output_metadata.get(key) or incremental.get(key) or settings.get(key) or definition.get(key)
         if isinstance(value, str) and value.strip():
             return value.strip()
@@ -224,6 +233,7 @@ def resolve_pk_columns(
     )
     output_pk = collect_pk_columns(
         output_metadata.get("pk_spec") or output_metadata.get("pkSpec"),
+        output_metadata.get("primary_key_columns") or output_metadata.get("primaryKeyColumns"),
         output_metadata.get("primary_key")
         or output_metadata.get("primaryKey")
         or output_metadata.get("primary_keys")
@@ -240,6 +250,7 @@ def resolve_pk_columns(
         declared_pk.extend(
             collect_pk_columns(
                 item.get("pk_spec") or item.get("pkSpec"),
+                item.get("primary_key_columns") or item.get("primaryKeyColumns"),
                 item.get("primary_key")
                 or item.get("primaryKey")
                 or item.get("primary_keys")

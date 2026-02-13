@@ -64,6 +64,11 @@ from shared.services.storage.lakefs_client import LakeFSClient, LakeFSConflictEr
 from shared.services.storage.lakefs_storage_service import LakeFSStorageService
 from shared.services.registries.lineage_store import LineageStore
 from shared.services.pipeline.pipeline_profiler import compute_column_stats
+from shared.services.pipeline.dataset_output_semantics import (
+    DatasetWriteMode,
+    resolve_dataset_write_policy,
+    validate_dataset_output_metadata,
+)
 from shared.services.pipeline.output_plugins import (
     OUTPUT_KIND_DATASET,
     OUTPUT_KIND_GEOTEMPORAL,
@@ -1857,12 +1862,74 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                         logger.error("Pipeline expectations failed (build): %s", expectation_errors)
                         return
 
-                    output_format = _resolve_output_format(definition=definition, output_metadata=metadata)
-                    partition_cols = _resolve_partition_columns(
-                        definition=definition,
-                        output_metadata=metadata,
-                    )
                     dataset_name = str(output_name or job.output_dataset_name)
+                    write_mode_requested = output_write_mode
+                    write_mode_resolved = output_write_mode
+                    runtime_write_mode = output_write_mode
+                    write_policy_hash: Optional[str] = None
+                    pk_columns_policy: List[str] = []
+                    post_filtering_column: Optional[str] = None
+                    if output_kind == OUTPUT_KIND_DATASET:
+                        dataset_policy = resolve_dataset_write_policy(
+                            definition=definition,
+                            output_metadata=metadata,
+                            execution_semantics=execution_semantics,
+                        )
+                        metadata = dict(dataset_policy.normalized_metadata)
+                        write_mode_requested = dataset_policy.requested_write_mode
+                        write_mode_resolved = dataset_policy.resolved_write_mode.value
+                        runtime_write_mode = dataset_policy.runtime_write_mode
+                        write_policy_hash = dataset_policy.policy_hash
+                        pk_columns_policy = list(dataset_policy.primary_key_columns)
+                        post_filtering_column = dataset_policy.post_filtering_column
+                        dataset_output_errors = validate_dataset_output_metadata(
+                            definition=definition,
+                            output_metadata=metadata,
+                            execution_semantics=execution_semantics,
+                            available_columns=set(schema_columns or []),
+                        )
+                        if dataset_output_errors:
+                            error_payload = self._build_error_payload(
+                                message="Dataset output metadata invalid",
+                                errors=dataset_output_errors,
+                                code=ErrorCode.REQUEST_VALIDATION_FAILED,
+                                category=ErrorCategory.INPUT,
+                                status_code=422,
+                                external_code="PIPELINE_DATASET_OUTPUT_METADATA_INVALID",
+                                stage="output_metadata",
+                                job=job,
+                                node_id=node_id,
+                                context={
+                                    "execution_semantics": execution_semantics,
+                                    "output_name": dataset_name,
+                                },
+                            )
+                            await record_run(
+                                job_id=job.job_id,
+                                mode="build",
+                                status="FAILED",
+                                node_id=node_id,
+                                row_count=delta_row_count,
+                                output_json=error_payload,
+                                input_lakefs_commits=input_commit_payload,
+                                finished_at=utcnow(),
+                            )
+                            await record_artifact(
+                                status="FAILED",
+                                errors=dataset_output_errors,
+                                inputs=inputs_payload,
+                            )
+                            await emit_job_event(status="FAILED", errors=dataset_output_errors)
+                            logger.error("Pipeline dataset output metadata invalid (build): %s", dataset_output_errors)
+                            return
+                        output_format = dataset_policy.output_format
+                        partition_cols = list(dataset_policy.partition_by)
+                    else:
+                        output_format = _resolve_output_format(definition=definition, output_metadata=metadata)
+                        partition_cols = _resolve_partition_columns(
+                            definition=definition,
+                            output_metadata=metadata,
+                        )
                     schema_hash = _hash_schema_columns(schema_columns)
                     sample_rows = await self._run_spark(
                         lambda: output_df.limit(preview_limit).collect(),
@@ -1883,6 +1950,12 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                             "output_df": output_df,
                             "output_format": output_format,
                             "partition_columns": partition_cols,
+                            "write_mode_requested": write_mode_requested,
+                            "write_mode_resolved": write_mode_resolved,
+                            "runtime_write_mode": runtime_write_mode,
+                            "write_policy_hash": write_policy_hash,
+                            "pk_columns": pk_columns_policy,
+                            "post_filtering_column": post_filtering_column,
                             "artifact_prefix": artifact_prefix,
                             "schema_columns": schema_columns,
                             "schema_hash": schema_hash,
@@ -1941,22 +2014,37 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                 build_outputs: List[Dict[str, Any]] = []
                 for item in output_work:
                     output_df = item["output_df"]
-                    artifact_key = await self._materialize_output_by_kind(
+                    materialized = await self._materialize_output_by_kind(
                         output_kind=str(item.get("output_kind") or OUTPUT_KIND_DATASET),
                         output_metadata=item.get("output_metadata") if isinstance(item.get("output_metadata"), dict) else {},
                         df=output_df,
                         artifact_bucket=artifact_repo,
                         prefix=f"{build_branch}/{item['artifact_prefix']}",
-                        write_mode=output_write_mode,
+                        db_name=job.db_name,
+                        branch=base_branch,
+                        dataset_name=str(item.get("dataset_name") or ""),
+                        execution_semantics=execution_semantics,
+                        write_mode=str(item.get("runtime_write_mode") or output_write_mode),
                         file_prefix=job.job_id,
                         file_format=item["output_format"],
                         partition_cols=item["partition_columns"],
+                        base_row_count=int(item.get("delta_row_count") or 0),
                     )
                     if _PYSPARK_AVAILABLE:
                         with contextlib.suppress(Exception):
                             output_df.unpersist(blocking=False)
-                    row_count = int(item["delta_row_count"])
-                    if output_write_mode == "append":
+                    resolved_runtime_write_mode = str(
+                        materialized.get("runtime_write_mode")
+                        or item.get("runtime_write_mode")
+                        or output_write_mode
+                    )
+                    delta_row_count = int(
+                        materialized.get("delta_row_count")
+                        if materialized.get("delta_row_count") is not None
+                        else int(item.get("delta_row_count") or 0)
+                    )
+                    row_count = delta_row_count
+                    if resolved_runtime_write_mode == "append":
                         try:
                             existing_dataset = await self.dataset_registry.get_dataset_by_name(
                                 db_name=job.db_name,
@@ -1968,7 +2056,7 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                                     dataset_id=existing_dataset.dataset_id
                                 )
                                 if existing_version and existing_version.row_count is not None:
-                                    row_count = int(existing_version.row_count) + int(item["delta_row_count"])
+                                    row_count = int(existing_version.row_count) + delta_row_count
                         except Exception as exc:
                             logger.debug("Failed to resolve previous row_count for incremental build: %s", exc)
                     build_outputs.append(
@@ -1978,12 +2066,18 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                             "output_kind": item.get("output_kind", OUTPUT_KIND_DATASET),
                             "output_metadata": item.get("output_metadata") if isinstance(item.get("output_metadata"), dict) else {},
                             "dataset_name": item["dataset_name"],
-                            "artifact_key": artifact_key,
+                            "artifact_key": materialized["artifact_key"],
                             "artifact_prefix": item["artifact_prefix"],
-                            "output_format": item["output_format"],
-                            "partition_columns": item["partition_columns"],
+                            "output_format": materialized.get("output_format") or item["output_format"],
+                            "partition_columns": materialized.get("partition_by") or item["partition_columns"],
                             "row_count": row_count,
-                            "delta_row_count": item["delta_row_count"] if output_write_mode == "append" else None,
+                            "delta_row_count": delta_row_count if resolved_runtime_write_mode == "append" else None,
+                            "write_mode_requested": materialized.get("write_mode_requested") or item.get("write_mode_requested"),
+                            "write_mode_resolved": materialized.get("write_mode_resolved") or item.get("write_mode_resolved"),
+                            "runtime_write_mode": resolved_runtime_write_mode,
+                            "pk_columns": materialized.get("pk_columns") or item.get("pk_columns") or [],
+                            "post_filtering_column": materialized.get("post_filtering_column") or item.get("post_filtering_column"),
+                            "write_policy_hash": materialized.get("write_policy_hash") or item.get("write_policy_hash"),
                             "columns": item["schema_columns"],
                             "schema_hash": item["schema_hash"],
                             "schema_json": {"columns": item["schema_columns"]},
@@ -2243,12 +2337,78 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                 )
                 output_sample = [row.asDict(recursive=True) for row in sample_rows]
 
-                output_format = _resolve_output_format(definition=definition, output_metadata=metadata)
-                partition_cols = _resolve_partition_columns(
-                    definition=definition,
-                    output_metadata=metadata,
-                )
                 dataset_name = str(output_name or job.output_dataset_name)
+                write_mode_requested = output_write_mode
+                write_mode_resolved = output_write_mode
+                runtime_write_mode = output_write_mode
+                write_policy_hash: Optional[str] = None
+                pk_columns_policy: List[str] = []
+                post_filtering_column: Optional[str] = None
+                if output_kind == OUTPUT_KIND_DATASET:
+                    dataset_policy = resolve_dataset_write_policy(
+                        definition=definition,
+                        output_metadata=metadata,
+                        execution_semantics=execution_semantics,
+                    )
+                    metadata = dict(dataset_policy.normalized_metadata)
+                    write_mode_requested = dataset_policy.requested_write_mode
+                    write_mode_resolved = dataset_policy.resolved_write_mode.value
+                    runtime_write_mode = dataset_policy.runtime_write_mode
+                    write_policy_hash = dataset_policy.policy_hash
+                    pk_columns_policy = list(dataset_policy.primary_key_columns)
+                    post_filtering_column = dataset_policy.post_filtering_column
+                    dataset_output_errors = validate_dataset_output_metadata(
+                        definition=definition,
+                        output_metadata=metadata,
+                        execution_semantics=execution_semantics,
+                        available_columns=set(schema_columns or []),
+                    )
+                    if dataset_output_errors:
+                        expectation_payload = self._build_error_payload(
+                            message="Dataset output metadata invalid",
+                            errors=dataset_output_errors,
+                            code=ErrorCode.REQUEST_VALIDATION_FAILED,
+                            category=ErrorCategory.INPUT,
+                            status_code=422,
+                            external_code="PIPELINE_DATASET_OUTPUT_METADATA_INVALID",
+                            stage="output_metadata",
+                            job=job,
+                            node_id=node_id,
+                            context={
+                                "execution_semantics": execution_semantics,
+                                "output_name": dataset_name,
+                            },
+                        )
+                        await record_build(
+                            status="FAILED",
+                            output_json=expectation_payload,
+                        )
+                        await record_run(
+                            job_id=job.job_id,
+                            mode="deploy",
+                            status="FAILED",
+                            node_id=node_id,
+                            row_count=delta_row_count,
+                            output_json=expectation_payload,
+                            input_lakefs_commits=input_commit_payload,
+                            finished_at=utcnow(),
+                        )
+                        await record_artifact(
+                            status="FAILED",
+                            errors=dataset_output_errors,
+                            inputs=inputs_payload,
+                        )
+                        await emit_job_event(status="FAILED", errors=dataset_output_errors)
+                        logger.error("Pipeline dataset output metadata invalid: %s", dataset_output_errors)
+                        return
+                    output_format = dataset_policy.output_format
+                    partition_cols = list(dataset_policy.partition_by)
+                else:
+                    output_format = _resolve_output_format(definition=definition, output_metadata=metadata)
+                    partition_cols = _resolve_partition_columns(
+                        definition=definition,
+                        output_metadata=metadata,
+                    )
                 safe_name = dataset_name.replace(" ", "_")
                 artifact_prefix = f"pipelines/{job.db_name}/{pipeline_ref}/{safe_name}"
                 column_stats = compute_column_stats(rows=output_sample, columns=schema_columns)
@@ -2263,6 +2423,12 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                         "artifact_prefix": artifact_prefix,
                         "output_format": output_format,
                         "partition_columns": partition_cols,
+                        "write_mode_requested": write_mode_requested,
+                        "write_mode_resolved": write_mode_resolved,
+                        "runtime_write_mode": runtime_write_mode,
+                        "write_policy_hash": write_policy_hash,
+                        "pk_columns": pk_columns_policy,
+                        "post_filtering_column": post_filtering_column,
                         "row_count": delta_row_count,
                         "columns": schema_columns,
                         "rows": output_sample,
@@ -2318,16 +2484,31 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
             staged_outputs: List[Dict[str, Any]] = []
             for item in output_work:
                 branch_prefix = f"{run_branch}/{item['artifact_prefix']}"
-                await self._materialize_output_by_kind(
+                materialized = await self._materialize_output_by_kind(
                     output_kind=str(item.get("output_kind") or OUTPUT_KIND_DATASET),
                     output_metadata=item.get("output_metadata") if isinstance(item.get("output_metadata"), dict) else {},
                     df=item["output_df"],
                     artifact_bucket=artifact_repo,
                     prefix=branch_prefix,
-                    write_mode=output_write_mode,
+                    db_name=job.db_name,
+                    branch=base_branch,
+                    dataset_name=str(item.get("dataset_name") or ""),
+                    execution_semantics=execution_semantics,
+                    write_mode=str(item.get("runtime_write_mode") or output_write_mode),
                     file_prefix=job.job_id,
                     file_format=item["output_format"],
                     partition_cols=item["partition_columns"],
+                    base_row_count=int(item.get("row_count") or 0),
+                )
+                resolved_runtime_write_mode = str(
+                    materialized.get("runtime_write_mode")
+                    or item.get("runtime_write_mode")
+                    or output_write_mode
+                )
+                delta_row_count = int(
+                    materialized.get("delta_row_count")
+                    if materialized.get("delta_row_count") is not None
+                    else int(item.get("row_count") or 0)
                 )
                 staged_outputs.append(
                     {
@@ -2337,9 +2518,15 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                         "output_metadata": item.get("output_metadata") if isinstance(item.get("output_metadata"), dict) else {},
                         "dataset_name": item["dataset_name"],
                         "artifact_prefix": item["artifact_prefix"],
-                        "output_format": item["output_format"],
-                        "partition_columns": item["partition_columns"],
-                        "row_count": item["row_count"],
+                        "output_format": materialized.get("output_format") or item["output_format"],
+                        "partition_columns": materialized.get("partition_by") or item["partition_columns"],
+                        "row_count": delta_row_count,
+                        "write_mode_requested": materialized.get("write_mode_requested") or item.get("write_mode_requested"),
+                        "write_mode_resolved": materialized.get("write_mode_resolved") or item.get("write_mode_resolved"),
+                        "runtime_write_mode": resolved_runtime_write_mode,
+                        "pk_columns": materialized.get("pk_columns") or item.get("pk_columns") or [],
+                        "post_filtering_column": materialized.get("post_filtering_column") or item.get("post_filtering_column"),
+                        "write_policy_hash": materialized.get("write_policy_hash") or item.get("write_policy_hash"),
                         "columns": item["columns"],
                         "rows": item["rows"],
                         "sample_row_count": item["sample_row_count"],
@@ -2398,8 +2585,9 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                     name=dataset_name,
                     branch=base_branch,
                 )
+                resolved_runtime_write_mode = str(item.get("runtime_write_mode") or output_write_mode)
                 total_row_count = delta_row_count
-                if output_write_mode == "append" and dataset:
+                if resolved_runtime_write_mode == "append" and dataset:
                     previous = await self.dataset_registry.get_latest_version(dataset_id=dataset.dataset_id)
                     if previous and previous.row_count is not None:
                         total_row_count = int(previous.row_count) + delta_row_count
@@ -2422,7 +2610,12 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                         "columns": schema_columns,
                         "rows": output_sample,
                         "row_count": total_row_count,
-                        "delta_row_count": delta_row_count if output_write_mode == "append" else None,
+                        "delta_row_count": delta_row_count if resolved_runtime_write_mode == "append" else None,
+                        "write_mode_requested": item.get("write_mode_requested"),
+                        "write_mode_resolved": item.get("write_mode_resolved"),
+                        "runtime_write_mode": resolved_runtime_write_mode,
+                        "pk_columns": item.get("pk_columns") or [],
+                        "write_policy_hash": item.get("write_policy_hash"),
                         "sample_row_count": len(output_sample),
                         "column_stats": item.get("column_stats") or {},
                     },
@@ -2446,7 +2639,13 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                         "dataset_name": dataset_name,
                         "artifact_key": artifact_key,
                         "row_count": total_row_count,
-                        "delta_row_count": delta_row_count if output_write_mode == "append" else None,
+                        "delta_row_count": delta_row_count if resolved_runtime_write_mode == "append" else None,
+                        "write_mode_requested": item.get("write_mode_requested"),
+                        "write_mode_resolved": item.get("write_mode_resolved"),
+                        "runtime_write_mode": resolved_runtime_write_mode,
+                        "pk_columns": item.get("pk_columns") or [],
+                        "post_filtering_column": item.get("post_filtering_column"),
+                        "write_policy_hash": item.get("write_policy_hash"),
                         "lakefs_commit_id": merge_commit_id,
                         "lakefs_branch": base_branch,
                         "objectify_job_id": objectify_job_id,
@@ -2936,11 +3135,16 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
         df: DataFrame,
         artifact_bucket: str,
         prefix: str,
+        db_name: Optional[str] = None,
+        branch: Optional[str] = None,
+        dataset_name: Optional[str] = None,
+        execution_semantics: str = "snapshot",
         write_mode: str = "overwrite",
         file_prefix: Optional[str] = None,
         file_format: str = "parquet",
         partition_cols: Optional[List[str]] = None,
-    ) -> str:
+        base_row_count: Optional[int] = None,
+    ) -> Dict[str, Any]:
         normalized_kind = normalize_output_kind(output_kind)
         if normalized_kind == OUTPUT_KIND_DATASET:
             return await self._materialize_dataset_output(
@@ -2948,13 +3152,19 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                 df=df,
                 artifact_bucket=artifact_bucket,
                 prefix=prefix,
+                db_name=db_name,
+                branch=branch,
+                dataset_name=dataset_name,
+                execution_semantics=execution_semantics,
                 write_mode=write_mode,
                 file_prefix=file_prefix,
                 file_format=file_format,
                 partition_cols=partition_cols,
+                base_row_count=base_row_count,
             )
+
         if normalized_kind == OUTPUT_KIND_GEOTEMPORAL:
-            return await self._materialize_geotemporal_output(
+            artifact_key = await self._materialize_geotemporal_output(
                 output_metadata=output_metadata,
                 df=df,
                 artifact_bucket=artifact_bucket,
@@ -2964,8 +3174,8 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                 file_format=file_format,
                 partition_cols=partition_cols,
             )
-        if normalized_kind == OUTPUT_KIND_MEDIA:
-            return await self._materialize_media_output(
+        elif normalized_kind == OUTPUT_KIND_MEDIA:
+            artifact_key = await self._materialize_media_output(
                 output_metadata=output_metadata,
                 df=df,
                 artifact_bucket=artifact_bucket,
@@ -2975,8 +3185,8 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                 file_format=file_format,
                 partition_cols=partition_cols,
             )
-        if normalized_kind == OUTPUT_KIND_VIRTUAL:
-            return await self._materialize_virtual_output(
+        elif normalized_kind == OUTPUT_KIND_VIRTUAL:
+            artifact_key = await self._materialize_virtual_output(
                 output_metadata=output_metadata,
                 df=df,
                 artifact_bucket=artifact_bucket,
@@ -2986,8 +3196,8 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                 file_format=file_format,
                 partition_cols=partition_cols,
             )
-        if normalized_kind == OUTPUT_KIND_ONTOLOGY:
-            return await self._materialize_ontology_output(
+        elif normalized_kind == OUTPUT_KIND_ONTOLOGY:
+            artifact_key = await self._materialize_ontology_output(
                 output_metadata=output_metadata,
                 df=df,
                 artifact_bucket=artifact_bucket,
@@ -2997,7 +3207,18 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                 file_format=file_format,
                 partition_cols=partition_cols,
             )
-        raise ValueError(f"Unsupported output_kind for materialization: {normalized_kind}")
+        else:
+            raise ValueError(f"Unsupported output_kind for materialization: {normalized_kind}")
+
+        return {
+            "artifact_key": artifact_key,
+            "delta_row_count": int(base_row_count or 0),
+            "write_mode_requested": write_mode,
+            "write_mode_resolved": write_mode,
+            "runtime_write_mode": write_mode,
+            "pk_columns": [],
+            "write_policy_hash": None,
+        }
 
     async def _materialize_dataset_output(
         self,
@@ -3006,21 +3227,132 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
         df: DataFrame,
         artifact_bucket: str,
         prefix: str,
+        db_name: Optional[str],
+        branch: Optional[str],
+        dataset_name: Optional[str],
+        execution_semantics: str,
         write_mode: str,
         file_prefix: Optional[str],
         file_format: str,
         partition_cols: Optional[List[str]],
-    ) -> str:
-        _ = output_metadata
-        return await self._materialize_output_dataframe(
-            df,
+        base_row_count: Optional[int],
+    ) -> Dict[str, Any]:
+        policy = resolve_dataset_write_policy(
+            definition={},
+            output_metadata=output_metadata,
+            execution_semantics=execution_semantics,
+        )
+        for warning in policy.warnings:
+            logger.warning("Dataset output policy normalized for %s: %s", dataset_name or prefix, warning)
+        output_metadata.clear()
+        output_metadata.update(policy.normalized_metadata)
+
+        validation_errors = validate_dataset_output_metadata(
+            definition={},
+            output_metadata=output_metadata,
+            execution_semantics=execution_semantics,
+            available_columns=set(df.columns or []),
+        )
+        if validation_errors:
+            raise ValueError("Invalid dataset output metadata: " + "; ".join(validation_errors))
+
+        pk_columns = list(policy.primary_key_columns)
+        if pk_columns and policy.requires_primary_key:
+            await self._assert_no_duplicate_primary_keys(
+                df,
+                primary_key_columns=pk_columns,
+                label=f"dataset_output.input.{dataset_name or prefix}",
+            )
+
+        existing_df = self._empty_dataframe()
+        if policy.resolved_write_mode in {
+            DatasetWriteMode.APPEND_ONLY_NEW_ROWS,
+            DatasetWriteMode.CHANGELOG,
+            DatasetWriteMode.SNAPSHOT_DIFFERENCE,
+        }:
+            existing_df = await self._load_existing_output_dataset(
+                db_name=db_name,
+                branch=branch,
+                dataset_name=dataset_name,
+            )
+            if existing_df.columns and pk_columns:
+                missing_existing = [column for column in pk_columns if column not in set(existing_df.columns)]
+                if missing_existing:
+                    raise ValueError(
+                        "Existing dataset missing primary_key_columns: " + ", ".join(missing_existing)
+                    )
+                await self._assert_no_duplicate_primary_keys(
+                    existing_df,
+                    primary_key_columns=pk_columns,
+                    label=f"dataset_output.existing.{dataset_name or prefix}",
+                )
+
+        aligned_columns = list(df.columns or [])
+        input_aligned = self._align_columns(df, aligned_columns) if aligned_columns else df
+        existing_aligned = self._align_columns(existing_df, aligned_columns) if aligned_columns else existing_df
+
+        materialized_df = input_aligned
+        if policy.resolved_write_mode == DatasetWriteMode.ALWAYS_APPEND:
+            materialized_df = input_aligned
+        elif policy.resolved_write_mode == DatasetWriteMode.APPEND_ONLY_NEW_ROWS:
+            if existing_aligned.columns and pk_columns:
+                existing_keys = existing_aligned.select(*pk_columns).distinct()
+                materialized_df = input_aligned.join(existing_keys, on=pk_columns, how="left_anti")
+            else:
+                materialized_df = input_aligned
+        elif policy.resolved_write_mode in {DatasetWriteMode.CHANGELOG, DatasetWriteMode.SNAPSHOT_DIFFERENCE}:
+            if existing_aligned.columns and pk_columns:
+                left = input_aligned.withColumn("__input_hash", self._row_hash_expr(input_aligned))
+                right = existing_aligned.withColumn("__existing_hash", self._row_hash_expr(existing_aligned))
+                changed = left.join(
+                    right.select(*(pk_columns + ["__existing_hash"])),
+                    on=pk_columns,
+                    how="left",
+                ).filter(
+                    F.col("__existing_hash").isNull() | (F.col("__existing_hash") != F.col("__input_hash"))
+                )
+                materialized_df = changed.select(*aligned_columns)
+            else:
+                materialized_df = input_aligned
+        elif policy.resolved_write_mode == DatasetWriteMode.SNAPSHOT_REPLACE:
+            materialized_df = input_aligned
+        elif policy.resolved_write_mode == DatasetWriteMode.SNAPSHOT_REPLACE_AND_REMOVE:
+            post_col = str(policy.post_filtering_column or "").strip()
+            if not post_col:
+                raise ValueError("post_filtering_column is required for snapshot_replace_and_remove")
+            materialized_df = self._filter_snapshot_replace_active_rows(
+                input_aligned,
+                post_filtering_column=post_col,
+            )
+
+        delta_row_count = int(
+            await self._run_spark(
+                lambda: materialized_df.count(),
+                label=f"count:materialized:{dataset_name or prefix}",
+            )
+        )
+        artifact_key = await self._materialize_output_dataframe(
+            materialized_df,
             artifact_bucket=artifact_bucket,
             prefix=prefix,
-            write_mode=write_mode,
+            write_mode=policy.runtime_write_mode,
             file_prefix=file_prefix,
-            file_format=file_format,
-            partition_cols=partition_cols,
+            file_format=policy.output_format or file_format,
+            partition_cols=policy.partition_by or partition_cols,
         )
+        return {
+            "artifact_key": artifact_key,
+            "delta_row_count": delta_row_count,
+            "write_mode_requested": policy.requested_write_mode,
+            "write_mode_resolved": policy.resolved_write_mode.value,
+            "runtime_write_mode": policy.runtime_write_mode,
+            "pk_columns": list(policy.primary_key_columns),
+            "post_filtering_column": policy.post_filtering_column,
+            "output_format": policy.output_format,
+            "partition_by": list(policy.partition_by),
+            "write_policy_hash": policy.policy_hash,
+            "input_row_count": int(base_row_count or delta_row_count),
+        }
 
     async def _materialize_geotemporal_output(
         self,
@@ -3114,6 +3446,77 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
             partition_cols=partition_cols,
         )
 
+    async def _load_existing_output_dataset(
+        self,
+        *,
+        db_name: Optional[str],
+        branch: Optional[str],
+        dataset_name: Optional[str],
+    ) -> DataFrame:
+        if not self.dataset_registry:
+            return self._empty_dataframe()
+        resolved_db = str(db_name or "").strip()
+        resolved_branch = str(branch or "").strip() or "main"
+        resolved_name = str(dataset_name or "").strip()
+        if not resolved_db or not resolved_name:
+            return self._empty_dataframe()
+
+        dataset = await self.dataset_registry.get_dataset_by_name(
+            db_name=resolved_db,
+            name=resolved_name,
+            branch=resolved_branch,
+        )
+        if not dataset:
+            return self._empty_dataframe()
+        version = await self.dataset_registry.get_latest_version(dataset_id=dataset.dataset_id)
+        if not version or not str(version.artifact_key or "").strip():
+            return self._empty_dataframe()
+        parsed = parse_s3_uri(str(version.artifact_key))
+        if not parsed:
+            raise ValueError(f"Invalid artifact_key for dataset {resolved_name}: {version.artifact_key}")
+        bucket, key = parsed
+        temp_dirs: List[str] = []
+        try:
+            return await self._load_artifact_dataframe(bucket, key, temp_dirs)
+        finally:
+            for temp_dir in temp_dirs:
+                shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def _align_columns(self, df: DataFrame, columns: List[str]) -> DataFrame:
+        if not columns:
+            return df
+        aligned = df
+        existing = set(df.columns or [])
+        for column in columns:
+            if column not in existing:
+                aligned = aligned.withColumn(column, F.lit(None))
+        return aligned.select(*columns)
+
+    async def _assert_no_duplicate_primary_keys(
+        self,
+        df: DataFrame,
+        *,
+        primary_key_columns: List[str],
+        label: str,
+    ) -> None:
+        if not primary_key_columns:
+            return
+        duplicate_count = int(
+            await self._run_spark(
+                lambda: df.groupBy(*primary_key_columns).count().filter(F.col("count") > 1).limit(1).count(),
+                label=f"duplicate_pk_check:{label}",
+            )
+        )
+        if duplicate_count > 0:
+            raise ValueError(
+                "Primary key duplicates detected for columns: " + ", ".join(primary_key_columns)
+            )
+
+    def _filter_snapshot_replace_active_rows(self, df: DataFrame, *, post_filtering_column: str) -> DataFrame:
+        normalized = F.lower(F.trim(F.col(post_filtering_column).cast("string")))
+        inactive = normalized.isin("1", "true", "t", "yes", "y", "on")
+        return df.filter(~inactive | F.col(post_filtering_column).isNull())
+
     async def _materialize_output_dataframe(
         self,
         df: DataFrame,
@@ -3135,8 +3538,8 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
         if resolved_write_mode not in {"overwrite", "append"}:
             raise ValueError("write_mode must be overwrite or append")
         resolved_format = str(file_format or "parquet").strip().lower() or "parquet"
-        if resolved_format not in {"parquet", "json"}:
-            raise ValueError("file_format must be parquet or json")
+        if resolved_format not in {"parquet", "json", "csv", "avro", "orc"}:
+            raise ValueError("file_format must be parquet|json|csv|avro|orc")
         resolved_partition_cols = [col for col in (partition_cols or []) if str(col).strip()]
         if resolved_partition_cols:
             missing = [col for col in resolved_partition_cols if col not in df.columns]
@@ -3158,14 +3561,36 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                     lambda: writer.parquet(output_path),
                     label=f"write_parquet:{normalized_prefix}",
                 )
-            else:
+            elif resolved_format == "json":
                 await self._run_spark(
                     lambda: writer.json(output_path),
                     label=f"write_json:{normalized_prefix}",
                 )
+            elif resolved_format == "csv":
+                await self._run_spark(
+                    lambda: writer.option("header", "true").csv(output_path),
+                    label=f"write_csv:{normalized_prefix}",
+                )
+            elif resolved_format == "avro":
+                await self._run_spark(
+                    lambda: writer.format("avro").save(output_path),
+                    label=f"write_avro:{normalized_prefix}",
+                )
+            else:
+                await self._run_spark(
+                    lambda: writer.orc(output_path),
+                    label=f"write_orc:{normalized_prefix}",
+                )
+            extension_map = {
+                "parquet": {".parquet"},
+                "json": {".json"},
+                "csv": {".csv"},
+                "avro": {".avro"},
+                "orc": {".orc"},
+            }
             part_files = _list_part_files(
                 output_path,
-                extensions={".parquet"} if resolved_format == "parquet" else {".json"},
+                extensions=extension_map.get(resolved_format, {f".{resolved_format}"}),
             )
             if not part_files:
                 raise FileNotFoundError("Spark output part files not found")
@@ -3180,9 +3605,13 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                     base_name = f"{unique_prefix}_{base_name}"
                 rel_path = os.path.join(dir_name, base_name) if dir_name else base_name
                 target_key = f"{normalized_prefix}/{rel_path.replace(os.sep, '/')}"
-                content_type = (
-                    "application/x-parquet" if resolved_format == "parquet" else "application/json"
-                )
+                content_type = {
+                    "parquet": "application/x-parquet",
+                    "json": "application/json",
+                    "csv": "text/csv",
+                    "avro": "application/avro",
+                    "orc": "application/orc",
+                }.get(resolved_format, "application/octet-stream")
                 with open(part_file, "rb") as handle:
                     await self.storage.save_bytes(
                         artifact_bucket,
@@ -4306,6 +4735,10 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
             return "excel"
         if ext == ".json":
             return "json"
+        if ext == ".avro":
+            return "avro"
+        if ext == ".orc":
+            return "orc"
         return ""
 
     def _load_external_input_dataframe(self, read_config: Dict[str, Any], *, node_id: str) -> DataFrame:
@@ -4456,6 +4889,8 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
         has_parquet = any(path.endswith(".parquet") for path in local_paths)
         has_json = any(path.endswith(".json") for path in local_paths)
         has_csv = any(path.endswith(".csv") for path in local_paths)
+        has_avro = any(path.endswith(".avro") for path in local_paths)
+        has_orc = any(path.endswith(".orc") for path in local_paths)
         has_excel = any(path.endswith((".xlsx", ".xlsm")) for path in local_paths)
 
         if forced_format == "parquet" or (not forced_format and has_parquet):
@@ -4468,6 +4903,16 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
             return await self._run_spark(
                 lambda: self._strip_bom_headers(reader.csv(temp_dir)),
                 label="read_prefix:csv",
+            )
+        if forced_format == "avro" or (not forced_format and has_avro):
+            return await self._run_spark(
+                lambda: reader.format("avro").load(temp_dir),
+                label="read_prefix:avro",
+            )
+        if forced_format == "orc" or (not forced_format and has_orc):
+            return await self._run_spark(
+                lambda: reader.orc(temp_dir),
+                label="read_prefix:orc",
             )
         if forced_format in {"excel", "xlsx"} or (not forced_format and has_excel):
             return await self._run_spark(
