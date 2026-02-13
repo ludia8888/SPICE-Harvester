@@ -1969,6 +1969,8 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                             "write_policy_hash": write_policy_hash,
                             "pk_columns": pk_columns_policy,
                             "post_filtering_column": post_filtering_column,
+                            "has_incremental_input": has_incremental_input,
+                            "incremental_inputs_have_additive_updates": incremental_inputs_have_additive_updates,
                             "artifact_prefix": artifact_prefix,
                             "schema_columns": schema_columns,
                             "schema_hash": schema_hash,
@@ -2092,6 +2094,16 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                             "pk_columns": materialized.get("pk_columns") or item.get("pk_columns") or [],
                             "post_filtering_column": materialized.get("post_filtering_column") or item.get("post_filtering_column"),
                             "write_policy_hash": materialized.get("write_policy_hash") or item.get("write_policy_hash"),
+                            "has_incremental_input": (
+                                materialized.get("has_incremental_input")
+                                if materialized.get("has_incremental_input") is not None
+                                else item.get("has_incremental_input")
+                            ),
+                            "incremental_inputs_have_additive_updates": (
+                                materialized.get("incremental_inputs_have_additive_updates")
+                                if materialized.get("incremental_inputs_have_additive_updates") is not None
+                                else item.get("incremental_inputs_have_additive_updates")
+                            ),
                             "columns": item["schema_columns"],
                             "schema_hash": item["schema_hash"],
                             "schema_json": {"columns": item["schema_columns"]},
@@ -2447,6 +2459,8 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                         "write_policy_hash": write_policy_hash,
                         "pk_columns": pk_columns_policy,
                         "post_filtering_column": post_filtering_column,
+                        "has_incremental_input": has_incremental_input,
+                        "incremental_inputs_have_additive_updates": incremental_inputs_have_additive_updates,
                         "row_count": delta_row_count,
                         "columns": schema_columns,
                         "rows": output_sample,
@@ -2546,6 +2560,16 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                         "pk_columns": materialized.get("pk_columns") or item.get("pk_columns") or [],
                         "post_filtering_column": materialized.get("post_filtering_column") or item.get("post_filtering_column"),
                         "write_policy_hash": materialized.get("write_policy_hash") or item.get("write_policy_hash"),
+                        "has_incremental_input": (
+                            materialized.get("has_incremental_input")
+                            if materialized.get("has_incremental_input") is not None
+                            else item.get("has_incremental_input")
+                        ),
+                        "incremental_inputs_have_additive_updates": (
+                            materialized.get("incremental_inputs_have_additive_updates")
+                            if materialized.get("incremental_inputs_have_additive_updates") is not None
+                            else item.get("incremental_inputs_have_additive_updates")
+                        ),
                         "columns": item["columns"],
                         "rows": item["rows"],
                         "sample_row_count": item["sample_row_count"],
@@ -2635,6 +2659,10 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                         "runtime_write_mode": resolved_runtime_write_mode,
                         "pk_columns": item.get("pk_columns") or [],
                         "write_policy_hash": item.get("write_policy_hash"),
+                        "has_incremental_input": item.get("has_incremental_input"),
+                        "incremental_inputs_have_additive_updates": item.get(
+                            "incremental_inputs_have_additive_updates"
+                        ),
                         "sample_row_count": len(output_sample),
                         "column_stats": item.get("column_stats") or {},
                     },
@@ -2665,6 +2693,10 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                         "pk_columns": item.get("pk_columns") or [],
                         "post_filtering_column": item.get("post_filtering_column"),
                         "write_policy_hash": item.get("write_policy_hash"),
+                        "has_incremental_input": item.get("has_incremental_input"),
+                        "incremental_inputs_have_additive_updates": item.get(
+                            "incremental_inputs_have_additive_updates"
+                        ),
                         "lakefs_commit_id": merge_commit_id,
                         "lakefs_branch": base_branch,
                         "objectify_job_id": objectify_job_id,
@@ -3239,6 +3271,8 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
             "runtime_write_mode": write_mode,
             "pk_columns": [],
             "write_policy_hash": None,
+            "has_incremental_input": None,
+            "incremental_inputs_have_additive_updates": None,
         }
 
     async def _materialize_dataset_output(
@@ -3283,36 +3317,34 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
             raise ValueError("Invalid dataset output metadata: " + "; ".join(validation_errors))
 
         pk_columns = list(policy.primary_key_columns)
-        if pk_columns and policy.requires_primary_key:
-            await self._assert_no_duplicate_primary_keys(
-                df,
-                primary_key_columns=pk_columns,
-                label=f"dataset_output.input.{dataset_name or prefix}",
-            )
 
         existing_df = self._empty_dataframe()
         if policy.resolved_write_mode in {
             DatasetWriteMode.APPEND_ONLY_NEW_ROWS,
             DatasetWriteMode.SNAPSHOT_DIFFERENCE,
+            DatasetWriteMode.SNAPSHOT_REPLACE,
+            DatasetWriteMode.SNAPSHOT_REPLACE_AND_REMOVE,
         }:
             existing_df = await self._load_existing_output_dataset(
                 db_name=db_name,
                 branch=branch,
                 dataset_name=dataset_name,
             )
-            if existing_df.columns and pk_columns:
-                missing_existing = [column for column in pk_columns if column not in set(existing_df.columns)]
-                if missing_existing:
-                    raise ValueError(
-                        "Existing dataset missing primary_key_columns: " + ", ".join(missing_existing)
-                    )
-                await self._assert_no_duplicate_primary_keys(
-                    existing_df,
-                    primary_key_columns=pk_columns,
-                    label=f"dataset_output.existing.{dataset_name or prefix}",
+
+        if existing_df.columns and pk_columns:
+            missing_existing = [column for column in pk_columns if column not in set(existing_df.columns)]
+            if missing_existing:
+                raise ValueError(
+                    "Existing dataset missing primary_key_columns: " + ", ".join(missing_existing)
                 )
 
         aligned_columns = list(df.columns or [])
+        if policy.resolved_write_mode in {
+            DatasetWriteMode.SNAPSHOT_REPLACE,
+            DatasetWriteMode.SNAPSHOT_REPLACE_AND_REMOVE,
+        } and existing_df.columns:
+            existing_only = [column for column in (existing_df.columns or []) if column not in set(aligned_columns)]
+            aligned_columns = [*aligned_columns, *existing_only]
         input_aligned = self._align_columns(df, aligned_columns) if aligned_columns else df
         existing_aligned = self._align_columns(existing_df, aligned_columns) if aligned_columns else existing_df
 
@@ -3323,11 +3355,12 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
             # Changelog appends all rows produced in the current transaction.
             materialized_df = input_aligned
         elif policy.resolved_write_mode == DatasetWriteMode.APPEND_ONLY_NEW_ROWS:
+            deduped_input = input_aligned.dropDuplicates(pk_columns) if pk_columns else input_aligned
             if existing_aligned.columns and pk_columns:
                 existing_keys = existing_aligned.select(*pk_columns).distinct()
-                materialized_df = input_aligned.join(existing_keys, on=pk_columns, how="left_anti")
+                materialized_df = deduped_input.join(existing_keys, on=pk_columns, how="left_anti")
             else:
-                materialized_df = input_aligned
+                materialized_df = deduped_input
         elif policy.resolved_write_mode == DatasetWriteMode.SNAPSHOT_DIFFERENCE:
             if existing_aligned.columns and pk_columns:
                 existing_keys = existing_aligned.select(*pk_columns).distinct()
@@ -3335,15 +3368,30 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
             else:
                 materialized_df = input_aligned
         elif policy.resolved_write_mode == DatasetWriteMode.SNAPSHOT_REPLACE:
-            materialized_df = input_aligned
+            upsert_df = input_aligned.dropDuplicates(pk_columns) if pk_columns else input_aligned
+            if existing_aligned.columns and pk_columns:
+                existing_dedup = existing_aligned.dropDuplicates(pk_columns)
+                upsert_keys = upsert_df.select(*pk_columns).distinct()
+                preserved_existing = existing_dedup.join(upsert_keys, on=pk_columns, how="left_anti")
+                materialized_df = preserved_existing.unionByName(upsert_df, allowMissingColumns=True)
+            else:
+                materialized_df = upsert_df
         elif policy.resolved_write_mode == DatasetWriteMode.SNAPSHOT_REPLACE_AND_REMOVE:
             post_col = str(policy.post_filtering_column or "").strip()
             if not post_col:
                 raise ValueError("post_filtering_column is required for snapshot_replace_and_remove")
-            materialized_df = self._filter_snapshot_replace_active_rows(
-                input_aligned,
-                post_filtering_column=post_col,
-            )
+            is_false_expr = self._post_filter_false_expr(post_filtering_column=post_col)
+            upsert_input = input_aligned.filter(~is_false_expr)
+            upsert_df = upsert_input.dropDuplicates(pk_columns) if pk_columns else upsert_input
+            false_keys = input_aligned.filter(is_false_expr).select(*pk_columns).distinct()
+            if existing_aligned.columns and pk_columns:
+                existing_dedup = existing_aligned.dropDuplicates(pk_columns)
+                upsert_keys = upsert_df.select(*pk_columns).distinct()
+                preserved_existing = existing_dedup.join(upsert_keys, on=pk_columns, how="left_anti")
+                preserved_existing = preserved_existing.join(false_keys, on=pk_columns, how="left_anti")
+                materialized_df = preserved_existing.unionByName(upsert_df, allowMissingColumns=True)
+            else:
+                materialized_df = upsert_df
 
         delta_row_count = int(
             await self._run_spark(
@@ -3372,6 +3420,8 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
             "partition_by": list(policy.partition_by),
             "write_policy_hash": policy.policy_hash,
             "input_row_count": int(base_row_count or delta_row_count),
+            "has_incremental_input": policy.has_incremental_input,
+            "incremental_inputs_have_additive_updates": policy.incremental_inputs_have_additive_updates,
         }
 
     async def _materialize_geotemporal_output(
@@ -3512,30 +3562,9 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                 aligned = aligned.withColumn(column, F.lit(None))
         return aligned.select(*columns)
 
-    async def _assert_no_duplicate_primary_keys(
-        self,
-        df: DataFrame,
-        *,
-        primary_key_columns: List[str],
-        label: str,
-    ) -> None:
-        if not primary_key_columns:
-            return
-        duplicate_count = int(
-            await self._run_spark(
-                lambda: df.groupBy(*primary_key_columns).count().filter(F.col("count") > 1).limit(1).count(),
-                label=f"duplicate_pk_check:{label}",
-            )
-        )
-        if duplicate_count > 0:
-            raise ValueError(
-                "Primary key duplicates detected for columns: " + ", ".join(primary_key_columns)
-            )
-
-    def _filter_snapshot_replace_active_rows(self, df: DataFrame, *, post_filtering_column: str) -> DataFrame:
+    def _post_filter_false_expr(self, *, post_filtering_column: str) -> Any:
         normalized = F.lower(F.trim(F.col(post_filtering_column).cast("string")))
-        inactive = normalized.isin("1", "true", "t", "yes", "y", "on")
-        return df.filter(~inactive | F.col(post_filtering_column).isNull())
+        return normalized.isin("0", "false", "f", "no", "n", "off")
 
     async def _materialize_output_dataframe(
         self,

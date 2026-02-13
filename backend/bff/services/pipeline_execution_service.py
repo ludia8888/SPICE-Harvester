@@ -59,6 +59,19 @@ from shared.observability.tracing import trace_external_call
 logger = logging.getLogger(__name__)
 
 
+def _parse_optional_bool(value: Any) -> Optional[bool]:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return None
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "y", "on"}:
+        return True
+    if text in {"0", "false", "no", "n", "off"}:
+        return False
+    return None
+
+
 def _resolve_output_contract_from_definition(
     *,
     definition_json: Dict[str, Any],
@@ -1123,6 +1136,16 @@ async def deploy_pipeline(
                 post_filtering_column = str(
                     item.get("post_filtering_column") or item.get("postFilteringColumn") or ""
                 ).strip() or None
+                has_incremental_input = _parse_optional_bool(
+                    item.get("has_incremental_input")
+                    if "has_incremental_input" in item
+                    else item.get("hasIncrementalInput")
+                )
+                incremental_inputs_have_additive_updates = _parse_optional_bool(
+                    item.get("incremental_inputs_have_additive_updates")
+                    if "incremental_inputs_have_additive_updates" in item
+                    else item.get("incrementalInputsHaveAdditiveUpdates")
+                )
 
                 dataset = await dataset_registry.get_dataset_by_name(
                     db_name=db_name,
@@ -1163,6 +1186,8 @@ async def deploy_pipeline(
                         "pk_columns": pk_columns,
                         "post_filtering_column": post_filtering_column,
                         "write_policy_hash": write_policy_hash,
+                        "has_incremental_input": has_incremental_input,
+                        "incremental_inputs_have_additive_updates": incremental_inputs_have_additive_updates,
                         "breaking_changes": breaking_changes,
                     }
                 )
@@ -1191,6 +1216,10 @@ async def deploy_pipeline(
                     definition=definition_json or {},
                     output_metadata=output_contract.get("output_metadata") if isinstance(output_contract.get("output_metadata"), dict) else {},
                     execution_semantics=execution_semantics,
+                    has_incremental_input=_parse_optional_bool(item.get("has_incremental_input")),
+                    incremental_inputs_have_additive_updates=_parse_optional_bool(
+                        item.get("incremental_inputs_have_additive_updates")
+                    ),
                 )
                 observed_hash = str(item.get("write_policy_hash") or "").strip()
                 observed_resolved = str(item.get("write_mode_resolved") or "").strip()
