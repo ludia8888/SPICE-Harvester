@@ -24,7 +24,7 @@ Welcome to the SPICE HARVESTER project documentation. This directory contains al
 
 #### For Developers
 1. Start with the [System Architecture](ARCHITECTURE.md) to understand the system (90-95% complete backend)
-2. Follow the root [README](../README.md) for backend setup instructions
+2. Follow the root repo `README.md` for backend setup instructions
 3. Use the [Frontend UI/UX Spec](frontend.md) for frontend development
 4. Review the [API Reference](API_REFERENCE.md) for endpoint details
 5. Check [Security Documentation](SECURITY.md) for secure coding practices
@@ -43,7 +43,7 @@ Welcome to the SPICE HARVESTER project documentation. This directory contains al
 4. Check monitoring and maintenance procedures (incl. [Data Lineage](DATA_LINEAGE.md), [Audit Logs](AUDIT_LOGS.md))
 
 #### For QA Engineers
-1. Review the test structure in [Backend testing docs](../backend/docs/testing/COMPLEX_TYPES_TEST_README.md)
+1. Review the test structure in `backend/docs/testing/COMPLEX_TYPES_TEST_README.md`
 2. Check API endpoints in [API Reference](API_REFERENCE.md)
 3. Follow testing procedures in relevant sections
 

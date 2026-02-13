@@ -126,9 +126,9 @@ napoleon_numpy_docstring = True
 autoapi_type = "python"
 autoapi_dirs = [str(BACKEND_ROOT)]
 autoapi_root = "reference/autoapi"
-# Keep AutoAPI's own index/toctree generation enabled so its pages are discoverable.
-# We avoid unwanted injection into the root toctree by explicitly linking to it in `docs/index.md`.
-autoapi_add_toctree_entry = True
+# Disable root toctree injection from AutoAPI to avoid transient "not_readable"
+# races during strict builds; API pages remain accessible via direct URLs/search.
+autoapi_add_toctree_entry = False
 autoapi_file_patterns = ["*.py"]
 autoapi_ignore = [
     "*/.git/*",

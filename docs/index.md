@@ -18,6 +18,7 @@ ERROR_SPEC
 ERROR_TAXONOMY
 OPERATIONS
 SECURITY
+architecture/rbac-future-design
 ```
 
 ```{toctree}
@@ -36,6 +37,7 @@ AGENT_PRD
 AGENT_PRD_CHECKLIST
 PipelineBuilder_checklist
 DATA_LINEAGE
+FOUNDRY_PARITY_REPORT
 AUDIT_LOGS
 IDEMPOTENCY_CONTRACT
 ACTION_WRITEBACK_DESIGN
@@ -74,7 +76,6 @@ LLM_INTEGRATION
 :caption: Reference
 
 reference/index
-reference/autoapi/index
 ```
 
 ```{toctree}

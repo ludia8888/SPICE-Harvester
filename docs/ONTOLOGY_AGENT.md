@@ -129,7 +129,7 @@ Ontology Agent는 한 요청 안에서 반복적으로 도구를 호출하는 **
 | `selected_model` | string | - | 선호 LLM 모델 |
 
 #### Response
-```json
+```text
 {
   "status": "success",
   "message": "Ontology agent completed successfully",

@@ -11,8 +11,8 @@ repos:
 
       - id: docs-sphinx-check
         name: Docs Sphinx Check
-        entry: .venv-docs/bin/python scripts/check_docs.py --allow-warnings
+        entry: .venv-docs/bin/python scripts/check_docs.py
         language: system
         pass_filenames: false
         always_run: true
-        description: "Fail commit on Sphinx build errors"
+        description: "Fail commit on Sphinx warnings/errors"

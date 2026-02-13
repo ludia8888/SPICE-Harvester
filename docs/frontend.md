@@ -1,3 +1,5 @@
+# Frontend
+
 시현님, 아래 문서는 BFF v1 레퍼런스(2025‑12‑19) 계약을 그대로 준수하면서, **Blueprint.js(팔란티어 스타일)**로 “프론트엔드 개발자가 즉시 구현 가능한 수준”SPICE Harvester UI/UX 기획서 최종본 (BFF v1 Strict)
 	•	버전: UI Spec v1.0
 	•	기준 API: BFF /api/v1 only
@@ -158,8 +160,8 @@ Graph Query는 ID 기반이므로, UI는 최소한 이 캐시가 필요합니다
 	•	ClassRegistryItem
 	•	class_id
 	•	label(LocalizedText)
-	•	properties[](name/type/label/required/pk)
-	•	relationships[](predicate/target/label/cardinality)
+	•	properties[]: name/type/label/required/pk
+	•	relationships[]: predicate/target/label/cardinality
 	•	사용처:
 	•	Graph Builder의 class/predicate dropdown
 	•	Import target_schema 구성(= properties → ImportTargetField[])
