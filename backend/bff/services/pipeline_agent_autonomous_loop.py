@@ -568,6 +568,10 @@ _PIPELINE_AGENT_ALLOWED_TOOLS: tuple[str, ...] = (
     "plan_add_dedupe",
     "plan_add_normalize",
     "plan_add_regex_replace",
+    "plan_add_split",
+    "plan_add_geospatial",
+    "plan_add_pattern_mining",
+    "plan_add_stream_join",
     "plan_add_output",
     "plan_add_edge",
     "plan_delete_edge",
@@ -1200,6 +1204,23 @@ def _build_system_prompt(*, allowed_tools: List[str]) -> str:
         "  Required: `input_node_id`, `expression` (string) + `alias` (new column name).\n"
         "  OR: `input_node_id`, `computations` (list of `{alias, expression}`).\n"
         "  Optional: `node_id`.\n"
+        "\n"
+        "### plan_add_split\n"
+        "  Required: `input_node_id`, `expression`.\n"
+        "  Optional: `true_node_id`, `false_node_id`.\n"
+        "  Note: split is macro-expanded into true/false filter branches.\n"
+        "\n"
+        "### plan_add_geospatial\n"
+        "  Required: `input_node_id`, `mode` (point|geohash|distance).\n"
+        "  Optional: `config` (mode-specific fields), `node_id`.\n"
+        "\n"
+        "### plan_add_pattern_mining\n"
+        "  Required: `input_node_id`, `source_column`, `pattern`, `output_column`.\n"
+        "  Optional: `match_mode` (contains|extract), `node_id`.\n"
+        "\n"
+        "### plan_add_stream_join\n"
+        "  Required: `left_node_id`, `right_node_id`, `left_keys`, `right_keys`.\n"
+        "  Optional: `join_type`, `strategy` (dynamic|left_lookup|static), `node_id`.\n"
         "\n"
         "### dataset_sample\n"
         "  Required: `dataset_id`.  Optional: `limit` (default 20, max 50), `columns` (list).\n"
