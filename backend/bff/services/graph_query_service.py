@@ -282,6 +282,59 @@ def _collect_class_ids_from_hops(hops: Any) -> List[str]:
     return [c for c in class_ids if c]
 
 
+def _normalize_paths_for_response(paths: Any) -> List[Dict[str, Any]]:
+    """
+    Normalize graph path payloads to a stable object shape.
+
+    GraphFederationService may emit paths as `List[List[str]]` while API response
+    schema expects `List[Dict[str, Any]]`.
+    """
+    if not isinstance(paths, list):
+        return []
+
+    normalized: List[Dict[str, Any]] = []
+    for idx, path in enumerate(paths):
+        if isinstance(path, dict):
+            normalized.append(path)
+            continue
+
+        node_ids: List[str] = []
+        if isinstance(path, (list, tuple)):
+            for node_id in path:
+                text = str(node_id or "").strip()
+                if text:
+                    node_ids.append(text)
+        else:
+            text = str(path or "").strip()
+            if text:
+                node_ids.append(text)
+
+        normalized.append(
+            {
+                "path_id": idx,
+                "nodes": node_ids,
+                "hops": max(0, len(node_ids) - 1),
+            }
+        )
+    return normalized
+
+
+def _normalize_es_doc_id(raw_id: Any) -> str:
+    """
+    Normalize graph document identifiers to instance ID form for API compatibility.
+
+    Internal graph IDs are often stored as `Class/instance_id`; response field
+    `es_doc_id` is expected by clients/tests as the instance identifier.
+    """
+    text = str(raw_id or "").strip()
+    if not text:
+        return ""
+    if "/" in text:
+        _, instance_id = text.split("/", 1)
+        return instance_id
+    return text
+
+
 @trace_external_call("bff.graph_query.execute_graph_query")
 async def execute_graph_query(
     *,
@@ -443,10 +496,16 @@ async def execute_graph_query(
         nodes: List[GraphNode] = []
         for node in filtered_nodes:
             terminus_id = str(node.get("terminus_id") or node.get("id") or "")
-            es_doc_id = node.get("es_doc_id") or terminus_id or node.get("id")
+            node_id = str(node.get("id") or "")
+            es_doc_id = (
+                str(node.get("es_doc_id") or "").strip()
+                or str(node.get("instance_id") or "").strip()
+                or _normalize_es_doc_id(terminus_id)
+                or _normalize_es_doc_id(node_id)
+            )
             es_ref = node.get("es_ref") or {
                 "index": f"{db_name}_instances",
-                "id": str(es_doc_id),
+                "id": node_id or terminus_id or str(es_doc_id),
             }
             node_index_status = dict(node.get("index_status") or {})
 
@@ -546,7 +605,7 @@ async def execute_graph_query(
             writeback_enabled=ctx.writeback_enabled,
             nodes=nodes,
             edges=edges,
-            paths=result.get("paths") if query.include_paths else None,
+            paths=_normalize_paths_for_response(result.get("paths")) if query.include_paths else None,
             index_summary=index_summary,
             query={
                 "start_class": query.start_class,

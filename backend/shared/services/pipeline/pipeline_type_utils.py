@@ -6,7 +6,6 @@ import re
 from typing import Any, Iterable, Optional
 
 from shared.services.pipeline.pipeline_schema_utils import normalize_schema_type
-import logging
 
 _XSD_TO_SPARK_TYPE: dict[str, str] = {
     "xsd:string": "string",
@@ -281,8 +280,7 @@ def parse_datetime_text_with_ambiguity(
             is_ambiguous=False,
             format_used="ISO-8601",
         )
-    except Exception:
-        logging.getLogger(__name__).warning("Broad exception fallback at shared/services/pipeline/pipeline_type_utils.py:283", exc_info=True)
+    except (TypeError, ValueError):
         pass
 
     base = normalized.replace("T", " ")
@@ -310,8 +308,7 @@ def parse_datetime_text_with_ambiguity(
                 is_ambiguous=False,
                 format_used=fmt,
             )
-        except Exception:
-            logging.getLogger(__name__).warning("Broad exception fallback at shared/services/pipeline/pipeline_type_utils.py:311", exc_info=True)
+        except ValueError:
             continue
 
     if "/" in base or "-" in base:
@@ -347,8 +344,7 @@ def parse_datetime_text_with_ambiguity(
                                 f"or {second}/{first}/{year} (European: day/month) = {second:02d}/{first:02d}/{year}. "
                                 "Assumed US format (month/day). Verify date format for your data source."
                             )
-                        except Exception:
-                            logging.getLogger(__name__).warning("Broad exception fallback at shared/services/pipeline/pipeline_type_utils.py:347", exc_info=True)
+                        except ValueError:
                             pass
                     else:
                         candidates = []
@@ -365,8 +361,7 @@ def parse_datetime_text_with_ambiguity(
                             ambiguity_warning=ambiguity_warning,
                             format_used=fmt,
                         )
-                    except Exception:
-                        logging.getLogger(__name__).warning("Broad exception fallback at shared/services/pipeline/pipeline_type_utils.py:364", exc_info=True)
+                    except ValueError:
                         continue
     return None
 

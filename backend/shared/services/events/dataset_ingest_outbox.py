@@ -32,6 +32,24 @@ from shared.utils.backoff_utils import next_exponential_backoff_at
 logger = logging.getLogger(__name__)
 
 
+def _coerce_occurred_at(value: Any) -> Optional[datetime]:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return None
+        normalized = raw.replace("Z", "+00:00")
+        try:
+            parsed = datetime.fromisoformat(normalized)
+        except ValueError as exc:
+            raise ValueError(f"Invalid occurred_at value: {value!r}") from exc
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+    raise TypeError(f"Unsupported occurred_at type: {type(value).__name__}")
+
+
 class DatasetIngestOutboxPublisher:
     def __init__(
         self,
@@ -206,11 +224,12 @@ class DatasetIngestOutboxPublisher:
             if self.lineage_store is None:
                 raise RuntimeError("LineageStore unavailable")
             payload = item.payload or {}
+            occurred_at = _coerce_occurred_at(payload.get("occurred_at"))
             await self.lineage_store.record_link(
                 from_node_id=payload.get("from_node_id"),
                 to_node_id=payload.get("to_node_id"),
                 edge_type=payload.get("edge_type"),
-                occurred_at=payload.get("occurred_at"),
+                occurred_at=occurred_at,
                 from_label=payload.get("from_label"),
                 to_label=payload.get("to_label"),
                 db_name=payload.get("db_name"),

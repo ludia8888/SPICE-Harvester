@@ -21,6 +21,7 @@ from bff.routers.pipeline_ops import (
     _resolve_pipeline_protected_branches,
     _validate_dependency_targets,
 )
+from bff.routers.pipeline_ops_preflight import _validate_pipeline_definition
 from bff.routers.pipeline_shared import _ensure_pipeline_permission, _log_pipeline_audit
 from shared.config.app_config import AppConfig
 from shared.config.settings import get_settings
@@ -392,6 +393,17 @@ async def update_pipeline(
                 definition_json=definition_json,
                 branch=branch or pipeline.branch,
             )
+            validation_errors = _validate_pipeline_definition(
+                definition_json=definition_json,
+                require_output=True,
+            )
+            if validation_errors:
+                raise classified_http_exception(
+                    status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    "Pipeline definition invalid",
+                    code=ErrorCode.REQUEST_VALIDATION_FAILED,
+                    extra={"errors": validation_errors},
+                )
 
         update = await pipeline_registry.update_pipeline(
             pipeline_id=pipeline_id,

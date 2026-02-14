@@ -39,6 +39,9 @@ COPY bff /app/bff
 # Copy data_connector module
 COPY data_connector /app/data_connector
 
+# Shared runtime dependency used by BFF rebuild/index services
+COPY objectify_worker /app/objectify_worker
+
 # Create data directory for SQLite
 RUN mkdir -p /app/data
 

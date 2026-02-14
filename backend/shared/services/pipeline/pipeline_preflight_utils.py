@@ -1599,6 +1599,15 @@ async def compute_pipeline_preflight(
             )
         elif operation == "window":
             schema_by_node[node_id] = _apply_window(base, metadata)
+        elif operation == "udf":
+            # UDF output schema is user code dependent and can only be confirmed at runtime.
+            # Keep known input columns for downstream checks but mark as dynamic so
+            # schema contract validation does not produce false blocking errors here.
+            schema_by_node[node_id] = SchemaInfo(
+                columns=list(base.columns),
+                type_map=dict(base.type_map),
+                dynamic_columns=True,
+            )
         else:
             schema_by_node[node_id] = base
 

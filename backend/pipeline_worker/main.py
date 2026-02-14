@@ -164,6 +164,18 @@ SUPPORTED_TRANSFORMS_SPARK = SUPPORTED_TRANSFORMS
 T = TypeVar("T")
 
 
+def _schema_column_names(columns: Optional[List[Any]]) -> set[str]:
+    names: set[str] = set()
+    for item in columns or []:
+        if isinstance(item, dict):
+            name = str(item.get("name") or item.get("column") or "").strip()
+        else:
+            name = str(item or "").strip()
+        if name:
+            names.add(name)
+    return names
+
+
 class _PipelinePayloadParseError(ValueError):
     def __init__(
         self,
@@ -1912,7 +1924,7 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                             execution_semantics=execution_semantics,
                             has_incremental_input=has_incremental_input,
                             incremental_inputs_have_additive_updates=incremental_inputs_have_additive_updates,
-                            available_columns=set(schema_columns or []),
+                            available_columns=_schema_column_names(schema_columns),
                         )
                         if dataset_output_errors:
                             error_payload = self._build_error_payload(
@@ -2406,7 +2418,7 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                         execution_semantics=execution_semantics,
                         has_incremental_input=has_incremental_input,
                         incremental_inputs_have_additive_updates=incremental_inputs_have_additive_updates,
-                        available_columns=set(schema_columns or []),
+                        available_columns=_schema_column_names(schema_columns),
                     )
                     if dataset_output_errors:
                         expectation_payload = self._build_error_payload(

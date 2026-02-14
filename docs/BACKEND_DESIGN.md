@@ -1,14 +1,14 @@
 # Backend Design Reference
 
-> Generated: 2026-02-14T10:15:49+09:00
+> Generated: 2026-02-14T10:49:13+09:00
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 > Source: AST + docstring extraction (module/class/function) via `scripts/generate_backend_methods.py`.
 
 ## Coverage Summary
 
-- Modules scanned: **977**
-- Modules with module docstring: **594/977**
-- Modules with broad `except Exception`: **312**
+- Modules scanned: **978**
+- Modules with module docstring: **594/978**
+- Modules with broad `except Exception`: **311**
 - Modules with bare `except:`: **0**
 - Modules with `return` inside `finally`: **0**
 
@@ -1528,10 +1528,10 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - API surface: public=3 | top-level functions=3 | classes=0 | methods=0
-- Runtime signals: async_functions=3 | try=3 | raise=7 | broad_except=3 | bare_except=0 | finally_return=0
+- Runtime signals: async_functions=3 | try=4 | raise=10 | broad_except=3 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/3 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
 - Internal imports (6): bff.routers.pipeline_deps; bff.routers.pipeline_shared; shared.errors.error_types; shared.models.requests; shared.observability.tracing; shared.services.registries.pipeline_registry
-- External imports (3): fastapi; logging; typing
+- External imports (4): asyncio; fastapi; logging; typing
 - Public API names: get_pipeline_artifact; list_pipeline_artifacts; list_pipeline_runs
 
 ### `backend/bff/routers/pipeline_ops.py`
@@ -2451,9 +2451,9 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
-- API surface: public=6 | top-level functions=12 | classes=1 | methods=0
+- API surface: public=6 | top-level functions=14 | classes=1 | methods=0
 - Runtime signals: async_functions=7 | try=18 | raise=15 | broad_except=18 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=5/12 (41%) | classes=0/1 (0%) | methods=0/0 (n/a)
+- Doc coverage: module=yes | top-level functions=7/14 (50%) | classes=0/1 (0%) | methods=0/0 (n/a)
 - Internal imports (13): shared.config.app_config; shared.config.settings; shared.errors.error_types; shared.models.graph_query; shared.observability.tracing; shared.security.input_sanitizer; shared.services.core.graph_federation_service_es; shared.services.core.writeback_merge_service (+5 more)
 - External imports (5): dataclasses; datetime; fastapi; logging; typing
 - Public API names: GraphBranchContext; execute_graph_query; execute_multi_hop_query; execute_simple_graph_query; find_relationship_paths; graph_service_health
@@ -2830,9 +2830,9 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - API surface: public=2 | top-level functions=2 | classes=0 | methods=0
-- Runtime signals: async_functions=2 | try=5 | raise=11 | broad_except=5 | bare_except=0 | finally_return=0
+- Runtime signals: async_functions=2 | try=5 | raise=12 | broad_except=5 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
-- Internal imports (10): bff.routers.pipeline_ops; bff.routers.pipeline_shared; shared.config.app_config; shared.errors.error_types; shared.models.requests; shared.observability.tracing; shared.security.input_sanitizer; shared.services.pipeline.pipeline_scheduler (+2 more)
+- Internal imports (11): bff.routers.pipeline_ops; bff.routers.pipeline_ops_preflight; bff.routers.pipeline_shared; shared.config.app_config; shared.errors.error_types; shared.models.requests; shared.observability.tracing; shared.security.input_sanitizer (+3 more)
 - External imports (4): fastapi; logging; typing; uuid
 - Public API names: create_pipeline; list_pipelines
 
@@ -2914,9 +2914,9 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - API surface: public=3 | top-level functions=3 | classes=0 | methods=0
-- Runtime signals: async_functions=3 | try=6 | raise=17 | broad_except=6 | bare_except=0 | finally_return=0
+- Runtime signals: async_functions=3 | try=6 | raise=18 | broad_except=6 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/3 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
-- Internal imports (11): bff.routers.pipeline_ops; bff.routers.pipeline_shared; shared.config.app_config; shared.config.settings; shared.errors.error_types; shared.models.requests; shared.observability.tracing; shared.security.input_sanitizer (+3 more)
+- Internal imports (12): bff.routers.pipeline_ops; bff.routers.pipeline_ops_preflight; bff.routers.pipeline_shared; shared.config.app_config; shared.config.settings; shared.errors.error_types; shared.models.requests; shared.observability.tracing (+4 more)
 - External imports (3): fastapi; logging; typing
 - Public API names: get_pipeline; get_pipeline_readiness; update_pipeline
 
@@ -5747,9 +5747,9 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
-- API surface: public=2 | top-level functions=3 | classes=2 | methods=100
+- API surface: public=2 | top-level functions=4 | classes=2 | methods=100
 - Runtime signals: async_functions=44 | try=62 | raise=81 | broad_except=47 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=0/3 (0%) | classes=0/2 (0%) | methods=5/100 (5%)
+- Doc coverage: module=yes | top-level functions=0/4 (0%) | classes=0/2 (0%) | methods=5/100 (5%)
 - Internal imports (51): data_connector.google_sheets.service; pipeline_worker.spark_schema_helpers; pipeline_worker.spark_transform_engine; pipeline_worker.worker_helpers; shared.config.app_config; shared.config.settings; shared.errors.error_envelope; shared.errors.error_types (+43 more)
 - External imports (17): __future__; asyncio; base64; concurrent; confluent_kafka; datetime; functools; httpx (+9 more)
 - Public API names: PipelineWorker; main
@@ -7783,9 +7783,9 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
-- API surface: public=4 | top-level functions=3 | classes=1 | methods=7
-- Runtime signals: async_functions=8 | try=2 | raise=2 | broad_except=2 | bare_except=0 | finally_return=0
-- Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/1 (0%) | methods=0/7 (0%)
+- API surface: public=4 | top-level functions=4 | classes=1 | methods=7
+- Runtime signals: async_functions=8 | try=3 | raise=4 | broad_except=2 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/4 (0%) | classes=0/1 (0%) | methods=0/7 (0%)
 - Internal imports (13): shared.config.app_config; shared.config.settings; shared.models.event_envelope; shared.observability.context_propagation; shared.observability.tracing; shared.services.events.outbox_runtime; shared.services.kafka.dlq_publisher; shared.services.kafka.producer_factory (+5 more)
 - External imports (6): __future__; asyncio; confluent_kafka; datetime; logging; typing
 - Public API names: DatasetIngestOutboxPublisher; build_dataset_event_payload; flush_dataset_ingest_outbox; run_dataset_ingest_outbox_worker
@@ -8400,10 +8400,10 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - API surface: public=1 | top-level functions=5 | classes=0 | methods=0
-- Runtime signals: async_functions=0 | try=2 | raise=0 | broad_except=2 | bare_except=0 | finally_return=0
+- Runtime signals: async_functions=0 | try=2 | raise=0 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=1/5 (20%) | classes=0/0 (n/a) | methods=0/0 (n/a)
 - Internal imports (0): not documented
-- External imports (5): __future__; collections; json; logging; typing
+- External imports (4): __future__; collections; json; typing
 - Public API names: compute_column_stats
 
 ### `backend/shared/services/pipeline/pipeline_scheduler.py`
@@ -8498,10 +8498,10 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - API surface: public=12 | top-level functions=11 | classes=2 | methods=0
-- Runtime signals: async_functions=0 | try=4 | raise=0 | broad_except=4 | bare_except=0 | finally_return=0
+- Runtime signals: async_functions=0 | try=4 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=4/11 (36%) | classes=2/2 (100%) | methods=0/0 (n/a)
 - Internal imports (1): shared.services.pipeline.pipeline_schema_utils
-- External imports (6): __future__; dataclasses; datetime; logging; re; typing
+- External imports (5): __future__; dataclasses; datetime; re; typing
 - Public API names: DateParseResult; NumericParseResult; infer_xsd_type_from_values; normalize_cast_mode; normalize_cast_target; parse_datetime_text; parse_datetime_text_with_ambiguity; parse_decimal_text; parse_decimal_text_with_ambiguity; parse_int_text; spark_type_to_xsd; xsd_to_spark_type
 
 ### `backend/shared/services/pipeline/pipeline_udf_runtime.py`
@@ -11893,6 +11893,20 @@
 - Internal imports (1): shared.services.core.graph_federation_service_es
 - External imports (2): pytest; unittest
 - Public API names: test_empty_relationships; test_empty_start_returns_empty; test_fan_out_cap; test_find_paths_es_sampling; test_forward_single_hop; test_get_relationship_refs; test_multi_hop_3_layers; test_no_cycles; test_node_id; test_normalize_hops_dict; test_normalize_hops_empty; test_normalize_hops_tuple (+3 more)
+
+### `backend/tests/unit/services/test_graph_query_paths_normalization.py`
+- Module summary: no docstring
+- Responsibilities: not documented
+- Invariants: not documented
+- Failure modes: not documented
+- Extension points: not documented
+- Dependencies (doc): not documented
+- API surface: public=3 | top-level functions=3 | classes=0 | methods=0
+- Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Internal imports (1): bff.services.graph_query_service
+- External imports (1): __future__
+- Public API names: test_normalize_es_doc_id_strips_class_prefix; test_normalize_paths_converts_list_paths_to_object_shape; test_normalize_paths_preserves_existing_object_paths
 
 ### `backend/tests/unit/services/test_graph_service_health.py`
 - Module summary: Tests for graph_service_health (ES-only, no TerminusDB).
