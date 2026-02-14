@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Mapping, Optional, Tuple
 
 import httpx
 from fastapi import HTTPException, Request, status
@@ -236,6 +236,60 @@ def _build_error_headers(payload: Dict[str, Any]) -> Dict[str, str]:
     return headers
 
 
+def _get_error_metrics_collector(service_name: str):
+    from shared.observability.metrics import get_metrics_collector
+
+    return get_metrics_collector(service_name)
+
+
+def _record_error_observability(*, service_name: str, payload: Dict[str, Any]) -> None:
+    try:
+        collector = _get_error_metrics_collector(service_name)
+        record = getattr(collector, "record_error_envelope", None)
+        if callable(record):
+            record(payload, source="http")
+    except Exception as exc:
+        logger.warning("Failed to record error observability metrics: %s", exc, exc_info=True)
+
+
+def _emit_error_log(payload: Dict[str, Any]) -> None:
+    enterprise = payload.get("enterprise") if isinstance(payload.get("enterprise"), Mapping) else {}
+    diagnostics = payload.get("diagnostics") if isinstance(payload.get("diagnostics"), Mapping) else {}
+    origin = payload.get("origin") if isinstance(payload.get("origin"), Mapping) else {}
+    event = {
+        "error_code": payload.get("code"),
+        "error_category": payload.get("category"),
+        "http_status": payload.get("http_status"),
+        "enterprise_code": enterprise.get("code"),
+        "enterprise_class": enterprise.get("class"),
+        "enterprise_domain": enterprise.get("domain"),
+        "legacy_code": enterprise.get("legacy_code"),
+        "runbook_ref": enterprise.get("runbook_ref"),
+        "request_id": payload.get("request_id"),
+        "correlation_id": payload.get("correlation_id"),
+        "trace_id": payload.get("trace_id"),
+        "error_group": diagnostics.get("group_fingerprint"),
+        "error_instance": diagnostics.get("instance_fingerprint"),
+        "origin_service": origin.get("service"),
+        "origin_method": origin.get("method"),
+        "origin_path": origin.get("path"),
+        "origin_endpoint": origin.get("endpoint"),
+    }
+
+    status_raw = payload.get("http_status")
+    try:
+        status_code = int(status_raw)
+    except (TypeError, ValueError):
+        status_code = 500
+
+    if status_code >= 500:
+        logger.error("API error response emitted", extra={"error_event": event})
+    elif status_code >= 400:
+        logger.warning("API error response emitted", extra={"error_event": event})
+    else:
+        logger.info("API error response emitted", extra={"error_event": event})
+
+
 def _build_response(
     request: Request,
     *,
@@ -261,6 +315,8 @@ def _build_response(
         context=context,
         external_code=external_code,
     )
+    _record_error_observability(service_name=service_name, payload=payload)
+    _emit_error_log(payload)
     headers = _build_error_headers(payload)
     return JSONResponse(
         status_code=payload.get("http_status", status_code),

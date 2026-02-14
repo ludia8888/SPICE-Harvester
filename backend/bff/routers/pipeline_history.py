@@ -57,7 +57,7 @@ async def list_pipeline_runs(
                 await asyncio.sleep(0.2)
         if runs is None:
             raise classified_http_exception(
-                status.HTTP_503_SERVICE_UNAVAILABLE,
+                status.HTTP_504_GATEWAY_TIMEOUT,
                 "Pipeline runs temporarily unavailable",
                 code=ErrorCode.DB_TIMEOUT,
             )
@@ -75,7 +75,7 @@ async def list_pipeline_runs(
             exc_info=True,
         )
         raise classified_http_exception(
-            status.HTTP_503_SERVICE_UNAVAILABLE,
+            status.HTTP_504_GATEWAY_TIMEOUT,
             "Pipeline runs temporarily unavailable",
             code=ErrorCode.DB_TIMEOUT,
         ) from exc

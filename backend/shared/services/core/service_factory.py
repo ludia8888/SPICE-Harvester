@@ -8,13 +8,14 @@ across BFF, OMS, and Funnel services.
 import logging
 import time
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
 import uvicorn
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
-from starlette.responses import Response
+from starlette.responses import JSONResponse, Response
 
 from shared.config.settings import (
     build_cors_middleware_config,
@@ -301,12 +302,17 @@ def _install_observability(app: FastAPI, service_info: ServiceInfo) -> None:
     - observable (/metrics exists; tracing logs warn when exporters missing)
     """
 
+    tracing_status: Dict[str, Any] = {}
+    metrics_status: Dict[str, Any] = {}
+    metrics_collector = None
+
     try:
         from shared.observability.tracing import get_tracing_service
         from shared.observability.metrics import (
             PROMETHEUS_CONTENT_TYPE_LATEST,
             RequestMetricsMiddleware,
             get_metrics_collector,
+            get_metrics_runtime_status,
             prometheus_latest,
         )
     except Exception as e:  # pragma: no cover - env dependent
@@ -318,8 +324,20 @@ def _install_observability(app: FastAPI, service_info: ServiceInfo) -> None:
         tracing_service = get_tracing_service(service_info.name)
         tracing_service.instrument_fastapi(app)
         app.state.tracing_service = tracing_service
+        tracing_status = tracing_service.runtime_status()
     except Exception as e:
         logger.warning(f"Tracing initialization failed (continuing without tracing): {e}")
+        tracing_status = {
+            "service": service_info.name,
+            "enabled": False,
+            "active": False,
+            "initialized": False,
+            "no_op_reason": str(e),
+            "exporters_enabled": [],
+            "exporters_active": [],
+            "fastapi_instrumented": False,
+            "client_instrumentations_active": [],
+        }
 
     # Metrics (Prometheus)
     try:
@@ -328,12 +346,76 @@ def _install_observability(app: FastAPI, service_info: ServiceInfo) -> None:
 
         # Request metrics middleware (call_next style)
         app.middleware("http")(RequestMetricsMiddleware(metrics_collector))
+        metrics_status = get_metrics_runtime_status(service_info.name)
     except Exception as e:
         logger.warning(f"Metrics initialization failed (continuing without request metrics): {e}")
+        metrics_status = {
+            "service": service_info.name,
+            "enabled": False,
+            "active": False,
+            "provider_initialized": False,
+            "no_op_reason": str(e),
+            "exporters_enabled": [],
+            "exporters_active": [],
+        }
+
+    if metrics_collector is not None:
+        try:
+            record_bootstrap = getattr(metrics_collector, "record_observability_bootstrap", None)
+            if callable(record_bootstrap):
+                record_bootstrap(
+                    tracing_status=tracing_status,
+                    metrics_status=metrics_status,
+                )
+        except Exception as e:
+            logger.warning("Failed to record observability bootstrap metrics: %s", e, exc_info=True)
+
+    app.state.observability_status = {
+        "service": service_info.name,
+        "tracing": tracing_status,
+        "metrics": metrics_status,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
 
     @app.get("/metrics", include_in_schema=False)
     async def prometheus_metrics():
         return Response(content=prometheus_latest(), media_type=PROMETHEUS_CONTENT_TYPE_LATEST)
+
+    @app.get("/observability/status", include_in_schema=False)
+    async def observability_status():
+        dynamic_tracing_status = tracing_status
+        try:
+            tracing_service = getattr(app.state, "tracing_service", None)
+            if tracing_service is not None and hasattr(tracing_service, "runtime_status"):
+                dynamic_tracing_status = tracing_service.runtime_status()
+        except Exception as e:
+            logger.warning("Failed to resolve tracing runtime status: %s", e, exc_info=True)
+
+        dynamic_metrics_status = metrics_status
+        try:
+            dynamic_metrics_status = get_metrics_runtime_status(service_info.name)
+        except Exception as e:
+            logger.warning("Failed to resolve metrics runtime status: %s", e, exc_info=True)
+
+        tracing_required = bool(dynamic_tracing_status.get("enabled"))
+        metrics_required = bool(dynamic_metrics_status.get("enabled"))
+        tracing_active = bool(dynamic_tracing_status.get("active"))
+        metrics_active = bool(dynamic_metrics_status.get("active"))
+        status_text = "ok"
+        if (tracing_required and not tracing_active) or (metrics_required and not metrics_active):
+            status_text = "degraded"
+
+        payload = {
+            "status": status_text,
+            "service": service_info.name,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "tracing": dynamic_tracing_status,
+            "metrics": dynamic_metrics_status,
+        }
+        return JSONResponse(
+            content=payload,
+            status_code=200 if status_text == "ok" else 503,
+        )
 
 
 def create_uvicorn_config(service_info: ServiceInfo, reload: bool = True) -> Dict[str, Any]:

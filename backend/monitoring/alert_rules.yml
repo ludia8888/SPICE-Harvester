@@ -19,13 +19,66 @@ groups:
           summary: "OTel collector down"
           description: "Prometheus scrape failed for otel-collector."
 
+      - alert: JaegerDown
+        expr: up{job="jaeger"} == 0
+        for: 2m
+        labels:
+          severity: page
+        annotations:
+          summary: "Jaeger down"
+          description: "Prometheus scrape failed for jaeger metrics endpoint."
+
       # FastAPI/Prometheus-client standard metric names (may be provided by instrumentation).
       - alert: SpiceHighHttp5xxRate
-        expr: sum(rate(http_requests_total{job="spice-services",status=~"5.."}[5m])) > 0
+        expr: sum(rate(spice_http_requests_total{status_code=~"5.."}[5m])) > 0
         for: 5m
         labels:
           severity: warn
         annotations:
           summary: "HTTP 5xx responses detected"
-          description: "5xx rate is > 0 for 5m across spice-services."
+          description: "5xx rate is > 0 for 5m across SPICE services."
 
+      - alert: SpiceEnterpriseErrorBurst
+        expr: sum(rate(spice_errors_total{http_status=~"5.."}[5m])) by (service, enterprise_code) > 0.05
+        for: 5m
+        labels:
+          severity: warn
+        annotations:
+          summary: "Enterprise error burst detected ({{ $labels.service }})"
+          description: "5xx enterprise error rate is elevated for code={{ $labels.enterprise_code }}."
+
+      - alert: SpiceRuntimeFallbackBurst
+        expr: sum(rate(spice_runtime_fallback_total[5m])) by (service, zone, operation, error_code) > 0.2
+        for: 10m
+        labels:
+          severity: warn
+        annotations:
+          summary: "Runtime fallback burst detected ({{ $labels.service }})"
+          description: "Runtime fallback rate is elevated for zone={{ $labels.zone }}, op={{ $labels.operation }}, code={{ $labels.error_code }}."
+
+      - alert: SpiceErrorTaxonomyMetricsMissing
+        expr: absent(spice_errors_total)
+        for: 5m
+        labels:
+          severity: warn
+        annotations:
+          summary: "Error taxonomy metrics missing"
+          description: "spice_errors_total is absent. Verify error envelope metric path."
+
+      - alert: SpiceRuntimeFallbackMetricsMissing
+        expr: absent(spice_runtime_fallback_total)
+        for: 5m
+        labels:
+          severity: warn
+        annotations:
+          summary: "Runtime fallback metrics missing"
+          description: "spice_runtime_fallback_total is absent. Verify runtime policy metric path."
+
+      - alert: SpiceObservabilitySignalInactive
+        expr: min by (service, signal) (spice_observability_signal_active) < 1
+        for: 10m
+        labels:
+          severity: warn
+        annotations:
+          summary: "Observability signal inactive ({{ $labels.service }}/{{ $labels.signal }})"
+          description: "Configured signal is not active. Check OTEL/exporter bootstrap and runtime status endpoint."

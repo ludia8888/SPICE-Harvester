@@ -1,6 +1,6 @@
 # Backend Method Index
 
-> Generated: 2026-02-14T10:49:13+09:00
+> Generated: 2026-02-14T12:42:29+09:00
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 
 ## action_outbox_worker
@@ -5554,9 +5554,12 @@
   - `_build_payload(request, service_name, code, category, status_code, message, detail, errors, context, external_code)` (line 173): no docstring
   - `_sanitize_header_value(value, max_len)` (line 203): no docstring
   - `_build_error_headers(payload)` (line 216): no docstring
-  - `_build_response(request, service_name, code, category, status_code, message, detail, errors, context, external_code)` (line 239): no docstring
-  - `_resolve_validation_error(exc)` (line 272): no docstring
-  - `install_error_handlers(app, service_name, validation_status)` (line 279): no docstring
+  - `_get_error_metrics_collector(service_name)` (line 239): no docstring
+  - `_record_error_observability(service_name, payload)` (line 245): no docstring
+  - `_emit_error_log(payload)` (line 255): no docstring
+  - `_build_response(request, service_name, code, category, status_code, message, detail, errors, context, external_code)` (line 293): no docstring
+  - `_resolve_validation_error(exc)` (line 328): no docstring
+  - `install_error_handlers(app, service_name, validation_status)` (line 335): no docstring
 
 ### `backend/shared/errors/error_types.py`
 - **Functions**
@@ -5574,17 +5577,18 @@
   - `_current_trace_id()` (line 56): no docstring
   - `_safe_text(value)` (line 77): no docstring
   - `_exception_fingerprint(zone, operation, exc, code)` (line 84): no docstring
-  - `log_exception_rate_limited(logger, zone, operation, exc, code, category, warn_interval_seconds, context)` (line 103): no docstring
-  - `fallback_value(policy, exc, logger, context)` (line 168): no docstring
-  - `preserve_primary_exception(primary_exc, cleanup_exc, logger, operation, zone, code, category, warn_interval_seconds, context)` (line 191): no docstring
-  - `assert_lineage_available(lineage_store, required, logger, operation, zone, context, warn_interval_seconds)` (line 226): no docstring
-  - `async record_lineage_or_raise(lineage_store, required, record_call, logger, operation, zone, context, warn_interval_seconds)` (line 256): no docstring
+  - `_record_runtime_fallback_metric(zone, operation, code, category)` (line 103): no docstring
+  - `log_exception_rate_limited(logger, zone, operation, exc, code, category, warn_interval_seconds, context)` (line 129): no docstring
+  - `fallback_value(policy, exc, logger, context)` (line 201): no docstring
+  - `preserve_primary_exception(primary_exc, cleanup_exc, logger, operation, zone, code, category, warn_interval_seconds, context)` (line 224): no docstring
+  - `assert_lineage_available(lineage_store, required, logger, operation, zone, context, warn_interval_seconds)` (line 259): no docstring
+  - `async record_lineage_or_raise(lineage_store, required, record_call, logger, operation, zone, context, warn_interval_seconds)` (line 289): no docstring
 - **Classes**
   - `RuntimeZone` (line 18): no docstring
   - `FallbackPolicy` (line 36): no docstring
   - `_RateState` (line 47): no docstring
-  - `LineageUnavailableError` (line 218): Raised when lineage is required but no lineage store is available.
-  - `LineageRecordError` (line 222): Raised when lineage recording fails in fail-closed mode.
+  - `LineageUnavailableError` (line 251): Raised when lineage is required but no lineage store is available.
+  - `LineageRecordError` (line 255): Raised when lineage recording fails in fail-closed mode.
 
 ### `backend/shared/i18n/__init__.py`
 
@@ -6079,32 +6083,38 @@
 
 ### `backend/shared/observability/metrics.py`
 - **Functions**
-  - `_log_no_op_once(reason)` (line 67): no docstring
-  - `initialize_metrics_provider(service_name)` (line 75): Configure a global MeterProvider so OTel metrics are actually exported.
-  - `_prom_counter(name, description, labelnames)` (line 145): no docstring
-  - `_prom_histogram(name, description, labelnames)` (line 153): no docstring
-  - `_prom_gauge(name, description, labelnames)` (line 161): no docstring
-  - `measure_time(metric_name, collector)` (line 666): Decorator for measuring function execution time
-  - `prometheus_latest()` (line 779): Render Prometheus metrics for `/metrics`.
-  - `get_metrics_collector(service_name)` (line 793): Get or create global metrics collector
+  - `_log_no_op_once(reason)` (line 69): no docstring
+  - `initialize_metrics_provider(service_name)` (line 78): Configure a global MeterProvider so OTel metrics are actually exported.
+  - `_prom_counter(name, description, labelnames)` (line 151): no docstring
+  - `_prom_histogram(name, description, labelnames)` (line 159): no docstring
+  - `_prom_gauge(name, description, labelnames)` (line 167): no docstring
+  - `_normalize_label_value(value, default, max_len)` (line 175): no docstring
+  - `_normalize_bool_label(value)` (line 189): no docstring
+  - `measure_time(metric_name, collector)` (line 876): Decorator for measuring function execution time
+  - `prometheus_latest()` (line 989): Render Prometheus metrics for `/metrics`.
+  - `get_metrics_collector(service_name)` (line 1003): Get or create global metrics collector
+  - `get_metrics_runtime_status(service_name)` (line 1024): no docstring
 - **Classes**
   - `_SettingsValue` (line 42): no docstring
     - `__init__(self, getter)` (line 43): no docstring
     - `__get__(self, instance, owner)` (line 46): no docstring
   - `OpenTelemetryMetricsConfig` (line 50): no docstring
-  - `MetricsCollector` (line 169): Centralized metrics collection based on Context7 patterns
-    - `__init__(self, service_name)` (line 174): Initialize metrics collector
-    - `_initialize_metrics(self)` (line 187): Initialize all metrics
-    - `record_request(self, method, endpoint, status_code, duration, request_size, response_size)` (line 415): Record HTTP request metrics
-    - `record_db_query(self, operation, table, duration, success)` (line 464): Record database query metrics
-    - `record_cache_access(self, hit, cache_name)` (line 503): Record cache access
-    - `record_event(self, event_type, action, duration)` (line 528): Record event sourcing metrics
-    - `record_rate_limit(self, endpoint, rejected, strategy)` (line 566): Record rate limiting metrics
-    - `record_business_metric(self, metric_name, value, attributes)` (line 603): Record custom business metrics
-    - `timer(self, metric_name, attributes)` (line 639): Context manager for timing operations
-  - `RequestMetricsMiddleware` (line 720): FastAPI middleware for automatic request metrics collection
-    - `__init__(self, metrics_collector)` (line 725): Initialize middleware
-    - `async __call__(self, request, call_next)` (line 735): Process request and collect metrics
+  - `MetricsCollector` (line 193): Centralized metrics collection based on Context7 patterns
+    - `__init__(self, service_name)` (line 198): Initialize metrics collector
+    - `_initialize_metrics(self)` (line 211): Initialize all metrics
+    - `record_request(self, method, endpoint, status_code, duration, request_size, response_size)` (line 491): Record HTTP request metrics
+    - `record_db_query(self, operation, table, duration, success)` (line 540): Record database query metrics
+    - `record_cache_access(self, hit, cache_name)` (line 579): Record cache access
+    - `record_event(self, event_type, action, duration)` (line 604): Record event sourcing metrics
+    - `record_rate_limit(self, endpoint, rejected, strategy)` (line 642): Record rate limiting metrics
+    - `record_business_metric(self, metric_name, value, attributes)` (line 679): Record custom business metrics
+    - `record_error_envelope(self, payload, source)` (line 714): no docstring
+    - `record_runtime_fallback(self, zone, operation, error_code, error_category)` (line 755): no docstring
+    - `record_observability_bootstrap(self, tracing_status, metrics_status)` (line 789): no docstring
+    - `timer(self, metric_name, attributes)` (line 849): Context manager for timing operations
+  - `RequestMetricsMiddleware` (line 930): FastAPI middleware for automatic request metrics collection
+    - `__init__(self, metrics_collector)` (line 935): Initialize middleware
+    - `async __call__(self, request, call_next)` (line 945): Process request and collect metrics
 
 ### `backend/shared/observability/request_context.py`
 - **Functions**
@@ -6122,13 +6132,13 @@
 ### `backend/shared/observability/tracing.py`
 - **Functions**
   - `_sanitize_span_attributes(attributes)` (line 29): Ensure span attributes satisfy OpenTelemetry type constraints.
-  - `get_tracing_service(service_name)` (line 525): no docstring
-  - `trace_endpoint(name)` (line 534): Lazily create a tracing decorator for request handlers.
-  - `trace_db_operation(name)` (line 547): no docstring
-  - `trace_external_call(name)` (line 553): no docstring
-  - `trace_storage_operation(name, system)` (line 558): Trace storage operations (S3/MinIO, Elasticsearch, Redis, etc.).
-  - `trace_kafka_operation(name)` (line 565): Trace Kafka produce/consume operations.
-  - `_lazy_trace(name, kind, attributes)` (line 572): no docstring
+  - `get_tracing_service(service_name)` (line 572): no docstring
+  - `trace_endpoint(name)` (line 581): Lazily create a tracing decorator for request handlers.
+  - `trace_db_operation(name)` (line 594): no docstring
+  - `trace_external_call(name)` (line 600): no docstring
+  - `trace_storage_operation(name, system)` (line 605): Trace storage operations (S3/MinIO, Elasticsearch, Redis, etc.).
+  - `trace_kafka_operation(name)` (line 612): Trace Kafka produce/consume operations.
+  - `_lazy_trace(name, kind, attributes)` (line 619): no docstring
 - **Classes**
   - `_SettingsValue` (line 174): no docstring
     - `__init__(self, getter)` (line 175): no docstring
@@ -6136,19 +6146,20 @@
   - `OpenTelemetryConfig` (line 182): no docstring
   - `TracingService` (line 207): Distributed tracing facade.
     - `__init__(self, service_name)` (line 215): no docstring
-    - `_log_no_op_once(self, reason)` (line 224): no docstring
-    - `initialize(self)` (line 230): no docstring
-    - `instrument_fastapi(self, app)` (line 323): no docstring
-    - `instrument_clients(self)` (line 339): no docstring
-    - `span(self, name, kind, attributes)` (line 423): no docstring
-    - `trace(self, name, kind, attributes)` (line 445): no docstring
-    - `get_current_span(self)` (line 465): no docstring
-    - `record_exception(self, exception)` (line 470): no docstring
-    - `set_span_attribute(self, key, value)` (line 477): no docstring
-    - `get_trace_id(self)` (line 483): no docstring
-    - `get_span_id(self)` (line 492): no docstring
-    - `inject_trace_context(self, headers)` (line 501): no docstring
-    - `extract_trace_context(self, headers)` (line 511): no docstring
+    - `_log_no_op_once(self, reason)` (line 229): no docstring
+    - `initialize(self)` (line 236): no docstring
+    - `instrument_fastapi(self, app)` (line 342): no docstring
+    - `instrument_clients(self)` (line 359): no docstring
+    - `runtime_status(self)` (line 452): no docstring
+    - `span(self, name, kind, attributes)` (line 470): no docstring
+    - `trace(self, name, kind, attributes)` (line 492): no docstring
+    - `get_current_span(self)` (line 512): no docstring
+    - `record_exception(self, exception)` (line 517): no docstring
+    - `set_span_attribute(self, key, value)` (line 524): no docstring
+    - `get_trace_id(self)` (line 530): no docstring
+    - `get_span_id(self)` (line 539): no docstring
+    - `inject_trace_context(self, headers)` (line 548): no docstring
+    - `extract_trace_context(self, headers)` (line 558): no docstring
 
 ### `backend/shared/routers/__init__.py`
 
@@ -6698,23 +6709,23 @@
 
 ### `backend/shared/services/core/service_factory.py`
 - **Functions**
-  - `create_fastapi_service(service_info, custom_lifespan, include_health_check, include_logging_middleware, custom_tags, include_error_handlers, validation_error_status)` (line 60): Create a standardized FastAPI application with common configurations.
-  - `_install_openapi_language_contract(app)` (line 154): Add `?lang=en|ko` and `Accept-Language` to OpenAPI so clients discover i18n support.
-  - `_configure_cors(app)` (line 204): Configure CORS middleware based on environment variables
-  - `_add_logging_middleware(app)` (line 219): Add request logging middleware
-  - `_add_health_check(app, service_info)` (line 263): Add standardized health check endpoints
-  - `_add_debug_endpoints(app)` (line 287): Add debug endpoints for development environment
-  - `_install_observability(app, service_info)` (line 296): Install tracing + metrics in a way that is:
-  - `create_uvicorn_config(service_info, reload)` (line 339): Create standardized uvicorn configuration.
-  - `_get_logging_config(service_name)` (line 372): Get standardized logging configuration for uvicorn
-  - `run_service(app, service_info, app_module_path, reload)` (line 417): Run the service with standardized uvicorn configuration.
-  - `get_bff_service_info()` (line 436): no docstring
-  - `get_oms_service_info()` (line 468): no docstring
-  - `get_funnel_service_info()` (line 486): no docstring
-  - `get_agent_service_info()` (line 502): no docstring
+  - `create_fastapi_service(service_info, custom_lifespan, include_health_check, include_logging_middleware, custom_tags, include_error_handlers, validation_error_status)` (line 61): Create a standardized FastAPI application with common configurations.
+  - `_install_openapi_language_contract(app)` (line 155): Add `?lang=en|ko` and `Accept-Language` to OpenAPI so clients discover i18n support.
+  - `_configure_cors(app)` (line 205): Configure CORS middleware based on environment variables
+  - `_add_logging_middleware(app)` (line 220): Add request logging middleware
+  - `_add_health_check(app, service_info)` (line 264): Add standardized health check endpoints
+  - `_add_debug_endpoints(app)` (line 288): Add debug endpoints for development environment
+  - `_install_observability(app, service_info)` (line 297): Install tracing + metrics in a way that is:
+  - `create_uvicorn_config(service_info, reload)` (line 421): Create standardized uvicorn configuration.
+  - `_get_logging_config(service_name)` (line 454): Get standardized logging configuration for uvicorn
+  - `run_service(app, service_info, app_module_path, reload)` (line 499): Run the service with standardized uvicorn configuration.
+  - `get_bff_service_info()` (line 518): no docstring
+  - `get_oms_service_info()` (line 550): no docstring
+  - `get_funnel_service_info()` (line 568): no docstring
+  - `get_agent_service_info()` (line 584): no docstring
 - **Classes**
-  - `ServiceInfo` (line 38): Service configuration container
-    - `__init__(self, name, title, description, version, port, host, tags)` (line 41): no docstring
+  - `ServiceInfo` (line 39): Service configuration container
+    - `__init__(self, name, title, description, version, port, host, tags)` (line 42): no docstring
 
 ### `backend/shared/services/core/sheet_grid_parser.py`
 - **Classes**
@@ -8559,24 +8570,24 @@
   - `_handler_contains_runtime_policy_call(handler)` (line 162): no docstring
   - `_try_contains_lineage_calls(try_node)` (line 180): no docstring
   - `_count_runtime_guard_patterns(root, runtime_scope_glob)` (line 192): no docstring
-  - `_find_commented_exports(root, runtime_scope_glob)` (line 337): no docstring
-  - `_find_doc_only_modules(root, runtime_scope_glob)` (line 360): no docstring
-  - `_normalize_route_path(*parts)` (line 400): no docstring
-  - `_extract_apirouter_prefix(tree)` (line 410): no docstring
-  - `_iter_router_routes(tree)` (line 426): no docstring
-  - `_collect_app_route_collisions(root)` (line 446): no docstring
-  - `_find_duplicate_symbols(root, runtime_scope_glob)` (line 525): no docstring
-  - `_run_vulture_high_confidence(root)` (line 564): no docstring
-  - `_parse_catalog_specs(catalog_path)` (line 620): no docstring
-  - `_audit_classified(root, specs)` (line 669): no docstring
-  - `_dict_has_code_key(node)` (line 733): no docstring
-  - `_extract_code_literal(node)` (line 742): no docstring
-  - `_extract_dict_code(node)` (line 753): no docstring
-  - `_count_raw_http_exception(root)` (line 766): no docstring
-  - `_audit_raw_http_status_codes(calls, specs)` (line 820): no docstring
-  - `_count_raw_string_codes(root)` (line 854): no docstring
-  - `_print_counter(label, rows, top_n)` (line 869): no docstring
-  - `main()` (line 879): no docstring
+  - `_find_commented_exports(root, runtime_scope_glob)` (line 371): no docstring
+  - `_find_doc_only_modules(root, runtime_scope_glob)` (line 394): no docstring
+  - `_normalize_route_path(*parts)` (line 434): no docstring
+  - `_extract_apirouter_prefix(tree)` (line 444): no docstring
+  - `_iter_router_routes(tree)` (line 460): no docstring
+  - `_collect_app_route_collisions(root)` (line 480): no docstring
+  - `_find_duplicate_symbols(root, runtime_scope_glob)` (line 559): no docstring
+  - `_run_vulture_high_confidence(root)` (line 598): no docstring
+  - `_parse_catalog_specs(catalog_path)` (line 654): no docstring
+  - `_audit_classified(root, specs)` (line 703): no docstring
+  - `_dict_has_code_key(node)` (line 767): no docstring
+  - `_extract_code_literal(node)` (line 776): no docstring
+  - `_extract_dict_code(node)` (line 787): no docstring
+  - `_count_raw_http_exception(root)` (line 800): no docstring
+  - `_audit_raw_http_status_codes(calls, specs)` (line 854): no docstring
+  - `_count_raw_string_codes(root)` (line 888): no docstring
+  - `_print_counter(label, rows, top_n)` (line 903): no docstring
+  - `main()` (line 913): no docstring
 - **Classes**
   - `CodeSpec` (line 43): no docstring
   - `Mismatch` (line 50): no docstring
@@ -9896,7 +9907,7 @@
 
 ### `backend/tests/unit/errors/test_error_taxonomy_audit_guard.py`
 - **Functions**
-  - `test_error_taxonomy_audit_guard()` (line 54): no docstring
+  - `test_error_taxonomy_audit_guard()` (line 57): no docstring
 
 ### `backend/tests/unit/errors/test_error_taxonomy_coverage.py`
 - **Functions**
@@ -9918,17 +9929,18 @@
 
 ### `backend/tests/unit/errors/test_runtime_silent_failure_guards.py`
 - **Functions**
-  - `_iter_runtime_python_files(backend_dir)` (line 55): no docstring
-  - `test_runtime_has_no_return_in_finally()` (line 76): no docstring
-  - `test_runtime_scope_disallows_silent_failures()` (line 99): no docstring
+  - `_iter_runtime_python_files(backend_dir)` (line 58): no docstring
+  - `test_runtime_has_no_return_in_finally()` (line 79): no docstring
+  - `test_runtime_scope_disallows_silent_failures()` (line 102): no docstring
 - **Classes**
-  - `_ReturnInFinallyVisitor` (line 63): no docstring
-    - `__init__(self)` (line 64): no docstring
-    - `visit_Try(self, node)` (line 67): no docstring
+  - `_ReturnInFinallyVisitor` (line 66): no docstring
+    - `__init__(self)` (line 67): no docstring
+    - `visit_Try(self, node)` (line 70): no docstring
 
 ### `backend/tests/unit/errors/test_service_factory_error_handlers.py`
 - **Functions**
-  - `test_service_factory_installs_error_handlers_by_default()` (line 9): no docstring
+  - `test_service_factory_installs_error_handlers_by_default()` (line 10): no docstring
+  - `test_error_handler_records_error_taxonomy_metrics(monkeypatch)` (line 50): no docstring
 
 ### `backend/tests/unit/idempotency/__init__.py`
 
@@ -10304,10 +10316,10 @@
   - `_backend_dir()` (line 10): Resolve the `backend/` directory regardless of where the repo is checked out.
   - `_repo_root()` (line 25): no docstring
   - `test_prometheus_config_yaml_is_valid_and_wired()` (line 30): no docstring
-  - `test_alert_rules_yaml_is_valid_and_has_minimum_alerts()` (line 47): no docstring
-  - `test_alertmanager_yaml_is_valid_and_references_default_receiver()` (line 77): no docstring
-  - `test_grafana_dashboard_json_is_valid()` (line 92): no docstring
-  - `test_operations_doc_mentions_backup_scripts()` (line 103): Guard against ops runbook drift: docs should reference code-backed scripts.
+  - `test_alert_rules_yaml_is_valid_and_has_minimum_alerts()` (line 48): no docstring
+  - `test_alertmanager_yaml_is_valid_and_references_default_receiver()` (line 84): no docstring
+  - `test_grafana_dashboard_json_is_valid()` (line 99): no docstring
+  - `test_operations_doc_mentions_backup_scripts()` (line 126): Guard against ops runbook drift: docs should reference code-backed scripts.
 
 ### `backend/tests/unit/observability/test_config_monitor.py`
 - **Functions**
@@ -10317,6 +10329,11 @@
 - **Functions**
   - `test_kafka_headers_roundtrip_via_attached_context()` (line 11): no docstring
   - `test_kafka_headers_from_envelope_metadata_only_emits_known_keys()` (line 33): no docstring
+
+### `backend/tests/unit/observability/test_observability_status.py`
+- **Functions**
+  - `test_metrics_collector_is_scoped_per_service_name()` (line 11): no docstring
+  - `test_service_factory_exposes_observability_status_endpoint()` (line 28): no docstring
 
 ### `backend/tests/unit/observability/test_request_context.py`
 - **Functions**

@@ -1,13 +1,13 @@
 # Backend Design Reference
 
-> Generated: 2026-02-14T10:49:13+09:00
+> Generated: 2026-02-14T12:42:29+09:00
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 > Source: AST + docstring extraction (module/class/function) via `scripts/generate_backend_methods.py`.
 
 ## Coverage Summary
 
-- Modules scanned: **978**
-- Modules with module docstring: **594/978**
+- Modules scanned: **979**
+- Modules with module docstring: **594/979**
 - Modules with broad `except Exception`: **311**
 - Modules with bare `except:`: **0**
 - Modules with `return` inside `finally`: **0**
@@ -6425,9 +6425,9 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
-- API surface: public=1 | top-level functions=14 | classes=0 | methods=0
-- Runtime signals: async_functions=8 | try=2 | raise=0 | broad_except=1 | bare_except=0 | finally_return=0
-- Doc coverage: module=no | top-level functions=0/14 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- API surface: public=1 | top-level functions=17 | classes=0 | methods=0
+- Runtime signals: async_functions=8 | try=4 | raise=0 | broad_except=2 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/17 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
 - Internal imports (7): shared.config.settings; shared.errors.enterprise_catalog; shared.errors.error_envelope; shared.errors.error_types; shared.observability.request_context; shared.security.input_sanitizer; shared.utils.app_logger
 - External imports (6): __future__; fastapi; httpx; json; logging; typing
 - Public API names: install_error_handlers
@@ -6467,9 +6467,9 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
-- API surface: public=9 | top-level functions=8 | classes=5 | methods=0
-- Runtime signals: async_functions=1 | try=3 | raise=4 | broad_except=1 | bare_except=0 | finally_return=0
-- Doc coverage: module=no | top-level functions=0/8 (0%) | classes=2/5 (40%) | methods=0/0 (n/a)
+- API surface: public=9 | top-level functions=9 | classes=5 | methods=0
+- Runtime signals: async_functions=1 | try=4 | raise=4 | broad_except=1 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/9 (0%) | classes=2/5 (40%) | methods=0/0 (n/a)
 - Internal imports (2): shared.errors.error_types; shared.observability.request_context
 - External imports (8): __future__; dataclasses; enum; hashlib; logging; threading; time; typing
 - Public API names: FallbackPolicy; LineageRecordError; LineageUnavailableError; RuntimeZone; assert_lineage_available; fallback_value; log_exception_rate_limited; preserve_primary_exception; record_lineage_or_raise
@@ -7097,12 +7097,12 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
-- API surface: public=7 | top-level functions=8 | classes=4 | methods=13
-- Runtime signals: async_functions=2 | try=21 | raise=1 | broad_except=18 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=4/8 (50%) | classes=2/4 (50%) | methods=11/13 (84%)
+- API surface: public=8 | top-level functions=11 | classes=4 | methods=16
+- Runtime signals: async_functions=2 | try=26 | raise=1 | broad_except=23 | bare_except=0 | finally_return=0
+- Doc coverage: module=yes | top-level functions=4/11 (36%) | classes=2/4 (50%) | methods=11/16 (68%)
 - Internal imports (2): shared.config.settings; shared.utils.app_logger
 - External imports (7): contextlib; functools; logging; opentelemetry; prometheus_client; time; typing
-- Public API names: MetricsCollector; OpenTelemetryMetricsConfig; RequestMetricsMiddleware; get_metrics_collector; initialize_metrics_provider; measure_time; prometheus_latest
+- Public API names: MetricsCollector; OpenTelemetryMetricsConfig; RequestMetricsMiddleware; get_metrics_collector; get_metrics_runtime_status; initialize_metrics_provider; measure_time; prometheus_latest
 
 ### `backend/shared/observability/request_context.py`
 - Module summary: Request/operation context for debugging.
@@ -7125,9 +7125,9 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
-- API surface: public=8 | top-level functions=8 | classes=3 | methods=16
+- API surface: public=8 | top-level functions=8 | classes=3 | methods=17
 - Runtime signals: async_functions=2 | try=30 | raise=1 | broad_except=29 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=4/8 (50%) | classes=1/3 (33%) | methods=0/16 (0%)
+- Doc coverage: module=yes | top-level functions=4/8 (50%) | classes=1/3 (33%) | methods=0/17 (0%)
 - Internal imports (2): shared.config.settings; shared.utils.app_logger
 - External imports (6): __future__; contextlib; functools; logging; os; typing
 - Public API names: OpenTelemetryConfig; TracingService; get_tracing_service; trace_db_operation; trace_endpoint; trace_external_call; trace_kafka_operation; trace_storage_operation
@@ -7644,10 +7644,10 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - API surface: public=8 | top-level functions=14 | classes=1 | methods=1
-- Runtime signals: async_functions=6 | try=4 | raise=0 | broad_except=4 | bare_except=0 | finally_return=0
+- Runtime signals: async_functions=7 | try=7 | raise=0 | broad_except=7 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=10/14 (71%) | classes=1/1 (100%) | methods=0/1 (0%)
 - Internal imports (6): shared.config.settings; shared.errors.error_response; shared.i18n.middleware; shared.middleware.rate_limiter; shared.models.requests; shared.observability.request_context
-- External imports (7): contextlib; fastapi; logging; starlette; time; typing; uvicorn
+- External imports (8): contextlib; datetime; fastapi; logging; starlette; time; typing; uvicorn
 - Public API names: ServiceInfo; create_fastapi_service; create_uvicorn_config; get_agent_service_info; get_bff_service_info; get_funnel_service_info; get_oms_service_info; run_service
 
 ### `backend/shared/services/core/sheet_grid_parser.py`
@@ -10921,12 +10921,12 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
-- API surface: public=1 | top-level functions=1 | classes=0 | methods=0
-- Runtime signals: async_functions=0 | try=0 | raise=1 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
-- Internal imports (1): shared.services.core.service_factory
+- API surface: public=2 | top-level functions=2 | classes=0 | methods=0
+- Runtime signals: async_functions=0 | try=0 | raise=2 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Internal imports (2): shared.errors; shared.services.core.service_factory
 - External imports (2): fastapi; pytest
-- Public API names: test_service_factory_installs_error_handlers_by_default
+- Public API names: test_error_handler_records_error_taxonomy_metrics; test_service_factory_installs_error_handlers_by_default
 
 ### `backend/tests/unit/idempotency/__init__.py`
 - Module summary: no docstring
@@ -11207,6 +11207,20 @@
 - Internal imports (0): not documented
 - External imports (2): importlib; pytest
 - Public API names: test_kafka_headers_from_envelope_metadata_only_emits_known_keys; test_kafka_headers_roundtrip_via_attached_context
+
+### `backend/tests/unit/observability/test_observability_status.py`
+- Module summary: no docstring
+- Responsibilities: not documented
+- Invariants: not documented
+- Failure modes: not documented
+- Extension points: not documented
+- Dependencies (doc): not documented
+- API surface: public=2 | top-level functions=2 | classes=0 | methods=0
+- Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Internal imports (2): shared.observability.metrics; shared.services.core.service_factory
+- External imports (3): __future__; fastapi; pytest
+- Public API names: test_metrics_collector_is_scoped_per_service_name; test_service_factory_exposes_observability_status_endpoint
 
 ### `backend/tests/unit/observability/test_request_context.py`
 - Module summary: no docstring

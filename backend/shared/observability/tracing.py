@@ -15,7 +15,7 @@ from __future__ import annotations
 import os
 from contextlib import contextmanager
 from functools import wraps
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from shared.config.settings import get_settings
 from shared.utils.app_logger import get_logger
@@ -217,17 +217,25 @@ class TracingService:
         self._initialized = False
         self.tracer = None
         self._no_op_logged = False
+        self._last_no_op_reason: Optional[str] = None
+        self._exporters_enabled: List[str] = []
+        self._exporters_active: List[str] = []
+        self._client_instrumentations_active: List[str] = []
+        self._fastapi_instrumented = False
 
         if not HAS_OPENTELEMETRY:
             self._log_no_op_once("OpenTelemetry core not available; tracing disabled")
 
     def _log_no_op_once(self, reason: str) -> None:
+        self._last_no_op_reason = reason
         if self._no_op_logged:
             return
         self._no_op_logged = True
         logger.warning(f"TracingService running in no-op mode: {reason}")
 
     def initialize(self) -> None:
+        self._exporters_enabled = []
+        self._exporters_active = []
         if not HAS_OPENTELEMETRY:
             self._log_no_op_once("OpenTelemetry core not available; tracing disabled")
             return
@@ -259,10 +267,13 @@ class TracingService:
             processors = 0
 
             if OpenTelemetryConfig.EXPORT_CONSOLE:
+                self._exporters_enabled.append("console")
                 tracer_provider.add_span_processor(BatchSpanProcessor(ConsoleSpanExporter()))
+                self._exporters_active.append("console")
                 processors += 1
 
             if OpenTelemetryConfig.EXPORT_OTLP:
+                self._exporters_enabled.append("otlp")
                 if OTLPSpanExporter is None:
                     logger.warning("OTLP exporter requested but opentelemetry-exporter-otlp is not installed")
                 elif not OpenTelemetryConfig.OTLP_ENDPOINT:
@@ -274,12 +285,14 @@ class TracingService:
                                 OTLPSpanExporter(endpoint=OpenTelemetryConfig.OTLP_ENDPOINT, insecure=True)
                             )
                         )
+                        self._exporters_active.append("otlp")
                         processors += 1
                         logger.info(f"OTLP exporter configured: {OpenTelemetryConfig.OTLP_ENDPOINT}")
                     except Exception as e:
                         logger.error(f"Failed to configure OTLP exporter: {e}")
 
             if OpenTelemetryConfig.EXPORT_JAEGER:
+                self._exporters_enabled.append("jaeger")
                 if JaegerExporter is None:
                     logger.warning("Jaeger exporter requested but opentelemetry-exporter-jaeger is not installed")
                 else:
@@ -288,12 +301,16 @@ class TracingService:
                         tracer_provider.add_span_processor(
                             BatchSpanProcessor(JaegerExporter(agent_host_name=host, agent_port=int(port_str)))
                         )
+                        self._exporters_active.append("jaeger")
                         processors += 1
                         logger.info(f"Jaeger exporter configured: {OpenTelemetryConfig.JAEGER_ENDPOINT}")
                     except Exception as e:
                         logger.error(f"Failed to configure Jaeger exporter: {e}")
 
             if processors == 0:
+                self._log_no_op_once(
+                    "Tracing enabled but no exporters configured/available; spans will not be exported"
+                )
                 logger.warning(
                     "Tracing enabled but no exporters configured/available; spans will not be exported"
                 )
@@ -315,6 +332,8 @@ class TracingService:
             set_global_textmap(propagator)
             self.tracer = otel_trace.get_tracer(self.service_name, OpenTelemetryConfig.SERVICE_VERSION)
             self._initialized = True
+            if processors > 0:
+                self._last_no_op_reason = None
             logger.info(f"OpenTelemetry tracing initialized: service={self.service_name} sample_rate={ratio}")
         except Exception as e:
             logger.error(f"Failed to initialize OpenTelemetry tracing: {e}")
@@ -332,6 +351,7 @@ class TracingService:
                 tracer_provider=get_tracer_provider(),
                 excluded_urls="/health,/metrics,/api/v1/health/*",
             )
+            self._fastapi_instrumented = True
             logger.info("FastAPI instrumented for tracing")
         except Exception as e:
             logger.error(f"Failed to instrument FastAPI: {e}")
@@ -339,6 +359,8 @@ class TracingService:
     def instrument_clients(self) -> None:
         if not HAS_OPENTELEMETRY or not OpenTelemetryConfig.ENABLE_TRACING:
             return
+
+        self._client_instrumentations_active = []
 
         # NOTE: opentelemetry-instrumentation-asyncio has historically caused runtime
         # issues around `asyncio.to_thread` / partial callables in some versions.
@@ -352,6 +374,7 @@ class TracingService:
         else:
             try:
                 AsyncioInstrumentor().instrument()
+                self._client_instrumentations_active.append("asyncio")
                 logger.info("Asyncio instrumented")
             except Exception as e:
                 logger.error(f"Failed to instrument Asyncio: {e}")
@@ -359,6 +382,7 @@ class TracingService:
         if HTTPXClientInstrumentor is not None:
             try:
                 HTTPXClientInstrumentor().instrument()
+                self._client_instrumentations_active.append("httpx")
                 logger.info("HTTPX instrumented")
             except Exception as e:
                 logger.error(f"Failed to instrument HTTPX: {e}")
@@ -368,6 +392,7 @@ class TracingService:
         if RequestsInstrumentor is not None:
             try:
                 RequestsInstrumentor().instrument()
+                self._client_instrumentations_active.append("requests")
                 logger.info("Requests instrumented")
             except Exception as e:
                 logger.error(f"Failed to instrument Requests: {e}")
@@ -377,6 +402,7 @@ class TracingService:
         if AioHttpClientInstrumentor is not None:
             try:
                 AioHttpClientInstrumentor().instrument()
+                self._client_instrumentations_active.append("aiohttp_client")
                 logger.info("AioHttpClient instrumented")
             except Exception as e:
                 logger.error(f"Failed to instrument AioHttpClient: {e}")
@@ -386,6 +412,7 @@ class TracingService:
         if BotocoreInstrumentor is not None:
             try:
                 BotocoreInstrumentor().instrument()
+                self._client_instrumentations_active.append("botocore")
                 logger.info("Botocore instrumented")
             except Exception as e:
                 logger.error(f"Failed to instrument Botocore: {e}")
@@ -395,6 +422,7 @@ class TracingService:
         if AsyncPGInstrumentor is not None:
             try:
                 AsyncPGInstrumentor().instrument()
+                self._client_instrumentations_active.append("asyncpg")
                 logger.info("AsyncPG instrumented")
             except Exception as e:
                 logger.error(f"Failed to instrument AsyncPG: {e}")
@@ -404,6 +432,7 @@ class TracingService:
         if RedisInstrumentor is not None:
             try:
                 RedisInstrumentor().instrument()
+                self._client_instrumentations_active.append("redis")
                 logger.info("Redis instrumented")
             except Exception as e:
                 logger.error(f"Failed to instrument Redis: {e}")
@@ -413,11 +442,29 @@ class TracingService:
         if KafkaInstrumentor is not None:
             try:
                 KafkaInstrumentor().instrument()
+                self._client_instrumentations_active.append("kafka")
                 logger.info("Kafka instrumented")
             except Exception as e:
                 logger.error(f"Failed to instrument Kafka: {e}")
         else:
             logger.debug("Kafka instrumentation not available")
+
+    def runtime_status(self) -> Dict[str, Any]:
+        enabled = bool(HAS_OPENTELEMETRY and OpenTelemetryConfig.ENABLE_TRACING)
+        return {
+            "service": self.service_name,
+            "enabled": enabled,
+            "active": bool(enabled and self._initialized and self.tracer is not None and len(self._exporters_active) > 0),
+            "initialized": bool(self._initialized),
+            "no_op_reason": self._last_no_op_reason,
+            "sample_rate": float(OpenTelemetryConfig.TRACE_SAMPLE_RATE),
+            "fastapi_instrumented": bool(self._fastapi_instrumented),
+            "client_instrumentations_active": list(self._client_instrumentations_active),
+            "exporters_enabled": list(dict.fromkeys(self._exporters_enabled)),
+            "exporters_active": list(dict.fromkeys(self._exporters_active)),
+            "otlp_endpoint": OpenTelemetryConfig.OTLP_ENDPOINT or "",
+            "jaeger_endpoint": OpenTelemetryConfig.JAEGER_ENDPOINT or "",
+        }
 
     @contextmanager
     def span(self, name: str, kind=None, attributes: Optional[Dict[str, Any]] = None):

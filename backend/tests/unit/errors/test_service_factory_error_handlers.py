@@ -2,6 +2,7 @@ import pytest
 from fastapi import HTTPException, status
 from fastapi.testclient import TestClient
 
+from shared.errors import error_response
 from shared.services.core.service_factory import ServiceInfo, create_fastapi_service
 
 
@@ -43,3 +44,46 @@ def test_service_factory_installs_error_handlers_by_default() -> None:
     assert resp.headers.get("x-runbook-ref") == payload["enterprise"]["runbook_ref"]
     assert resp.headers.get("x-error-group") == payload["diagnostics"]["group_fingerprint"]
     assert resp.headers.get("x-error-instance") == payload["diagnostics"]["instance_fingerprint"]
+
+
+@pytest.mark.unit
+def test_error_handler_records_error_taxonomy_metrics(monkeypatch: pytest.MonkeyPatch) -> None:
+    recorded: list[dict] = []
+
+    class _FakeCollector:
+        def record_error_envelope(self, payload, *, source="http"):  # noqa: ANN001
+            recorded.append({"payload": payload, "source": source})
+
+    monkeypatch.setattr(
+        error_response,
+        "_get_error_metrics_collector",
+        lambda service_name: _FakeCollector(),
+    )
+
+    service_info = ServiceInfo(
+        name="oms",
+        title="Test Service",
+        description="Test Service for enterprise error metrics",
+    )
+    app = create_fastapi_service(
+        service_info=service_info,
+        include_health_check=False,
+        include_logging_middleware=False,
+    )
+
+    @app.get("/explode")
+    def explode():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "UPSTREAM_UNAVAILABLE", "category": "upstream", "message": "upstream unavailable"},
+        )
+
+    client = TestClient(app)
+    resp = client.get("/explode")
+    assert resp.status_code == 503
+    assert len(recorded) == 1
+    metric_payload = recorded[0]["payload"]
+    assert recorded[0]["source"] == "http"
+    assert metric_payload["code"] == "UPSTREAM_UNAVAILABLE"
+    assert metric_payload["category"] == "upstream"
+    assert metric_payload["enterprise"]["class"] == "unavailable"

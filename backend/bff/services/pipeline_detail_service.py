@@ -399,7 +399,7 @@ async def update_pipeline(
             )
             if validation_errors:
                 raise classified_http_exception(
-                    status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    status.HTTP_400_BAD_REQUEST,
                     "Pipeline definition invalid",
                     code=ErrorCode.REQUEST_VALIDATION_FAILED,
                     extra={"errors": validation_errors},

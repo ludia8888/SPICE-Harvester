@@ -100,6 +100,32 @@ def _exception_fingerprint(
     return hashlib.sha256(payload.encode("utf-8", errors="replace")).hexdigest()[:20]
 
 
+def _record_runtime_fallback_metric(
+    *,
+    zone: RuntimeZone,
+    operation: str,
+    code: ErrorCode,
+    category: ErrorCategory,
+) -> None:
+    try:
+        from shared.config.settings import get_settings
+        from shared.observability.metrics import get_metrics_collector
+
+        service_name = get_settings().observability.service_name_effective
+        collector = get_metrics_collector(service_name)
+        record = getattr(collector, "record_runtime_fallback", None)
+        if callable(record):
+            record(
+                zone=zone.value,
+                operation=operation,
+                error_code=code.value,
+                error_category=category.value,
+            )
+    except (ImportError, AttributeError, RuntimeError, TypeError, ValueError):
+        # Runtime fallback telemetry must not break primary control flow.
+        return
+
+
 def log_exception_rate_limited(
     logger: logging.Logger,
     *,
@@ -161,6 +187,13 @@ def log_exception_rate_limited(
             _safe_text(exc),
             extra={"runtime_fallback": payload},
         )
+
+    _record_runtime_fallback_metric(
+        zone=zone,
+        operation=operation,
+        code=code,
+        category=category,
+    )
 
     return fingerprint
 

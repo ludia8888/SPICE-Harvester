@@ -6,7 +6,7 @@ This module provides metrics collection for monitoring system performance.
 """
 
 import time
-from typing import Dict, Optional, Any
+from typing import Any, Dict, Mapping, Optional
 from functools import wraps
 from contextlib import contextmanager
 
@@ -62,10 +62,13 @@ class OpenTelemetryMetricsConfig:
 
 _metrics_provider_initialized = False
 _metrics_provider_no_op_logged = False
+_metrics_provider_no_op_reason: Optional[str] = None
+_metrics_provider_active_exporters: list[str] = []
 
 
 def _log_no_op_once(reason: str) -> None:
-    global _metrics_provider_no_op_logged
+    global _metrics_provider_no_op_logged, _metrics_provider_no_op_reason
+    _metrics_provider_no_op_reason = reason
     if _metrics_provider_no_op_logged:
         return
     _metrics_provider_no_op_logged = True
@@ -79,9 +82,10 @@ def initialize_metrics_provider(*, service_name: str) -> None:
     Safe to call multiple times; first call wins (per-process).
     """
 
-    global _metrics_provider_initialized
+    global _metrics_provider_active_exporters, _metrics_provider_initialized, _metrics_provider_no_op_reason
     if _metrics_provider_initialized:
         return
+    _metrics_provider_active_exporters = []
 
     if not OpenTelemetryMetricsConfig.ENABLE_METRICS:
         _log_no_op_once("OTEL_ENABLE_METRICS=false")
@@ -113,6 +117,7 @@ def initialize_metrics_provider(*, service_name: str) -> None:
                 interval_ms = int(max(OpenTelemetryMetricsConfig.EXPORT_INTERVAL_SECONDS, 1.0) * 1000)
                 exporter = OTLPMetricExporter(endpoint=OpenTelemetryMetricsConfig.OTLP_ENDPOINT, insecure=True)
                 readers.append(PeriodicExportingMetricReader(exporter, export_interval_millis=interval_ms))
+                _metrics_provider_active_exporters.append("otlp")
                 logger.info(
                     "OTLP metrics exporter configured: endpoint=%s interval_s=%s",
                     OpenTelemetryMetricsConfig.OTLP_ENDPOINT,
@@ -131,6 +136,7 @@ def initialize_metrics_provider(*, service_name: str) -> None:
         provider = MeterProvider(resource=resource, metric_readers=readers)
         set_meter_provider(provider)
         _metrics_provider_initialized = True
+        _metrics_provider_no_op_reason = None
         logger.info("OpenTelemetry metrics initialized: service=%s", service_name)
     except Exception as e:
         logging.getLogger(__name__).warning("Broad exception fallback at shared/observability/metrics.py:132", exc_info=True)
@@ -164,6 +170,24 @@ def _prom_gauge(name: str, description: str, *, labelnames: tuple[str, ...]) -> 
         metric = Gauge(name, description, labelnames=labelnames)
         _PROM_GAUGES[name] = metric
     return metric
+
+
+def _normalize_label_value(
+    value: Any,
+    *,
+    default: str = "unknown",
+    max_len: int = 128,
+) -> str:
+    if value is None:
+        return default
+    text = str(value).strip()
+    if not text:
+        return default
+    return text[:max_len]
+
+
+def _normalize_bool_label(value: Any) -> str:
+    return "true" if bool(value) else "false"
 
 
 class MetricsCollector:
@@ -295,6 +319,18 @@ class MetricsCollector:
                 unit="1"
             )
 
+            # Error taxonomy metrics
+            self._metrics["errors_total"] = self.meter.create_counter(
+                name="spice_errors_total",
+                description="Total error envelopes emitted by enterprise taxonomy labels",
+                unit="1",
+            )
+            self._metrics["runtime_fallback_total"] = self.meter.create_counter(
+                name="spice_runtime_fallback_total",
+                description="Total runtime fallback events emitted by runtime exception policy",
+                unit="1",
+            )
+
             # Pipeline scheduler metrics
             self._metrics["pipeline_scheduler_ticks"] = self.meter.create_counter(
                 name="pipeline_scheduler_ticks_total",
@@ -407,6 +443,46 @@ class MetricsCollector:
                 "spice_business_total",
                 "Business counters",
                 labelnames=("service", "metric"),
+            )
+            self._prom["errors_total"] = _prom_counter(
+                "spice_errors_total",
+                "Error envelopes emitted by enterprise taxonomy labels",
+                labelnames=(
+                    "service",
+                    "source",
+                    "code",
+                    "category",
+                    "http_status",
+                    "enterprise_code",
+                    "enterprise_class",
+                    "enterprise_domain",
+                    "retryable",
+                ),
+            )
+            self._prom["runtime_fallback_total"] = _prom_counter(
+                "spice_runtime_fallback_total",
+                "Runtime fallback events emitted by runtime exception policy",
+                labelnames=("service", "zone", "operation", "error_code", "error_category"),
+            )
+            self._prom["observability_signal_enabled"] = _prom_gauge(
+                "spice_observability_signal_enabled",
+                "Whether an observability signal is configured to be enabled (1=true, 0=false)",
+                labelnames=("service", "signal"),
+            )
+            self._prom["observability_signal_active"] = _prom_gauge(
+                "spice_observability_signal_active",
+                "Whether an observability signal is active at runtime (1=true, 0=false)",
+                labelnames=("service", "signal"),
+            )
+            self._prom["observability_exporter_enabled"] = _prom_gauge(
+                "spice_observability_exporter_enabled",
+                "Whether an observability exporter is enabled by config (1=true, 0=false)",
+                labelnames=("service", "signal", "exporter"),
+            )
+            self._prom["observability_exporter_active"] = _prom_gauge(
+                "spice_observability_exporter_active",
+                "Whether an observability exporter is active at runtime (1=true, 0=false)",
+                labelnames=("service", "signal", "exporter"),
             )
             
         except Exception as e:
@@ -634,6 +710,140 @@ class MetricsCollector:
             self._prom["business_total"].labels(self.service_name, metric_name).inc(float(value) if value else 1.0)
         except Exception as e:
             logger.error(f"Failed to record Prometheus business metric {metric_name}: {e}")
+
+    def record_error_envelope(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        source: str = "http",
+    ) -> None:
+        enterprise = payload.get("enterprise") if isinstance(payload.get("enterprise"), Mapping) else {}
+        attributes = {
+            "service": _normalize_label_value(self.service_name),
+            "source": _normalize_label_value(source),
+            "code": _normalize_label_value(payload.get("code"), default="INTERNAL_ERROR"),
+            "category": _normalize_label_value(payload.get("category"), default="internal"),
+            "http_status": _normalize_label_value(payload.get("http_status"), default="500"),
+            "enterprise_code": _normalize_label_value(enterprise.get("code"), default="unknown"),
+            "enterprise_class": _normalize_label_value(enterprise.get("class"), default="unknown"),
+            "enterprise_domain": _normalize_label_value(enterprise.get("domain"), default="unknown"),
+            "retryable": _normalize_bool_label(payload.get("retryable")),
+        }
+
+        try:
+            if "errors_total" in self._metrics:
+                self._metrics["errors_total"].add(1, attributes)
+        except Exception as e:
+            logger.error(f"Failed to record error taxonomy metrics: {e}")
+
+        try:
+            if "errors_total" in self._prom:
+                self._prom["errors_total"].labels(
+                    attributes["service"],
+                    attributes["source"],
+                    attributes["code"],
+                    attributes["category"],
+                    attributes["http_status"],
+                    attributes["enterprise_code"],
+                    attributes["enterprise_class"],
+                    attributes["enterprise_domain"],
+                    attributes["retryable"],
+                ).inc()
+        except Exception as e:
+            logger.error(f"Failed to record Prometheus error taxonomy metrics: {e}")
+
+    def record_runtime_fallback(
+        self,
+        *,
+        zone: str,
+        operation: str,
+        error_code: str,
+        error_category: str,
+    ) -> None:
+        attributes = {
+            "service": _normalize_label_value(self.service_name),
+            "zone": _normalize_label_value(zone),
+            "operation": _normalize_label_value(operation),
+            "error_code": _normalize_label_value(error_code),
+            "error_category": _normalize_label_value(error_category),
+        }
+
+        try:
+            if "runtime_fallback_total" in self._metrics:
+                self._metrics["runtime_fallback_total"].add(1, attributes)
+        except Exception as e:
+            logger.error(f"Failed to record runtime fallback metrics: {e}")
+
+        try:
+            if "runtime_fallback_total" in self._prom:
+                self._prom["runtime_fallback_total"].labels(
+                    attributes["service"],
+                    attributes["zone"],
+                    attributes["operation"],
+                    attributes["error_code"],
+                    attributes["error_category"],
+                ).inc()
+        except Exception as e:
+            logger.error(f"Failed to record Prometheus runtime fallback metrics: {e}")
+
+    def record_observability_bootstrap(
+        self,
+        *,
+        tracing_status: Optional[Mapping[str, Any]] = None,
+        metrics_status: Optional[Mapping[str, Any]] = None,
+    ) -> None:
+        if "observability_signal_enabled" not in self._prom:
+            return
+
+        tracing_enabled = bool((tracing_status or {}).get("enabled"))
+        tracing_active = bool((tracing_status or {}).get("active"))
+        tracing_exporters_enabled = {
+            _normalize_label_value(name)
+            for name in ((tracing_status or {}).get("exporters_enabled") or [])
+            if str(name or "").strip()
+        }
+        tracing_exporters_active = {
+            _normalize_label_value(name)
+            for name in ((tracing_status or {}).get("exporters_active") or [])
+            if str(name or "").strip()
+        }
+
+        metrics_enabled = bool((metrics_status or {}).get("enabled"))
+        metrics_active = bool((metrics_status or {}).get("active"))
+        metrics_exporters_enabled = {
+            _normalize_label_value(name)
+            for name in ((metrics_status or {}).get("exporters_enabled") or [])
+            if str(name or "").strip()
+        }
+        metrics_exporters_active = {
+            _normalize_label_value(name)
+            for name in ((metrics_status or {}).get("exporters_active") or [])
+            if str(name or "").strip()
+        }
+
+        try:
+            self._prom["observability_signal_enabled"].labels(self.service_name, "tracing").set(1 if tracing_enabled else 0)
+            self._prom["observability_signal_active"].labels(self.service_name, "tracing").set(1 if tracing_active else 0)
+            self._prom["observability_signal_enabled"].labels(self.service_name, "metrics").set(1 if metrics_enabled else 0)
+            self._prom["observability_signal_active"].labels(self.service_name, "metrics").set(1 if metrics_active else 0)
+
+            for exporter in sorted(tracing_exporters_enabled | tracing_exporters_active | {"otlp", "jaeger", "console"}):
+                self._prom["observability_exporter_enabled"].labels(
+                    self.service_name, "tracing", exporter
+                ).set(1 if exporter in tracing_exporters_enabled else 0)
+                self._prom["observability_exporter_active"].labels(
+                    self.service_name, "tracing", exporter
+                ).set(1 if exporter in tracing_exporters_active else 0)
+
+            for exporter in sorted(metrics_exporters_enabled | metrics_exporters_active | {"otlp"}):
+                self._prom["observability_exporter_enabled"].labels(
+                    self.service_name, "metrics", exporter
+                ).set(1 if exporter in metrics_exporters_enabled else 0)
+                self._prom["observability_exporter_active"].labels(
+                    self.service_name, "metrics", exporter
+                ).set(1 if exporter in metrics_exporters_active else 0)
+        except Exception as e:
+            logger.error(f"Failed to record observability bootstrap metrics: {e}")
     
     @contextmanager
     def timer(self, metric_name: str, attributes: Optional[Dict[str, str]] = None):
@@ -786,8 +996,8 @@ def prometheus_latest() -> bytes:
 PROMETHEUS_CONTENT_TYPE_LATEST = CONTENT_TYPE_LATEST
 
 
-# Global metrics collector
-_metrics_collector: Optional[MetricsCollector] = None
+# Global metrics collector cache (per service in-process)
+_metrics_collectors: Dict[str, MetricsCollector] = {}
 
 
 def get_metrics_collector(service_name: str) -> MetricsCollector:
@@ -800,8 +1010,37 @@ def get_metrics_collector(service_name: str) -> MetricsCollector:
     Returns:
         MetricsCollector instance
     """
-    global _metrics_collector
-    if _metrics_collector is None:
-        initialize_metrics_provider(service_name=service_name)
-        _metrics_collector = MetricsCollector(service_name)
-    return _metrics_collector
+    key = _normalize_label_value(service_name, default="spice-harvester")
+    collector = _metrics_collectors.get(key)
+    if collector is not None:
+        return collector
+
+    initialize_metrics_provider(service_name=key)
+    collector = MetricsCollector(key)
+    _metrics_collectors[key] = collector
+    return collector
+
+
+def get_metrics_runtime_status(service_name: Optional[str] = None) -> Dict[str, Any]:
+    settings = get_settings()
+    resolved_service = _normalize_label_value(
+        service_name or settings.observability.service_name_effective,
+        default="spice-harvester",
+    )
+    enabled = bool(OpenTelemetryMetricsConfig.ENABLE_METRICS)
+    exporters_enabled: list[str] = []
+    if bool(OpenTelemetryMetricsConfig.EXPORT_OTLP):
+        exporters_enabled.append("otlp")
+    active_exporters = list(_metrics_provider_active_exporters)
+    active = bool(enabled and _metrics_provider_initialized and active_exporters)
+    return {
+        "service": resolved_service,
+        "enabled": enabled,
+        "provider_initialized": bool(_metrics_provider_initialized),
+        "active": active,
+        "no_op_reason": _metrics_provider_no_op_reason,
+        "exporters_enabled": exporters_enabled,
+        "exporters_active": active_exporters,
+        "otlp_endpoint": _normalize_label_value(OpenTelemetryMetricsConfig.OTLP_ENDPOINT, default=""),
+        "export_interval_seconds": float(OpenTelemetryMetricsConfig.EXPORT_INTERVAL_SECONDS),
+    }

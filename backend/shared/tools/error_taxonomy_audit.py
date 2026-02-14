@@ -208,6 +208,8 @@ def _count_runtime_guard_patterns(
         "dataset_write_mode_gap": [],
         "dataset_required_columns_gap": [],
         "dataset_write_format_gap": [],
+        "error_monitoring_gap": [],
+        "observability_status_gap": [],
     }
     for path in _iter_runtime_files(root, runtime_scope_glob=runtime_scope_glob):
         try:
@@ -227,6 +229,38 @@ def _count_runtime_guard_patterns(
                 issues["output_kind_metadata_gap"].append((str(path), 1))
             if "validate_dataset_output_metadata(" not in source:
                 issues["dataset_required_columns_gap"].append((str(path), 1))
+
+        if rel == "shared/observability/metrics.py":
+            required_snippets = (
+                "def record_error_envelope(",
+                "def record_runtime_fallback(",
+                "spice_errors_total",
+                "spice_runtime_fallback_total",
+            )
+            if any(snippet not in source for snippet in required_snippets):
+                issues["error_monitoring_gap"].append((str(path), 1))
+
+        if rel == "shared/errors/error_response.py":
+            required_snippets = (
+                "def _record_error_observability(",
+                "def _emit_error_log(",
+                "_record_error_observability(",
+            )
+            if any(snippet not in source for snippet in required_snippets):
+                issues["error_monitoring_gap"].append((str(path), 1))
+
+        if rel == "shared/errors/runtime_exception_policy.py":
+            if source.count("_record_runtime_fallback_metric(") < 2:
+                issues["error_monitoring_gap"].append((str(path), 1))
+
+        if rel == "shared/services/core/service_factory.py":
+            required_snippets = (
+                '"/observability/status"',
+                "record_observability_bootstrap",
+                "get_metrics_runtime_status(",
+            )
+            if any(snippet not in source for snippet in required_snippets):
+                issues["observability_status_gap"].append((str(path), 1))
 
         if rel == "shared/services/pipeline/pipeline_preflight_utils.py":
             if "validate_dataset_output_metadata(" not in source:
@@ -946,6 +980,16 @@ def main() -> int:
         help="Fail when dataset output format support does not cover parquet|json|csv|avro|orc",
     )
     parser.add_argument(
+        "--fail-on-error-monitoring-gap",
+        action="store_true",
+        help="Fail when error taxonomy observability hooks are missing from metrics/error runtime paths",
+    )
+    parser.add_argument(
+        "--fail-on-observability-status-gap",
+        action="store_true",
+        help="Fail when service-level observability status endpoint/bootstrap hooks are missing",
+    )
+    parser.add_argument(
         "--runtime-scope-glob",
         action="append",
         default=[],
@@ -1040,6 +1084,8 @@ def main() -> int:
     print(f"Runtime dataset write-mode gaps: {len(runtime_issues['dataset_write_mode_gap'])}")
     print(f"Runtime dataset required-columns gaps: {len(runtime_issues['dataset_required_columns_gap'])}")
     print(f"Runtime dataset write-format gaps: {len(runtime_issues['dataset_write_format_gap'])}")
+    print(f"Runtime error monitoring gaps: {len(runtime_issues['error_monitoring_gap'])}")
+    print(f"Runtime observability status gaps: {len(runtime_issues['observability_status_gap'])}")
     print(f"Runtime commented exports in __init__.py: {len(commented_exports)}")
     print(f"Runtime doc-only modules: {len(doc_only_modules)}")
     print(f"App route collisions: {len(route_collisions)}")
@@ -1132,6 +1178,14 @@ def main() -> int:
         print("\\nRuntime dataset write-format gap hits:")
         for path, line in runtime_issues["dataset_write_format_gap"][:120]:
             print(f"  {path}:{line}")
+    if runtime_issues["error_monitoring_gap"]:
+        print("\\nRuntime error monitoring gap hits:")
+        for path, line in runtime_issues["error_monitoring_gap"][:120]:
+            print(f"  {path}:{line}")
+    if runtime_issues["observability_status_gap"]:
+        print("\\nRuntime observability status gap hits:")
+        for path, line in runtime_issues["observability_status_gap"][:120]:
+            print(f"  {path}:{line}")
     if commented_exports:
         print("\\nRuntime commented export hits (__init__.py):")
         for path, line in commented_exports[:120]:
@@ -1198,6 +1252,10 @@ def main() -> int:
     if args.fail_on_dataset_required_columns_gap and runtime_issues["dataset_required_columns_gap"]:
         exit_code = 1
     if args.fail_on_dataset_write_format_gap and runtime_issues["dataset_write_format_gap"]:
+        exit_code = 1
+    if args.fail_on_error_monitoring_gap and runtime_issues["error_monitoring_gap"]:
+        exit_code = 1
+    if args.fail_on_observability_status_gap and runtime_issues["observability_status_gap"]:
         exit_code = 1
     if args.fail_on_commented_export and commented_exports:
         exit_code = 1

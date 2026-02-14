@@ -16,6 +16,11 @@ scrape_configs:
     static_configs:
       - targets: ["otel-collector:8889"]
 
+  # Jaeger internal metrics endpoint
+  - job_name: jaeger
+    static_configs:
+      - targets: ["jaeger:14269"]
+
   # Direct Prometheus scrape for FastAPI /metrics (prometheus-client)
   - job_name: spice-services
     metrics_path: /metrics
