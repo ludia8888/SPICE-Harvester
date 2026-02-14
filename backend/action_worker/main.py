@@ -62,6 +62,10 @@ from shared.utils.action_input_schema import (
 )
 from shared.utils.action_audit_policy import audit_action_log_result
 from shared.utils.action_data_access import evaluate_action_target_data_access
+from shared.utils.action_runtime_contracts import (
+    extract_required_action_interfaces,
+    load_action_target_runtime_contract,
+)
 from shared.utils.action_permission_profile import (
     ActionPermissionProfile,
     ActionPermissionProfileError,
@@ -954,6 +958,23 @@ class ActionWorker(StrictHeartbeatKafkaWorker[_ActionCommandPayload, None]):
                     db_name=db_name,
                     branch=ontology_commit_id,
                 )
+                required_interfaces = set(extract_required_action_interfaces(spec))
+                class_interface_refs: Dict[str, List[str]] = {}
+                class_field_types: Dict[str, Dict[str, str]] = {}
+
+                async def _ensure_class_contract(class_id: str) -> None:
+                    if class_id in class_interface_refs:
+                        return
+                    contract = await load_action_target_runtime_contract(
+                        terminus=self.terminus,
+                        db_name=db_name,
+                        class_id=class_id,
+                        branch=ontology_commit_id,
+                    )
+                    if contract is None:
+                        raise RuntimeError(f"Target class not found at ontology commit (class_id={class_id})")
+                    class_interface_refs[class_id] = contract.interfaces
+                    class_field_types[class_id] = contract.field_types
 
                 def _is_public_identifier(value: Any) -> bool:
                     text = str(value or "").strip()
@@ -966,6 +987,7 @@ class ActionWorker(StrictHeartbeatKafkaWorker[_ActionCommandPayload, None]):
                     instance_id = safe_str(item.instance_id)
                     if not class_id or not instance_id:
                         raise ValueError("each compiled target requires class_id and instance_id")
+                    await _ensure_class_contract(class_id)
 
                     prefix = f"{db_name}/{base_branch}/{class_id}/{instance_id}/"
                     command_files = await self.base_storage.list_command_files(
@@ -1058,37 +1080,73 @@ class ActionWorker(StrictHeartbeatKafkaWorker[_ActionCommandPayload, None]):
                             "lifecycle_id": lifecycle_id,
                             "base_state": base_state,
                             "changes": changes,
+                            "field_types": class_field_types.get(class_id, {}),
                             "observed_base": observed_base,
                             "base_token": base_token,
                         }
                     )
 
+                if required_interfaces:
+                    for tgt in loaded_targets:
+                        class_id = safe_str(tgt.get("class_id"))
+                        implemented = set(class_interface_refs.get(class_id, []))
+                        missing = sorted(required_interfaces - implemented)
+                        if missing:
+                            await self.action_logs.mark_failed(
+                                action_log_id=action_log_id,
+                                result=_audit_result(
+                                    {
+                                        "error": "action_interface_not_implemented",
+                                        "message": "Action target class does not satisfy required interfaces",
+                                        "class_id": class_id,
+                                        "required_interfaces": sorted(required_interfaces),
+                                        "implemented_interfaces": sorted(implemented),
+                                        "missing_interfaces": missing,
+                                    }
+                                ),
+                            )
+                            raise _ActionRejected("action_interface_not_implemented")
+
                 enforce_data_access = requires_action_data_access_enforcement(
                     profile=permission_profile,
                     global_enforcement=AppConfig.WRITEBACK_ENFORCE_ACTION_DATA_ACCESS,
                 )
-                if enforce_data_access:
+                principal_tags = None
+                if submitted_by and submitted_by != "system":
+                    principal_tags = build_principal_tags(
+                        principal_type=submitted_by_type,
+                        principal_id=submitted_by,
+                        role=actor_role,
+                    )
+                enforce_edit_access = bool(principal_tags)
+                if enforce_data_access or enforce_edit_access:
                     if self.dataset_registry is None:
                         self.dataset_registry = DatasetRegistry()
                         await self.dataset_registry.connect()
                     if not self.dataset_registry:
+                        error_key = "data_access_unverifiable" if enforce_data_access else "edit_access_unverifiable"
                         await self.action_logs.mark_failed(
                             action_log_id=action_log_id,
                             result=_audit_result(
                                 {
-                                    "error": "data_access_unverifiable",
-                                    "message": "DatasetRegistry not initialized for action data_access checks",
+                                    "error": error_key,
+                                    "message": "DatasetRegistry not initialized for action target access checks",
                                 }
                             ),
                         )
-                        raise _ActionRejected("data_access_unverifiable")
+                        raise _ActionRejected(error_key)
 
                     access_report = await evaluate_action_target_data_access(
                         dataset_registry=self.dataset_registry,
                         db_name=db_name,
                         targets=loaded_targets,
+                        enforce_data_access_policy=enforce_data_access,
+                        principal_tags=principal_tags,
+                        enforce_object_edit_policy=enforce_edit_access,
+                        enforce_attachment_edit_policy=enforce_edit_access,
+                        enforce_object_set_edit_policy=enforce_edit_access,
                     )
-                    if access_report.unverifiable:
+                    if enforce_data_access and access_report.unverifiable:
                         await self.action_logs.mark_failed(
                             action_log_id=action_log_id,
                             result=_audit_result(
@@ -1100,7 +1158,7 @@ class ActionWorker(StrictHeartbeatKafkaWorker[_ActionCommandPayload, None]):
                             ),
                         )
                         raise _ActionRejected("data_access_unverifiable")
-                    if access_report.denied:
+                    if enforce_data_access and access_report.denied:
                         await self.action_logs.mark_failed(
                             action_log_id=action_log_id,
                             result=_audit_result(
@@ -1112,6 +1170,30 @@ class ActionWorker(StrictHeartbeatKafkaWorker[_ActionCommandPayload, None]):
                             ),
                         )
                         raise _ActionRejected("data_access_denied")
+                    if enforce_edit_access and access_report.edit_unverifiable:
+                        await self.action_logs.mark_failed(
+                            action_log_id=action_log_id,
+                            result=_audit_result(
+                                {
+                                    "error": "edit_access_unverifiable",
+                                    "message": "Unable to verify one or more target edit permissions",
+                                    "unverifiable": access_report.edit_unverifiable,
+                                }
+                            ),
+                        )
+                        raise _ActionRejected("edit_access_unverifiable")
+                    if enforce_edit_access and access_report.edit_denied:
+                        await self.action_logs.mark_failed(
+                            action_log_id=action_log_id,
+                            result=_audit_result(
+                                {
+                                    "error": "edit_access_denied",
+                                    "message": "Actor cannot edit one or more target object types/fields",
+                                    "denied": access_report.edit_denied,
+                                }
+                            ),
+                        )
+                        raise _ActionRejected("edit_access_denied")
 
                 submission_criteria = str(spec.get("submission_criteria") or "").strip()
                 if submission_criteria:

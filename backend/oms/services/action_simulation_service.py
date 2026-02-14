@@ -50,6 +50,10 @@ from shared.utils.writeback_lifecycle import DEFAULT_LIFECYCLE_ID, derive_lifecy
 from shared.utils.writeback_paths import queue_entry_prefix, queue_entry_key, ref_key, writeback_patchset_key
 from shared.utils.action_writeback import is_noop_changes, safe_str
 from shared.observability.tracing import trace_external_call
+from shared.utils.action_runtime_contracts import (
+    extract_required_action_interfaces,
+    load_action_target_runtime_contract,
+)
 from shared.utils.writeback_patch_apply import apply_changes_to_payload
 from shared.utils.time_utils import utcnow
 import logging
@@ -318,6 +322,7 @@ class TargetPreflight:
     conflict_fields: List[str]
     conflict_links: List[Dict[str, str]]
     object_conflict_policy: Optional[str]
+    field_types: Dict[str, str]
     assumptions: Optional[Dict[str, Any]] = None
 
 
@@ -810,6 +815,34 @@ async def preflight_action_writeback(
         db_name=db_name,
         branch=ontology_commit_id,
     )
+    required_interfaces = extract_required_action_interfaces(action_spec)
+    required_interface_set = set(required_interfaces)
+    class_interface_refs: Dict[str, List[str]] = {}
+    class_field_types: Dict[str, Dict[str, str]] = {}
+
+    async def _ensure_class_runtime_contract(class_id: str) -> None:
+        if class_id in class_interface_refs:
+            return
+        contract = await load_action_target_runtime_contract(
+            terminus=terminus,
+            db_name=db_name,
+            class_id=class_id,
+            branch=ontology_commit_id,
+        )
+        if contract is None:
+            raise ActionSimulationRejected(
+                _attach_enterprise(
+                    {
+                        "error": "action_target_class_not_found",
+                        "message": "Target class not found at ontology commit",
+                        "class_id": class_id,
+                        "ontology_commit_id": ontology_commit_id,
+                    }
+                ),
+                status_code=404,
+            )
+        class_interface_refs[class_id] = contract.interfaces
+        class_field_types[class_id] = contract.field_types
 
     target_docs: Dict[Tuple[str, str], Dict[str, Any]] = {}
     access_docs: Dict[Tuple[str, str], Dict[str, Any]] = {}
@@ -822,6 +855,7 @@ async def preflight_action_writeback(
                 _attach_enterprise({"error": "action_implementation_invalid", "message": "each compiled target requires class_id and instance_id"}),
                 status_code=500,
             )
+        await _ensure_class_runtime_contract(class_id)
 
         prefix = f"{db_name}/{base_branch}/{class_id}/{instance_id}/"
         command_files = await base_storage.list_command_files(bucket=AppConfig.INSTANCE_BUCKET, prefix=prefix)
@@ -944,9 +978,29 @@ async def preflight_action_writeback(
                 conflict_fields=conflict_fields,
                 conflict_links=conflict_links,
                 object_conflict_policy=obj_meta.get("conflict_policy") if isinstance(obj_meta, dict) else None,
+                field_types=class_field_types.get(class_id, {}),
                 assumptions=assumptions_payload,
             )
         )
+
+    if required_interface_set:
+        for tgt in loaded:
+            implemented = set(class_interface_refs.get(tgt.class_id, []))
+            missing = sorted(required_interface_set - implemented)
+            if missing:
+                raise ActionSimulationRejected(
+                    _attach_enterprise(
+                        {
+                            "error": "action_interface_not_implemented",
+                            "message": "Action target class does not satisfy required interfaces",
+                            "class_id": tgt.class_id,
+                            "required_interfaces": sorted(required_interface_set),
+                            "implemented_interfaces": sorted(implemented),
+                            "missing_interfaces": missing,
+                        }
+                    ),
+                    status_code=403,
+                )
 
     try:
         resolved_permission_profile = permission_profile or resolve_action_permission_profile(action_spec)
@@ -966,16 +1020,25 @@ async def preflight_action_writeback(
         profile=resolved_permission_profile,
         global_enforcement=AppConfig.WRITEBACK_ENFORCE_ACTION_DATA_ACCESS,
     )
-    if enforce_data_access:
+    principal_tags = None
+    if submitted_by and submitted_by != "system":
+        principal_tags = build_principal_tags(
+            principal_type=submitted_by_type,
+            principal_id=submitted_by,
+            role=actor_role,
+        )
+    enforce_edit_access = bool(principal_tags)
+
+    if enforce_data_access or enforce_edit_access:
         if not dataset_registry:
+            error_key = "data_access_unverifiable" if enforce_data_access else "edit_access_unverifiable"
             raise ActionSimulationRejected(
                 _attach_enterprise(
                     {
-                        "error": "data_access_unverifiable",
+                        "error": error_key,
                         "message": (
                             "DatasetRegistry not available "
-                            "(WRITEBACK_ENFORCE_ACTION_DATA_ACCESS=true or "
-                            "permission_model=datasource_derived)"
+                            "(required for action target access/edit policy verification)"
                         ),
                     }
                 ),
@@ -989,11 +1052,18 @@ async def preflight_action_writeback(
                     "class_id": tgt.class_id,
                     "instance_id": tgt.instance_id,
                     "base_state": tgt.access_base_state,
+                    "changes": tgt.changes,
+                    "field_types": tgt.field_types,
                 }
                 for tgt in loaded
             ],
+            enforce_data_access_policy=enforce_data_access,
+            principal_tags=principal_tags,
+            enforce_object_edit_policy=enforce_edit_access,
+            enforce_attachment_edit_policy=enforce_edit_access,
+            enforce_object_set_edit_policy=enforce_edit_access,
         )
-        if access_report.unverifiable:
+        if enforce_data_access and access_report.unverifiable:
             raise ActionSimulationRejected(
                 _attach_enterprise(
                     {
@@ -1004,13 +1074,35 @@ async def preflight_action_writeback(
                 ),
                 status_code=503,
             )
-        if access_report.denied:
+        if enforce_data_access and access_report.denied:
             raise ActionSimulationRejected(
                 _attach_enterprise(
                     {
                         "error": "data_access_denied",
                         "message": "Actor cannot access one or more target rows under data_access policy",
                         "denied": access_report.denied,
+                    }
+                ),
+                status_code=403,
+            )
+        if enforce_edit_access and access_report.edit_unverifiable:
+            raise ActionSimulationRejected(
+                _attach_enterprise(
+                    {
+                        "error": "edit_access_unverifiable",
+                        "message": "Unable to verify one or more target edit permissions",
+                        "unverifiable": access_report.edit_unverifiable,
+                    }
+                ),
+                status_code=503,
+            )
+        if enforce_edit_access and access_report.edit_denied:
+            raise ActionSimulationRejected(
+                _attach_enterprise(
+                    {
+                        "error": "edit_access_denied",
+                        "message": "Actor cannot edit one or more target object types/fields",
+                        "denied": access_report.edit_denied,
                     }
                 ),
                 status_code=403,

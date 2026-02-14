@@ -29,6 +29,7 @@ def _preflight(*, conflict_fields: list[str], conflict_policy: str | None = None
         conflict_fields=conflict_fields,
         conflict_links=[],
         object_conflict_policy=None,
+        field_types={"status": "string"},
         assumptions=None,
     )
     return ActionPreflight(

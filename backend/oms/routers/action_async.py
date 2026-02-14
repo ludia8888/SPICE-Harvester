@@ -44,12 +44,17 @@ from shared.utils.action_template_engine import (
 )
 from shared.utils.action_simulation_utils import reject_simulation_delete_flag
 from shared.utils.resource_rid import format_resource_rid, parse_metadata_rev
+from shared.utils.action_runtime_contracts import (
+    extract_required_action_interfaces,
+    load_action_target_runtime_contract,
+)
 from shared.utils.writeback_conflicts import (
     compute_base_token,
     compute_observed_base,
 )
 from shared.utils.access_policy import apply_access_policy
 from shared.utils.action_data_access import evaluate_action_target_data_access
+from shared.utils.principal_policy import build_principal_tags
 from shared.utils.action_permission_profile import (
     ActionPermissionProfileError,
     requires_action_data_access_enforcement,
@@ -293,7 +298,28 @@ async def submit_action_async(
 
         audited_log_input = audit_action_log_input(validated_input, audit_policy=spec.get("audit_policy"))
 
-        # Best-effort: capture observed_base at submission time to enable field-level conflict checks
+        submitted_by = str((request.metadata or {}).get("user_id") or "").strip()
+        submitted_by_type = str((request.metadata or {}).get("user_type") or "user").strip().lower() or "user"
+        if not submitted_by:
+            raise classified_http_exception(
+                status.HTTP_400_BAD_REQUEST,
+                "request.metadata.user_id is required for action submissions",
+                code=ErrorCode.REQUEST_VALIDATION_FAILED,
+            )
+        actor_role = await enforce_action_permission(
+            db_name=db_name,
+            submitted_by=submitted_by,
+            submitted_by_type=submitted_by_type,
+            action_spec=spec,
+        )
+        principal_tags = build_principal_tags(
+            principal_type=submitted_by_type,
+            principal_id=submitted_by,
+            role=actor_role,
+        )
+        enforce_edit_access = submitted_by != "system" and bool(principal_tags)
+
+        # Capture observed_base at submission time to enable field-level conflict checks
         # when the worker executes later (ACTION_WRITEBACK_DESIGN.md).
         snapshot_targets: list[dict[str, Any]] = []
         access_targets: list[dict[str, Any]] = []
@@ -310,21 +336,56 @@ async def submit_action_async(
         if compiled_shape:
             settings = get_settings()
             storage = create_storage_service(settings)
-            if enforce_data_access and not storage:
+            if (enforce_data_access or enforce_edit_access) and not storage:
                 raise classified_http_exception(
                     status.HTTP_503_SERVICE_UNAVAILABLE,
-                    "StorageService unavailable for action target data access checks",
+                    "StorageService unavailable for action target access checks",
                     code=ErrorCode.STORAGE_UNAVAILABLE,
                 )
+            required_interfaces = set(extract_required_action_interfaces(spec))
+            class_interface_refs: dict[str, list[str]] = {}
+            class_field_types: dict[str, dict[str, str]] = {}
+
+            async def _ensure_class_contract(class_id: str) -> None:
+                if class_id in class_interface_refs:
+                    return
+                contract = await load_action_target_runtime_contract(
+                    terminus=terminus,
+                    db_name=db_name,
+                    class_id=class_id,
+                    branch=ontology_commit_id,
+                )
+                if contract is None:
+                    raise classified_http_exception(
+                        status.HTTP_404_NOT_FOUND,
+                        f"target class not found at ontology commit: {class_id}",
+                        code=ErrorCode.RESOURCE_NOT_FOUND,
+                    )
+                class_interface_refs[class_id] = contract.interfaces
+                class_field_types[class_id] = contract.field_types
+
             if storage:
                 max_targets = max(0, int(settings.writeback.writeback_submission_snapshot_max_targets))
-                access_scan_limit = len(compiled_shape) if enforce_data_access else max_targets
+                access_scan_limit = len(compiled_shape) if (enforce_data_access or enforce_edit_access) else max_targets
                 for idx, item in enumerate(compiled_shape[: max(0, access_scan_limit)]):
                     target_class_id = str(item.class_id or "").strip()
                     target_instance_id = str(item.instance_id or "").strip()
                     if not target_class_id or not target_instance_id:
                         continue
                     changes = dict(item.changes or {})
+                    await _ensure_class_contract(target_class_id)
+                    if required_interfaces:
+                        implemented = set(class_interface_refs.get(target_class_id, []))
+                        missing = sorted(required_interfaces - implemented)
+                        if missing:
+                            raise classified_http_exception(
+                                status.HTTP_403_FORBIDDEN,
+                                (
+                                    "Action target class does not satisfy required interfaces "
+                                    f"(class_id={target_class_id}, missing={missing})"
+                                ),
+                                code=ErrorCode.PERMISSION_DENIED,
+                            )
 
                     prefix = f"{db_name}/{resolved_base_branch}/{target_class_id}/{target_instance_id}/"
                     command_files = await storage.list_command_files(bucket=AppConfig.INSTANCE_BUCKET, prefix=prefix)
@@ -334,12 +395,14 @@ async def submit_action_async(
                     )
                     if not isinstance(base_state, dict):
                         base_state = {}
-                    if enforce_data_access:
+                    if enforce_data_access or enforce_edit_access:
                         access_targets.append(
                             {
                                 "class_id": target_class_id,
                                 "instance_id": target_instance_id,
                                 "base_state": base_state,
+                                "changes": changes,
+                                "field_types": class_field_types.get(target_class_id, {}),
                             }
                         )
 
@@ -361,43 +424,46 @@ async def submit_action_async(
                             }
                         )
 
-        # Create ActionLog (audit SSoT).
-        action_log_id = uuid4()
-        submitted_by = str((request.metadata or {}).get("user_id") or "").strip()
-        submitted_by_type = str((request.metadata or {}).get("user_type") or "user").strip().lower() or "user"
-        if not submitted_by:
-            raise classified_http_exception(
-                status.HTTP_400_BAD_REQUEST,
-                "request.metadata.user_id is required for action submissions",
-                code=ErrorCode.REQUEST_VALIDATION_FAILED,
-            )
-        await enforce_action_permission(
-            db_name=db_name,
-            submitted_by=submitted_by,
-            submitted_by_type=submitted_by_type,
-            action_spec=spec,
-        )
-
-        if enforce_data_access and access_targets:
+        if (enforce_data_access or enforce_edit_access) and access_targets:
             dataset_registry = DatasetRegistry()
             await dataset_registry.connect()
             access_report = await evaluate_action_target_data_access(
                 dataset_registry=dataset_registry,
                 db_name=db_name,
                 targets=access_targets,
+                enforce_data_access_policy=enforce_data_access,
+                principal_tags=principal_tags if enforce_edit_access else None,
+                enforce_object_edit_policy=enforce_edit_access,
+                enforce_attachment_edit_policy=enforce_edit_access,
+                enforce_object_set_edit_policy=enforce_edit_access,
             )
-            if access_report.unverifiable:
+            if enforce_data_access and access_report.unverifiable:
                 raise classified_http_exception(
                     status.HTTP_503_SERVICE_UNAVAILABLE,
                     "Unable to verify action target data access policy",
                     code=ErrorCode.STORAGE_UNAVAILABLE,
                 )
-            if access_report.denied:
+            if enforce_data_access and access_report.denied:
                 raise classified_http_exception(
                     status.HTTP_403_FORBIDDEN,
                     "Permission denied",
                     code=ErrorCode.PERMISSION_DENIED,
                 )
+            if enforce_edit_access and access_report.edit_unverifiable:
+                raise classified_http_exception(
+                    status.HTTP_503_SERVICE_UNAVAILABLE,
+                    "Unable to verify action target edit permissions",
+                    code=ErrorCode.STORAGE_UNAVAILABLE,
+                )
+            if enforce_edit_access and access_report.edit_denied:
+                raise classified_http_exception(
+                    status.HTTP_403_FORBIDDEN,
+                    "Permission denied",
+                    code=ErrorCode.PERMISSION_DENIED,
+                )
+
+        # Create ActionLog (audit SSoT).
+        action_log_id = uuid4()
         log_metadata = dict(request.metadata or {})
         # Durable trace correlation: persist W3C context on the ActionLog (ontology object)
         # so outbox/reconciler workers can attach original traces even when running later.

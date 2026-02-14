@@ -41,6 +41,9 @@ _SPEC_ALIASES = {
     "backingSource": "backing_source",
     "inputSchema": "input_schema",
     "permissionPolicy": "permission_policy",
+    "targetInterfaces": "target_interfaces",
+    "targetInterfaceRefs": "target_interface_refs",
+    "appliesTo": "applies_to",
     "requiredProperties": "required_properties",
     "requiredRelationships": "required_relationships",
     "sideEffects": "side_effects",
@@ -61,6 +64,9 @@ _REFERENCE_KEYS = {
     "objectTypeRef",
     "interface_ref",
     "interfaceRef",
+    "target_interfaces",
+    "targetInterfaceRefs",
+    "target_interface_refs",
     "shared_property_ref",
     "sharedPropertyRef",
 }
@@ -595,6 +601,37 @@ def _collect_required_field_issues(resource_type: str, spec: Dict[str, Any]) -> 
                     message="action_type conflict_policy must be one of: WRITEBACK_WINS, BASE_WINS, FAIL, MANUAL_REVIEW",
                     invalid_fields=["conflict_policy"],
                 )
+
+        target_interfaces = spec.get("target_interfaces")
+        if target_interfaces is None:
+            target_interfaces = spec.get("target_interface_refs")
+        if target_interfaces is not None:
+            if not _validate_string_list(target_interfaces, field_name="target_interfaces"):
+                _append_spec_issue(
+                    issues,
+                    message="action_type target_interfaces must be a list of non-empty interface ids",
+                    invalid_fields=["target_interfaces"],
+                )
+
+        applies_to = spec.get("applies_to")
+        if applies_to is not None:
+            if not isinstance(applies_to, dict):
+                _append_spec_issue(
+                    issues,
+                    message="action_type applies_to must be an object when provided",
+                    invalid_fields=["applies_to"],
+                )
+            else:
+                applies_interfaces = applies_to.get("interfaces")
+                if applies_interfaces is not None and not _validate_string_list(
+                    applies_interfaces,
+                    field_name="applies_to.interfaces",
+                ):
+                    _append_spec_issue(
+                        issues,
+                        message="action_type applies_to.interfaces must be a list of non-empty interface ids",
+                        invalid_fields=["applies_to.interfaces"],
+                    )
 
         submission_criteria = spec.get("submission_criteria")
         if submission_criteria is not None:

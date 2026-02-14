@@ -1,13 +1,13 @@
 # Backend Design Reference
 
-> Generated: 2026-02-14T10:12:35+09:00
+> Generated: 2026-02-14T10:15:49+09:00
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 > Source: AST + docstring extraction (module/class/function) via `scripts/generate_backend_methods.py`.
 
 ## Coverage Summary
 
-- Modules scanned: **975**
-- Modules with module docstring: **594/975**
+- Modules scanned: **977**
+- Modules with module docstring: **594/977**
 - Modules with broad `except Exception`: **312**
 - Modules with bare `except:`: **0**
 - Modules with `return` inside `finally`: **0**
@@ -66,9 +66,9 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - API surface: public=2 | top-level functions=1 | classes=4 | methods=23
-- Runtime signals: async_functions=17 | try=24 | raise=52 | broad_except=13 | bare_except=0 | finally_return=0
+- Runtime signals: async_functions=18 | try=24 | raise=56 | broad_except=13 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/1 (0%) | classes=1/4 (25%) | methods=0/23 (0%)
-- Internal imports (44): oms.services.async_terminus; oms.services.ontology_resources; shared.config.app_config; shared.config.settings; shared.errors.enterprise_catalog; shared.errors.error_types; shared.models.event_envelope; shared.models.events (+36 more)
+- Internal imports (45): oms.services.async_terminus; oms.services.ontology_resources; shared.config.app_config; shared.config.settings; shared.errors.enterprise_catalog; shared.errors.error_types; shared.models.event_envelope; shared.models.events (+37 more)
 - External imports (7): __future__; asyncio; collections; dataclasses; json; logging; typing
 - Public API names: ActionWorker; main
 
@@ -1278,7 +1278,7 @@
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
-- Internal imports (1): bff.routers
+- Internal imports (3): bff.routers; bff.routers.pipeline_datasets_uploads_csv; bff.routers.pipeline_datasets_versions
 - External imports (1): fastapi
 - Public API names: not documented
 
@@ -4970,9 +4970,9 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - API surface: public=10 | top-level functions=3 | classes=8 | methods=0
-- Runtime signals: async_functions=2 | try=12 | raise=29 | broad_except=4 | bare_except=0 | finally_return=0
+- Runtime signals: async_functions=3 | try=12 | raise=33 | broad_except=4 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=2/3 (66%) | classes=2/8 (25%) | methods=0/0 (n/a)
-- Internal imports (29): oms.dependencies; oms.services.action_simulation_service; oms.services.ontology_deployment_registry_v2; oms.services.ontology_resources; shared.config.app_config; shared.config.settings; shared.errors.error_types; shared.models.commands (+21 more)
+- Internal imports (31): oms.dependencies; oms.services.action_simulation_service; oms.services.ontology_deployment_registry_v2; oms.services.ontology_resources; shared.config.app_config; shared.config.settings; shared.errors.error_types; shared.models.commands (+23 more)
 - External imports (7): __future__; datetime; fastapi; logging; pydantic; typing; uuid
 - Public API names: ActionSimulateAssumptions; ActionSimulateObservedBaseOverrides; ActionSimulateRequest; ActionSimulateScenarioRequest; ActionSimulateStatePatch; ActionSimulateTargetAssumption; ActionSubmitRequest; ActionSubmitResponse; simulate_action_async; submit_action_async
 
@@ -5152,9 +5152,9 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - API surface: public=8 | top-level functions=13 | classes=4 | methods=1
-- Runtime signals: async_functions=4 | try=15 | raise=62 | broad_except=7 | bare_except=0 | finally_return=0
+- Runtime signals: async_functions=5 | try=15 | raise=66 | broad_except=7 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/13 (0%) | classes=0/4 (0%) | methods=0/1 (0%)
-- Internal imports (27): oms.services.async_terminus; oms.services.ontology_resources; shared.config.app_config; shared.errors.enterprise_catalog; shared.errors.error_types; shared.observability.tracing; shared.security.database_access; shared.services.core.object_type_meta_resolver (+19 more)
+- Internal imports (28): oms.services.async_terminus; oms.services.ontology_resources; shared.config.app_config; shared.errors.enterprise_catalog; shared.errors.error_types; shared.observability.tracing; shared.security.database_access; shared.services.core.object_type_meta_resolver (+20 more)
 - External imports (4): __future__; dataclasses; logging; typing
 - Public API names: ActionPreflight; ActionSimulationRejected; ActionSimulationScenario; TargetPreflight; build_patchset_for_scenario; enforce_action_permission; preflight_action_writeback; simulate_effects_for_patchset
 
@@ -9183,10 +9183,10 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
-- API surface: public=2 | top-level functions=2 | classes=2 | methods=1
-- Runtime signals: async_functions=2 | try=1 | raise=0 | broad_except=1 | bare_except=0 | finally_return=0
-- Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/2 (0%) | methods=0/1 (0%)
-- Internal imports (1): shared.utils.access_policy
+- API surface: public=2 | top-level functions=8 | classes=2 | methods=1
+- Runtime signals: async_functions=4 | try=2 | raise=0 | broad_except=2 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/8 (0%) | classes=0/2 (0%) | methods=0/1 (0%)
+- Internal imports (3): shared.utils.access_policy; shared.utils.ontology_type_normalization; shared.utils.principal_policy
 - External imports (4): __future__; dataclasses; logging; typing
 - Public API names: ActionTargetDataAccessReport; evaluate_action_target_data_access
 
@@ -9217,6 +9217,20 @@
 - Internal imports (0): not documented
 - External imports (3): __future__; dataclasses; typing
 - Public API names: ActionPermissionProfile; ActionPermissionProfileError; requires_action_data_access_enforcement; resolve_action_permission_profile
+
+### `backend/shared/utils/action_runtime_contracts.py`
+- Module summary: no docstring
+- Responsibilities: not documented
+- Invariants: not documented
+- Failure modes: not documented
+- Extension points: not documented
+- Dependencies (doc): not documented
+- API surface: public=6 | top-level functions=5 | classes=1 | methods=0
+- Runtime signals: async_functions=1 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/5 (0%) | classes=0/1 (0%) | methods=0/0 (n/a)
+- Internal imports (1): shared.utils.ontology_type_normalization
+- External imports (3): __future__; dataclasses; typing
+- Public API names: ActionTargetRuntimeContract; build_property_type_map_from_properties; extract_interfaces_from_metadata; extract_required_action_interfaces; load_action_target_runtime_contract; strip_interface_prefix
 
 ### `backend/shared/utils/action_simulation_utils.py`
 - Module summary: no docstring
@@ -11229,12 +11243,12 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
-- API surface: public=3 | top-level functions=5 | classes=1 | methods=1
-- Runtime signals: async_functions=19 | try=0 | raise=1 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=no | top-level functions=0/5 (0%) | classes=0/1 (0%) | methods=0/1 (0%)
+- API surface: public=5 | top-level functions=7 | classes=1 | methods=1
+- Runtime signals: async_functions=29 | try=0 | raise=1 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/7 (0%) | classes=0/1 (0%) | methods=0/1 (0%)
 - Internal imports (3): oms.dependencies; oms.routers.action_async; oms.services.action_simulation_service
-- External imports (5): __future__; fastapi; httpx; pytest; typing
-- Public API names: action_async_app; test_simulate_returns_503_when_datasource_derived_data_access_is_unverifiable; test_submit_returns_403_for_datasource_derived_without_data_engineer_role
+- External imports (6): __future__; fastapi; httpx; pytest; types; typing
+- Public API names: action_async_app; test_simulate_returns_503_when_datasource_derived_data_access_is_unverifiable; test_submit_returns_403_for_datasource_derived_without_data_engineer_role; test_submit_returns_403_when_target_class_misses_required_interface; test_submit_returns_503_when_target_edit_access_is_unverifiable
 
 ### `backend/tests/unit/oms/test_instance_router.py`
 - Module summary: Tests for OMS instance router (ES-backed, Phase 2).
@@ -12923,12 +12937,12 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
-- API surface: public=3 | top-level functions=3 | classes=1 | methods=2
-- Runtime signals: async_functions=4 | try=0 | raise=1 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/1 (0%) | methods=0/2 (0%)
+- API surface: public=6 | top-level functions=6 | classes=1 | methods=2
+- Runtime signals: async_functions=7 | try=0 | raise=1 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/6 (0%) | classes=0/1 (0%) | methods=0/2 (0%)
 - Internal imports (1): shared.utils.action_data_access
 - External imports (3): __future__; pytest; types
-- Public API names: test_evaluate_action_target_data_access_allows_when_policy_missing; test_evaluate_action_target_data_access_denied; test_evaluate_action_target_data_access_marks_unverifiable_on_registry_error
+- Public API names: test_evaluate_action_target_data_access_allows_when_policy_missing; test_evaluate_action_target_data_access_attachment_policy_missing_is_unverifiable; test_evaluate_action_target_data_access_denied; test_evaluate_action_target_data_access_edit_denied_by_object_edit_policy; test_evaluate_action_target_data_access_marks_unverifiable_on_registry_error; test_evaluate_action_target_data_access_object_set_policy_enforced_for_link_changes
 
 ### `backend/tests/unit/utils/test_action_input_schema.py`
 - Module summary: no docstring
@@ -12957,6 +12971,20 @@
 - Internal imports (1): shared.utils.action_permission_profile
 - External imports (2): __future__; pytest
 - Public API names: test_requires_action_data_access_enforcement_for_profile_or_global_flag; test_resolve_action_permission_profile_defaults; test_resolve_action_permission_profile_rejects_invalid_model; test_resolve_action_permission_profile_rejects_non_boolean_edits_flag; test_resolve_action_permission_profile_supports_aliases
+
+### `backend/tests/unit/utils/test_action_runtime_contracts.py`
+- Module summary: no docstring
+- Responsibilities: not documented
+- Invariants: not documented
+- Failure modes: not documented
+- Extension points: not documented
+- Dependencies (doc): not documented
+- API surface: public=5 | top-level functions=5 | classes=0 | methods=0
+- Runtime signals: async_functions=4 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/5 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Internal imports (1): shared.utils.action_runtime_contracts
+- External imports (3): __future__; pytest; types
+- Public API names: test_build_property_type_map_from_properties_handles_models_and_dicts; test_extract_interfaces_from_metadata_supports_aliases; test_extract_required_action_interfaces_normalizes_prefix_and_dedupes; test_load_action_target_runtime_contract_extracts_metadata_and_properties; test_load_action_target_runtime_contract_returns_none_when_class_missing
 
 ### `backend/tests/unit/utils/test_action_template_engine.py`
 - Module summary: no docstring

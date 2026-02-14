@@ -1,6 +1,6 @@
 # Backend Method Index
 
-> Generated: 2026-02-14T10:12:35+09:00
+> Generated: 2026-02-14T10:15:49+09:00
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 
 ## action_outbox_worker
@@ -29,35 +29,35 @@
 
 ### `backend/action_worker/main.py`
 - **Functions**
-  - `async main()` (line 1772): no docstring
+  - `async main()` (line 1854): no docstring
 - **Classes**
-  - `_ActionCommandPayload` (line 108): no docstring
-  - `_ActionCommandParseError` (line 115): no docstring
-  - `_ActionRejected` (line 119): Used to short-circuit retries when the ActionLog is already finalized with a rejection result.
-  - `ActionWorker` (line 123): no docstring
-    - `__init__(self)` (line 124): no docstring
-    - `async initialize(self)` (line 161): no docstring
-    - `async shutdown(self)` (line 215): no docstring
-    - `_parse_payload(self, payload)` (line 233): no docstring
-    - `_fallback_metadata(self, payload)` (line 286): no docstring
-    - `_registry_key(self, payload)` (line 289): no docstring
-    - `async _process_payload(self, payload)` (line 300): no docstring
-    - `_span_name(self, payload)` (line 335): no docstring
-    - `_span_attributes(self, msg, payload, registry_key)` (line 338): no docstring
-    - `_metric_event_name(self, payload)` (line 359): no docstring
-    - `async _on_parse_error(self, msg, raw_payload, error)` (line 362): no docstring
-    - `async _on_retry_scheduled(self, payload, error, attempt_count, backoff_s, retryable)` (line 393): no docstring
-    - `async _on_terminal_failure(self, payload, error, attempt_count, retryable)` (line 409): no docstring
-    - `_is_retryable_error(exc, payload)` (line 425): no docstring
-    - `async _publish_to_dlq(self, msg, stage, error, attempt_count, payload_text, payload_obj, kafka_headers, fallback_metadata)` (line 434): no docstring
-    - `async _send_to_dlq(self, msg, error, attempt_count, payload, raw_payload, stage, payload_text, payload_obj, kafka_headers, fallback_metadata)` (line 462): no docstring
-    - `async run(self)` (line 493): no docstring
-    - `async _enforce_permission(self, db_name, submitted_by, submitted_by_type, action_spec)` (line 497): no docstring
-    - `async _check_writeback_dataset_acl_alignment(self, db_name, submitted_by, submitted_by_type, actor_role, ontology_commit_id, resources, class_ids)` (line 529): no docstring
-    - `async _execute_action(self, db_name, action_log_id, command, envelope)` (line 756): no docstring
-    - `async _ensure_branch(self, repository, branch)` (line 1601): no docstring
-    - `async _write_patchset_commit(self, repository, branch, action_log_id, patchset, metadata_doc)` (line 1604): no docstring
-    - `async _append_queue_entries(self, repository, branch, patchset_commit_id, action_log_id, action_applied_seq)` (line 1657): no docstring
+  - `_ActionCommandPayload` (line 112): no docstring
+  - `_ActionCommandParseError` (line 119): no docstring
+  - `_ActionRejected` (line 123): Used to short-circuit retries when the ActionLog is already finalized with a rejection result.
+  - `ActionWorker` (line 127): no docstring
+    - `__init__(self)` (line 128): no docstring
+    - `async initialize(self)` (line 165): no docstring
+    - `async shutdown(self)` (line 219): no docstring
+    - `_parse_payload(self, payload)` (line 237): no docstring
+    - `_fallback_metadata(self, payload)` (line 290): no docstring
+    - `_registry_key(self, payload)` (line 293): no docstring
+    - `async _process_payload(self, payload)` (line 304): no docstring
+    - `_span_name(self, payload)` (line 339): no docstring
+    - `_span_attributes(self, msg, payload, registry_key)` (line 342): no docstring
+    - `_metric_event_name(self, payload)` (line 363): no docstring
+    - `async _on_parse_error(self, msg, raw_payload, error)` (line 366): no docstring
+    - `async _on_retry_scheduled(self, payload, error, attempt_count, backoff_s, retryable)` (line 397): no docstring
+    - `async _on_terminal_failure(self, payload, error, attempt_count, retryable)` (line 413): no docstring
+    - `_is_retryable_error(exc, payload)` (line 429): no docstring
+    - `async _publish_to_dlq(self, msg, stage, error, attempt_count, payload_text, payload_obj, kafka_headers, fallback_metadata)` (line 438): no docstring
+    - `async _send_to_dlq(self, msg, error, attempt_count, payload, raw_payload, stage, payload_text, payload_obj, kafka_headers, fallback_metadata)` (line 466): no docstring
+    - `async run(self)` (line 497): no docstring
+    - `async _enforce_permission(self, db_name, submitted_by, submitted_by_type, action_spec)` (line 501): no docstring
+    - `async _check_writeback_dataset_acl_alignment(self, db_name, submitted_by, submitted_by_type, actor_role, ontology_commit_id, resources, class_ids)` (line 533): no docstring
+    - `async _execute_action(self, db_name, action_log_id, command, envelope)` (line 760): no docstring
+    - `async _ensure_branch(self, repository, branch)` (line 1683): no docstring
+    - `async _write_patchset_commit(self, repository, branch, action_log_id, patchset, metadata_doc)` (line 1686): no docstring
+    - `async _append_queue_entries(self, repository, branch, patchset_commit_id, action_log_id, action_applied_seq)` (line 1739): no docstring
 
 ## agent
 
@@ -3833,18 +3833,18 @@
 
 ### `backend/oms/routers/action_async.py`
 - **Functions**
-  - `_resolve_writeback_target(db_name, raw_target)` (line 162): no docstring
-  - `async submit_action_async(db_name, action_type_id, request, base_branch, terminus, event_store)` (line 184): Submit an Action for async execution.
-  - `async simulate_action_async(db_name, action_type_id, request, terminus)` (line 489): Simulate an Action writeback (dry-run).
+  - `_resolve_writeback_target(db_name, raw_target)` (line 167): no docstring
+  - `async submit_action_async(db_name, action_type_id, request, base_branch, terminus, event_store)` (line 189): Submit an Action for async execution.
+  - `async simulate_action_async(db_name, action_type_id, request, terminus)` (line 555): Simulate an Action writeback (dry-run).
 - **Classes**
-  - `ActionSubmitRequest` (line 74): no docstring
-  - `ActionSubmitResponse` (line 85): no docstring
-  - `ActionSimulateScenarioRequest` (line 96): no docstring
-  - `ActionSimulateStatePatch` (line 104): Patch-like state override for decision simulation (what-if).
-  - `ActionSimulateObservedBaseOverrides` (line 115): Override observed_base snapshot fields/links to simulate stale reads.
-  - `ActionSimulateTargetAssumption` (line 122): no docstring
-  - `ActionSimulateAssumptions` (line 129): no docstring
-  - `ActionSimulateRequest` (line 136): no docstring
+  - `ActionSubmitRequest` (line 79): no docstring
+  - `ActionSubmitResponse` (line 90): no docstring
+  - `ActionSimulateScenarioRequest` (line 101): no docstring
+  - `ActionSimulateStatePatch` (line 109): Patch-like state override for decision simulation (what-if).
+  - `ActionSimulateObservedBaseOverrides` (line 120): Override observed_base snapshot fields/links to simulate stale reads.
+  - `ActionSimulateTargetAssumption` (line 127): no docstring
+  - `ActionSimulateAssumptions` (line 134): no docstring
+  - `ActionSimulateRequest` (line 141): no docstring
 
 ### `backend/oms/routers/branch.py`
 - **Functions**
@@ -3920,19 +3920,19 @@
   - `async _validate_relationships_gate(terminus, db_name, branch, ontology_payload, enabled)` (line 429): no docstring
   - `async _ensure_database_exists(db_name, terminus)` (line 455): 데이터베이스 존재 여부 확인 후 404 예외 발생
   - `async create_ontology(ontology_request, request, db_name, branch, terminus, event_store, command_status_service)` (line 485): 내부 ID 기반 온톨로지 생성
-  - `async validate_ontology_create(ontology_request, request, db_name, branch, terminus)` (line 822): 온톨로지 생성 검증 (no write).
-  - `async validate_ontology_update(ontology_data, request, db_name, class_id, branch, terminus)` (line 928): 온톨로지 업데이트 검증 (no write).
-  - `async list_ontologies(db_name, branch, class_type, limit, offset, terminus, label_mapper)` (line 1048): 내부 ID 기반 온톨로지 목록 조회
-  - `async analyze_relationship_network(db_name, terminus)` (line 1129): 🔥 관계 네트워크 종합 분석 엔드포인트
-  - `async get_ontology(request, db_name, class_id, branch, terminus, converter, label_mapper)` (line 1162): 내부 ID 기반 온톨로지 조회
-  - `async update_ontology(ontology_data, request, db_name, class_id, branch, expected_seq, terminus, event_store, command_status_service)` (line 1253): 내부 ID 기반 온톨로지 업데이트
-  - `async delete_ontology(request, db_name, class_id, branch, expected_seq, terminus, event_store, command_status_service)` (line 1591): 내부 ID 기반 온톨로지 삭제
-  - `async query_ontologies(query, db_name, branch, terminus)` (line 1710): 내부 ID 기반 온톨로지 쿼리
-  - `async create_ontology_with_advanced_relationships(ontology_request, request, db_name, branch, auto_generate_inverse, validate_relationships, check_circular_references, terminus, event_store, command_status_service)` (line 1813): 🔥 고급 관계 관리 기능을 포함한 온톨로지 생성
-  - `async validate_ontology_relationships(request, db_name, terminus)` (line 2087): 🔥 온톨로지 관계 검증 전용 엔드포인트
-  - `async detect_circular_references(db_name, new_ontology, terminus)` (line 2135): 🔥 순환 참조 탐지 전용 엔드포인트
-  - `async find_relationship_paths(start_entity, db_name, end_entity, max_depth, path_type, terminus)` (line 2185): 🔥 관계 경로 탐색 엔드포인트
-  - `async get_reachable_entities(start_entity, db_name, max_depth, terminus)` (line 2247): 🔥 도달 가능한 엔티티 조회 엔드포인트
+  - `async validate_ontology_create(ontology_request, request, db_name, branch, terminus)` (line 800): 온톨로지 생성 검증 (no write).
+  - `async validate_ontology_update(ontology_data, request, db_name, class_id, branch, terminus)` (line 906): 온톨로지 업데이트 검증 (no write).
+  - `async list_ontologies(db_name, branch, class_type, limit, offset, terminus, label_mapper)` (line 1026): 내부 ID 기반 온톨로지 목록 조회
+  - `async analyze_relationship_network(db_name, terminus)` (line 1107): 🔥 관계 네트워크 종합 분석 엔드포인트
+  - `async get_ontology(request, db_name, class_id, branch, terminus, converter, label_mapper)` (line 1140): 내부 ID 기반 온톨로지 조회
+  - `async update_ontology(ontology_data, request, db_name, class_id, branch, expected_seq, terminus, event_store, command_status_service)` (line 1231): 내부 ID 기반 온톨로지 업데이트
+  - `async delete_ontology(request, db_name, class_id, branch, expected_seq, terminus, event_store, command_status_service)` (line 1569): 내부 ID 기반 온톨로지 삭제
+  - `async query_ontologies(query, db_name, branch, terminus)` (line 1688): 내부 ID 기반 온톨로지 쿼리
+  - `async create_ontology_with_advanced_relationships(ontology_request, request, db_name, branch, auto_generate_inverse, validate_relationships, check_circular_references, terminus, event_store, command_status_service)` (line 1791): 🔥 고급 관계 관리 기능을 포함한 온톨로지 생성
+  - `async validate_ontology_relationships(request, db_name, terminus)` (line 2065): 🔥 온톨로지 관계 검증 전용 엔드포인트
+  - `async detect_circular_references(db_name, new_ontology, terminus)` (line 2113): 🔥 순환 참조 탐지 전용 엔드포인트
+  - `async find_relationship_paths(start_entity, db_name, end_entity, max_depth, path_type, terminus)` (line 2163): 🔥 관계 경로 탐색 엔드포인트
+  - `async get_reachable_entities(start_entity, db_name, max_depth, terminus)` (line 2225): 🔥 도달 가능한 엔티티 조회 엔드포인트
 
 ### `backend/oms/routers/ontology_extensions.py`
 - **Functions**
@@ -4021,25 +4021,25 @@
 
 ### `backend/oms/services/action_simulation_service.py`
 - **Functions**
-  - `_enterprise_payload_for_error(error_key)` (line 65): no docstring
-  - `_attach_enterprise(payload)` (line 90): no docstring
-  - `_assumption_is_forbidden_field(field)` (line 114): no docstring
-  - `_extract_link_fields(ops)` (line 123): no docstring
-  - `_extract_patch_field_lists(patch)` (line 143): no docstring
-  - `_apply_assumption_patch(scope, base_state, patch)` (line 166): no docstring
-  - `_apply_observed_base_overrides(observed_base, overrides)` (line 219): no docstring
-  - `_coerce_overlay_branch(db_name, writeback_target, overlay_branch)` (line 341): no docstring
-  - `async enforce_action_permission(db_name, submitted_by, submitted_by_type, action_spec)` (line 351): no docstring
-  - `async _check_writeback_dataset_acl_alignment(db_name, submitted_by, submitted_by_type, actor_role, ontology_commit_id, resources, dataset_registry, class_ids)` (line 417): no docstring
-  - `async preflight_action_writeback(terminus, base_storage, dataset_registry, db_name, action_type_id, ontology_commit_id, action_spec, action_type_rid, input_payload, assumptions, submitted_by, submitted_by_type, actor_role, permission_profile, base_branch, overlay_branch)` (line 668): no docstring
-  - `build_patchset_for_scenario(preflight, action_log_id, conflict_policy_override)` (line 1166): no docstring
-  - `async simulate_effects_for_patchset(base_storage, lakefs_storage, db_name, base_branch, overlay_branch, writeback_repo, writeback_branch, action_log_id, patchset_id, targets, base_overrides_by_target)` (line 1255): no docstring
+  - `_enterprise_payload_for_error(error_key)` (line 69): no docstring
+  - `_attach_enterprise(payload)` (line 94): no docstring
+  - `_assumption_is_forbidden_field(field)` (line 118): no docstring
+  - `_extract_link_fields(ops)` (line 127): no docstring
+  - `_extract_patch_field_lists(patch)` (line 147): no docstring
+  - `_apply_assumption_patch(scope, base_state, patch)` (line 170): no docstring
+  - `_apply_observed_base_overrides(observed_base, overrides)` (line 223): no docstring
+  - `_coerce_overlay_branch(db_name, writeback_target, overlay_branch)` (line 346): no docstring
+  - `async enforce_action_permission(db_name, submitted_by, submitted_by_type, action_spec)` (line 356): no docstring
+  - `async _check_writeback_dataset_acl_alignment(db_name, submitted_by, submitted_by_type, actor_role, ontology_commit_id, resources, dataset_registry, class_ids)` (line 422): no docstring
+  - `async preflight_action_writeback(terminus, base_storage, dataset_registry, db_name, action_type_id, ontology_commit_id, action_spec, action_type_rid, input_payload, assumptions, submitted_by, submitted_by_type, actor_role, permission_profile, base_branch, overlay_branch)` (line 673): no docstring
+  - `build_patchset_for_scenario(preflight, action_log_id, conflict_policy_override)` (line 1258): no docstring
+  - `async simulate_effects_for_patchset(base_storage, lakefs_storage, db_name, base_branch, overlay_branch, writeback_repo, writeback_branch, action_log_id, patchset_id, targets, base_overrides_by_target)` (line 1347): no docstring
 - **Classes**
-  - `ActionSimulationRejected` (line 58): no docstring
-    - `__init__(self, payload, status_code)` (line 59): no docstring
-  - `ActionSimulationScenario` (line 302): no docstring
-  - `TargetPreflight` (line 308): no docstring
-  - `ActionPreflight` (line 325): no docstring
+  - `ActionSimulationRejected` (line 62): no docstring
+    - `__init__(self, payload, status_code)` (line 63): no docstring
+  - `ActionSimulationScenario` (line 306): no docstring
+  - `TargetPreflight` (line 312): no docstring
+  - `ActionPreflight` (line 330): no docstring
 
 ### `backend/oms/services/async_terminus.py`
 - **Classes**
@@ -4176,26 +4176,26 @@
 
 ### `backend/oms/services/ontology_resource_validator.py`
 - **Functions**
-  - `_normalize_spec(spec)` (line 117): no docstring
-  - `_merge_payload_spec(payload)` (line 130): no docstring
-  - `_extract_reference_values(value, keys, parent_is_ref)` (line 141): no docstring
-  - `collect_reference_values(spec)` (line 154): no docstring
-  - `check_required_fields(resource_type, spec)` (line 158): no docstring
-  - `async find_missing_references(db_name, resource_type, payload, terminus, branch)` (line 164): no docstring
-  - `_canonicalize_ref(raw)` (line 200): no docstring
-  - `_is_primitive_reference(value)` (line 210): no docstring
-  - `_strip_object_ref(raw)` (line 224): no docstring
-  - `_collect_link_type_issues(spec)` (line 239): no docstring
-  - `_collect_relationship_spec_issues(spec)` (line 262): no docstring
-  - `async _find_missing_link_type_refs(terminus, db_name, branch, spec)` (line 334): no docstring
-  - `_validate_required_fields(resource_type, spec)` (line 353): no docstring
-  - `_collect_required_field_issues(resource_type, spec)` (line 359): no docstring
-  - `_collect_required_items_issues(items, item_name, name_keys)` (line 773): no docstring
-  - `_collect_permission_policy_issues(policy)` (line 811): no docstring
-  - `_validate_string_list(value, field_name)` (line 903): no docstring
-  - `_append_spec_issue(issues, message, missing_fields, invalid_fields)` (line 913): no docstring
-  - `async _reference_exists(terminus, resources, db_name, branch, ref_type, ref)` (line 932): no docstring
-  - `async validate_resource(db_name, resource_type, payload, terminus, branch, expected_head_commit, strict)` (line 975): no docstring
+  - `_normalize_spec(spec)` (line 123): no docstring
+  - `_merge_payload_spec(payload)` (line 136): no docstring
+  - `_extract_reference_values(value, keys, parent_is_ref)` (line 147): no docstring
+  - `collect_reference_values(spec)` (line 160): no docstring
+  - `check_required_fields(resource_type, spec)` (line 164): no docstring
+  - `async find_missing_references(db_name, resource_type, payload, terminus, branch)` (line 170): no docstring
+  - `_canonicalize_ref(raw)` (line 206): no docstring
+  - `_is_primitive_reference(value)` (line 216): no docstring
+  - `_strip_object_ref(raw)` (line 230): no docstring
+  - `_collect_link_type_issues(spec)` (line 245): no docstring
+  - `_collect_relationship_spec_issues(spec)` (line 268): no docstring
+  - `async _find_missing_link_type_refs(terminus, db_name, branch, spec)` (line 340): no docstring
+  - `_validate_required_fields(resource_type, spec)` (line 359): no docstring
+  - `_collect_required_field_issues(resource_type, spec)` (line 365): no docstring
+  - `_collect_required_items_issues(items, item_name, name_keys)` (line 810): no docstring
+  - `_collect_permission_policy_issues(policy)` (line 848): no docstring
+  - `_validate_string_list(value, field_name)` (line 940): no docstring
+  - `_append_spec_issue(issues, message, missing_fields, invalid_fields)` (line 950): no docstring
+  - `async _reference_exists(terminus, resources, db_name, branch, ref_type, ref)` (line 969): no docstring
+  - `async validate_resource(db_name, resource_type, payload, terminus, branch, expected_head_commit, strict)` (line 1012): no docstring
 - **Classes**
   - `ResourceSpecError` (line 27): Raised when resource spec is invalid or missing required fields.
   - `ResourceReferenceError` (line 31): Raised when resource spec references missing entities.
@@ -8638,12 +8638,18 @@
 
 ### `backend/shared/utils/action_data_access.py`
 - **Functions**
-  - `_target_text(payload, key)` (line 29): no docstring
-  - `async evaluate_action_target_data_access(dataset_registry, db_name, targets, scope)` (line 37): no docstring
+  - `_target_text(payload, key)` (line 36): no docstring
+  - `_extract_changes(target)` (line 44): no docstring
+  - `_extract_changed_fields(changes)` (line 49): no docstring
+  - `_has_link_changes(changes)` (line 66): no docstring
+  - `_changed_attachment_fields(changed_fields, field_types)` (line 72): no docstring
+  - `_changed_object_set_fields(changed_fields, field_types, link_changed)` (line 85): no docstring
+  - `async _load_object_type_policy(dataset_registry, db_name, scope, class_id, cache)` (line 101): no docstring
+  - `async evaluate_action_target_data_access(dataset_registry, db_name, targets, scope, enforce_data_access_policy, principal_tags, enforce_object_edit_policy, enforce_attachment_edit_policy, enforce_object_set_edit_policy, fail_on_missing_edit_policy, object_edit_scope, attachment_edit_scope, object_set_edit_scope)` (line 143): no docstring
 - **Classes**
-  - `_DatasetRegistryLike` (line 12): no docstring
-    - `async get_access_policy(self, db_name, scope, subject_type, subject_id)` (line 13): no docstring
-  - `ActionTargetDataAccessReport` (line 24): no docstring
+  - `_DatasetRegistryLike` (line 17): no docstring
+    - `async get_access_policy(self, db_name, scope, subject_type, subject_id)` (line 18): no docstring
+  - `ActionTargetDataAccessReport` (line 29): no docstring
 
 ### `backend/shared/utils/action_input_schema.py`
 - **Functions**
@@ -8670,6 +8676,16 @@
   - `ActionPermissionProfile` (line 27): no docstring
     - `requires_permission_policy(self)` (line 32): no docstring
     - `requires_data_access_enforcement(self)` (line 36): no docstring
+
+### `backend/shared/utils/action_runtime_contracts.py`
+- **Functions**
+  - `strip_interface_prefix(value)` (line 18): no docstring
+  - `extract_interfaces_from_metadata(metadata)` (line 28): no docstring
+  - `extract_required_action_interfaces(action_spec)` (line 50): no docstring
+  - `build_property_type_map_from_properties(properties)` (line 91): no docstring
+  - `async load_action_target_runtime_contract(terminus, db_name, class_id, branch)` (line 110): no docstring
+- **Classes**
+  - `ActionTargetRuntimeContract` (line 13): no docstring
 
 ### `backend/shared/utils/action_simulation_utils.py`
 - **Functions**
@@ -10316,14 +10332,16 @@
 
 ### `backend/tests/unit/oms/test_action_async_permission_profile_api.py`
 - **Functions**
-  - `_build_action_spec()` (line 14): no docstring
-  - `_install_deployment_and_resource_mocks(monkeypatch, action_spec)` (line 43): no docstring
-  - `action_async_app()` (line 76): no docstring
-  - `async test_submit_returns_403_for_datasource_derived_without_data_engineer_role(action_async_app, monkeypatch)` (line 97): no docstring
-  - `async test_simulate_returns_503_when_datasource_derived_data_access_is_unverifiable(action_async_app, monkeypatch)` (line 125): no docstring
+  - `_build_action_spec()` (line 15): no docstring
+  - `_install_deployment_and_resource_mocks(monkeypatch, action_spec)` (line 44): no docstring
+  - `action_async_app()` (line 77): no docstring
+  - `async test_submit_returns_403_for_datasource_derived_without_data_engineer_role(action_async_app, monkeypatch)` (line 109): no docstring
+  - `async test_simulate_returns_503_when_datasource_derived_data_access_is_unverifiable(action_async_app, monkeypatch)` (line 137): no docstring
+  - `async test_submit_returns_403_when_target_class_misses_required_interface(action_async_app, monkeypatch)` (line 213): no docstring
+  - `async test_submit_returns_503_when_target_edit_access_is_unverifiable(action_async_app, monkeypatch)` (line 255): no docstring
 - **Classes**
-  - `_FakeEventStore` (line 70): no docstring
-    - `async append_event(self, _event)` (line 71): no docstring
+  - `_FakeEventStore` (line 71): no docstring
+    - `async append_event(self, _event)` (line 72): no docstring
 
 ### `backend/tests/unit/oms/test_instance_router.py`
 - **Functions**
@@ -10483,10 +10501,10 @@
 ### `backend/tests/unit/services/test_action_simulation_scenarios.py`
 - **Functions**
   - `_preflight(conflict_fields, conflict_policy)` (line 13): no docstring
-  - `test_conflict_policy_fail_rejects()` (line 52): no docstring
-  - `test_conflict_policy_base_wins_skips()` (line 61): no docstring
-  - `test_conflict_policy_writeback_wins_applies()` (line 78): no docstring
-  - `test_no_conflict_does_not_reject_under_fail()` (line 93): no docstring
+  - `test_conflict_policy_fail_rejects()` (line 53): no docstring
+  - `test_conflict_policy_base_wins_skips()` (line 62): no docstring
+  - `test_conflict_policy_writeback_wins_applies()` (line 79): no docstring
+  - `test_no_conflict_does_not_reject_under_fail()` (line 94): no docstring
 
 ### `backend/tests/unit/services/test_admin_recompute_projection_service.py`
 - **Functions**
@@ -11742,13 +11760,16 @@
 
 ### `backend/tests/unit/utils/test_action_data_access.py`
 - **Functions**
-  - `async test_evaluate_action_target_data_access_denied()` (line 30): no docstring
-  - `async test_evaluate_action_target_data_access_allows_when_policy_missing()` (line 58): no docstring
-  - `async test_evaluate_action_target_data_access_marks_unverifiable_on_registry_error()` (line 77): no docstring
+  - `async test_evaluate_action_target_data_access_denied()` (line 40): no docstring
+  - `async test_evaluate_action_target_data_access_allows_when_policy_missing()` (line 68): no docstring
+  - `async test_evaluate_action_target_data_access_marks_unverifiable_on_registry_error()` (line 87): no docstring
+  - `async test_evaluate_action_target_data_access_edit_denied_by_object_edit_policy()` (line 106): no docstring
+  - `async test_evaluate_action_target_data_access_attachment_policy_missing_is_unverifiable()` (line 137): no docstring
+  - `async test_evaluate_action_target_data_access_object_set_policy_enforced_for_link_changes()` (line 164): no docstring
 - **Classes**
   - `_StubDatasetRegistry` (line 10): no docstring
-    - `__init__(self, policy_by_class, raise_for)` (line 11): no docstring
-    - `async get_access_policy(self, db_name, scope, subject_type, subject_id)` (line 15): no docstring
+    - `__init__(self, policy_by_class, policy_by_scope_class, raise_for)` (line 11): no docstring
+    - `async get_access_policy(self, db_name, scope, subject_type, subject_id)` (line 22): no docstring
 
 ### `backend/tests/unit/utils/test_action_input_schema.py`
 - **Functions**
@@ -11764,6 +11785,14 @@
   - `test_resolve_action_permission_profile_rejects_invalid_model()` (line 38): no docstring
   - `test_resolve_action_permission_profile_rejects_non_boolean_edits_flag()` (line 45): no docstring
   - `test_requires_action_data_access_enforcement_for_profile_or_global_flag()` (line 52): no docstring
+
+### `backend/tests/unit/utils/test_action_runtime_contracts.py`
+- **Functions**
+  - `test_extract_required_action_interfaces_normalizes_prefix_and_dedupes()` (line 16): no docstring
+  - `test_extract_interfaces_from_metadata_supports_aliases()` (line 26): no docstring
+  - `test_build_property_type_map_from_properties_handles_models_and_dicts()` (line 36): no docstring
+  - `async test_load_action_target_runtime_contract_returns_none_when_class_missing()` (line 47): no docstring
+  - `async test_load_action_target_runtime_contract_extracts_metadata_and_properties()` (line 63): no docstring
 
 ### `backend/tests/unit/utils/test_action_template_engine.py`
 - **Functions**

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any, Dict
 
 import pytest
@@ -80,8 +81,19 @@ def action_async_app() -> FastAPI:
     async def _fake_db_name(db_name: str) -> str:
         return db_name
 
+    class _FakeTerminus:
+        async def get_ontology(
+            self,
+            db_name: str,  # noqa: ARG002
+            class_id: str | None = None,  # noqa: ARG002
+            raise_if_missing: bool = True,  # noqa: ARG002
+            *,
+            branch: str = "main",  # noqa: ARG002
+        ) -> Any:
+            return SimpleNamespace(metadata={}, properties=[])
+
     async def _fake_terminus() -> object:
-        return object()
+        return _FakeTerminus()
 
     async def _fake_event_store() -> _FakeEventStore:
         return _FakeEventStore()
@@ -159,6 +171,12 @@ async def test_simulate_returns_503_when_datasource_derived_data_access_is_unver
         async def close(self) -> None:
             return None
 
+        async def close(self) -> None:
+            return None
+
+        async def close(self) -> None:
+            return None
+
     async def _fake_preflight(**kwargs: Any):  # noqa: ANN401, ARG001
         raise action_async.ActionSimulationRejected(
             {
@@ -188,3 +206,101 @@ async def test_simulate_returns_503_when_datasource_derived_data_access_is_unver
 
     assert response.status_code == 503, response.text
     assert "data_access_unverifiable" in response.text
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_submit_returns_403_when_target_class_misses_required_interface(
+    action_async_app: FastAPI,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    action_spec = _build_action_spec()
+    action_spec["target_interfaces"] = ["IApproval"]
+    _install_deployment_and_resource_mocks(monkeypatch, action_spec=action_spec)
+
+    monkeypatch.setattr(
+        action_async,
+        "compile_template_v1_change_shape",
+        lambda _impl, input_payload: [
+            SimpleNamespace(
+                class_id="Ticket",
+                instance_id="t1",
+                changes={"set": {"status": "APPROVED"}, "unset": [], "link_add": [], "link_remove": [], "delete": False},
+            )
+        ],
+    )
+
+    async def _fake_role(*, db_name: str, principal_type: str, principal_id: str) -> str:  # noqa: ARG001
+        return "DataEngineer"
+
+    monkeypatch.setattr(simulation_service, "get_database_access_role", _fake_role)
+
+    transport = ASGITransport(app=action_async_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/actions/demo/async/ApproveTicket/submit",
+            json={
+                "input": {"ticket": {"class_id": "Ticket", "instance_id": "t1"}},
+                "metadata": {"user_id": "alice", "user_type": "user"},
+                "base_branch": "main",
+            },
+        )
+
+    assert response.status_code == 403, response.text
+    assert "required interfaces" in response.text
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_submit_returns_503_when_target_edit_access_is_unverifiable(
+    action_async_app: FastAPI,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_deployment_and_resource_mocks(monkeypatch, action_spec=_build_action_spec())
+
+    monkeypatch.setattr(
+        action_async,
+        "compile_template_v1_change_shape",
+        lambda _impl, input_payload: [
+            SimpleNamespace(
+                class_id="Ticket",
+                instance_id="t1",
+                changes={"set": {"status": "APPROVED"}, "unset": [], "link_add": [], "link_remove": [], "delete": False},
+            )
+        ],
+    )
+
+    async def _fake_role(*, db_name: str, principal_type: str, principal_id: str) -> str:  # noqa: ARG001
+        return "DataEngineer"
+
+    class _FakeDatasetRegistry:
+        async def connect(self) -> None:
+            return None
+
+        async def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(simulation_service, "get_database_access_role", _fake_role)
+    monkeypatch.setattr(action_async, "DatasetRegistry", _FakeDatasetRegistry)
+    async def _fake_access_report(**kwargs: Any) -> Any:  # noqa: ANN401, ARG001
+        return SimpleNamespace(
+            denied=[],
+            unverifiable=[],
+            edit_denied=[],
+            edit_unverifiable=[{"class_id": "Ticket", "instance_id": "t1", "scope": "object_edit"}],
+        )
+
+    monkeypatch.setattr(action_async, "evaluate_action_target_data_access", _fake_access_report)
+
+    transport = ASGITransport(app=action_async_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/actions/demo/async/ApproveTicket/submit",
+            json={
+                "input": {"ticket": {"class_id": "Ticket", "instance_id": "t1"}},
+                "metadata": {"user_id": "alice", "user_type": "user"},
+                "base_branch": "main",
+            },
+        )
+
+    assert response.status_code == 503, response.text

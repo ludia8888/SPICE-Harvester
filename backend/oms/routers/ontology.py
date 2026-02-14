@@ -606,28 +606,6 @@ async def create_ontology(
                 content=error_payload,
             )
 
-        missing_groups = await _validate_group_refs(
-            terminus=terminus,
-            db_name=db_name,
-            branch=branch,
-            metadata=metadata_payload,
-        )
-        if missing_groups:
-            error_payload = build_error_envelope(
-                service_name="oms",
-                message="그룹(group) 참조를 찾을 수 없습니다",
-                detail="Group references not found",
-                code=ErrorCode.REQUEST_VALIDATION_FAILED,
-                category=ErrorCategory.INPUT,
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                errors=["Group references not found"],
-                context={"missing_groups": missing_groups},
-            )
-            return JSONResponse(
-                status_code=error_payload["http_status"],
-                content=error_payload,
-            )
-
         lint_report = lint_ontology_create(
             class_id=str(ontology_data.get("id")),
             label=label_display,
