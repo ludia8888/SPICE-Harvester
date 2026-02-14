@@ -18,6 +18,7 @@ from shared.services.pipeline.output_plugins import (
     OUTPUT_KIND_ONTOLOGY,
     OUTPUT_KIND_VIRTUAL,
     normalize_output_kind,
+    resolve_ontology_output_semantics,
     validate_output_payload,
 )
 from shared.services.pipeline.pipeline_schema_utils import normalize_schema_contract, normalize_schema_type
@@ -1004,6 +1005,12 @@ async def compute_pipeline_preflight(
                             }
                         )
             elif resolved_output_kind == OUTPUT_KIND_ONTOLOGY:
+                ontology_required_columns: List[str] = []
+                try:
+                    ontology_semantics = resolve_ontology_output_semantics(merged_output_payload)
+                    ontology_required_columns = list(ontology_semantics.required_columns)
+                except ValueError:
+                    ontology_required_columns = []
                 if available_columns is None:
                     issues.append(
                         {
@@ -1014,18 +1021,7 @@ async def compute_pipeline_preflight(
                         }
                     )
                 else:
-                    source_key_column = _output_metadata_text(
-                        merged_output_payload,
-                        "source_key_column",
-                        "sourceKeyColumn",
-                    )
-                    target_key_column = _output_metadata_text(
-                        merged_output_payload,
-                        "target_key_column",
-                        "targetKeyColumn",
-                    )
-                    required_columns = [column for column in (source_key_column, target_key_column) if column]
-                    missing_columns = [column for column in required_columns if column not in available_columns]
+                    missing_columns = [column for column in ontology_required_columns if column not in available_columns]
                     if missing_columns:
                         issues.append(
                             {
@@ -1124,7 +1120,23 @@ async def compute_pipeline_preflight(
                                 "message": f"streamJoin strategy must be dynamic|left_lookup|static (got: {stream_spec.strategy})",
                             }
                         )
-                    elif stream_spec.strategy == "left_lookup":
+                    elif stream_spec.strategy in {"left_lookup", "static"}:
+                        strategy_name = stream_spec.strategy
+                        requested_join_type = str(
+                            metadata.get("joinType") or metadata.get("join_type") or ""
+                        ).strip().lower()
+                        if requested_join_type and requested_join_type not in {"left", "inner"}:
+                            issues.append(
+                                {
+                                    "kind": "stream_join_join_type_invalid",
+                                    "severity": "error",
+                                    "node_id": node_id,
+                                    "message": (
+                                        f"streamJoin strategy={strategy_name} requires joinType=left "
+                                        f"(got: {requested_join_type})"
+                                    ),
+                                }
+                            )
                         right_input_id = str(input_ids[1] or "").strip() if len(input_ids) >= 2 else ""
                         right_node = nodes.get(right_input_id) if right_input_id else None
                         right_node_type = str((right_node or {}).get("type") or "").strip().lower()
@@ -1135,7 +1147,7 @@ async def compute_pipeline_preflight(
                                     "severity": "error",
                                     "node_id": node_id,
                                     "message": (
-                                        "streamJoin strategy=left_lookup requires right input to be a direct input node "
+                                        f"streamJoin strategy={strategy_name} requires right input to be a direct input node "
                                         "(no upstream transforms)"
                                     ),
                                     "right_input_id": right_input_id or None,
@@ -1148,7 +1160,7 @@ async def compute_pipeline_preflight(
                                     "severity": "error",
                                     "node_id": node_id,
                                     "message": (
-                                        "streamJoin strategy=left_lookup requires right input to be batch lookup "
+                                        f"streamJoin strategy={strategy_name} requires right input to be batch lookup "
                                         "source (stream read mode/format is not allowed)"
                                     ),
                                     "right_input_id": right_input_id or None,

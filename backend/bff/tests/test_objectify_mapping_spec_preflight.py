@@ -246,7 +246,8 @@ def test_mapping_spec_source_missing_is_rejected():
 
     assert res.status_code == 400
     detail = res.json()["detail"]
-    assert detail["code"] == "MAPPING_SPEC_SOURCE_MISSING"
+    assert detail["code"] == "OBJECTIFY_MAPPING_ERROR"
+    assert detail["error_code"] == "MAPPING_SPEC_SOURCE_MISSING"
     assert detail["missing_sources"] == ["missing"]
 
 
@@ -260,7 +261,8 @@ def test_mapping_spec_target_unknown_is_rejected():
 
     assert res.status_code == 400
     detail = res.json()["detail"]
-    assert detail["code"] == "MAPPING_SPEC_TARGET_UNKNOWN"
+    assert detail["code"] == "OBJECTIFY_MAPPING_ERROR"
+    assert detail["error_code"] == "MAPPING_SPEC_TARGET_UNKNOWN"
     assert detail["missing_targets"] == ["unknown"]
 
 
@@ -277,7 +279,8 @@ def test_mapping_spec_relationship_target_is_rejected():
 
     assert res.status_code == 400
     detail = res.json()["detail"]
-    assert detail["code"] == "MAPPING_SPEC_RELATIONSHIP_CARDINALITY_UNSUPPORTED"
+    assert detail["code"] == "OBJECTIFY_MAPPING_ERROR"
+    assert detail["error_code"] == "MAPPING_SPEC_RELATIONSHIP_CARDINALITY_UNSUPPORTED"
     assert detail["targets"] == ["owner"]
 
 
@@ -306,7 +309,8 @@ def test_mapping_spec_dataset_pk_target_mismatch_is_rejected():
 
     assert res.status_code == 400
     detail = res.json()["detail"]
-    assert detail["code"] == "MAPPING_SPEC_DATASET_PK_TARGET_MISMATCH"
+    assert detail["code"] == "OBJECTIFY_MAPPING_ERROR"
+    assert detail["error_code"] == "MAPPING_SPEC_DATASET_PK_TARGET_MISMATCH"
 
 
 def test_mapping_spec_required_missing_is_rejected():
@@ -325,7 +329,8 @@ def test_mapping_spec_required_missing_is_rejected():
 
     assert res.status_code == 400
     detail = res.json()["detail"]
-    assert detail["code"] == "MAPPING_SPEC_REQUIRED_MISSING"
+    assert detail["code"] == "OBJECTIFY_MAPPING_ERROR"
+    assert detail["error_code"] == "MAPPING_SPEC_REQUIRED_MISSING"
     assert detail["missing_targets"] == ["email"]
 
 
@@ -345,7 +350,8 @@ def test_mapping_spec_primary_key_missing_is_rejected():
 
     assert res.status_code == 400
     detail = res.json()["detail"]
-    assert detail["code"] == "MAPPING_SPEC_TITLE_KEY_MISSING"
+    assert detail["code"] == "OBJECTIFY_MAPPING_ERROR"
+    assert detail["error_code"] == "MAPPING_SPEC_TITLE_KEY_MISSING"
     assert detail["missing_targets"] == ["id"]
 
 
@@ -370,7 +376,8 @@ def test_mapping_spec_unsupported_type_is_rejected():
 
     assert res.status_code == 400
     detail = res.json()["detail"]
-    assert detail["code"] == "MAPPING_SPEC_UNSUPPORTED_TYPES"
+    assert detail["code"] == "OBJECTIFY_MAPPING_ERROR"
+    assert detail["error_code"] == "MAPPING_SPEC_UNSUPPORTED_TYPES"
     assert detail["targets"] == ["tags"]
 
 
@@ -388,7 +395,8 @@ def test_mapping_spec_target_type_mismatch_is_rejected():
 
     assert res.status_code == 400
     detail = res.json()["detail"]
-    assert detail["code"] == "MAPPING_SPEC_TARGET_TYPE_MISMATCH"
+    assert detail["code"] == "OBJECTIFY_MAPPING_ERROR"
+    assert detail["error_code"] == "MAPPING_SPEC_TARGET_TYPE_MISMATCH"
     assert detail["mismatches"][0]["target_field"] == "name"
 
 
@@ -410,7 +418,8 @@ def test_mapping_spec_source_type_incompatible_is_rejected():
 
     assert res.status_code == 400
     detail = res.json()["detail"]
-    assert detail["code"] == "MAPPING_SPEC_TYPE_INCOMPATIBLE"
+    assert detail["code"] == "OBJECTIFY_MAPPING_ERROR"
+    assert detail["error_code"] == "MAPPING_SPEC_TYPE_INCOMPATIBLE"
     assert detail["mismatches"] == [
         {
             "source_field": "amount",
@@ -439,7 +448,8 @@ def test_mapping_spec_source_type_unsupported_is_rejected():
 
     assert res.status_code == 400
     detail = res.json()["detail"]
-    assert detail["code"] == "MAPPING_SPEC_SOURCE_TYPE_UNSUPPORTED"
+    assert detail["code"] == "OBJECTIFY_MAPPING_ERROR"
+    assert detail["error_code"] == "MAPPING_SPEC_SOURCE_TYPE_UNSUPPORTED"
     assert detail["sources"] == [{"source_field": "payload", "source_type": "struct"}]
 
 

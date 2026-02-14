@@ -8,14 +8,18 @@ error handling, and common operations for command status tracking.
 import asyncio
 import json
 import logging
-from typing import Optional, Dict, Any, List
-from datetime import datetime, timedelta, timezone
+from typing import TYPE_CHECKING, Optional, Dict, Any, List
+from datetime import datetime, timezone
 import redis.asyncio as redis
 from redis.asyncio.connection import ConnectionPool
 from redis.exceptions import RedisError
 
 from shared.observability.tracing import trace_storage_operation
 from shared.services.storage.connectivity import AsyncClientPingMixin
+
+if TYPE_CHECKING:
+    from shared.config.settings import ApplicationSettings
+    from shared.services.core.background_task_manager import BackgroundTaskManager
 
 logger = logging.getLogger(__name__)
 

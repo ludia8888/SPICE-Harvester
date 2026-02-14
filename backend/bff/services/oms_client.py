@@ -16,11 +16,6 @@ from shared.observability.request_context import get_correlation_id, get_request
 from bff.services.base_http_client import ManagedAsyncClient
 
 # shared 모델 import
-from shared.models.ontology import (
-    OntologyCreateRequest,
-    OntologyUpdateRequest,
-    QueryRequestInternal,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -720,13 +715,6 @@ class OMSClient(ManagedAsyncClient):
     ) -> Dict[str, Any]:
         """시스템 레벨 변경사항 커밋 (데이터베이스 생성/삭제 등)"""
         try:
-            commit_data = {
-                "message": message,
-                "author": author,
-                "operation": operation,
-                "target": target,
-                "timestamp": "auto"
-            }
             
             # 시스템 로그나 메타데이터 데이터베이스에 기록
             # 여기서는 간단히 로그로 기록하고 향후 확장 가능
@@ -947,5 +935,5 @@ class OMSClient(ManagedAsyncClient):
     async def __aenter__(self):
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
+    async def __aexit__(self, _exc_type, _exc_val, _exc_tb):
         await self.close()

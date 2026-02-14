@@ -18,7 +18,7 @@ import asyncio
 import json
 import hashlib
 from datetime import datetime, timezone
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any
 import aiohttp
 import redis.asyncio as aioredis
 import boto3
@@ -259,7 +259,7 @@ class ConsistencyChecker:
                     if resp.status != 200:
                         return {"passed": False, "error": "Failed to get TDB schema"}
                     
-                    tdb_schema = await resp.json()
+                    await resp.json()
                 
                 # Get projected documents from ES
                 index_name = f"instances_{db_name.replace('-', '_')}"

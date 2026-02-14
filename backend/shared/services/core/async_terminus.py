@@ -5,7 +5,6 @@ This is a lightweight version for BFF to connect to TerminusDB
 
 import httpx
 import logging
-from typing import Any, Dict, Optional
 from shared.models.config import ConnectionConfig
 
 logger = logging.getLogger(__name__)

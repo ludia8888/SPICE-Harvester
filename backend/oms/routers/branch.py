@@ -4,9 +4,8 @@
 """
 
 import logging
-from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict
 
 from oms.dependencies import TerminusServiceDep
@@ -21,7 +20,7 @@ from shared.security.input_sanitizer import (
     validate_db_name,
 )
 from shared.utils.branch_utils import protected_branch_write_message
-from shared.errors.error_types import ErrorCode, ErrorCategory, classified_http_exception
+from shared.errors.error_types import ErrorCode, classified_http_exception
 from shared.observability.tracing import trace_endpoint
 
 logger = logging.getLogger(__name__)
@@ -432,13 +431,6 @@ async def commit_changes(
         # TerminusDB에서는 변경사항이 없어도 커밋 가능
         
         # 커밋 실행 (TerminusDB에서는 자동으로 변경사항을 커밋)
-        commit_info = {
-            "message": message,
-            "author": author,
-            "operation": operation,
-            "branch": current_branch,
-            "timestamp": "auto"
-        }
         
         # 실제 커밋은 TerminusDB의 자동 커밋에 의존
         # 여기서는 커밋 정보를 로그로 기록

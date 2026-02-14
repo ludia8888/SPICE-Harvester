@@ -7,11 +7,10 @@ signals so the UI doesn't need to reconstruct state from multiple backends.
 
 from shared.observability.tracing import trace_endpoint
 
-import os
 from typing import Any, Dict, Optional
 
 import httpx
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Query, status
 
 from shared.errors.error_types import ErrorCode, classified_http_exception
 

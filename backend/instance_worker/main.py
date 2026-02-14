@@ -17,7 +17,6 @@ import asyncio
 import json
 import logging
 import os
-import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional, Set, List, Union
@@ -38,7 +37,7 @@ from shared.models.event_envelope import EventEnvelope
 from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
 from shared.security.auth_utils import BFF_TOKEN_ENV_KEYS, get_expected_token
-from shared.security.input_sanitizer import validate_branch_name, validate_class_id, validate_instance_id
+from shared.security.input_sanitizer import validate_branch_name, validate_instance_id
 from shared.services.kafka.dlq_publisher import DlqPublishSpec
 from shared.services.kafka.processed_event_worker import (
     CommandParseError,
@@ -61,7 +60,7 @@ from shared.services.core.audit_log_store import AuditLogStore
 from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.errors.runtime_exception_policy import LineageRecordError, LineageUnavailableError
 from shared.utils.chaos import maybe_crash
-from shared.utils.ontology_version import normalize_ontology_version, resolve_ontology_version
+from shared.utils.ontology_version import normalize_ontology_version
 from shared.utils.app_logger import configure_logging
 from shared.utils.deterministic_ids import deterministic_uuid5_hex_prefix, deterministic_uuid5_str
 from shared.utils.blank_utils import strip_to_none

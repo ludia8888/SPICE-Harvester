@@ -306,7 +306,7 @@ class BaseTerminusService:
         await self.connect()
         return self
     
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
+    async def __aexit__(self, _exc_type, _exc_val, _exc_tb):
         """비동기 컨텍스트 매니저 종료"""
         await self.disconnect()
     

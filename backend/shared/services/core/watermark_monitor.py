@@ -9,7 +9,7 @@ providing visibility into system lag and processing performance.
 import asyncio
 import time
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
 import logging
 import json

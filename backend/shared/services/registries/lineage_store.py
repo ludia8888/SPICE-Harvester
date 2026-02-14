@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 import asyncpg
@@ -1026,7 +1026,7 @@ class LineageStore(PostgresSchemaRegistry):
                     column = "to_node_id"
 
                 remaining_edges = max_edges - len(edges_by_id)
-                remaining_nodes = max_nodes - len(visited)
+                max_nodes - len(visited)
                 limit = max(1, min(10000, remaining_edges + 50))
 
                 async with self._pool.acquire() as conn:

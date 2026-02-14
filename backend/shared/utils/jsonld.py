@@ -3,7 +3,7 @@ JSON-LD utilities for SPICE HARVESTER
 """
 
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 import logging
 
 logger = logging.getLogger(__name__)

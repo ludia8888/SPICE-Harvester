@@ -16,7 +16,7 @@ from shared.observability.tracing import trace_endpoint
 
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Query, status
 
 from shared.errors.error_types import ErrorCode, classified_http_exception
 

@@ -16,6 +16,7 @@ Key improvements:
 6. ✅ Easy testing and mocking
 """
 
+import logging
 from typing import Annotated, Optional
 from fastapi import HTTPException, status, Path, Depends
 
@@ -25,8 +26,7 @@ from shared.dependencies.providers import (
     get_jsonld_converter as get_shared_jsonld_converter,
     get_label_mapper as get_shared_label_mapper,
     RedisServiceDep,
-    ElasticsearchServiceDep,
-    SettingsDep
+    ElasticsearchServiceDep
 )
 from shared.config.settings import ApplicationSettings, get_settings
 from shared.errors.error_envelope import build_error_envelope

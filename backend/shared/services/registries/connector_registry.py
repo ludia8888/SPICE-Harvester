@@ -580,7 +580,7 @@ class ConnectorRegistry(PostgresSchemaRegistry):
         if not self._pool:
             raise RuntimeError("ConnectorRegistry not connected")
         lim = max(1, min(int(limit), 500))
-        now = utcnow()
+        utcnow()
         async with self._pool.acquire() as conn:
             async with conn.transaction():
                 rows = await conn.fetch(

@@ -5,7 +5,6 @@ Event Sourcing: S3/MinIO Event Store(SSoT)에 Command 이벤트를 저장
 """
 
 import logging
-from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, status, Query
 from fastapi.responses import JSONResponse
@@ -93,7 +92,7 @@ async def create_database(
             metadata={"source": "OMS", "user": "system"},
         )
 
-        envelope = await append_event_sourcing_command(
+        await append_event_sourcing_command(
             event_store=event_store,
             command=command,
             actor="system",
@@ -219,7 +218,7 @@ async def delete_database(
             metadata={"source": "OMS", "user": "system"},
         )
 
-        envelope = await append_event_sourcing_command(
+        await append_event_sourcing_command(
             event_store=event_store,
             command=command,
             actor="system",

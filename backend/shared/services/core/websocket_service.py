@@ -7,12 +7,15 @@ Redis Pub/Sub와 WebSocket을 연결하여 실시간 Command 상태 업데이트
 import asyncio
 import json
 import logging
-from typing import Dict, Set, Optional, Any, List
+from typing import TYPE_CHECKING, Dict, Set, Optional, Any, List
 from datetime import datetime, timezone
-from fastapi import WebSocket, WebSocketDisconnect
+from fastapi import WebSocket
 from dataclasses import dataclass, field
 
 from shared.services.storage.redis_service import RedisService
+
+if TYPE_CHECKING:
+    from shared.services.core.background_task_manager import BackgroundTaskManager
 
 logger = logging.getLogger(__name__)
 

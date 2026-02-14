@@ -13,7 +13,7 @@ from contextlib import asynccontextmanager
 from typing import Optional
 
 import asyncpg
-from asyncpg import Connection, Pool
+from asyncpg import Pool
 
 from shared.config.settings import get_settings
 from .mvcc import MVCCTransactionManager, IsolationLevel

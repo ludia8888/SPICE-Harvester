@@ -9,9 +9,8 @@ from shared.observability.tracing import trace_endpoint
 
 import json
 import logging
-from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Request, status
 
 from shared.errors.error_types import ErrorCode, classified_http_exception
 from fastapi.responses import StreamingResponse
@@ -30,7 +29,6 @@ from bff.routers.pipeline_plans import (
 from bff.services.pipeline_agent_autonomous_loop import (
     run_pipeline_agent_mcp_autonomous,
     run_pipeline_agent_streaming,
-    StreamEvent,
 )
 from shared.config.settings import get_settings
 from shared.dependencies.providers import AuditLogStoreDep, LLMGatewayDep, RedisServiceDep

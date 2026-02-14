@@ -9,7 +9,7 @@ from shared.observability.tracing import trace_endpoint
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, Query, Request, status
 
 from shared.errors.error_types import ErrorCode, classified_http_exception
 

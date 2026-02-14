@@ -18,13 +18,12 @@ runs without proper monitoring and error handling.
 """
 
 import asyncio
-import json
 import logging
 import traceback
 from datetime import datetime, timezone, timedelta
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
-from uuid import UUID, uuid4
+from typing import Any, Callable, Dict, List, Optional, Tuple
+from uuid import uuid4
 
 from shared.services.storage.redis_service import RedisService
 from shared.services.core.websocket_service import WebSocketNotificationService

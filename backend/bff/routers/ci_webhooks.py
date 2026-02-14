@@ -12,12 +12,12 @@ Security model:
 
 from shared.observability.tracing import trace_endpoint
 
-import contextlib
+import logging
 from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Request, status
 
 from shared.errors.error_types import ErrorCode, classified_http_exception
 from pydantic import BaseModel, Field
@@ -29,6 +29,7 @@ from shared.services.registries.agent_session_registry import AgentSessionRegist
 from shared.utils.uuid_utils import safe_uuid as _safe_uuid
 
 router = APIRouter(prefix="/admin/ci", tags=["Admin"])
+logger = logging.getLogger(__name__)
 
 
 class AgentSessionCIResultIngestRequest(BaseModel):
@@ -89,7 +90,7 @@ async def ingest_ci_result(
         created_at=datetime.now(timezone.utc),
     )
 
-    with contextlib.suppress(Exception):
+    try:
         await sessions.append_event(
             event_id=str(uuid4()),
             session_id=session_id,
@@ -107,6 +108,14 @@ async def ingest_ci_result(
                 "run_id": ci_record.run_id,
                 "source": "ci_webhook",
             },
+        )
+    except Exception as exc:
+        logger.warning(
+            "Failed to append CI_RESULT event session_id=%s tenant_id=%s: %s",
+            session_id,
+            tenant_id,
+            exc,
+            exc_info=True,
         )
 
     return ApiResponse.created(

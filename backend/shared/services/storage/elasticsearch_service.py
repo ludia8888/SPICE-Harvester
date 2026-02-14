@@ -5,10 +5,8 @@ Provides a centralized Elasticsearch client with connection pooling,
 error handling, and common operations for search and indexing.
 """
 
-import json
 import logging
-from typing import Optional, Dict, Any, List, Tuple, Union
-from datetime import datetime
+from typing import TYPE_CHECKING, Optional, Dict, Any, List, Tuple, Union
 from elasticsearch import AsyncElasticsearch
 # elasticsearch>=8.11.0 is now required in shared/pyproject.toml
 from elasticsearch.exceptions import (
@@ -21,6 +19,9 @@ from elasticsearch.helpers import async_bulk
 
 from shared.observability.tracing import trace_storage_operation
 from shared.services.storage.connectivity import AsyncClientPingMixin
+
+if TYPE_CHECKING:
+    from shared.config.settings import ApplicationSettings
 
 logger = logging.getLogger(__name__)
 

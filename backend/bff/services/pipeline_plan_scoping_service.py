@@ -72,7 +72,7 @@ async def _load_scoped_plan(
     )
     plan = _load_plan_or_400(record)
     db_name = _extract_db_name_or_400(plan)
-    _enforce_db_scope_or_403(request, db_name=db_name)
+    enforce_db_scope_or_403(request, db_name=db_name)
     branch = str(plan.data_scope.branch or "").strip() or None if plan.data_scope else None
     return PipelinePlanRequestContext(
         plan_id=resolved_plan_id,

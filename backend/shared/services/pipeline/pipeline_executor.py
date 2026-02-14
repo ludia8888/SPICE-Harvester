@@ -725,7 +725,7 @@ class PipelineExecutor:
 
         out_rows: List[Dict[str, Any]] = []
         for row in table.rows:
-            out_rows.append(fn(dict(row)))
+            out_rows.extend(fn(dict(row)))
 
         columns: List[str] = list(table.columns)
         seen = set(columns)

@@ -4,7 +4,7 @@ Apply human-in-the-loop patches to structure analysis outputs.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from shared.models.structure_analysis import BoundingBox, SheetStructureAnalysisResponse
 from shared.models.structure_patch import SheetStructurePatch, SheetStructurePatchOp

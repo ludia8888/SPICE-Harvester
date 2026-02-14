@@ -3,7 +3,6 @@ MCP Client for integrating with various MCP servers
 Provides unified interface for Context7 and other MCP services
 """
 
-import asyncio
 import json
 import logging
 import os
@@ -12,7 +11,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-import httpx
 from anyio import ClosedResourceError, BrokenResourceError, EndOfStream
 from mcp.client.session import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client

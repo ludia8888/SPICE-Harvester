@@ -5,10 +5,10 @@ S3 호환 객체 스토리지 연동 서비스
 
 import hashlib
 import json
-import os
+import logging
 import asyncio
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional, AsyncIterator, Tuple, BinaryIO, Union
+from typing import TYPE_CHECKING, Any, Dict, Optional, AsyncIterator, Tuple, BinaryIO, Union
 
 try:
     import boto3
@@ -25,6 +25,9 @@ except ImportError:
 from shared.models.commands import CommandType
 from shared.observability.tracing import trace_storage_operation
 from shared.services.storage.s3_client_config import build_s3_client_config
+
+if TYPE_CHECKING:
+    from shared.config.settings import ApplicationSettings
 
 
 class StorageService:

@@ -2,7 +2,7 @@
 Google Sheets models for SPICE HARVESTER
 """
 
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator
 

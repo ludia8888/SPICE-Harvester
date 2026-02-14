@@ -138,7 +138,6 @@ def _date_datetime_ratios(values: Sequence[Any]) -> tuple[float, float]:
     datetime_like = 0
     total = 0
     for v in values:
-        raw = v
         if isinstance(v, datetime):
             total += 1
             if v.hour or v.minute or v.second or v.microsecond:

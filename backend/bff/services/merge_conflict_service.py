@@ -18,7 +18,6 @@ from bff.dependencies import OMSClient
 from bff.utils.conflict_converter import ConflictConverter
 from shared.models.requests import ApiResponse, MergeRequest
 from shared.security.input_sanitizer import SecurityViolationError, validate_branch_name, validate_db_name
-from shared.utils.async_utils import await_if_needed as _await_if_needed
 from shared.utils.async_utils import raise_for_status_async as _raise_for_status
 from shared.utils.async_utils import response_json_async as _response_json
 from shared.utils.diff_utils import normalize_diff_changes

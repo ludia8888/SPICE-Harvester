@@ -20,19 +20,17 @@ Key improvements:
 import asyncio
 import logging
 from contextlib import asynccontextmanager
-from typing import Any, Dict, Optional
+from typing import Optional
 
 # Third party imports
 import httpx
-from fastapi import Depends, FastAPI, HTTPException, Request, status
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, status
 
 # Centralized configuration and dependency injection
 from shared.config.settings import get_settings, ApplicationSettings
 from shared.errors.error_types import ErrorCode, classified_http_exception
 from shared.dependencies import (
     initialize_container, 
-    get_container, 
     shutdown_container,
     register_core_services
 )
@@ -43,12 +41,6 @@ from shared.services.events.objectify_reconciler import run_objectify_reconciler
 from shared.services.agent.agent_retention_worker import run_agent_session_retention_worker
 from shared.services.storage.storage_service import StorageService, create_storage_service
 from shared.services.registries.lineage_store import LineageStore
-from shared.dependencies.providers import (
-    StorageServiceDep,
-    RedisServiceDep, 
-    ElasticsearchServiceDep,
-    SettingsDep
-)
 
 # Service factory import
 from shared.services.core.service_factory import create_fastapi_service, get_bff_service_info, run_service
@@ -66,36 +58,15 @@ from shared.services.pipeline.pipeline_executor import PipelineExecutor
 from shared.services.registries.objectify_registry import ObjectifyRegistry
 
 # Shared models and utilities
-from shared.models.ontology import (
-    OntologyCreateRequestBFF,
-    OntologyResponse,
-    OntologyUpdateRequest,
-    QueryRequest,
-    QueryResponse,
-)
-from shared.models.requests import (
-    ApiResponse,
-    BranchCreateRequest,
-    CheckoutRequest,
-    CommitRequest,
-    MergeRequest,
-    RollbackRequest,
-)
-from shared.security.input_sanitizer import (
-    SecurityViolationError,
-    sanitize_input,
-    validate_class_id,
-    validate_db_name,
-)
 from shared.utils.label_mapper import LabelMapper
 from shared.dependencies import configure_type_inference_service
 from shared.services.storage.redis_service import create_redis_service
-from shared.services.core.websocket_service import get_notification_service, get_connection_manager
+from shared.services.core.websocket_service import get_notification_service
 from shared.services.core.schema_change_monitor import SchemaChangeMonitor, MonitorConfig
 from shared.services.core.schema_drift_detector import SchemaDriftDetector
 
 # Rate limiting middleware
-from shared.middleware.rate_limiter import rate_limit, RateLimitPresets, RateLimiter
+from shared.middleware.rate_limiter import RateLimiter
 
 # Auth middleware
 from bff.middleware.auth import install_bff_auth_middleware, ensure_bff_auth_configured

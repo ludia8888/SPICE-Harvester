@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import json
 import logging
 from datetime import datetime, timedelta, timezone
@@ -54,8 +53,16 @@ async def run_agent_session_retention_worker(
                                 key = str(item.get("key") or "").strip()
                                 if not bucket or not key:
                                     continue
-                                with contextlib.suppress(Exception):
+                                try:
                                     await storage_service.delete_object(bucket=bucket, key=key)
+                                except Exception as exc:
+                                    logger.warning(
+                                        "Agent retention failed to delete upload object bucket=%s key=%s: %s",
+                                        bucket,
+                                        key,
+                                        exc,
+                                        exc_info=True,
+                                    )
                         except Exception as exc:
                             logger.warning("Agent retention upload cleanup failed: %s", exc)
 
@@ -114,8 +121,10 @@ def _parse_retention_policy(raw: Optional[str]) -> dict[str, dict[str, Any]]:
             action_raw = value.get("action")
             days_value: Optional[int] = None
             if days_raw is not None:
-                with contextlib.suppress(Exception):
+                try:
                     days_value = int(str(days_raw).strip())
+                except (TypeError, ValueError):
+                    days_value = None
             action_value: Optional[str] = None
             if action_raw is not None:
                 candidate = str(action_raw).strip().lower()
@@ -144,8 +153,10 @@ def _policy_days_action(
     action_value = default_action
     if isinstance(entry, dict):
         if entry.get("days") is not None:
-            with contextlib.suppress(Exception):
+            try:
                 days_value = int(entry.get("days"))
+            except (TypeError, ValueError):
+                days_value = default_days
         if entry.get("action") is not None:
             candidate = str(entry.get("action")).strip().lower()
             if candidate in _RETENTION_ACTIONS:
@@ -205,8 +216,16 @@ async def _apply_policy(
                 key = str(item.get("key") or "").strip()
                 if not bucket or not key:
                     continue
-                with contextlib.suppress(Exception):
+                try:
                     await storage_service.delete_object(bucket=bucket, key=key)
+                except Exception as exc:
+                    logger.warning(
+                        "Agent retention failed to delete upload object bucket=%s key=%s: %s",
+                        bucket,
+                        key,
+                        exc,
+                        exc_info=True,
+                    )
         except Exception as exc:
             logger.warning("Agent retention upload cleanup failed: %s", exc)
 

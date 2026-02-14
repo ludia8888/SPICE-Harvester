@@ -15,7 +15,6 @@ from typing import Any, Dict, List, Optional
 from mcp.server import InitializationOptions, Server
 from mcp.server.stdio import stdio_server
 from mcp.types import ResourcesCapability, ServerCapabilities, Tool, ToolsCapability
-from pydantic import BaseModel
 
 # Import paths depend on whether we run from source (repo layout) or from a container image.
 _this_file = Path(__file__).resolve()

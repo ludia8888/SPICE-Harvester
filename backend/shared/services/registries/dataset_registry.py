@@ -6,11 +6,10 @@ Stores dataset metadata + versions (artifact references + samples).
 
 from __future__ import annotations
 
-import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 from uuid import uuid4
 
 import asyncpg
@@ -4182,7 +4181,6 @@ class DatasetRegistry(PostgresSchemaRegistry):
                 ingest_request_id = str(row["ingest_request_id"])
                 dataset_id = str(row["dataset_id"])
                 db_name = str(row["db_name"])
-                branch = str(row["branch"])
                 lakefs_commit_id = str(row["lakefs_commit_id"])
                 artifact_key = row["artifact_key"]
                 sample_json = coerce_json_dataset(row["sample_json"]) or {}

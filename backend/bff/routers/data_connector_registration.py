@@ -9,7 +9,7 @@ This router is intentionally thin: business logic lives in
 
 from typing import Any, Dict
 
-from fastapi import APIRouter, Depends, Request, status
+from fastapi import APIRouter, Depends, Request
 
 from bff.routers.data_connector_deps import get_connector_registry, get_dataset_registry, get_google_sheets_service
 from bff.services import data_connector_registration_service

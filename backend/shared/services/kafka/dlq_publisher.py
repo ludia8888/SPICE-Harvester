@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import Any, Mapping, Optional
@@ -25,6 +26,8 @@ from shared.observability.context_propagation import (
     kafka_headers_from_envelope_metadata,
 )
 from shared.utils.time_utils import utcnow
+
+logger = logging.getLogger(__name__)
 
 
 def _safe_decode(value: Any) -> Optional[str]:

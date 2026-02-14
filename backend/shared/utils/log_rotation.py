@@ -7,9 +7,9 @@ import os
 import glob
 import gzip
 import shutil
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
-from typing import List, Tuple, Optional
+from typing import List, Tuple
 import stat
 import logging
 
@@ -73,7 +73,6 @@ class LogRotationManager:
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             
             # Generate rotated filename
-            base_name = log_file.stem  # e.g., 'oms_20250720_140532'
             rotated_name = f"{service_name}_rotated_{timestamp}.log"
             rotated_path = self.log_dir / rotated_name
             

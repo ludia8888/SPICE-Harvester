@@ -10,7 +10,7 @@ These utilities are intentionally sample-based and side-effect free so they can 
 """
 
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List
 
 from shared.services.pipeline.pipeline_schema_utils import normalize_schema_type
 from shared.services.pipeline.pipeline_value_predicates import (

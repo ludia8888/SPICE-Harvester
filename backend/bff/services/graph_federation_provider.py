@@ -10,7 +10,6 @@ from shared.config.settings import ApplicationSettings, get_settings
 from shared.dependencies.container import ServiceContainer, get_container
 from shared.services.core.graph_federation_service_es import GraphFederationServiceES
 from shared.services.storage.elasticsearch_service import (
-    ElasticsearchService,
     create_elasticsearch_service,
 )
 from shared.observability.tracing import trace_external_call

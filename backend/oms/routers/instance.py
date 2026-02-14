@@ -6,7 +6,7 @@ Dataset-primary indexing: objectify_worker/instance_worker가 ES에 직접 write
 """
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from oms.dependencies import ValidatedDatabaseName

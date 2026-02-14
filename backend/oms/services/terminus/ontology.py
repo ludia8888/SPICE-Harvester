@@ -3,7 +3,6 @@ Ontology Service for TerminusDB
 온톨로지/스키마 CRUD 작업 서비스
 """
 
-import contextlib
 import logging
 from typing import Any, Dict, List, Optional, Union
 from datetime import datetime, timezone
@@ -13,7 +12,6 @@ from oms.exceptions import (
     DatabaseError,
     DuplicateOntologyError,
     OntologyNotFoundError,
-    OntologyValidationError
 )
 from shared.models.ontology import OntologyBase, OntologyResponse, Property, Relationship
 from shared.models.common import DataType
@@ -37,8 +35,9 @@ class OntologyService(DatabaseBackedTerminusService):
     async def disconnect(self) -> None:
         # Close nested db_service first to avoid leaking its httpx client in short-lived contexts/tests.
         try:
-            with contextlib.suppress(Exception):
-                await self._key_spec_registry.close()
+            await self._key_spec_registry.close()
+        except Exception as exc:
+            logger.warning("Failed to close ontology key spec registry: %s", exc, exc_info=True)
         finally:
             await super().disconnect()
 
@@ -241,7 +240,7 @@ class OntologyService(DatabaseBackedTerminusService):
             }
             
             # Create schema document in TerminusDB
-            response = await self._make_request("POST", endpoint, schema_doc, params=params)
+            await self._make_request("POST", endpoint, schema_doc, params=params)
             
             logger.info(f"Ontology '{ontology.id}' created in database '{db_name}'")
             

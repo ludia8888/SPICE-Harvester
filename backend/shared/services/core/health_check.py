@@ -18,7 +18,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Dict, List, Optional, Any, Union
+from typing import Dict, List, Optional, Any
 import logging
 
 logger = logging.getLogger(__name__)

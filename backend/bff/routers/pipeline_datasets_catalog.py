@@ -10,7 +10,6 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
-import bff.routers.pipeline_datasets_ops as ops
 from bff.routers.pipeline_datasets_ops import (
     _select_sample_row,
 )

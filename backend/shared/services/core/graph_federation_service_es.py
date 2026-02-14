@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import logging
 from collections import deque
-from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from shared.config.search_config import get_instances_index_name
@@ -87,6 +86,14 @@ class GraphFederationServiceES:
         """Execute multi-hop graph query entirely within Elasticsearch."""
         await self._ensure_connected()
         base_branch = validate_branch_name(base_branch or "main")
+        if strict_overlay and overlay_branch and overlay_branch != base_branch:
+            logger.warning(
+                "strict_overlay requested but ES federation currently queries base branch only "
+                "(base=%s overlay=%s, terminus=%s)",
+                base_branch,
+                overlay_branch,
+                terminus_branch,
+            )
         index_name = get_instances_index_name(db_name, branch=base_branch)
 
         graph_settings = get_settings().graph_query
@@ -226,6 +233,14 @@ class GraphFederationServiceES:
         """Single-class ES search — no hops."""
         await self._ensure_connected()
         base_branch = validate_branch_name(base_branch or "main")
+        if strict_overlay and overlay_branch and overlay_branch != base_branch:
+            logger.warning(
+                "strict_overlay requested but ES federation currently queries base branch only "
+                "(base=%s overlay=%s, terminus=%s)",
+                base_branch,
+                overlay_branch,
+                terminus_branch,
+            )
         index_name = get_instances_index_name(db_name, branch=base_branch)
 
         docs, total = await self._search_start_class(

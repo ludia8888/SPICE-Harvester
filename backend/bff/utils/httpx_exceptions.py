@@ -8,7 +8,7 @@ from __future__ import annotations
 from typing import Any
 
 import httpx
-from fastapi import HTTPException, status
+from fastapi import status
 
 from shared.errors.error_types import ErrorCode, classified_http_exception
 import logging

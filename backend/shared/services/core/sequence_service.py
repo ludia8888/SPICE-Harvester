@@ -6,7 +6,6 @@ This service provides sequence number generation for events,
 ensuring proper ordering within each aggregate.
 """
 
-import asyncio
 from typing import Dict, Optional
 import redis.asyncio as aioredis
 import logging

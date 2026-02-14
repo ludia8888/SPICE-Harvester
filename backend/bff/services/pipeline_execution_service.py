@@ -4,7 +4,6 @@ Pipeline execution domain logic (BFF).
 Extracted from `bff.routers.pipeline_execution` to keep routers thin.
 """
 
-import asyncio
 import logging
 from typing import Any, Dict, Optional
 from uuid import uuid4
@@ -32,7 +31,6 @@ from bff.services.ontology_occ_guard_service import (
     fetch_branch_head_commit_id,
     resolve_branch_head_commit_with_bootstrap,
 )
-from shared.config.app_config import AppConfig
 from shared.dependencies.providers import AuditLogStoreDep, LineageStoreDep
 from shared.errors.error_envelope import build_error_envelope
 from shared.errors.error_types import ErrorCategory, ErrorCode, classified_http_exception
@@ -151,7 +149,7 @@ async def preview_pipeline(
 ) -> ApiResponse:
     try:
         # Require idempotency key for preview operations
-        idempotency_key = _require_pipeline_idempotency_key(request, operation="pipeline preview")
+        _require_pipeline_idempotency_key(request, operation="pipeline preview")
         await _ensure_pipeline_permission(
             pipeline_registry,
             pipeline_id=pipeline_id,
@@ -406,7 +404,7 @@ async def build_pipeline(
 ) -> ApiResponse:
     try:
         # Require idempotency key for build operations
-        idempotency_key = _require_pipeline_idempotency_key(request, operation="pipeline build")
+        _require_pipeline_idempotency_key(request, operation="pipeline build")
         await _ensure_pipeline_permission(
             pipeline_registry,
             pipeline_id=pipeline_id,
@@ -630,7 +628,7 @@ async def deploy_pipeline(
 ) -> ApiResponse:
     try:
         # Require idempotency key for deploy operations
-        idempotency_key = _require_pipeline_idempotency_key(request, operation="pipeline deploy")
+        _require_pipeline_idempotency_key(request, operation="pipeline deploy")
         await _ensure_pipeline_permission(
             pipeline_registry,
             pipeline_id=pipeline_id,
@@ -656,7 +654,6 @@ async def deploy_pipeline(
             dependencies_raw = definition_json.get("dependencies")
         dependencies: Optional[list[dict[str, str]]] = None
         node_id = str(sanitized.get("node_id") or "").strip() or None
-        dataset_name = str(output.get("dataset_name") or "").strip()
         db_name = str(output.get("db_name") or "").strip()
         outputs = sanitized.get("outputs") if isinstance(sanitized.get("outputs"), list) else None
         expectations = sanitized.get("expectations") if isinstance(sanitized.get("expectations"), list) else None

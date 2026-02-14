@@ -6,7 +6,6 @@ Stores pipeline output snapshots as JSON in object storage and returns the S3 ke
 
 from __future__ import annotations
 
-import json
 from datetime import datetime, timezone
 from typing import Any, Dict, List
 

@@ -7,6 +7,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from shared.errors.error_types import ErrorCode, classified_http_exception
 from shared.services.core.service_factory import ServiceInfo, create_fastapi_service
 
 
@@ -97,3 +98,38 @@ def test_error_response_contains_enterprise_metadata() -> None:
     assert payload["diagnostics"]["lookup"]["enterprise_code"] == payload["enterprise"]["code"]
     assert payload["diagnostics"]["group_fingerprint"].startswith("sha256:")
     assert payload["diagnostics"]["instance_fingerprint"].startswith("sha256:")
+
+
+@pytest.mark.unit
+def test_classified_http_exception_preserves_enterprise_and_external_codes() -> None:
+    service_info = ServiceInfo(
+        name="bff",
+        title="Test Service",
+        description="Test Service for external code propagation",
+    )
+    app: FastAPI = create_fastapi_service(
+        service_info=service_info,
+        include_health_check=False,
+        include_logging_middleware=False,
+    )
+
+    @app.get("/mapping-error")
+    def mapping_error() -> None:
+        raise classified_http_exception(
+            400,
+            "mapping invalid",
+            code=ErrorCode.OBJECTIFY_MAPPING_ERROR,
+            external_code="MAPPING_SPEC_SOURCE_MISSING",
+            extra={"missing_sources": ["missing"]},
+        )
+
+    client = TestClient(app, raise_server_exceptions=False)
+    resp = client.get("/mapping-error")
+    payload = resp.json()
+
+    assert resp.status_code == 400
+    assert payload["code"] == "OBJECTIFY_MAPPING_ERROR"
+    assert payload["enterprise"]["legacy_code"] == "MAPPING_SPEC_SOURCE_MISSING"
+    assert payload["message"] == "mapping invalid"
+    detail = payload["detail"] if isinstance(payload.get("detail"), dict) else {}
+    assert detail.get("missing_sources") == ["missing"]

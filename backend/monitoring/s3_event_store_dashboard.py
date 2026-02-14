@@ -13,7 +13,7 @@ Real-time monitoring of S3 Event Store metrics:
 import asyncio
 import json
 from datetime import datetime, timezone
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, Optional
 from collections import defaultdict
 import aioboto3
 from prometheus_client import Counter, Histogram, Gauge, generate_latest

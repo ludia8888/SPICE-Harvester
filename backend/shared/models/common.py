@@ -5,7 +5,7 @@ Common data types and enums for SPICE HARVESTER
 from dataclasses import dataclass
 from enum import Enum
 import warnings
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 import logging
 
 from .query_operator_mixin import QueryOperatorApplicabilityMixin

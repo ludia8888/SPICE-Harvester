@@ -12,12 +12,10 @@ Key features:
 5. ✅ Readiness and liveness probes for K8s
 """
 
-import asyncio
-import json
 import time
 from datetime import datetime, timezone
-from typing import Dict, Any, Optional, List
-from fastapi import APIRouter, Depends, HTTPException, Request, status, Query
+from typing import Dict, Any, Optional
+from fastapi import APIRouter, Depends, Request, status, Query
 from fastapi.responses import JSONResponse
 from starlette.responses import RedirectResponse
 

@@ -7,7 +7,7 @@ Composed by `bff.routers.pipeline` via router composition (Composite pattern).
 import logging
 from typing import Any, Dict
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from bff.routers.pipeline_deps import get_pipeline_registry
 from bff.routers.pipeline_shared import _ensure_pipeline_permission, _log_pipeline_audit

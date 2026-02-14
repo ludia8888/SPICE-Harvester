@@ -49,7 +49,8 @@ class ObjectifyWritePath(Protocol):
         instance_relationships: Optional[Dict[str, Dict[str, Any]]] = None,
         target_field_types: Optional[Dict[str, str]] = None,
     ) -> ObjectifyWriteBatchResult:
-        ...
+        _ = (objectify_pk_fields, objectify_instance_id_field)
+        raise NotImplementedError
 
     async def finalize_job(
         self,
@@ -146,6 +147,7 @@ class DatasetPrimaryIndexWritePath:
         instance_relationships: Optional[Dict[str, Dict[str, Any]]] = None,
         target_field_types: Optional[Dict[str, str]] = None,
     ) -> ObjectifyWriteBatchResult:
+        _ = (objectify_pk_fields, objectify_instance_id_field)
         if not instances:
             return ObjectifyWriteBatchResult(command_ids=[], indexed_instance_ids=[])
 

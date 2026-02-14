@@ -17,7 +17,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, AsyncGenerator, Dict, List, Literal, Optional
 from uuid import uuid4
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -27,6 +27,7 @@ from bff.services.pipeline_plan_validation import validate_pipeline_plan
 from shared.models.pipeline_plan import PipelinePlan, PipelinePlanDataScope
 from shared.services.core.audit_log_store import AuditLogStore
 from shared.services.registries.dataset_registry import DatasetRegistry
+from shared.services.registries.pipeline_registry import PipelineRegistry
 from shared.services.agent.llm_gateway import (
     LLMCallMeta,
     LLMGateway,
@@ -2514,7 +2515,7 @@ async def _run_agent_core(
     else:
         system_chars = len(system_prompt)
         prompt_char_limit = int((model_config.safe_prompt_chars - system_chars) * 0.85)
-    prompt_budget = PromptBudget(total_chars=prompt_char_limit)
+    PromptBudget(total_chars=prompt_char_limit)
 
     # ── Prompt log ──
     state.prompt_items = [

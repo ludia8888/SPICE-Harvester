@@ -335,6 +335,80 @@ def test_add_stream_join_rejects_left_lookup_with_streaming_right_input():
         )
 
 
+def test_add_stream_join_rejects_static_with_transformed_right_input():
+    plan = new_plan(goal="stream join validation", db_name="demo")
+    plan = add_input(plan, dataset_id="left", node_id="left").plan
+    plan = add_input(plan, dataset_id="right", node_id="right").plan
+    right_filtered = add_filter(plan, input_node_id="right", expression="id > 0", node_id="right_filter").plan
+    with pytest.raises(PipelinePlanBuilderError, match="requires right input to be a direct input node"):
+        add_stream_join(
+            right_filtered,
+            left_node_id="left",
+            right_node_id="right_filter",
+            left_keys=["id"],
+            right_keys=["id"],
+            strategy="static",
+            node_id="sj1",
+        )
+
+
+def test_add_stream_join_rejects_static_with_streaming_right_input():
+    plan = new_plan(goal="stream join validation", db_name="demo")
+    plan = add_input(plan, dataset_id="left", node_id="left").plan
+    plan = add_input(
+        plan,
+        dataset_id="right",
+        node_id="right",
+        read={"format": "kafka"},
+    ).plan
+    with pytest.raises(PipelinePlanBuilderError, match="requires right input to be batch lookup source"):
+        add_stream_join(
+            plan,
+            left_node_id="left",
+            right_node_id="right",
+            left_keys=["id"],
+            right_keys=["id"],
+            strategy="static",
+            node_id="sj1",
+        )
+
+
+def test_add_stream_join_static_defaults_join_type_to_left():
+    plan = new_plan(goal="stream join default join type", db_name="demo")
+    plan = add_input(plan, dataset_id="left", node_id="left").plan
+    plan = add_input(plan, dataset_id="right", node_id="right").plan
+
+    result = add_stream_join(
+        plan,
+        left_node_id="left",
+        right_node_id="right",
+        left_keys=["id"],
+        right_keys=["id"],
+        strategy="static",
+        node_id="sj_static",
+    )
+    node = next(node for node in result.plan["definition_json"]["nodes"] if node["id"] == result.node_id)
+    assert node["metadata"]["joinType"] == "left"
+
+
+def test_add_stream_join_static_rejects_non_left_join_type():
+    plan = new_plan(goal="stream join static join type", db_name="demo")
+    plan = add_input(plan, dataset_id="left", node_id="left").plan
+    plan = add_input(plan, dataset_id="right", node_id="right").plan
+
+    with pytest.raises(PipelinePlanBuilderError, match="strategy=static requires joinType=left"):
+        add_stream_join(
+            plan,
+            left_node_id="left",
+            right_node_id="right",
+            left_keys=["id"],
+            right_keys=["id"],
+            strategy="static",
+            join_type="full",
+            node_id="sj_static_invalid",
+        )
+
+
 def test_add_pivot_builds_metadata():
     plan = new_plan(goal="pivot", db_name="demo")
     plan = add_input(plan, dataset_id="ds", node_id="inp").plan

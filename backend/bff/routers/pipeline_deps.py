@@ -11,6 +11,14 @@ from bff.routers.registry_deps import get_dataset_registry, get_objectify_regist
 from shared.services.pipeline.pipeline_executor import PipelineExecutor
 from shared.services.pipeline.pipeline_job_queue import PipelineJobQueue
 
+__all__ = [
+    "get_dataset_registry",
+    "get_objectify_registry",
+    "get_pipeline_registry",
+    "get_pipeline_executor",
+    "get_pipeline_job_queue",
+]
+
 
 async def get_pipeline_executor() -> PipelineExecutor:
     from bff.main import get_pipeline_executor as _get_pipeline_executor

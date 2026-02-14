@@ -12,9 +12,9 @@ Key features:
 5. ✅ Environment drift detection
 """
 
-import asyncio
-from datetime import datetime, timezone, timedelta
-from typing import Dict, List, Optional, Any
+import logging
+from datetime import datetime, timezone
+from typing import Dict, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query, BackgroundTasks
 from fastapi.responses import JSONResponse
 
@@ -23,7 +23,7 @@ from shared.dependencies.providers import get_settings_dependency
 from shared.errors.error_types import ErrorCode, classified_http_exception
 from shared.observability.config_monitor import (
     ConfigurationMonitor, ConfigChange, ConfigSeverity, 
-    ConfigChangeType, ConfigSecurityAudit
+    ConfigChangeType
 )
 
 router = APIRouter(tags=["Config Monitoring"])

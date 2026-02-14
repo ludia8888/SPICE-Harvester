@@ -8,7 +8,6 @@ import logging
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timezone
 from enum import Enum
-from uuid import UUID
 
 from shared.config.settings import get_settings
 from shared.services.storage.redis_service import RedisService

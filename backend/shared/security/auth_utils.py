@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from typing import Iterable, Mapping, Optional
 
 from shared.config.settings import get_settings
@@ -76,7 +77,7 @@ def auth_required(
     if require_env_key == "OMS_REQUIRE_AUTH":
         return auth.is_oms_auth_required(default_required=default_required)
 
-    if allow_pytest and settings.is_pytest:
+    if allow_pytest and (settings.is_pytest or bool(os.getenv(pytest_env_key))):
         return False
     if get_expected_token(token_env_keys):
         return True

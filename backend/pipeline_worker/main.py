@@ -8,8 +8,6 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import contextlib
-import hashlib
 import json
 import logging
 import os
@@ -17,7 +15,7 @@ import shutil
 import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import datetime
 from functools import reduce
 import operator
 from typing import Any, Callable, Dict, List, Optional, TypeVar
@@ -52,7 +50,6 @@ from shared.config.settings import get_settings
 from shared.errors.error_envelope import build_error_envelope
 from shared.errors.error_types import ErrorCategory, ErrorCode
 from shared.errors.runtime_exception_policy import RuntimeZone, log_exception_rate_limited, record_lineage_or_raise
-from shared.models.event_envelope import EventEnvelope
 from shared.models.pipeline_job import PipelineJob
 from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
@@ -61,8 +58,7 @@ from shared.services.kafka.dlq_publisher import DlqPublishSpec
 from shared.services.kafka.producer_factory import create_kafka_dlq_producer
 from shared.services.kafka.producer_ops import close_kafka_producer
 from shared.services.registries.dataset_registry import DatasetRegistry
-from shared.services.storage.lakefs_client import LakeFSClient, LakeFSConflictError, LakeFSError
-from shared.services.storage.lakefs_storage_service import LakeFSStorageService
+from shared.services.storage.lakefs_client import LakeFSClient, LakeFSConflictError
 from shared.services.registries.lineage_store import LineageStore
 from shared.services.pipeline.pipeline_profiler import compute_column_stats
 from shared.services.pipeline.pipeline_kafka_avro import (
@@ -83,6 +79,7 @@ from shared.services.pipeline.output_plugins import (
     OUTPUT_KIND_ONTOLOGY,
     OUTPUT_KIND_VIRTUAL,
     normalize_output_kind,
+    resolve_ontology_output_semantics,
     resolve_output_kind,
     validate_output_payload,
 )
@@ -94,7 +91,7 @@ from shared.services.pipeline.pipeline_definition_validator import (
     validate_pipeline_definition,
 )
 from shared.services.pipeline.pipeline_graph_utils import build_incoming, normalize_edges, normalize_nodes, topological_sort
-from shared.services.pipeline.pipeline_parameter_utils import apply_parameters, normalize_parameters
+from shared.services.pipeline.pipeline_parameter_utils import normalize_parameters
 from shared.services.pipeline.pipeline_definition_utils import (
     build_expectations_with_pk,
     normalize_expectation_columns,
@@ -103,7 +100,6 @@ from shared.services.pipeline.pipeline_definition_utils import (
     resolve_pk_columns,
     resolve_pk_semantics,
     validate_pk_semantics,
-    split_expectation_columns,
 )
 from shared.services.pipeline.pipeline_dataset_utils import normalize_dataset_selection, resolve_dataset_version
 from shared.services.pipeline.pipeline_validation_utils import (
@@ -119,8 +115,6 @@ from shared.services.pipeline.pipeline_type_utils import normalize_cast_mode, sp
 from shared.services.pipeline.pipeline_transform_spec import (
     SUPPORTED_TRANSFORMS,
     normalize_operation,
-    normalize_union_mode,
-    resolve_join_spec,
 )
 from shared.services.registries.objectify_registry import ObjectifyRegistry
 from shared.services.registries.backing_source_adapter import MappingSpecResolver, is_oms_mapping_spec
@@ -2066,8 +2060,10 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                         base_row_count=int(item.get("delta_row_count") or 0),
                     )
                     if _PYSPARK_AVAILABLE:
-                        with contextlib.suppress(Exception):
+                        try:
                             output_df.unpersist(blocking=False)
+                        except Exception as exc:
+                            logger.warning("Failed to unpersist output dataframe: %s", exc, exc_info=True)
                     resolved_runtime_write_mode = str(
                         materialized.get("runtime_write_mode")
                         or item.get("runtime_write_mode")
@@ -2930,8 +2926,10 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                 shutil.rmtree(path, ignore_errors=True)
             if _PYSPARK_AVAILABLE and persisted_dfs:
                 for df in persisted_dfs:
-                    with contextlib.suppress(Exception):
+                    try:
                         df.unpersist(blocking=False)
+                    except Exception as exc:
+                        logger.warning("Failed to unpersist persisted dataframe: %s", exc, exc_info=True)
             # Restore any per-job overrides so the next run starts from the worker defaults.
             if self.spark and prev_spark_conf:
                 for key, value in prev_spark_conf.items():
@@ -3341,6 +3339,7 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
         existing_df = self._empty_dataframe()
         if policy.resolved_write_mode in {
             DatasetWriteMode.APPEND_ONLY_NEW_ROWS,
+            DatasetWriteMode.CHANGELOG,
             DatasetWriteMode.SNAPSHOT_DIFFERENCE,
             DatasetWriteMode.SNAPSHOT_REPLACE,
             DatasetWriteMode.SNAPSHOT_REPLACE_AND_REMOVE,
@@ -3368,22 +3367,22 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
         input_aligned = self._align_columns(df, aligned_columns) if aligned_columns else df
         existing_aligned = self._align_columns(existing_df, aligned_columns) if aligned_columns else existing_df
 
-        if policy.resolved_write_mode in {
-            DatasetWriteMode.APPEND_ONLY_NEW_ROWS,
-            DatasetWriteMode.CHANGELOG,
-            DatasetWriteMode.SNAPSHOT_DIFFERENCE,
-            DatasetWriteMode.SNAPSHOT_REPLACE,
-            DatasetWriteMode.SNAPSHOT_REPLACE_AND_REMOVE,
-        } and pk_columns:
-            await self._assert_no_duplicate_primary_keys(
-                df=input_aligned,
-                pk_columns=pk_columns,
-                write_mode=policy.resolved_write_mode.value,
-                dataset_label=str(dataset_name or prefix or "output"),
-            )
-
         materialized_df = input_aligned
-        if policy.resolved_write_mode == DatasetWriteMode.ALWAYS_APPEND:
+        deduped_input = (
+            input_aligned.dropDuplicates(pk_columns)
+            if pk_columns
+            and policy.resolved_write_mode
+            in {
+                DatasetWriteMode.APPEND_ONLY_NEW_ROWS,
+                DatasetWriteMode.SNAPSHOT_REPLACE,
+                DatasetWriteMode.SNAPSHOT_REPLACE_AND_REMOVE,
+            }
+            else input_aligned
+        )
+
+        if policy.resolved_write_mode == DatasetWriteMode.DEFAULT:
+            materialized_df = input_aligned
+        elif policy.resolved_write_mode == DatasetWriteMode.ALWAYS_APPEND:
             materialized_df = input_aligned
         elif policy.resolved_write_mode == DatasetWriteMode.CHANGELOG:
             materialized_df = self._select_new_or_changed_rows(
@@ -3395,9 +3394,9 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
         elif policy.resolved_write_mode == DatasetWriteMode.APPEND_ONLY_NEW_ROWS:
             if existing_aligned.columns and pk_columns:
                 existing_keys = existing_aligned.select(*pk_columns).distinct()
-                materialized_df = input_aligned.join(existing_keys, on=pk_columns, how="left_anti")
+                materialized_df = deduped_input.join(existing_keys, on=pk_columns, how="left_anti")
             else:
-                materialized_df = input_aligned
+                materialized_df = deduped_input
         elif policy.resolved_write_mode == DatasetWriteMode.SNAPSHOT_DIFFERENCE:
             if existing_aligned.columns and pk_columns:
                 existing_keys = existing_aligned.select(*pk_columns).distinct()
@@ -3407,7 +3406,7 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
             else:
                 materialized_df = input_aligned
         elif policy.resolved_write_mode == DatasetWriteMode.SNAPSHOT_REPLACE:
-            upsert_df = input_aligned
+            upsert_df = deduped_input
             if existing_aligned.columns and pk_columns:
                 existing_dedup = existing_aligned.dropDuplicates(pk_columns)
                 upsert_keys = upsert_df.select(*pk_columns).distinct()
@@ -3421,7 +3420,7 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                 raise ValueError("post_filtering_column is required for snapshot_replace_and_remove")
             is_false_expr = self._post_filter_false_expr(post_filtering_column=post_col)
             upsert_input = input_aligned.filter(~is_false_expr)
-            upsert_df = upsert_input
+            upsert_df = upsert_input.dropDuplicates(pk_columns) if pk_columns else upsert_input
             false_keys = input_aligned.filter(is_false_expr).select(*pk_columns).distinct()
             if existing_aligned.columns and pk_columns:
                 existing_dedup = existing_aligned.dropDuplicates(pk_columns)
@@ -3627,9 +3626,8 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
         file_format: str,
         partition_cols: Optional[List[str]],
     ) -> str:
-        source_key_column = str(output_metadata.get("source_key_column") or output_metadata.get("sourceKeyColumn") or "").strip()
-        target_key_column = str(output_metadata.get("target_key_column") or output_metadata.get("targetKeyColumn") or "").strip()
-        required_columns = [column for column in (source_key_column, target_key_column) if column]
+        ontology_semantics = resolve_ontology_output_semantics(output_metadata)
+        required_columns = list(ontology_semantics.required_columns)
         if required_columns:
             self._ensure_output_columns_present(
                 df=df,
@@ -3735,31 +3733,6 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
         for column in tracked_columns:
             changed_expr = changed_expr | (~F.col(column).eqNullSafe(F.col(f"__existing_{column}")))
         return joined.filter(changed_expr).select(*selected_input.columns)
-
-    async def _assert_no_duplicate_primary_keys(
-        self,
-        *,
-        df: DataFrame,
-        pk_columns: List[str],
-        write_mode: str,
-        dataset_label: str,
-    ) -> None:
-        if not pk_columns:
-            return
-        duplicate_candidates = df.groupBy(*[F.col(column) for column in pk_columns]).count().filter(F.col("count") > 1).limit(1)
-        duplicate_rows = await self._run_spark(
-            lambda: duplicate_candidates.collect(),
-            label=f"check_duplicate_pk:{dataset_label}",
-        )
-        if not duplicate_rows:
-            return
-        sample_row = duplicate_rows[0].asDict(recursive=True)
-        duplicate_count = int(sample_row.get("count") or 0)
-        sample_pk = {column: sample_row.get(column) for column in pk_columns}
-        raise ValueError(
-            "Duplicate primary_key_columns detected for "
-            f"write_mode={write_mode}: sample={sample_pk}, duplicate_count={duplicate_count}"
-        )
 
     def _post_filter_false_expr(self, *, post_filtering_column: str) -> Any:
         normalized = F.lower(F.trim(F.col(post_filtering_column).cast("string")))
@@ -4702,11 +4675,11 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
     def _sql_ident(self, name: str) -> str:
         return f"`{str(name).replace('`', '``')}`"
 
-    def _clean_string_column(self, column: "Column") -> "Column":
+    def _clean_string_column(self, column: Any) -> Any:
         trimmed = F.trim(column.cast("string"))
         return F.when((trimmed.isNull()) | (F.length(trimmed) == 0), F.lit(None)).otherwise(trimmed)
 
-    def _try_cast_column(self, column: str, spark_type: str) -> "Column":
+    def _try_cast_column(self, column: str, spark_type: str) -> Any:
         ident = self._sql_ident(column)
         cleaned = f"nullif(trim({ident}), '')"
         if spark_type in {"bigint", "int", "long"}:
@@ -4732,7 +4705,7 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
             return F.expr(f"try_cast({cleaned} as date)")
         return F.expr(cleaned)
 
-    def _safe_cast_column(self, column: str, target_type: str) -> "Column":
+    def _safe_cast_column(self, column: str, target_type: str) -> Any:
         spark_type = xsd_to_spark_type(target_type)
         source = F.col(str(column))
         if self.cast_mode == "STRICT":

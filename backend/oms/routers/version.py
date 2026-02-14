@@ -4,9 +4,9 @@
 """
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field
 
 from oms.dependencies import TerminusServiceDep
@@ -23,7 +23,7 @@ from shared.utils.commit_utils import coerce_commit_id
 from shared.utils.diff_utils import normalize_diff_response
 from shared.utils.branch_utils import protected_branch_write_message
 from shared.config.settings import get_settings
-from shared.errors.error_types import ErrorCode, ErrorCategory, classified_http_exception
+from shared.errors.error_types import ErrorCode, classified_http_exception
 from shared.observability.tracing import trace_endpoint
 
 logger = logging.getLogger(__name__)

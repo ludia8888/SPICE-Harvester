@@ -7,7 +7,7 @@ import asyncio
 import logging
 import random
 from abc import ABC, abstractmethod
-from typing import Optional, Callable, Any
+from typing import Callable, Any
 from enum import Enum
 
 import asyncpg

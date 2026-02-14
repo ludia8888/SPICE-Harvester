@@ -7,7 +7,6 @@ import re
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-from ..models.common import DataType
 from .base_validator import BaseValidator, ValidationResult
 
 

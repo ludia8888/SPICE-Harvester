@@ -977,15 +977,16 @@ def _apply_udf(ctx: _SparkTransformContext) -> DataFrame:
     expected_keys: Optional[tuple[str, ...]] = None
     sampled_outputs: List[Dict[str, Any]] = []
     for row in sample_rows:
-        transformed = fn(row.asDict(recursive=True))
-        transformed_keys = tuple(transformed.keys())
-        if expected_keys is None:
-            expected_keys = transformed_keys
-        elif transformed_keys != expected_keys:
-            raise ValueError("udf must return a consistent output schema for every row")
-        sampled_outputs.append(dict(transformed))
+        transformed_rows = fn(row.asDict(recursive=True))
+        for transformed in transformed_rows:
+            transformed_keys = tuple(transformed.keys())
+            if expected_keys is None:
+                expected_keys = transformed_keys
+            elif transformed_keys != expected_keys:
+                raise ValueError("udf must return a consistent output schema for every row")
+            sampled_outputs.append(dict(transformed))
 
-    if expected_keys is None:
+    if expected_keys is None or not sampled_outputs:
         return source.limit(0)
     normalized_sampled = [{key: payload.get(key) for key in expected_keys} for payload in sampled_outputs]
     sampled_schema = source.sparkSession.createDataFrame(normalized_sampled).schema
@@ -997,10 +998,11 @@ def _apply_udf(ctx: _SparkTransformContext) -> DataFrame:
             local_fn = compile_udf(code_bc.value)
             local_expected_keys = expected_keys_bc.value
             for row in rows:
-                transformed = local_fn(row.asDict(recursive=True))
-                if tuple(transformed.keys()) != local_expected_keys:
-                    raise ValueError("udf must return a consistent output schema for every row")
-                yield {key: transformed.get(key) for key in local_expected_keys}
+                transformed_rows = local_fn(row.asDict(recursive=True))
+                for transformed in transformed_rows:
+                    if tuple(transformed.keys()) != local_expected_keys:
+                        raise ValueError("udf must return a consistent output schema for every row")
+                    yield {key: transformed.get(key) for key in local_expected_keys}
 
         transformed_rdd = source.rdd.mapPartitions(_map_partition)
         return source.sparkSession.createDataFrame(transformed_rdd, schema=sampled_schema)

@@ -7,12 +7,12 @@ deduplicate common CRUD/control-flow (Facade pattern).
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Optional, Sequence
+from typing import Any, Dict, Optional
 
-from fastapi import HTTPException, Request, status
+from fastapi import Request, status
 from fastapi.responses import JSONResponse
 
-from shared.errors.error_types import ErrorCode, ErrorCategory, classified_http_exception
+from shared.errors.error_types import ErrorCode, classified_http_exception
 from bff.routers.ontology_ops import _transform_properties_for_oms
 from bff.services.ontology_class_id_service import resolve_or_generate_class_id
 from bff.services.ontology_label_mapper_service import register_ontology_label_mappings

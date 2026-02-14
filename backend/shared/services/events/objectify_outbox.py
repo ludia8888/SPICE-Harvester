@@ -6,14 +6,12 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional
 
-from confluent_kafka import Producer
 
 from shared.config.app_config import AppConfig
 from shared.config.settings import get_settings
 from shared.observability.context_propagation import (
     attach_context_from_carrier,
     carrier_from_envelope_metadata,
-    kafka_headers_from_envelope_metadata,
     kafka_headers_with_dedup,
 )
 from shared.observability.tracing import get_tracing_service

@@ -7,7 +7,6 @@ import asyncio
 import json
 import logging
 import os
-from contextlib import suppress
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
 

@@ -11,7 +11,7 @@ import logging
 from typing import Any, Dict, Optional
 from shared.observability.tracing import trace_endpoint
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, HTTPException, Request, status
 
 from shared.errors.error_types import ErrorCode, classified_http_exception
 from pydantic import BaseModel, Field
@@ -23,7 +23,7 @@ from shared.services.agent.llm_gateway import LLMGateway
 from shared.services.core.audit_log_store import AuditLogStore
 from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.services.registries.pipeline_plan_registry import PipelinePlanRegistry
-from shared.services.storage.redis_service import RedisService, create_redis_service
+from shared.services.storage.redis_service import create_redis_service
 from shared.config.settings import get_settings
 from bff.services.pipeline_agent_autonomous_loop import run_pipeline_agent_mcp_autonomous
 

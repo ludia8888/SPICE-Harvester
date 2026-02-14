@@ -2,7 +2,7 @@ from shared.observability.tracing import trace_endpoint
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Request, status
 
 from bff.routers.pipeline_deps import get_dataset_registry, get_pipeline_registry
 from bff.routers.pipeline_plans_deps import get_pipeline_plan_registry

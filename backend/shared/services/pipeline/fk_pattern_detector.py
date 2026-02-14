@@ -11,8 +11,6 @@ import logging
 import re
 from typing import Any, Dict, List, Optional, Set, Tuple
 from dataclasses import dataclass, field
-from collections import Counter
-import statistics
 
 logger = logging.getLogger(__name__)
 

@@ -16,3 +16,30 @@ def test_policy_allows_matches_typed_principal():
     policy = {"effect": "ALLOW", "principals": ["service:svc-1"]}
     assert policy_allows(policy=policy, principal_tags=tags) is True
 
+
+def test_policy_allows_legacy_roles_alias():
+    tags = build_principal_tags(user_id="alice", role="DomainModeler")
+    policy = {"effect": "ALLOW", "roles": ["DomainModeler"]}
+    assert policy_allows(policy=policy, principal_tags=tags) is True
+
+
+def test_policy_denies_legacy_roles_alias_for_deny_effect():
+    tags = build_principal_tags(user_id="alice", role="DomainModeler")
+    policy = {"effect": "DENY", "roles": ["DomainModeler"]}
+    assert policy_allows(policy=policy, principal_tags=tags) is False
+
+
+def test_policy_fails_closed_for_unsupported_legacy_policy_shapes():
+    tags = build_principal_tags(user_id="alice", role="DomainModeler")
+    policy = {"effect": "ALLOW", "rules": [{"op": "always_true"}]}
+    assert policy_allows(policy=policy, principal_tags=tags) is False
+
+
+def test_policy_fails_closed_for_unsupported_legacy_fields_even_with_principals():
+    tags = build_principal_tags(user_id="alice", role="DomainModeler")
+    policy = {
+        "effect": "ALLOW",
+        "principals": ["role:DomainModeler"],
+        "rules": [{"op": "always_true"}],
+    }
+    assert policy_allows(policy=policy, principal_tags=tags) is False

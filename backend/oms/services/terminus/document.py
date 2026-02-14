@@ -4,9 +4,8 @@ Document Service for TerminusDB
 """
 
 import logging
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 from datetime import datetime, timezone
-import json
 
 from .db_backed import DatabaseBackedTerminusService
 from oms.exceptions import (

@@ -1,0 +1,1613 @@
+# Runtime Ultra Audit Latest
+
+Generated at (UTC): 2026-02-13T22:33:22.426355+00:00
+
+## error_taxonomy_audit_strict
+- Command: `python3 backend/shared/tools/error_taxonomy_audit.py --backend-root backend --fail-on-bare-except --fail-on-suppress-exception --fail-on-silent-broad-except --fail-on-lineage-fail-open --fail-on-raw-code --fail-on-route-collision --fail-on-duplicate-symbol --report-vulture-high-confidence`
+- Return code: `0`
+
+### stdout
+```text
+=== Error Taxonomy Audit ===
+Catalog specs: 60
+classified_http_exception calls: 1045
+  with code: 1040
+  with literal status+code: 1012
+Status/code mismatches: 0
+Unknown ErrorCode in classified calls: 0
+Raw HTTPException literal status+code audited: 0
+Raw HTTPException status/code mismatches: 0
+Unknown ErrorCode in raw HTTPException: 0
+Runtime return-in-finally: 0
+Runtime bare except: 0
+Runtime suppress(Exception): 0
+Runtime silent broad except: 0
+Runtime broad except without log/raise: 0
+Runtime lineage fail-open handlers: 0
+Runtime streamJoin strategy ignored handlers: 0
+Runtime output kind metadata gap handlers: 0
+Runtime preflight swallowed handlers: 0
+Runtime dataset write-mode gaps: 0
+Runtime dataset required-columns gaps: 0
+Runtime dataset write-format gaps: 0
+Runtime commented exports in __init__.py: 0
+Runtime doc-only modules: 0
+App route collisions: 0
+Runtime duplicate symbols: 0
+Vulture high-confidence runtime candidates: 0
+Vulture high-confidence test candidates: 16
+Vulture high-confidence script candidates: 1
+Vulture invocation errors: 0
+
+Raw HTTPException usages (all): 0
+Raw HTTPException usages (with embedded detail.code): 0
+Raw HTTPException usages (without detail.code): 0
+Raw string payload codes (code/error_code/api_code/legacy_code/external_code): 0
+\nVulture high-confidence test candidates:
+  bff/tests/test_import_commit_wiring.py:17: unused variable 'tb' (100% confidence)
+  bff/tests/test_pipeline_router_uploads.py:313: unused variable 'tb' (100% confidence)
+  bff/tests/test_pipeline_router_uploads.py:352: unused variable 'tb' (100% confidence)
+  funnel/tests/test_data_processor.py:34: unused variable 'tb' (100% confidence)
+  funnel/tests/test_type_inference_router.py:153: unused variable 'tb' (100% confidence)
+  tests/unit/observability/test_tracing_config.py:53: unused variable 'tb' (100% confidence)
+  tests/unit/observability/test_tracing_config.py:92: unused variable 'tb' (100% confidence)
+  tests/unit/services/test_agent_runtime_artifacts.py:139: unused variable 'tb' (100% confidence)
+  tests/unit/services/test_agent_runtime_artifacts.py:289: unused variable 'tb' (100% confidence)
+  tests/unit/services/test_agent_runtime_delegated_auth.py:41: unused variable 'tb' (100% confidence)
+  tests/unit/services/test_agent_runtime_pipeline_wait.py:69: unused variable 'tb' (100% confidence)
+  tests/unit/services/test_agent_runtime_templating.py:68: unused variable 'tb' (100% confidence)
+  tests/unit/services/test_event_store_connect_idempotent.py:35: unused variable 'tb' (100% confidence)
+  tests/unit/services/test_funnel_data_processor.py:35: unused variable 'tb' (100% confidence)
+  tests/unit/services/test_pipeline_registry_commit_predicate_fallback.py:19: unused variable 'tb' (100% confidence)
+  tests/unit/services/test_postgres_schema_registry.py:15: unused variable 'tb' (100% confidence)
+\nVulture high-confidence script candidates:
+  scripts/migrations/migrate_es_to_terminus_lightweight.py:127: unreachable code after 'return' (100% confidence)
+```
+
+## ruff_f821_runtime
+- Command: `ruff check backend --select F821 --exclude tests,scripts,.venv,venv`
+- Return code: `0`
+
+### stdout
+```text
+All checks passed!
+```
+
+## ruff_f401_f841_runtime_json
+- Command: `ruff check backend --select F401,F841 --exclude tests,scripts,.venv,venv --output-format json`
+- Return code: `0`
+
+### stdout
+```text
+[]
+```
+
+## vulture_runtime_min_conf_100
+- Command: `python3 -m vulture backend --exclude tests/*,scripts/*,.venv/*,venv/* --min-confidence 100`
+- Return code: `3`
+
+### stdout
+```text
+backend/bff/tests/test_import_commit_wiring.py:17: unused variable 'tb' (100% confidence)
+backend/bff/tests/test_pipeline_router_uploads.py:313: unused variable 'tb' (100% confidence)
+backend/bff/tests/test_pipeline_router_uploads.py:352: unused variable 'tb' (100% confidence)
+backend/funnel/tests/test_data_processor.py:34: unused variable 'tb' (100% confidence)
+backend/funnel/tests/test_type_inference_router.py:153: unused variable 'tb' (100% confidence)
+backend/scripts/migrations/migrate_es_to_terminus_lightweight.py:127: unreachable code after 'return' (100% confidence)
+backend/tests/unit/observability/test_tracing_config.py:53: unused variable 'tb' (100% confidence)
+backend/tests/unit/observability/test_tracing_config.py:92: unused variable 'tb' (100% confidence)
+backend/tests/unit/services/test_agent_runtime_artifacts.py:139: unused variable 'tb' (100% confidence)
+backend/tests/unit/services/test_agent_runtime_artifacts.py:289: unused variable 'tb' (100% confidence)
+backend/tests/unit/services/test_agent_runtime_delegated_auth.py:41: unused variable 'tb' (100% confidence)
+backend/tests/unit/services/test_agent_runtime_pipeline_wait.py:69: unused variable 'tb' (100% confidence)
+backend/tests/unit/services/test_agent_runtime_templating.py:68: unused variable 'tb' (100% confidence)
+backend/tests/unit/services/test_event_store_connect_idempotent.py:35: unused variable 'tb' (100% confidence)
+backend/tests/unit/services/test_funnel_data_processor.py:35: unused variable 'tb' (100% confidence)
+backend/tests/unit/services/test_pipeline_registry_commit_predicate_fallback.py:19: unused variable 'tb' (100% confidence)
+backend/tests/unit/services/test_postgres_schema_registry.py:15: unused variable 'tb' (100% confidence)
+```
+
+## pytest_collect_only
+- Command: `pytest --collect-only -q`
+- Return code: `0`
+
+### stdout
+```text
+============================= test session starts ==============================
+platform darwin -- Python 3.11.14, pytest-7.4.3, pluggy-1.6.0
+rootdir: /Users/isihyeon/Desktop/SPICE-Harvester/backend
+configfile: pytest.ini
+testpaths: tests
+plugins: anyio-4.12.1, langsmith-0.6.2, Faker-20.1.0, cov-4.1.0, asyncio-0.21.1, mock-3.12.0, typeguard-4.4.4
+asyncio: mode=Mode.AUTO
+collected 1169 items / 4 skipped
+
+<Package tests>
+  <Module test_access_policy_link_indexing_e2e.py>
+    <Function test_access_policy_filters_and_masks_query_results>
+    <Function test_link_indexing_updates_relationships_and_status>
+    <Function test_object_type_migration_requires_edit_reset>
+  <Module test_auth_hardening_e2e.py>
+    <Function test_auth_disabled_requires_explicit_allow>
+    <Function test_oms_write_requires_auth>
+  <Module test_branch_virtualization_e2e.py>
+    <Function test_branch_virtualization_overlay_copy_on_write>
+  <Module test_command_status_ttl_e2e.py>
+    <Function test_command_status_ttl_configurable>
+  <Module test_consistency_e2e_smoke.py>
+    <Class TestSafeKafkaConsumerConfiguration>
+      <Function test_enforced_isolation_level>
+      <Function test_enforced_auto_commit_disabled>
+      <Function test_workers_use_safe_consumer>
+      <Function test_no_raw_consumer_in_worker_tree>
+    <Class TestKafkaProducerConfiguration>
+      <Function test_pipeline_job_queue_producer_is_idempotent>
+      <Function test_connector_trigger_producer_is_idempotent>
+    <Class TestKafkaConnectivity>
+      <Function test_kafka_topics_exist>
+      <Function test_kafka_consumer_groups_listable>
+      <Function test_expected_consumer_groups_present>
+      <Function test_read_committed_filters_aborted_transactions>
+    <Class TestBFFHealth>
+      <Function test_bff_health_endpoint>
+      <Function test_bff_databases_connected>
+    <Class TestMSAServiceHealth>
+      <Function test_oms_health_endpoint>
+      <Function test_funnel_health_endpoint>
+      <Function test_agent_health_endpoint>
+      <Function test_ingest_reconciler_health_endpoint>
+    <Class TestDatabaseConnectivity>
+      <Function test_postgres_connection>
+      <Function test_redis_connection>
+    <Class TestInfraConnectivity>
+      <Function test_minio_health>
+      <Function test_lakefs_health>
+      <Function test_elasticsearch_health>
+      <Function test_terminusdb_port_open>
+    <Class TestSystemWiring>
+      <Function test_message_relay_publishes_event_store_appends>
+      <Function test_connector_trigger_publishes_outbox>
+      <Function test_pipeline_scheduler_enqueues_scheduled_pipeline>
+      <Function test_action_outbox_emits_action_applied_event>
+    <Class TestOutboxPatternVerification>
+      <Function test_objectify_outbox_uses_aggregate_key>
+      <Function test_objectify_outbox_tracks_delivery>
+      <Function test_message_relay_prefers_ordering_key>
+    <Class TestProcessedEventRegistryIdempotency>
+      <Function test_claim_idempotency>
+      <Function test_sequence_ordering>
+    <Class TestPipelineJobQueue>
+      <Function test_pipeline_job_has_dedupe_key>
+      <Function test_pipeline_job_queue_uses_pipeline_id_key>
+    <Class TestEndToEndFlowSimulation>
+      <Function test_objectify_job_creation_flow>
+      <Function test_pipeline_job_creation_flow>
+    <Class TestWorkerModuleImports>
+      <Function test_objectify_worker_import>
+      <Function test_pipeline_worker_import>
+      <Function test_action_worker_import>
+      <Function test_connector_sync_worker_import>
+      <Function test_ontology_worker_import>
+      <Function test_instance_worker_import>
+      <Function test_projection_worker_import>
+      <Function test_action_outbox_worker_import>
+      <Function test_ingest_reconciler_worker_import>
+      <Function test_writeback_materializer_worker_import>
+      <Function test_connector_trigger_service_import>
+      <Function test_pipeline_scheduler_import>
+      <Function test_message_relay_import>
+    <Class TestConsistencySummary>
+      <Function test_all_critical_settings_enforced>
+      <Function test_idempotency_patterns_present>
+      <Function test_occ_support_present>
+  <Module test_core_functionality.py>
+    <Class TestCoreOntologyManagement>
+      <Function test_database_lifecycle>
+      <Function test_ontology_creation>
+      <Function test_ontology_i18n_label_projection>
+      <Function test_ontology_creation_advanced_relationships>
+    <Class TestBFFGraphFederation>
+      <Function test_schema_suggestion>
+      <Function test_graph_query_federation>
+    <Class TestEventSourcingInfrastructure>
+      <Function test_s3_event_storage>
+      <Function test_postgresql_processed_event_registry>
+      <Function test_kafka_message_flow>
+    <Class TestComplexTypes>
+      <Function test_email_validation>
+      <Function test_phone_validation>
+      <Function test_json_validation>
+    <Class TestHealthEndpoints>
+      <Function test_oms_health>
+      <Function test_bff_health>
+      <Function test_funnel_health>
+  <Module test_critical_fixes_e2e.py>
+    <Function test_config_monitor_current_returns_payload>
+    <Function test_openapi_excludes_wip_projections>
+    <Function test_i18n_translates_health_description>
+    <Function test_rate_limit_headers_present_on_success>
+    <Function test_redis_down_rate_limit_and_command_status_fallback>
+    <Function test_bff_sensitive_get_requires_auth>
+    <Function test_command_status_dual_outage_returns_503>
+  <Module test_event_store_tls_guard.py>
+    <Function test_event_store_tls_requirement>
+  <Module test_financial_investigation_workflow_e2e.py>
+    <Function test_financial_investigation_workflow_e2e>
+  <Module test_idempotency_chaos.py>
+    <Function test_registry_duplicate_delivery_causes_one_side_effect>
+    <Function test_registry_reclaims_stuck_processing_after_lease_timeout>
+    <Function test_registry_concurrent_claim_has_single_winner>
+    <Function test_registry_mark_failed_owner_mismatch_raises>
+    <Function test_registry_sequence_guard_is_monotonic>
+    <Function test_command_status_endpoint_exposes_failure_reason>
+    <Function test_event_store_rejects_event_id_reuse_with_different_command_payload>
+  <Module test_oms_smoke.py>
+    <Function test_oms_end_to_end_smoke>
+  <Module test_openapi_contract_smoke.py>
+    <Function test_openapi_stable_contract_smoke>
+  <Module test_pipeline_streaming_semantics_e2e.py>
+    <Function test_streaming_build_deploy_promotes_all_outputs>
+    <Function test_streaming_build_fails_as_job_group_on_contract_mismatch>
+  <Module test_pipeline_type_mismatch_guard_e2e.py>
+    <Function test_preview_rejects_type_mismatch_in_compute_expression>
+  <Module test_sequence_allocator.py>
+    <Function test_allocator_concurrent_reservation_is_unique_and_monotonic>
+    <Function test_allocator_seeding_starts_after_existing_stream_max>
+    <Function test_allocator_catches_up_when_seed_is_ahead_of_db_state>
+    <Function test_allocator_occ_reserves_only_when_expected_matches>
+  <Module test_terminus_version_control.py>
+    <Function test_terminus_branch_lifecycle_v12>
+  <Module test_websocket_auth_e2e.py>
+    <Function test_ws_requires_token>
+    <Function test_ws_allows_token>
+  <Module test_worker_lease_safety_e2e.py>
+    <Function test_invalid_lease_settings_fail_fast>
+    <Function test_registry_disable_rejected>
+    <Function test_heartbeat_not_blocked_by_poll>
+<Module tests/integration/test_pipeline_branch_lifecycle.py>
+  <Function test_pipeline_branch_lifecycle>
+<Module tests/unit/config/test_app_config_topics.py>
+  <Function test_get_all_topics_includes_command_dlqs>
+<Module tests/unit/config/test_config_drift_guards.py>
+  <Function test_app_config_reflects_current_settings>
+  <Function test_no_os_getenv_calls_outside_settings_module>
+  <Function test_no_application_settings_instantiation_outside_settings_module>
+  <Function test_no_import_global_settings_symbol_outside_settings_module>
+<Module tests/unit/config/test_kafka_config.py>
+  <Function test_kafka_eos_producer_config>
+  <Function test_kafka_eos_consumer_config>
+  <Function test_transactional_producer_batch_success>
+  <Function test_transactional_producer_batch_no_transactions>
+<Module tests/unit/config/test_settings_ssot.py>
+  <Function test_pipeline_publish_lock_timeout_fallback>
+  <Function test_agent_bff_token_and_command_timeout_fallback>
+  <Function test_client_token_fallbacks>
+  <Function test_lakefs_repository_defaults>
+  <Function test_local_port_host_aliases>
+  <Function test_objectify_dataset_primary_chunk_size_defaults>
+  <Function test_objectify_dataset_primary_chunk_size_clamps_lower_bound>
+<Package errors>
+  <Module test_error_envelope_lint.py>
+    <Function test_no_direct_status_error_dicts>
+    <Function test_error_response_contains_enterprise_metadata>
+    <Function test_classified_http_exception_preserves_enterprise_and_external_codes>
+  <Module test_error_taxonomy_audit_guard.py>
+    <Function test_error_taxonomy_audit_guard>
+  <Module test_error_taxonomy_coverage.py>
+    <Function test_error_taxonomy_covers_all_code_like_literals>
+  <Module test_legacy_error_code_sync.py>
+    <Function test_legacy_error_code_enum_is_registered_in_catalog>
+  <Module test_policy_drift_guards.py>
+    <Function test_enterprise_catalog_fingerprint_is_pinned>
+    <Function test_agent_tool_allowlist_bundle_hash_is_pinned>
+  <Module test_runtime_silent_failure_guards.py>
+    <Function test_runtime_has_no_return_in_finally>
+    <Function test_runtime_scope_disallows_silent_failures>
+  <Module test_service_factory_error_handlers.py>
+    <Function test_service_factory_installs_error_handlers_by_default>
+<Package idempotency>
+  <Module test_enterprise_idempotency.py>
+    <Class TestPipelineJobDedupeKey>
+      <Function test_dedupe_key_auto_generated>
+      <Function test_dedupe_key_preserved_when_provided>
+      <Function test_dedupe_key_deterministic>
+      <Function test_dedupe_key_includes_idempotency_key>
+      <Function test_dedupe_key_includes_definition_hash>
+      <Function test_dedupe_key_includes_node_id>
+      <Function test_dedupe_key_different_for_different_modes>
+      <Function test_build_dedupe_key_static_method>
+      <Function test_build_dedupe_key_matches_instance>
+    <Class TestKafkaHeadersWithDedup>
+      <Function test_dedup_header_with_explicit_dedup_id>
+      <Function test_dedup_header_computed_from_event_id>
+      <Function test_dedup_header_with_global_aggregate>
+      <Function test_dedup_header_extracted_from_payload>
+      <Function test_dedup_header_with_pipeline_id_fallback>
+      <Function test_no_dedup_header_when_no_id>
+      <Function test_preserves_trace_headers>
+    <Class TestPipelineRegistryOCC>
+      <Function test_occ_conflict_error_attributes>
+      <Function test_occ_conflict_error_without_actual_version>
+      <Function test_pipeline_record_has_occ_version>
+      <Function test_pipeline_record_occ_version_default>
+    <Class TestPipelineAPIIdempotencyKeys>
+      <Function test_get_idempotency_key_from_primary_header>
+      <Function test_get_idempotency_key_from_fallback_header>
+      <Function test_get_idempotency_key_returns_none_when_missing>
+      <Function test_get_idempotency_key_strips_whitespace>
+      <Function test_get_idempotency_key_returns_none_for_empty_string>
+      <Function test_require_pipeline_idempotency_key_success>
+      <Function test_require_pipeline_idempotency_key_raises_when_missing>
+      <Function test_require_pipeline_idempotency_key_includes_operation_in_error>
+    <Class TestWorkerAggregateOrdering>
+      <Function test_pipeline_job_has_sequence_number>
+      <Function test_pipeline_job_sequence_number_optional>
+    <Class TestIdempotencyIntegration>
+      <Function test_pipeline_job_complete_idempotency_flow>
+      <Function test_kafka_headers_include_job_dedupe>
+<Package kafka>
+  <Module test_event_envelope_worker_dlq.py>
+    <Function test_publish_envelope_failure_to_dlq_uses_default_key_and_shape>
+    <Function test_publish_envelope_failure_to_dlq_noops_without_producer>
+    <Function test_send_envelope_failure_to_dlq_builds_key_with_fallback>
+  <Module test_processed_event_worker_bootstrap.py>
+    <Function test_initialize_safe_consumer_runtime_sets_consumer_ops>
+    <Function test_initialize_safe_consumer_runtime_without_partition_reset>
+  <Module test_processed_event_worker_dlq_normalization.py>
+    <Function test_normalize_dlq_publish_inputs_uses_inferred_defaults>
+    <Function test_normalize_dlq_publish_inputs_preserves_explicit_values>
+    <Function test_parse_error_context_extracts_custom_error_fields>
+    <Function test_fallback_metadata_from_raw_payload_extracts_metadata_dict>
+    <Function test_fallback_metadata_from_raw_payload_returns_none_for_invalid_payload>
+    <Function test_publish_parse_error_to_dlq_calls_sender>
+    <Function test_publish_parse_error_to_dlq_raise_toggle>
+    <Function test_publish_standard_dlq_record_missing_producer_modes>
+    <Function test_publish_standard_dlq_record_success>
+    <Function test_send_standard_dlq_record_normalizes_and_invokes_publisher>
+  <Module test_processed_event_worker_silent_failure_guards.py>
+    <Function test_handle_partition_message_propagates_error_when_partition_revoked>
+    <Function test_handle_partition_message_keeps_primary_error_when_cleanup_fails>
+    <Function test_handle_claimed_logs_warning_on_heartbeat_join_failure>
+  <Module test_producer_ops_shutdown.py>
+    <Function test_close_kafka_producer_prefers_ops_when_present>
+    <Function test_close_kafka_producer_flushes_raw_producer>
+    <Function test_close_kafka_producer_handles_noarg_flush_signature>
+    <Function test_close_kafka_producer_swallows_close_errors>
+  <Module test_retry_classifier.py>
+    <Function test_normalize_error_message_lowercases>
+    <Function test_contains_marker_trims_and_matches_case_insensitive>
+    <Function test_classify_retryable_by_markers_priority_and_default>
+    <Function test_create_retry_policy_profile_normalizes_markers>
+    <Function test_classify_retryable_with_profile_uses_predefined_profile>
+  <Module test_safe_consumer.py>
+    <Class TestSafeKafkaConsumerConfig>
+      <Function test_enforced_settings_cannot_be_overridden>
+      <Function test_isolation_level_read_committed>
+      <Function test_auto_commit_disabled>
+      <Function test_validate_consumer_config_rejects_uncommitted>
+      <Function test_validate_consumer_config_rejects_auto_commit>
+      <Function test_validate_consumer_config_accepts_valid>
+    <Class TestConsumerState>
+      <Function test_consumer_state_values>
+    <Class TestPartitionState>
+      <Function test_partition_state_creation>
+    <Class TestRebalanceHandler>
+      <Function test_rebalance_handler_on_revoke_marks_rebalancing>
+      <Function test_rebalance_handler_on_assign_marks_running>
+      <Function test_rebalance_handler_calls_user_callbacks>
+    <Class TestSafeKafkaConsumerIntegration>
+      <Function test_consumer_creation_with_enforced_settings>
+      <Function test_extra_config_cannot_override_enforced>
+      <Function test_is_rebalancing_property>
+      <Function test_commit_message_marks_partition_processed>
+      <Function test_seek_delegates_and_clears_inflight_state>
+  <Module test_worker_consumer_runtime.py>
+    <Function test_commit_checks_revoked_at_execution_time>
+    <Function test_seek_checks_revoked_at_execution_time>
+    <Function test_commit_updates_commit_state_after_commit>
+    <Function test_seek_updates_commit_state_after_seek>
+<Module tests/unit/mcp/test_critical_gap_fixes.py>
+  <Class TestExtractSparkErrorDetailsLogic>
+    <Function test_extract_errors_from_output_json>
+    <Function test_extract_error_summary>
+    <Function test_extract_error_summary_from_dict>
+    <Function test_extract_stack_trace>
+    <Function test_extract_traceback_alternative>
+    <Function test_extract_exception_type>
+    <Function test_empty_output_json>
+    <Function test_missing_output_json>
+    <Function test_output_json_not_dict>
+    <Function test_truncates_long_error_summary>
+    <Function test_truncates_long_stack_trace>
+    <Function test_filters_empty_errors>
+  <Class TestColumnValidationLogic>
+    <Function test_exact_match_columns>
+    <Function test_case_insensitive_match>
+    <Function test_suggest_similar_columns>
+    <Function test_no_suggestions_for_unrelated>
+  <Class TestObjectifyWaitLogic>
+    <Function test_completed_status_detection>
+    <Function test_failed_status_detection>
+    <Function test_running_status_not_final>
+    <Function test_queued_status_not_final>
+  <Class TestOntologyQueryLogic>
+    <Function test_build_query_body_basic>
+    <Function test_build_query_body_with_filters>
+    <Function test_limit_capping>
+    <Function test_limit_minimum>
+  <Class TestDatasetLookupLogic>
+    <Function test_default_branch>
+    <Function test_custom_branch>
+    <Function test_whitespace_branch_handling>
+  <Class TestMCPServerIntegration>
+    <Function test_pipeline_mcp_server_imports>
+    <Function test_extract_spark_error_details_import>
+    <Function test_server_instantiation>
+<Module tests/unit/mcp/test_debug_mcp_tools.py>
+  <Function test_debug_get_errors_returns_accumulated_errors>
+  <Function test_debug_get_errors_respects_limit>
+  <Function test_debug_get_errors_excludes_warnings>
+  <Function test_debug_get_errors_empty>
+  <Function test_debug_get_execution_log_returns_entries>
+  <Function test_debug_get_execution_log_filters_by_step>
+  <Function test_debug_get_execution_log_handles_invalid_json>
+  <Function test_debug_inspect_node_returns_node_info>
+  <Function test_debug_inspect_node_not_found>
+  <Function test_debug_inspect_node_requires_node_id>
+  <Function test_debug_explain_failure_diagnoses_errors>
+  <Function test_debug_explain_failure_handles_permission_error>
+  <Function test_debug_explain_failure_handles_timeout>
+  <Function test_debug_explain_failure_empty_errors>
+  <Function test_debug_dry_run_valid_plan>
+  <Function test_debug_dry_run_empty_plan>
+  <Function test_debug_dry_run_no_nodes>
+  <Function test_debug_dry_run_missing_input>
+  <Function test_debug_dry_run_missing_output>
+  <Function test_debug_dry_run_disconnected_nodes>
+<Module tests/unit/mcp/test_objectify_mcp_tools.py>
+  <Function test_objectify_suggest_mapping_basic>
+  <Function test_objectify_create_mapping_spec>
+  <Function test_objectify_list_mapping_specs>
+  <Function test_objectify_run>
+  <Function test_objectify_get_status>
+  <Function test_objectify_get_status_not_found>
+  <Function test_objectify_suggest_mapping_no_matches>
+  <Function test_objectify_create_mapping_spec_validates_mappings>
+  <Function test_objectify_run_finds_active_mapping_spec>
+<Module tests/unit/mcp/test_pipeline_plan_add_output_contract.py>
+  <Function test_plan_add_output_accepts_dataset_canonical_fields>
+  <Function test_plan_add_output_normalizes_dataset_camel_case_aliases>
+<Module tests/unit/mcp/test_pipeline_plan_add_udf_contract.py>
+  <Function test_plan_add_udf_accepts_reference_fields>
+  <Function test_plan_add_udf_accepts_camel_case_aliases>
+  <Function test_plan_add_udf_requires_pinned_version>
+<Module tests/unit/middleware/test_middleware_fixes.py>
+  <Function test_i18n_large_json_not_truncated>
+  <Function test_i18n_translates_description_field>
+  <Function test_rate_limit_headers_attach_for_dict_response>
+  <Function test_bff_auth_middleware_blocks_unsafe_methods>
+  <Function test_bff_auth_accepts_rotated_admin_tokens>
+  <Function test_bff_dev_master_auth_allows_missing_token_in_development>
+  <Function test_bff_dev_master_auth_is_disabled_in_production>
+  <Function test_bff_admin_guard_allows_dev_master_without_token_in_development>
+  <Function test_bff_admin_guard_requires_token_in_production_even_with_dev_master_flag>
+  <Function test_rate_limit_admin_bypass_requires_valid_token>
+  <Function test_bff_auth_allows_user_jwt_when_enabled>
+  <Function test_bff_user_jwt_accepts_rotated_hs256_secrets>
+  <Function test_bff_agent_auth_requires_delegated_user_jwt_when_enabled>
+  <Function test_bff_agent_auth_accepts_rotated_agent_tokens>
+  <Function test_bff_agent_auth_requires_user_jwt_enabled_for_agent_calls>
+  <Function test_oms_auth_accepts_rotated_tokens>
+  <Function test_bff_admin_token_requires_user_jwt_for_agent_endpoints_when_enabled>
+  <Function test_bff_agent_tool_policy_enforced_via_tool_registry>
+  <Function test_bff_agent_tool_policy_enforces_session_enabled_tools_and_abac>
+  <Function test_bff_agent_tool_idempotency_replays_without_reexecution>
+<Module tests/unit/monitoring/test_monitoring_configs.py>
+  <Function test_prometheus_config_yaml_is_valid_and_wired>
+  <Function test_alert_rules_yaml_is_valid_and_has_minimum_alerts>
+  <Function test_alertmanager_yaml_is_valid_and_references_default_receiver>
+  <Function test_grafana_dashboard_json_is_valid>
+  <Function test_operations_doc_mentions_backup_scripts>
+<Module tests/unit/observability/test_config_monitor.py>
+  <Function test_config_monitor_current_endpoint_ok>
+<Module tests/unit/observability/test_context_propagation.py>
+  <Function test_kafka_headers_roundtrip_via_attached_context>
+  <Function test_kafka_headers_from_envelope_metadata_only_emits_known_keys>
+<Module tests/unit/observability/test_request_context.py>
+  <Function test_parse_baggage_header_best_effort>
+  <Function test_trace_context_filter_includes_request_context_fields>
+  <Function test_carrier_from_envelope_metadata_appends_baggage_from_fields>
+  <Function test_attach_context_from_kafka_uses_fallback_metadata_for_contextvars>
+  <Function test_event_envelope_from_command_includes_context_correlation_id>
+  <Function test_event_envelope_from_command_prefers_command_metadata_over_context>
+<Module tests/unit/observability/test_tracing_config.py>
+  <Function test_otlp_export_disabled_when_no_endpoint>
+  <Function test_span_omits_kind_when_none>
+  <Function test_span_passes_kind_when_set>
+<Module tests/unit/oms/test_instance_router.py>
+  <Function test_get_class_instances>
+  <Function test_get_class_instances_with_search>
+  <Function test_get_instance>
+  <Function test_get_instance_not_found>
+  <Function test_get_instance_class_mismatch>
+  <Function test_get_class_instance_count>
+  <Function test_sparql_returns_410>
+<Module tests/unit/openapi/test_wip_hidden.py>
+  <Function test_wip_projection_endpoints_hidden_from_openapi>
+<Module tests/unit/pipeline_functions/test_functions_matrix_contract.py>
+  <Function test_functions_snapshot_entries_have_valid_classification>
+  <Function test_functions_snapshot_has_no_unclassified_rows>
+  <Function test_functions_snapshot_loader_fallback_parser_without_pyyaml>
+<Module tests/unit/pipeline_functions/test_functions_preview_compat.py>
+  <Function test_functions_preview_supported_matrix_contract>
+<Module tests/unit/pipeline_functions/test_functions_spark_compat.py>
+  <Function test_functions_spark_supported_matrix_contract>
+<Module tests/unit/routers/test_monitoring_router_deprecation_headers.py>
+  <Function test_metrics_redirect_without_deprecated_query_has_no_deprecation_headers>
+  <Function test_metrics_redirect_with_deprecated_query_sets_deprecation_headers>
+<Module tests/unit/routers/test_schema_changes.py>
+  <Class TestSchemaChangesModels>
+    <Function test_subscription_create_request_valid>
+    <Function test_subscription_create_request_defaults>
+    <Function test_subscription_create_request_invalid_subject_type>
+    <Function test_acknowledge_request>
+    <Function test_compatibility_check_request_optional_version>
+  <Class TestSchemaChangesEndpoints>
+    <Function test_list_schema_changes_empty>
+    <Function test_list_schema_changes_with_results>
+    <Function test_list_schema_changes_with_filters>
+    <Function test_acknowledge_drift_success>
+    <Function test_acknowledge_drift_not_found>
+    <Function test_create_subscription_success>
+    <Function test_delete_subscription_success>
+    <Function test_get_stats_empty>
+    <Function test_get_stats_with_data>
+  <Class TestMappingCompatibility>
+    <Function test_check_compatibility_no_drift>
+    <Function test_check_compatibility_with_breaking_drift>
+    <Function test_check_compatibility_mapping_not_found>
+<Package security>
+  <Module test_data_encryption.py>
+    <Function test_data_encryptor_round_trip_text>
+    <Function test_data_encryptor_round_trip_json>
+    <Function test_data_encryptor_round_trip_bytes>
+    <Function test_data_encryptor_supports_key_rotation>
+    <Function test_agent_session_registry_decrypts_message_content>
+    <Function test_agent_session_registry_decrypts_tool_call_payloads>
+  <Module test_database_access.py>
+    <Function test_get_database_access_role_returns_none_when_table_missing>
+    <Function test_has_database_access_config_returns_false_when_table_missing>
+    <Function test_enforce_database_role_allows_when_unconfigured_and_flag_unset>
+    <Function test_enforce_database_role_denies_when_flag_true_and_no_role>
+  <Module test_principal_utils.py>
+    <Function test_resolve_principal_defaults_when_missing_headers>
+    <Function test_resolve_principal_uses_header_values>
+    <Function test_resolve_principal_enforces_allowed_types>
+    <Function test_resolve_principal_supports_custom_defaults>
+    <Function test_resolve_principal_uses_custom_header_keys>
+    <Function test_actor_label_defaults>
+<Module tests/unit/serializers/test_complex_type_serializer.py>
+  <Function test_array_roundtrip>
+  <Function test_object_roundtrip>
+  <Function test_enum_serialization>
+  <Function test_money_serialization_object>
+  <Function test_coordinate_string_deserialization>
+  <Function test_image_and_file_serialization>
+<Package services>
+  <Module test_action_simulation_assumptions.py>
+    <Function test_apply_assumption_patch_applies_set_unset_and_links>
+    <Function test_apply_assumption_patch_rejects_forbidden_field>
+    <Function test_apply_observed_base_overrides_rejects_unknown_field>
+    <Function test_observed_base_override_can_create_conflict>
+  <Module test_action_simulation_scenarios.py>
+    <Function test_conflict_policy_fail_rejects>
+    <Function test_conflict_policy_base_wins_skips>
+    <Function test_conflict_policy_writeback_wins_applies>
+    <Function test_no_conflict_does_not_reject_under_fail>
+  <Module test_admin_recompute_projection_service.py>
+    <Function test_start_recompute_projection_blocks_instances_in_dataset_primary_mode>
+    <Function test_start_recompute_projection_allows_ontologies_in_dataset_primary_mode>
+    <Function test_recompute_projection_task_blocks_instances_in_dataset_primary_mode>
+  <Module test_admin_reindex_instances.py>
+    <Function test_reindex_no_mapping_specs>
+    <Function test_reindex_submits_jobs>
+    <Function test_reindex_handles_missing_dataset_version>
+    <Function test_reindex_with_multiple_specs>
+  <Module test_agent_graph_retry.py>
+    <Function test_agent_graph_retries_transient_read_failure>
+    <Function test_agent_graph_does_not_retry_writes_by_default>
+    <Function test_agent_graph_respects_enterprise_max_attempts>
+    <Function test_agent_graph_uses_retry_after_when_allowed>
+  <Module test_agent_graph_simulation_gate.py>
+    <Function test_simulation_rejection_stops_before_submit>
+  <Module test_agent_overlay_policy.py>
+    <Function test_agent_blocks_write_when_overlay_degraded>
+  <Module test_agent_policy.py>
+    <Function test_policy_overlay_degraded_safe_mode>
+    <Function test_policy_idempotency_in_progress_is_safe_retry>
+    <Function test_policy_timeout_retry_for_reads>
+    <Function test_policy_validation_no_retry>
+    <Function test_policy_submission_criteria_failed_includes_reason>
+    <Function test_policy_submission_criteria_failed_state_mismatch_proposes_check_state>
+  <Module test_agent_retention_worker.py>
+    <Function test_agent_retention_worker_calls_apply_retention_once>
+    <Function test_agent_retention_worker_supports_policy_per_object_type>
+  <Module test_agent_runtime_artifacts.py>
+    <Function test_agent_runtime_blocks_missing_required_artifacts>
+    <Function test_agent_runtime_stores_produced_artifacts_and_resolves_templates>
+    <Function test_agent_runtime_compacts_large_tool_payload_instead_of_omitting>
+  <Module test_agent_runtime_delegated_auth.py>
+    <Function test_agent_runtime_sends_service_token_and_delegated_user_token>
+  <Module test_agent_runtime_pipeline_wait.py>
+    <Function test_agent_runtime_waits_for_pipeline_job_completion>
+  <Module test_agent_runtime_simulation_signals.py>
+    <Function test_extract_action_simulation_signals_rejected_includes_reason>
+    <Function test_extract_action_simulation_rejection_returns_enterprise>
+    <Function test_extract_action_simulation_rejection_returns_none_when_accepted>
+  <Module test_agent_runtime_templating.py>
+    <Function test_agent_runtime_resolves_step_output_templates>
+  <Module test_agent_session_state_machine.py>
+    <Function test_validate_session_status_transition_allows_valid_transitions[ACTIVE-WAITING_APPROVAL]>
+    <Function test_validate_session_status_transition_allows_valid_transitions[ACTIVE-RUNNING_TOOL]>
+    <Function test_validate_session_status_transition_allows_valid_transitions[WAITING_APPROVAL-RUNNING_TOOL]>
+    <Function test_validate_session_status_transition_allows_valid_transitions[RUNNING_TOOL-COMPLETED]>
+    <Function test_validate_session_status_transition_allows_valid_transitions[RUNNING_TOOL-ERROR]>
+    <Function test_validate_session_status_transition_allows_valid_transitions[ERROR-ACTIVE]>
+    <Function test_validate_session_status_transition_allows_valid_transitions[ERROR-RUNNING_TOOL]>
+    <Function test_validate_session_status_transition_allows_valid_transitions[COMPLETED-ACTIVE]>
+    <Function test_validate_session_status_transition_allows_valid_transitions[COMPLETED-WAITING_APPROVAL]>
+    <Function test_validate_session_status_transition_allows_valid_transitions[COMPLETED-RUNNING_TOOL]>
+    <Function test_validate_session_status_transition_allows_valid_transitions[ACTIVE-TERMINATED]>
+    <Function test_validate_session_status_transition_rejects_invalid_transitions[TERMINATED-ACTIVE]>
+    <Function test_validate_session_status_transition_rejects_invalid_transitions[TERMINATED-RUNNING_TOOL]>
+    <Function test_validate_session_status_transition_rejects_unknown_states>
+  <Module test_async_terminus_branch_info.py>
+    <Function test_get_branch_info_returns_current_and_protection_flags>
+    <Function test_get_branch_info_raises_for_unknown_branch>
+  <Module test_changelog_store.py>
+    <Function test_record_changelog>
+    <Function test_list_changelogs>
+    <Function test_list_changelogs_with_class_filter>
+    <Function test_get_changelog>
+    <Function test_get_changelog_not_found>
+    <Function test_record_changelog_failure_handled>
+  <Module test_command_status_fallback.py>
+    <Function test_command_status_falls_back_to_registry>
+    <Function test_command_status_falls_back_to_event_store_when_registry_has_no_record>
+  <Module test_consistency_token.py>
+    <Function test_token_roundtrip>
+    <Function test_consistency_token_service_creates_metadata>
+  <Module test_database_error_policy.py>
+    <Function test_apply_message_error_policies_raises_policy_http_exception>
+    <Function test_apply_message_error_policies_returns_fallback_when_configured>
+  <Module test_database_service_error_mapping.py>
+    <Function test_list_branches_maps_not_found_to_404>
+    <Function test_create_branch_maps_duplicate_to_409>
+    <Function test_get_versions_returns_empty_on_empty_history>
+  <Module test_dataset_ingest_commit_service.py>
+    <Function test_ensure_lakefs_commit_artifact_uses_existing_values>
+    <Function test_ensure_lakefs_commit_artifact_commits_when_missing>
+    <Function test_persist_ingest_commit_state_skips_when_unchanged>
+    <Function test_persist_ingest_commit_state_marks_and_updates_transaction>
+  <Module test_dataset_output_semantics.py>
+    <Function test_normalize_dataset_output_metadata_legacy_aliases>
+    <Function test_resolve_dataset_write_policy_default_snapshot>
+    <Function test_resolve_dataset_write_policy_default_incremental_with_pk_without_additive_signal>
+    <Function test_resolve_dataset_write_policy_default_incremental_without_pk>
+    <Function test_resolve_dataset_write_policy_default_streaming_with_pk_uses_append_only_new_rows>
+    <Function test_resolve_dataset_write_policy_default_streaming_without_pk_uses_always_append>
+    <Function test_resolve_dataset_write_policy_default_incremental_with_additive_updates_false>
+    <Function test_resolve_dataset_write_policy_default_incremental_with_additive_updates_true>
+    <Function test_resolve_dataset_write_policy_default_incremental_additive_without_pk>
+    <Function test_resolve_dataset_write_policy_default_without_incremental_inputs>
+    <Function test_resolve_dataset_write_policy_snapshot_difference_uses_append_runtime>
+    <Function test_resolve_dataset_write_policy_changelog_uses_append_runtime>
+    <Function test_validate_dataset_output_metadata_requires_pk_and_post_filtering>
+    <Function test_validate_dataset_output_metadata_checks_available_columns>
+    <Function test_validate_dataset_output_metadata_rejects_csv_with_partition_by>
+    <Function test_validate_dataset_output_metadata_rejects_json_with_partition_by>
+    <Function test_dataset_write_policy_hash_stable>
+  <Module test_dlq_handler_fixed.py>
+    <Function test_dlq_handler_retry_and_poison_flow>
+    <Function test_dlq_handler_retry_success_records_recovery>
+  <Module test_dlq_payload_shapes.py>
+    <Function test_action_worker_send_to_dlq_payload_shape>
+    <Function test_ontology_worker_send_to_dlq_payload_shape>
+    <Function test_instance_worker_send_to_dlq_payload_shape>
+  <Module test_envelope_dlq_publisher.py>
+    <Function test_build_envelope_dlq_event_applies_standard_metadata>
+    <Function test_publish_envelope_dlq_uses_producer_ops_and_flushes>
+  <Module test_event_replay.py>
+    <Function test_event_replay_aggregate_and_history>
+    <Function test_event_replay_all_and_determinism>
+  <Module test_event_store_connect_idempotent.py>
+    <Function test_event_store_connect_is_idempotent_under_concurrency>
+    <Function test_event_store_connect_fails_when_lineage_required_and_store_unavailable>
+    <Function test_event_store_lineage_record_failure_propagates_when_required>
+  <Module test_fk_pattern_detector.py>
+    <Class TestFKDetectionConfig>
+      <Function test_default_config>
+      <Function test_from_dict>
+    <Class TestForeignKeyPatternDetector>
+      <Function test_detect_by_naming_id_suffix>
+      <Function test_detect_by_naming_fk_suffix>
+      <Function test_exclude_timestamp_columns>
+      <Function test_exclude_boolean_prefixes>
+      <Function test_match_with_target_candidates>
+      <Function test_match_plural_target_name>
+      <Function test_min_confidence_filter>
+      <Function test_suggest_link_type>
+      <Function test_generate_predicate_from_column>
+      <Function test_incompatible_types_excluded>
+      <Function test_empty_schema>
+      <Function test_patterns_sorted_by_confidence>
+  <Module test_funnel_data_processor.py>
+    <Function test_process_google_sheets_preview_sets_explicit_timeout>
+  <Module test_graph_federation_service_es.py>
+    <Function test_normalize_hops_dict>
+    <Function test_normalize_hops_tuple>
+    <Function test_normalize_hops_empty>
+    <Function test_node_id>
+    <Function test_parse_ref>
+    <Function test_get_relationship_refs>
+    <Function test_forward_single_hop>
+    <Function test_reverse_single_hop>
+    <Function test_multi_hop_3_layers>
+    <Function test_fan_out_cap>
+    <Function test_no_cycles>
+    <Function test_empty_relationships>
+    <Function test_simple_graph_query>
+    <Function test_find_paths_es_sampling>
+    <Function test_empty_start_returns_empty>
+  <Module test_graph_service_health.py>
+    <Function test_health_green>
+    <Function test_health_yellow>
+    <Function test_health_red>
+    <Function test_health_connection_failure>
+  <Module test_health_check_redis.py>
+    <Function test_redis_health_check_includes_info_details>
+    <Function test_redis_health_check_ignores_info_errors>
+  <Module test_idempotency_service.py>
+    <Function test_idempotency_service_detects_duplicates>
+    <Function test_idempotency_service_marks_processed_and_failed>
+  <Module test_input_validation_service.py>
+    <Function test_validated_db_name_returns_valid_value>
+    <Function test_validated_db_name_converts_value_error_to_http_400>
+    <Function test_validated_branch_name_converts_security_violation>
+    <Function test_sanitized_payload_returns_sanitized_data>
+    <Function test_sanitized_payload_converts_security_violation>
+  <Module test_instance_index_rebuild_service.py>
+    <Function test_rebuild_success_with_existing_alias>
+    <Function test_rebuild_success_no_existing_data>
+    <Function test_rebuild_success_concrete_index>
+    <Function test_rebuild_alias_swap_failure>
+    <Function test_resolve_alias_targets>
+    <Function test_resolve_alias_targets_no_alias>
+    <Function test_reindex_from_source>
+    <Function test_get_class_counts>
+    <Function test_get_class_counts_empty_index>
+  <Module test_instances_service_projection_mode.py>
+    <Function test_list_instances_es_error_fails_closed_without_fallback>
+    <Function test_get_instance_es_error_fails_closed_without_fallback>
+    <Function test_get_instance_missing_doc_returns_404_without_fallback>
+    <Function test_sample_values_reads_from_es>
+    <Function test_sample_values_es_error_fails_closed>
+  <Module test_lakefs_branch_utils.py>
+    <Function test_ensure_lakefs_branch_creates_branch>
+    <Function test_ensure_lakefs_branch_ignores_conflict>
+    <Function test_ensure_lakefs_branch_requires_client>
+  <Module test_llm_gateway_resilience.py>
+    <Function test_llm_gateway_retries_on_http_5xx>
+    <Function test_llm_gateway_circuit_breaker_opens>
+    <Function test_llm_gateway_cache_key_is_partition_scoped>
+    <Function test_llm_gateway_native_tool_calling_falls_back_on_unsupported>
+    <Function test_llm_gateway_provider_policy_can_disable_cache>
+    <Function test_llm_gateway_provider_policy_can_set_no_store_and_partition_isolation>
+    <Function test_llm_gateway_provider_policy_can_set_actor_isolation_for_anthropic>
+  <Module test_llm_quota.py>
+    <Function test_llm_quota_is_noop_without_policy>
+    <Function test_llm_quota_raises_when_denied>
+    <Function test_llm_quota_consumes_for_tenant_and_user>
+  <Module test_object_type_meta_resolver.py>
+    <Function test_object_type_meta_resolver_parses_and_caches>
+    <Function test_object_type_meta_resolver_blank_id_uses_default>
+    <Function test_object_type_meta_resolver_on_error_returns_default_and_caches>
+  <Module test_objectify_dag_service.py>
+    <Function test_wait_for_objectify_submitted_allows_dataset_primary_completed_without_commands>
+    <Function test_wait_for_objectify_submitted_defaults_to_dataset_primary_when_report_missing>
+    <Function test_wait_for_objectify_submitted_requires_commands_for_submitted_status>
+  <Module test_objectify_delta_utils.py>
+    <Class TestDeltaResult>
+      <Function test_default_stats>
+      <Function test_has_changes_true>
+      <Function test_has_changes_false>
+    <Class TestWatermarkState>
+      <Function test_to_dict>
+      <Function test_from_dict>
+    <Class TestObjectifyDeltaComputer>
+      <Function test_compute_row_key_single_pk>
+      <Function test_compute_row_key_composite_pk>
+      <Function test_compute_row_hash>
+      <Function test_compare_watermarks_datetime>
+      <Function test_compare_watermarks_numeric>
+      <Function test_compare_watermarks_string>
+      <Function test_compare_watermarks_none_handling>
+      <Function test_filter_rows_by_watermark>
+      <Function test_filter_rows_by_watermark_empty>
+      <Function test_filter_rows_by_watermark_null_values>
+    <Class TestCreateDeltaComputerForMappingSpec>
+      <Function test_creates_computer_with_pk_from_spec>
+      <Function test_fallback_to_id_field>
+      <Function test_fallback_to_first_field>
+  <Module test_occ_patterns.py>
+    <Class TestOCCConflictError>
+      <Function test_error_message>
+      <Function test_error_without_actual_version>
+    <Class TestObjectifyJobRecordOCC>
+      <Function test_record_has_occ_version_default>
+      <Function test_record_with_explicit_occ_version>
+    <Class TestOntologyMappingSpecRecordOCC>
+      <Function test_record_has_occ_version_default>
+      <Function test_record_with_explicit_occ_version>
+    <Class TestOCCPatternIntegration>
+      <Function test_occ_conflict_is_runtime_error>
+      <Function test_occ_error_can_be_raised_and_caught>
+  <Module test_oms_client_branch_api.py>
+    <Function test_create_branch_accepts_string_input>
+    <Function test_create_branch_accepts_dict_input_for_backward_compatibility>
+    <Function test_get_and_delete_branch_use_typed_paths>
+  <Module test_oms_error_policy.py>
+    <Function test_raise_oms_boundary_exception_with_custom_http_status_detail>
+    <Function test_raise_oms_boundary_exception_maps_value_error_to_400>
+    <Function test_raise_oms_boundary_exception_maps_generic_to_500>
+  <Module test_ontology_class_id_service.py>
+    <Function test_resolve_or_generate_class_id_returns_validated_id>
+    <Function test_resolve_or_generate_class_id_converts_validation_error>
+    <Function test_resolve_or_generate_class_id_converts_security_violation>
+    <Function test_resolve_or_generate_class_id_generates_when_missing>
+  <Module test_ontology_deployment_registry_template_method.py>
+    <Function test_registry_ensure_schema_builds_indexes_for_v1>
+    <Function test_registry_ensure_schema_builds_indexes_for_v2>
+    <Function test_registry_v2_claim_batch_normalizes_json_payload>
+    <Function test_registry_purge_outbox_uses_registry_table>
+  <Module test_ontology_interface_contract.py>
+    <Function test_interface_contract_missing_property_is_reported>
+    <Function test_interface_contract_missing_interface_is_reported>
+  <Module test_ontology_linter_pk_branching.py>
+    <Function test_linter_allows_implicit_pk_on_dev_branch>
+    <Function test_linter_blocks_implicit_pk_on_protected_branch>
+    <Function test_linter_requires_explicit_title_key_when_disabled>
+  <Module test_ontology_occ_guard_service.py>
+    <Function test_resolve_expected_head_commit_uses_given_value_without_calling_oms>
+    <Function test_fetch_branch_head_commit_id_extracts_from_head_payload>
+    <Function test_resolve_expected_head_commit_falls_back_to_commit_keys>
+    <Function test_resolve_expected_head_commit_raises_when_unresolved>
+    <Function test_resolve_expected_head_commit_allows_none_when_configured>
+    <Function test_resolve_branch_head_commit_with_bootstrap_retries_after_branch_create>
+    <Function test_resolve_branch_head_commit_with_bootstrap_accepts_branch_conflict>
+    <Function test_resolve_branch_head_commit_with_bootstrap_returns_none_when_unresolved>
+  <Module test_ontology_resource_validator.py>
+    <Function test_action_type_requires_input_schema_and_policy>
+    <Function test_object_type_requires_pk_spec_and_backing_source>
+    <Function test_shared_property_requires_properties_list>
+    <Function test_function_requires_expression_and_return_type_ref>
+    <Function test_action_type_rejects_unsafe_submission_criteria_expression>
+    <Function test_action_type_rejects_invalid_validation_rules>
+    <Function test_link_type_invalid_predicate_is_reported>
+    <Function test_relationship_spec_missing_is_reported>
+    <Function test_relationship_spec_invalid_type_is_reported>
+    <Function test_relationship_spec_object_backed_requires_object_type>
+    <Function test_relationship_spec_join_table_requires_dataset_or_auto_create>
+    <Function test_link_type_missing_refs_are_reported>
+  <Module test_ontology_router_helpers.py>
+    <Function test_extract_group_refs_dedupes>
+    <Function test_validate_group_refs_reports_missing>
+    <Function test_apply_shared_properties_merges_and_tracks_duplicates>
+    <Function test_validate_value_type_refs_detects_base_type_mismatch>
+    <Function test_collect_interface_issues_reports_missing_property>
+    <Function test_validate_relationships_gate_returns_422>
+  <Module test_ontology_value_type_immutability.py>
+    <Function test_value_type_immutability_blocks_base_type_change>
+    <Function test_value_type_immutability_blocks_constraint_change>
+    <Function test_value_type_immutability_allows_same_spec>
+  <Module test_outbox_runtime.py>
+    <Function test_build_outbox_worker_id_prefers_configured_value>
+    <Function test_build_outbox_worker_id_uses_service_and_hostname>
+    <Function test_maybe_purge_with_interval_executes_and_logs>
+    <Function test_run_outbox_poll_loop_runs_flush_purge_and_close>
+    <Function test_flush_outbox_until_empty_stops_and_closes>
+    <Function test_flush_outbox_until_empty_propagates_primary_error_without_close>
+    <Function test_flush_outbox_until_empty_keeps_primary_error_when_close_also_fails>
+    <Function test_flush_outbox_until_empty_raises_close_error_when_no_primary_error>
+    <Function test_run_outbox_poll_loop_raises_close_error_when_no_primary_error>
+  <Module test_output_plugins.py>
+    <Function test_normalize_output_kind_supports_legacy_aliases>
+    <Function test_resolve_output_kind_reports_alias_usage>
+    <Function test_validate_output_payload_ontology_object_requires_target_class>
+    <Function test_validate_output_payload_ontology_link_requires_full_metadata>
+    <Function test_validate_output_payload_dataset_has_no_required_fields>
+    <Function test_validate_output_payload_dataset_requires_pk_for_append_only_new_rows>
+    <Function test_validate_output_payload_dataset_requires_post_filtering_for_snapshot_remove>
+    <Function test_validate_output_payload_dataset_rejects_unsupported_output_format>
+    <Function test_validate_output_payload_dataset_rejects_partitioned_csv>
+    <Function test_validate_output_payload_dataset_rejects_partitioned_json>
+    <Function test_validate_output_payload_dataset_accepts_full_metadata>
+    <Function test_validate_output_payload_geotemporal_requires_metadata>
+    <Function test_validate_output_payload_geotemporal_accepts_camel_case>
+    <Function test_validate_output_payload_media_requires_type_enum>
+    <Function test_validate_output_payload_virtual_requires_refresh_mode_enum>
+    <Function test_validate_output_payload_virtual_accepts_required_values>
+    <Function test_validate_output_payload_virtual_rejects_dataset_write_settings>
+    <Function test_normalize_output_kind_rejects_unknown_kind>
+  <Module test_pipeline_advanced_transforms.py>
+    <Function test_add_split_expands_to_true_false_filter_nodes>
+    <Function test_validate_pipeline_definition_accepts_advanced_transforms>
+    <Function test_validate_pipeline_definition_rejects_invalid_stream_join_strategy>
+    <Function test_validate_pipeline_definition_rejects_invalid_stream_join_time_direction>
+    <Function test_validate_pipeline_definition_rejects_dynamic_stream_join_without_event_time_fields>
+    <Function test_validate_pipeline_definition_rejects_left_lookup_with_transformed_right_input>
+    <Function test_validate_pipeline_definition_rejects_left_lookup_with_streaming_right_input>
+    <Function test_builder_helpers_add_geospatial_pattern_mining_stream_join>
+  <Module test_pipeline_agent_allowed_tools.py>
+    <Function test_agent_allowed_tools_include_advanced_plan_tools>
+    <Function test_agent_allowed_tools_cover_pipeline_plan_tools>
+  <Module test_pipeline_claim_refuter.py>
+    <Function test_refuter_pk_duplicate_is_hard_failure>
+    <Function test_refuter_join_functional_right_detects_duplicate_right_matches_left>
+    <Function test_refuter_cast_success_finds_parse_failure>
+    <Function test_refuter_cast_lossless_detects_leading_zero_loss>
+    <Function test_refuter_cast_lossless_allows_strip_leading_zeros>
+    <Function test_refuter_fk_hard_is_downgraded_to_soft>
+    <Function test_refuter_filter_only_nulls_finds_removed_non_null_row>
+    <Function test_refuter_filter_min_retain_rate_finds_low_retention>
+    <Function test_refuter_union_row_lossless_finds_missing_input_row>
+    <Function test_refuter_fails_open_when_unable_to_execute_preview>
+  <Module test_pipeline_cleansing_upstream_push.py>
+    <Function test_cleansing_upstream_push_common_ancestor>
+  <Module test_pipeline_control_plane_events.py>
+    <Function test_control_plane_events_always_on>
+    <Function test_control_plane_event_emits_with_topic>
+  <Module test_pipeline_definition_utils_columns.py>
+    <Function test_normalize_expectation_columns_with_csv>
+    <Function test_normalize_expectation_columns_with_list>
+    <Function test_normalize_expectation_columns_with_none>
+  <Module test_pipeline_definition_validator.py>
+    <Function test_validate_pipeline_definition_requires_nodes>
+    <Function test_validate_pipeline_definition_requires_output_node_when_configured>
+    <Function test_validate_pipeline_definition_detects_missing_edge_nodes>
+    <Function test_validate_pipeline_definition_normalizes_metadata_fields_to_columns>
+    <Function test_validate_pipeline_definition_reports_missing_columns_for_normalize>
+    <Function test_validate_pipeline_definition_uses_custom_udf_message>
+    <Function test_validate_pipeline_definition_udf_requires_udf_id_when_reference_policy_enabled>
+    <Function test_validate_pipeline_definition_udf_rejects_inline_code_when_reference_policy_enabled>
+    <Function test_validate_pipeline_definition_udf_requires_version_when_pinning_enabled>
+    <Function test_validate_pipeline_definition_rejects_invalid_dataset_output_metadata>
+    <Function test_validate_pipeline_definition_rejects_streaming_non_kafka_external_input>
+    <Function test_validate_pipeline_definition_rejects_streaming_without_checkpoint_location>
+    <Function test_validate_pipeline_definition_rejects_kafka_json_without_schema>
+    <Function test_validate_pipeline_definition_allows_kafka_avro_with_schema_registry_reference>
+    <Function test_validate_pipeline_definition_rejects_kafka_avro_without_schema_or_registry>
+    <Function test_validate_pipeline_definition_rejects_kafka_avro_with_missing_registry_version>
+    <Function test_validate_pipeline_definition_rejects_kafka_avro_with_latest_registry_version>
+    <Function test_validate_pipeline_definition_allows_batch_kafka_without_checkpoint>
+    <Function test_validate_pipeline_definition_requires_watermark_for_streaming_semantics>
+  <Module test_pipeline_execution_service_dataset_policy.py>
+    <Function test_resolve_output_contract_from_definition_merges_declared_metadata>
+    <Function test_dataset_write_policy_hash_consistent_for_definition_contract>
+  <Module test_pipeline_executor_csv_parsing.py>
+    <Function test_executor_parses_quoted_csv_headers_and_joins_correctly>
+  <Module test_pipeline_executor_function_categories.py>
+    <Function test_function_categories_row_aggregation_generator_are_distinct_and_work>
+  <Module test_pipeline_executor_normalize.py>
+    <Function test_normalize_transform_trims_and_nulls>
+  <Module test_pipeline_executor_preview.py>
+    <Function test_executor_preview_supports_node_level_preview_and_row_count>
+    <Function test_executor_compute_structured_target_column_overwrites_existing>
+    <Function test_executor_compute_equals_is_treated_as_comparison_when_lhs_exists>
+    <Function test_executor_stream_join_dynamic_uses_backward_time_direction_by_default>
+    <Function test_executor_stream_join_dynamic_supports_forward_direction>
+    <Function test_executor_stream_join_dynamic_applies_cache_expiration_window>
+    <Function test_executor_stream_join_dynamic_selects_single_best_match_per_left_row>
+    <Function test_executor_stream_join_dynamic_emits_unmatched_rows_as_outer_join>
+    <Function test_executor_stream_join_left_lookup_forces_left_join_semantics>
+    <Function test_executor_stream_join_left_lookup_picks_latest_right_row_per_key_without_event_time>
+  <Module test_pipeline_executor_transform_safety.py>
+    <Function test_join_requires_keys_by_default>
+    <Function test_join_allow_cross_join_requires_cross_type>
+    <Function test_cross_join_explicit_opt_in_produces_cartesian_product_and_preserves_column_mapping>
+    <Function test_union_strict_raises_on_schema_mismatch>
+    <Function test_union_common_only_keeps_only_shared_columns>
+    <Function test_union_pad_missing_nulls_includes_superset_columns>
+  <Module test_pipeline_expectations_and_contracts.py>
+    <Function test_expectations_unique_detects_duplicate_primary_key>
+    <Function test_expectations_unique_detects_duplicate_composite_key>
+    <Function test_expectations_row_count_bounds>
+    <Function test_schema_contract_missing_required_column_is_reported>
+    <Function test_schema_contract_type_mismatch_is_reported>
+  <Module test_pipeline_join_evaluator.py>
+    <Function test_join_evaluator_reports_coverage_and_explosion>
+    <Function test_join_evaluator_aligns_inputs_to_join_keys>
+  <Module test_pipeline_kafka_avro_schema.py>
+    <Function test_resolve_inline_avro_schema_prefers_inline_metadata>
+    <Function test_validate_kafka_avro_schema_requires_inline_or_registry>
+    <Function test_validate_kafka_avro_schema_rejects_missing_registry_subject>
+    <Function test_validate_kafka_avro_schema_rejects_invalid_registry_version>
+    <Function test_validate_kafka_avro_schema_rejects_latest_registry_version_explicitly>
+    <Function test_resolve_kafka_avro_schema_registry_reference_supports_options_aliases>
+    <Function test_fetch_kafka_avro_schema_from_registry_parses_schema_payload>
+  <Module test_pipeline_ops_preflight.py>
+    <Function test_run_pipeline_preflight_fail_closed_raises_http_exception>
+    <Function test_run_pipeline_preflight_fail_open_returns_warning_payload>
+    <Function test_run_pipeline_preflight_blocks_unpinned_udf_version>
+    <Function test_run_pipeline_preflight_blocks_missing_udf_reference>
+  <Module test_pipeline_plan_builder.py>
+    <Function test_new_plan_has_minimum_shape>
+    <Function test_add_input_and_output_wires_edges>
+    <Function test_add_output_persists_output_metadata_into_outputs_entry>
+    <Function test_add_output_warns_when_legacy_alias_kind_used>
+    <Function test_add_output_normalizes_dataset_write_metadata_aliases>
+    <Function test_add_input_supports_read_config>
+    <Function test_add_external_input_creates_input_node_without_dataset_selection>
+    <Function test_configure_input_read_patches_input_nodes_only>
+    <Function test_add_join_requires_two_inputs_and_keys>
+    <Function test_add_join_accepts_hints_and_broadcast_flags>
+    <Function test_add_join_rejects_cross_join>
+    <Function test_add_cast_requires_column_and_type>
+    <Function test_compute_column_and_assignments_build_metadata>
+    <Function test_add_udf_builds_reference_metadata>
+    <Function test_add_udf_rejects_invalid_version>
+    <Function test_select_expr_builds_metadata>
+    <Function test_add_sort_supports_desc_prefix_and_dict_form>
+    <Function test_add_explode_builds_metadata>
+    <Function test_add_union_builds_metadata>
+    <Function test_add_stream_join_rejects_left_lookup_with_transformed_right_input>
+    <Function test_add_stream_join_rejects_left_lookup_with_streaming_right_input>
+    <Function test_add_stream_join_rejects_static_with_transformed_right_input>
+    <Function test_add_stream_join_rejects_static_with_streaming_right_input>
+    <Function test_add_stream_join_static_defaults_join_type_to_left>
+    <Function test_add_pivot_builds_metadata>
+    <Function test_add_edge_is_idempotent>
+    <Function test_delete_edge_is_noop_if_missing_but_warns>
+    <Function test_set_node_inputs_replaces_incoming_edges_ordered>
+    <Function test_update_node_metadata_merges_and_unsets>
+    <Function test_update_settings_patches_definition_settings>
+    <Function test_delete_node_removes_outputs_entry>
+    <Function test_update_output_renames_and_syncs_output_node_metadata>
+  <Module test_pipeline_preflight_dataset_output.py>
+    <Function test_compute_pipeline_preflight_blocks_when_dataset_pk_columns_missing>
+    <Function test_compute_pipeline_preflight_accepts_valid_dataset_write_metadata>
+    <Function test_compute_pipeline_preflight_blocks_partitioned_csv_dataset_output>
+    <Function test_compute_pipeline_preflight_blocks_partitioned_json_dataset_output>
+    <Function test_compute_pipeline_preflight_blocks_streaming_external_non_kafka_input>
+    <Function test_compute_pipeline_preflight_blocks_streaming_external_missing_checkpoint>
+    <Function test_compute_pipeline_preflight_blocks_kafka_json_without_schema>
+    <Function test_compute_pipeline_preflight_allows_kafka_avro_with_schema_registry_reference>
+    <Function test_compute_pipeline_preflight_blocks_kafka_avro_without_schema_or_registry>
+    <Function test_compute_pipeline_preflight_blocks_kafka_avro_with_missing_registry_version>
+    <Function test_compute_pipeline_preflight_blocks_kafka_avro_with_latest_registry_version>
+    <Function test_compute_pipeline_preflight_allows_batch_kafka_without_checkpoint>
+    <Function test_compute_pipeline_preflight_blocks_streaming_without_watermark>
+    <Function test_compute_pipeline_preflight_blocks_geotemporal_missing_required_columns>
+    <Function test_compute_pipeline_preflight_blocks_virtual_dataset_write_settings>
+    <Function test_compute_pipeline_preflight_blocks_left_lookup_with_transformed_right_input>
+    <Function test_compute_pipeline_preflight_blocks_left_lookup_with_streaming_right_input>
+    <Function test_compute_pipeline_preflight_blocks_static_with_transformed_right_input>
+    <Function test_compute_pipeline_preflight_blocks_static_with_streaming_right_input>
+  <Module test_pipeline_preview_inspector.py>
+    <Function test_preview_inspector_suggests_normalize_and_casts>
+    <Function test_preview_inspector_no_cleansing_needed_for_clean_columns>
+    <Function test_preview_inspector_suggests_dedupe_for_duplicate_rows>
+    <Function test_preview_inspector_suggests_regex_replace_for_phone>
+  <Module test_pipeline_profiler.py>
+    <Function test_compute_column_stats_string_column_counts_null_empty_whitespace_and_top_values>
+    <Function test_compute_column_stats_numeric_min_max_mean_from_mixed_values>
+  <Module test_pipeline_registry_branch_idempotency.py>
+    <Function test_create_branch_is_idempotent_when_db_unique_violation_races>
+  <Module test_pipeline_registry_commit_predicate_fallback.py>
+    <Function test_add_version_handles_lakefs_predicate_failed_by_resolving_head_commit>
+  <Module test_pipeline_scheduler_control_plane_events.py>
+    <Function test_scheduler_emits_ignored_event>
+  <Module test_pipeline_scheduler_ignored_runs.py>
+    <Function test_scheduler_records_ignored_when_schedule_due_but_dependencies_up_to_date>
+    <Function test_scheduler_records_ignored_when_schedule_due_but_dependency_not_satisfied>
+    <Function test_scheduler_does_not_trigger_dependency_only_when_pipeline_is_newer_than_deps>
+    <Function test_scheduler_triggers_interval_schedule_when_due>
+    <Function test_scheduler_triggers_cron_schedule_when_matches>
+    <Function test_scheduler_triggers_when_dependency_is_newer_than_pipeline_build>
+  <Module test_pipeline_scheduler_validation.py>
+    <Function test_normalize_dependencies_accepts_pipeline_id_variants>
+    <Function test_normalize_dependencies_reports_invalid_entries>
+    <Function test_cron_expression_validation_matches_supported_subset>
+    <Function test_dependencies_satisfied_raises_when_dependency_pipeline_missing>
+  <Module test_pipeline_schema_casts.py>
+    <Function test_extract_schema_casts_returns_empty_for_non_dict_inputs>
+    <Function test_extract_schema_casts_parses_columns_dicts_and_strings>
+    <Function test_extract_schema_casts_falls_back_to_fields>
+    <Function test_extract_schema_casts_extracts_from_properties>
+  <Module test_pipeline_task_spec_policy.py>
+    <Function test_clamp_task_spec_disables_join_for_single_dataset>
+    <Function test_policy_rejects_join_when_disallowed>
+    <Function test_policy_rejects_advanced_transform_when_disallowed>
+    <Function test_policy_rejects_report_only_scope>
+  <Module test_pipeline_type_inference.py>
+    <Function test_infer_xsd_type_with_confidence_integer>
+    <Function test_infer_xsd_type_with_confidence_decimal>
+    <Function test_infer_xsd_type_with_confidence_boolean>
+    <Function test_infer_xsd_type_with_confidence_datetime>
+    <Function test_infer_xsd_type_with_confidence_falls_back_to_string_for_mixed_values>
+    <Function test_common_join_key_type_biases_to_string_on_mismatch>
+  <Module test_pipeline_udf_runtime.py>
+    <Function test_compile_row_udf_accepts_simple_transform>
+    <Function test_compile_row_udf_accepts_escaped_newline_source>
+    <Function test_compile_row_udf_accepts_flat_map_output>
+    <Function test_compile_row_udf_rejects_imports>
+    <Function test_compile_row_udf_rejects_private_attribute_access>
+    <Function test_compile_row_udf_rejects_top_level_statements>
+    <Function test_compile_row_udf_rejects_loops>
+    <Function test_resolve_udf_reference_requires_udf_id_when_policy_enabled>
+    <Function test_resolve_udf_reference_requires_version_when_pinning_enabled>
+    <Function test_resolve_udf_reference_uses_registry_and_cache_key>
+    <Function test_resolve_udf_reference_allows_latest_when_version_pinning_disabled>
+    <Function test_resolve_udf_reference_rejects_inline_code_even_when_reference_flag_disabled>
+  <Module test_pipeline_udf_versioning.py>
+    <Function test_udf_can_be_created_reused_and_version_upgraded>
+  <Module test_pipeline_unit_test_runner.py>
+    <Function test_pipeline_unit_tests_define_inputs_and_expected_outputs>
+    <Function test_pipeline_unit_tests_report_diffs_for_breaking_changes>
+  <Module test_pipeline_value_predicates.py>
+    <Function test_is_bool_like>
+    <Function test_is_int_like>
+    <Function test_is_decimal_like_include_int_policy>
+    <Function test_is_datetime_like_iso_only_and_general_modes>
+  <Module test_pipeline_worker_diff_handling.py>
+    <Function test_list_lakefs_diff_paths_ignores_removed>
+    <Function test_load_input_dataframe_fallback_on_diff_failure>
+    <Function test_load_input_dataframe_removed_only_diff_returns_empty>
+  <Module test_postgres_schema_registry.py>
+    <Function test_health_check_connects_when_pool_missing>
+    <Function test_health_check_returns_false_on_query_failure>
+  <Module test_projection_position_tracker.py>
+    <Function test_get_position_empty>
+    <Function test_update_and_get_position>
+    <Function test_update_position_monotonic>
+    <Function test_reset_position>
+    <Function test_list_positions>
+    <Function test_compute_lag>
+    <Function test_compute_lag_unhealthy>
+  <Module test_relationship_extractor.py>
+    <Class TestExtractRelationshipsWithRelMap>
+      <Function test_single_relationship>
+      <Function test_many_relationship>
+      <Function test_deduplicates_many>
+      <Function test_missing_field_skipped>
+      <Function test_empty_rel_map>
+    <Class TestExtractRelationshipsWithOntologyData>
+      <Function test_oms_dict_format>
+      <Function test_terminus_schema_format>
+    <Class TestPatternFallback>
+      <Function test_detects_by_pattern>
+      <Function test_pattern_fallback_disabled>
+      <Function test_pattern_list_refs>
+    <Class TestEdgeCases>
+      <Function test_invalid_ref_format>
+      <Function test_non_string_ref>
+      <Function test_single_cardinality_with_multiple_values>
+      <Function test_single_cardinality_with_empty_list>
+      <Function test_none_inputs>
+  <Module test_relationship_reconciler.py>
+    <Function test_collect_relationships_extracts_from_class_defs>
+    <Function test_collect_relationships_deduplicates>
+    <Function test_scan_and_group_fk>
+    <Function test_bulk_update_relationships>
+    <Function test_detect_fk_field_via_pattern>
+    <Function test_reconcile_returns_no_classes_when_oms_empty>
+  <Module test_schema_drift_detector.py>
+    <Class TestSchemaDriftConfig>
+      <Function test_default_config>
+      <Function test_type_compatibility_widening>
+    <Class TestSchemaDriftDetector>
+      <Function test_no_drift_same_schema>
+      <Function test_detect_column_added>
+      <Function test_detect_column_removed>
+      <Function test_detect_type_changed>
+      <Function test_detect_column_renamed>
+      <Function test_mixed_changes>
+      <Function test_change_summary>
+      <Function test_severity_classification_info>
+      <Function test_severity_classification_breaking>
+      <Function test_pk_column_removal_is_critical>
+      <Function test_hash_based_quick_check>
+      <Function test_to_notification_payload>
+      <Function test_empty_schema_handling>
+  <Module test_schema_versioning.py>
+    <Function test_schema_version_parsing_and_comparison>
+    <Function test_schema_registry_register_and_migrate>
+    <Function test_schema_versioning_service_event_helpers>
+  <Module test_sequence_service.py>
+    <Function test_sequence_service_increments_and_caches>
+    <Function test_sequence_service_set_reset_and_batch>
+    <Function test_sequence_service_lists_sequences>
+  <Module test_standard_dlq_publisher.py>
+    <Function test_publish_standard_dlq_builds_payload_and_flushes>
+    <Function test_publish_contextual_dlq_json_uses_synthetic_source_key>
+  <Module test_storage_service.py>
+    <Function test_list_command_files_paginates_filters_and_sorts>
+    <Function test_storage_service_does_not_disable_tls_verify_by_default>
+    <Function test_storage_service_respects_explicit_tls_verify_flag>
+    <Function test_storage_service_supports_tls_ca_bundle_path>
+  <Module test_sync_wrapper_service.py>
+    <Function test_wait_for_command_success>
+    <Function test_wait_for_command_timeout>
+    <Function test_wait_for_command_failure>
+    <Function test_execute_sync_calls_wait>
+  <Module test_watermark_monitor.py>
+    <Function test_watermark_monitor_metrics_and_alerts>
+    <Function test_partition_and_global_watermark_helpers>
+  <Module test_worker_stores_lineage_policy.py>
+    <Function test_initialize_worker_stores_fails_when_lineage_required>
+    <Function test_initialize_worker_stores_allows_fail_open_override>
+<Package utils>
+  <Module test_access_policy.py>
+    <Function test_access_policy_allows_matching_rows>
+    <Function test_access_policy_denies_matching_rows>
+    <Function test_access_policy_masks_columns>
+  <Module test_action_audit_policy.py>
+    <Function test_audit_action_log_input_redacts_keys_recursively>
+    <Function test_audit_action_log_input_truncates_when_exceeds_max_bytes>
+    <Function test_audit_action_log_result_summarizes_large_change_arrays>
+  <Module test_action_input_schema.py>
+    <Function test_validate_action_input_validates_and_normalizes_object_ref>
+    <Function test_validate_action_input_rejects_unknown_fields_by_default>
+    <Function test_validate_action_input_rejects_reserved_internal_keys_anywhere>
+    <Function test_validate_action_input_reports_invalid_schema>
+  <Module test_action_template_engine.py>
+    <Function test_compile_template_v1_change_shape_merges_and_tracks_touched_fields>
+    <Function test_compile_template_v1_resolves_refs_and_now>
+    <Function test_compile_template_v1_rejects_delete_plus_edits_for_same_target>
+    <Function test_compile_template_v1_supports_bulk_targets_from_list>
+  <Module test_blank_utils.py>
+    <Function test_is_blank_value>
+    <Function test_strip_to_none>
+  <Module test_canonical_json.py>
+    <Function test_canonical_json_dumps_sorts_keys_and_is_compact>
+    <Function test_canonical_json_dumps_normalizes_datetime_to_utc>
+    <Function test_sha256_prefixed_has_expected_prefix>
+  <Module test_common_base_response_deprecation.py>
+    <Function test_base_response_emits_deprecation_once>
+  <Module test_dependency_parsing.py>
+    <Function test_parse_requirements_txt_extracts_versions>
+    <Function test_parse_pyproject_toml_extracts_dependencies>
+  <Module test_deprecation_utils.py>
+    <Function test_deprecated_decorator_sync>
+    <Function test_legacy_and_experimental_decorators>
+  <Module test_json_utils_coercion.py>
+    <Function test_coerce_json_list_from_list>
+    <Function test_coerce_json_list_from_string_list>
+    <Function test_coerce_json_list_from_wrapped_dict>
+    <Function test_coerce_json_list_wrap_dict_when_requested>
+    <Function test_coerce_json_dict_from_dict_and_string>
+    <Function test_coerce_json_dict_wraps_non_dict_json_by_default>
+    <Function test_coerce_json_dict_can_disable_parsed_fallback>
+  <Module test_label_mapper_i18n.py>
+    <Function test_label_mapper_detects_language_for_string_and_falls_back>
+    <Function test_label_mapper_supports_language_map_and_reverse_lookup>
+    <Function test_label_mapper_batch_fallback_returns_best_available>
+  <Module test_llm_safety.py>
+    <Function test_mask_pii_text_masks_email>
+    <Function test_mask_pii_text_preserves_uuid>
+    <Function test_mask_pii_dict>
+    <Class TestDetectValuePattern>
+      <Function test_detects_uuid>
+      <Function test_detects_sequential_id>
+      <Function test_detects_iso_date>
+      <Function test_detects_ambiguous_dates>
+      <Function test_detects_email>
+      <Function test_detects_boolean_string>
+      <Function test_detects_numeric_strings>
+      <Function test_detects_native_types>
+      <Function test_detects_url>
+      <Function test_detects_short_codes>
+      <Function test_detects_identifier_like>
+      <Function test_free_text_fallback>
+    <Class TestExtractColumnValuePatterns>
+      <Function test_uuid_column>
+      <Function test_sequential_id_column>
+      <Function test_mixed_patterns_column>
+      <Function test_empty_values>
+      <Function test_provides_examples>
+    <Class TestBuildColumnSemanticObservations>
+      <Function test_id_column_with_uuid_values>
+      <Function test_created_at_column>
+      <Function test_foreign_key_pattern>
+      <Function test_sensitive_column_warning>
+      <Function test_status_column_categorical>
+      <Function test_boolean_flag_column>
+    <Class TestBuildRelationshipObservations>
+      <Function test_high_overlap_relationship>
+      <Function test_no_overlap_relationship>
+      <Function test_one_to_many_hint>
+      <Function test_null_handling>
+      <Function test_provides_agent_instruction>
+      <Function test_non_matching_examples>
+  <Module test_log_rotation.py>
+    <Function test_rotate_and_limit_logs>
+    <Function test_compress_and_cleanup>
+  <Module test_number_utils.py>
+    <Function test_to_int_or_none_with_none>
+    <Function test_to_int_or_none_with_valid_values>
+    <Function test_to_int_or_none_with_invalid_values>
+  <Module test_ontology_stamp.py>
+    <Function test_merge_ontology_stamp_prefers_existing>
+    <Function test_merge_ontology_stamp_fills_missing>
+  <Module test_principal_policy.py>
+    <Function test_build_principal_tags_user_id_back_compat>
+    <Function test_build_principal_tags_emits_typed_principal>
+    <Function test_policy_allows_matches_typed_principal>
+  <Module test_pythonpath_setup.py>
+    <Function test_detect_backend_directory_with_markers>
+    <Function test_setup_pythonpath_updates_env>
+    <Function test_setup_pythonpath_invalid_directory>
+    <Function test_configure_python_environment_success>
+  <Module test_resource_rid.py>
+    <Function test_parse_metadata_rev_defaults_to_one>
+    <Function test_parse_metadata_rev_parses_int>
+    <Function test_format_resource_rid_always_includes_revision>
+    <Function test_strip_rid_revision_handles_prefixed_and_unprefixed>
+  <Module test_safe_bool_expression.py>
+    <Function test_safe_eval_bool_expression_supports_attribute_compare>
+    <Function test_safe_eval_bool_expression_supports_boolean_ops>
+    <Function test_safe_eval_bool_expression_supports_subscript>
+    <Function test_safe_eval_bool_expression_rejects_private_attribute_access>
+    <Function test_safe_eval_bool_expression_rejects_calls>
+    <Function test_safe_eval_bool_expression_rejects_non_constant_subscript>
+    <Function test_safe_eval_bool_expression_errors_on_unknown_identifier>
+    <Function test_safe_eval_bool_expression_errors_on_non_boolean_result>
+    <Function test_safe_eval_bool_expression_errors_on_not_non_boolean_operand>
+    <Function test_validate_bool_expression_syntax_accepts_safe_expressions>
+    <Function test_validate_bool_expression_syntax_rejects_calls>
+  <Module test_schema_columns_hash_utils.py>
+    <Function test_extract_schema_columns_supports_list_payload>
+    <Function test_extract_schema_columns_supports_dict_shapes>
+    <Function test_extract_schema_names_and_types>
+    <Function test_compute_schema_hash_from_payload_matches_columns_hash>
+  <Module test_submission_criteria_diagnostics.py>
+    <Function test_submission_criteria_reason_missing_role>
+    <Function test_submission_criteria_reason_state_mismatch>
+    <Function test_submission_criteria_reason_mixed>
+  <Module test_token_count.py>
+    <Function test_approx_token_count_handles_none_and_empty_string>
+    <Function test_approx_token_count_counts_payload>
+    <Function test_approx_token_count_collection_policy_toggle>
+    <Function test_approx_token_count_json_matches_json_serialized_size>
+  <Module test_utils_core.py>
+    <Function test_parse_bool_env_and_int_env>
+    <Function test_safe_path_helpers>
+    <Function test_s3_uri_helpers>
+    <Function test_branch_utils_defaults>
+  <Module test_uuid_utils.py>
+    <Function test_safe_uuid_accepts_valid_uuid>
+    <Function test_safe_uuid_rejects_invalid_values>
+  <Module test_worker_runner.py>
+    <Function test_run_component_lifecycle_propagates_run_error_without_close>
+    <Function test_run_component_lifecycle_keeps_primary_error_when_close_also_fails>
+    <Function test_run_component_lifecycle_raises_close_error_when_no_primary_error>
+  <Module test_writeback_conflicts.py>
+    <Function test_normalize_conflict_policy_defaults_to_fail>
+    <Function test_parse_conflict_policy_returns_none_for_missing_or_unknown>
+    <Function test_parse_conflict_policy_accepts_known_values_case_insensitive>
+    <Function test_normalize_conflict_policy_accepts_known_values_case_insensitive>
+    <Function test_detect_overlap_fields_compares_current_to_observed>
+    <Function test_detect_overlap_links_flags_base_removed_patch_adds>
+    <Function test_detect_overlap_links_flags_base_added_patch_removes>
+    <Function test_resolve_applied_changes_no_conflict_always_applies>
+    <Function test_resolve_applied_changes_writeback_wins_applies_on_conflict>
+    <Function test_resolve_applied_changes_base_wins_skips_on_conflict>
+    <Function test_resolve_applied_changes_base_wins_skips_on_link_conflict>
+    <Function test_resolve_applied_changes_fail_rejects_on_conflict>
+    <Function test_resolve_applied_changes_fail_rejects_on_link_conflict>
+  <Module test_writeback_governance.py>
+    <Function test_extract_backing_dataset_id_reads_object_type_spec>
+    <Function test_extract_backing_dataset_id_returns_none_for_missing_shape>
+    <Function test_policies_aligned_requires_dicts_and_exact_match>
+  <Module test_writeback_lifecycle.py>
+    <Function test_derive_lifecycle_id_prefers_top_level_value>
+    <Function test_derive_lifecycle_id_reads_metadata_value>
+    <Function test_derive_lifecycle_id_uses_last_create_command_id>
+    <Function test_derive_lifecycle_id_defaults_when_missing>
+    <Function test_overlay_doc_id_composes_instance_and_lifecycle>
+    <Function test_overlay_doc_id_rejects_delimiter_collision>
+  <Module test_writeback_patch_apply.py>
+    <Function test_apply_changes_set_unset>
+    <Function test_apply_changes_link_add_and_remove>
+    <Function test_apply_changes_link_scalar_coerces_to_list>
+    <Function test_apply_changes_delete_short_circuits>
+    <Function test_apply_changes_type_validation>
+  <Module test_writeback_paths.py>
+    <Function test_queue_entry_prefix_builds_expected_path>
+    <Function test_snapshot_keys_match_design_layout>
+<Module tests/unit/validators/test_base_type_validators.py>
+  <Function test_array_validator_rejects_null_items>
+  <Function test_array_validator_rejects_nested_arrays>
+  <Function test_struct_validator_rejects_nested_struct>
+  <Function test_struct_validator_rejects_array_field>
+  <Function test_geopoint_validator_accepts_latlon>
+  <Function test_geopoint_validator_rejects_out_of_range>
+  <Function test_geoshape_validator_accepts_point>
+  <Function test_geoshape_validator_rejects_invalid_type>
+  <Function test_vector_validator_accepts_numeric_list>
+  <Function test_vector_validator_rejects_wrong_dimensions>
+  <Function test_marking_validator_rejects_non_string>
+  <Function test_cipher_validator_rejects_non_string>
+  <Function test_media_uses_string_validator>
+  <Function test_attachment_uses_string_validator>
+  <Function test_time_series_uses_string_validator>
+<Package workers>
+  <Module test_connector_sync_worker.py>
+    <Function test_sync_worker_bff_scope_headers>
+    <Function test_sync_worker_fetch_schema_and_target_types>
+    <Function test_sync_worker_process_google_sheets_update>
+    <Function test_sync_worker_handle_envelope_rejects_unknown>
+    <Function test_sync_worker_run_processes_message>
+    <Function test_sync_worker_heartbeat_loop_stops>
+  <Module test_connector_trigger_service.py>
+    <Function test_trigger_service_initialize_and_close>
+    <Function test_trigger_service_is_due>
+    <Function test_trigger_service_poll_google_sheets_refreshes_token>
+    <Function test_trigger_service_publish_outbox>
+  <Module test_instance_worker_helpers.py>
+    <Function test_extract_payload_from_message_success>
+    <Function test_extract_payload_from_message_rejects_non_command>
+    <Function test_primary_key_and_objectify_helpers>
+    <Function test_retryable_error_detection>
+  <Module test_instance_worker_objectify_gates.py>
+    <Function test_primary_key_required_when_generation_disabled>
+    <Function test_relationship_fallback_can_be_disabled>
+  <Module test_instance_worker_s3.py>
+    <Function test_s3_call_does_not_block_event_loop>
+  <Module test_message_relay_process.py>
+    <Function test_event_publisher_processes_index>
+  <Module test_objectify_delta_lakefs.py>
+    <Function test_delta_result_has_changes_true>
+    <Function test_delta_result_has_changes_false>
+    <Function test_delta_result_stats_auto_computed>
+    <Function test_compute_row_key>
+    <Function test_compute_row_hash_deterministic>
+    <Function test_compute_row_hash_differs_on_change>
+    <Function test_compute_delta_from_lakefs_diff_added_file>
+    <Function test_compute_delta_from_lakefs_diff_removed_file>
+    <Function test_compute_delta_from_lakefs_diff_changed_file>
+    <Function test_compute_delta_from_snapshots>
+    <Function test_create_delta_computer_from_mapping_spec>
+    <Function test_create_delta_computer_fallback_pk>
+  <Module test_objectify_incremental_default.py>
+    <Function test_default_execution_mode_is_incremental>
+    <Function test_explicit_full_mode>
+    <Function test_explicit_delta_mode>
+    <Function test_watermark_fields>
+    <Function test_auto_detect_watermark_column>
+  <Module test_objectify_worker_helpers.py>
+    <Function test_objectify_worker_field_helpers>
+    <Function test_objectify_worker_row_key_derivation>
+  <Module test_objectify_worker_lineage_dataset_version.py>
+    <Function test_instance_lineage_records_dataset_version>
+  <Module test_objectify_worker_link_index_dangling.py>
+    <Function test_link_index_fails_on_missing_target_when_policy_fail>
+    <Function test_link_index_warns_on_missing_target_when_policy_warn>
+    <Function test_link_index_creates_link_when_fk_matches_target>
+    <Function test_link_index_dedupes_duplicate_pairs_for_join_table>
+    <Function test_object_backed_link_index_creates_link>
+    <Function test_object_backed_full_sync_clears_links_when_no_rows>
+    <Function test_link_index_records_pass_result_with_lineage>
+    <Function test_link_index_records_warn_when_dangling_policy_warn>
+    <Function test_link_index_records_fail_when_dangling_policy_fail>
+    <Function test_link_edits_are_applied_to_updates>
+  <Module test_objectify_worker_p0_gates.py>
+    <Function test_missing_source_column_is_fatal>
+    <Function test_primary_key_missing_when_source_blank>
+    <Function test_required_field_missing_is_reported>
+    <Function test_value_constraints_fail_fast>
+    <Function test_value_constraints_format_failures[email-email-not-an-email]>
+    <Function test_value_constraints_format_failures[url-uri-not-a-url]>
+    <Function test_value_constraints_format_failures[uuid-uuid-not-a-uuid]>
+    <Function test_value_constraints_min_length_enforced>
+    <Function test_value_constraints_pattern_enforced>
+    <Function test_duplicate_primary_key_is_blocked>
+    <Function test_instance_id_requires_row_key>
+  <Module test_objectify_worker_pk_uniqueness.py>
+    <Function test_pk_duplicates_fail_before_writes>
+  <Module test_objectify_write_paths.py>
+    <Function test_dataset_primary_write_path_indexes_instances_directly>
+    <Function test_build_document_populates_properties_from_flat_instance>
+    <Function test_build_document_preserves_existing_properties>
+    <Function test_build_document_skips_none_values>
+    <Function test_write_instances_passes_target_field_types>
+    <Function test_dataset_primary_finalize_prunes_stale_docs_on_full>
+  <Module test_ontology_worker_helpers.py>
+    <Function test_wait_for_database_exists_success>
+    <Function test_wait_for_database_exists_timeout>
+    <Function test_consumer_ops_defaults_to_inline>
+    <Function test_heartbeat_loop_no_registry>
+  <Module test_pipeline_worker_helpers.py>
+    <Function test_resolve_code_version_and_sensitive_keys>
+    <Function test_resolve_lakefs_repository>
+    <Function test_watermark_snapshot_helpers>
+    <Function test_resolve_output_format_and_partitions>
+    <Function test_resolve_external_read_mode_streaming_aliases>
+    <Function test_resolve_streaming_trigger_mode_and_timeout>
+    <Function test_streaming_external_source_requires_kafka_format>
+    <Function test_streaming_external_source_respects_global_toggle>
+    <Function test_resolve_kafka_value_format_and_checkpoint_policy>
+    <Function test_resolve_kafka_avro_schema_accepts_schema_registry_reference>
+    <Function test_resolve_kafka_avro_schema_rejects_incomplete_schema_registry_reference>
+    <Function test_resolve_kafka_avro_schema_rejects_latest_registry_version>
+  <Module test_pipeline_worker_objectify_auto_enqueue.py>
+    <Function test_pipeline_worker_enqueues_objectify_job>
+    <Function test_pipeline_worker_schema_mismatch_records_gate>
+  <Module test_pipeline_worker_objectify_auto_enqueue_nospark.py>
+    <Function test_pipeline_worker_enqueues_objectify_job_without_pyspark>
+    <Function test_pipeline_worker_schema_mismatch_records_gate_without_pyspark>
+  <Module test_pipeline_worker_transforms.py>
+    <Function test_apply_transform_basic_ops>
+    <Function test_apply_transform_join_union_groupby_pivot_window>
+    <Function test_watermark_helpers>
+    <Function test_pipeline_worker_file_helpers>
+  <Module test_spark_advanced_transforms.py>
+    <Function test_split_transform>
+    <Function test_geospatial_point_and_distance>
+    <Function test_geospatial_geohash>
+    <Function test_pattern_mining_contains_and_extract>
+    <Function test_stream_join_transform>
+    <Function test_stream_join_transform_respects_cache_expiration>
+    <Function test_stream_join_transform_dynamic_selects_single_best_match_per_left_row>
+    <Function test_stream_join_left_lookup_selects_single_latest_right_row_without_event_time>
+    <Function test_stream_join_static_defaults_to_left_join_semantics>
+    <Function test_materialize_output_dataframe_rejects_partitioned_json>
+    <Function test_materialize_dataset_output_deduplicates_duplicate_primary_keys_for_append_only_new_rows>
+    <Function test_materialize_dataset_output_changelog_appends_only_new_or_changed_rows>
+    <Function test_materialize_dataset_output_snapshot_difference_keeps_current_transaction_duplicates>
+    <Function test_materialize_virtual_output_writes_manifest_artifact>
+    <Function test_select_new_or_changed_rows_returns_new_and_changed>
+    <Function test_select_new_or_changed_rows_without_pk_returns_input>
+    <Function test_select_new_or_changed_rows_can_preserve_input_duplicates_for_changelog>
+    <Function test_udf_transform_applies_resolved_code>
+    <Function test_udf_transform_supports_flat_map_rows>
+    <Function test_udf_transform_rejects_schema_drift>
+
+=============================== warnings summary ===============================
+../../../../../opt/homebrew/lib/python3.11/site-packages/starlette/formparsers.py:12
+  /opt/homebrew/lib/python3.11/site-packages/starlette/formparsers.py:12: PendingDeprecationWarning: Please use `import python_multipart` instead.
+    import multipart
+
+../../../../../opt/homebrew/lib/python3.11/site-packages/google/rpc/__init__.py:18
+  /opt/homebrew/lib/python3.11/site-packages/google/rpc/__init__.py:18: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+    import pkg_resources
+
+../../../../../opt/homebrew/lib/python3.11/site-packages/pkg_resources/__init__.py:3146
+  /opt/homebrew/lib/python3.11/site-packages/pkg_resources/__init__.py:3146: DeprecationWarning: Deprecated call to `pkg_resources.declare_namespace('google')`.
+  Implementing implicit namespace packages (as specified in PEP 420) is preferred to `pkg_resources.declare_namespace`. See https://setuptools.pypa.io/en/latest/references/keywords.html#keyword-namespace-packages
+    declare_namespace(pkg)
+
+../../../../../opt/homebrew/lib/python3.11/site-packages/pkg_resources/__init__.py:3146
+  /opt/homebrew/lib/python3.11/site-packages/pkg_resources/__init__.py:3146: DeprecationWarning: Deprecated call to `pkg_resources.declare_namespace('google.logging')`.
+  Implementing implicit namespace packages (as specified in PEP 420) is preferred to `pkg_resources.declare_namespace`. See https://setuptools.pypa.io/en/latest/references/keywords.html#keyword-namespace-packages
+    declare_namespace(pkg)
+
+../../../../../opt/homebrew/lib/python3.11/site-packages/pkg_resources/__init__.py:2558
+../../../../../opt/homebrew/lib/python3.11/site-packages/pkg_resources/__init__.py:2558
+  /opt/homebrew/lib/python3.11/site-packages/pkg_resources/__init__.py:2558: DeprecationWarning: Deprecated call to `pkg_resources.declare_namespace('google')`.
+  Implementing implicit namespace packages (as specified in PEP 420) is preferred to `pkg_resources.declare_namespace`. See https://setuptools.pypa.io/en/latest/references/keywords.html#keyword-namespace-packages
+    declare_namespace(parent)
+
+../../../../../opt/homebrew/lib/python3.11/site-packages/pkg_resources/__init__.py:3146
+  /opt/homebrew/lib/python3.11/site-packages/pkg_resources/__init__.py:3146: DeprecationWarning: Deprecated call to `pkg_resources.declare_namespace('sphinxcontrib')`.
+  Implementing implicit namespace packages (as specified in PEP 420) is preferred to `pkg_resources.declare_namespace`. See https://setuptools.pypa.io/en/latest/references/keywords.html#keyword-namespace-packages
+    declare_namespace(pkg)
+
+../../../../../opt/homebrew/lib/python3.11/site-packages/google/rpc/__init__.py:20
+  /opt/homebrew/lib/python3.11/site-packages/google/rpc/__init__.py:20: DeprecationWarning: Deprecated call to `pkg_resources.declare_namespace('google.rpc')`.
+  Implementing implicit namespace packages (as specified in PEP 420) is preferred to `pkg_resources.declare_namespace`. See https://setuptools.pypa.io/en/latest/references/keywords.html#keyword-namespace-packages
+    pkg_resources.declare_namespace(__name__)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+======================== 1169 tests collected in 3.59s =========================
+```

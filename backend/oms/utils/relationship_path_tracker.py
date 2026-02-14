@@ -8,9 +8,9 @@ import logging
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Optional, Set
 
-from shared.models.ontology import OntologyResponse, Relationship
+from shared.models.ontology import OntologyResponse
 from oms.utils.cardinality_utils import inverse_cardinality
 
 logger = logging.getLogger(__name__)

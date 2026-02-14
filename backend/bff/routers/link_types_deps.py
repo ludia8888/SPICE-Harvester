@@ -6,3 +6,8 @@ shared FastAPI dependencies (registries/clients) used across link-type subrouter
 
 
 from bff.routers.registry_deps import get_dataset_registry, get_objectify_registry
+
+__all__ = [
+    "get_dataset_registry",
+    "get_objectify_registry",
+]

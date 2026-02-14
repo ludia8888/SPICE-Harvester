@@ -31,6 +31,16 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/schema-changes", tags=["Schema Changes"])
 
+__all__ = [
+    "AcknowledgeRequest",
+    "CompatibilityCheckRequest",
+    "CompatibilityCheckResponse",
+    "SchemaChangeItem",
+    "SubscriptionCreateRequest",
+    "SubscriptionResponse",
+    "router",
+]
+
 
 # ----- Endpoints -----
 

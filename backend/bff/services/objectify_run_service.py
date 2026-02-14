@@ -8,12 +8,12 @@ a focused Facade for objectify job submission.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 from uuid import uuid4
 
 from fastapi import HTTPException, Request, status
 
-from shared.errors.error_types import ErrorCode, ErrorCategory, classified_http_exception
+from shared.errors.error_types import ErrorCode, classified_http_exception
 
 from bff.routers.objectify_deps import _require_db_role
 from bff.schemas.objectify_requests import TriggerObjectifyRequest
@@ -26,7 +26,6 @@ from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.services.registries.objectify_registry import ObjectifyRegistry
 from shared.services.registries.pipeline_registry import PipelineRegistry
 from shared.services.registries.backing_source_adapter import (
-    BackingSourceMappingSpec,
     get_mapping_from_oms,
     is_oms_mapping_spec,
 )

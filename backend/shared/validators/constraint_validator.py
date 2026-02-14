@@ -5,7 +5,7 @@ Provides enhanced constraint validation for complex types
 
 import re
 from decimal import Decimal
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict
 
 from .base_validator import ValidationResult
 import logging

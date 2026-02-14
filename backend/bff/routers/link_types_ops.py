@@ -5,7 +5,6 @@ service layer. It exists to support router composition and to keep backwards
 compatibility with existing imports/tests.
 """
 
-
 from bff.services.link_types_mapping_service import (
     build_join_schema as _build_join_schema,
     build_mapping_request as _build_mapping_request,
@@ -22,4 +21,21 @@ from bff.services.link_types_mapping_service import (
     resolve_object_type_contract as _resolve_object_type_contract,
     resolve_property_type as _resolve_property_type,
 )
+
+__all__ = [
+    "_build_join_schema",
+    "_build_mapping_request",
+    "_compute_schema_hash",
+    "_ensure_join_dataset",
+    "_extract_ontology_properties",
+    "_extract_ontology_relationships",
+    "_extract_schema_columns",
+    "_extract_schema_types",
+    "_normalize_pk_fields",
+    "_normalize_policy",
+    "_normalize_spec_type",
+    "_resolve_dataset_and_version",
+    "_resolve_object_type_contract",
+    "_resolve_property_type",
+]
 

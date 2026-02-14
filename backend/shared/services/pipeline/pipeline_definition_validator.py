@@ -189,18 +189,6 @@ def validate_pipeline_definition(
         node_type = str(node.get("type") or "").strip().lower()
         if node_type == "input":
             metadata = node.get("metadata") if isinstance(node.get("metadata"), dict) else {}
-            dataset_id = str(
-                metadata.get("datasetId")
-                or metadata.get("dataset_id")
-                or metadata.get("id")
-                or ""
-            ).strip()
-            dataset_name = str(
-                metadata.get("datasetName")
-                or metadata.get("dataset_name")
-                or metadata.get("name")
-                or ""
-            ).strip()
             read_config = metadata.get("read") if isinstance(metadata.get("read"), dict) else {}
             read_format = str(
                 read_config.get("format")
@@ -470,20 +458,30 @@ def validate_pipeline_definition(
                     errors.append(
                         f"streamJoin has invalid timeDirection '{stream_spec.time_direction}' on node {node_id}"
                     )
-                if stream_spec.strategy == "left_lookup" and len(incoming_ids) >= 2:
-                    right_input_id = str(incoming_ids[1] or "").strip()
-                    right_node = nodes.get(right_input_id) if right_input_id else None
-                    right_node_type = str((right_node or {}).get("type") or "").strip().lower()
-                    if right_node_type != "input":
+                if stream_spec.strategy in {"left_lookup", "static"}:
+                    strategy_name = stream_spec.strategy
+                    requested_join_type = str(
+                        metadata.get("joinType") or metadata.get("join_type") or ""
+                    ).strip().lower()
+                    if requested_join_type and requested_join_type not in {"left", "inner"}:
                         errors.append(
-                            "streamJoin strategy=left_lookup requires right input to be a direct input node "
-                            f"(no upstream transforms) on node {node_id}"
+                            f"streamJoin strategy={strategy_name} requires joinType=left "
+                            f"(got: {requested_join_type}) on node {node_id}"
                         )
-                    elif is_stream_like_input_node(right_node):
-                        errors.append(
-                            "streamJoin strategy=left_lookup requires right input to be batch lookup source "
-                            f"(stream read mode/format is not allowed) on node {node_id}"
-                        )
+                    if len(incoming_ids) >= 2:
+                        right_input_id = str(incoming_ids[1] or "").strip()
+                        right_node = nodes.get(right_input_id) if right_input_id else None
+                        right_node_type = str((right_node or {}).get("type") or "").strip().lower()
+                        if right_node_type != "input":
+                            errors.append(
+                                f"streamJoin strategy={strategy_name} requires right input to be a direct input node "
+                                f"(no upstream transforms) on node {node_id}"
+                            )
+                        elif is_stream_like_input_node(right_node):
+                            errors.append(
+                                f"streamJoin strategy={strategy_name} requires right input to be batch lookup source "
+                                f"(stream read mode/format is not allowed) on node {node_id}"
+                            )
                 if stream_spec.strategy == "dynamic":
                     if not str(stream_spec.left_event_time_column or "").strip():
                         errors.append(f"streamJoin dynamic requires leftEventTimeColumn on node {node_id}")

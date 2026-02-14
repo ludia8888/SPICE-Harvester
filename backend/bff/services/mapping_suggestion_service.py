@@ -4,7 +4,7 @@
 """
 
 import logging
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 from dataclasses import dataclass
 import re
 import unicodedata
@@ -607,7 +607,7 @@ class MappingSuggestionService:
             re.compile(r'^\+?\d{1,3}[\s\-]?\(?\d{1,4}\)?[\s\-]?\d{3,4}[\s\-]?\d{4}$'),  # International
             re.compile(r'^0\d{1,2}[\s\-]?\d{3,4}[\s\-]?\d{4}$'),  # Korean
         ]
-        date_pattern = re.compile(r'^\d{4}-\d{2}-\d{2}')
+        re.compile(r'^\d{4}-\d{2}-\d{2}')
         id_pattern = re.compile(r'^[A-Z0-9\-\_]{6,}$', re.IGNORECASE)
         
         email_count = sum(1 for v in values if isinstance(v, str) and email_pattern.match(v))

@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 import re
-from typing import Any, Iterable, List, Optional, Tuple
+from typing import Any, Iterable, Optional
 
 from shared.services.pipeline.pipeline_schema_utils import normalize_schema_type
 import logging

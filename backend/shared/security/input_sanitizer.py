@@ -3,12 +3,10 @@ Comprehensive Input Sanitization Module
 모든 사용자 입력에 대한 보안 검증 및 정화 처리
 """
 
-import html
-import json
 import logging
 import re
 import urllib.parse
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List
 
 from shared.config.settings import get_settings
 

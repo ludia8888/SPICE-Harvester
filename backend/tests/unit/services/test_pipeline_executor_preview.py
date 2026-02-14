@@ -616,6 +616,73 @@ async def test_executor_stream_join_left_lookup_forces_left_join_semantics() -> 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_executor_stream_join_static_forces_left_join_semantics_even_when_full_requested() -> None:
+    db_name = "demo"
+    left_name = "left_stream"
+    right_name = "right_lookup"
+    left_id = "ds-demo-left-main"
+    right_id = "ds-demo-right-main"
+
+    registry = _DatasetRegistry()
+    registry.datasets_by_name[(db_name, left_name, "main")] = _Dataset(
+        dataset_id=left_id,
+        db_name=db_name,
+        name=left_name,
+        branch="main",
+        schema_json={"columns": [{"name": "id", "type": "xsd:integer"}, {"name": "value_left", "type": "xsd:string"}]},
+    )
+    registry.datasets_by_name[(db_name, right_name, "main")] = _Dataset(
+        dataset_id=right_id,
+        db_name=db_name,
+        name=right_name,
+        branch="main",
+        schema_json={"columns": [{"name": "id", "type": "xsd:integer"}, {"name": "value_right", "type": "xsd:string"}]},
+    )
+    registry.versions_by_dataset_id[left_id] = _Version(
+        dataset_id=left_id,
+        artifact_key=None,
+        sample_json={"rows": [{"id": 10, "value_left": "left-only"}]},
+    )
+    registry.versions_by_dataset_id[right_id] = _Version(
+        dataset_id=right_id,
+        artifact_key=None,
+        sample_json={"rows": []},
+    )
+
+    executor = PipelineExecutor(dataset_registry=registry)
+    definition = {
+        "nodes": [
+            {"id": "left", "type": "input", "metadata": {"datasetName": left_name}},
+            {"id": "right", "type": "input", "metadata": {"datasetName": right_name}},
+            {
+                "id": "sj1",
+                "type": "transform",
+                "metadata": {
+                    "operation": "streamJoin",
+                    "joinType": "full",
+                    "leftKeys": ["id"],
+                    "rightKeys": ["id"],
+                    "streamJoin": {"strategy": "static"},
+                },
+            },
+            {"id": "out1", "type": "output"},
+        ],
+        "edges": [
+            {"from": "left", "to": "sj1"},
+            {"from": "right", "to": "sj1"},
+            {"from": "sj1", "to": "out1"},
+        ],
+    }
+
+    preview = await executor.preview(definition=definition, db_name=db_name, node_id="sj1", limit=10)
+    assert preview["row_count"] == 1
+    row = (preview.get("rows") or [])[0]
+    assert row.get("id") == 10
+    assert row.get("value_right") is None
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_executor_stream_join_left_lookup_picks_latest_right_row_per_key_without_event_time() -> None:
     db_name = "demo"
     left_name = "left_stream"

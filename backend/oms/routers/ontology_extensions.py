@@ -19,13 +19,11 @@ from oms.services.ontology_resources import (
     normalize_resource_type,
 )
 from oms.services.ontology_health_issue_registry import (
-    ISSUE_CATALOG_VERSION,
     build_link_type_ref,
     build_object_type_ref,
     build_ontology_resource_ref,
     normalize_issue,
     normalize_issue_code,
-    normalize_severity,
     REL_CLASS_LEVEL_CODES,
 )
 from oms.services.ontology_resource_validator import (
@@ -54,9 +52,7 @@ from shared.config.settings import get_settings
 from shared.utils.ontology_type_normalization import normalize_ontology_base_type
 from shared.services.core.ontology_linter import (
     OntologyLinterConfig,
-    compute_risk_score,
     lint_ontology_create,
-    risk_level,
 )
 from shared.utils.commit_utils import coerce_commit_id
 from shared.utils.id_generator import generate_simple_id

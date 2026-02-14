@@ -8,7 +8,7 @@ import asyncio
 import logging
 from contextlib import nullcontext
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any, Optional
 
 from shared.services.pipeline.pipeline_job_queue import PipelineJobQueue

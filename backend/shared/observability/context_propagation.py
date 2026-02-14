@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import logging
 from contextlib import contextmanager
-from typing import Any, Dict, Iterable, Iterator, Mapping, MutableMapping, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterator, Mapping, MutableMapping, Optional, Sequence, Tuple
 from urllib.parse import quote
 
 from shared.observability.request_context import (

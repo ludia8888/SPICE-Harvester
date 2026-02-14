@@ -29,7 +29,6 @@ for _path in (str(_backend_root), str(_repo_root)):
     if _path and _path not in sys.path:
         sys.path.append(_path)
 
-from mcp_servers.pipeline_mcp_helpers import extract_spark_error_details as _extract_spark_error_details  # noqa: E402
 from mcp_servers.pipeline_tools.dataset_tools import build_dataset_tool_handlers  # noqa: E402
 from mcp_servers.pipeline_tools.debug_tools import build_debug_tool_handlers  # noqa: E402
 from mcp_servers.pipeline_tools.objectify_tools import build_objectify_tool_handlers  # noqa: E402

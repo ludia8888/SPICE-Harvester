@@ -9,6 +9,7 @@ from shared.services.pipeline.output_plugins import (
     OUTPUT_KIND_ONTOLOGY,
     OUTPUT_KIND_VIRTUAL,
     normalize_output_kind,
+    resolve_ontology_output_semantics,
     resolve_output_kind,
     validate_output_payload,
 )
@@ -48,6 +49,36 @@ def test_validate_output_payload_ontology_link_requires_full_metadata() -> None:
     )
     assert errors
     assert "missing required link metadata" in errors[0]
+
+
+@pytest.mark.unit
+def test_validate_output_payload_ontology_rejects_unknown_relationship_spec_type() -> None:
+    errors = validate_output_payload(
+        kind="ontology",
+        payload={
+            "relationship_spec_type": "invalid-kind",
+            "target_class_id": "Target",
+        },
+    )
+    assert errors == ["relationship_spec_type must be one of: edge|link|node|object|object_type|relationship"]
+
+
+@pytest.mark.unit
+def test_resolve_ontology_output_semantics_exposes_required_columns_for_link() -> None:
+    resolved = resolve_ontology_output_semantics(
+        {
+            "relationship_spec_type": "link",
+            "link_type_id": "owns",
+            "source_class_id": "Customer",
+            "target_class_id": "Order",
+            "predicate": "owns_order",
+            "cardinality": "1:n",
+            "source_key_column": "customer_id",
+            "target_key_column": "order_id",
+        }
+    )
+    assert resolved.relationship_spec_type == "link"
+    assert list(resolved.required_columns) == ["customer_id", "order_id"]
 
 
 @pytest.mark.unit

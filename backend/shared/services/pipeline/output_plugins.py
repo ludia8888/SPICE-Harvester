@@ -171,41 +171,73 @@ class _VirtualPlugin(_RequiredMetadataPlugin):
         return []
 
 
+@dataclass(frozen=True)
+class OntologyOutputSemantics:
+    relationship_spec_type: str
+    required_columns: tuple[str, ...]
+
+_ONTOLOGY_LINK_REQUIRED_FIELDS = (
+    "link_type_id",
+    "source_class_id",
+    "target_class_id",
+    "predicate",
+    "cardinality",
+    "source_key_column",
+    "target_key_column",
+    "relationship_spec_type",
+)
+_ONTOLOGY_LINK_SPEC_TYPES = frozenset({"link", "relationship", "edge"})
+_ONTOLOGY_OBJECT_SPEC_TYPES = frozenset({"object", "object_type", "node"})
+_SUPPORTED_ONTOLOGY_SPEC_TYPES = frozenset(set(_ONTOLOGY_LINK_SPEC_TYPES) | set(_ONTOLOGY_OBJECT_SPEC_TYPES))
+
+
+def resolve_ontology_output_semantics(payload: Mapping[str, Any]) -> OntologyOutputSemantics:
+    relationship_spec_type = _text(payload, "relationship_spec_type", "relationshipSpecType").lower()
+    if relationship_spec_type and relationship_spec_type not in _SUPPORTED_ONTOLOGY_SPEC_TYPES:
+        allowed = "|".join(sorted(_SUPPORTED_ONTOLOGY_SPEC_TYPES))
+        raise ValueError(f"relationship_spec_type must be one of: {allowed}")
+
+    has_link_hints = any(
+        _text(payload, field, _camel_case(field))
+        for field in (
+            "link_type_id",
+            "source_class_id",
+            "predicate",
+            "cardinality",
+            "source_key_column",
+            "target_key_column",
+        )
+    )
+    if relationship_spec_type in _ONTOLOGY_LINK_SPEC_TYPES or has_link_hints:
+        missing = [field for field in _ONTOLOGY_LINK_REQUIRED_FIELDS if not _text(payload, field, _camel_case(field))]
+        if missing:
+            raise ValueError(f"missing required link metadata ({', '.join(missing)})")
+        source_key_column = _text(payload, "source_key_column", "sourceKeyColumn")
+        target_key_column = _text(payload, "target_key_column", "targetKeyColumn")
+        return OntologyOutputSemantics(
+            relationship_spec_type="link",
+            required_columns=tuple(column for column in (source_key_column, target_key_column) if column),
+        )
+
+    if not _text(payload, "target_class_id", "targetClassId"):
+        raise ValueError("target_class_id is required")
+
+    source_key_column = _text(payload, "source_key_column", "sourceKeyColumn")
+    target_key_column = _text(payload, "target_key_column", "targetKeyColumn")
+    return OntologyOutputSemantics(
+        relationship_spec_type="object",
+        required_columns=tuple(column for column in (source_key_column, target_key_column) if column),
+    )
+
+
 class _OntologyPlugin:
     kind = OUTPUT_KIND_ONTOLOGY
 
-    _link_required_fields = (
-        "link_type_id",
-        "source_class_id",
-        "target_class_id",
-        "predicate",
-        "cardinality",
-        "source_key_column",
-        "target_key_column",
-        "relationship_spec_type",
-    )
-
     def validate(self, payload: Mapping[str, Any]) -> list[str]:
-        relationship_spec_type = _text(payload, "relationship_spec_type", "relationshipSpecType").lower()
-        has_link_hints = any(
-            _text(payload, field, _camel_case(field))
-            for field in (
-                "link_type_id",
-                "source_class_id",
-                "predicate",
-                "cardinality",
-                "source_key_column",
-                "target_key_column",
-            )
-        )
-        if relationship_spec_type in {"link", "relationship", "edge"} or has_link_hints:
-            missing = [field for field in self._link_required_fields if not _text(payload, field, _camel_case(field))]
-            if missing:
-                return [f"missing required link metadata ({', '.join(missing)})"]
-            return []
-
-        if not _text(payload, "target_class_id", "targetClassId"):
-            return ["target_class_id is required"]
+        try:
+            resolve_ontology_output_semantics(payload)
+        except ValueError as exc:
+            return [str(exc)]
         return []
 
 

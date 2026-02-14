@@ -9,7 +9,7 @@ CQRS read path: Query from Elasticsearch with TerminusDB graph federation
 """
 
 import logging
-from typing import Any, AsyncIterator, Dict, List, Optional
+from typing import Any, AsyncIterator, Dict
 from fastapi import APIRouter, Depends, Query as QueryParam
 from pydantic import BaseModel
 

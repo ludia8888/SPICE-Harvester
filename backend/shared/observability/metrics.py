@@ -11,7 +11,7 @@ from functools import wraps
 from contextlib import contextmanager
 
 from opentelemetry import metrics
-from opentelemetry.metrics import Counter, Histogram, UpDownCounter, ObservableGauge, set_meter_provider
+from opentelemetry.metrics import set_meter_provider
 from prometheus_client import Counter as PrometheusCounter, Histogram as PrometheusHistogram, Gauge
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
@@ -763,7 +763,7 @@ class RequestMetricsMiddleware:
             
             return response
             
-        except Exception as e:
+        except Exception:
             # Record failed request
             duration = time.time() - start_time
             self.metrics.record_request(

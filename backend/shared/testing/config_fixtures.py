@@ -14,13 +14,12 @@ Key features:
 
 import asyncio
 import os
-from typing import Any, Dict, Optional, Type, TypeVar, AsyncGenerator, Generator
+from typing import Any, Dict, Type, TypeVar, AsyncGenerator
 from unittest.mock import Mock, AsyncMock
 import pytest
 from contextlib import asynccontextmanager
 
 from shared.config.settings import ApplicationSettings, Environment, DatabaseSettings, ServiceSettings
-from shared.dependencies import ServiceContainer
 from shared.services.storage.storage_service import StorageService
 from shared.services.storage.redis_service import RedisService
 from shared.services.storage.elasticsearch_service import ElasticsearchService
@@ -286,7 +285,7 @@ class ConfigOverride:
             os.environ[env_key] = str(value)
         return self
     
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, _exc_type, _exc_val, _exc_tb):
         # Restore original environment variables
         for env_key, original_value in self.original_values.items():
             if original_value is None:

@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, Optional
 
-from fastapi import HTTPException, status
+from fastapi import status
 
 from shared.errors.error_types import ErrorCode, classified_http_exception
 

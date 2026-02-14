@@ -6,9 +6,7 @@ This service provides schema versioning capabilities for events and entities,
 ensuring smooth migrations and backward compatibility.
 """
 
-import json
 from typing import Dict, Any, Optional, Callable, List
-from datetime import datetime
 from enum import Enum
 import logging
 

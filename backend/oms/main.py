@@ -30,14 +30,8 @@ from fastapi.responses import JSONResponse
 from shared.config.settings import get_settings, ApplicationSettings
 from shared.dependencies import (
     initialize_container, 
-    get_container, 
     shutdown_container,
     register_core_services
-)
-from shared.dependencies.providers import (
-    RedisServiceDep,
-    ElasticsearchServiceDep,
-    SettingsDep
 )
 
 # Service factory import
@@ -62,7 +56,7 @@ from oms.services.ontology_deployment_registry_v2 import OntologyDeploymentRegis
 from oms.database.postgres import db as postgres_db
 
 # Rate limiting middleware
-from shared.middleware.rate_limiter import rate_limit, RateLimitPresets, RateLimiter
+from shared.middleware.rate_limiter import RateLimiter
 
 # Router imports
 from oms.routers import (

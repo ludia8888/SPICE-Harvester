@@ -299,37 +299,28 @@ def normalize_dataset_output_metadata(
     )
 
 
-def _resolve_default_mode(
+def _resolve_default_runtime_write_mode(
     *,
     execution_semantics: str,
     has_incremental_input: bool,
-    primary_key_columns: List[str],
     incremental_inputs_have_additive_updates: Optional[bool],
     warnings: List[str],
-) -> DatasetWriteMode:
+) -> str:
+    # Foundry default mode is transaction-oriented:
+    # append only when incremental inputs are additive; otherwise snapshot(overwrite).
     if execution_semantics == "streaming":
-        if primary_key_columns:
-            return DatasetWriteMode.APPEND_ONLY_NEW_ROWS
-        warnings.append(
-            "write_mode default resolved to always_append for streaming semantics because primary_key_columns are missing"
-        )
-        return DatasetWriteMode.ALWAYS_APPEND
+        return "append"
 
     if not has_incremental_input:
-        return DatasetWriteMode.SNAPSHOT_REPLACE
+        return "overwrite"
     if incremental_inputs_have_additive_updates is False:
-        return DatasetWriteMode.SNAPSHOT_REPLACE
+        return "overwrite"
     if incremental_inputs_have_additive_updates is None:
         warnings.append(
-            "write_mode default resolved to snapshot_replace because additive incremental update signal is unavailable"
+            "write_mode default resolved to snapshot(overwrite) because additive incremental update signal is unavailable"
         )
-        return DatasetWriteMode.SNAPSHOT_REPLACE
-    if primary_key_columns:
-        return DatasetWriteMode.APPEND_ONLY_NEW_ROWS
-    warnings.append(
-        "write_mode default resolved to always_append because primary_key_columns are missing"
-    )
-    return DatasetWriteMode.ALWAYS_APPEND
+        return "overwrite"
+    return "append"
 
 
 def _normalize_bool(value: Any) -> Optional[bool]:
@@ -418,16 +409,18 @@ def resolve_dataset_write_policy(
         warnings.append(f"unknown write_mode '{effective_write_mode}' normalized to default")
         effective_write_mode = DatasetWriteMode.DEFAULT.value
 
+    resolved_mode = DatasetWriteMode.DEFAULT
+    runtime_write_mode = "overwrite"
     if effective_write_mode == DatasetWriteMode.DEFAULT.value:
-        resolved_mode = _resolve_default_mode(
+        runtime_write_mode = _resolve_default_runtime_write_mode(
             execution_semantics=resolved_execution,
             has_incremental_input=effective_has_incremental_input,
-            primary_key_columns=primary_key_columns,
             incremental_inputs_have_additive_updates=effective_additive_updates,
             warnings=warnings,
         )
     else:
         resolved_mode = DatasetWriteMode(effective_write_mode)
+        runtime_write_mode = _runtime_write_mode(resolved_mode)
 
     output_format = _text(normalized.metadata.get("output_format") or "parquet").lower() or "parquet"
     partition_by = _normalize_partition_by(normalized.metadata.get("partition_by"))
@@ -436,7 +429,7 @@ def resolve_dataset_write_policy(
     policy = ResolvedDatasetWritePolicy(
         requested_write_mode=requested_write_mode,
         resolved_write_mode=resolved_mode,
-        runtime_write_mode=_runtime_write_mode(resolved_mode),
+        runtime_write_mode=runtime_write_mode,
         primary_key_columns=primary_key_columns,
         post_filtering_column=post_filtering_column,
         output_format=output_format,

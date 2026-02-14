@@ -29,6 +29,7 @@ from shared.models.ontology import OntologyCreateRequestBFF
 from shared.models.responses import ApiResponse
 from shared.security.input_sanitizer import (
     SecurityViolationError,
+    sanitize_input,
     validate_class_id,
 )
 from shared.utils.language import get_accept_language

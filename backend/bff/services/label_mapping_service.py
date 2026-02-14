@@ -22,7 +22,6 @@ from pydantic import BaseModel, Field
 from bff.services.oms_client import OMSClient
 from shared.errors.error_envelope import build_error_envelope
 from shared.errors.error_types import ErrorCategory, ErrorCode, classified_http_exception
-from shared.models.requests import ApiResponse
 from shared.observability.request_context import get_correlation_id, get_request_id
 from shared.security.input_sanitizer import SecurityViolationError, sanitize_input
 from shared.utils.label_mapper import LabelMapper

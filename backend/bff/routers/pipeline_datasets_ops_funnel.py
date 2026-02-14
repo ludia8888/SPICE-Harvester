@@ -7,7 +7,7 @@ Small, stable helpers extracted from `bff.routers.pipeline_datasets_ops`.
 import logging
 from typing import Any, Dict, Optional
 
-from fastapi import HTTPException, status
+from fastapi import status
 
 from shared.errors.error_types import ErrorCode, classified_http_exception
 

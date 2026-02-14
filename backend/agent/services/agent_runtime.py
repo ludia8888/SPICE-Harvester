@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import json
 import logging
 import re
@@ -144,7 +143,7 @@ def _extract_retry_after_ms(headers: Dict[str, str]) -> Optional[int]:
             return None
         return seconds * 1000
 
-    with contextlib.suppress(Exception):
+    try:
         dt = parsedate_to_datetime(raw)
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
@@ -152,8 +151,8 @@ def _extract_retry_after_ms(headers: Dict[str, str]) -> Optional[int]:
         if delta_ms <= 0:
             return None
         return delta_ms
-
-    return None
+    except (TypeError, ValueError, OverflowError):
+        return None
 
 def _is_agent_proxy_path(path: str) -> bool:
     normalized = path if path.startswith("/") else f"/{path}"

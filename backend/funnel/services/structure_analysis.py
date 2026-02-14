@@ -2541,7 +2541,6 @@ class FunnelStructureAnalyzer:
     def _pivot_transposed(
         cls, sub: List[List[Any]], *, header_cols: int
     ) -> Tuple[List[str], List[List[Any]], List[int]]:
-        height = len(sub)
         width = max((len(r) for r in sub), default=0)
         header_cols = max(1, header_cols)
 
@@ -2913,10 +2912,11 @@ class FunnelStructureAnalyzer:
         row: int,
         non_empty_in_row: Optional[int],
     ) -> float:
+        _ = (row, non_empty_in_row)
         if inferred_type != DataType.STRING.value:
             return 1.0
 
-        lower = text.lower()
+        text.lower()
         if len(text) >= 80:
             return 0.15
 

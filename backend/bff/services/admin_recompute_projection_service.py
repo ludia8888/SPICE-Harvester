@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, Literal, Optional, Protocol, Tuple
 from uuid import uuid4
 
-from fastapi import BackgroundTasks, HTTPException, Request, status
+from fastapi import BackgroundTasks, Request, status
 from shared.errors.error_types import ErrorCode, classified_http_exception
 
 from bff.routers.admin_task_monitor import monitor_admin_task

@@ -7,7 +7,7 @@ TerminusDB v11.x에서 지원하는 모든 스키마 타입들을 체계적으�
 """
 
 from enum import Enum
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Union
 import logging
 
 logger = logging.getLogger(__name__)
@@ -171,7 +171,11 @@ class TerminusSchemaBuilder:
     def add_one_of_type(self, name: str, type_options: List[str], optional: bool = False) -> "TerminusSchemaBuilder":
         """OneOfType 속성 추가 (Union type)"""
         # 🔥 ULTRA! TerminusDB doesn't support OneOfType - use JSON string instead
-        logger.warning(f"OneOfType not supported by TerminusDB - converting field '{name}' to JSON string")
+        logger.warning(
+            "OneOfType not supported by TerminusDB - converting field '%s' (%s) to JSON string",
+            name,
+            ",".join(type_options) if type_options else "no-options",
+        )
         prop_type = TerminusSchemaType.STRING.value  # Store as JSON string
         if optional:
             prop_type = {"@type": "Optional", "@class": prop_type}

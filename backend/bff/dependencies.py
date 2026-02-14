@@ -17,22 +17,18 @@ Key improvements:
 """
 
 from typing import Any, Dict, List, Optional
-import json
 
 import httpx
-from fastapi import HTTPException, status, Depends
+from fastapi import status, Depends
 
 # Modern dependency injection imports
 from shared.dependencies import get_container, ServiceContainer
 from shared.dependencies.providers import (
-    get_elasticsearch_service,
+    get_elasticsearch_service as get_shared_elasticsearch_service,
     get_jsonld_converter as get_shared_jsonld_converter,
     get_label_mapper as get_shared_label_mapper,
-    get_storage_service,
-    StorageServiceDep,
-    RedisServiceDep,
-    ElasticsearchServiceDep,
-    SettingsDep
+    get_redis_service as get_shared_redis_service,
+    get_storage_service as get_shared_storage_service,
 )
 from shared.config.settings import ApplicationSettings
 from shared.errors.error_envelope import build_error_envelope
@@ -572,6 +568,9 @@ get_oms_client = BFFDependencyProvider.get_oms_client
 get_label_mapper = get_shared_label_mapper
 get_jsonld_converter = get_shared_jsonld_converter
 get_action_log_registry = BFFDependencyProvider.get_action_log_registry
+get_elasticsearch_service = get_shared_elasticsearch_service
+get_storage_service = get_shared_storage_service
+get_redis_service = get_shared_redis_service
 
 
 # Health check function for the modernized dependencies

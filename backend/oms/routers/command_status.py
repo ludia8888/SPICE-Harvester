@@ -11,7 +11,7 @@ import logging
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, HTTPException, status
 
 from oms.dependencies import CommandStatusServiceDep, EventStoreDep, ProcessedEventRegistryDep
 from shared.models.commands import CommandResult, CommandStatus

@@ -11,10 +11,8 @@ Design goals (see docs/LLM_INTEGRATION.md):
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import json
 import logging
-import os
 import re
 import time
 from dataclasses import dataclass
@@ -1113,7 +1111,7 @@ class LLMGateway:
                     total_tokens = int(cached_meta.get("total_tokens") or 0)
                     output_digest = digest_for_audit(cached["data"])
                     if audit_store and audit_partition_key:
-                        with contextlib.suppress(Exception):
+                        try:
                             await audit_store.log(
                                 partition_key=audit_partition_key,
                                 actor=audit_actor,
@@ -1140,6 +1138,8 @@ class LLMGateway:
                                     "cost_estimate": 0.0,
                                 },
                             )
+                        except Exception as exc:
+                            logger.warning("Failed to write LLM cache-hit audit log: %s", exc, exc_info=True)
                     return parsed, LLMCallMeta(
                         provider=provider,
                         model=model_to_use,

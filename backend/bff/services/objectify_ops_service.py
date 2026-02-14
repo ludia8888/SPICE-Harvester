@@ -17,7 +17,6 @@ from shared.utils.schema_columns import (
     extract_schema_type_map as _extract_schema_type_map_raw,
 )
 from shared.utils.schema_hash import compute_schema_hash_from_sample
-from shared.utils.schema_type_compatibility import is_type_compatible as _is_type_compatible
 from shared.utils.objectify_outputs import match_output_name as _match_output_name_raw
 
 _ALLOWED_SOURCE_TYPES = {

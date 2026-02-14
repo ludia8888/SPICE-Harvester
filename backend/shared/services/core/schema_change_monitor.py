@@ -14,8 +14,8 @@ Features:
 import asyncio
 import logging
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List, Optional, Set
-from dataclasses import dataclass, field
+from typing import Any, Callable, Dict, List, Optional
+from dataclasses import dataclass
 
 from shared.errors.error_envelope import build_error_envelope
 from shared.errors.error_types import ErrorCategory, ErrorCode
@@ -23,7 +23,6 @@ from shared.errors.error_types import ErrorCategory, ErrorCode
 from shared.services.core.schema_drift_detector import (
     SchemaDriftDetector,
     SchemaDrift,
-    SchemaDriftConfig,
     ImpactedMapping,
 )
 

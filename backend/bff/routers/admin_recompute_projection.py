@@ -8,7 +8,7 @@ This router is intentionally thin: business logic lives in
 schemas live in `bff.schemas.admin_projection_requests`.
 """
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 from shared.observability.tracing import trace_endpoint
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request, status
@@ -16,7 +16,6 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request, status
 from bff.dependencies import get_elasticsearch_service
 from bff.schemas.admin_projection_requests import RecomputeProjectionRequest, RecomputeProjectionResponse
 from bff.services import admin_recompute_projection_service
-from bff.services.admin_reindex_instances_service import reindex_all_instances
 from shared.dependencies.providers import AuditLogStoreDep, BackgroundTaskManagerDep, LineageStoreDep, RedisServiceDep
 from shared.middleware.rate_limiter import RateLimitPresets, rate_limit
 from shared.services.storage.elasticsearch_service import ElasticsearchService

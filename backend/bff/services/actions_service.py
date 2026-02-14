@@ -12,9 +12,9 @@ from typing import Any, AsyncIterator, Callable, Dict, List, Optional
 from uuid import UUID
 
 import httpx
-from fastapi import HTTPException, Request, status
+from fastapi import Request, status
 
-from shared.errors.error_types import ErrorCode, ErrorCategory, classified_http_exception
+from shared.errors.error_types import ErrorCode, classified_http_exception
 from bff.schemas.actions_requests import ActionSimulateRequest, ActionSubmitRequest
 from bff.services.input_validation_service import sanitized_payload, validated_db_name
 from bff.services.oms_client import OMSClient

@@ -17,7 +17,7 @@ from uuid import UUID, uuid4
 
 from fastapi import HTTPException, Request, status
 
-from shared.errors.error_types import ErrorCategory, ErrorCode, classified_http_exception
+from shared.errors.error_types import ErrorCode, classified_http_exception
 
 from bff.dependencies import LabelMapper, TerminusService
 from bff.services.oms_client import OMSClient

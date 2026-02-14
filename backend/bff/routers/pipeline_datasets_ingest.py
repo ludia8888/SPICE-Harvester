@@ -8,7 +8,6 @@ from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
-import bff.routers.pipeline_datasets_ops as ops
 from bff.routers.pipeline_datasets_ops import (
     _compute_funnel_analysis_from_sample,
 )

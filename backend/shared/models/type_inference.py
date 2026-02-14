@@ -7,7 +7,6 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from shared.models.common import DataType
 
 
 def _default_risk_policy() -> Dict[str, Any]:

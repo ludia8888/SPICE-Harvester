@@ -12,9 +12,10 @@ Features:
 - Test-friendly mocking support
 """
 
+import logging
 from typing import Annotated, Optional
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, status
 
 from shared.errors.error_types import ErrorCode, classified_http_exception
 

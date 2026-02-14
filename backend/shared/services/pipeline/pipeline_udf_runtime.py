@@ -3,7 +3,7 @@ from __future__ import annotations
 import ast
 import hashlib
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Mapping, MutableMapping, Optional, Protocol
+from typing import Any, Callable, Dict, Iterable, List, Mapping, MutableMapping, Optional, Protocol
 
 
 class PipelineUdfError(ValueError):
@@ -211,7 +211,22 @@ def validate_udf_output_schema(payload: Any) -> Dict[str, Any]:
     return normalized
 
 
-def compile_udf(code: str) -> Callable[[Dict[str, Any]], Dict[str, Any]]:
+def normalize_udf_output_rows(payload: Any) -> List[Dict[str, Any]]:
+    if payload is None:
+        return []
+    if isinstance(payload, dict):
+        return [validate_udf_output_schema(payload)]
+    if isinstance(payload, (str, bytes)):
+        raise PipelineUdfError("UDF transform(row) must return dict or list[dict]")
+    if isinstance(payload, Iterable):
+        rows: List[Dict[str, Any]] = []
+        for item in payload:
+            rows.append(validate_udf_output_schema(item))
+        return rows
+    raise PipelineUdfError("UDF transform(row) must return dict or list[dict]")
+
+
+def compile_udf(code: str) -> Callable[[Dict[str, Any]], List[Dict[str, Any]]]:
     return compile_row_udf(code)
 
 
@@ -230,12 +245,12 @@ def _normalize_udf_source(code: str) -> str:
     return normalized
 
 
-def compile_row_udf(code: str) -> Callable[[Dict[str, Any]], Dict[str, Any]]:
+def compile_row_udf(code: str) -> Callable[[Dict[str, Any]], List[Dict[str, Any]]]:
     """
     Compile a Python UDF for row-level transforms.
 
     Contract:
-    - user must define `transform(row)` where row is a dict and return a dict
+    - user must define `transform(row)` where row is a dict and return dict or list[dict]
     - imports are not allowed
     """
 
@@ -258,8 +273,8 @@ def compile_row_udf(code: str) -> Callable[[Dict[str, Any]], Dict[str, Any]]:
     if not callable(fn):
         raise PipelineUdfError("UDF must define callable transform(row)")
 
-    def _wrapped(row: Dict[str, Any]) -> Dict[str, Any]:
+    def _wrapped(row: Dict[str, Any]) -> List[Dict[str, Any]]:
         out = fn(dict(row))
-        return validate_udf_output_schema(out)
+        return normalize_udf_output_rows(out)
 
     return _wrapped

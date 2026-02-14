@@ -5,7 +5,7 @@
 
 import logging
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from shared.models.ontology import Cardinality, Relationship
 

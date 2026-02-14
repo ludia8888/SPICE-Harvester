@@ -4,12 +4,12 @@
 """
 
 import logging
-from collections import defaultdict, deque
+from collections import defaultdict
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set
 
-from shared.models.ontology import OntologyResponse, Relationship
+from shared.models.ontology import OntologyResponse
 from oms.utils.cardinality_utils import inverse_cardinality
 
 logger = logging.getLogger(__name__)

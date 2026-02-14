@@ -10,7 +10,7 @@ import time
 from typing import Optional, Dict, Any, Callable
 from datetime import datetime, timezone
 
-from shared.models.sync_wrapper import SyncOptions, SyncResult, TimeoutError
+from shared.models.sync_wrapper import SyncOptions, SyncResult
 from shared.models.commands import CommandStatus
 from shared.services.core.command_status_service import CommandStatusService
 
@@ -47,7 +47,6 @@ class SyncWrapperService:
         """
         start_time = time.time()
         progress_history = [] if options.include_progress else None
-        last_status = CommandStatus.PENDING
         retry_count = 0
         
         try:
@@ -82,7 +81,7 @@ class SyncWrapperService:
             # 마지막 상태 확인
             last_details = await self.command_status_service.get_command_details(command_id)
             if last_details:
-                last_status = last_details["status"]
+                last_details["status"]
                 
             # 타임아웃 결과 반환
             return SyncResult(

@@ -5,7 +5,6 @@ httpx를 사용한 비동기 TerminusDB 클라이언트 구현
 """
 
 import asyncio
-import json
 import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -14,7 +13,6 @@ import httpx
 
 from oms.exceptions import (
     ConnectionError,
-    CriticalDataLossRisk,
     DuplicateOntologyError,
     OntologyNotFoundError,
     OntologyValidationError,
@@ -25,31 +23,20 @@ from oms.utils.terminus_retry import build_async_retry
 from oms.utils.circular_reference_detector import CircularReferenceDetector
 from oms.utils.relationship_path_tracker import PathQuery, PathType, RelationshipPathTracker
 from oms.validators.relationship_validator import RelationshipValidator, ValidationSeverity
-from shared.models.common import DataType
 from shared.models.config import ConnectionConfig
-from shared.models.ontology import OntologyBase, OntologyResponse, Relationship, Property
+from shared.models.ontology import OntologyBase, OntologyResponse, Relationship
 
 # Import new relationship management components
 from .relationship_manager import RelationshipManager
 from .property_to_relationship_converter import PropertyToRelationshipConverter
 
 # Import new TerminusDB schema type support
-from oms.utils.terminus_schema_types import (
-    TerminusSchemaBuilder, 
-    TerminusSchemaConverter, 
-    TerminusConstraintProcessor,
-    create_basic_class_schema,
-    create_subdocument_schema,
-    convert_simple_schema
-)
 
 # Import constraint and default value extraction
-from oms.utils.constraint_extractor import ConstraintExtractor
 from shared.observability.tracing import trace_external_call
 
 # Import modular TerminusDB services
 from .terminus import (
-    BaseTerminusService,
     DatabaseService,
     QueryService,
     InstanceService,
@@ -345,7 +332,10 @@ class AsyncTerminusService:
         """
         if not class_id:
             return await self.ontology_service.list_ontologies(db_name, branch=branch, limit=1000, offset=0)
-        return await self.ontology_service.get_ontology(db_name, class_id, branch=branch)
+        result = await self.ontology_service.get_ontology(db_name, class_id, branch=branch)
+        if result is None and raise_if_missing:
+            raise OntologyNotFoundError(f"Ontology not found: {class_id}")
+        return result
 
     @trace_external_call("oms.terminus.create_ontology")
     async def create_ontology(
@@ -1009,6 +999,6 @@ class AsyncTerminusService:
         """Async context manager entry"""
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
+    async def __aexit__(self, _exc_type, _exc_val, _exc_tb):
         """Async context manager exit"""
         await self.close()

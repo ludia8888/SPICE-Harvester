@@ -379,14 +379,12 @@ async def execute_graph_query(
 
         # Apply server-side merge fallback for DEGRADED overlay
         effective_overlay_status = ctx.overlay_status
-        writeback_edits_present: Optional[bool] = None
         if degraded_fallback and query.include_documents:
             try:
                 merged_nodes, edits_found = await _merge_fallback_for_degraded(
                     db_name=db_name, ctx=ctx, documents=filtered_nodes,
                 )
                 filtered_nodes = merged_nodes
-                writeback_edits_present = edits_found
                 effective_overlay_status = "DEGRADED"
                 # Rebuild allowed_ids after merge (tombstoned nodes removed)
                 allowed_ids = {str(n.get("id")) for n in filtered_nodes if isinstance(n, dict)}

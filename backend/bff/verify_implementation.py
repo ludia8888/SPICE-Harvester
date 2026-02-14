@@ -5,8 +5,6 @@ think ultra! 실제로 작동하는 구현의 핵심 기능들 검증
 """
 
 import asyncio
-import importlib.util
-import json
 import logging
 
 
@@ -24,7 +22,7 @@ def test_core_conflict_system():
         import sys
         import os
         sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-        from bff.utils.conflict_converter import ConflictConverter, ConflictSeverity, PathType
+        from bff.utils.conflict_converter import ConflictConverter, ConflictSeverity
 
         converter = ConflictConverter()
         print("✅ ConflictConverter import successful")

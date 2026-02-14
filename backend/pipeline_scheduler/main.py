@@ -7,7 +7,6 @@ Polls pipeline registry for scheduled pipelines and enqueues jobs.
 from __future__ import annotations
 
 import asyncio
-import logging
 
 from shared.config.settings import get_settings
 from shared.observability.metrics import get_metrics_collector

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Awaitable, Dict, List, Callable, Optional
+from typing import Any, Awaitable, Dict, Callable
 
 from shared.errors.error_types import ErrorCategory, ErrorCode
 from shared.observability.tracing import trace_external_call

@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from ..models.common import DataType
-from .base_validator import ValidationResult
 import logging
 
 

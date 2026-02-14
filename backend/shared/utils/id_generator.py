@@ -4,7 +4,6 @@ ID Generator 유틸리티
 """
 
 import re
-import time
 import unicodedata
 from datetime import datetime
 from typing import Any, Dict, Optional, Union

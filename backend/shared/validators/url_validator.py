@@ -7,7 +7,6 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 import logging
 
-from ..models.common import DataType
 from .base_validator import BaseValidator, ValidationResult
 
 logger = logging.getLogger(__name__)

@@ -158,6 +158,7 @@ class KafkaEOSConfig:
         return {
             'retention.ms': str(retention_ms),
             'min.insync.replicas': str(min_insync_replicas),
+            'replication.factor': str(replication_factor),
             'compression.type': 'snappy',
             'cleanup.policy': 'delete',
             'segment.ms': str(86400000),  # 1 day segments

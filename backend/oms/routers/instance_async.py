@@ -12,24 +12,18 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status, 
 from pydantic import BaseModel, Field
 
 from oms.dependencies import (
-    JSONLDConverterDep,
-    LabelMapperDep,
     TerminusServiceDep,
     EventStoreDep,  # Added for S3/MinIO Event Store
     CommandStatusServiceDep,
     ProcessedEventRegistryDep,
-    ValidatedDatabaseName,
     ValidatedClassId,
     ensure_database_exists
 )
 from oms.routers._event_sourcing import append_event_sourcing_command, build_command_status_metadata
-from shared.dependencies.providers import RedisServiceDep
 from shared.config.app_config import AppConfig
 from shared.models.commands import CommandType, InstanceCommand, CommandResult, CommandStatus
-from shared.models.common import BaseResponse
 from shared.services.core.command_status_service import CommandStatusService
 from shared.services.registries.processed_event_registry import ProcessedEventRegistry
-from shared.services.storage.redis_service import RedisService
 from shared.utils.ontology_version import resolve_ontology_version
 from oms.utils.command_status_utils import map_registry_status
 from oms.utils.ontology_stamp import merge_ontology_stamp
@@ -37,8 +31,6 @@ from shared.security.input_sanitizer import (
     SecurityViolationError,
     sanitize_input,
     validate_branch_name,
-    validate_class_id,
-    validate_db_name,
     validate_instance_id,
 )
 from shared.errors.error_types import ErrorCode, classified_http_exception

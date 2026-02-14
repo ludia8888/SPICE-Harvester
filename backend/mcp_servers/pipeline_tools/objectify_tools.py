@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, Awaitable, Dict, List, Optional, Callable
+from typing import Any, Awaitable, Dict, List, Callable
 
 from shared.errors.error_types import ErrorCategory, ErrorCode
 from shared.observability.tracing import trace_external_call

@@ -40,12 +40,22 @@ def spark() -> SparkSession:
     if java_home and os.path.exists(java_home):
         os.environ.setdefault("JAVA_HOME", java_home)
         os.environ.setdefault("PATH", f"{java_home}/bin:" + os.environ.get("PATH", ""))
+    backend_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+    current_pythonpath = os.environ.get("PYTHONPATH", "")
+    pythonpath_entries = [entry for entry in current_pythonpath.split(os.pathsep) if entry]
+    if backend_root not in pythonpath_entries:
+        os.environ["PYTHONPATH"] = (
+            backend_root
+            if not current_pythonpath
+            else backend_root + os.pathsep + current_pythonpath
+        )
     os.environ.setdefault("PYSPARK_PYTHON", sys.executable)
     os.environ.setdefault("PYSPARK_DRIVER_PYTHON", sys.executable)
     builder = (
         SparkSession.builder.master("local[1]")
         .appName("pipeline-worker-advanced-transform-tests")
         .config("spark.ui.enabled", "false")
+        .config("spark.executorEnv.PYTHONPATH", os.environ.get("PYTHONPATH", ""))
     )
     try:
         session = builder.getOrCreate()
@@ -346,6 +356,34 @@ def test_stream_join_left_lookup_selects_single_latest_right_row_without_event_t
     assert matched_rows[0]["right_val"] == "right-latest"
 
 
+@pytest.mark.unit
+def test_stream_join_static_defaults_to_left_join_semantics(worker: PipelineWorker) -> None:
+    left = worker.spark.createDataFrame(
+        [(1, "left-a"), (2, "left-b")],
+        ["id", "left_val"],
+    )
+    right = worker.spark.createDataFrame(
+        [(1, "right-a"), (3, "right-c")],
+        ["id", "right_val"],
+    )
+
+    out = worker._apply_transform(
+        {
+            "operation": "streamJoin",
+            "joinType": "inner",
+            "leftKeys": ["id"],
+            "rightKeys": ["id"],
+            "streamJoin": {"strategy": "static"},
+        },
+        [left, right],
+        {},
+    )
+    rows = out.orderBy("id").collect()
+    assert len(rows) == 2
+    assert rows[0]["id"] == 1 and rows[0]["right_val"] == "right-a"
+    assert rows[1]["id"] == 2 and rows[1]["right_val"] is None
+
+
 class _StorageStub:
     def __init__(self) -> None:
         self.created_buckets: list[str] = []
@@ -394,7 +432,9 @@ async def test_materialize_output_dataframe_rejects_partitioned_json(worker: Pip
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_materialize_dataset_output_fails_on_duplicate_primary_keys(worker: PipelineWorker) -> None:
+async def test_materialize_dataset_output_deduplicates_duplicate_primary_keys_for_append_only_new_rows(
+    worker: PipelineWorker,
+) -> None:
     storage = _StorageStub()
     worker.storage = storage  # type: ignore[assignment]
     df = worker.spark.createDataFrame(
@@ -405,29 +445,205 @@ async def test_materialize_dataset_output_fails_on_duplicate_primary_keys(worker
         ["id", "name"],
     )
 
-    with pytest.raises(ValueError) as exc_info:
-        await worker._materialize_dataset_output(
-            output_metadata={
-                "write_mode": "append_only_new_rows",
-                "primary_key_columns": ["id"],
-                "output_format": "parquet",
-            },
-            df=df,
-            artifact_bucket="bucket-dataset",
-            prefix="pipeline/dataset-output",
-            db_name=None,
-            branch=None,
-            dataset_name="dataset_output",
-            execution_semantics="streaming",
-            incremental_inputs_have_additive_updates=True,
-            write_mode="append",
-            file_prefix=None,
-            file_format="parquet",
-            partition_cols=None,
-            base_row_count=2,
-        )
+    result = await worker._materialize_dataset_output(
+        output_metadata={
+            "write_mode": "append_only_new_rows",
+            "primary_key_columns": ["id"],
+            "output_format": "parquet",
+        },
+        df=df,
+        artifact_bucket="bucket-dataset",
+        prefix="pipeline/dataset-output",
+        db_name=None,
+        branch=None,
+        dataset_name="dataset_output",
+        execution_semantics="streaming",
+        incremental_inputs_have_additive_updates=True,
+        write_mode="append",
+        file_prefix=None,
+        file_format="parquet",
+        partition_cols=None,
+        base_row_count=2,
+    )
 
-    assert "Duplicate primary_key_columns detected for write_mode=append_only_new_rows" in str(exc_info.value)
+    assert result["delta_row_count"] == 1
+    assert result["runtime_write_mode"] == "append"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_materialize_dataset_output_changelog_appends_only_new_or_changed_rows(worker: PipelineWorker) -> None:
+    storage = _StorageStub()
+    worker.storage = storage  # type: ignore[assignment]
+
+    incoming = worker.spark.createDataFrame(
+        [
+            (1, "same"),
+            (2, "changed"),
+            (3, "new"),
+        ],
+        ["id", "name"],
+    )
+    existing = worker.spark.createDataFrame(
+        [
+            (1, "same"),
+            (2, "before"),
+        ],
+        ["id", "name"],
+    )
+
+    async def _fake_load_existing_output_dataset(**kwargs):  # noqa: ANN003
+        _ = kwargs
+        return existing
+
+    worker._load_existing_output_dataset = _fake_load_existing_output_dataset  # type: ignore[assignment]
+
+    result = await worker._materialize_dataset_output(
+        output_metadata={
+            "write_mode": "changelog",
+            "primary_key_columns": ["id"],
+            "output_format": "parquet",
+        },
+        df=incoming,
+        artifact_bucket="bucket-dataset",
+        prefix="pipeline/dataset-output",
+        db_name="demo",
+        branch="main",
+        dataset_name="dataset_output",
+        execution_semantics="incremental",
+        incremental_inputs_have_additive_updates=True,
+        write_mode="append",
+        file_prefix=None,
+        file_format="parquet",
+        partition_cols=None,
+        base_row_count=3,
+    )
+    assert result["delta_row_count"] == 2
+    assert result["runtime_write_mode"] == "append"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_materialize_dataset_output_snapshot_difference_keeps_current_transaction_duplicates(
+    worker: PipelineWorker,
+) -> None:
+    storage = _StorageStub()
+    worker.storage = storage  # type: ignore[assignment]
+
+    incoming = worker.spark.createDataFrame(
+        [
+            (1, "changed-but-existing"),
+            (2, "new-a"),
+            (2, "new-b"),
+        ],
+        ["id", "name"],
+    )
+    existing = worker.spark.createDataFrame(
+        [
+            (1, "before"),
+        ],
+        ["id", "name"],
+    )
+
+    async def _fake_load_existing_output_dataset(**kwargs):  # noqa: ANN003
+        _ = kwargs
+        return existing
+
+    worker._load_existing_output_dataset = _fake_load_existing_output_dataset  # type: ignore[assignment]
+
+    result = await worker._materialize_dataset_output(
+        output_metadata={
+            "write_mode": "snapshot_difference",
+            "primary_key_columns": ["id"],
+            "output_format": "parquet",
+        },
+        df=incoming,
+        artifact_bucket="bucket-dataset",
+        prefix="pipeline/dataset-output",
+        db_name="demo",
+        branch="main",
+        dataset_name="dataset_output",
+        execution_semantics="incremental",
+        incremental_inputs_have_additive_updates=True,
+        write_mode="append",
+        file_prefix=None,
+        file_format="parquet",
+        partition_cols=None,
+        base_row_count=3,
+    )
+    assert result["delta_row_count"] == 2
+    assert result["runtime_write_mode"] == "overwrite"
+    assert storage.deleted_prefixes == [("bucket-dataset", "pipeline/dataset-output")]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_materialize_dataset_output_default_incremental_without_additive_signal_uses_snapshot_runtime(
+    worker: PipelineWorker,
+) -> None:
+    storage = _StorageStub()
+    worker.storage = storage  # type: ignore[assignment]
+    df = worker.spark.createDataFrame([(1, "a"), (2, "b")], ["id", "name"])
+
+    result = await worker._materialize_dataset_output(
+        output_metadata={
+            "primary_key_columns": ["id"],
+            "output_format": "parquet",
+        },
+        df=df,
+        artifact_bucket="bucket-dataset",
+        prefix="pipeline/dataset-output",
+        db_name="demo",
+        branch="main",
+        dataset_name="dataset_output",
+        execution_semantics="incremental",
+        incremental_inputs_have_additive_updates=None,
+        write_mode="append",
+        file_prefix=None,
+        file_format="parquet",
+        partition_cols=None,
+        base_row_count=2,
+    )
+
+    assert result["write_mode_requested"] == "default"
+    assert result["write_mode_resolved"] == "default"
+    assert result["runtime_write_mode"] == "overwrite"
+    assert storage.deleted_prefixes == [("bucket-dataset", "pipeline/dataset-output")]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_materialize_dataset_output_default_incremental_additive_updates_uses_append_runtime(
+    worker: PipelineWorker,
+) -> None:
+    storage = _StorageStub()
+    worker.storage = storage  # type: ignore[assignment]
+    df = worker.spark.createDataFrame([(1, "a"), (2, "b")], ["id", "name"])
+
+    result = await worker._materialize_dataset_output(
+        output_metadata={
+            "primary_key_columns": ["id"],
+            "output_format": "parquet",
+        },
+        df=df,
+        artifact_bucket="bucket-dataset",
+        prefix="pipeline/dataset-output",
+        db_name="demo",
+        branch="main",
+        dataset_name="dataset_output",
+        execution_semantics="incremental",
+        incremental_inputs_have_additive_updates=True,
+        write_mode="append",
+        file_prefix=None,
+        file_format="parquet",
+        partition_cols=None,
+        base_row_count=2,
+    )
+
+    assert result["write_mode_requested"] == "default"
+    assert result["write_mode_resolved"] == "default"
+    assert result["runtime_write_mode"] == "append"
+    assert storage.deleted_prefixes == []
 
 
 @pytest.mark.unit
@@ -572,6 +788,31 @@ def transform(row):
     rows = out.orderBy("id").collect()
     assert rows[0]["value_upper"] == "A"
     assert rows[1]["value_upper"] == "B"
+
+
+@pytest.mark.unit
+def test_udf_transform_supports_flat_map_rows(worker: PipelineWorker) -> None:
+    df = worker.spark.createDataFrame([(1,), (2,)], ["id"])
+    code = """
+def transform(row):
+    base = int(row["id"])
+    return [
+        {"id": base, "variant": "left"},
+        {"id": base, "variant": "right"},
+    ]
+"""
+    out = worker._apply_transform(
+        {
+            "operation": "udf",
+            "__resolved_udf_code": code,
+        },
+        [df],
+        {},
+    )
+    rows = out.orderBy("id", "variant").collect()
+    assert len(rows) == 4
+    assert rows[0]["variant"] == "left"
+    assert rows[1]["variant"] == "right"
 
 
 @pytest.mark.unit

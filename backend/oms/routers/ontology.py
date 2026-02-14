@@ -4,7 +4,6 @@ OMS 온톨로지 라우터 - 내부 ID 기반 온톨로지 관리
 
 import logging
 import hmac
-from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status, Path, Query
@@ -12,9 +11,6 @@ from fastapi.responses import JSONResponse
 
 # Modernized dependency injection imports
 from oms.dependencies import (
-    get_jsonld_converter, 
-    get_label_mapper, 
-    get_terminus_service,
     TerminusServiceDep,
     JSONLDConverterDep,
     LabelMapperDep,
@@ -26,7 +22,6 @@ from oms.dependencies import (
 )
 from oms.routers._event_sourcing import append_event_sourcing_command, build_command_status_metadata
 from shared.models.commands import CommandType, OntologyCommand
-from shared.models.events import EventType
 from shared.config.app_config import AppConfig
 from shared.utils.ontology_version import resolve_ontology_version
 from shared.utils.language import coerce_localized_text, get_accept_language, select_localized_text
@@ -51,7 +46,6 @@ from oms.services.ontology_resources import OntologyResourceService
 from oms.services.property_to_relationship_converter import PropertyToRelationshipConverter
 from oms.validation_codes import OntologyValidationCode as OVC
 from shared.utils.jsonld import JSONToJSONLDConverter
-from shared.utils.label_mapper import LabelMapper
 from shared.models.common import BaseResponse
 from shared.models.requests import ApiResponse
 from shared.errors.error_envelope import build_error_envelope
@@ -59,7 +53,6 @@ from shared.errors.error_types import ErrorCategory, ErrorCode, classified_http_
 
 # shared 모델 import
 from shared.models.ontology import (
-    OntologyBase,
     OntologyCreateRequest,
     OntologyResponse,
     OntologyUpdateRequest,
@@ -81,7 +74,6 @@ from shared.observability.tracing import trace_endpoint
 
 # Rate limiting import
 from shared.middleware.rate_limiter import rate_limit, RateLimitPresets
-from shared.config.rate_limit_config import RateLimitConfig, EndpointCategory
 from shared.config.settings import get_settings
 from shared.security.auth_utils import extract_presented_token, get_expected_token
 from shared.utils.branch_utils import get_protected_branches, protected_branch_write_message
@@ -537,7 +529,7 @@ async def create_ontology(
         description_i18n = coerce_localized_text(raw_description) if raw_description is not None else {}
 
         label_display = select_localized_text(label_i18n, lang=lang) or str(ontology_data.get("id") or "Unknown")
-        description_display = (
+        (
             select_localized_text(description_i18n, lang=lang) if description_i18n else None
         )
 
@@ -799,8 +791,7 @@ async def create_ontology(
         import traceback
         from oms.services.async_terminus import DuplicateOntologyError, OntologyNotFoundError, OntologyValidationError
         
-        error_msg = f"Failed to create ontology: {e}"
-        traceback_str = traceback.format_exc()
+        traceback.format_exc()
         
         # 에러 타입에 따른 적절한 HTTP 상태 코드 반환
         if isinstance(e, DuplicateOntologyError) or "DocumentIdAlreadyExists" in str(e):
@@ -1169,6 +1160,7 @@ async def analyze_relationship_network(
 @router.get("/{class_id}")
 @trace_endpoint("oms.ontology.get")
 async def get_ontology(
+    request: Request,
     db_name: str = Depends(ensure_database_exists),
     class_id: str = Depends(ValidatedClassId),
     branch: str = Query("main", description="Target branch (default: main)"),
@@ -1543,7 +1535,7 @@ async def update_ontology(
                 created_by=actor,
             )
 
-            envelope = await append_event_sourcing_command(
+            await append_event_sourcing_command(
                 event_store=event_store,
                 command=command,
                 actor=actor,

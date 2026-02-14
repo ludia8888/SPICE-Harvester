@@ -15,23 +15,6 @@ from bff.routers.ontology_imports import router as imports_router
 from bff.routers.ontology_metadata import router as metadata_router
 from bff.routers.ontology_relationships import router as relationships_router
 from bff.routers.ontology_suggestions import router as suggestions_router
-from bff.routers.ontology_ops import (
-    _build_sample_data_from_preview,
-    _build_source_schema_from_preview,
-    _extract_target_field_types_from_import_schema,
-    _localized_to_string,
-    _normalize_mapping_type,
-    _transform_properties_for_oms,
-)
-from bff.schemas.ontology_requests import (
-    ImportFieldMapping,
-    ImportFromGoogleSheetsRequest,
-    ImportTargetField,
-    MappingFromGoogleSheetsRequest,
-    MappingSuggestionRequest,
-    SchemaFromDataRequest,
-    SchemaFromGoogleSheetsRequest,
-)
 
 router = APIRouter(tags=["Ontology Management"])
 

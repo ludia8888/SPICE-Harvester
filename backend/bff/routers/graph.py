@@ -8,7 +8,7 @@ import logging
 from typing import Any, Dict, List, Optional
 from shared.observability.tracing import trace_endpoint
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, Query, Request, status
 
 from shared.errors.error_types import ErrorCode, classified_http_exception
 from pydantic import BaseModel

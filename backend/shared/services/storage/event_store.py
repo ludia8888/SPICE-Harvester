@@ -16,7 +16,7 @@ the canonical SSoT without importing other service packages.
 import json
 import asyncio
 from datetime import datetime, timezone
-from typing import List, AsyncIterator, Optional, Dict, Any, AsyncGenerator
+from typing import List, AsyncIterator, Optional, Dict, Any
 from datetime import timedelta
 import hashlib
 from urllib.parse import urlparse

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any, Iterable, Optional, Set
+from typing import Any, Optional, Set
 
 
 class PrincipalPolicyError(ValueError):
     pass
+
+
+_SUPPORTED_PRINCIPAL_PREFIXES = {"user", "group", "role", "service"}
 
 
 def build_principal_tags(
@@ -45,14 +47,40 @@ def policy_allows(*, policy: Any, principal_tags: Set[str]) -> bool:
     if effect not in {"ALLOW", "DENY"}:
         effect = "ALLOW"
 
-    principals = policy.get("principals")
-    if principals is None:
-        principals = []
-    if isinstance(principals, str):
-        principals = [p.strip() for p in principals.split(",") if p.strip()]
-    if not isinstance(principals, list):
-        principals = []
-    principal_set = {str(p).strip() for p in principals if str(p).strip()}
+    def _normalize_policy_principals(raw: Any, *, default_prefix: Optional[str] = None) -> Set[str]:
+        values: list[str] = []
+        if isinstance(raw, str):
+            values = [part.strip() for part in raw.split(",")]
+        elif isinstance(raw, list):
+            values = [str(part).strip() for part in raw]
+        else:
+            return set()
+
+        normalized: Set[str] = set()
+        for value in values:
+            if not value:
+                continue
+            if ":" in value:
+                prefix, remainder = value.split(":", 1)
+                pfx = str(prefix).strip().lower()
+                rem = str(remainder).strip()
+                if pfx in _SUPPORTED_PRINCIPAL_PREFIXES and rem:
+                    normalized.add(f"{pfx}:{rem}")
+                    continue
+            if default_prefix:
+                normalized.add(f"{default_prefix}:{value}")
+        return normalized
+
+    principal_set: Set[str] = set()
+    principal_set.update(_normalize_policy_principals(policy.get("principals")))
+    principal_set.update(_normalize_policy_principals(policy.get("roles"), default_prefix="role"))
+    principal_set.update(_normalize_policy_principals(policy.get("users"), default_prefix="user"))
+    principal_set.update(_normalize_policy_principals(policy.get("groups"), default_prefix="group"))
+    principal_set.update(_normalize_policy_principals(policy.get("services"), default_prefix="service"))
+
+    if any(policy.get(key) not in (None, "", [], {}) for key in ("scopes", "rules", "policy")):
+        # Runtime supports principal/tag-based policy only.
+        return False
 
     if not principal_set:
         return effect != "ALLOW"

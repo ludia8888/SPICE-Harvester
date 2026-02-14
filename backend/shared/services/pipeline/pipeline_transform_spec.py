@@ -186,7 +186,8 @@ def resolve_stream_join_spec(metadata: Dict[str, Any]) -> StreamJoinSpec:
 def resolve_stream_join_effective_join_type(*, strategy: str, requested_join_type: str) -> str:
     strategy_norm = str(strategy or "dynamic").strip().lower() or "dynamic"
     requested_norm = str(requested_join_type or "").strip().lower()
-    if strategy_norm == "left_lookup":
+    if strategy_norm in {"left_lookup", "static"}:
+        # Foundry stream+lookup/static behavior is left-preserving; enforce left semantics.
         return "left"
     if requested_norm in {"full", "outer", "full_outer", "fullouter"}:
         return "full"

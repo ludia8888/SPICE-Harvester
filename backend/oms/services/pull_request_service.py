@@ -234,7 +234,7 @@ class PullRequestService(BaseTerminusService):
             }
             
             try:
-                result = await self._make_request("POST", endpoint, rebase_data)
+                await self._make_request("POST", endpoint, rebase_data)
                 # If dry run succeeds, no conflicts
                 return None
             except Exception as e:

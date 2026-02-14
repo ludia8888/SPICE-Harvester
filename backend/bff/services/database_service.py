@@ -14,7 +14,7 @@ import httpx
 from fastapi import HTTPException, Request, status
 from fastapi.responses import JSONResponse
 
-from shared.errors.error_types import ErrorCode, ErrorCategory, classified_http_exception
+from shared.errors.error_types import ErrorCode, classified_http_exception
 
 from bff.services.database_error_policy import MessageErrorPolicy, apply_message_error_policies
 from bff.services.oms_client import OMSClient

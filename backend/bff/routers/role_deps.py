@@ -9,7 +9,7 @@ try/except logic across routers.
 from collections.abc import Callable
 from typing import Any
 
-from fastapi import HTTPException, Request, status
+from fastapi import Request, status
 
 from shared.errors.error_types import ErrorCode, classified_http_exception
 

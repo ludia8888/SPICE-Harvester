@@ -18,7 +18,7 @@ from datetime import date, datetime, time
 from decimal import Decimal
 from io import BytesIO
 import re
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from shared.models.sheet_grid import SheetGrid
 from shared.models.structure_analysis import MergeRange

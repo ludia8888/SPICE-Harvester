@@ -13,9 +13,9 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import uuid4
 
-from fastapi import HTTPException, Request, status
+from fastapi import Request, status
 
-from shared.errors.error_types import ErrorCode, ErrorCategory, classified_http_exception
+from shared.errors.error_types import ErrorCode, classified_http_exception
 from shared.errors.legacy_codes import LegacyErrorCode
 
 from bff.schemas.link_types_requests import (

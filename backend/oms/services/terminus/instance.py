@@ -169,14 +169,12 @@ class InstanceService(DatabaseBackedTerminusService):
             if instance_id and instance_id not in candidates:
                 candidates.append(instance_id)
 
-            last_error: Optional[Exception] = None
             for doc_id in candidates:
                 params = {"graph_type": "instance", "id": doc_id}
                 try:
                     result = await self._make_request("GET", endpoint, params=params)
                 except ValueError as e:
                     # Treat "not found" as a miss and try the next candidate.
-                    last_error = e
                     msg = str(e).lower()
                     if "404" in msg or "not found" in msg or "documentnotfound" in msg:
                         continue

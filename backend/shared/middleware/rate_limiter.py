@@ -9,7 +9,7 @@ import hashlib
 import time
 from typing import Optional, Dict, Any, Tuple, Mapping
 from functools import wraps
-from fastapi import FastAPI, Request, HTTPException, status
+from fastapi import FastAPI, Request, status
 import redis.asyncio as redis
 
 from shared.config.settings import get_settings

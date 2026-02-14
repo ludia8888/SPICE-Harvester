@@ -1,5 +1,4 @@
 
-from bff.routers.registry_deps import get_agent_policy_registry
 from shared.services.registries.dataset_profile_registry import DatasetProfileRegistry
 from shared.services.registries.pipeline_plan_registry import PipelinePlanRegistry
 

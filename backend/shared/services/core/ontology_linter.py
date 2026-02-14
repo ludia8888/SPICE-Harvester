@@ -452,6 +452,36 @@ def lint_ontology_update(
             )
         )
 
+    existing_rel_pairs = {
+        (rel.predicate, rel.target)
+        for rel in (existing_relationships or [])
+        if getattr(rel, "predicate", None) and getattr(rel, "target", None)
+    }
+    updated_rel_pairs = {
+        (rel.predicate, rel.target)
+        for rel in (updated_relationships or [])
+        if getattr(rel, "predicate", None) and getattr(rel, "target", None)
+    }
+    removed_relationships = sorted(existing_rel_pairs - updated_rel_pairs)
+    if removed_relationships:
+        warnings.append(
+            _issue(
+                LintSeverity.WARNING,
+                "ONT904",
+                m(
+                    en="Removing relationships is a high-risk change. (impacts traversals and join paths)",
+                    ko="관계 삭제는 고위험 변경입니다. (탐색 경로 및 조인 경로에 영향)",
+                ),
+                path="relationships",
+                metadata={
+                    "removed_relationships": [
+                        {"predicate": predicate, "target": target}
+                        for predicate, target in removed_relationships
+                    ]
+                },
+            )
+        )
+
     type_changes: List[Tuple[str, str, str]] = []
     required_changes: List[Tuple[str, bool, bool]] = []
     for name in sorted(set(existing_by_name) & set(updated_by_name)):

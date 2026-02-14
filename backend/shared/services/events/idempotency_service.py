@@ -6,7 +6,6 @@ This service provides idempotency guarantees for event processing,
 preventing duplicate event processing in distributed systems.
 """
 
-import asyncio
 import json
 import hashlib
 from typing import Optional, Dict, Any, Tuple

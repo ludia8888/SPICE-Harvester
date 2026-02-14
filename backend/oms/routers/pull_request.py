@@ -8,13 +8,12 @@ Following SOLID principles:
 """
 
 import logging
-from typing import Optional, List
+from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, ConfigDict
 
-from oms.dependencies import TerminusServiceDep
-from oms.services.pull_request_service import PullRequestService, PullRequestStatus
+from oms.services.pull_request_service import PullRequestService
 from oms.database.postgres import db as postgres_db
 from shared.models.requests import ApiResponse
 from shared.models.base import OptimisticLockError

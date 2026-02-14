@@ -10,7 +10,7 @@ without creating import cycles.
 from typing import Any, Dict, Optional
 from uuid import UUID
 
-from fastapi import HTTPException, Request, status
+from fastapi import Request, status
 
 from shared.errors.error_types import ErrorCode, classified_http_exception
 

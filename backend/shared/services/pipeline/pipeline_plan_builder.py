@@ -1178,14 +1178,19 @@ def add_stream_join(
         else (stream_meta.get("joinType") or stream_meta.get("join_type"))
     )
     if join_type_raw is None or str(join_type_raw).strip() == "":
-        join_type_norm = "left" if strategy_norm == "left_lookup" else "full"
+        join_type_norm = "left" if strategy_norm in {"left_lookup", "static"} else "full"
     else:
         join_type_norm = str(join_type_raw).strip().lower()
-    if strategy_norm == "left_lookup" and join_type_norm != "left":
-        warnings.append("streamJoin strategy=left_lookup forces joinType=left")
-        join_type_norm = "left"
-    if strategy_norm in {"dynamic", "static"} and join_type_norm not in {"full", "outer", "full_outer", "fullouter"}:
-        warnings.append("streamJoin strategy=dynamic|static forces joinType=full (outer semantics)")
+    if strategy_norm in {"left_lookup", "static"}:
+        if join_type_norm == "inner":
+            warnings.append(f"streamJoin strategy={strategy_norm} defaults joinType=inner to joinType=left")
+            join_type_norm = "left"
+        elif join_type_norm != "left":
+            raise PipelinePlanBuilderError(
+                f"streamJoin strategy={strategy_norm} requires joinType=left (got: {join_type_norm})"
+            )
+    if strategy_norm == "dynamic" and join_type_norm not in {"full", "outer", "full_outer", "fullouter"}:
+        warnings.append("streamJoin strategy=dynamic forces joinType=full (outer semantics)")
         join_type_norm = "full"
     if join_type_norm in {"outer", "full_outer", "fullouter"}:
         join_type_norm = "full"
@@ -1288,17 +1293,18 @@ def add_stream_join(
             raise PipelinePlanBuilderError(
                 "dynamic streamJoin requires: " + ", ".join(missing)
             )
-    if strategy_norm == "left_lookup":
+    if strategy_norm in {"left_lookup", "static"}:
+        strategy_name = strategy_norm
         right_node = node_by_id.get(right)
         right_node_type = str((right_node or {}).get("type") or "").strip().lower()
         if right_node_type != "input":
             raise PipelinePlanBuilderError(
-                "streamJoin strategy=left_lookup requires right input to be a direct input node "
+                f"streamJoin strategy={strategy_name} requires right input to be a direct input node "
                 "(no upstream transforms)"
             )
         if is_stream_like_input_node(right_node):
             raise PipelinePlanBuilderError(
-                "streamJoin strategy=left_lookup requires right input to be batch lookup source "
+                f"streamJoin strategy={strategy_name} requires right input to be batch lookup source "
                 "(stream read mode/format is not allowed)"
             )
     mutation = add_transform(
@@ -1574,18 +1580,25 @@ def validate_structure(plan: Dict[str, Any]) -> Tuple[List[str], List[str]]:
                 strategy = str(stream_meta.get("strategy") or "").strip().lower() or "dynamic"
                 if strategy not in {"dynamic", "left_lookup", "static"}:
                     errors.append(f"streamJoin strategy must be dynamic|left_lookup|static on node {node_id}")
-                elif strategy == "left_lookup" and len(incoming_ids) >= 2:
+                elif strategy in {"left_lookup", "static"} and len(incoming_ids) >= 2:
+                    strategy_name = strategy
+                    requested_join_type = str(metadata.get("joinType") or metadata.get("join_type") or "").strip().lower()
+                    if requested_join_type and requested_join_type not in {"left", "inner"}:
+                        errors.append(
+                            f"streamJoin strategy={strategy_name} requires joinType=left "
+                            f"(got: {requested_join_type}) on node {node_id}"
+                        )
                     right_input_id = str(incoming_ids[1] or "").strip()
                     right_node = node_by_id.get(right_input_id) if right_input_id else None
                     right_node_type = str((right_node or {}).get("type") or "").strip().lower()
                     if right_node_type != "input":
                         errors.append(
-                            "streamJoin strategy=left_lookup requires right input to be a direct input node "
+                            f"streamJoin strategy={strategy_name} requires right input to be a direct input node "
                             f"(no upstream transforms) on node {node_id}"
                         )
                     elif is_stream_like_input_node(right_node):
                         errors.append(
-                            "streamJoin strategy=left_lookup requires right input to be batch lookup source "
+                            f"streamJoin strategy={strategy_name} requires right input to be batch lookup source "
                             f"(stream read mode/format is not allowed) on node {node_id}"
                         )
             if op == "union":

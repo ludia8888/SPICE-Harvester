@@ -226,7 +226,7 @@ def with_optimistic_lock(
             if expected_version is not None:
                 logger.debug(
                     f"Optimistic lock check for {entity_type} "
-                    f"with expected version {expected_version}"
+                    f"with expected version {expected_version} on field {version_field}"
                 )
                 
             return await func(*args, **kwargs)

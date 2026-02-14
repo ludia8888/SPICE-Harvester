@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hmac
-from typing import Optional
 
 from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse

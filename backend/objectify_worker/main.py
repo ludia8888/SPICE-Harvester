@@ -1031,10 +1031,8 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
 
         # ── Mapping spec resolution: OMS backing_source (if no PG mapping_spec_id) or PostgreSQL ──
         mapping_spec = None
-        oms_backed = False
         if not job.mapping_spec_id:
             # OMS mode: resolve from object_type backing_source
-            oms_backed = True
             try:
                 ot_contract = await self._fetch_object_type_contract(job)
             except Exception as oms_fetch_exc:
@@ -1821,16 +1819,56 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                     target_field_types=target_field_types,
                     mapping_sources=mapping_sources,
                     sources_by_target=sources_by_target,
+                    required_targets=required_targets,
                     pk_targets=pk_targets,
-                    pk_target_map=pk_target_map,
-                    instance_id_field=instance_id_field,
-                    job=job,
-                    options=options,
-                    allow_partial=allow_partial,
+                    pk_fields=pk_fields,
+                    field_constraints=field_constraints,
+                    field_raw_types=field_raw_types,
                     seen_row_keys=seen_row_keys,
                 )
+                batch_errors = batch.get("errors") or []
+                if batch_errors:
+                    if self._has_p0_errors(batch_errors):
+                        await _fail_job("validation_failed", report={"errors": batch_errors[:200]})
+                    if allow_partial:
+                        remaining = max(0, 200 - len(errors))
+                        if remaining:
+                            errors.extend(batch_errors[:remaining])
+                    else:
+                        await _fail_job("validation_failed", report={"errors": batch_errors[:200]})
                 instances = batch.get("instances") or []
-                instance_ids = batch.get("instance_ids") or []
+                row_keys = batch.get("row_keys") or []
+                if any(not key for key in row_keys):
+                    await _fail_job(
+                        "validation_failed",
+                        report={
+                            "errors": [
+                                {
+                                    "code": VC.PRIMARY_KEY_MISSING.value,
+                                    "message": "Row key cannot be derived from primary key values",
+                                }
+                            ]
+                        },
+                    )
+                instance_id_field = None
+                if pk_targets:
+                    for target in pk_targets:
+                        if target in target_field_types:
+                            instance_id_field = target
+                            break
+                if not instance_id_field:
+                    for candidate in (f"{job.target_class_id.lower()}_id", "id"):
+                        if candidate in target_field_types:
+                            instance_id_field = candidate
+                            break
+                instances, instance_ids = self._ensure_instance_ids(
+                    instances,
+                    class_id=job.target_class_id,
+                    stable_seed=stable_seed or job.job_id,
+                    mapping_spec_version=job.mapping_spec_version,
+                    row_keys=row_keys,
+                    instance_id_field=instance_id_field,
+                )
 
                 if instances:
                     for idx in range(0, len(instances), batch_size):
@@ -3385,7 +3423,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                 except Exception as exc:
                     logger.warning(
                         "Failed to load link edits for class %s: %s",
-                        class_id,
+                        job.target_class_id,
                         exc,
                         exc_info=True,
                     )

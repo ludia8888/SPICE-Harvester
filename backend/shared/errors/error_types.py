@@ -1,5 +1,6 @@
 from enum import Enum
 from typing import Any, Mapping
+from fastapi import HTTPException
 
 
 class ErrorCategory(str, Enum):

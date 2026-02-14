@@ -8,9 +8,9 @@ tracking similar to Palantir Foundry's Changelog Datasets.
 
 from shared.observability.tracing import trace_endpoint
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Query, status
 from shared.errors.error_types import ErrorCode, classified_http_exception
 
 router = APIRouter(tags=["Objectify Changelog"])

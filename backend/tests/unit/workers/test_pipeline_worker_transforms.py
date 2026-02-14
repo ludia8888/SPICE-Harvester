@@ -46,12 +46,22 @@ def spark() -> SparkSession:
     if java_home and os.path.exists(java_home):
         os.environ.setdefault("JAVA_HOME", java_home)
         os.environ.setdefault("PATH", f"{java_home}/bin:" + os.environ.get("PATH", ""))
+    backend_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+    current_pythonpath = os.environ.get("PYTHONPATH", "")
+    pythonpath_entries = [entry for entry in current_pythonpath.split(os.pathsep) if entry]
+    if backend_root not in pythonpath_entries:
+        os.environ["PYTHONPATH"] = (
+            backend_root
+            if not current_pythonpath
+            else backend_root + os.pathsep + current_pythonpath
+        )
     os.environ.setdefault("PYSPARK_PYTHON", sys.executable)
     os.environ.setdefault("PYSPARK_DRIVER_PYTHON", sys.executable)
     builder = (
         SparkSession.builder.master("local[1]")
         .appName("pipeline-worker-tests")
         .config("spark.ui.enabled", "false")
+        .config("spark.executorEnv.PYTHONPATH", os.environ.get("PYTHONPATH", ""))
     )
     try:
         session = builder.getOrCreate()

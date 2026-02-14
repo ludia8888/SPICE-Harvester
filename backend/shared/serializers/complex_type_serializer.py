@@ -3,8 +3,7 @@ Complex type serializer for SPICE HARVESTER
 """
 
 import json
-from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple
 import logging
 
 from ..models.common import DataType

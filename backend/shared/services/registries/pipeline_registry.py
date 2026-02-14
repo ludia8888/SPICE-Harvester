@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
@@ -23,7 +23,6 @@ from shared.services.storage.lakefs_client import (
     LakeFSConfig,
     LakeFSConflictError,
     LakeFSError,
-    LakeFSNotFoundError,
 )
 from shared.services.storage.lakefs_storage_service import LakeFSStorageService
 from shared.utils.path_utils import safe_path_segment

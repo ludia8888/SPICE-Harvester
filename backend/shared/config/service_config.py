@@ -7,10 +7,8 @@ allowing flexible configuration through environment variables while
 maintaining sensible defaults.
 """
 
-import json
 import logging
-import os
-from typing import List, Optional, Tuple
+from typing import List, Optional
 
 from pydantic import ValidationError
 

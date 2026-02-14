@@ -7,7 +7,7 @@ authorization + registry workflows (Facade pattern).
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, List, Optional
 
 from fastapi import HTTPException, Request, status
 
@@ -50,7 +50,7 @@ async def create_backing_datasource(
     if not dataset:
         raise classified_http_exception(status.HTTP_404_NOT_FOUND, "Dataset not found", code=ErrorCode.RESOURCE_NOT_FOUND)
 
-    _enforce_db_scope_or_403(request, db_name=dataset.db_name)
+    enforce_db_scope_or_403(request, db_name=dataset.db_name)
     await enforce_required_database_role(request, db_name=dataset.db_name, roles=DATA_ENGINEER_ROLES)
 
     existing = await dataset_registry.get_backing_datasource_by_dataset(
@@ -94,7 +94,7 @@ async def list_backing_datasources(
         dataset = await dataset_registry.get_dataset(dataset_id=dataset_id)
         if not dataset:
             raise classified_http_exception(status.HTTP_404_NOT_FOUND, "Dataset not found", code=ErrorCode.RESOURCE_NOT_FOUND)
-        _enforce_db_scope_or_403(request, db_name=dataset.db_name)
+        enforce_db_scope_or_403(request, db_name=dataset.db_name)
         await enforce_required_database_role(request, db_name=dataset.db_name, roles=READ_ROLES)
         record = await dataset_registry.get_backing_datasource_by_dataset(
             dataset_id=dataset.dataset_id,
@@ -103,7 +103,7 @@ async def list_backing_datasources(
         if record:
             records = [record.__dict__]
     elif db_name:
-        _enforce_db_scope_or_403(request, db_name=db_name)
+        enforce_db_scope_or_403(request, db_name=db_name)
         await enforce_required_database_role(request, db_name=db_name, roles=READ_ROLES)
         records = [item.__dict__ for item in await dataset_registry.list_backing_datasources(db_name=db_name, branch=branch)]
     else:
@@ -122,7 +122,7 @@ async def get_backing_datasource(
     record = await dataset_registry.get_backing_datasource(backing_id=backing_id)
     if not record:
         raise classified_http_exception(status.HTTP_404_NOT_FOUND, "Backing datasource not found", code=ErrorCode.RESOURCE_NOT_FOUND)
-    _enforce_db_scope_or_403(request, db_name=record.db_name)
+    enforce_db_scope_or_403(request, db_name=record.db_name)
     await enforce_required_database_role(request, db_name=record.db_name, roles=READ_ROLES)
     return ApiResponse.success(message="Backing datasource retrieved", data={"backing_datasource": record.__dict__})
 
@@ -139,7 +139,7 @@ async def create_backing_datasource_version(
     backing = await dataset_registry.get_backing_datasource(backing_id=backing_id)
     if not backing:
         raise classified_http_exception(status.HTTP_404_NOT_FOUND, "Backing datasource not found", code=ErrorCode.RESOURCE_NOT_FOUND)
-    _enforce_db_scope_or_403(request, db_name=backing.db_name)
+    enforce_db_scope_or_403(request, db_name=backing.db_name)
     await enforce_required_database_role(request, db_name=backing.db_name, roles=DATA_ENGINEER_ROLES)
 
     dataset_version_id = str(payload.get("dataset_version_id") or "").strip()
@@ -171,7 +171,7 @@ async def list_backing_datasource_versions(
     backing = await dataset_registry.get_backing_datasource(backing_id=backing_id)
     if not backing:
         raise classified_http_exception(status.HTTP_404_NOT_FOUND, "Backing datasource not found", code=ErrorCode.RESOURCE_NOT_FOUND)
-    _enforce_db_scope_or_403(request, db_name=backing.db_name)
+    enforce_db_scope_or_403(request, db_name=backing.db_name)
     await enforce_required_database_role(request, db_name=backing.db_name, roles=READ_ROLES)
     records = await dataset_registry.list_backing_datasource_versions(backing_id=backing_id)
     return ApiResponse.success(
@@ -192,7 +192,7 @@ async def get_backing_datasource_version(
         raise classified_http_exception(status.HTTP_404_NOT_FOUND, "Backing datasource version not found", code=ErrorCode.RESOURCE_NOT_FOUND)
     backing = await dataset_registry.get_backing_datasource(backing_id=record.backing_id)
     if backing:
-        _enforce_db_scope_or_403(request, db_name=backing.db_name)
+        enforce_db_scope_or_403(request, db_name=backing.db_name)
         await enforce_required_database_role(request, db_name=backing.db_name, roles=READ_ROLES)
     return ApiResponse.success(
         message="Backing datasource version retrieved",
@@ -212,7 +212,7 @@ async def create_key_spec(
     dataset = await dataset_registry.get_dataset(dataset_id=dataset_id)
     if not dataset:
         raise classified_http_exception(status.HTTP_404_NOT_FOUND, "Dataset not found", code=ErrorCode.RESOURCE_NOT_FOUND)
-    _enforce_db_scope_or_403(request, db_name=dataset.db_name)
+    enforce_db_scope_or_403(request, db_name=dataset.db_name)
     await enforce_required_database_role(request, db_name=dataset.db_name, roles=DOMAIN_MODEL_ROLES)
 
     dataset_version_id = str(payload.get("dataset_version_id") or "").strip() or None
@@ -266,7 +266,7 @@ async def list_key_specs(
         dataset = await dataset_registry.get_dataset(dataset_id=dataset_id)
         if not dataset:
             raise classified_http_exception(status.HTTP_404_NOT_FOUND, "Dataset not found", code=ErrorCode.RESOURCE_NOT_FOUND)
-        _enforce_db_scope_or_403(request, db_name=dataset.db_name)
+        enforce_db_scope_or_403(request, db_name=dataset.db_name)
         await enforce_required_database_role(request, db_name=dataset.db_name, roles=READ_ROLES)
     records = await dataset_registry.list_key_specs(dataset_id=dataset_id)
     return ApiResponse.success(message="Key specs retrieved", data={"key_specs": [r.__dict__ for r in records]})
@@ -284,7 +284,7 @@ async def get_key_spec(
         raise classified_http_exception(status.HTTP_404_NOT_FOUND, "Key spec not found", code=ErrorCode.RESOURCE_NOT_FOUND)
     dataset = await dataset_registry.get_dataset(dataset_id=record.dataset_id)
     if dataset:
-        _enforce_db_scope_or_403(request, db_name=dataset.db_name)
+        enforce_db_scope_or_403(request, db_name=dataset.db_name)
         await enforce_required_database_role(request, db_name=dataset.db_name, roles=READ_ROLES)
     return ApiResponse.success(message="Key spec retrieved", data={"key_spec": record.__dict__})
 
@@ -300,7 +300,7 @@ async def list_schema_migration_plans(
     dataset_registry: DatasetRegistry,
 ) -> ApiResponse:
     if db_name:
-        _enforce_db_scope_or_403(request, db_name=db_name)
+        enforce_db_scope_or_403(request, db_name=db_name)
         await enforce_required_database_role(request, db_name=db_name, roles=READ_ROLES)
     records = await dataset_registry.list_schema_migration_plans(
         db_name=db_name,
@@ -366,7 +366,7 @@ async def upsert_access_policy(
 ) -> ApiResponse:
     payload = sanitize_input(body.model_dump())
     db_name = validate_db_name(payload.get("db_name") or "")
-    _enforce_db_scope_or_403(request, db_name=db_name)
+    enforce_db_scope_or_403(request, db_name=db_name)
     await enforce_required_database_role(request, db_name=db_name, roles=SECURITY_ROLES)
 
     subject_type = str(payload.get("subject_type") or "").strip()
@@ -410,7 +410,7 @@ async def list_access_policies(
     dataset_registry: DatasetRegistry,
 ) -> ApiResponse:
     if db_name:
-        _enforce_db_scope_or_403(request, db_name=db_name)
+        enforce_db_scope_or_403(request, db_name=db_name)
         await enforce_required_database_role(request, db_name=db_name, roles=SECURITY_ROLES)
 
     records = await dataset_registry.list_access_policies(

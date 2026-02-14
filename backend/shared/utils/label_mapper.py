@@ -5,7 +5,6 @@ Label Mapper 유틸리티
 """
 
 import asyncio
-import json
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -17,7 +16,6 @@ import aiosqlite
 
 # shared 모델 import
 from shared.config.settings import get_settings
-from shared.models.ontology import QueryFilter, QueryInput
 from shared.utils.language import coerce_localized_text, fallback_languages, normalize_language
 
 logger = logging.getLogger(__name__)

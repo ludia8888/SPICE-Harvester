@@ -3,12 +3,11 @@ Context7 Development Helper
 Utilities for using Context7 during development
 """
 
-import asyncio
 import logging
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 from datetime import datetime, timezone
 
-from backend.mcp_servers.mcp_client import get_context7_client, Context7Client
+from backend.mcp_servers.mcp_client import get_context7_client
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +39,8 @@ class Context7Developer:
             Analysis results with patterns, suggestions, and warnings
         """
         try:
+            normalized_related_files = [str(path) for path in (related_files or []) if str(path).strip()]
+
             # Search for similar implementations
             similar_patterns = await self.client.search(
                 f"similar implementation: {description}",
@@ -55,6 +56,10 @@ class Context7Developer:
             
             # Check for potential issues
             issues_query = f"potential issues when implementing: {description}"
+            if normalized_related_files:
+                issues_query = (
+                    f"{issues_query}; related files: {', '.join(normalized_related_files[:10])}"
+                )
             potential_issues = await self.client.search(
                 issues_query,
                 limit=3
@@ -64,6 +69,7 @@ class Context7Developer:
             analysis = {
                 "feature": feature_name,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
+                "related_files": normalized_related_files,
                 "similar_patterns": similar_patterns,
                 "architecture_insights": architecture_insights,
                 "potential_issues": potential_issues,

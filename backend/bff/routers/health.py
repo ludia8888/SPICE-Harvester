@@ -6,13 +6,10 @@
 import logging
 from shared.observability.tracing import trace_endpoint
 
-from fastapi import APIRouter, Depends, status
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Depends
 
 from bff.dependencies import get_oms_client
 from bff.services.oms_client import OMSClient
-from shared.errors.error_envelope import build_error_envelope
-from shared.errors.error_types import ErrorCategory, ErrorCode
 
 logger = logging.getLogger(__name__)
 

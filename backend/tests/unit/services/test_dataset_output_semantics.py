@@ -36,7 +36,7 @@ def test_resolve_dataset_write_policy_default_snapshot() -> None:
         output_metadata={},
         execution_semantics="snapshot",
     )
-    assert policy.resolved_write_mode == DatasetWriteMode.SNAPSHOT_REPLACE
+    assert policy.resolved_write_mode == DatasetWriteMode.DEFAULT
     assert policy.runtime_write_mode == "overwrite"
 
 
@@ -47,7 +47,7 @@ def test_resolve_dataset_write_policy_default_incremental_with_pk_without_additi
         output_metadata={"primary_key_columns": ["id"]},
         execution_semantics="incremental",
     )
-    assert policy.resolved_write_mode == DatasetWriteMode.SNAPSHOT_REPLACE
+    assert policy.resolved_write_mode == DatasetWriteMode.DEFAULT
     assert policy.runtime_write_mode == "overwrite"
     assert any("additive incremental update signal is unavailable" in warning for warning in policy.warnings)
 
@@ -59,7 +59,7 @@ def test_resolve_dataset_write_policy_default_incremental_without_pk() -> None:
         output_metadata={},
         execution_semantics="incremental",
     )
-    assert policy.resolved_write_mode == DatasetWriteMode.SNAPSHOT_REPLACE
+    assert policy.resolved_write_mode == DatasetWriteMode.DEFAULT
     assert any("additive incremental update signal is unavailable" in warning for warning in policy.warnings)
 
 
@@ -71,7 +71,7 @@ def test_resolve_dataset_write_policy_default_streaming_with_pk_uses_append_only
         execution_semantics="streaming",
         has_incremental_input=True,
     )
-    assert policy.resolved_write_mode == DatasetWriteMode.APPEND_ONLY_NEW_ROWS
+    assert policy.resolved_write_mode == DatasetWriteMode.DEFAULT
     assert policy.runtime_write_mode == "append"
 
 
@@ -83,9 +83,9 @@ def test_resolve_dataset_write_policy_default_streaming_without_pk_uses_always_a
         execution_semantics="streaming",
         has_incremental_input=True,
     )
-    assert policy.resolved_write_mode == DatasetWriteMode.ALWAYS_APPEND
+    assert policy.resolved_write_mode == DatasetWriteMode.DEFAULT
     assert policy.runtime_write_mode == "append"
-    assert any("streaming semantics" in warning for warning in policy.warnings)
+    assert not policy.warnings
 
 
 @pytest.mark.unit
@@ -97,7 +97,7 @@ def test_resolve_dataset_write_policy_default_incremental_with_additive_updates_
         has_incremental_input=True,
         incremental_inputs_have_additive_updates=False,
     )
-    assert policy.resolved_write_mode == DatasetWriteMode.SNAPSHOT_REPLACE
+    assert policy.resolved_write_mode == DatasetWriteMode.DEFAULT
     assert policy.runtime_write_mode == "overwrite"
 
 
@@ -110,7 +110,7 @@ def test_resolve_dataset_write_policy_default_incremental_with_additive_updates_
         has_incremental_input=True,
         incremental_inputs_have_additive_updates=True,
     )
-    assert policy.resolved_write_mode == DatasetWriteMode.APPEND_ONLY_NEW_ROWS
+    assert policy.resolved_write_mode == DatasetWriteMode.DEFAULT
     assert policy.runtime_write_mode == "append"
 
 
@@ -123,9 +123,9 @@ def test_resolve_dataset_write_policy_default_incremental_additive_without_pk() 
         has_incremental_input=True,
         incremental_inputs_have_additive_updates=True,
     )
-    assert policy.resolved_write_mode == DatasetWriteMode.ALWAYS_APPEND
+    assert policy.resolved_write_mode == DatasetWriteMode.DEFAULT
     assert policy.runtime_write_mode == "append"
-    assert any("primary_key_columns are missing" in warning for warning in policy.warnings)
+    assert not policy.warnings
 
 
 @pytest.mark.unit
@@ -136,12 +136,12 @@ def test_resolve_dataset_write_policy_default_without_incremental_inputs() -> No
         execution_semantics="incremental",
         has_incremental_input=False,
     )
-    assert policy.resolved_write_mode == DatasetWriteMode.SNAPSHOT_REPLACE
+    assert policy.resolved_write_mode == DatasetWriteMode.DEFAULT
     assert policy.runtime_write_mode == "overwrite"
 
 
 @pytest.mark.unit
-def test_resolve_dataset_write_policy_snapshot_difference_uses_overwrite_runtime() -> None:
+def test_resolve_dataset_write_policy_snapshot_difference_uses_snapshot_runtime() -> None:
     policy = resolve_dataset_write_policy(
         definition={},
         output_metadata={"write_mode": "snapshot_difference", "primary_key_columns": ["id"]},

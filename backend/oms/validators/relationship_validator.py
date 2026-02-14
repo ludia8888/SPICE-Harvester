@@ -6,9 +6,9 @@
 import logging
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional
 
-from shared.models.ontology import Cardinality, OntologyResponse, Relationship
+from shared.models.ontology import OntologyResponse, Relationship
 
 logger = logging.getLogger(__name__)
 

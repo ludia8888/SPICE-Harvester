@@ -3,11 +3,10 @@ Property to Relationship 자동 변환기
 사용자가 클래스 내부에서 정의한 속성을 관계로 자동 변환
 """
 
-import json
 import logging
-from typing import Dict, List, Tuple, Optional, Any
+from typing import Dict, List, Tuple, Any
 
-from shared.models.ontology import Property, Relationship
+from shared.models.ontology import Property
 
 logger = logging.getLogger(__name__)
 

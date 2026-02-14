@@ -11,7 +11,7 @@ import logging
 from uuid import UUID
 
 import httpx
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, status
 
 from bff.dependencies import OMSClientDep
 from shared.errors.error_types import ErrorCode, classified_http_exception

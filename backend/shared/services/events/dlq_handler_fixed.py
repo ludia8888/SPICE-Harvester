@@ -9,7 +9,6 @@ FIXED: Uses thread pool for blocking Kafka operations.
 
 import asyncio
 import json
-import time
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, Optional, List, Callable
 from dataclasses import dataclass, field
@@ -339,7 +338,7 @@ class DLQHandlerFixed:
             
             # Try to process the message
             try:
-                result = await processor(json.loads(failed_msg.value))
+                await processor(json.loads(failed_msg.value))
                 
                 # Success! Message recovered
                 logger.info(f"Successfully recovered message after {failed_msg.retry_count} retries")

@@ -7,7 +7,6 @@ import uuid
 from typing import Any, Dict, List, Optional
 import logging
 
-from ..models.common import DataType
 from .base_validator import BaseValidator, ValidationResult
 
 logger = logging.getLogger(__name__)

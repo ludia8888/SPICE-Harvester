@@ -4,7 +4,7 @@ Extracted from `bff.routers.pipeline_datasets_versions` to keep routers thin.
 """
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 from uuid import uuid4
 
 from fastapi import HTTPException, Request, status

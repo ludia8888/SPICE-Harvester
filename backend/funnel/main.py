@@ -17,7 +17,7 @@ from funnel.routers.type_inference_router import router as type_inference_router
 from shared.utils.app_logger import get_logger
 
 # Rate limiting middleware
-from shared.middleware.rate_limiter import rate_limit, RateLimitPresets, RateLimiter
+from shared.middleware.rate_limiter import RateLimiter
 
 logger = get_logger(__name__)
 

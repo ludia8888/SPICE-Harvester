@@ -13,7 +13,7 @@ from uuid import UUID
 from fastapi import HTTPException, status
 from elasticsearch.exceptions import ConnectionError as ESConnectionError, NotFoundError, RequestError
 
-from shared.errors.error_types import ErrorCode, ErrorCategory, classified_http_exception
+from shared.errors.error_types import ErrorCode, classified_http_exception
 
 from bff.utils.action_log_serialization import ACTION_LOG_CLASS_ID, serialize_action_log_record
 from shared.config.app_config import AppConfig

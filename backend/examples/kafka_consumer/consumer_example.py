@@ -3,14 +3,12 @@ Kafka Consumer Example
 온톨로지 이벤트를 구독하여 처리하는 예제
 """
 
-import asyncio
 import json
 import logging
 import signal
 from typing import Optional
 
-from confluent_kafka import Consumer, KafkaError, KafkaException
-from confluent_kafka.admin import AdminClient
+from confluent_kafka import Consumer, KafkaError
 
 from shared.config.service_config import ServiceConfig
 
