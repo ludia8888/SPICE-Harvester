@@ -1,22 +1,27 @@
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Mapping, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from oms.services.async_terminus import AsyncTerminusService
 from oms.services.ontology_resources import OntologyResourceService
 from shared.config.app_config import AppConfig
 from shared.errors.enterprise_catalog import is_external_code, resolve_enterprise_error
 from shared.errors.error_types import ErrorCode
-from shared.security.database_access import DOMAIN_MODEL_ROLES, get_database_access_role
+from shared.security.database_access import DATA_ENGINEER_ROLES, DOMAIN_MODEL_ROLES, get_database_access_role
 from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.services.storage.lakefs_storage_service import LakeFSStorageService
 from shared.services.storage.storage_service import StorageService
 from shared.services.core.object_type_meta_resolver import build_object_type_meta_resolver
 from shared.services.core.writeback_merge_service import WritebackMergeService
-from shared.utils.access_policy import apply_access_policy
+from shared.utils.action_data_access import evaluate_action_target_data_access
+from shared.utils.action_permission_profile import (
+    ActionPermissionProfile,
+    ActionPermissionProfileError,
+    PERMISSION_MODEL_ONTOLOGY_ROLES,
+    requires_action_data_access_enforcement,
+    resolve_action_permission_profile,
+)
 from shared.utils.action_input_schema import (
     ActionInputSchemaError,
     ActionInputValidationError,
@@ -24,7 +29,6 @@ from shared.utils.action_input_schema import (
 )
 from shared.utils.action_template_engine import (
     ActionImplementationError,
-    CompiledTarget,
     compile_template_v1,
     compile_template_v1_change_shape,
 )
@@ -351,6 +355,20 @@ async def enforce_action_permission(
     submitted_by_type: str,
     action_spec: Dict[str, Any],
 ) -> Optional[str]:
+    try:
+        permission_profile = resolve_action_permission_profile(action_spec)
+    except ActionPermissionProfileError as exc:
+        raise ActionSimulationRejected(
+            _attach_enterprise(
+                {
+                    "error": "action_permission_profile_invalid",
+                    "message": str(exc),
+                    "field": exc.field,
+                }
+            ),
+            status_code=409,
+        ) from exc
+
     actor = str(submitted_by or "").strip()
     if not actor:
         raise ActionSimulationRejected(
@@ -367,14 +385,28 @@ async def enforce_action_permission(
 
     actor_type = str(submitted_by_type or "user").strip().lower() or "user"
     role = await get_database_access_role(db_name=db_name, principal_type=actor_type, principal_id=actor)
-    if role not in DOMAIN_MODEL_ROLES:
-        raise ActionSimulationRejected(
-            _attach_enterprise({"error": ErrorCode.PERMISSION_DENIED.value, "message": "Permission denied"}),
-            status_code=403,
-        )
+    if permission_profile.permission_model == PERMISSION_MODEL_ONTOLOGY_ROLES:
+        if role not in DOMAIN_MODEL_ROLES:
+            raise ActionSimulationRejected(
+                _attach_enterprise({"error": ErrorCode.PERMISSION_DENIED.value, "message": "Permission denied"}),
+                status_code=403,
+            )
+    else:
+        if role not in DATA_ENGINEER_ROLES:
+            raise ActionSimulationRejected(
+                _attach_enterprise({"error": ErrorCode.PERMISSION_DENIED.value, "message": "Permission denied"}),
+                status_code=403,
+            )
 
-    tags = build_principal_tags(principal_type=actor_type, principal_id=actor, role=role)
-    if not policy_allows(policy=action_spec.get("permission_policy"), principal_tags=tags):
+    if permission_profile.permission_model == PERMISSION_MODEL_ONTOLOGY_ROLES:
+        tags = build_principal_tags(principal_type=actor_type, principal_id=actor, role=role)
+        if not policy_allows(policy=action_spec.get("permission_policy"), principal_tags=tags):
+            raise ActionSimulationRejected(
+                _attach_enterprise({"error": ErrorCode.PERMISSION_DENIED.value, "message": "Permission denied"}),
+                status_code=403,
+            )
+
+    if permission_profile.edits_beyond_actions and role not in DATA_ENGINEER_ROLES:
         raise ActionSimulationRejected(
             _attach_enterprise({"error": ErrorCode.PERMISSION_DENIED.value, "message": "Permission denied"}),
             status_code=403,
@@ -648,6 +680,7 @@ async def preflight_action_writeback(
     submitted_by: str,
     submitted_by_type: str,
     actor_role: Optional[str],
+    permission_profile: Optional[ActionPermissionProfile],
     base_branch: str,
     overlay_branch: Optional[str],
 ) -> ActionPreflight:
@@ -915,31 +948,69 @@ async def preflight_action_writeback(
             )
         )
 
-    if AppConfig.WRITEBACK_ENFORCE_GOVERNANCE and dataset_registry:
-        denied: List[Dict[str, Any]] = []
-        for tgt in loaded:
-            try:
-                access_policy = await dataset_registry.get_access_policy(
-                    db_name=db_name,
-                    scope="data_access",
-                    subject_type="object_type",
-                    subject_id=tgt.class_id,
-                )
-            except Exception:
-                logging.getLogger(__name__).warning("Broad exception fallback at oms/services/action_simulation_service.py:926", exc_info=True)
-                access_policy = None
-            if not access_policy or not isinstance(access_policy.policy, dict) or not access_policy.policy:
-                continue
-            filtered, _info = apply_access_policy([tgt.access_base_state], policy=access_policy.policy)
-            if not filtered:
-                denied.append({"class_id": tgt.class_id, "instance_id": tgt.instance_id})
-        if denied:
+    try:
+        resolved_permission_profile = permission_profile or resolve_action_permission_profile(action_spec)
+    except ActionPermissionProfileError as exc:
+        raise ActionSimulationRejected(
+            _attach_enterprise(
+                {
+                    "error": "action_permission_profile_invalid",
+                    "message": str(exc),
+                    "field": exc.field,
+                }
+            ),
+            status_code=409,
+        ) from exc
+
+    enforce_data_access = requires_action_data_access_enforcement(
+        profile=resolved_permission_profile,
+        global_enforcement=AppConfig.WRITEBACK_ENFORCE_ACTION_DATA_ACCESS,
+    )
+    if enforce_data_access:
+        if not dataset_registry:
+            raise ActionSimulationRejected(
+                _attach_enterprise(
+                    {
+                        "error": "data_access_unverifiable",
+                        "message": (
+                            "DatasetRegistry not available "
+                            "(WRITEBACK_ENFORCE_ACTION_DATA_ACCESS=true or "
+                            "permission_model=datasource_derived)"
+                        ),
+                    }
+                ),
+                status_code=503,
+            )
+        access_report = await evaluate_action_target_data_access(
+            dataset_registry=dataset_registry,
+            db_name=db_name,
+            targets=[
+                {
+                    "class_id": tgt.class_id,
+                    "instance_id": tgt.instance_id,
+                    "base_state": tgt.access_base_state,
+                }
+                for tgt in loaded
+            ],
+        )
+        if access_report.unverifiable:
+            raise ActionSimulationRejected(
+                _attach_enterprise(
+                    {
+                        "error": "data_access_unverifiable",
+                        "message": "Unable to verify one or more target rows under data_access policy",
+                        "unverifiable": access_report.unverifiable,
+                    }
+                ),
+                status_code=503,
+            )
+        if access_report.denied:
             raise ActionSimulationRejected(
                 _attach_enterprise(
                     {
                         "error": "data_access_denied",
                         "message": "Actor cannot access one or more target rows under data_access policy",
-                        "denied": denied,
+                        "denied": access_report.denied,
                     }
                 ),
                 status_code=403,

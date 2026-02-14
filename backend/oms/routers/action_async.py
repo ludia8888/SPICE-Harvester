@@ -8,7 +8,6 @@ to the Event Store for the action worker to execute.
 from __future__ import annotations
 
 import logging
-import os
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from uuid import UUID, uuid4
@@ -21,12 +20,11 @@ from oms.services.ontology_deployment_registry_v2 import OntologyDeploymentRegis
 from oms.services.ontology_resources import OntologyResourceService
 from shared.config.app_config import AppConfig
 from shared.config.settings import get_settings
-from shared.errors.error_types import ErrorCategory, ErrorCode, classified_http_exception
+from shared.errors.error_types import ErrorCode, classified_http_exception
 from shared.models.commands import ActionCommand
 from shared.models.event_envelope import EventEnvelope
 from shared.observability.context_propagation import enrich_metadata_with_current_trace
 from shared.observability.request_context import get_correlation_id
-from shared.security.database_access import DOMAIN_MODEL_ROLES, get_database_access_role
 from shared.security.input_sanitizer import SecurityViolationError, sanitize_input
 from shared.services.registries.action_log_registry import ActionLogRegistry
 from shared.services.registries.action_simulation_registry import ActionSimulationRegistry
@@ -45,13 +43,18 @@ from shared.utils.action_template_engine import (
     compile_template_v1_change_shape,
 )
 from shared.utils.action_simulation_utils import reject_simulation_delete_flag
-from shared.utils.principal_policy import build_principal_tags, policy_allows
 from shared.utils.resource_rid import format_resource_rid, parse_metadata_rev
 from shared.utils.writeback_conflicts import (
     compute_base_token,
     compute_observed_base,
 )
 from shared.utils.access_policy import apply_access_policy
+from shared.utils.action_data_access import evaluate_action_target_data_access
+from shared.utils.action_permission_profile import (
+    ActionPermissionProfileError,
+    requires_action_data_access_enforcement,
+    resolve_action_permission_profile,
+)
 from shared.utils.writeback_lifecycle import derive_lifecycle_id
 from shared.observability.tracing import trace_endpoint
 
@@ -156,7 +159,6 @@ class ActionSimulateRequest(BaseModel):
         description="Optional decision simulation assumptions (Level 2 state injection).",
     )
 
-
 def _resolve_writeback_target(
     *,
     db_name: str,
@@ -182,7 +184,8 @@ def _resolve_writeback_target(
 async def submit_action_async(
     db_name: str = Depends(ensure_database_exists),
     action_type_id: str = Path(..., description="Action type identifier"),
-    request: ActionSubmitRequest = ...,
+    *,
+    request: ActionSubmitRequest,
     base_branch: Optional[str] = Query(default=None, description="Deprecated alias; use base_branch in body"),
     terminus=TerminusServiceDep,
     event_store=EventStoreDep,
@@ -196,6 +199,7 @@ async def submit_action_async(
     - lakeFS writeback commit
     - ActionApplied emission
     """
+    dataset_registry: Optional[DatasetRegistry] = None
     try:
         action_type_id = str(action_type_id or "").strip()
         if not action_type_id:
@@ -238,6 +242,18 @@ async def submit_action_async(
         spec = action_resource.get("spec") if isinstance(action_resource, dict) else None
         if not isinstance(spec, dict):
             spec = {}
+        try:
+            permission_profile = resolve_action_permission_profile(spec)
+        except ActionPermissionProfileError as exc:
+            raise classified_http_exception(
+                status.HTTP_409_CONFLICT,
+                f"action_type_permission_profile_invalid for {action_type_id}: {exc}",
+                code=ErrorCode.ACTION_TEMPLATE_ERROR,
+            ) from exc
+        enforce_data_access = requires_action_data_access_enforcement(
+            profile=permission_profile,
+            global_enforcement=AppConfig.WRITEBACK_ENFORCE_ACTION_DATA_ACCESS,
+        )
         action_meta = action_resource.get("metadata") if isinstance(action_resource, dict) else None
         action_type_rid = format_resource_rid(
             resource_type="action_type",
@@ -280,6 +296,7 @@ async def submit_action_async(
         # Best-effort: capture observed_base at submission time to enable field-level conflict checks
         # when the worker executes later (ACTION_WRITEBACK_DESIGN.md).
         snapshot_targets: list[dict[str, Any]] = []
+        access_targets: list[dict[str, Any]] = []
         implementation = spec.get("implementation")
         try:
             compiled_shape = compile_template_v1_change_shape(implementation, input_payload=validated_input)
@@ -293,9 +310,16 @@ async def submit_action_async(
         if compiled_shape:
             settings = get_settings()
             storage = create_storage_service(settings)
+            if enforce_data_access and not storage:
+                raise classified_http_exception(
+                    status.HTTP_503_SERVICE_UNAVAILABLE,
+                    "StorageService unavailable for action target data access checks",
+                    code=ErrorCode.STORAGE_UNAVAILABLE,
+                )
             if storage:
                 max_targets = max(0, int(settings.writeback.writeback_submission_snapshot_max_targets))
-                for item in compiled_shape[: max(0, max_targets)]:
+                access_scan_limit = len(compiled_shape) if enforce_data_access else max_targets
+                for idx, item in enumerate(compiled_shape[: max(0, access_scan_limit)]):
                     target_class_id = str(item.class_id or "").strip()
                     target_instance_id = str(item.instance_id or "").strip()
                     if not target_class_id or not target_instance_id:
@@ -310,24 +334,32 @@ async def submit_action_async(
                     )
                     if not isinstance(base_state, dict):
                         base_state = {}
+                    if enforce_data_access:
+                        access_targets.append(
+                            {
+                                "class_id": target_class_id,
+                                "instance_id": target_instance_id,
+                                "base_state": base_state,
+                            }
+                        )
 
-                    lifecycle_id = derive_lifecycle_id(base_state)
-
-                    snapshot_targets.append(
-                        {
-                            "class_id": target_class_id,
-                            "instance_id": target_instance_id,
-                            "lifecycle_id": lifecycle_id,
-                            "base_token": compute_base_token(
-                                db_name=db_name,
-                                class_id=target_class_id,
-                                instance_id=target_instance_id,
-                                lifecycle_id=lifecycle_id,
-                                base_doc=base_state,
-                            ),
-                            "observed_base": compute_observed_base(base=base_state, changes=changes),
-                        }
-                    )
+                    if idx < max_targets:
+                        lifecycle_id = derive_lifecycle_id(base_state)
+                        snapshot_targets.append(
+                            {
+                                "class_id": target_class_id,
+                                "instance_id": target_instance_id,
+                                "lifecycle_id": lifecycle_id,
+                                "base_token": compute_base_token(
+                                    db_name=db_name,
+                                    class_id=target_class_id,
+                                    instance_id=target_instance_id,
+                                    lifecycle_id=lifecycle_id,
+                                    base_doc=base_state,
+                                ),
+                                "observed_base": compute_observed_base(base=base_state, changes=changes),
+                            }
+                        )
 
         # Create ActionLog (audit SSoT).
         action_log_id = uuid4()
@@ -339,20 +371,28 @@ async def submit_action_async(
                 "request.metadata.user_id is required for action submissions",
                 code=ErrorCode.REQUEST_VALIDATION_FAILED,
             )
-        if submitted_by != "system":
-            role = await get_database_access_role(
+        await enforce_action_permission(
+            db_name=db_name,
+            submitted_by=submitted_by,
+            submitted_by_type=submitted_by_type,
+            action_spec=spec,
+        )
+
+        if enforce_data_access and access_targets:
+            dataset_registry = DatasetRegistry()
+            await dataset_registry.connect()
+            access_report = await evaluate_action_target_data_access(
+                dataset_registry=dataset_registry,
                 db_name=db_name,
-                principal_type=submitted_by_type,
-                principal_id=submitted_by,
+                targets=access_targets,
             )
-            if role not in DOMAIN_MODEL_ROLES:
+            if access_report.unverifiable:
                 raise classified_http_exception(
-                    status.HTTP_403_FORBIDDEN,
-                    "Permission denied",
-                    code=ErrorCode.PERMISSION_DENIED,
+                    status.HTTP_503_SERVICE_UNAVAILABLE,
+                    "Unable to verify action target data access policy",
+                    code=ErrorCode.STORAGE_UNAVAILABLE,
                 )
-            tags = build_principal_tags(principal_type=submitted_by_type, principal_id=submitted_by, role=role)
-            if not policy_allows(policy=spec.get("permission_policy"), principal_tags=tags):
+            if access_report.denied:
                 raise classified_http_exception(
                     status.HTTP_403_FORBIDDEN,
                     "Permission denied",
@@ -424,12 +464,21 @@ async def submit_action_async(
             writeback_target=writeback_target,
         )
 
+    except ActionSimulationRejected as exc:
+        raise classified_http_exception(
+            exc.status_code,
+            str(exc.payload),
+            code=ErrorCode.ACTION_CONFLICT_POLICY_FAILED,
+        ) from exc
     except SecurityViolationError as e:
         raise classified_http_exception(
             status.HTTP_400_BAD_REQUEST,
             str(e),
             code=ErrorCode.INPUT_SANITIZATION_FAILED,
         ) from e
+    finally:
+        if dataset_registry:
+            await dataset_registry.close()
 
 
 @router.post(
@@ -440,7 +489,8 @@ async def submit_action_async(
 async def simulate_action_async(
     db_name: str = Depends(ensure_database_exists),
     action_type_id: str = Path(..., description="Action type identifier"),
-    request: ActionSimulateRequest = ...,
+    *,
+    request: ActionSimulateRequest,
     terminus=TerminusServiceDep,
 ) -> Dict[str, Any]:
     """
@@ -518,6 +568,18 @@ async def simulate_action_async(
         spec = action_resource.get("spec") if isinstance(action_resource, dict) else None
         if not isinstance(spec, dict):
             spec = {}
+        try:
+            permission_profile = resolve_action_permission_profile(spec)
+        except ActionPermissionProfileError as exc:
+            raise classified_http_exception(
+                status.HTTP_409_CONFLICT,
+                f"action_type_permission_profile_invalid for {action_type_id}: {exc}",
+                code=ErrorCode.ACTION_TEMPLATE_ERROR,
+            ) from exc
+        enforce_data_access = requires_action_data_access_enforcement(
+            profile=permission_profile,
+            global_enforcement=AppConfig.WRITEBACK_ENFORCE_ACTION_DATA_ACCESS,
+        )
         action_meta = action_resource.get("metadata") if isinstance(action_resource, dict) else None
         action_type_rid = format_resource_rid(
             resource_type="action_type",
@@ -588,7 +650,7 @@ async def simulate_action_async(
                 code=ErrorCode.STORAGE_UNAVAILABLE,
             )
 
-        if AppConfig.WRITEBACK_ENFORCE_GOVERNANCE:
+        if AppConfig.WRITEBACK_ENFORCE_GOVERNANCE or enforce_data_access:
             dataset_registry = DatasetRegistry()
             await dataset_registry.connect()
 
@@ -615,6 +677,7 @@ async def simulate_action_async(
             submitted_by=submitted_by,
             submitted_by_type=submitted_by_type,
             actor_role=actor_role,
+            permission_profile=permission_profile,
             base_branch=resolved_base_branch,
             overlay_branch=request.overlay_branch,
         )
@@ -944,3 +1007,9 @@ async def simulate_action_async(
             await dataset_registry.close()
         if simulation_registry:
             await simulation_registry.close()
+
+
+# FastAPI + postponed annotations safety:
+# Keep request parameter annotations concrete so they are always treated as body models.
+submit_action_async.__annotations__["request"] = ActionSubmitRequest
+simulate_action_async.__annotations__["request"] = ActionSimulateRequest

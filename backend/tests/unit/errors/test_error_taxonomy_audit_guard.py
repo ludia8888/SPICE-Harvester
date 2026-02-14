@@ -30,7 +30,11 @@ _STRICT_RUNTIME_GLOBS = (
     "shared/utils/worker_runner.py",
     "shared/observability/context_propagation.py",
     "shared/observability/logging.py",
+    "shared/utils/action_permission_profile.py",
     "bff/middleware/auth.py",
+    "oms/services/ontology_resource_validator.py",
+    "oms/services/action_simulation_service.py",
+    "oms/routers/action_async.py",
     "oms/services/async_terminus.py",
     "oms/services/terminus/base.py",
     "oms/services/terminus/document.py",
@@ -61,6 +65,7 @@ def test_error_taxonomy_audit_guard() -> None:
         "--fail-on-suppress-exception",
         "--fail-on-silent-broad-except",
         "--fail-on-lineage-fail-open",
+        "--fail-on-action-permission-profile-gap",
         "--fail-on-streamjoin-strategy-ignored",
         "--fail-on-output-kind-metadata-gap",
         "--fail-on-preflight-swallowed",
@@ -69,6 +74,8 @@ def test_error_taxonomy_audit_guard() -> None:
         "--fail-on-dataset-write-format-gap",
         "--fail-on-commented-export",
         "--fail-on-doc-only-module",
+        "--fail-on-route-collision",
+        "--fail-on-duplicate-symbol",
     ]
     for pattern in _STRICT_RUNTIME_GLOBS:
         cmd.extend(["--runtime-scope-glob", pattern])

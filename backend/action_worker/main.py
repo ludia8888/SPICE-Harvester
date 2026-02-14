@@ -15,7 +15,6 @@ import json
 import logging
 from collections import Counter
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 from shared.services.kafka.producer_factory import create_kafka_dlq_producer
@@ -31,7 +30,7 @@ from shared.models.event_envelope import EventEnvelope
 from shared.models.events import ActionAppliedEvent
 from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
-from shared.security.database_access import DOMAIN_MODEL_ROLES, get_database_access_role
+from shared.security.database_access import DATA_ENGINEER_ROLES, DOMAIN_MODEL_ROLES, get_database_access_role
 from shared.services.kafka.dlq_publisher import DlqPublishSpec
 from shared.services.kafka.retry_classifier import (
     ACTION_COMMAND_RETRY_PROFILE,
@@ -62,7 +61,14 @@ from shared.utils.action_input_schema import (
     validate_action_input,
 )
 from shared.utils.action_audit_policy import audit_action_log_result
-from shared.utils.access_policy import apply_access_policy
+from shared.utils.action_data_access import evaluate_action_target_data_access
+from shared.utils.action_permission_profile import (
+    ActionPermissionProfile,
+    ActionPermissionProfileError,
+    PERMISSION_MODEL_ONTOLOGY_ROLES,
+    requires_action_data_access_enforcement,
+    resolve_action_permission_profile,
+)
 from shared.utils.principal_policy import build_principal_tags, policy_allows
 from shared.utils.worker_runner import run_worker_until_stopped
 from shared.utils.resource_rid import format_resource_rid, parse_metadata_rev, strip_rid_revision
@@ -181,7 +187,7 @@ class ActionWorker(StrictHeartbeatKafkaWorker[_ActionCommandPayload, None]):
 
         await event_store.connect()
         await self.action_logs.connect()
-        if AppConfig.WRITEBACK_ENFORCE_GOVERNANCE:
+        if AppConfig.WRITEBACK_ENFORCE_GOVERNANCE or AppConfig.WRITEBACK_ENFORCE_ACTION_DATA_ACCESS:
             self.dataset_registry = DatasetRegistry()
             await self.dataset_registry.connect()
 
@@ -495,22 +501,30 @@ class ActionWorker(StrictHeartbeatKafkaWorker[_ActionCommandPayload, None]):
         submitted_by: Optional[str],
         submitted_by_type: str = "user",
         action_spec: Dict[str, Any],
-    ) -> Optional[str]:
-        # Minimal P0: enforce DB role + action permission_policy (best-effort).
+    ) -> tuple[Optional[str], ActionPermissionProfile]:
+        permission_profile = resolve_action_permission_profile(action_spec)
         actor = (submitted_by or "").strip()
         if not actor or actor == "system":
-            return None
+            return None, permission_profile
 
         actor_type = str(submitted_by_type or "user").strip().lower() or "user"
         role = await get_database_access_role(db_name=db_name, principal_type=actor_type, principal_id=actor)
-        if role not in DOMAIN_MODEL_ROLES:
-            raise PermissionError("Permission denied")
+        if permission_profile.permission_model == PERMISSION_MODEL_ONTOLOGY_ROLES:
+            if role not in DOMAIN_MODEL_ROLES:
+                raise PermissionError("Permission denied")
+        else:
+            if role not in DATA_ENGINEER_ROLES:
+                raise PermissionError("Permission denied")
 
-        policy = action_spec.get("permission_policy")
-        tags = build_principal_tags(principal_type=actor_type, principal_id=actor, role=role)
-        if not policy_allows(policy=policy, principal_tags=tags):
+        if permission_profile.permission_model == PERMISSION_MODEL_ONTOLOGY_ROLES:
+            policy = action_spec.get("permission_policy")
+            tags = build_principal_tags(principal_type=actor_type, principal_id=actor, role=role)
+            if not policy_allows(policy=policy, principal_tags=tags):
+                raise PermissionError("Permission denied")
+
+        if permission_profile.edits_beyond_actions and role not in DATA_ENGINEER_ROLES:
             raise PermissionError("Permission denied")
-        return role
+        return role, permission_profile
 
     async def _check_writeback_dataset_acl_alignment(
         self,
@@ -788,12 +802,23 @@ class ActionWorker(StrictHeartbeatKafkaWorker[_ActionCommandPayload, None]):
         )
 
         submitted_by_type = str((log_rec.metadata or {}).get("user_type") or "user").strip().lower() or "user"
-        actor_role = await self._enforce_permission(
-            db_name=db_name,
-            submitted_by=log_rec.submitted_by,
-            submitted_by_type=submitted_by_type,
-            action_spec=spec,
-        )
+        try:
+            actor_role, permission_profile = await self._enforce_permission(
+                db_name=db_name,
+                submitted_by=log_rec.submitted_by,
+                submitted_by_type=submitted_by_type,
+                action_spec=spec,
+            )
+        except ActionPermissionProfileError as exc:
+            await self.action_logs.mark_failed(
+                action_log_id=action_log_id,
+                result={
+                    "error": "action_permission_profile_invalid",
+                    "message": str(exc),
+                    "field": exc.field,
+                },
+            )
+            raise _ActionRejected("action_permission_profile_invalid") from exc
         audit_policy = spec.get("audit_policy")
 
         def _audit_result(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -1038,43 +1063,51 @@ class ActionWorker(StrictHeartbeatKafkaWorker[_ActionCommandPayload, None]):
                         }
                     )
 
-                if AppConfig.WRITEBACK_ENFORCE_GOVERNANCE and self.dataset_registry:
-                    denied: List[Dict[str, Any]] = []
-                    for loaded in loaded_targets:
-                        class_id = safe_str(loaded.get("class_id"))
-                        instance_id = safe_str(loaded.get("instance_id"))
-                        base_state = loaded.get("base_state") if isinstance(loaded.get("base_state"), dict) else None
-                        if not class_id or not instance_id or not base_state:
-                            continue
-                        try:
-                            access_policy = await self.dataset_registry.get_access_policy(
-                                db_name=db_name,
-                                scope="data_access",
-                                subject_type="object_type",
-                                subject_id=class_id,
-                            )
-                        except Exception as exc:
-                            logger.warning(
-                                "Failed to load object_type access policy for class %s: %s",
-                                class_id,
-                                exc,
-                                exc_info=True,
-                            )
-                            access_policy = None
-                        if not access_policy or not isinstance(access_policy.policy, dict) or not access_policy.policy:
-                            continue
-                        filtered, _info = apply_access_policy([base_state], policy=access_policy.policy)
-                        if not filtered:
-                            denied.append({"class_id": class_id, "instance_id": instance_id})
+                enforce_data_access = requires_action_data_access_enforcement(
+                    profile=permission_profile,
+                    global_enforcement=AppConfig.WRITEBACK_ENFORCE_ACTION_DATA_ACCESS,
+                )
+                if enforce_data_access:
+                    if self.dataset_registry is None:
+                        self.dataset_registry = DatasetRegistry()
+                        await self.dataset_registry.connect()
+                    if not self.dataset_registry:
+                        await self.action_logs.mark_failed(
+                            action_log_id=action_log_id,
+                            result=_audit_result(
+                                {
+                                    "error": "data_access_unverifiable",
+                                    "message": "DatasetRegistry not initialized for action data_access checks",
+                                }
+                            ),
+                        )
+                        raise _ActionRejected("data_access_unverifiable")
 
-                    if denied:
+                    access_report = await evaluate_action_target_data_access(
+                        dataset_registry=self.dataset_registry,
+                        db_name=db_name,
+                        targets=loaded_targets,
+                    )
+                    if access_report.unverifiable:
+                        await self.action_logs.mark_failed(
+                            action_log_id=action_log_id,
+                            result=_audit_result(
+                                {
+                                "error": "data_access_unverifiable",
+                                "message": "Unable to verify one or more target rows under data_access policy",
+                                "unverifiable": access_report.unverifiable,
+                                }
+                            ),
+                        )
+                        raise _ActionRejected("data_access_unverifiable")
+                    if access_report.denied:
                         await self.action_logs.mark_failed(
                             action_log_id=action_log_id,
                             result=_audit_result(
                                 {
                                 "error": "data_access_denied",
                                 "message": "Actor cannot access one or more target rows under data_access policy",
-                                "denied": denied,
+                                "denied": access_report.denied,
                                 }
                             ),
                         )

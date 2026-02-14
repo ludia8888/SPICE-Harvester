@@ -15,6 +15,7 @@ import argparse
 import ast
 import fnmatch
 import re
+import subprocess
 import sys
 from collections import Counter
 from dataclasses import dataclass
@@ -126,6 +127,14 @@ def _is_exception_type(node: Optional[ast.AST]) -> bool:
     return False
 
 
+def _is_suppress_call(func: ast.AST) -> bool:
+    if isinstance(func, ast.Name):
+        return func.id == "suppress"
+    if isinstance(func, ast.Attribute):
+        return func.attr == "suppress"
+    return False
+
+
 def _handler_contains_log_call(handler: ast.ExceptHandler) -> bool:
     for node in ast.walk(handler):
         if not isinstance(node, ast.Call):
@@ -192,6 +201,7 @@ def _count_runtime_guard_patterns(
         "silent_broad_except": [],
         "broad_except_no_log": [],
         "lineage_fail_open": [],
+        "action_permission_profile_gap": [],
         "streamjoin_strategy_ignored": [],
         "output_kind_metadata_gap": [],
         "preflight_swallowed_error": [],
@@ -227,6 +237,37 @@ def _count_runtime_guard_patterns(
                 issues["dataset_write_mode_gap"].append((str(path), 1))
             if "{\"parquet\", \"json\", \"csv\", \"avro\", \"orc\"}" not in source:
                 issues["dataset_write_format_gap"].append((str(path), 1))
+
+        action_permission_required_snippets = {
+            "action_worker/main.py": (
+                "resolve_action_permission_profile(",
+                "action_permission_profile_invalid",
+                "requires_action_data_access_enforcement(",
+            ),
+            "oms/services/action_simulation_service.py": (
+                "resolve_action_permission_profile(",
+                "action_permission_profile_invalid",
+                "requires_action_data_access_enforcement(",
+            ),
+            "oms/routers/action_async.py": (
+                "resolve_action_permission_profile(",
+                "permission_profile_invalid",
+                "requires_action_data_access_enforcement(",
+            ),
+            "oms/services/ontology_resource_validator.py": (
+                "resolve_action_permission_profile(",
+                "ActionPermissionProfileError",
+            ),
+            "shared/utils/action_permission_profile.py": (
+                "PERMISSION_MODEL_ONTOLOGY_ROLES",
+                "PERMISSION_MODEL_DATASOURCE_DERIVED",
+                "resolve_action_permission_profile(",
+            ),
+        }
+        required_snippets = action_permission_required_snippets.get(rel)
+        if required_snippets:
+            if any(snippet not in source for snippet in required_snippets):
+                issues["action_permission_profile_gap"].append((str(path), 1))
 
         for node in ast.walk(tree):
             if isinstance(node, ast.FunctionDef) and node.name == "_apply_stream_join":
@@ -284,7 +325,7 @@ def _count_runtime_guard_patterns(
                     expr = item.context_expr
                     if not isinstance(expr, ast.Call):
                         continue
-                    if not isinstance(expr.func, ast.Name) or expr.func.id != "suppress":
+                    if not _is_suppress_call(expr.func):
                         continue
                     if not expr.args:
                         continue
@@ -354,6 +395,226 @@ def _find_doc_only_modules(
             continue
 
     return hits
+
+
+def _normalize_route_path(*parts: str) -> str:
+    tokens: List[str] = []
+    for part in parts:
+        for token in str(part or "").split("/"):
+            token = token.strip()
+            if token:
+                tokens.append(token)
+    return "/" + "/".join(tokens) if tokens else "/"
+
+
+def _extract_apirouter_prefix(tree: ast.AST) -> str:
+    for node in getattr(tree, "body", []):
+        if not isinstance(node, ast.Assign):
+            continue
+        if not any(isinstance(target, ast.Name) and target.id == "router" for target in node.targets):
+            continue
+        if not isinstance(node.value, ast.Call):
+            continue
+        if not isinstance(node.value.func, ast.Name) or node.value.func.id != "APIRouter":
+            continue
+        for kw in node.value.keywords:
+            if kw.arg == "prefix" and isinstance(kw.value, ast.Constant) and isinstance(kw.value.value, str):
+                return kw.value.value
+    return ""
+
+
+def _iter_router_routes(tree: ast.AST) -> Iterable[Tuple[str, str, int, str]]:
+    methods = {"get", "post", "put", "patch", "delete", "options", "head"}
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        for dec in node.decorator_list:
+            if not isinstance(dec, ast.Call):
+                continue
+            if not isinstance(dec.func, ast.Attribute):
+                continue
+            if dec.func.attr not in methods:
+                continue
+            if not isinstance(dec.func.value, ast.Name) or dec.func.value.id != "router":
+                continue
+            route_path = ""
+            if dec.args and isinstance(dec.args[0], ast.Constant) and isinstance(dec.args[0].value, str):
+                route_path = dec.args[0].value
+            yield dec.func.attr.upper(), route_path, node.lineno, node.name
+
+
+def _collect_app_route_collisions(root: Path) -> List[Tuple[str, int, str]]:
+    app_specs: List[Tuple[str, Dict[str, str]]] = [
+        ("bff/main.py", {"bff.routers": "bff/routers", "shared.routers": "shared/routers"}),
+        ("oms/main.py", {"oms.routers": "oms/routers", "shared.routers": "shared/routers"}),
+    ]
+    collisions: List[Tuple[str, int, str]] = []
+
+    for main_rel, module_roots in app_specs:
+        main_path = root / main_rel
+        if not main_path.exists():
+            continue
+        try:
+            main_tree = ast.parse(main_path.read_text(encoding="utf-8"))
+        except (OSError, SyntaxError):
+            continue
+
+        import_map: Dict[str, Path] = {}
+        for node in getattr(main_tree, "body", []):
+            if not isinstance(node, ast.ImportFrom):
+                continue
+            if not node.module or node.module not in module_roots:
+                continue
+            base = root / module_roots[node.module]
+            for alias in node.names:
+                alias_name = alias.asname or alias.name
+                import_map[alias_name] = base / f"{alias.name}.py"
+
+        include_entries: List[Tuple[str, str, int]] = []
+        for node in ast.walk(main_tree):
+            if not isinstance(node, ast.Call):
+                continue
+            if not isinstance(node.func, ast.Attribute) or node.func.attr != "include_router":
+                continue
+            if not node.args:
+                continue
+            arg = node.args[0]
+            module_name: Optional[str] = None
+            if (
+                isinstance(arg, ast.Attribute)
+                and arg.attr == "router"
+                and isinstance(arg.value, ast.Name)
+            ):
+                module_name = arg.value.id
+            if not module_name:
+                continue
+            include_prefix = ""
+            for kw in node.keywords:
+                if kw.arg == "prefix" and isinstance(kw.value, ast.Constant) and isinstance(kw.value.value, str):
+                    include_prefix = kw.value.value
+            include_entries.append((module_name, include_prefix, node.lineno))
+
+        seen: Dict[Tuple[str, str], Tuple[str, int, str, int]] = {}
+        for module_name, include_prefix, include_line in include_entries:
+            router_path = import_map.get(module_name)
+            if not router_path or not router_path.exists():
+                continue
+            try:
+                router_tree = ast.parse(router_path.read_text(encoding="utf-8"))
+            except (OSError, SyntaxError):
+                continue
+            router_prefix = _extract_apirouter_prefix(router_tree)
+            for method, route_path, route_line, func_name in _iter_router_routes(router_tree):
+                full_path = _normalize_route_path(include_prefix, router_prefix, route_path)
+                key = (method, full_path)
+                origin = (str(router_path), route_line, func_name, include_line)
+                if key in seen:
+                    previous = seen[key]
+                    detail = (
+                        f"route collision in {main_rel}: {method} {full_path} "
+                        f"({previous[0]}:{previous[1]} via include@{previous[3]}) vs "
+                        f"({origin[0]}:{origin[1]} via include@{origin[3]})"
+                    )
+                    collisions.append((str(main_path), include_line, detail))
+                else:
+                    seen[key] = origin
+
+    return collisions
+
+
+def _find_duplicate_symbols(
+    root: Path,
+    *,
+    runtime_scope_glob: Optional[List[str]] = None,
+) -> List[Tuple[str, int, str]]:
+    hits: List[Tuple[str, int, str]] = []
+    for path in _iter_runtime_files(root, runtime_scope_glob=runtime_scope_glob):
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except (OSError, SyntaxError):
+            continue
+
+        module_seen: Dict[str, int] = {}
+        for node in getattr(tree, "body", []):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                if node.name in module_seen:
+                    detail = (
+                        f"duplicate module function `{node.name}` "
+                        f"(first:{module_seen[node.name]}, again:{node.lineno})"
+                    )
+                    hits.append((str(path), node.lineno, detail))
+                else:
+                    module_seen[node.name] = node.lineno
+            elif isinstance(node, ast.ClassDef):
+                class_seen: Dict[str, int] = {}
+                for item in node.body:
+                    if not isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                        continue
+                    if item.name in class_seen:
+                        detail = (
+                            f"duplicate class method `{node.name}.{item.name}` "
+                            f"(first:{class_seen[item.name]}, again:{item.lineno})"
+                        )
+                        hits.append((str(path), item.lineno, detail))
+                    else:
+                        class_seen[item.name] = item.lineno
+    return hits
+
+
+def _run_vulture_high_confidence(root: Path) -> Dict[str, List[str]]:
+    cmd = [
+        sys.executable,
+        "-m",
+        "vulture",
+        ".",
+        "--exclude",
+        "tests/*,scripts/*,.venv/*,venv/*",
+        "--min-confidence",
+        "100",
+    ]
+    try:
+        result = subprocess.run(
+            cmd,
+            cwd=str(root),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError as exc:
+        return {
+            "runtime": [],
+            "tests": [],
+            "scripts": [],
+            "errors": [f"vulture invocation failed: {exc}"],
+        }
+
+    runtime: List[str] = []
+    tests: List[str] = []
+    scripts: List[str] = []
+    errors: List[str] = []
+
+    for line in (result.stdout or "").splitlines():
+        row = line.strip()
+        if not row:
+            continue
+        path = row.split(":", 1)[0]
+        if path.startswith("tests/") or "/tests/" in path:
+            tests.append(row)
+        elif path.startswith("scripts/") or "/scripts/" in path:
+            scripts.append(row)
+        else:
+            runtime.append(row)
+
+    stderr = (result.stderr or "").strip()
+    if stderr:
+        errors.append(stderr)
+
+    return {
+        "runtime": runtime,
+        "tests": tests,
+        "scripts": scripts,
+        "errors": errors,
+    }
 
 
 def _parse_catalog_specs(catalog_path: Path) -> Dict[str, CodeSpec]:
@@ -650,6 +911,11 @@ def main() -> int:
         help="Fail when lineage write calls are wrapped by broad exception handlers that do not re-raise",
     )
     parser.add_argument(
+        "--fail-on-action-permission-profile-gap",
+        action="store_true",
+        help="Fail when action permission model/profile enforcement contract is missing in validator/runtime paths",
+    )
+    parser.add_argument(
         "--fail-on-streamjoin-strategy-ignored",
         action="store_true",
         help="Fail when streamJoin execution path delegates to generic join without strategy-aware spec handling",
@@ -695,6 +961,26 @@ def main() -> int:
         action="store_true",
         help="Fail when runtime modules contain only docstrings/imports (potential legacy garbage modules)",
     )
+    parser.add_argument(
+        "--fail-on-route-collision",
+        action="store_true",
+        help="Fail when FastAPI routes collide within the same app include graph",
+    )
+    parser.add_argument(
+        "--fail-on-duplicate-symbol",
+        action="store_true",
+        help="Fail when duplicate module/class function symbols are found in runtime files",
+    )
+    parser.add_argument(
+        "--report-vulture-high-confidence",
+        action="store_true",
+        help="Report vulture --min-confidence 100 findings (runtime/tests/scripts split)",
+    )
+    parser.add_argument(
+        "--fail-on-vulture-runtime-high-confidence",
+        action="store_true",
+        help="Fail when vulture --min-confidence 100 reports runtime candidates",
+    )
     args = parser.parse_args()
 
     root = Path(args.backend_root).resolve()
@@ -722,6 +1008,14 @@ def main() -> int:
         root,
         runtime_scope_glob=list(args.runtime_scope_glob or []),
     )
+    route_collisions = _collect_app_route_collisions(root)
+    duplicate_symbols = _find_duplicate_symbols(
+        root,
+        runtime_scope_glob=list(args.runtime_scope_glob or []),
+    )
+    vulture_report: Optional[Dict[str, List[str]]] = None
+    if args.report_vulture_high_confidence or args.fail_on_vulture_runtime_high_confidence:
+        vulture_report = _run_vulture_high_confidence(root)
 
     print("=== Error Taxonomy Audit ===")
     print(f"Catalog specs: {len(specs)}")
@@ -739,6 +1033,7 @@ def main() -> int:
     print(f"Runtime silent broad except: {len(runtime_issues['silent_broad_except'])}")
     print(f"Runtime broad except without log/raise: {len(runtime_issues['broad_except_no_log'])}")
     print(f"Runtime lineage fail-open handlers: {len(runtime_issues['lineage_fail_open'])}")
+    print(f"Runtime action permission profile gaps: {len(runtime_issues['action_permission_profile_gap'])}")
     print(f"Runtime streamJoin strategy ignored handlers: {len(runtime_issues['streamjoin_strategy_ignored'])}")
     print(f"Runtime output kind metadata gap handlers: {len(runtime_issues['output_kind_metadata_gap'])}")
     print(f"Runtime preflight swallowed handlers: {len(runtime_issues['preflight_swallowed_error'])}")
@@ -747,6 +1042,13 @@ def main() -> int:
     print(f"Runtime dataset write-format gaps: {len(runtime_issues['dataset_write_format_gap'])}")
     print(f"Runtime commented exports in __init__.py: {len(commented_exports)}")
     print(f"Runtime doc-only modules: {len(doc_only_modules)}")
+    print(f"App route collisions: {len(route_collisions)}")
+    print(f"Runtime duplicate symbols: {len(duplicate_symbols)}")
+    if vulture_report is not None:
+        print(f"Vulture high-confidence runtime candidates: {len(vulture_report.get('runtime', []))}")
+        print(f"Vulture high-confidence test candidates: {len(vulture_report.get('tests', []))}")
+        print(f"Vulture high-confidence script candidates: {len(vulture_report.get('scripts', []))}")
+        print(f"Vulture invocation errors: {len(vulture_report.get('errors', []))}")
 
     if mismatches:
         print("\\nTop mismatches:")
@@ -802,6 +1104,10 @@ def main() -> int:
         print("\\nRuntime lineage fail-open hits:")
         for path, line in runtime_issues["lineage_fail_open"][:120]:
             print(f"  {path}:{line}")
+    if runtime_issues["action_permission_profile_gap"]:
+        print("\\nRuntime action permission profile gap hits:")
+        for path, line in runtime_issues["action_permission_profile_gap"][:120]:
+            print(f"  {path}:{line}")
     if runtime_issues["streamjoin_strategy_ignored"]:
         print("\\nRuntime streamJoin strategy ignored hits:")
         for path, line in runtime_issues["streamjoin_strategy_ignored"][:120]:
@@ -834,6 +1140,31 @@ def main() -> int:
         print("\\nRuntime doc-only module hits:")
         for path, line in doc_only_modules[:120]:
             print(f"  {path}:{line}")
+    if route_collisions:
+        print("\\nApp route collision hits:")
+        for path, line, detail in route_collisions[:120]:
+            print(f"  {path}:{line} {detail}")
+    if duplicate_symbols:
+        print("\\nRuntime duplicate symbol hits:")
+        for path, line, detail in duplicate_symbols[:120]:
+            print(f"  {path}:{line} {detail}")
+    if vulture_report is not None:
+        if vulture_report.get("errors"):
+            print("\\nVulture invocation errors:")
+            for row in vulture_report["errors"][:20]:
+                print(f"  {row}")
+        if vulture_report.get("runtime"):
+            print("\\nVulture high-confidence runtime candidates:")
+            for row in vulture_report["runtime"][:120]:
+                print(f"  {row}")
+        if vulture_report.get("tests"):
+            print("\\nVulture high-confidence test candidates:")
+            for row in vulture_report["tests"][:120]:
+                print(f"  {row}")
+        if vulture_report.get("scripts"):
+            print("\\nVulture high-confidence script candidates:")
+            for row in vulture_report["scripts"][:120]:
+                print(f"  {row}")
 
     exit_code = 0
     if mismatches or unknown or raw_mismatches or raw_unknown:
@@ -854,6 +1185,8 @@ def main() -> int:
         exit_code = 1
     if args.fail_on_lineage_fail_open and runtime_issues["lineage_fail_open"]:
         exit_code = 1
+    if args.fail_on_action_permission_profile_gap and runtime_issues["action_permission_profile_gap"]:
+        exit_code = 1
     if args.fail_on_streamjoin_strategy_ignored and runtime_issues["streamjoin_strategy_ignored"]:
         exit_code = 1
     if args.fail_on_output_kind_metadata_gap and runtime_issues["output_kind_metadata_gap"]:
@@ -869,6 +1202,12 @@ def main() -> int:
     if args.fail_on_commented_export and commented_exports:
         exit_code = 1
     if args.fail_on_doc_only_module and doc_only_modules:
+        exit_code = 1
+    if args.fail_on_route_collision and route_collisions:
+        exit_code = 1
+    if args.fail_on_duplicate_symbol and duplicate_symbols:
+        exit_code = 1
+    if args.fail_on_vulture_runtime_high_confidence and vulture_report and vulture_report.get("runtime"):
         exit_code = 1
     return exit_code
 

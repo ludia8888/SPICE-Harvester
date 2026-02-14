@@ -13,7 +13,6 @@ Features:
 """
 
 import json
-import contextlib
 import logging
 import os
 from enum import Enum
@@ -737,19 +736,23 @@ class LLMSettings(BaseSettings):
                 mock_dir = str(self.mock_dir or "").strip()
                 if mock_dir:
                     candidate = Path(mock_dir) / f"{token.lower()}.json"
-                    with contextlib.suppress(Exception):
+                    try:
                         file_value = candidate.read_text(encoding="utf-8").strip()
                         if file_value:
                             return file_value
+                    except OSError as exc:
+                        logger.warning("Failed to read task-scoped mock JSON %s: %s", candidate, exc, exc_info=True)
         fallback = str(self.mock_json or "").strip()
         if fallback:
             return fallback
         mock_dir = str(self.mock_dir or "").strip()
         if mock_dir:
-            with contextlib.suppress(Exception):
+            try:
                 file_value = (Path(mock_dir) / "default.json").read_text(encoding="utf-8").strip()
                 if file_value:
                     return file_value
+            except OSError as exc:
+                logger.warning("Failed to read default mock JSON from %s: %s", mock_dir, exc, exc_info=True)
         return None
 
 
@@ -4083,6 +4086,13 @@ class WritebackSettings(BaseSettings):
     writeback_enforce_governance: bool = Field(
         default=False,
         description="Enforce governance checks for writeback (WRITEBACK_ENFORCE_GOVERNANCE)",
+    )
+    writeback_enforce_action_data_access: bool = Field(
+        default=True,
+        description=(
+            "Enforce action target data_access policy checks on submit/simulate/worker "
+            "(WRITEBACK_ENFORCE_ACTION_DATA_ACCESS)"
+        ),
     )
     writeback_read_overlay: bool = Field(
         default=False,

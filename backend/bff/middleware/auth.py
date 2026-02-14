@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import hmac
 import json
 import logging
@@ -750,6 +749,48 @@ async def _enforce_internal_agent_tool_policy(request: Request) -> Optional[JSON
                     category=ErrorCategory.PERMISSION,
                 )
 
+        allowed_action_type_ids = {str(v).strip() for v in (data_policies.get("allowed_action_type_ids") or []) if str(v).strip()}
+        if allowed_action_type_ids:
+            action_type_id = (
+                path_params.get("action_type_id")
+                or path_params.get("actionTypeId")
+                or request.query_params.get("action_type_id")
+                or request.query_params.get("actionTypeId")
+                or _body_lookup(("action_type_id", "actionTypeId", "action_type", "actionType"))
+                or ""
+            ).strip()
+            if action_type_id and action_type_id not in allowed_action_type_ids:
+                return _error_response(
+                    request=request,
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    message="Permission denied",
+                    code=ErrorCode.PERMISSION_DENIED,
+                    category=ErrorCategory.PERMISSION,
+                )
+
+        allowed_ontology_ids = {str(v).strip() for v in (data_policies.get("allowed_ontology_ids") or []) if str(v).strip()}
+        if allowed_ontology_ids:
+            ontology_id = (
+                path_params.get("ontology_id")
+                or path_params.get("ontologyId")
+                or path_params.get("class_id")
+                or path_params.get("classId")
+                or request.query_params.get("ontology_id")
+                or request.query_params.get("ontologyId")
+                or request.query_params.get("class_id")
+                or request.query_params.get("classId")
+                or _body_lookup(("ontology_id", "ontologyId", "class_id", "classId", "target_class_id", "targetClassId"))
+                or ""
+            ).strip()
+            if ontology_id and ontology_id not in allowed_ontology_ids:
+                return _error_response(
+                    request=request,
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    message="Permission denied",
+                    code=ErrorCode.PERMISSION_DENIED,
+                    category=ErrorCategory.PERMISSION,
+                )
+
     request.state.agent_tool_policy = policy
     request.state.agent_tool_id = tool_id
     return None
@@ -1145,10 +1186,12 @@ async def _bff_auth_handle_agent_token(request: Request, call_next: _CallNext, c
     denied = await _enforce_internal_agent_tool_policy(request)
     if denied is not None:
         denied_obj: Any = {}
-        with contextlib.suppress(Exception):
+        try:
             raw = denied.body if hasattr(denied, "body") else b""
             if isinstance(raw, (bytes, bytearray)) and raw:
                 denied_obj = json.loads(bytes(raw).decode("utf-8", errors="replace"))
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            logger.warning("Failed to parse denied response body for telemetry: %s", exc, exc_info=True)
         if denied_obj in (None, ""):
             denied_obj = {}
         request.state.agent_tool_response_body = denied_obj
@@ -1162,7 +1205,7 @@ async def _bff_auth_handle_agent_token(request: Request, call_next: _CallNext, c
     except Exception as exc:
         await _finalize_tool_idempotency_error(request, exc)
         # Best-effort tool call telemetry for crashes.
-        with contextlib.suppress(Exception):
+        try:
             response = _error_response(
                 request=request,
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -1172,6 +1215,8 @@ async def _bff_auth_handle_agent_token(request: Request, call_next: _CallNext, c
             )
             request.state.agent_tool_response_body = _internal_error_payload(request, message="Internal error")
             await _finalize_session_tool_call(request, response, terminal_status="FAILED")
+        except Exception as telemetry_exc:
+            logger.warning("Failed to finalize agent tool telemetry after crash: %s", telemetry_exc, exc_info=True)
         raise
     response = await _finalize_tool_idempotency(request, response)
     await _finalize_session_tool_call(

@@ -1,6 +1,7 @@
 import pytest
 
 from oms.services.ontology_resource_validator import (
+    _collect_permission_policy_issues,
     _collect_relationship_spec_issues,
     _collect_link_type_issues,
     _find_missing_link_type_refs,
@@ -139,3 +140,88 @@ async def test_link_type_missing_refs_are_reported():
         spec={"from": "Customer", "to": "Order", "predicate": "has_order", "cardinality": "1:n"},
     )
     assert missing == ["Order"]
+
+
+@pytest.mark.unit
+def test_permission_policy_allows_legacy_roles_alias_for_runtime_compat() -> None:
+    issues = _collect_permission_policy_issues(
+        {
+            "effect": "ALLOW",
+            "roles": ["DomainModeler"],
+        }
+    )
+    assert issues == []
+
+
+@pytest.mark.unit
+def test_permission_policy_allows_legacy_users_alias_for_runtime_compat() -> None:
+    issues = _collect_permission_policy_issues(
+        {
+            "effect": "ALLOW",
+            "users": ["alice"],
+        }
+    )
+    assert issues == []
+
+
+@pytest.mark.unit
+def test_permission_policy_rejects_unsupported_legacy_fields() -> None:
+    issues = _collect_permission_policy_issues(
+        {
+            "effect": "ALLOW",
+            "principals": ["role:DomainModeler"],
+            "rules": [{"op": "always_true"}],
+        }
+    )
+    invalid = {field for issue in issues for field in issue["details"]["invalid_fields"]}
+    assert "permission_policy.rules" in invalid
+
+
+@pytest.mark.unit
+def test_action_type_datasource_derived_allows_missing_permission_policy() -> None:
+    spec = {
+        "permission_model": "datasource_derived",
+        "input_schema": {"fields": [{"name": "ticket", "type": "object_ref", "required": True}]},
+        "writeback_target": {"repo": "ontology-writeback", "branch": "writeback-{db_name}"},
+        "implementation": {
+            "type": "template_v1",
+            "targets": [{"target": {"from": "input.ticket"}, "changes": {"set": {"status": "APPROVED"}}}],
+        },
+    }
+    issues = check_required_fields("action_type", spec)
+    missing = {field for issue in issues for field in issue["details"]["missing_fields"]}
+    assert "permission_policy" not in missing
+
+
+@pytest.mark.unit
+def test_action_type_rejects_invalid_permission_model() -> None:
+    spec = {
+        "permission_model": "invalid_model",
+        "input_schema": {"fields": [{"name": "ticket", "type": "object_ref", "required": True}]},
+        "writeback_target": {"repo": "ontology-writeback", "branch": "writeback-{db_name}"},
+        "implementation": {
+            "type": "template_v1",
+            "targets": [{"target": {"from": "input.ticket"}, "changes": {"set": {"status": "APPROVED"}}}],
+        },
+    }
+    issues = check_required_fields("action_type", spec)
+    invalid = {field for issue in issues for field in issue["details"]["invalid_fields"]}
+    assert "permission_model" in invalid
+
+
+@pytest.mark.unit
+def test_action_type_rejects_non_boolean_edits_beyond_actions() -> None:
+    spec = {
+        "permission_model": "ontology_roles",
+        "edits_beyond_actions": "yes",
+        "input_schema": {"fields": [{"name": "ticket", "type": "object_ref", "required": True}]},
+        "permission_policy": {"effect": "ALLOW", "principals": ["role:DomainModeler"]},
+        "writeback_target": {"repo": "ontology-writeback", "branch": "writeback-{db_name}"},
+        "implementation": {
+            "type": "template_v1",
+            "targets": [{"target": {"from": "input.ticket"}, "changes": {"set": {"status": "APPROVED"}}}],
+        },
+    }
+    issues = check_required_fields("action_type", spec)
+    invalid = {field for issue in issues for field in issue["details"]["invalid_fields"]}
+    assert "edits_beyond_actions" in invalid

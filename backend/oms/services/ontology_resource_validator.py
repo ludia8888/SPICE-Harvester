@@ -6,13 +6,17 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from oms.services.async_terminus import AsyncTerminusService
 from oms.services.ontology_resources import OntologyResourceService, normalize_resource_type
 from oms.validation_codes import OntologyValidationCode as OVC
 from shared.observability.tracing import trace_external_call
 from shared.utils.action_input_schema import ActionInputSchemaError, normalize_input_schema
+from shared.utils.action_permission_profile import (
+    ActionPermissionProfileError,
+    resolve_action_permission_profile,
+)
 from shared.utils.action_template_engine import ActionImplementationError, validate_template_v1_definition
 from shared.utils.key_spec import normalize_key_spec
 from shared.utils.safe_bool_expression import BoolExpressionError, validate_bool_expression_syntax
@@ -165,7 +169,7 @@ async def find_missing_references(
     terminus: AsyncTerminusService,
     branch: str,
 ) -> List[str]:
-    normalized_type = normalize_resource_type(resource_type)
+    normalize_resource_type(resource_type)
     spec = _merge_payload_spec(payload)
     refs = collect_reference_values(spec)
 
@@ -516,6 +520,17 @@ def _collect_required_field_issues(resource_type: str, spec: Dict[str, Any]) -> 
                 invalid_fields=["deterministic"],
             )
     elif resource_type == "action_type":
+        permission_profile = None
+        try:
+            permission_profile = resolve_action_permission_profile(spec)
+        except ActionPermissionProfileError as exc:
+            invalid_field = exc.field or "permission_model"
+            _append_spec_issue(
+                issues,
+                message=f"action_type permission profile is invalid: {exc}",
+                invalid_fields=[invalid_field],
+            )
+
         input_schema = spec.get("input_schema")
         if not isinstance(input_schema, dict) or not input_schema:
             _append_spec_issue(
@@ -533,11 +548,18 @@ def _collect_required_field_issues(resource_type: str, spec: Dict[str, Any]) -> 
                     invalid_fields=["input_schema"],
                 )
         permission_policy = spec.get("permission_policy")
-        if not isinstance(permission_policy, dict) or not permission_policy:
+        policy_required = permission_profile is None or permission_profile.requires_permission_policy
+        if policy_required and (not isinstance(permission_policy, dict) or not permission_policy):
             _append_spec_issue(
                 issues,
                 message="action_type requires non-empty permission_policy object",
                 missing_fields=["permission_policy"],
+            )
+        if permission_policy is not None and (not isinstance(permission_policy, dict) or not permission_policy):
+            _append_spec_issue(
+                issues,
+                message="action_type permission_policy must be a non-empty object when provided",
+                invalid_fields=["permission_policy"],
             )
         if isinstance(permission_policy, dict) and permission_policy:
             issues.extend(_collect_permission_policy_issues(permission_policy))
@@ -788,28 +810,45 @@ def _collect_required_items_issues(
 
 def _collect_permission_policy_issues(policy: Dict[str, Any]) -> List[Dict[str, Any]]:
     issues: List[Dict[str, Any]] = []
+    effect = policy.get("effect")
+    principals = policy.get("principals")
+    roles = policy.get("roles")
+    users = policy.get("users")
+    groups = policy.get("groups")
+    services = policy.get("services")
 
-    # New (policy) shape: { effect: "ALLOW|DENY", principals: ["role:...","user:..."], conditions?: {} }
-    if any(key in policy for key in ("effect", "principals")):
-        effect = policy.get("effect")
-        principals = policy.get("principals")
-
-        if not isinstance(effect, str) or not effect.strip():
+    if not isinstance(effect, str) or not effect.strip():
+        _append_spec_issue(
+            issues,
+            message="permission_policy requires effect",
+            missing_fields=["permission_policy.effect"],
+        )
+    else:
+        normalized = effect.strip().upper()
+        if normalized not in {"ALLOW", "DENY"}:
             _append_spec_issue(
                 issues,
-                message="permission_policy requires effect",
-                missing_fields=["permission_policy.effect"],
+                message="permission_policy.effect must be ALLOW or DENY",
+                invalid_fields=["permission_policy.effect"],
             )
-        else:
-            normalized = effect.strip().upper()
-            if normalized not in {"ALLOW", "DENY"}:
-                _append_spec_issue(
-                    issues,
-                    message="permission_policy.effect must be ALLOW or DENY",
-                    invalid_fields=["permission_policy.effect"],
-                )
 
-        if principals is None or principals == []:
+    has_principals = principals is not None
+    alias_values = {
+        "roles": roles,
+        "users": users,
+        "groups": groups,
+        "services": services,
+    }
+    has_aliases = any(value is not None for value in alias_values.values())
+    if not has_principals and not has_aliases:
+        _append_spec_issue(
+            issues,
+            message="permission_policy requires principals (or legacy roles/users/groups/services aliases)",
+            missing_fields=["permission_policy.principals"],
+        )
+
+    if has_principals:
+        if principals in (None, []):
             _append_spec_issue(
                 issues,
                 message="permission_policy requires principals",
@@ -834,71 +873,29 @@ def _collect_permission_policy_issues(policy: Dict[str, Any]) -> List[Dict[str, 
                     invalid_fields=["permission_policy.principals"],
                 )
 
-        return issues
+    for alias_field, alias_value in alias_values.items():
+        if alias_value is None:
+            continue
+        if not _validate_string_list(alias_value, field_name=f"permission_policy.{alias_field}"):
+            _append_spec_issue(
+                issues,
+                message=f"permission_policy.{alias_field} must be a list of non-empty strings",
+                invalid_fields=[f"permission_policy.{alias_field}"],
+            )
 
-    has_policy = False
-    roles = policy.get("roles")
-    scopes = policy.get("scopes")
-    rules = policy.get("rules")
-    policy_text = policy.get("policy")
-
-    if roles is not None:
-        if _validate_string_list(roles, field_name="permission_policy.roles"):
-            has_policy = True
-        else:
-            _append_spec_issue(
-                issues,
-                message="permission_policy.roles must be a list of non-empty strings",
-                invalid_fields=["permission_policy.roles"],
-            )
-    if scopes is not None:
-        if _validate_string_list(scopes, field_name="permission_policy.scopes"):
-            has_policy = True
-        else:
-            _append_spec_issue(
-                issues,
-                message="permission_policy.scopes must be a list of non-empty strings",
-                invalid_fields=["permission_policy.scopes"],
-            )
-    if rules is not None:
-        if isinstance(rules, list):
-            if not rules:
-                _append_spec_issue(
-                    issues,
-                    message="permission_policy.rules must be non-empty",
-                    invalid_fields=["permission_policy.rules"],
-                )
-            else:
-                has_policy = True
-        elif isinstance(rules, dict):
-            if not rules:
-                _append_spec_issue(
-                    issues,
-                    message="permission_policy.rules must be non-empty",
-                    invalid_fields=["permission_policy.rules"],
-                )
-            else:
-                has_policy = True
-        else:
-            _append_spec_issue(
-                issues,
-                message="permission_policy.rules must be object or list",
-                invalid_fields=["permission_policy.rules"],
-            )
-    if policy_text is not None:
-        if not isinstance(policy_text, str) or not policy_text.strip():
-            _append_spec_issue(
-                issues,
-                message="permission_policy.policy must be non-empty string",
-                invalid_fields=["permission_policy.policy"],
-            )
-        else:
-            has_policy = True
-    if not has_policy:
+    unsupported_keys = [
+        field
+        for field in ("scopes", "rules", "policy")
+        if field in policy and policy.get(field) not in (None, "", [], {})
+    ]
+    if unsupported_keys:
         _append_spec_issue(
             issues,
-            message="action_type permission_policy must define effect+principals or roles/scopes/policy/rules",
-            missing_fields=["permission_policy.effect|principals|roles|scopes|policy|rules"],
+            message=(
+                "permission_policy unsupported fields for runtime evaluation: "
+                + ", ".join(sorted(unsupported_keys))
+            ),
+            invalid_fields=[f"permission_policy.{field}" for field in sorted(unsupported_keys)],
         )
     return issues
 

@@ -178,6 +178,7 @@ class AppConfig:
     # NOTE: Defaults are intentionally conservative; enable explicitly per environment.
     WRITEBACK_ENFORCE = _SettingsValue("writeback.writeback_enforce")
     WRITEBACK_ENFORCE_GOVERNANCE = _SettingsValue("writeback.writeback_enforce_governance")
+    WRITEBACK_ENFORCE_ACTION_DATA_ACCESS = _SettingsValue("writeback.writeback_enforce_action_data_access")
     WRITEBACK_READ_OVERLAY = _SettingsValue("writeback.writeback_read_overlay")
     WRITEBACK_ENABLED_OBJECT_TYPES_RAW = _SettingsValue("writeback.writeback_enabled_object_types")
     WRITEBACK_DATASET_ACL_SCOPE = _SettingsValue("writeback.writeback_dataset_acl_scope")

@@ -697,6 +697,136 @@ def test_bff_agent_tool_policy_enforces_session_enabled_tools_and_abac():
 
 
 @pytest.mark.unit
+def test_bff_agent_tool_policy_enforces_action_type_and_ontology_abac():
+    user_token = jwt.encode(
+        {"sub": "user-1", "roles": ["Owner"], "tenant_id": "tenant-2"},
+        "jwt-secret",
+        algorithm="HS256",
+    )
+
+    class StubToolRegistry:
+        def __init__(self, policy):  # noqa: ANN001
+            self._policy = policy
+
+        async def get_tool_policy(self, *, tool_id: str):  # noqa: ANN001
+            return self._policy.get(tool_id)
+
+    class StubPolicyRegistry:
+        def __init__(self, policy):  # noqa: ANN001
+            self._policy = policy
+
+        async def get_tenant_policy(self, *, tenant_id: str):  # noqa: ANN001
+            if tenant_id != self._policy["tenant_id"]:
+                return None
+            return SimpleNamespace(**self._policy)
+
+    class StubContainer:
+        def __init__(self, *, tool_registry, policy_registry):  # noqa: ANN001
+            self._tool_registry = tool_registry
+            self._policy_registry = policy_registry
+
+        def get_agent_tool_registry(self):  # noqa: ANN001
+            return self._tool_registry
+
+        def get_agent_policy_registry(self):  # noqa: ANN001
+            return self._policy_registry
+
+    now = datetime.now(timezone.utc)
+    action_tool = AgentToolPolicyRecord(
+        tool_id="actions.execute",
+        method="POST",
+        path="/api/v1/databases/{db_name}/actions/{action_type_id}/execute",
+        risk_level="write",
+        requires_approval=False,
+        requires_idempotency_key=False,
+        status="ACTIVE",
+        roles=["Owner"],
+        max_payload_bytes=200000,
+        created_at=now,
+        updated_at=now,
+    )
+    ontology_tool = AgentToolPolicyRecord(
+        tool_id="ontology.read",
+        method="GET",
+        path="/api/v1/databases/{db_name}/ontology/{ontology_id}",
+        risk_level="read",
+        requires_approval=False,
+        requires_idempotency_key=False,
+        status="ACTIVE",
+        roles=["Owner"],
+        max_payload_bytes=200000,
+        created_at=now,
+        updated_at=now,
+    )
+    tenant_policy = {
+        "tenant_id": "tenant-2",
+        "allowed_tools": ["actions.execute", "ontology.read"],
+        "allowed_models": [],
+        "default_model": None,
+        "auto_approve_rules": {},
+        "data_policies": {
+            "allowed_db_names": ["allowed-db"],
+            "allowed_action_type_ids": ["action-1"],
+            "allowed_ontology_ids": ["ontology-1"],
+        },
+        "created_at": now,
+        "updated_at": now,
+    }
+
+    with _set_env(
+        BFF_REQUIRE_AUTH="true",
+        BFF_AGENT_TOKEN="agent-secret",
+        USER_JWT_ENABLED="true",
+        USER_JWT_HS256_SECRET="jwt-secret",
+    ):
+        app = FastAPI()
+        app.state.bff_container = StubContainer(
+            tool_registry=StubToolRegistry(
+                {
+                    "actions.execute": action_tool,
+                    "ontology.read": ontology_tool,
+                }
+            ),
+            policy_registry=StubPolicyRegistry(tenant_policy),
+        )
+        install_bff_auth_middleware(app)
+
+        @app.post("/api/v1/databases/{db_name}/actions/{action_type_id}/execute")
+        async def execute_action(db_name: str, action_type_id: str):  # noqa: ANN001
+            return {"db_name": db_name, "action_type_id": action_type_id}
+
+        @app.get("/api/v1/databases/{db_name}/ontology/{ontology_id}")
+        async def read_ontology(db_name: str, ontology_id: str):  # noqa: ANN001
+            return {"db_name": db_name, "ontology_id": ontology_id}
+
+        client = TestClient(app)
+
+        action_headers = {
+            "X-Admin-Token": "agent-secret",
+            "X-Delegated-Authorization": f"Bearer {user_token}",
+            "X-Agent-Tool-ID": "actions.execute",
+            "X-Agent-Tool-Run-ID": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+        }
+        resp = client.post("/api/v1/databases/allowed-db/actions/action-2/execute", headers=action_headers)
+        assert resp.status_code == 403
+
+        resp = client.post("/api/v1/databases/allowed-db/actions/action-1/execute", headers=action_headers)
+        assert resp.status_code == 200
+
+        ontology_headers = {
+            "X-Admin-Token": "agent-secret",
+            "X-Delegated-Authorization": f"Bearer {user_token}",
+            "X-Agent-Tool-ID": "ontology.read",
+            "X-Agent-Tool-Run-ID": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+        }
+        resp = client.get("/api/v1/databases/allowed-db/ontology/ontology-2", headers=ontology_headers)
+        assert resp.status_code == 403
+
+        resp = client.get("/api/v1/databases/allowed-db/ontology/ontology-1", headers=ontology_headers)
+        assert resp.status_code == 200
+
+
+@pytest.mark.unit
 def test_bff_agent_tool_idempotency_replays_without_reexecution():
     user_token = jwt.encode(
         {"sub": "user-1", "roles": ["Owner"], "tenant_id": "tenant-1"},
