@@ -1,6 +1,6 @@
 # Backend Method Index
 
-> Generated: 2026-02-14T06:15:41+09:00
+> Generated: 2026-02-14T10:12:35+09:00
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 
 ## action_outbox_worker
@@ -1563,15 +1563,16 @@
 
 ### `backend/bff/services/objectify_ops_service.py`
 - **Functions**
-  - `_match_output_name(output, name)` (line 33): no docstring
-  - `_compute_schema_hash_from_sample(sample_json)` (line 37): no docstring
-  - `_extract_schema_columns(schema)` (line 41): no docstring
-  - `_extract_schema_types(schema)` (line 45): no docstring
-  - `_normalize_mapping_pair(item)` (line 49): no docstring
-  - `_build_mapping_change_summary(previous_mappings, new_mappings)` (line 59): no docstring
-  - `_extract_ontology_fields(payload)` (line 112): no docstring
-  - `_resolve_import_type(raw_type)` (line 116): no docstring
-  - `_unwrap_data_payload(payload)` (line 120): no docstring
+  - `_match_output_name(output, name)` (line 34): no docstring
+  - `_compute_schema_hash_from_sample(sample_json)` (line 38): no docstring
+  - `_extract_schema_columns(schema)` (line 42): no docstring
+  - `_extract_schema_types(schema)` (line 46): no docstring
+  - `_normalize_mapping_pair(item)` (line 50): no docstring
+  - `_build_mapping_change_summary(previous_mappings, new_mappings)` (line 60): no docstring
+  - `_extract_ontology_fields(payload)` (line 113): no docstring
+  - `_resolve_import_type(raw_type)` (line 117): no docstring
+  - `_is_type_compatible(source_type, target_type)` (line 121): no docstring
+  - `_unwrap_data_payload(payload)` (line 125): no docstring
 
 ### `backend/bff/services/objectify_run_service.py`
 - **Functions**
@@ -10312,17 +10313,6 @@
   - `test_otlp_export_disabled_when_no_endpoint()` (line 29): no docstring
   - `test_span_omits_kind_when_none()` (line 36): no docstring
   - `test_span_passes_kind_when_set()` (line 74): no docstring
-
-### `backend/tests/unit/oms/test_action_async_permission_profile_api.py`
-- **Functions**
-  - `_build_action_spec()` (line 14): no docstring
-  - `_install_deployment_and_resource_mocks(monkeypatch, action_spec)` (line 43): no docstring
-  - `action_async_app()` (line 76): no docstring
-  - `async test_submit_returns_403_for_datasource_derived_without_data_engineer_role(action_async_app, monkeypatch)` (line 97): no docstring
-  - `async test_simulate_returns_503_when_datasource_derived_data_access_is_unverifiable(action_async_app, monkeypatch)` (line 125): no docstring
-- **Classes**
-  - `_FakeEventStore` (line 70): no docstring
-    - `async append_event(self, _event)` (line 71): no docstring
 
 ### `backend/tests/unit/oms/test_action_async_permission_profile_api.py`
 - **Functions**

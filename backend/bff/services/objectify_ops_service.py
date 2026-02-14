@@ -12,6 +12,7 @@ from bff.services.link_types_mapping_service import extract_ontology_properties,
 from shared.services.pipeline.pipeline_schema_utils import normalize_schema_type
 from shared.utils.import_type_normalization import resolve_import_type
 from shared.utils.payload_utils import unwrap_data_payload
+from shared.utils.schema_type_compatibility import is_type_compatible
 from shared.utils.schema_columns import (
     extract_schema_column_names as _extract_schema_column_names_raw,
     extract_schema_type_map as _extract_schema_type_map_raw,
@@ -115,6 +116,10 @@ def _extract_ontology_fields(payload: Any) -> tuple[Dict[str, Dict[str, Any]], D
 
 def _resolve_import_type(raw_type: Any) -> Optional[str]:
     return resolve_import_type(raw_type)
+
+
+def _is_type_compatible(source_type: str, target_type: str) -> bool:
+    return is_type_compatible(source_type, target_type)
 
 
 def _unwrap_data_payload(payload: Any) -> Dict[str, Any]:

@@ -1,6 +1,6 @@
 # Backend Design Reference
 
-> Generated: 2026-02-14T06:15:41+09:00
+> Generated: 2026-02-14T10:12:35+09:00
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 > Source: AST + docstring extraction (module/class/function) via `scripts/generate_backend_methods.py`.
 
@@ -2633,10 +2633,10 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
-- API surface: public=0 | top-level functions=9 | classes=0 | methods=0
+- API surface: public=0 | top-level functions=10 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=0/9 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
-- Internal imports (7): bff.services.link_types_mapping_service; shared.services.pipeline.pipeline_schema_utils; shared.utils.import_type_normalization; shared.utils.objectify_outputs; shared.utils.payload_utils; shared.utils.schema_columns; shared.utils.schema_hash
+- Doc coverage: module=yes | top-level functions=0/10 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Internal imports (8): bff.services.link_types_mapping_service; shared.services.pipeline.pipeline_schema_utils; shared.utils.import_type_normalization; shared.utils.objectify_outputs; shared.utils.payload_utils; shared.utils.schema_columns; shared.utils.schema_hash; shared.utils.schema_type_compatibility
 - External imports (2): __future__; typing
 - Public API names: not documented
 
