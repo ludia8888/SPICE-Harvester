@@ -13,6 +13,7 @@ from shared.errors.error_types import ErrorCode, classified_http_exception
 from shared.models.requests import ApiResponse
 from shared.security.input_sanitizer import validate_db_name
 from shared.observability.tracing import trace_db_operation
+from shared.services.pipeline.pipeline_udf_runtime import compile_udf, PipelineUdfError
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,14 @@ async def create_udf(
 ) -> dict[str, Any]:
     try:
         db_name = validate_db_name(db_name)
+        # Validate UDF code at creation time (fail-closed: reject unsafe code before save)
+        try:
+            compile_udf(code)
+        except PipelineUdfError as exc:
+            raise classified_http_exception(
+                status.HTTP_400_BAD_REQUEST, f"UDF code validation failed: {exc}",
+                code=ErrorCode.REQUEST_VALIDATION_FAILED,
+            ) from exc
         udf = await pipeline_registry.create_udf(
             db_name=db_name,
             name=name.strip(),
@@ -139,6 +148,14 @@ async def create_udf_version(
         if not udf:
             raise classified_http_exception(status.HTTP_404_NOT_FOUND, "UDF not found", code=ErrorCode.RESOURCE_NOT_FOUND)
 
+        # Validate UDF code at version creation time (fail-closed)
+        try:
+            compile_udf(code)
+        except PipelineUdfError as exc:
+            raise classified_http_exception(
+                status.HTTP_400_BAD_REQUEST, f"UDF code validation failed: {exc}",
+                code=ErrorCode.REQUEST_VALIDATION_FAILED,
+            ) from exc
         version = await pipeline_registry.create_udf_version(
             udf_id=udf_id,
             code=code,

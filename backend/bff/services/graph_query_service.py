@@ -933,7 +933,7 @@ async def find_relationship_paths(
             max_depth=max_depth,
         )
 
-        logger.info("✅ Found %s paths via REAL WOQL schema discovery", len(paths))
+        logger.info("✅ Found %s paths via schema discovery", len(paths))
         return {
             "source_class": source_class,
             "target_class": target_class,

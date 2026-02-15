@@ -30,5 +30,6 @@ __all__ = [
     "governance",
     "object_types",
     "link_types",
+    "foundry_ontology_v2",
     "actions",
 ]

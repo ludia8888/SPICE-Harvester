@@ -508,7 +508,7 @@ class TestCoreOntologyManagement:
 
     @pytest.mark.asyncio
     async def test_ontology_creation_advanced_relationships(self):
-        """Test advanced ontology creation path is truly event-sourced and functional."""
+        """Test ontology creation with relationships is event-sourced and functional."""
         async with aiohttp.ClientSession(headers=AUTH_HEADERS) as session:
             db_name = f"test_adv_ontology_db_{uuid.uuid4().hex[:12]}"
             ontology_branch = f"ontology/{uuid.uuid4().hex[:8]}"
@@ -562,7 +562,7 @@ class TestCoreOntologyManagement:
             product_adv = {
                 "id": "AdvProduct",
                 "label": "Advanced Product",
-                "description": "Product created via create-advanced endpoint",
+                "description": "Product created via ontology endpoint",
                 "properties": [
                     {
                         "name": "product_id",
@@ -583,13 +583,9 @@ class TestCoreOntologyManagement:
             }
 
             async with session.post(
-                f"{OMS_URL}/api/v1/database/{db_name}/ontology/create-advanced",
+                f"{OMS_URL}/api/v1/database/{db_name}/ontology",
                 json=product_adv,
-                params={
-                    "validate_relationships": "true",
-                    "check_circular_references": "true",
-                    "branch": ontology_branch,
-                },
+                params={"branch": ontology_branch},
             ) as resp:
                 assert resp.status == 202
                 body = await resp.json()
@@ -605,16 +601,17 @@ class TestCoreOntologyManagement:
             )
             await _wait_for_command_terminal_state(session, command_id=str(command_id))
 
-            # Verify the relationship network analyzer works end-to-end (no broken method wiring).
-            async with session.get(f"{OMS_URL}/api/v1/database/{db_name}/ontology/analyze-network") as resp:
+            # Verify relationship payload was persisted on read path.
+            async with session.get(
+                f"{OMS_URL}/api/v1/database/{db_name}/ontology/AdvProduct",
+                params={"branch": ontology_branch},
+            ) as resp:
                 assert resp.status == 200
                 body = await resp.json()
                 assert body.get("status") == "success"
-                analysis = body.get("data") or {}
-                assert "summary" in analysis
-                assert "graph_structure" in analysis
-                assert "validation" in analysis
-                assert "cycle_analysis" in analysis
+                ontology = body.get("data") or {}
+                relationships = ontology.get("relationships") or []
+                assert any(rel.get("predicate") == "owned_by" for rel in relationships)
 
 
 class TestBFFGraphFederation:

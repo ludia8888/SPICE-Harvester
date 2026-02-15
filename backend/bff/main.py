@@ -93,6 +93,7 @@ from bff.routers import (
     governance,
     graph,
     health,
+    foundry_ontology_v2,
     instance_async,
     instances,
     lineage,
@@ -1025,13 +1026,14 @@ async def get_pipeline_executor() -> PipelineExecutor:
 
 # Router registration (unchanged)
 app.include_router(database.router, prefix="/api/v1")
-# NOTE: Ontology extensions must be registered before legacy ontology routes because
-# legacy `/ontology/{class_id}` would otherwise greedily capture subpaths like
+# NOTE: Ontology extensions must be registered before generic ontology routes because
+# `/ontology/{class_id}` would otherwise greedily capture subpaths like
 # `/ontology/branches` or `/ontology/action-types`.
 app.include_router(ontology_extensions.router, prefix="/api/v1")
 app.include_router(ontology.router, prefix="/api/v1")
 app.include_router(object_types.router, prefix="/api/v1")
 app.include_router(link_types.router, prefix="/api/v1")
+app.include_router(foundry_ontology_v2.router, prefix="/api")
 app.include_router(query.router, prefix="/api/v1")
 app.include_router(mapping.router, prefix="/api/v1")
 app.include_router(health.router, prefix="/api/v1")

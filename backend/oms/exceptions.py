@@ -67,12 +67,6 @@ class TransactionUpdateError(AtomicUpdateError):
     pass
 
 
-class WOQLUpdateError(AtomicUpdateError):
-    """Raised when WOQL-based atomic update fails"""
-
-    pass
-
-
 class BackupCreationError(AtomicUpdateError):
     """Raised when backup creation fails"""
 

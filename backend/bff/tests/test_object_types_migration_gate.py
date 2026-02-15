@@ -162,7 +162,9 @@ async def test_object_type_migration_requires_approval():
         )
 
     assert exc_info.value.status_code == 409
-    assert exc_info.value.detail["code"] == "OBJECT_TYPE_MIGRATION_REQUIRED"
+    detail = exc_info.value.detail
+    assert detail["code"] == "CONFLICT"
+    assert detail["error_code"] == "OBJECT_TYPE_MIGRATION_REQUIRED"
     assert dataset_registry.last_gate["status"] == "FAIL"
     assert dataset_registry.last_gate["details"]["backing_changed"] is True
 

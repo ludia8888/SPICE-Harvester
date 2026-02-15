@@ -1,6 +1,6 @@
 """
 Instance Management Router
-Elasticsearch 기반 인스턴스 데이터 조회 API (Phase 2: TerminusDB-free)
+Foundry Object Storage v2 read mapping for instance data
 
 Dataset-primary indexing: objectify_worker/instance_worker가 ES에 직접 write한 데이터를 조회.
 """
@@ -225,17 +225,3 @@ async def get_class_instance_count(
             code=ErrorCode.INTERNAL_ERROR,
         )
 
-
-@router.post("/sparql")
-@trace_endpoint("oms.instance.sparql")
-async def execute_sparql_query(
-    db_name: str = Depends(ValidatedDatabaseName),
-) -> Dict[str, Any]:
-    """
-    SPARQL 엔드포인트 — deprecated (TerminusDB 제거됨).
-    """
-    raise classified_http_exception(
-        status.HTTP_410_GONE,
-        "SPARQL endpoint is deprecated. Use instance search endpoints instead.",
-        code=ErrorCode.RESOURCE_GONE,
-    )

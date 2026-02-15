@@ -16,6 +16,7 @@ Key improvements:
 6. ✅ Easy testing and mocking
 """
 
+import base64
 from typing import Any, Dict, List, Optional
 
 import httpx
@@ -153,7 +154,7 @@ class TerminusService:
 
     async def get_database_info(self, db_name: str):
         """데이터베이스 정보 조회"""
-        response = await self.oms_client.check_database_exists(db_name)
+        response = await self.oms_client.get_database(db_name)
         return response
 
     async def list_classes(self, db_name: str, *, branch: str = "main"):
@@ -235,10 +236,134 @@ class TerminusService:
         )
         return response
 
-    async def query_database(self, db_name: str, query: str):
-        """데이터베이스 쿼리"""
-        response = await self.oms_client.query_ontologies(db_name, query)
-        return response
+    async def query_database(self, db_name: str, query: Dict[str, Any]):
+        """데이터베이스 쿼리 (Foundry Search Objects v2 adapter)."""
+        if not isinstance(query, dict):
+            raise ValueError("query must be an object")
+
+        class_id = str(query.get("class_id") or "").strip()
+        if not class_id:
+            raise ValueError("class_id is required")
+
+        raw_limit = query.get("limit", 100)
+        raw_offset = query.get("offset", 0)
+        try:
+            limit = int(raw_limit)
+            offset = int(raw_offset)
+        except Exception as exc:
+            raise ValueError("limit/offset must be integers") from exc
+
+        if limit < 1:
+            limit = 1
+        if limit > 1000:
+            limit = 1000
+        if offset < 0:
+            raise ValueError("offset must be >= 0")
+
+        filters = query.get("filters") or []
+        where = self._build_foundry_where(filters)
+        page_token = self._encode_page_token(offset) if offset > 0 else None
+        branch = str(query.get("branch") or "main").strip() or "main"
+        select_fields: Optional[List[str]] = None
+        if isinstance(query.get("select"), list):
+            select_fields = [str(v).strip() for v in query["select"] if str(v).strip()]
+
+        order_by = str(query.get("order_by") or "").strip() or None
+        order_direction = str(query.get("order_direction") or "asc").strip().lower() or "asc"
+        if order_direction not in {"asc", "desc"}:
+            raise ValueError("order_direction must be 'asc' or 'desc'")
+
+        response = await self.oms_client.search_objects_v2(
+            db_name=db_name,
+            object_type=class_id,
+            where=where,
+            page_size=limit,
+            page_token=page_token,
+            select=select_fields,
+            order_by=order_by,
+            order_direction=order_direction,
+            branch=branch,
+        )
+
+        data = response.get("data") if isinstance(response, dict) else None
+        rows: List[Dict[str, Any]] = list(data) if isinstance(data, list) else []
+
+        total_count = 0
+        if isinstance(response, dict):
+            try:
+                total_count = int(response.get("totalCount") or 0)
+            except (TypeError, ValueError):
+                total_count = len(rows)
+
+        return {
+            "data": rows,
+            "count": total_count,
+            "nextPageToken": response.get("nextPageToken") if isinstance(response, dict) else None,
+        }
+
+    @staticmethod
+    def _encode_page_token(offset: int) -> str:
+        raw = str(max(0, int(offset))).encode("utf-8")
+        return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+    @staticmethod
+    def _build_foundry_where(filters: Any) -> Dict[str, Any]:
+        if not isinstance(filters, list) or not filters:
+            # Match-all equivalent within SearchJsonQueryV2.
+            return {"type": "not", "value": {"type": "isNull", "field": "instance_id"}}
+
+        clauses: List[Dict[str, Any]] = []
+        for f in filters:
+            if not isinstance(f, dict):
+                continue
+            clauses.append(TerminusService._map_filter_to_foundry(f))
+
+        if not clauses:
+            return {"type": "not", "value": {"type": "isNull", "field": "instance_id"}}
+        if len(clauses) == 1:
+            return clauses[0]
+        return {"type": "and", "value": clauses}
+
+    @staticmethod
+    def _map_filter_to_foundry(filter_item: Dict[str, Any]) -> Dict[str, Any]:
+        field = str(filter_item.get("field") or "").strip()
+        if not field:
+            raise ValueError("filter.field is required")
+
+        operator = str(filter_item.get("operator") or "").strip().lower()
+        value = filter_item.get("value")
+
+        if operator == "eq":
+            return {"type": "eq", "field": field, "value": value}
+        if operator == "ne":
+            return {"type": "not", "value": {"type": "eq", "field": field, "value": value}}
+        if operator == "gt":
+            return {"type": "gt", "field": field, "value": value}
+        if operator in {"ge", "gte"}:
+            return {"type": "gte", "field": field, "value": value}
+        if operator == "lt":
+            return {"type": "lt", "field": field, "value": value}
+        if operator in {"le", "lte"}:
+            return {"type": "lte", "field": field, "value": value}
+        if operator == "is_null":
+            return {"type": "isNull", "field": field}
+        if operator == "is_not_null":
+            return {"type": "not", "value": {"type": "isNull", "field": field}}
+        if operator == "like":
+            return {"type": "containsAnyTerm", "field": field, "value": str(value or "")}
+        if operator == "in":
+            if not isinstance(value, list) or not value:
+                raise ValueError("in operator requires a non-empty list value")
+            return {"type": "or", "value": [{"type": "eq", "field": field, "value": v} for v in value]}
+        if operator == "not_in":
+            if not isinstance(value, list) or not value:
+                raise ValueError("not_in operator requires a non-empty list value")
+            return {
+                "type": "not",
+                "value": {"type": "or", "value": [{"type": "eq", "field": field, "value": v} for v in value]},
+            }
+
+        raise ValueError(f"Unsupported query operator: {operator}")
 
     # Branch management methods (실제 OMS API 호출)
     async def create_branch(
@@ -411,142 +536,6 @@ class TerminusService:
             return await response_json_async(response)
         except (httpx.HTTPError, httpx.TimeoutException, ValueError) as e:
             raise RuntimeError(f"충돌 해결 실패 ({db_name}): {e}")
-
-    # Advanced relationship management methods - OMS API calls
-    async def create_ontology_with_advanced_relationships(
-        self,
-        db_name: str,
-        ontology_data: Dict[str, Any],
-        *,
-        branch: str = "main",
-        auto_generate_inverse: bool = False,
-        validate_relationships: bool = True,
-        check_circular_references: bool = True,
-        headers: Optional[Dict[str, str]] = None,
-    ) -> Dict[str, Any]:
-        """고급 관계 관리 기능을 포함한 온톨로지 생성 - OMS API 호출"""
-        try:
-            response = await self.oms_client.client.post(
-                f"/api/v1/database/{db_name}/ontology/create-advanced",
-                json=ontology_data,
-                params={
-                    "branch": branch,
-                    "auto_generate_inverse": auto_generate_inverse,
-                    "validate_relationships": validate_relationships,
-                    "check_circular_references": check_circular_references,
-                },
-                headers=headers,
-            )
-            if response.status_code >= 400:
-                try:
-                    payload = response.json()
-                except Exception:
-                    logging.getLogger(__name__).warning("Broad exception fallback at bff/dependencies.py:445", exc_info=True)
-                    payload = {"detail": response.text}
-                raise classified_http_exception(response.status_code, str(payload), code=ErrorCode.UPSTREAM_ERROR)
-            return response.json()
-        except (httpx.HTTPError, httpx.TimeoutException, ValueError) as e:
-            raise RuntimeError(f"고급 온톨로지 생성 실패 ({db_name}): {e}")
-
-    async def validate_relationships(
-        self,
-        db_name: str,
-        ontology_data: Dict[str, Any],
-        *,
-        branch: str = "main",
-        headers: Optional[Dict[str, str]] = None,
-    ) -> Dict[str, Any]:
-        """온톨로지 관계 검증 - OMS API 호출 (no write)."""
-        try:
-            response = await self.oms_client.client.post(
-                f"/api/v1/database/{db_name}/ontology/validate-relationships",
-                json=ontology_data,
-                params={"branch": branch},
-                headers=headers,
-            )
-            response.raise_for_status()
-            body = response.json()
-            if isinstance(body, dict) and "data" in body:
-                return body["data"]
-            return body
-        except (httpx.HTTPError, httpx.TimeoutException, ValueError) as e:
-            raise RuntimeError(f"관계 검증 실패 ({db_name}): {e}")
-
-    async def detect_circular_references(
-        self,
-        db_name: str,
-        *,
-        branch: str = "main",
-        new_ontology: Optional[Dict[str, Any]] = None,
-        headers: Optional[Dict[str, str]] = None,
-    ) -> Dict[str, Any]:
-        """순환 참조 탐지 - OMS API 호출 (no write)."""
-        try:
-            response = await self.oms_client.client.post(
-                f"/api/v1/database/{db_name}/ontology/detect-circular-references",
-                json=new_ontology,
-                params={"branch": branch},
-                headers=headers,
-            )
-            response.raise_for_status()
-            body = response.json()
-            if isinstance(body, dict) and "data" in body:
-                return body["data"]
-            return body
-        except (httpx.HTTPError, httpx.TimeoutException, ValueError) as e:
-            raise RuntimeError(f"순환 참조 탐지 실패 ({db_name}): {e}")
-
-    async def analyze_relationship_network(
-        self,
-        db_name: str,
-        *,
-        branch: str = "main",
-        headers: Optional[Dict[str, str]] = None,
-    ) -> Dict[str, Any]:
-        """관계 네트워크 분석 - OMS API 호출 (no write)."""
-        try:
-            response = await self.oms_client.client.get(
-                f"/api/v1/database/{db_name}/ontology/analyze-network",
-                params={"branch": branch},
-                headers=headers,
-            )
-            response.raise_for_status()
-            body = response.json()
-            if isinstance(body, dict) and "data" in body:
-                return body["data"]
-            return body
-        except (httpx.HTTPError, httpx.TimeoutException, ValueError) as e:
-            raise RuntimeError(f"관계 네트워크 분석 실패 ({db_name}): {e}")
-
-    async def find_relationship_paths(
-        self,
-        db_name: str,
-        start_entity: str,
-        end_entity: Optional[str] = None,
-        max_depth: int = 5,
-        path_type: str = "shortest",
-        *,
-        branch: str = "main",
-        headers: Optional[Dict[str, str]] = None,
-    ) -> Dict[str, Any]:
-        """관계 경로 탐색 - OMS API 호출 (no write)."""
-        params: Dict[str, Any] = {"max_depth": max_depth, "path_type": path_type, "branch": branch}
-        if end_entity:
-            params["end_entity"] = end_entity
-        try:
-            response = await self.oms_client.client.get(
-                f"/api/v1/database/{db_name}/ontology/relationship-paths/{start_entity}",
-                params=params,
-                headers=headers,
-            )
-            response.raise_for_status()
-            body = response.json()
-            if isinstance(body, dict) and "data" in body:
-                return body["data"]
-            return body
-        except (httpx.HTTPError, httpx.TimeoutException, ValueError) as e:
-            raise RuntimeError(f"관계 경로 탐색 실패 ({db_name}): {e}")
-
 
 async def get_terminus_service(
     oms_client: OMSClient = Depends(BFFDependencyProvider.get_oms_client)

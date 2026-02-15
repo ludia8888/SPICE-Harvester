@@ -153,6 +153,7 @@ export const OntologyPage = ({ dbName }: { dbName: string }) => {
     }
     return coerceExpectedSeq((detailQuery.data as { version?: number }).version)
   }, [detailQuery.data])
+  const existingClassWritesDisabled = Boolean(selectedClass)
 
   const validateMutation = useMutation({
     mutationFn: async () => {
@@ -338,7 +339,13 @@ export const OntologyPage = ({ dbName }: { dbName: string }) => {
             <div className="card-title">
               <Text>Editor</Text>
               <div className="form-row">
-                <Button small icon="tick-circle" onClick={handleValidate} loading={validateMutation.isPending}>
+                <Button
+                  small
+                  icon="tick-circle"
+                  onClick={handleValidate}
+                  loading={validateMutation.isPending}
+                  disabled={existingClassWritesDisabled}
+                >
                   Validate
                 </Button>
                 <Button
@@ -347,7 +354,7 @@ export const OntologyPage = ({ dbName }: { dbName: string }) => {
                   icon="cloud-upload"
                   onClick={handleApply}
                   loading={applyMutation.isPending}
-                  disabled={isProtected && (!adminMode || !adminToken)}
+                  disabled={existingClassWritesDisabled || (isProtected && (!adminMode || !adminToken))}
                 >
                   Apply
                 </Button>
@@ -357,12 +364,17 @@ export const OntologyPage = ({ dbName }: { dbName: string }) => {
                   icon="trash"
                   onClick={handleDelete}
                   loading={deleteMutation.isPending}
-                  disabled={!selectedClass || (isProtected && (!adminMode || !adminToken))}
+                  disabled
                 >
                   Delete
                 </Button>
               </div>
             </div>
+            {existingClassWritesDisabled ? (
+              <Callout intent={Intent.WARNING} style={{ marginBottom: 12 }}>
+                Existing class update/delete via legacy v1 endpoints has been removed. Use the Foundry object type contract flow.
+              </Callout>
+            ) : null}
             <FormGroup label="Class ID (optional)">
               <InputGroup value={selectedClass ?? ''} disabled placeholder="Auto-generated for new classes" />
             </FormGroup>

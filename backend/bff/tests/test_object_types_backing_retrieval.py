@@ -1,5 +1,3 @@
-from types import SimpleNamespace
-
 import pytest
 from starlette.requests import Request
 
@@ -12,46 +10,29 @@ class _FakeOMSClient:
         return {
             "data": {
                 "id": resource_id,
+                "label": {"en": "Account"},
                 "spec": {
-                    "backing_source": {"ref": "backing-1", "version_id": "backing-ver-1"},
+                    "status": "ACTIVE",
+                    "pk_spec": {"primary_key": ["account_id"], "title_key": ["account_id"]},
+                    "visibility": "NORMAL",
                 },
             }
         }
 
-
-class _FakeDatasetRegistry:
-    async def get_backing_datasource(self, *, backing_id):  # noqa: ANN003
-        if backing_id != "backing-1":
-            return None
-        return SimpleNamespace(
-            backing_id="backing-1",
-            dataset_id="ds-1",
-            db_name="test_db",
-            name="backing",
-            description=None,
-            source_type="dataset",
-            source_ref=None,
-            branch="main",
-            status="ACTIVE",
-        )
-
-    async def get_backing_datasource_version(self, *, version_id):  # noqa: ANN003
-        if version_id != "backing-ver-1":
-            return None
-        return SimpleNamespace(
-            version_id="backing-ver-1",
-            backing_id="backing-1",
-            dataset_version_id="ver-1",
-            schema_hash="hash-1",
-            metadata={},
-            status="ACTIVE",
-        )
-
-
-class _FakeObjectifyRegistry:
-    async def get_mapping_spec(self, *, mapping_spec_id):  # noqa: ANN003
-        _ = mapping_spec_id
-        return None
+    async def get_ontology(self, db_name, class_id, *, branch="main"):  # noqa: ANN001, ANN003
+        _ = db_name, branch
+        return {
+            "data": {
+                "properties": [
+                    {
+                        "name": "account_id",
+                        "label": {"en": "Account ID"},
+                        "type": "xsd:string",
+                        "required": True,
+                    }
+                ]
+            }
+        }
 
 
 async def _noop_require_domain_role(request, *, db_name):  # noqa: ANN001, ANN003
@@ -60,7 +41,7 @@ async def _noop_require_domain_role(request, *, db_name):  # noqa: ANN001, ANN00
 
 
 @pytest.mark.asyncio
-async def test_object_type_retrieval_includes_backing_datasource():
+async def test_object_type_retrieval_uses_foundry_shape():
     request = Request({"type": "http", "headers": []})
     original_require = object_types_router._require_domain_role
     object_types_router._require_domain_role = _noop_require_domain_role
@@ -71,12 +52,21 @@ async def test_object_type_retrieval_includes_backing_datasource():
             request=request,
             branch="main",
             oms_client=_FakeOMSClient(),
-            dataset_registry=_FakeDatasetRegistry(),
-            objectify_registry=_FakeObjectifyRegistry(),
         )
     finally:
         object_types_router._require_domain_role = original_require
 
     data = response.data
-    assert data["backing_datasource"]["backing_id"] == "backing-1"
-    assert data["backing_datasource_version"]["version_id"] == "backing-ver-1"
+    assert data["apiName"] == "Account"
+    assert data["displayName"] == "Account"
+    assert data["status"] == "ACTIVE"
+    assert data["visibility"] == "NORMAL"
+    assert data["primaryKey"] == "account_id"
+    assert data["titleProperty"] == "account_id"
+    assert data["properties"]["account_id"]["displayName"] == "Account ID"
+    assert data["properties"]["account_id"]["dataType"]["type"] == "string"
+    assert data["properties"]["account_id"]["required"] is True
+    assert data["properties"]["account_id"]["status"] == "ACTIVE"
+    assert "backing_datasource" not in data
+    assert "backing_datasource_version" not in data
+    assert "mapping_spec" not in data

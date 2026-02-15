@@ -129,9 +129,9 @@ async def test_get_class_instance_count(mock_es):
 
 
 @pytest.mark.asyncio
-async def test_sparql_returns_410():
+async def test_sparql_endpoint_removed_returns_404():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         resp = await client.post("/instance/test_db/sparql")
 
-    assert resp.status_code == 410
+    assert resp.status_code == 404

@@ -1,273 +1,491 @@
 """
-Query Router for CQRS Read Side
-CQRS read path: Query from Elasticsearch with TerminusDB graph federation
+Foundry-style Object Search Router (OMS).
 
-🔥 THINK ULTRA: This implements the correct query patterns:
-1. Simple queries → Direct from Elasticsearch
-2. Graph queries → TerminusDB for traversal, ES for documents
-3. WOQL queries → TerminusDB analysis with optional ES enrichment
+Provides Foundry Search Objects API v2-compatible read surface on top of the
+instances Elasticsearch index.
 """
 
+import base64
 import logging
-from typing import Any, AsyncIterator, Dict
-from fastapi import APIRouter, Depends, Query as QueryParam
-from pydantic import BaseModel
+import re
+from typing import Any, Dict, List, Literal, Optional
+from uuid import uuid4
 
-from oms.dependencies import (
-    AsyncTerminusService,
-    TerminusServiceDep,
-    ValidatedDatabaseName,
-)
-from elasticsearch import AsyncElasticsearch
-from shared.config.settings import get_settings
-from shared.errors.error_types import ErrorCode, classified_http_exception
+from fastapi import APIRouter, Body, Depends, Query, status
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
+
+from oms.dependencies import ValidatedDatabaseName
+from shared.config.search_config import get_instances_index_name
+from shared.dependencies.providers import ElasticsearchServiceDep
 from shared.observability.tracing import trace_endpoint
+from shared.security.input_sanitizer import (
+    SecurityViolationError,
+    validate_branch_name,
+    validate_class_id,
+)
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-
-class SimpleQuery(BaseModel):
-    """Simple SQL-like query"""
-    query: str  # e.g., "SELECT * FROM Product WHERE price > 1000"
-
-
-class WOQLQuery(BaseModel):
-    """WOQL query for graph analysis"""
-    type: str = "select"
-    query: str  # WOQL/SPARQL query string
-
-
-async def get_elasticsearch() -> AsyncIterator[AsyncElasticsearch]:
-    """Get Elasticsearch client"""
-    settings = get_settings()
-    es_url = f"http://{settings.database.elasticsearch_host}:{settings.database.elasticsearch_port}"
-    es_username = (settings.database.elasticsearch_username or "").strip()
-    es_password = settings.database.elasticsearch_password or ""
-
-    es_kwargs = {
-        "hosts": [es_url],
-        "verify_certs": False,
-        "ssl_show_warn": False,
+# Foundry docs: json queries can be nested at most three levels deep.
+# Internal depth starts at 0 for root, so max allowed depth index is 2.
+_MAX_QUERY_DEPTH = 2
+_FIELD_NAME_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9_.-]*$")
+_FORBIDDEN_FIELD_SEGMENTS = frozenset(
+    {
+        "__proto__",
+        "constructor",
+        "_id",
+        "_index",
+        "_source",
+        "_routing",
+        "_type",
+        "_version",
+        "_seq_no",
+        "_primary_term",
     }
-    if es_username:
-        es_kwargs["basic_auth"] = (es_username, es_password)
+)
+_TOP_LEVEL_FIELDS = frozenset(
+    {
+        "instance_id",
+        "class_id",
+        "class_label",
+        "db_name",
+        "branch",
+        "created_at",
+        "updated_at",
+        "lifecycle_id",
+        "event_id",
+        "event_sequence",
+        "event_timestamp",
+    }
+)
 
-    client = AsyncElasticsearch(**es_kwargs)
+
+class SearchJsonQueryV2(BaseModel):
+    """
+    Foundry SearchJsonQueryV2-compatible DSL (subset used by this service).
+    """
+
+    type: Literal[
+        "eq",
+        "in",
+        "gt",
+        "lt",
+        "gte",
+        "lte",
+        "isNull",
+        "contains",
+        "containsAnyTerm",
+        "containsAllTerms",
+        "containsAllTermsInOrder",
+        "containsAllTermsInOrderPrefixLastTerm",
+        "and",
+        "or",
+        "not",
+    ]
+    field: Optional[str] = None
+    value: Any = None
+
+    @model_validator(mode="after")
+    def _validate_shape(self) -> "SearchJsonQueryV2":
+        if self.type in {"and", "or"}:
+            if not isinstance(self.value, list) or not self.value:
+                raise ValueError(f"{self.type} query requires a non-empty list in value")
+            return self
+
+        if self.type == "not":
+            if self.value is None:
+                raise ValueError("not query requires value")
+            return self
+
+        if not isinstance(self.field, str) or not self.field.strip():
+            raise ValueError(f"{self.type} query requires field")
+
+        if self.type != "isNull" and self.value is None:
+            raise ValueError(f"{self.type} query requires value")
+
+        if self.type == "in":
+            if not isinstance(self.value, list) or not self.value:
+                raise ValueError("in query requires a non-empty list value")
+
+        if self.type in {
+            "containsAnyTerm",
+            "containsAllTerms",
+            "containsAllTermsInOrder",
+            "containsAllTermsInOrderPrefixLastTerm",
+        }:
+            if not isinstance(self.value, str) or not self.value.strip():
+                raise ValueError(f"{self.type} query requires a non-empty string value")
+
+        return self
+
+
+class SearchObjectsRequestV2(BaseModel):
+    where: Optional[SearchJsonQueryV2] = None
+    orderBy: Optional[Dict[str, Any]] = None
+    pageSize: int = Field(default=100, ge=1, le=1000)
+    pageToken: Optional[str] = None
+    select: Optional[List[str]] = None
+    selectV2: Optional[List[Any]] = None
+    excludeRid: Optional[bool] = None
+    snapshot: Optional[bool] = None
+
+    @field_validator("select")
+    @classmethod
+    def _validate_select(cls, value: Optional[List[str]]) -> Optional[List[str]]:
+        if value is None:
+            return None
+        cleaned: List[str] = []
+        for raw in value:
+            field = str(raw or "").strip()
+            if not field:
+                raise ValueError("select entries must be non-empty strings")
+            cleaned.append(field)
+        return cleaned
+
+    @model_validator(mode="after")
+    def _validate_select_compat(self) -> "SearchObjectsRequestV2":
+        if self.select and self.selectV2:
+            raise ValueError("Only one of select/selectV2 may be provided")
+        return self
+
+
+class SearchObjectsResponseV2(BaseModel):
+    data: List[Dict[str, Any]]
+    nextPageToken: Optional[str] = None
+    totalCount: str
+
+
+def _foundry_error(
+    status_code: int,
+    *,
+    error_code: str,
+    error_name: str,
+    parameters: Optional[Dict[str, Any]] = None,
+) -> JSONResponse:
+    payload = {
+        "errorCode": error_code,
+        "errorName": error_name,
+        "errorInstanceId": str(uuid4()),
+        "parameters": parameters or {},
+    }
+    return JSONResponse(status_code=status_code, content=payload)
+
+
+def _validate_field_name(field: str) -> str:
+    normalized = str(field or "").strip()
+    if not normalized or not _FIELD_NAME_RE.match(normalized):
+        raise ValueError(f"Invalid field name: {field!r}")
+
+    for segment in normalized.split("."):
+        lowered = segment.lower()
+        if segment.startswith("_") or lowered in _FORBIDDEN_FIELD_SEGMENTS:
+            raise ValueError(f"Forbidden field name segment: {segment!r}")
+    return normalized
+
+
+def _resolve_field_path(field: str) -> str:
+    validated = _validate_field_name(field)
+    if validated in _TOP_LEVEL_FIELDS:
+        return validated
+    if validated.startswith("data.") or validated.startswith("properties."):
+        return validated
+    return f"data.{validated}"
+
+
+def _decode_page_token(page_token: Optional[str]) -> int:
+    if page_token is None:
+        return 0
+    token = page_token.strip()
+    if not token:
+        return 0
+
     try:
-        yield client
-    finally:
-        await client.close()
+        padding = "=" * (-len(token) % 4)
+        decoded = base64.urlsafe_b64decode(f"{token}{padding}".encode("ascii")).decode("utf-8")
+        offset = int(decoded)
+    except Exception as exc:
+        raise ValueError("pageToken must be base64-encoded non-negative integer offset") from exc
+
+    if offset < 0:
+        raise ValueError("pageToken offset must be >= 0")
+    return offset
 
 
-@router.post("/query/{db_name}")
-@trace_endpoint("oms.query.execute_simple")
-async def execute_simple_query(
+def _encode_page_token(offset: int) -> str:
+    raw = str(max(0, int(offset))).encode("utf-8")
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def _coerce_query(value: Any) -> SearchJsonQueryV2:
+    if isinstance(value, SearchJsonQueryV2):
+        return value
+    return SearchJsonQueryV2.model_validate(value)
+
+
+def _default_match_all_where() -> Dict[str, Any]:
+    # SearchJsonQueryV2 has no explicit match-all operator.
+    return {"type": "not", "value": {"type": "isNull", "field": "instance_id"}}
+
+
+def _normalize_sort_direction(value: Any) -> str:
+    direction = str(value or "asc").strip().lower()
+    if direction not in {"asc", "desc"}:
+        raise ValueError("orderBy.fields[].direction must be 'asc' or 'desc'")
+    return direction
+
+
+def _resolve_select_fields(request: SearchObjectsRequestV2) -> Optional[List[str]]:
+    if request.select:
+        return list(request.select)
+
+    if not request.selectV2:
+        return None
+
+    extracted: List[str] = []
+    for raw in request.selectV2:
+        candidate: Optional[str] = None
+        if isinstance(raw, str):
+            candidate = raw
+        elif isinstance(raw, dict):
+            candidate = (
+                raw.get("propertyApiName")
+                or raw.get("apiName")
+                or raw.get("name")
+            )
+            if candidate is None and isinstance(raw.get("property"), dict):
+                nested = raw["property"]
+                candidate = (
+                    nested.get("propertyApiName")
+                    or nested.get("apiName")
+                    or nested.get("name")
+                )
+
+        field = str(candidate or "").strip()
+        if not field:
+            raise ValueError("selectV2 entries must contain a property identifier")
+        extracted.append(field)
+
+    return extracted
+
+
+def _build_sort_clause(request: SearchObjectsRequestV2) -> List[Dict[str, Any]]:
+    order_by = request.orderBy
+    if not isinstance(order_by, dict):
+        return [{"instance_id": {"order": "asc"}}]
+
+    order_type = str(order_by.get("orderType") or "fields").strip()
+    if order_type != "fields":
+        raise ValueError("orderBy.orderType must be 'fields'")
+
+    raw_fields = order_by.get("fields")
+    if not isinstance(raw_fields, list) or not raw_fields:
+        raise ValueError("orderBy.fields must be a non-empty list")
+
+    sort: List[Dict[str, Any]] = []
+    has_instance_id_sort = False
+
+    for item in raw_fields:
+        if not isinstance(item, dict):
+            raise ValueError("orderBy.fields entries must be objects")
+        field = str(item.get("field") or "").strip()
+        if not field:
+            raise ValueError("orderBy.fields[].field is required")
+        direction = _normalize_sort_direction(item.get("direction"))
+        field_path = _resolve_field_path(field)
+        if field_path == "instance_id":
+            has_instance_id_sort = True
+        sort.append({field_path: {"order": direction}})
+
+    if not has_instance_id_sort:
+        sort.append({"instance_id": {"order": "asc"}})
+
+    return sort
+
+
+def _to_es_query(query: Any, *, depth: int = 0) -> Dict[str, Any]:
+    if depth > _MAX_QUERY_DEPTH:
+        raise ValueError("Search query nesting is too deep")
+
+    q = _coerce_query(query)
+
+    if q.type == "and":
+        children = [_to_es_query(child, depth=depth + 1) for child in q.value]
+        return {"bool": {"must": children}}
+
+    if q.type == "or":
+        children = [_to_es_query(child, depth=depth + 1) for child in q.value]
+        return {"bool": {"should": children, "minimum_should_match": 1}}
+
+    if q.type == "not":
+        child = _to_es_query(q.value, depth=depth + 1)
+        return {"bool": {"must_not": [child]}}
+
+    field_path = _resolve_field_path(str(q.field))
+
+    if q.type == "eq":
+        return {"term": {field_path: q.value}}
+    if q.type == "in":
+        return {"terms": {field_path: list(q.value)}}
+    if q.type == "gt":
+        return {"range": {field_path: {"gt": q.value}}}
+    if q.type == "lt":
+        return {"range": {field_path: {"lt": q.value}}}
+    if q.type == "gte":
+        return {"range": {field_path: {"gte": q.value}}}
+    if q.type == "lte":
+        return {"range": {field_path: {"lte": q.value}}}
+    if q.type == "isNull":
+        return {"bool": {"must_not": [{"exists": {"field": field_path}}]}}
+
+    if q.type == "contains":
+        # Foundry semantics: array contains the provided value.
+        return {"term": {field_path: q.value}}
+    if q.type == "containsAnyTerm":
+        return {"match": {field_path: {"query": str(q.value).strip(), "operator": "or"}}}
+    if q.type == "containsAllTerms":
+        return {"match": {field_path: {"query": str(q.value).strip(), "operator": "and"}}}
+    if q.type == "containsAllTermsInOrder":
+        return {"match_phrase": {field_path: str(q.value).strip()}}
+    if q.type == "containsAllTermsInOrderPrefixLastTerm":
+        return {"match_phrase_prefix": {field_path: str(q.value).strip()}}
+
+    raise ValueError(f"Unsupported query operator: {q.type}")
+
+
+def _flatten_source(source: Dict[str, Any]) -> Dict[str, Any]:
+    data = source.get("data")
+    flat: Dict[str, Any] = dict(data) if isinstance(data, dict) else {}
+
+    if not flat:
+        properties = source.get("properties")
+        if isinstance(properties, list):
+            for prop in properties:
+                if not isinstance(prop, dict):
+                    continue
+                name = str(prop.get("name") or "").strip()
+                if not name:
+                    continue
+                flat[name] = prop.get("value")
+
+    for key in (
+        "instance_id",
+        "class_id",
+        "class_label",
+        "db_name",
+        "branch",
+        "created_at",
+        "updated_at",
+    ):
+        value = source.get(key)
+        if value is not None and key not in flat:
+            flat[key] = value
+
+    return flat
+
+
+@router.post(
+    "/objects/{db_name}/{object_type}/search",
+    response_model=SearchObjectsResponseV2,
+)
+@trace_endpoint("oms.query.search_objects_v2")
+async def search_objects_v2(
+    payload: Dict[str, Any] = Body(...),
     db_name: str = Depends(ValidatedDatabaseName),
-    query: SimpleQuery = ...,
-    es_client: AsyncElasticsearch = Depends(get_elasticsearch),
-) -> Dict[str, Any]:
+    object_type: str = ...,
+    branch: str = Query(default="main"),
+    es: ElasticsearchServiceDep = ...,
+) -> SearchObjectsResponseV2 | JSONResponse:
     """
-    Execute simple SQL-like query against Elasticsearch
-    
-    This is PATTERN 1: Direct ES queries for simple instance retrieval
-    No TerminusDB involvement - pure document store query
+    Foundry Search Objects API v2-compatible object search.
     """
+
     try:
-        # Parse the simple SQL-like query
-        # For now, support basic SELECT * FROM Class WHERE field op value
-        query_str = query.query.strip()
-        
-        # Extract class name (preserve original case)
-        query_upper = query_str.upper()
-        if "FROM" not in query_upper:
-            raise ValueError("Query must contain FROM clause")
-        
-        # Find the position of FROM to extract class name with original case
-        from_index = query_upper.index("FROM") + 4
-        remaining = query_str[from_index:].strip()
-        
-        # Get class name (first word after FROM)
-        class_name = remaining.split()[0] if remaining else None
-        
-        if not class_name:
-            raise ValueError("No class name specified")
-        
-        # Build ES query
-        # Note: class_id is mapped as text with keyword subfield
-        es_query = {
-            "query": {
-                "bool": {
-                    "must": [
-                        {"term": {"class_id.keyword": class_name}}
-                    ]
-                }
-            },
-            "size": 100
-        }
-        
-        # Add WHERE conditions if present
-        if "WHERE" in query_upper:
-            where_index = query_upper.index("WHERE") + 5
-            where_part = query_str[where_index:].strip()
-            
-            # Simple parser for conditions like "price > 1000"
-            if ">" in where_part:
-                field, value = where_part.split(">")
-                field = field.strip()
-                value = float(value.strip())
-                es_query["query"]["bool"]["must"].append({
-                    "range": {f"data.{field}": {"gt": value}}
-                })
-            elif "<" in where_part:
-                field, value = where_part.split("<")
-                field = field.strip()
-                value = float(value.strip())
-                es_query["query"]["bool"]["must"].append({
-                    "range": {f"data.{field}": {"lt": value}}
-                })
-            elif "=" in where_part:
-                field, value = where_part.split("=")
-                field = field.strip()
-                value = value.strip().strip('"').strip("'")
-                es_query["query"]["bool"]["must"].append({
-                    "term": {f"data.{field}": value}
-                })
-        
-        # Execute ES query
-        index_name = f"{db_name.lower()}_instances"
-        logger.info(f"Executing ES query on index {index_name}: {es_query}")
-        result = await es_client.search(
-            index=index_name,
-            body=es_query,
-            ignore_unavailable=True,
-            allow_no_indices=True,
-        )
-        logger.info(f"ES query result: {result.get('hits', {}).get('total', {})}")
-        
-        # Extract documents
-        hits = result.get("hits", {}).get("hits", [])
-        documents = []
-        for hit in hits:
-            source = hit["_source"]
-            # Return the data field which contains the actual instance data
-            doc = source.get("data", {})
-            doc["_instance_id"] = source.get("instance_id")
-            doc["_class_id"] = source.get("class_id")
-            documents.append(doc)
-        
-        return {
-            "success": True,
-            "data": documents,
-            "count": len(documents),
-            "query": query_str
-        }
-        
-    except Exception as e:
-        logger.error(f"Query execution failed: {e}")
-        raise classified_http_exception(500, str(e), code=ErrorCode.INTERNAL_ERROR)
-    finally:
-        await es_client.close()
+        request = SearchObjectsRequestV2.model_validate(payload)
+        object_type = validate_class_id(object_type)
+        branch = validate_branch_name(branch)
+        offset = _decode_page_token(request.pageToken)
 
-
-@router.post("/query/{db_name}/woql")
-@trace_endpoint("oms.query.execute_woql")
-async def execute_woql_query(
-    db_name: str = Depends(ValidatedDatabaseName),
-    query: WOQLQuery = ...,
-    terminus: AsyncTerminusService = TerminusServiceDep,
-    es_client: AsyncElasticsearch = Depends(get_elasticsearch),
-) -> Dict[str, Any]:
-    """
-    Execute WOQL query for graph analysis
-    
-    This is PATTERN 3: Complex graph queries using TerminusDB
-    Returns lightweight nodes with optional ES document enrichment
-    """
-    try:
-        # Execute WOQL query via TerminusDB
-        woql_result = await terminus.execute_woql(db_name, query.query)
-        
-        # Extract bindings
-        bindings = woql_result.get("bindings", [])
-        
-        # Optionally enrich with ES documents
-        # (For now, just return the graph results)
-        
-        return {
-            "success": True,
-            "data": {
-                "bindings": bindings,
-                "count": len(bindings)
-            },
-            "query_type": "woql"
-        }
-        
-    except Exception as e:
-        logger.error(f"WOQL query failed: {e}")
-        raise classified_http_exception(500, str(e), code=ErrorCode.INTERNAL_ERROR)
-    finally:
-        await es_client.close()
-
-
-@router.get("/instances/{db_name}/{class_id}")
-@trace_endpoint("oms.query.list_instances")
-async def list_instances(
-    db_name: str = Depends(ValidatedDatabaseName),
-    class_id: str = ...,
-    limit: int = QueryParam(default=100, le=1000),
-    offset: int = QueryParam(default=0, ge=0),
-    es_client: AsyncElasticsearch = Depends(get_elasticsearch),
-) -> Dict[str, Any]:
-    """
-    List instances of a class from Elasticsearch
-    
-    Direct ES query for listing instances - no graph traversal needed
-    """
-    try:
-        index_name = f"{db_name.lower()}_instances"
-        
-        # Build ES query
-        es_query = {
-            "query": {
-                "term": {"class_id": class_id}
-            },
-            "size": limit,
-            "from": offset
-        }
-        
-        # Execute query
-        result = await es_client.search(
-            index=index_name,
-            body=es_query
-        )
-        
-        # Extract instances
-        hits = result.get("hits", {}).get("hits", [])
-        instances = []
-        for hit in hits:
-            source = hit["_source"]
-            instance = source.get("data", {})
-            instance["_metadata"] = {
-                "instance_id": source.get("instance_id"),
-                "class_id": source.get("class_id"),
-                "created_at": source.get("created_at"),
-                "s3_uri": source.get("s3_uri")
+        object_query = _to_es_query(request.where or _default_match_all_where())
+        sort_clause = _build_sort_clause(request)
+        selected_fields = _resolve_select_fields(request)
+        query = {
+            "bool": {
+                "must": [
+                    {"term": {"class_id": object_type}},
+                    object_query,
+                ]
             }
-            instances.append(instance)
-        
-        return {
-            "success": True,
-            "data": instances,
-            "total": result.get("hits", {}).get("total", {}).get("value", 0),
-            "class_id": class_id,
-            "limit": limit,
-            "offset": offset
         }
-        
-    except Exception as e:
-        logger.error(f"Failed to list instances: {e}")
-        raise classified_http_exception(500, str(e), code=ErrorCode.INTERNAL_ERROR)
-    finally:
-        await es_client.close()
+
+        index_name = get_instances_index_name(db_name, branch=branch)
+        result = await es.search(
+            index=index_name,
+            query=query,
+            size=request.pageSize,
+            from_=offset,
+            sort=sort_clause,
+        )
+
+        hits = result.get("hits", [])
+        if not isinstance(hits, list):
+            hits = []
+
+        flattened = [_flatten_source(hit) for hit in hits if isinstance(hit, dict)]
+
+        if selected_fields is not None:
+            projected: List[Dict[str, Any]] = []
+            for row in flattened:
+                projected.append({key: row.get(key) for key in selected_fields if key in row})
+            flattened = projected
+
+        if bool(request.excludeRid):
+            for row in flattened:
+                if isinstance(row, dict):
+                    row.pop("__rid", None)
+
+        total = int(result.get("total") or 0)
+
+        next_page_token: Optional[str] = None
+        next_offset = offset + len(flattened)
+        if next_offset < total:
+            next_page_token = _encode_page_token(next_offset)
+
+        return SearchObjectsResponseV2(
+            data=flattened,
+            nextPageToken=next_page_token,
+            totalCount=str(total),
+        )
+
+    except ValidationError as exc:
+        return _foundry_error(
+            status.HTTP_400_BAD_REQUEST,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidArgument",
+            parameters={"message": str(exc)},
+        )
+    except SecurityViolationError as exc:
+        return _foundry_error(
+            status.HTTP_400_BAD_REQUEST,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidArgument",
+            parameters={"message": str(exc)},
+        )
+    except ValueError as exc:
+        return _foundry_error(
+            status.HTTP_400_BAD_REQUEST,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidArgument",
+            parameters={"message": str(exc)},
+        )
+    except Exception as exc:
+        logger.error("Foundry object search failed (%s/%s): %s", db_name, object_type, exc)
+        return _foundry_error(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            error_code="INTERNAL",
+            error_name="InternalServerError",
+            parameters={"message": "Failed to execute object search"},
+        )

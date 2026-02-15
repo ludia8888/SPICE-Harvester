@@ -9,7 +9,7 @@
 - Version: `2.0.0`
 - OpenAPI: `3.1.0`
 
-## Endpoint Index (`/api/v1`)
+## Endpoint Index (`/api/v1`, `/api/v2`)
 
 ### Actions
 - `GET /api/v1/databases/{db_name}/actions/logs`
@@ -124,6 +124,15 @@
 ### Document Bundles
 - `POST /api/v1/document-bundles/{bundle_id}/search`
 
+### Foundry Ontologies v2
+- `GET /api/v2/ontologies`
+- `GET /api/v2/ontologies/{ontology}`
+- `GET /api/v2/ontologies/{ontology}/objectTypes`
+- `GET /api/v2/ontologies/{ontology}/objectTypes/{objectType}`
+- `GET /api/v2/ontologies/{ontology}/objectTypes/{objectType}/outgoingLinkTypes`
+- `GET /api/v2/ontologies/{ontology}/objectTypes/{objectType}/outgoingLinkTypes/{linkType}`
+- `POST /api/v2/ontologies/{ontology}/objects/{objectType}/search`
+
 ### Governance
 - `GET /api/v1/access-policies`
 - `POST /api/v1/access-policies`
@@ -186,10 +195,7 @@
 - `GET /api/v1/monitoring/status`
 
 ### Objectify
-- `GET /api/v1/objectify/changelog`
-- `GET /api/v1/objectify/changelog/{changelog_id}`
 - `POST /api/v1/objectify/databases/{db_name}/datasets/{dataset_id}/detect-relationships`
-- `POST /api/v1/objectify/databases/{db_name}/reconcile-relationships`
 - `POST /api/v1/objectify/databases/{db_name}/run-dag`
 - `POST /api/v1/objectify/datasets/{dataset_id}/run`
 - `GET /api/v1/objectify/mapping-specs`
@@ -247,34 +253,27 @@
 - `GET /api/v1/databases/{db_name}/ontology/link-types/{link_type_id}/edits`
 - `POST /api/v1/databases/{db_name}/ontology/link-types/{link_type_id}/edits`
 - `POST /api/v1/databases/{db_name}/ontology/link-types/{link_type_id}/reindex`
+- `GET /api/v1/databases/{db_name}/ontology/object-types/{object_type_api_name}/outgoing-link-types`
+- `GET /api/v1/databases/{db_name}/ontology/object-types/{object_type_api_name}/outgoing-link-types/{link_type_api_name}`
 
 ### Ontology Management
-- `POST /api/v1/databases/{db_name}/check-circular-references`
 - `POST /api/v1/databases/{db_name}/import-from-excel/commit`
 - `POST /api/v1/databases/{db_name}/import-from-excel/dry-run`
 - `POST /api/v1/databases/{db_name}/import-from-google-sheets/commit`
 - `POST /api/v1/databases/{db_name}/import-from-google-sheets/dry-run`
 - `POST /api/v1/databases/{db_name}/ontology`
-- `POST /api/v1/databases/{db_name}/ontology-advanced`
-- `GET /api/v1/databases/{db_name}/ontology/list`
 - `POST /api/v1/databases/{db_name}/ontology/validate`
 - `POST /api/v1/databases/{db_name}/ontology/{class_id}/mapping-metadata`
 - `GET /api/v1/databases/{db_name}/ontology/{class_id}/schema`
-- `GET /api/v1/databases/{db_name}/ontology/{class_label}`
-- `PUT /api/v1/databases/{db_name}/ontology/{class_label}`
-- `DELETE /api/v1/databases/{db_name}/ontology/{class_label}`
-- `POST /api/v1/databases/{db_name}/ontology/{class_label}/validate`
-- `GET /api/v1/databases/{db_name}/relationship-network/analyze`
-- `GET /api/v1/databases/{db_name}/relationship-paths`
 - `POST /api/v1/databases/{db_name}/suggest-mappings`
 - `POST /api/v1/databases/{db_name}/suggest-mappings-from-excel`
 - `POST /api/v1/databases/{db_name}/suggest-mappings-from-google-sheets`
 - `POST /api/v1/databases/{db_name}/suggest-schema-from-data`
 - `POST /api/v1/databases/{db_name}/suggest-schema-from-excel`
 - `POST /api/v1/databases/{db_name}/suggest-schema-from-google-sheets`
-- `POST /api/v1/databases/{db_name}/validate-relationships`
 
 ### Ontology Object Types
+- `GET /api/v1/databases/{db_name}/ontology/object-types`
 - `POST /api/v1/databases/{db_name}/ontology/object-types`
 - `GET /api/v1/databases/{db_name}/ontology/object-types/{class_id}`
 - `PUT /api/v1/databases/{db_name}/ontology/object-types/{class_id}`
@@ -329,7 +328,6 @@
 ### Query
 - `POST /api/v1/databases/{db_name}/query`
 - `GET /api/v1/databases/{db_name}/query/builder`
-- `POST /api/v1/databases/{db_name}/query/raw`
 
 ### Schema Changes
 - `PUT /api/v1/schema-changes/drifts/{drift_id}/acknowledge`

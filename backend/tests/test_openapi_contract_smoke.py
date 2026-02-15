@@ -354,14 +354,6 @@ class SmokeContext:
     document_bundle_id: Optional[str] = None
 
     @property
-    def ontology_aggregate_id(self) -> str:
-        return f"{self.db_name}:main:{self.class_id}"
-
-    @property
-    def advanced_ontology_aggregate_id(self) -> str:
-        return f"{self.db_name}:main:{self.advanced_class_id}"
-
-    @property
     def instance_aggregate_id(self) -> str:
         return f"{self.db_name}:main:{self.class_id}:{self.instance_id}"
 
@@ -1103,19 +1095,6 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
         body = _ontology_payload(class_id=ctx.class_id, label_en="Product", label_ko="제품")
         return RequestPlan(op.method, op.path, url, (200, 202, 409), json_body=body)
 
-    if key == ("POST", "/api/v1/databases/{db_name}/ontology-advanced"):
-        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
-        body = _ontology_payload(class_id=ctx.advanced_class_id, label_en="Order", label_ko="주문")
-        return RequestPlan(op.method, op.path, url, (200, 202, 409), json_body=body)
-
-    if key == ("GET", "/api/v1/databases/{db_name}/ontology/list"):
-        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
-        return RequestPlan(op.method, op.path, url, (200,))
-
-    if key == ("GET", "/api/v1/databases/{db_name}/ontology/{class_label}"):
-        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'class_label': ctx.class_id})}"
-        return RequestPlan(op.method, op.path, url, (200,))
-
     if key == ("GET", "/api/v1/databases/{db_name}/ontology/{class_id}/schema"):
         url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'class_id': ctx.class_id})}"
         return RequestPlan(op.method, op.path, url, (200,))
@@ -1124,55 +1103,6 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
         url = f"{BFF_URL}{_format_path(op.path, ctx)}"
         body = _ontology_payload(class_id=f"Validate{ctx.class_id}", label_en="ValidateClass", label_ko="검증클래스")
         return RequestPlan(op.method, op.path, url, (200, 400, 422), json_body=body)
-
-    if key == ("POST", "/api/v1/databases/{db_name}/validate-relationships"):
-        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
-        body = _ontology_payload(class_id=f"RelValidate{ctx.class_id}", label_en="RelValidate", label_ko="관계검증")
-        return RequestPlan(op.method, op.path, url, (200, 400, 422), json_body=body)
-
-    if key == ("POST", "/api/v1/databases/{db_name}/check-circular-references"):
-        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
-        # No body -> checks existing DB schema.
-        return RequestPlan(op.method, op.path, url, (200, 404))
-
-    if key == ("GET", "/api/v1/databases/{db_name}/relationship-network/analyze"):
-        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
-        return RequestPlan(op.method, op.path, url, (200,))
-
-    if key == ("GET", "/api/v1/databases/{db_name}/relationship-paths"):
-        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
-        return RequestPlan(op.method, op.path, url, (200, 400), params={"start_entity": ctx.class_id})
-
-    if key == ("PUT", "/api/v1/databases/{db_name}/ontology/{class_label}"):
-        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'class_label': ctx.class_id})}"
-        expected_seq = await _get_write_side_last_sequence(
-            aggregate_type="OntologyClass", aggregate_id=ctx.ontology_aggregate_id
-        )
-        body = {"description": {"en": "Updated (openapi smoke)"}}
-        return RequestPlan(op.method, op.path, url, (200, 202, 409, 404), params={"expected_seq": expected_seq}, json_body=body)
-
-    if key == ("POST", "/api/v1/databases/{db_name}/ontology/{class_label}/validate"):
-        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'class_label': ctx.class_id})}"
-        body = {"description": {"en": "Validate update (openapi smoke)"}}
-        return RequestPlan(op.method, op.path, url, (200, 400, 422), json_body=body)
-
-    if key == ("DELETE", "/api/v1/databases/{db_name}/ontology/{class_label}"):
-        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'class_label': ctx.advanced_class_id})}"
-        expected_seq = await _get_write_side_last_sequence(
-            aggregate_type="OntologyClass", aggregate_id=ctx.advanced_ontology_aggregate_id
-        )
-        headers = {"X-Change-Reason": "openapi_smoke"}
-        if SMOKE_ADMIN_TOKEN:
-            headers["X-Admin-Token"] = SMOKE_ADMIN_TOKEN
-        # Protected branch deletes require admin token; without it we expect 403.
-        return RequestPlan(
-            op.method,
-            op.path,
-            url,
-            (200, 202, 404, 409, 403),
-            params={"expected_seq": expected_seq},
-            headers=headers,
-        )
 
     if key == ("POST", "/api/v1/databases/{db_name}/ontology/{class_id}/mapping-metadata"):
         url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'class_id': ctx.class_id})}"
@@ -1183,9 +1113,60 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
         url = f"{BFF_URL}{_format_path(op.path, ctx)}"
         return RequestPlan(op.method, op.path, url, (201, 400, 404, 409, 422), json_body=None, note="smoke: validate only")
 
+    if key == ("GET", "/api/v1/databases/{db_name}/ontology/object-types"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
+        params = {"pageSize": 10}
+        return RequestPlan(op.method, op.path, url, (200, 400, 403, 404), params=params)
+
     if key == ("GET", "/api/v1/databases/{db_name}/ontology/object-types/{class_id}"):
         url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'class_id': ctx.class_id})}"
         return RequestPlan(op.method, op.path, url, (200, 404))
+
+    if key == ("GET", "/api/v2/ontologies"):
+        url = f"{BFF_URL}{op.path}"
+        return RequestPlan(op.method, op.path, url, (200, 400, 403, 404))
+
+    if key == ("GET", "/api/v2/ontologies/{ontology}"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'ontology': ctx.db_name})}"
+        return RequestPlan(op.method, op.path, url, (200, 400, 403, 404))
+
+    if key == ("GET", "/api/v2/ontologies/{ontology}/objectTypes"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'ontology': ctx.db_name})}"
+        params = {"pageSize": 10}
+        return RequestPlan(op.method, op.path, url, (200, 400, 403, 404), params=params)
+
+    if key == ("GET", "/api/v2/ontologies/{ontology}/objectTypes/{objectType}"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'ontology': ctx.db_name, 'objectType': ctx.class_id})}"
+        return RequestPlan(op.method, op.path, url, (200, 400, 403, 404))
+
+    if key == ("GET", "/api/v2/ontologies/{ontology}/objectTypes/{objectType}/outgoingLinkTypes"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'ontology': ctx.db_name, 'objectType': ctx.class_id})}"
+        params = {"pageSize": 10}
+        return RequestPlan(op.method, op.path, url, (200, 400, 403, 404), params=params)
+
+    if key == ("GET", "/api/v2/ontologies/{ontology}/objectTypes/{objectType}/outgoingLinkTypes/{linkType}"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'ontology': ctx.db_name, 'objectType': ctx.class_id, 'linkType': ctx.link_type_id})}"
+        return RequestPlan(op.method, op.path, url, (200, 400, 403, 404))
+
+    if key == ("POST", "/api/v2/ontologies/{ontology}/objects/{objectType}/search"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'ontology': ctx.db_name, 'objectType': ctx.class_id})}"
+        body = {
+            "where": {"type": "eq", "field": "class_id", "value": ctx.class_id},
+            "pageSize": 10,
+        }
+        return RequestPlan(op.method, op.path, url, (200, 400, 403, 404), json_body=body)
+
+    if key == ("GET", "/api/v1/databases/{db_name}/ontology/object-types/{object_type_api_name}/outgoing-link-types"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'object_type_api_name': ctx.class_id})}"
+        params = {"pageSize": 10}
+        return RequestPlan(op.method, op.path, url, (200, 400, 404), params=params)
+
+    if key == (
+        "GET",
+        "/api/v1/databases/{db_name}/ontology/object-types/{object_type_api_name}/outgoing-link-types/{link_type_api_name}",
+    ):
+        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'object_type_api_name': ctx.class_id, 'link_type_api_name': ctx.link_type_id})}"
+        return RequestPlan(op.method, op.path, url, (200, 400, 404))
 
     if key == ("PUT", "/api/v1/databases/{db_name}/ontology/object-types/{class_id}"):
         url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'class_id': ctx.class_id})}"
@@ -1302,16 +1283,6 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
     if key == ("POST", "/api/v1/databases/{db_name}/query"):
         url = f"{BFF_URL}{_format_path(op.path, ctx)}"
         body = {
-            "class_id": ctx.class_id,
-            "filters": [{"field": f"{ctx.class_id.lower()}_id", "operator": "eq", "value": ctx.instance_id}],
-            "limit": 5,
-        }
-        return RequestPlan(op.method, op.path, url, (200,), json_body=body)
-
-    if key == ("POST", "/api/v1/databases/{db_name}/query/raw"):
-        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
-        body = {
-            "type": "select",
             "class_id": ctx.class_id,
             "filters": [{"field": f"{ctx.class_id.lower()}_id", "operator": "eq", "value": ctx.instance_id}],
             "limit": 5,
@@ -1726,11 +1697,6 @@ async def test_openapi_stable_contract_smoke():
         "/api/v1/databases/{db_name}/ontology",
         "/api/v1/database/{db_name}/ontology",
     )
-    db_ontology_advanced_path = _pick_spec_path(
-        spec_paths,
-        "/api/v1/databases/{db_name}/ontology-advanced",
-        "/api/v1/database/{db_name}/ontology-advanced",
-    )
     db_branches_path = _pick_spec_path(
         spec_paths,
         "/api/v1/databases/{db_name}/branches",
@@ -1846,9 +1812,9 @@ async def test_openapi_stable_contract_smoke():
                 (
                     Operation(
                         "POST",
-                        db_ontology_advanced_path,
+                        db_ontology_path,
                         ("Ontology Management",),
-                        "Create Ontology Advanced",
+                        "Create Ontology",
                     ),
                     _ontology_payload(class_id=ctx.advanced_class_id, label_en="Order", label_ko="주문"),
                 ),

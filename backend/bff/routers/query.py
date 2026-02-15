@@ -1,13 +1,12 @@
 """
 쿼리 라우터
-온톨로지 데이터 쿼리를 담당
+Foundry Search Objects v2 기반 데이터 쿼리를 담당
 """
 
 import logging
-from typing import Any, Dict
 from shared.observability.tracing import trace_endpoint
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Request, status
 
 from shared.errors.error_types import ErrorCode, classified_http_exception
 
@@ -18,7 +17,7 @@ from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.utils.access_policy import apply_access_policy
 
 # Security validation imports
-from shared.security.input_sanitizer import sanitize_input, validate_db_name
+from shared.security.input_sanitizer import validate_db_name
 
 # Add shared path for common utilities
 from shared.utils.language import get_accept_language
@@ -107,67 +106,6 @@ async def execute_query(
         )
 
 
-@router.post("/query/raw")
-@trace_endpoint("bff.query.execute_raw_query")
-async def execute_raw_query(
-    db_name: str,
-    query: Dict[str, Any],
-    terminus: TerminusService = Depends(get_terminus_service),
-    dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
-):
-    """
-    원시 쿼리 실행 (제한적 접근)
-
-    내부 ID 기반의 원시 쿼리를 실행합니다.
-    보안상 매우 제한적인 쿼리만 허용됩니다.
-    """
-    try:
-        # 데이터베이스 이름 검증
-        validated_db_name = validate_db_name(db_name)
-
-        # 쿼리 검증 - 허용된 쿼리 타입만 허용
-        allowed_query_types = ["select", "count", "exists"]
-        query_type = query.get("type", "").lower()
-
-        if query_type not in allowed_query_types:
-            raise classified_http_exception(
-                status.HTTP_403_FORBIDDEN,
-                f"허용되지 않은 쿼리 타입: {query_type}. 허용된 타입: {allowed_query_types}",
-                code=ErrorCode.PERMISSION_DENIED,
-            )
-
-        # 쿼리 파라미터 정화
-        sanitized_query = sanitize_input(query)
-
-        # 쿼리 실행 (OMS를 통해)
-        result = await terminus.query_database(validated_db_name, sanitized_query)
-
-        if isinstance(result, dict) and isinstance(result.get("data"), list):
-            class_id = str(sanitized_query.get("class_id") or "").strip()
-            if class_id:
-                policy = await dataset_registry.get_access_policy(
-                    db_name=validated_db_name,
-                    scope="data_access",
-                    subject_type="object_type",
-                    subject_id=class_id,
-                )
-                if policy:
-                    filtered, _ = apply_access_policy(result["data"], policy=policy.policy)
-                    result["data"] = filtered
-
-        return result
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to execute raw query: {e}")
-        raise classified_http_exception(
-            status.HTTP_500_INTERNAL_SERVER_ERROR,
-            f"원시 쿼리 실행 실패: {str(e)}",
-            code=ErrorCode.INTERNAL_ERROR,
-        )
-
-
 @router.get("/query/builder")
 @trace_endpoint("bff.query.query_builder_info")
 async def query_builder_info():
@@ -180,40 +118,65 @@ async def query_builder_info():
     # 공개 정보이므로 추가 입력 검증이 필요하지 않음
     
     return {
-        "operators": {
-            "comparison": ["=", "!=", ">", ">=", "<", "<="],
-            "string": ["LIKE", "NOT_LIKE", "STARTS_WITH", "ENDS_WITH", "CONTAINS"],
-            "array": ["IN", "NOT_IN"],
-            "null": ["IS_NULL", "IS_NOT_NULL"],
+        "dsl": "SearchJsonQueryV2",
+        "operators": [
+            "eq",
+            "in",
+            "gt",
+            "lt",
+            "gte",
+            "lte",
+            "isNull",
+            "contains",
+            "containsAnyTerm",
+            "containsAllTerms",
+            "containsAllTermsInOrder",
+            "containsAllTermsInOrderPrefixLastTerm",
+            "and",
+            "or",
+            "not",
+        ],
+        "pagination": {
+            "pageSize": "1..1000",
+            "pageToken": "base64-encoded offset",
         },
-        "order_directions": ["asc", "desc"],
-        "special_fields": {
-            "@id": "문서 ID",
-            "@type": "문서 타입",
-            "@created": "생성 시간",
-            "@modified": "수정 시간",
-        },
+        "request_fields": [
+            "where",
+            "orderBy",
+            "pageSize",
+            "pageToken",
+            "select",
+            "selectV2",
+            "excludeRid",
+            "snapshot",
+        ],
         "examples": {
-            "simple": {
-                "class_label": "제품",
-                "filters": [{"field_label": "가격", "operator": ">", "value": 10000}],
-                "limit": 10,
+            "simple_eq": {
+                "where": {"type": "eq", "field": "status", "value": "ACTIVE"},
+                "select": ["customer_id", "status"],
+                "orderBy": {"orderType": "fields", "fields": [{"field": "customer_id", "direction": "asc"}]},
+                "pageSize": 25,
             },
-            "complex": {
-                "class_label": "주문",
-                "filters": [
-                    {
-                        "field_label": "상태",
-                        "operator": "IN",
-                        "value_labels": ["배송중", "배송완료"],
-                    },
-                    {"field_label": "총액", "operator": ">=", "value": 50000},
-                ],
-                "select": ["주문번호", "고객명", "총액", "상태"],
-                "order_by": "주문일시",
-                "order_direction": "desc",
-                "limit": 20,
-                "offset": 0,
+            "compound": {
+                "where": {
+                    "type": "and",
+                    "value": [
+                        {"type": "gte", "field": "amount", "value": 1000},
+                        {
+                            "type": "or",
+                            "value": [
+                                {
+                                    "type": "containsAllTermsInOrderPrefixLastTerm",
+                                    "field": "customer_name",
+                                    "value": "Kim",
+                                },
+                                {"type": "containsAnyTerm", "field": "customer_name", "value": "Park"},
+                            ],
+                        },
+                    ],
+                },
+                "pageSize": 50,
+                "pageToken": "MTAw",
             },
         },
     }

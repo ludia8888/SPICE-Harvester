@@ -849,10 +849,6 @@ def _collect_permission_policy_issues(policy: Dict[str, Any]) -> List[Dict[str, 
     issues: List[Dict[str, Any]] = []
     effect = policy.get("effect")
     principals = policy.get("principals")
-    roles = policy.get("roles")
-    users = policy.get("users")
-    groups = policy.get("groups")
-    services = policy.get("services")
 
     if not isinstance(effect, str) or not effect.strip():
         _append_spec_issue(
@@ -869,56 +865,48 @@ def _collect_permission_policy_issues(policy: Dict[str, Any]) -> List[Dict[str, 
                 invalid_fields=["permission_policy.effect"],
             )
 
-    has_principals = principals is not None
-    alias_values = {
-        "roles": roles,
-        "users": users,
-        "groups": groups,
-        "services": services,
-    }
-    has_aliases = any(value is not None for value in alias_values.values())
-    if not has_principals and not has_aliases:
+    if principals is None:
         _append_spec_issue(
             issues,
-            message="permission_policy requires principals (or legacy roles/users/groups/services aliases)",
+            message="permission_policy requires principals",
             missing_fields=["permission_policy.principals"],
         )
-
-    if has_principals:
-        if principals in (None, []):
+    elif principals == []:
+        _append_spec_issue(
+            issues,
+            message="permission_policy requires principals",
+            missing_fields=["permission_policy.principals"],
+        )
+    elif not _validate_string_list(principals, field_name="permission_policy.principals"):
+        _append_spec_issue(
+            issues,
+            message="permission_policy.principals must be a list of non-empty strings",
+            invalid_fields=["permission_policy.principals"],
+        )
+    else:
+        invalid = []
+        for principal in principals or []:
+            p = str(principal).strip()
+            if not p.startswith(("user:", "group:", "role:", "service:")):
+                invalid.append(p)
+        if invalid:
             _append_spec_issue(
                 issues,
-                message="permission_policy requires principals",
-                missing_fields=["permission_policy.principals"],
-            )
-        elif not _validate_string_list(principals, field_name="permission_policy.principals"):
-            _append_spec_issue(
-                issues,
-                message="permission_policy.principals must be a list of non-empty strings",
+                message="permission_policy.principals must be namespaced (user:|group:|role:|service:)",
                 invalid_fields=["permission_policy.principals"],
             )
-        else:
-            invalid = []
-            for principal in principals or []:
-                p = str(principal).strip()
-                if not p.startswith(("user:", "group:", "role:", "service:")):
-                    invalid.append(p)
-            if invalid:
-                _append_spec_issue(
-                    issues,
-                    message="permission_policy.principals must be namespaced (user:|group:|role:|service:)",
-                    invalid_fields=["permission_policy.principals"],
-                )
 
-    for alias_field, alias_value in alias_values.items():
-        if alias_value is None:
-            continue
-        if not _validate_string_list(alias_value, field_name=f"permission_policy.{alias_field}"):
-            _append_spec_issue(
-                issues,
-                message=f"permission_policy.{alias_field} must be a list of non-empty strings",
-                invalid_fields=[f"permission_policy.{alias_field}"],
-            )
+    legacy_alias_fields = [
+        field
+        for field in ("roles", "users", "groups", "services")
+        if field in policy and policy.get(field) not in (None, "", [], {})
+    ]
+    if legacy_alias_fields:
+        _append_spec_issue(
+            issues,
+            message="permission_policy legacy aliases are not supported; use permission_policy.principals",
+            invalid_fields=[f"permission_policy.{field}" for field in sorted(legacy_alias_fields)],
+        )
 
     unsupported_keys = [
         field

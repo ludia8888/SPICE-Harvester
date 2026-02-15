@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 
 METHOD_ORDER = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"]
+SUPPORTED_PATH_PREFIXES = ("/api/v1", "/api/v2")
 
 
 def _method_sort_key(method: str) -> Tuple[int, str]:
@@ -35,7 +36,7 @@ def _collect_tagged_routes(schema: Dict) -> Dict[str, List[Tuple[str, str]]]:
     tag_map: Dict[str, List[Tuple[str, str]]] = {}
 
     for path, ops in paths.items():
-        if not path.startswith("/api/v1"):
+        if not any(path.startswith(prefix) for prefix in SUPPORTED_PATH_PREFIXES):
             continue
         for method, meta in ops.items():
             method_upper = method.upper()
@@ -66,7 +67,7 @@ def _render_api_reference(schema: Dict) -> str:
     lines.append(f"- Version: `{version}`")
     lines.append(f"- OpenAPI: `{openapi_version}`")
     lines.append("")
-    lines.append("## Endpoint Index (`/api/v1`)")
+    lines.append("## Endpoint Index (`/api/v1`, `/api/v2`)")
     lines.append("")
 
     for tag in sorted(routes_by_tag, key=lambda value: value.lower()):

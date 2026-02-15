@@ -230,20 +230,6 @@ async def create_database(
             )
             return JSONResponse(status_code=status.HTTP_202_ACCEPTED, content=result)
 
-        try:
-            commit_message = f"Create database: {validated_name}"
-            if body.description:
-                commit_message += f"\n\nDescription: {body.description}"
-
-            await oms.commit_database_change(
-                db_name=validated_name,
-                message=commit_message,
-                author="system",
-            )
-            logger.info("Auto-committed database creation: %s", validated_name)
-        except Exception as commit_error:
-            logger.warning("Failed to auto-commit database creation for %r: %s", validated_name, commit_error)
-
         await upsert_database_owner(
             db_name=validated_name,
             principal_type=actor_type,
@@ -346,17 +332,6 @@ async def delete_database(
         # Event Sourcing mode: pass through async contract (202 + command_id)
         if isinstance(result, dict) and result.get("status") == "accepted":
             return JSONResponse(status_code=status.HTTP_202_ACCEPTED, content=result)
-
-        try:
-            await oms.commit_system_change(
-                message=f"Delete database: {validated_db_name}",
-                author="system",
-                operation="database_delete",
-                target=validated_db_name,
-            )
-            logger.info("Auto-committed database deletion: %s", validated_db_name)
-        except Exception as commit_error:
-            logger.warning("Failed to auto-commit database deletion for %r: %s", validated_db_name, commit_error)
 
         return JSONResponse(
             status_code=status.HTTP_200_OK,

@@ -11,7 +11,6 @@ from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, File, Form, Query, UploadFile
 
-from bff.dependencies import TerminusService, TerminusServiceDep
 from bff.schemas.ontology_requests import (
     MappingFromGoogleSheetsRequest,
     MappingSuggestionRequest,
@@ -30,9 +29,7 @@ router = APIRouter(tags=["Ontology Management"])
 async def suggest_schema_from_data(
     db_name: str,
     request: SchemaFromDataRequest,
-    terminus: TerminusService = TerminusServiceDep,
 ):
-    _ = terminus
     return await ontology_suggestions_service.suggest_schema_from_data(db_name=db_name, body=request)
 
 
@@ -97,9 +94,7 @@ async def suggest_mappings_from_excel(
 async def suggest_schema_from_google_sheets(
     db_name: str,
     request: SchemaFromGoogleSheetsRequest,
-    terminus: TerminusService = TerminusServiceDep,
 ):
-    _ = terminus
     return await ontology_suggestions_service.suggest_schema_from_google_sheets(db_name=db_name, body=request)
 
 

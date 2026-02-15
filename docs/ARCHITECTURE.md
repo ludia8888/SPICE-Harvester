@@ -226,6 +226,7 @@ graph TD
 | `data_connector.router` | `/api/v1` | - |
 | `database.router` | `/api/v1` | - |
 | `document_bundles.router` | `/api/v1` | - |
+| `foundry_ontology_v2.router` | `/api` | - |
 | `governance.router` | `/api/v1` | - |
 | `graph.router` | `router-defined` | - |
 | `health.router` | `/api/v1` | - |
@@ -265,7 +266,7 @@ graph TD
 | `ontology.router` | `/api/v1` | ontology |
 | `ontology_extensions.router` | `/api/v1` | ontology |
 | `pull_request.router` | `/api/v1` | pull-requests |
-| `query.router` | `/api/v1` | query |
+| `query.router` | `/api/v1` | object-search |
 | `version.router` | `/api/v1` | version |
 
 ## Router Inventory (Funnel)

@@ -503,7 +503,8 @@ async def root():
         "description": "내부 ID 기반 핵심 온톨로지 관리 서비스",
         "features": [
             "내부 ID 기반 온톨로지 CRUD",
-            "TerminusDB 직접 연동",
+            "Foundry 스타일 Object Storage v2 검색",
+            "SearchJsonQueryV2 DSL 지원",
             "JSON-LD 변환",
             "버전 관리",
             "브랜치 관리",
@@ -695,7 +696,7 @@ if get_settings().is_development:
 app.include_router(database.router, prefix="/api/v1", tags=["database"])
 app.include_router(ontology_extensions.router, prefix="/api/v1", tags=["ontology"])
 app.include_router(ontology.router, prefix="/api/v1", tags=["ontology"])
-app.include_router(query.router, prefix="/api/v1", tags=["query"])
+app.include_router(query.router, prefix="/api/v1", tags=["object-search"])
 app.include_router(instance_async.router, prefix="/api/v1", tags=["async-instance"])
 app.include_router(instance.router, prefix="/api/v1", tags=["instance"])
 app.include_router(action_async.router, prefix="/api/v1", tags=["async-actions"])

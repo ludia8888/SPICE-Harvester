@@ -31,7 +31,7 @@ async def submit_action(
     action_type_id: str,
     request: ActionSubmitRequest,
     http_request: Request,
-    base_branch: str = Query("main", description="Base branch (Terminus) for authoritative reads"),
+    base_branch: str = Query("main", description="Base branch for authoritative reads"),
     overlay_branch: Optional[str] = Query(default=None, description="Overlay branch override (ES)"),
     oms_client: OMSClient = Depends(get_oms_client),
 ) -> Dict[str, Any]:

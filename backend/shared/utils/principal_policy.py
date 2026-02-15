@@ -14,15 +14,8 @@ def build_principal_tags(
     *,
     principal_type: Optional[str] = None,
     principal_id: Optional[str] = None,
-    user_id: Optional[str] = None,
     role: Optional[str] = None,
 ) -> Set[str]:
-    # Back-compat: legacy callers pass user_id.
-    if principal_id is None:
-        principal_id = user_id
-    if principal_type is None and user_id is not None:
-        principal_type = "user"
-
     ptype = str(principal_type or "").strip().lower()
     pid = str(principal_id or "").strip()
     tags: Set[str] = set()
@@ -47,7 +40,7 @@ def policy_allows(*, policy: Any, principal_tags: Set[str]) -> bool:
     if effect not in {"ALLOW", "DENY"}:
         effect = "ALLOW"
 
-    def _normalize_policy_principals(raw: Any, *, default_prefix: Optional[str] = None) -> Set[str]:
+    def _normalize_policy_principals(raw: Any) -> Set[str]:
         values: list[str] = []
         if isinstance(raw, str):
             values = [part.strip() for part in raw.split(",")]
@@ -66,19 +59,15 @@ def policy_allows(*, policy: Any, principal_tags: Set[str]) -> bool:
                 rem = str(remainder).strip()
                 if pfx in _SUPPORTED_PRINCIPAL_PREFIXES and rem:
                     normalized.add(f"{pfx}:{rem}")
-                    continue
-            if default_prefix:
-                normalized.add(f"{default_prefix}:{value}")
         return normalized
 
     principal_set: Set[str] = set()
     principal_set.update(_normalize_policy_principals(policy.get("principals")))
-    principal_set.update(_normalize_policy_principals(policy.get("roles"), default_prefix="role"))
-    principal_set.update(_normalize_policy_principals(policy.get("users"), default_prefix="user"))
-    principal_set.update(_normalize_policy_principals(policy.get("groups"), default_prefix="group"))
-    principal_set.update(_normalize_policy_principals(policy.get("services"), default_prefix="service"))
 
-    if any(policy.get(key) not in (None, "", [], {}) for key in ("scopes", "rules", "policy")):
+    if any(
+        policy.get(key) not in (None, "", [], {})
+        for key in ("roles", "users", "groups", "services", "scopes", "rules", "policy")
+    ):
         # Runtime supports principal/tag-based policy only.
         return False
 

@@ -1,7 +1,7 @@
 """Ontology extension endpoints (BFF).
 
 This module provides fixed subpaths under `/ontology/*` that must be registered
-before legacy ontology routes (see `bff.main` include order).
+before generic ontology routes (see `bff.main` include order).
 
 Routers are kept thin: OMS orchestration + error handling lives in
 `bff.services.ontology_extensions_service` (Facade), and request schemas live in

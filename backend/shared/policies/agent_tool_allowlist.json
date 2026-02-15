@@ -394,16 +394,5 @@
     "status": "ACTIVE",
     "roles": [],
     "max_payload_bytes": 200000
-  },
-  {
-    "tool_id": "query.raw",
-    "method": "POST",
-    "path": "/api/v1/databases/{db_name}/query/raw",
-    "risk_level": "read",
-    "requires_approval": false,
-    "requires_idempotency_key": true,
-    "status": "ACTIVE",
-    "roles": [],
-    "max_payload_bytes": 200000
   }
 ]

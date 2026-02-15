@@ -412,7 +412,7 @@ class VersionControlService(DatabaseBackedTerminusService):
             encoded_branch = self._encode_branch_name(branch_name)
             endpoint = f"/api/woql/{self.connection_info.account}/{db_name}/local/branch/{encoded_branch}"
             
-            # 빈 WOQL 쿼리로 커밋 생성
+            # Minimal marker mutation to force commit creation
             marker_id = f"@base:commit_marker_{uuid.uuid4().hex}"
             data = {
                 "commit_info": {

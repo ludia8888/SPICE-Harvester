@@ -23,7 +23,6 @@ import pytest_asyncio
 from shared.config.settings import get_settings
 from shared.config.service_config import ServiceConfig
 from shared.services.registries.dataset_registry import DatasetRegistry
-from shared.services.storage.event_store import EventStore
 from shared.services.storage.lakefs_storage_service import create_lakefs_storage_service
 from shared.utils.s3_uri import build_s3_uri
 from tests.utils.auth import bff_auth_headers, oms_auth_headers
@@ -455,12 +454,11 @@ async def _wait_for_relationship(
     last: Optional[dict] = None
     while time.monotonic() < deadline:
         async with session.post(
-            f"{OMS_URL}/api/v1/database/{db_name}/ontology/query",
+            f"{OMS_URL}/api/v1/objects/{db_name}/{class_id}/search",
             params={"branch": branch},
             json={
-                "class_id": class_id,
-                "filters": [{"field": pk_field, "operator": "eq", "value": pk_value}],
-                "limit": 5,
+                "where": {"type": "eq", "field": pk_field, "value": pk_value},
+                "pageSize": 5,
             },
         ) as resp:
             if resp.status != 200:
@@ -646,13 +644,13 @@ async def test_access_policy_filters_and_masks_query_results() -> None:
                 assert resp.status == 200, await resp.text()
 
             async with bff_session.post(
-                f"{BFF_URL}/api/v1/databases/{db_name}/query/raw",
-                json={"type": "select", "class_id": class_id, "limit": 20},
+                f"{BFF_URL}/api/v1/databases/{db_name}/query",
+                json={"class_id": class_id, "limit": 20},
                 headers={"X-DB-Name": db_name},
             ) as resp:
                 assert resp.status == 200, await resp.text()
                 payload = await resp.json()
-                data = payload.get("data") if isinstance(payload, dict) else None
+                data = payload.get("results") if isinstance(payload, dict) else None
                 assert isinstance(data, list)
                 assert len(data) == 1
                 row = data[0]

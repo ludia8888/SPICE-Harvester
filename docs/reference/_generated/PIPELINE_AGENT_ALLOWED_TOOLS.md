@@ -86,6 +86,7 @@
 - `plan_add_split`
 - `plan_add_stream_join`
 - `plan_add_transform`
+- `plan_add_udf`
 - `plan_add_union`
 - `plan_add_window`
 - `plan_add_window_expr`
@@ -104,7 +105,6 @@
 - `plan_validate`
 - `plan_validate_structure`
 - `preview_inspect`
-- `reconcile_relationships`
 - `trigger_incremental_objectify`
 
 ## Consistency checks
@@ -138,6 +138,5 @@
 - `mcp_specs_minus_allowed`:
   - `check_schema_drift`
   - `list_schema_changes`
-  - `plan_add_udf`
 
 <!-- END AUTO-GENERATED: pipeline_tooling_reference -->

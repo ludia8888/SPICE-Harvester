@@ -143,25 +143,27 @@ async def test_link_type_missing_refs_are_reported():
 
 
 @pytest.mark.unit
-def test_permission_policy_allows_legacy_roles_alias_for_runtime_compat() -> None:
+def test_permission_policy_rejects_legacy_roles_alias() -> None:
     issues = _collect_permission_policy_issues(
         {
             "effect": "ALLOW",
             "roles": ["DomainModeler"],
         }
     )
-    assert issues == []
+    invalid = {field for issue in issues for field in issue["details"]["invalid_fields"]}
+    assert "permission_policy.roles" in invalid
 
 
 @pytest.mark.unit
-def test_permission_policy_allows_legacy_users_alias_for_runtime_compat() -> None:
+def test_permission_policy_rejects_legacy_users_alias() -> None:
     issues = _collect_permission_policy_issues(
         {
             "effect": "ALLOW",
             "users": ["alice"],
         }
     )
-    assert issues == []
+    invalid = {field for issue in issues for field in issue["details"]["invalid_fields"]}
+    assert "permission_policy.users" in invalid
 
 
 @pytest.mark.unit

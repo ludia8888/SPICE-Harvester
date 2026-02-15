@@ -3,17 +3,7 @@ from unittest.mock import AsyncMock
 from fastapi.testclient import TestClient
 
 from bff.main import app
-from bff.dependencies import get_label_mapper, get_oms_client
-
-
-class _FakeLabelMapper:
-    async def get_class_id(self, db_name: str, label: str, lang: str = "ko"):
-        assert db_name == "demo_db"
-        assert label == "Product"
-        return "Product"
-
-    async def update_mappings(self, db_name: str, update_data: dict):
-        return None
+from bff.dependencies import get_oms_client
 
 
 def test_ontology_validate_create_proxies_to_oms():
@@ -44,16 +34,10 @@ def test_ontology_validate_create_proxies_to_oms():
     fake_oms.validate_ontology_create.assert_awaited_once()
 
 
-def test_ontology_validate_update_resolves_label_and_proxies_to_oms():
+def test_ontology_validate_update_endpoint_removed():
     fake_oms = AsyncMock()
-    fake_oms.validate_ontology_update.return_value = {
-        "status": "success",
-        "message": "ok",
-        "data": {"diff_lint": {"ok": True}},
-    }
 
     app.dependency_overrides[get_oms_client] = lambda: fake_oms
-    app.dependency_overrides[get_label_mapper] = lambda: _FakeLabelMapper()
 
     client = TestClient(app)
     try:
@@ -65,11 +49,5 @@ def test_ontology_validate_update_resolves_label_and_proxies_to_oms():
     finally:
         app.dependency_overrides.clear()
 
-    assert res.status_code == 200
-    payload = res.json()
-    assert payload["status"] == "success"
-
-    called = fake_oms.validate_ontology_update.await_args
-    assert called.args[0] == "demo_db"
-    assert called.args[1] == "Product"
-    assert called.kwargs["branch"] == "main"
+    assert res.status_code == 404
+    fake_oms.validate_ontology_update.assert_not_awaited()

@@ -2133,11 +2133,24 @@ export type RequestContext = {
 type Bff2SearchParams = Record<string, string | number | boolean | null | undefined>
 
 const bff2BuildApiUrl = (path: string, language: Language, searchParams?: Bff2SearchParams) => {
-  const normalizedPath = path.replace(/^\/+/, '')
+  const rawPath = String(path || '').trim()
+  const normalizedPath = rawPath.replace(/^\/+/, '')
   const base = API_BASE_URL.replace(/\/+$/, '')
-  const url = base.startsWith('http')
-    ? new URL(`${base}/${normalizedPath}`)
-    : new URL(`${base}/${normalizedPath}`, window.location.origin)
+  const isAbsoluteApiPath = normalizedPath.startsWith('api/')
+  let url: URL
+
+  if (isAbsoluteApiPath) {
+    if (base.startsWith('http')) {
+      const baseUrl = new URL(base)
+      url = new URL(`/${normalizedPath}`, `${baseUrl.protocol}//${baseUrl.host}`)
+    } else {
+      url = new URL(`/${normalizedPath}`, window.location.origin)
+    }
+  } else {
+    url = base.startsWith('http')
+      ? new URL(`${base}/${normalizedPath}`)
+      : new URL(`${base}/${normalizedPath}`, window.location.origin)
+  }
 
   url.searchParams.set('lang', language)
   if (searchParams) {
@@ -2400,6 +2413,49 @@ export type ApiEnvelope<T = Record<string, unknown>> = {
   [key: string]: unknown
 }
 
+type FoundryObjectTypeV2 = {
+  apiName?: string
+  displayName?: string
+  description?: string
+  properties?: Record<
+    string,
+    {
+      displayName?: string
+      dataType?: { type?: string }
+      required?: boolean
+    }
+  >
+}
+
+const toLegacyOntologyShape = (objectType: FoundryObjectTypeV2): Record<string, unknown> => {
+  const classId = String(objectType.apiName ?? '').trim()
+  const properties = Object.entries(objectType.properties ?? {}).map(([name, spec]) => ({
+    name,
+    label: String(spec?.displayName ?? name),
+    type: String(spec?.dataType?.type ?? 'xsd:string'),
+    required: Boolean(spec?.required),
+  }))
+
+  return {
+    id: classId,
+    label: String(objectType.displayName ?? classId),
+    description: String(objectType.description ?? ''),
+    properties,
+    relationships: [],
+  }
+}
+
+const throwRemovedOntologyWrite = (operation: string): never => {
+  throw new HttpError(
+    410,
+    `${operation} endpoint removed from v1 ontology API`,
+    {
+      errorCode: 'RESOURCE_GONE',
+      message: `${operation} via /api/v1/databases/{db_name}/ontology/{class_label} is removed. Use Foundry object type contract flow.`,
+    },
+  )
+}
+
 export const listBranches = async (context: RequestContext, dbName: string) => {
   const { payload } = await bff2RequestJson<{ branches?: unknown[]; count?: number }>(
     `databases/${encodeURIComponent(dbName)}/branches`,
@@ -2449,13 +2505,19 @@ export const listOntology = async (
   dbName: string,
   branch: string,
 ) => {
-  const { payload } = await bff2RequestJson<ApiEnvelope>(
-    `database/${encodeURIComponent(dbName)}/ontology/list`,
+  const { payload } = await bff2RequestJson<{ data?: FoundryObjectTypeV2[] }>(
+    `/api/v2/ontologies/${encodeURIComponent(dbName)}/objectTypes`,
     { method: 'GET' },
     context,
-    { branch },
+    { branch, pageSize: 1000 },
   )
-  return payload ?? {}
+  const classes = (payload?.data ?? []).map(toLegacyOntologyShape)
+  return {
+    status: 'success',
+    ontologies: classes,
+    data: { ontologies: classes },
+    branch,
+  }
 }
 
 export const getOntology = async (
@@ -2464,13 +2526,16 @@ export const getOntology = async (
   classLabel: string,
   branch: string,
 ) => {
-  const { payload } = await bff2RequestJson<ApiEnvelope>(
-    `database/${encodeURIComponent(dbName)}/ontology/${encodeURIComponent(classLabel)}`,
+  const { payload } = await bff2RequestJson<FoundryObjectTypeV2>(
+    `/api/v2/ontologies/${encodeURIComponent(dbName)}/objectTypes/${encodeURIComponent(classLabel)}`,
     { method: 'GET' },
     context,
     { branch },
   )
-  return payload ?? {}
+  if (!payload) {
+    return {}
+  }
+  return toLegacyOntologyShape(payload)
 }
 
 export const validateOntologyCreate = async (
@@ -2480,7 +2545,7 @@ export const validateOntologyCreate = async (
   input: Record<string, unknown>,
 ) => {
   const { payload } = await bff2RequestJson<ApiEnvelope>(
-    `database/${encodeURIComponent(dbName)}/ontology/validate`,
+    `databases/${encodeURIComponent(dbName)}/ontology/validate`,
     { method: 'POST', body: JSON.stringify(input) },
     context,
     { branch },
@@ -2496,7 +2561,7 @@ export const createOntology = async (
   extraHeaders?: HeadersInit,
 ) => {
   const { payload } = await bff2RequestJson<ApiEnvelope>(
-    `database/${encodeURIComponent(dbName)}/ontology`,
+    `databases/${encodeURIComponent(dbName)}/ontology`,
     { method: 'POST', body: JSON.stringify(input) },
     context,
     { branch },
@@ -2512,13 +2577,12 @@ export const validateOntologyUpdate = async (
   branch: string,
   input: Record<string, unknown>,
 ) => {
-  const { payload } = await bff2RequestJson<ApiEnvelope>(
-    `database/${encodeURIComponent(dbName)}/ontology/${encodeURIComponent(classLabel)}/validate`,
-    { method: 'POST', body: JSON.stringify(input) },
-    context,
-    { branch },
-  )
-  return payload ?? {}
+  void context
+  void dbName
+  void classLabel
+  void branch
+  void input
+  return throwRemovedOntologyWrite('validateOntologyUpdate')
 }
 
 export const updateOntology = async (
@@ -2530,14 +2594,14 @@ export const updateOntology = async (
   input: Record<string, unknown>,
   extraHeaders?: HeadersInit,
 ) => {
-  const { payload } = await bff2RequestJson<ApiEnvelope>(
-    `database/${encodeURIComponent(dbName)}/ontology/${encodeURIComponent(classLabel)}`,
-    { method: 'PUT', body: JSON.stringify(input) },
-    context,
-    { branch, expected_seq: expectedSeq },
-    extraHeaders,
-  )
-  return payload ?? {}
+  void context
+  void dbName
+  void classLabel
+  void branch
+  void expectedSeq
+  void input
+  void extraHeaders
+  return throwRemovedOntologyWrite('updateOntology')
 }
 
 export const deleteOntology = async (
@@ -2548,14 +2612,13 @@ export const deleteOntology = async (
   expectedSeq: number,
   extraHeaders?: HeadersInit,
 ) => {
-  const { payload } = await bff2RequestJson<ApiEnvelope>(
-    `database/${encodeURIComponent(dbName)}/ontology/${encodeURIComponent(classLabel)}`,
-    { method: 'DELETE' },
-    context,
-    { branch, expected_seq: expectedSeq },
-    extraHeaders,
-  )
-  return payload ?? {}
+  void context
+  void dbName
+  void classLabel
+  void branch
+  void expectedSeq
+  void extraHeaders
+  return throwRemovedOntologyWrite('deleteOntology')
 }
 
 export const getOntologySchema = async (
@@ -2566,7 +2629,7 @@ export const getOntologySchema = async (
   format: 'json' | 'jsonld' | 'owl' = 'json',
 ) => {
   const { payload } = await bff2RequestJson<ApiEnvelope>(
-    `database/${encodeURIComponent(dbName)}/ontology/${encodeURIComponent(classId)}/schema`,
+    `databases/${encodeURIComponent(dbName)}/ontology/${encodeURIComponent(classId)}/schema`,
     { method: 'GET' },
     context,
     { branch, format },
@@ -2576,7 +2639,7 @@ export const getOntologySchema = async (
 
 export const getMappingsSummary = async (context: RequestContext, dbName: string) => {
   const { payload } = await bff2RequestJson<Record<string, unknown>>(
-    `database/${encodeURIComponent(dbName)}/mappings/`,
+    `databases/${encodeURIComponent(dbName)}/mappings/`,
     { method: 'GET' },
     context,
   )
@@ -2585,7 +2648,7 @@ export const getMappingsSummary = async (context: RequestContext, dbName: string
 
 export const exportMappings = async (context: RequestContext, dbName: string) => {
   const response = await bff2RequestRaw(
-    `database/${encodeURIComponent(dbName)}/mappings/export`,
+    `databases/${encodeURIComponent(dbName)}/mappings/export`,
     { method: 'POST' },
     context,
   )
@@ -2602,7 +2665,7 @@ export const validateMappings = async (
   const body = new FormData()
   body.append('file', file)
   const { payload } = await bff2RequestJson<ApiEnvelope>(
-    `database/${encodeURIComponent(dbName)}/mappings/validate`,
+    `databases/${encodeURIComponent(dbName)}/mappings/validate`,
     { method: 'POST', body },
     context,
   )
@@ -2617,7 +2680,7 @@ export const importMappings = async (
   const body = new FormData()
   body.append('file', file)
   const { payload } = await bff2RequestJson<ApiEnvelope>(
-    `database/${encodeURIComponent(dbName)}/mappings/import`,
+    `databases/${encodeURIComponent(dbName)}/mappings/import`,
     { method: 'POST', body },
     context,
   )
@@ -2626,7 +2689,7 @@ export const importMappings = async (
 
 export const clearMappings = async (context: RequestContext, dbName: string) => {
   const { payload } = await bff2RequestJson<ApiEnvelope>(
-    `database/${encodeURIComponent(dbName)}/mappings/`,
+    `databases/${encodeURIComponent(dbName)}/mappings/`,
     { method: 'DELETE' },
     context,
   )
@@ -2713,7 +2776,7 @@ export const suggestMappingsFromGoogleSheets = async (
   input: Record<string, unknown>,
 ) => {
   const { payload } = await bff2RequestJson<ApiEnvelope>(
-    `database/${encodeURIComponent(dbName)}/suggest-mappings-from-google-sheets`,
+    `databases/${encodeURIComponent(dbName)}/suggest-mappings-from-google-sheets`,
     { method: 'POST', body: JSON.stringify(input) },
     context,
   )
@@ -2745,7 +2808,7 @@ export const suggestMappingsFromExcel = async (
     body.append('table_right', String(params.table_right ?? 0))
   }
   const { payload } = await bff2RequestJson<ApiEnvelope>(
-    `database/${encodeURIComponent(dbName)}/suggest-mappings-from-excel`,
+    `databases/${encodeURIComponent(dbName)}/suggest-mappings-from-excel`,
     { method: 'POST', body },
     context,
     { target_class_id: params.target_class_id },
@@ -2759,7 +2822,7 @@ export const dryRunImportFromGoogleSheets = async (
   input: Record<string, unknown>,
 ) => {
   const { payload } = await bff2RequestJson<ApiEnvelope>(
-    `database/${encodeURIComponent(dbName)}/import-from-google-sheets/dry-run`,
+    `databases/${encodeURIComponent(dbName)}/import-from-google-sheets/dry-run`,
     { method: 'POST', body: JSON.stringify(input) },
     context,
   )
@@ -2772,7 +2835,7 @@ export const commitImportFromGoogleSheets = async (
   input: Record<string, unknown>,
 ) => {
   const { payload } = await bff2RequestJson<ApiEnvelope>(
-    `database/${encodeURIComponent(dbName)}/import-from-google-sheets/commit`,
+    `databases/${encodeURIComponent(dbName)}/import-from-google-sheets/commit`,
     { method: 'POST', body: JSON.stringify(input) },
     context,
   )
@@ -2822,7 +2885,7 @@ export const dryRunImportFromExcel = async (
   if (payload.options_json) body.append('options_json', payload.options_json)
 
   const { payload: result } = await bff2RequestJson<ApiEnvelope>(
-    `database/${encodeURIComponent(dbName)}/import-from-excel/dry-run`,
+    `databases/${encodeURIComponent(dbName)}/import-from-excel/dry-run`,
     { method: 'POST', body },
     context,
   )
@@ -2870,7 +2933,7 @@ export const commitImportFromExcel = async (
   if (payload.options_json) body.append('options_json', payload.options_json)
 
   const { payload: result } = await bff2RequestJson<ApiEnvelope>(
-    `database/${encodeURIComponent(dbName)}/import-from-excel/commit`,
+    `databases/${encodeURIComponent(dbName)}/import-from-excel/commit`,
     { method: 'POST', body },
     context,
   )
@@ -2883,7 +2946,7 @@ export const suggestSchemaFromData = async (
   input: Record<string, unknown>,
 ) => {
   const { payload } = await bff2RequestJson<ApiEnvelope>(
-    `database/${encodeURIComponent(dbName)}/suggest-schema-from-data`,
+    `databases/${encodeURIComponent(dbName)}/suggest-schema-from-data`,
     { method: 'POST', body: JSON.stringify(input) },
     context,
   )
@@ -2896,7 +2959,7 @@ export const suggestSchemaFromGoogleSheets = async (
   input: Record<string, unknown>,
 ) => {
   const { payload } = await bff2RequestJson<ApiEnvelope>(
-    `database/${encodeURIComponent(dbName)}/suggest-schema-from-google-sheets`,
+    `databases/${encodeURIComponent(dbName)}/suggest-schema-from-google-sheets`,
     { method: 'POST', body: JSON.stringify(input) },
     context,
   )
@@ -2939,7 +3002,7 @@ export const suggestSchemaFromExcel = async (
   if (params?.max_rows !== undefined) body.append('max_rows', String(params.max_rows))
   if (params?.max_cols !== undefined) body.append('max_cols', String(params.max_cols))
   const { payload } = await bff2RequestJson<ApiEnvelope>(
-    `database/${encodeURIComponent(dbName)}/suggest-schema-from-excel`,
+    `databases/${encodeURIComponent(dbName)}/suggest-schema-from-excel`,
     { method: 'POST', body },
     context,
   )
@@ -2953,7 +3016,7 @@ export const listInstancesCtx = async (
   params: { limit?: number; offset?: number; search?: string },
 ) => {
   const { payload } = await bff2RequestJson<Record<string, unknown>>(
-    `database/${encodeURIComponent(dbName)}/class/${encodeURIComponent(classId)}/instances`,
+    `databases/${encodeURIComponent(dbName)}/class/${encodeURIComponent(classId)}/instances`,
     { method: 'GET' },
     context,
     params,
@@ -2968,7 +3031,7 @@ export const getInstanceCtx = async (
   instanceId: string,
 ) => {
   const { payload } = await bff2RequestJson<Record<string, unknown>>(
-    `database/${encodeURIComponent(dbName)}/class/${encodeURIComponent(classId)}/instance/${encodeURIComponent(instanceId)}`,
+    `databases/${encodeURIComponent(dbName)}/class/${encodeURIComponent(classId)}/instance/${encodeURIComponent(instanceId)}`,
     { method: 'GET' },
     context,
   )
@@ -2981,7 +3044,7 @@ export const getSampleValues = async (
   classId: string,
 ) => {
   const { payload } = await bff2RequestJson<Record<string, unknown>>(
-    `database/${encodeURIComponent(dbName)}/class/${encodeURIComponent(classId)}/sample-values`,
+    `databases/${encodeURIComponent(dbName)}/class/${encodeURIComponent(classId)}/sample-values`,
     { method: 'GET' },
     context,
   )
@@ -2996,7 +3059,7 @@ export const createInstance = async (
   input: Record<string, unknown>,
 ) => {
   const { payload } = await bff2RequestJson<CommandResult>(
-    `database/${encodeURIComponent(dbName)}/instances/${encodeURIComponent(classLabel)}/create`,
+    `databases/${encodeURIComponent(dbName)}/instances/${encodeURIComponent(classLabel)}/create`,
     { method: 'POST', body: JSON.stringify(input) },
     context,
     { branch },
@@ -3014,7 +3077,7 @@ export const updateInstance = async (
   input: Record<string, unknown>,
 ) => {
   const { payload } = await bff2RequestJson<CommandResult>(
-    `database/${encodeURIComponent(dbName)}/instances/${encodeURIComponent(classLabel)}/${encodeURIComponent(instanceId)}/update`,
+    `databases/${encodeURIComponent(dbName)}/instances/${encodeURIComponent(classLabel)}/${encodeURIComponent(instanceId)}/update`,
     { method: 'PUT', body: JSON.stringify(input) },
     context,
     { branch, expected_seq: expectedSeq },
@@ -3031,7 +3094,7 @@ export const deleteInstance = async (
   expectedSeq: number,
 ) => {
   const { payload } = await bff2RequestJson<CommandResult>(
-    `database/${encodeURIComponent(dbName)}/instances/${encodeURIComponent(classLabel)}/${encodeURIComponent(instanceId)}/delete`,
+    `databases/${encodeURIComponent(dbName)}/instances/${encodeURIComponent(classLabel)}/${encodeURIComponent(instanceId)}/delete`,
     { method: 'DELETE' },
     context,
     { branch, expected_seq: expectedSeq },
@@ -3047,7 +3110,7 @@ export const bulkCreateInstances = async (
   input: Record<string, unknown>,
 ) => {
   const { payload } = await bff2RequestJson<CommandResult>(
-    `database/${encodeURIComponent(dbName)}/instances/${encodeURIComponent(classLabel)}/bulk-create`,
+    `databases/${encodeURIComponent(dbName)}/instances/${encodeURIComponent(classLabel)}/bulk-create`,
     { method: 'POST', body: JSON.stringify(input) },
     context,
     { branch },
@@ -3095,7 +3158,7 @@ export const getGraphHealth = async (context: RequestContext) => {
 
 export const queryBuilderInfo = async (context: RequestContext, dbName: string) => {
   const { payload } = await bff2RequestJson<Record<string, unknown>>(
-    `database/${encodeURIComponent(dbName)}/query/builder`,
+    `databases/${encodeURIComponent(dbName)}/query/builder`,
     { method: 'GET' },
     context,
   )
@@ -3108,20 +3171,7 @@ export const runQuery = async (
   input: Record<string, unknown>,
 ) => {
   const { payload } = await bff2RequestJson<Record<string, unknown>>(
-    `database/${encodeURIComponent(dbName)}/query`,
-    { method: 'POST', body: JSON.stringify(input) },
-    context,
-  )
-  return payload ?? {}
-}
-
-export const runRawQuery = async (
-  context: RequestContext,
-  dbName: string,
-  input: Record<string, unknown>,
-) => {
-  const { payload } = await bff2RequestJson<Record<string, unknown>>(
-    `database/${encodeURIComponent(dbName)}/query/raw`,
+    `databases/${encodeURIComponent(dbName)}/query`,
     { method: 'POST', body: JSON.stringify(input) },
     context,
   )
@@ -3134,7 +3184,7 @@ export const simulateMerge = async (
   input: Record<string, unknown>,
 ) => {
   const { payload } = await bff2RequestJson<Record<string, unknown>>(
-    `database/${encodeURIComponent(dbName)}/merge/simulate`,
+    `databases/${encodeURIComponent(dbName)}/merge/simulate`,
     { method: 'POST', body: JSON.stringify(input) },
     context,
   )
@@ -3147,7 +3197,7 @@ export const resolveMerge = async (
   input: Record<string, unknown>,
 ) => {
   const { payload } = await bff2RequestJson<Record<string, unknown>>(
-    `database/${encodeURIComponent(dbName)}/merge/resolve`,
+    `databases/${encodeURIComponent(dbName)}/merge/resolve`,
     { method: 'POST', body: JSON.stringify(input) },
     context,
   )

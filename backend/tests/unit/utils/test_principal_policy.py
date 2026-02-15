@@ -1,8 +1,8 @@
 from shared.utils.principal_policy import build_principal_tags, policy_allows
 
 
-def test_build_principal_tags_user_id_back_compat():
-    tags = build_principal_tags(user_id="alice", role="DomainModeler")
+def test_build_principal_tags_defaults_to_user_prefix():
+    tags = build_principal_tags(principal_id="alice", role="DomainModeler")
     assert tags == {"user:alice", "role:DomainModeler"}
 
 
@@ -17,26 +17,26 @@ def test_policy_allows_matches_typed_principal():
     assert policy_allows(policy=policy, principal_tags=tags) is True
 
 
-def test_policy_allows_legacy_roles_alias():
-    tags = build_principal_tags(user_id="alice", role="DomainModeler")
+def test_policy_rejects_legacy_roles_alias():
+    tags = build_principal_tags(principal_id="alice", role="DomainModeler")
     policy = {"effect": "ALLOW", "roles": ["DomainModeler"]}
-    assert policy_allows(policy=policy, principal_tags=tags) is True
+    assert policy_allows(policy=policy, principal_tags=tags) is False
 
 
-def test_policy_denies_legacy_roles_alias_for_deny_effect():
-    tags = build_principal_tags(user_id="alice", role="DomainModeler")
+def test_policy_rejects_legacy_roles_alias_even_for_deny_effect():
+    tags = build_principal_tags(principal_id="alice", role="DomainModeler")
     policy = {"effect": "DENY", "roles": ["DomainModeler"]}
     assert policy_allows(policy=policy, principal_tags=tags) is False
 
 
 def test_policy_fails_closed_for_unsupported_legacy_policy_shapes():
-    tags = build_principal_tags(user_id="alice", role="DomainModeler")
+    tags = build_principal_tags(principal_id="alice", role="DomainModeler")
     policy = {"effect": "ALLOW", "rules": [{"op": "always_true"}]}
     assert policy_allows(policy=policy, principal_tags=tags) is False
 
 
 def test_policy_fails_closed_for_unsupported_legacy_fields_even_with_principals():
-    tags = build_principal_tags(user_id="alice", role="DomainModeler")
+    tags = build_principal_tags(principal_id="alice", role="DomainModeler")
     policy = {
         "effect": "ALLOW",
         "principals": ["role:DomainModeler"],

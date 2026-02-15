@@ -120,4 +120,5 @@ async def test_fk_type_mismatch_is_rejected():
 
     detail = exc_info.value.detail
     assert exc_info.value.status_code == 409
-    assert detail["code"] == "RELATIONSHIP_FK_TYPE_MISMATCH"
+    assert detail["code"] == "OBJECTIFY_CONTRACT_ERROR"
+    assert detail["error_code"] == "RELATIONSHIP_FK_TYPE_MISMATCH"

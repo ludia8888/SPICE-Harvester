@@ -36,7 +36,6 @@
 | `ontology_query_instances` | `db_name, class_id` | Query ontology instances by class type. Use this to verify objectify results by counting instances or retrieving sample data. Returns instance count and sample instances. |
 | `ontology_register_object_type` | `db_name, class_id, dataset_id, primary_key, title_key` | Register an ontology class as an object_type resource for objectify. REQUIRED before running objectify. Creates the object_type contract with pk_spec and backing_source configuration. |
 | `preview_inspect` | `preview` | Inspect a preview sample and propose cleansing suggestions (deterministic). |
-| `reconcile_relationships` | `db_name` | Auto-populate relationships on ES instances by detecting FK references between ontology classes. Call this AFTER objectify completes for all classes to link instances via foreign keys (e.g. Order.customer_id → Customer). Returns per-relationship stats. |
 | `trigger_incremental_objectify` | `db_name, mapping_spec_id` | Trigger objectify in incremental mode (watermark or delta). Processes only changed rows since last run. |
 
 ## Pipeline Control Plane (Spark worker execution)

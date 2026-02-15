@@ -10,9 +10,6 @@ from typing import Any, Dict, List, Optional
 import httpx
 
 from shared.config.settings import build_client_ssl_config, get_settings
-from shared.errors.error_envelope import build_error_envelope
-from shared.errors.error_types import ErrorCategory, ErrorCode
-from shared.observability.request_context import get_correlation_id, get_request_id
 from bff.services.base_http_client import ManagedAsyncClient
 
 # shared 모델 import
@@ -610,27 +607,6 @@ class OMSClient(ManagedAsyncClient):
             logger.error(f"온톨로지 업데이트 실패: {e}")
             raise
 
-    async def validate_ontology_update(
-        self,
-        db_name: str,
-        class_id: str,
-        update_data: Dict[str, Any],
-        *,
-        branch: str = "main",
-    ) -> Dict[str, Any]:
-        """온톨로지 업데이트 검증 (no write)."""
-        try:
-            response = await self.client.post(
-                f"/api/v1/database/{db_name}/ontology/{class_id}/validate",
-                params={"branch": branch},
-                json=update_data,
-            )
-            response.raise_for_status()
-            return response.json()
-        except Exception as e:
-            logger.error(f"온톨로지 업데이트 검증 실패 ({db_name}/{class_id}): {e}")
-            raise
-
     async def delete_ontology(
         self,
         db_name: str,
@@ -658,14 +634,54 @@ class OMSClient(ManagedAsyncClient):
             logger.error(f"온톨로지 삭제 실패: {e}")
             raise
 
-    async def query_ontologies(self, db_name: str, query: Dict[str, Any]) -> Dict[str, Any]:
-        """온톨로지 쿼리"""
+    async def search_objects_v2(
+        self,
+        db_name: str,
+        object_type: str,
+        where: Optional[Dict[str, Any]] = None,
+        *,
+        page_size: int = 100,
+        page_token: Optional[str] = None,
+        select: Optional[List[str]] = None,
+        order_by: Optional[str] = None,
+        order_direction: str = "asc",
+        exclude_rid: Optional[bool] = None,
+        snapshot: Optional[bool] = None,
+        branch: str = "main",
+    ) -> Dict[str, Any]:
+        """Foundry Search Objects API v2 proxy."""
         try:
-            response = await self.client.post(f"/api/v1/database/{db_name}/ontology/query", json=query)
+            body: Dict[str, Any] = {"pageSize": int(page_size)}
+            if where is not None:
+                body["where"] = where
+            else:
+                body["where"] = {"type": "not", "value": {"type": "isNull", "field": "instance_id"}}
+            if page_token:
+                body["pageToken"] = page_token
+            if select:
+                body["select"] = list(select)
+            if order_by:
+                direction = str(order_direction or "asc").strip().lower()
+                if direction not in {"asc", "desc"}:
+                    raise ValueError("order_direction must be 'asc' or 'desc'")
+                body["orderBy"] = {
+                    "orderType": "fields",
+                    "fields": [{"field": str(order_by).strip(), "direction": direction}],
+                }
+            if exclude_rid is not None:
+                body["excludeRid"] = bool(exclude_rid)
+            if snapshot is not None:
+                body["snapshot"] = bool(snapshot)
+
+            response = await self.client.post(
+                f"/api/v1/objects/{db_name}/{object_type}/search",
+                params={"branch": branch},
+                json=body,
+            )
             response.raise_for_status()
             return response.json()
         except Exception as e:
-            logger.error(f"온톨로지 쿼리 실패: {e}")
+            logger.error(f"Foundry object search failed ({db_name}/{object_type}): {e}")
             raise
 
     async def database_exists(self, db_name: str) -> bool:
@@ -677,259 +693,6 @@ class OMSClient(ManagedAsyncClient):
             return data.get("data", {}).get("exists", False)
         except Exception as e:
             logger.error(f"데이터베이스 존재 여부 확인 실패: {e}")
-            raise
-
-    async def commit_database_change(self, db_name: str, message: str, author: str = "system") -> Dict[str, Any]:
-        """데이터베이스 변경사항 자동 커밋"""
-        try:
-            commit_data = {
-                "message": message,
-                "author": author,
-                "operation": "database_change"
-            }
-            
-            # OMS의 브랜치 커밋 엔드포인트 사용
-            response = await self.client.post(f"/api/v1/branch/{db_name}/commit", json=commit_data)
-            
-            # 404 에러는 브랜치가 없다는 의미이므로 무시
-            if response.status_code == 404:
-                logger.info(f"Database {db_name} has no branches yet, skipping commit")
-                return {"status": "skipped", "message": "No branches to commit"}
-            
-            response.raise_for_status()
-            result = response.json()
-            logger.info(f"Successfully committed changes to database {db_name}: {message}")
-            return result
-            
-        except Exception as e:
-            logger.warning(f"Failed to commit database change for {db_name}: {e}")
-            # 커밋 실패는 심각한 오류가 아니므로 예외를 다시 던지지 않음
-            return {"status": "failed", "error": str(e)}
-
-    async def commit_system_change(
-        self, 
-        message: str, 
-        author: str = "system", 
-        operation: str = "system_change",
-        target: str = None
-    ) -> Dict[str, Any]:
-        """시스템 레벨 변경사항 커밋 (데이터베이스 생성/삭제 등)"""
-        try:
-            
-            # 시스템 로그나 메타데이터 데이터베이스에 기록
-            # 여기서는 간단히 로그로 기록하고 향후 확장 가능
-            logger.info(f"System change committed - Operation: {operation}, Target: {target}, Message: {message}")
-            
-            # 향후 메타데이터 데이터베이스나 Git 레포지토리에 실제 커밋 구현 가능
-            return {
-                "status": "success", 
-                "message": "System change logged",
-                "operation": operation,
-                "target": target
-            }
-            
-        except Exception as e:
-            logger.warning(f"Failed to commit system change: {e}")
-            return {"status": "failed", "error": str(e)}
-
-    async def get_class_metadata(self, db_name: str, class_id: str) -> Dict[str, Any]:
-        """클래스의 메타데이터 가져오기"""
-        try:
-            response = await self.client.get(f"/api/v1/database/{db_name}/ontology/{class_id}")
-            response.raise_for_status()
-            ontology_data = response.json()
-            
-            # Extract metadata from the ontology response
-            if isinstance(ontology_data, dict) and "data" in ontology_data:
-                class_data = ontology_data["data"]
-                # Return metadata fields or empty dict
-                return {
-                    "mapping_history": class_data.get("mapping_history", []),
-                    "last_mapping_date": class_data.get("last_mapping_date"),
-                    "total_mappings": class_data.get("total_mappings", 0),
-                    "mapping_sources": class_data.get("mapping_sources", [])
-                }
-            return {}
-        except Exception as e:
-            logger.error(f"클래스 메타데이터 조회 실패: {e}")
-            # Return empty metadata instead of raising
-            return {}
-
-    async def update_class_metadata(self, db_name: str, class_id: str, metadata: Dict[str, Any]) -> Dict[str, Any]:
-        """클래스의 메타데이터 업데이트"""
-        try:
-            # Get current class data
-            response = await self.client.get(f"/api/v1/database/{db_name}/ontology/{class_id}")
-            response.raise_for_status()
-            current_data = response.json()
-            
-            # Update with new metadata fields
-            if isinstance(current_data, dict) and "data" in current_data:
-                class_data = current_data["data"]
-                # Merge metadata into class data
-                update_data = {
-                    **class_data,
-                    "mapping_history": metadata.get("mapping_history", []),
-                    "last_mapping_date": metadata.get("last_mapping_date"),
-                    "total_mappings": metadata.get("total_mappings", 0),
-                    "mapping_sources": metadata.get("mapping_sources", [])
-                }
-                
-                # Update the class with new metadata
-                response = await self.client.put(
-                    f"/api/v1/database/{db_name}/ontology/{class_id}",
-                    json=update_data
-                )
-                response.raise_for_status()
-                return response.json()
-            
-            return build_error_envelope(
-                service_name=SERVICE_NAME,
-                message="Unable to update metadata",
-                detail="Unexpected ontology metadata response",
-                code=ErrorCode.UPSTREAM_ERROR,
-                category=ErrorCategory.UPSTREAM,
-                status_code=502,
-                context={"db_name": db_name, "class_id": class_id},
-                request_id=get_request_id(),
-                correlation_id=get_correlation_id(),
-            )
-        except Exception as e:
-            logger.error(f"클래스 메타데이터 업데이트 실패: {e}")
-            raise
-
-    async def get_class_instances(
-        self, 
-        db_name: str, 
-        class_id: str,
-        limit: int = 100,
-        offset: int = 0,
-        search: Optional[str] = None
-    ) -> Dict[str, Any]:
-        """
-        특정 클래스의 인스턴스 목록을 효율적으로 조회 (N+1 Query 최적화)
-        
-        Args:
-            db_name: 데이터베이스 이름
-            class_id: 클래스 ID
-            limit: 최대 결과 수
-            offset: 시작 위치
-            search: 검색 쿼리
-            
-        Returns:
-            완전히 조립된 인스턴스 목록
-        """
-        try:
-            params = {
-                "limit": limit,
-                "offset": offset
-            }
-            if search:
-                params["search"] = search
-                
-            response = await self.client.get(
-                f"/api/v1/instance/{db_name}/class/{class_id}/instances",
-                params=params
-            )
-            response.raise_for_status()
-            return response.json()
-        except Exception as e:
-            logger.error(f"클래스 인스턴스 목록 조회 실패: {e}")
-            raise
-    
-    async def get_instance(
-        self,
-        db_name: str,
-        instance_id: str,
-        class_id: Optional[str] = None
-    ) -> Dict[str, Any]:
-        """
-        개별 인스턴스를 효율적으로 조회
-        
-        Args:
-            db_name: 데이터베이스 이름
-            instance_id: 인스턴스 ID
-            class_id: 클래스 ID (선택사항)
-            
-        Returns:
-            완전한 인스턴스 객체
-        """
-        try:
-            params = {}
-            if class_id:
-                params["class_id"] = class_id
-                
-            response = await self.client.get(
-                f"/api/v1/instance/{db_name}/instance/{instance_id}",
-                params=params
-            )
-            response.raise_for_status()
-            return response.json()
-        except Exception as e:
-            logger.error(f"인스턴스 조회 실패: {e}")
-            raise
-    
-    async def count_class_instances(
-        self,
-        db_name: str,
-        class_id: str
-    ) -> Dict[str, Any]:
-        """
-        특정 클래스의 인스턴스 개수 조회
-        
-        Args:
-            db_name: 데이터베이스 이름
-            class_id: 클래스 ID
-            
-        Returns:
-            인스턴스 개수
-        """
-        try:
-            response = await self.client.get(
-                f"/api/v1/instance/{db_name}/class/{class_id}/count"
-            )
-            response.raise_for_status()
-            return response.json()
-        except Exception as e:
-            logger.error(f"인스턴스 개수 조회 실패: {e}")
-            raise
-    
-    async def execute_sparql(
-        self,
-        db_name: str,
-        query: str,
-        limit: Optional[int] = None,
-        offset: Optional[int] = None
-    ) -> Dict[str, Any]:
-        """
-        SPARQL 쿼리 실행
-        
-        Args:
-            db_name: 데이터베이스 이름
-            query: SPARQL 쿼리
-            limit: 최대 결과 수
-            offset: 시작 위치
-            
-        Returns:
-            쿼리 결과
-        """
-        try:
-            data = {"query": query}
-            params = {}
-            if limit is not None:
-                params["limit"] = limit
-            if offset is not None:
-                params["offset"] = offset
-                
-            response = await self.client.post(
-                f"/api/v1/instance/{db_name}/sparql",
-                json=data,
-                params=params
-            )
-            response.raise_for_status()
-            return response.json()
-        except Exception as e:
-            logger.error(f"SPARQL 쿼리 실행 실패: {e}")
             raise
 
     async def __aenter__(self):

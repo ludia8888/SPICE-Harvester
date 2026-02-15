@@ -255,7 +255,7 @@ class InstanceService(DatabaseBackedTerminusService):
             await self.db_service.ensure_db_exists(db_name)
 
             # NOTE: TerminusDB v12 supports filtering documents by `type` via the document API.
-            # This avoids WOQL/SPARQL dialect differences and keeps the endpoint deterministic.
+            # This keeps retrieval deterministic without query-dialect-specific translation.
             endpoint = (
                 f"/api/document/{self.connection_info.account}/{db_name}{self._branch_descriptor(branch)}"
             )

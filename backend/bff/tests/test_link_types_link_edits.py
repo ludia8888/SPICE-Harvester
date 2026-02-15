@@ -51,7 +51,8 @@ def test_link_edit_rejected_when_disabled():
 
     assert res.status_code == 409
     detail = res.json()["detail"]
-    assert detail["code"] == "LINK_EDITS_DISABLED"
+    assert detail["code"] == "CONFLICT"
+    assert detail["reason"] == "LINK_EDITS_DISABLED"
 
 
 def test_link_edit_records_when_enabled():

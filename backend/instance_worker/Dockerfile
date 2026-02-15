@@ -14,6 +14,7 @@ RUN pip install --upgrade pip setuptools wheel
 # Copy shared modules first
 COPY shared /app/shared
 COPY oms /app/oms
+COPY objectify_worker /app/objectify_worker
 
 # Install shared package (temporarily hide pyproject.toml to force setup.py usage)
 RUN cd /app/shared && mv pyproject.toml pyproject.toml.bak && cd /app && pip install ./shared && cd /app/shared && mv pyproject.toml.bak pyproject.toml

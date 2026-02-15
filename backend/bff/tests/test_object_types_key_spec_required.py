@@ -156,7 +156,9 @@ async def test_object_type_requires_primary_key():
                 objectify_registry=objectify_registry,
             )
         assert exc_info.value.status_code == 400
-        assert exc_info.value.detail == "pk_spec.primary_key is required"
+        detail = exc_info.value.detail
+        assert detail["code"] == "REQUEST_VALIDATION_FAILED"
+        assert detail["message"] == "pk_spec.primary_key is required"
     finally:
         object_types_router.enforce_database_role = original_enforce
 
@@ -194,6 +196,8 @@ async def test_object_type_requires_title_key():
                 objectify_registry=objectify_registry,
             )
         assert exc_info.value.status_code == 400
-        assert exc_info.value.detail == "pk_spec.title_key is required"
+        detail = exc_info.value.detail
+        assert detail["code"] == "REQUEST_VALIDATION_FAILED"
+        assert detail["message"] == "pk_spec.title_key is required"
     finally:
         object_types_router.enforce_database_role = original_enforce

@@ -3,6 +3,7 @@
 Composed by `bff.routers.link_types` via router composition (Composite pattern).
 """
 
+import base64
 import logging
 from shared.observability.tracing import trace_endpoint
 
@@ -28,6 +29,143 @@ LINK_EDIT_ROLES = DOMAIN_MODEL_ROLES | DATA_ENGINEER_ROLES
 require_link_edit_role = require_database_role(LINK_EDIT_ROLES)
 
 
+def _unwrap_data(payload):
+    if not isinstance(payload, dict):
+        return {}
+    data = payload.get("data")
+    if isinstance(data, dict):
+        return data
+    return payload
+
+
+def _extract_resources(payload):
+    data = _unwrap_data(payload)
+    resources = data.get("resources") if isinstance(data, dict) else None
+    if not isinstance(resources, list):
+        return []
+    return [entry for entry in resources if isinstance(entry, dict)]
+
+
+def _decode_page_token(page_token: str | None) -> int:
+    if page_token is None:
+        return 0
+    token = str(page_token).strip()
+    if not token:
+        return 0
+    try:
+        padding = "=" * (-len(token) % 4)
+        decoded = base64.urlsafe_b64decode(f"{token}{padding}".encode("ascii")).decode("utf-8")
+        offset = int(decoded)
+    except Exception as exc:
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            "pageToken must be base64-encoded non-negative integer offset",
+            code=ErrorCode.REQUEST_VALIDATION_FAILED,
+        ) from exc
+    if offset < 0:
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            "pageToken offset must be >= 0",
+            code=ErrorCode.REQUEST_VALIDATION_FAILED,
+        )
+    return offset
+
+
+def _encode_page_token(offset: int) -> str:
+    raw = str(max(0, int(offset))).encode("utf-8")
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def _normalize_object_ref(raw):
+    if not isinstance(raw, str):
+        return None
+    value = raw.strip()
+    if not value:
+        return None
+    for prefix in ("object_type:", "object:", "class:"):
+        if value.startswith(prefix):
+            value = value[len(prefix) :].strip()
+            break
+    if "@" in value:
+        value = value.split("@", 1)[0].strip()
+    return value or None
+
+
+def _localized_text(value):
+    if isinstance(value, str):
+        text = value.strip()
+        return text or None
+    if isinstance(value, dict):
+        for key in ("en", "ko"):
+            key_value = value.get(key)
+            if isinstance(key_value, str) and key_value.strip():
+                return key_value.strip()
+        for key_value in value.values():
+            if isinstance(key_value, str) and key_value.strip():
+                return key_value.strip()
+    return None
+
+
+def _map_cardinality(raw):
+    value = str(raw or "").strip().lower()
+    if value in {"1:1", "n:1", "one"}:
+        return "ONE"
+    if value in {"1:n", "n:1+", "n:m", "n:n", "many"}:
+        return "MANY"
+    if value == "m:1":
+        return "ONE"
+    return None
+
+
+def _to_foundry_outgoing_link_type(resource, *, source_object_type):
+    spec = resource.get("spec") if isinstance(resource.get("spec"), dict) else {}
+    from_ref = _normalize_object_ref(spec.get("from") if isinstance(spec, dict) else None)
+    if from_ref is None:
+        from_ref = _normalize_object_ref(resource.get("from"))
+    if from_ref != source_object_type:
+        return None
+
+    to_ref = _normalize_object_ref(spec.get("to") if isinstance(spec, dict) else None)
+    if to_ref is None:
+        to_ref = _normalize_object_ref(resource.get("to"))
+
+    relationship_spec = spec.get("relationship_spec") if isinstance(spec.get("relationship_spec"), dict) else {}
+    if not to_ref and isinstance(relationship_spec, dict):
+        to_ref = _normalize_object_ref(relationship_spec.get("target_object_type"))
+
+    link_type_api_name = str(resource.get("id") or "").strip()
+    if not link_type_api_name:
+        return None
+
+    out = {"apiName": link_type_api_name}
+    if to_ref:
+        out["objectTypeApiName"] = to_ref
+
+    display_name = _localized_text(resource.get("label"))
+    if display_name:
+        out["displayName"] = display_name
+
+    status_value = str(spec.get("status") or resource.get("status") or "ACTIVE").strip().upper()
+    out["status"] = status_value or "ACTIVE"
+
+    cardinality = _map_cardinality(spec.get("cardinality") if isinstance(spec, dict) else None)
+    if cardinality is None:
+        cardinality = _map_cardinality(resource.get("cardinality"))
+    if cardinality:
+        out["cardinality"] = cardinality
+
+    foreign_key_property = None
+    if isinstance(relationship_spec, dict):
+        foreign_key_property = relationship_spec.get("fk_column") or relationship_spec.get("source_key_column")
+    if isinstance(foreign_key_property, str) and foreign_key_property.strip():
+        out["foreignKeyPropertyApiName"] = foreign_key_property.strip()
+
+    link_type_rid = str(resource.get("rid") or "").strip()
+    if link_type_rid:
+        out["linkTypeRid"] = link_type_rid
+    return out
+
+
 @router.get("/link-types", response_model=ApiResponse)
 @trace_endpoint("bff.link_types.list_link_types")
 async def list_link_types(
@@ -38,10 +176,8 @@ async def list_link_types(
 ) -> ApiResponse:
     try:
         db_name = validate_db_name(db_name)
-        resources = await oms_client.list_ontology_resources(db_name, resource_type="link_type", branch=branch)
-        items = resources.get("resources") if isinstance(resources, dict) else None
-        if not isinstance(items, list):
-            items = []
+        payload = await oms_client.list_ontology_resources(db_name, resource_type="link_type", branch=branch)
+        items = _extract_resources(payload)
 
         enriched = []
         for entry in items:
@@ -63,6 +199,141 @@ async def list_link_types(
         raise
     except Exception as exc:
         logger.error("Failed to list link types: %s", exc)
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc), code=ErrorCode.INTERNAL_ERROR)
+
+
+@router.get("/object-types/{object_type_api_name}/outgoing-link-types", response_model=ApiResponse)
+@trace_endpoint("bff.link_types.list_outgoing_link_types")
+async def list_outgoing_link_types(
+    db_name: str,
+    object_type_api_name: str,
+    branch: str = Query("main", description="Target branch"),
+    page_size: int = Query(500, alias="pageSize", ge=1, le=1000),
+    page_token: str | None = Query(default=None, alias="pageToken"),
+    oms_client: OMSClient = OMSClientDep,
+) -> ApiResponse:
+    try:
+        db_name = validate_db_name(db_name)
+        object_type_api_name = str(object_type_api_name or "").strip()
+        if not object_type_api_name:
+            raise classified_http_exception(
+                status.HTTP_400_BAD_REQUEST,
+                "object_type_api_name is required",
+                code=ErrorCode.REQUEST_VALIDATION_FAILED,
+            )
+
+        offset = _decode_page_token(page_token)
+        scan_limit = min(max(page_size, 500), 1000)
+        scan_offset = 0
+        matched: list[dict] = []
+
+        while True:
+            payload = await oms_client.list_ontology_resources(
+                db_name,
+                resource_type="link_type",
+                branch=branch,
+                limit=scan_limit,
+                offset=scan_offset,
+            )
+            resources = _extract_resources(payload)
+            if not resources:
+                break
+
+            for resource in resources:
+                mapped = _to_foundry_outgoing_link_type(resource, source_object_type=object_type_api_name)
+                if mapped is not None:
+                    matched.append(mapped)
+
+            scan_offset += len(resources)
+            if len(resources) < scan_limit:
+                break
+
+        data = matched[offset : offset + page_size]
+        next_offset = offset + len(data)
+        next_page_token = _encode_page_token(next_offset) if next_offset < len(matched) else None
+        return ApiResponse.success(
+            message="Outgoing link types retrieved",
+            data={
+                "data": data,
+                "nextPageToken": next_page_token,
+            },
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("Failed to list outgoing link types: %s", exc)
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc), code=ErrorCode.INTERNAL_ERROR)
+
+
+@router.get(
+    "/object-types/{object_type_api_name}/outgoing-link-types/{link_type_api_name}",
+    response_model=ApiResponse,
+)
+@trace_endpoint("bff.link_types.get_outgoing_link_type")
+async def get_outgoing_link_type(
+    db_name: str,
+    object_type_api_name: str,
+    link_type_api_name: str,
+    branch: str = Query("main", description="Target branch"),
+    oms_client: OMSClient = OMSClientDep,
+) -> ApiResponse:
+    try:
+        db_name = validate_db_name(db_name)
+        object_type_api_name = str(object_type_api_name or "").strip()
+        link_type_api_name = str(link_type_api_name or "").strip()
+        if not object_type_api_name:
+            raise classified_http_exception(
+                status.HTTP_400_BAD_REQUEST,
+                "object_type_api_name is required",
+                code=ErrorCode.REQUEST_VALIDATION_FAILED,
+            )
+        if not link_type_api_name:
+            raise classified_http_exception(
+                status.HTTP_400_BAD_REQUEST,
+                "link_type_api_name is required",
+                code=ErrorCode.REQUEST_VALIDATION_FAILED,
+            )
+
+        try:
+            payload = await oms_client.get_ontology_resource(
+                db_name,
+                resource_type="link_type",
+                resource_id=link_type_api_name,
+                branch=branch,
+            )
+        except httpx.HTTPStatusError as exc:
+            if exc.response is not None and exc.response.status_code == status.HTTP_404_NOT_FOUND:
+                raise classified_http_exception(
+                    status.HTTP_404_NOT_FOUND,
+                    "Outgoing link type not found",
+                    code=ErrorCode.RESOURCE_NOT_FOUND,
+                ) from exc
+            raise
+
+        resource = payload.get("data") if isinstance(payload, dict) else payload
+        if not isinstance(resource, dict):
+            raise classified_http_exception(
+                status.HTTP_404_NOT_FOUND,
+                "Outgoing link type not found",
+                code=ErrorCode.RESOURCE_NOT_FOUND,
+            )
+
+        mapped = _to_foundry_outgoing_link_type(resource, source_object_type=object_type_api_name)
+        if mapped is None:
+            raise classified_http_exception(
+                status.HTTP_404_NOT_FOUND,
+                "Outgoing link type not found",
+                code=ErrorCode.RESOURCE_NOT_FOUND,
+            )
+
+        return ApiResponse.success(
+            message="Outgoing link type retrieved",
+            data=mapped,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("Failed to get outgoing link type: %s", exc)
         raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc), code=ErrorCode.INTERNAL_ERROR)
 
 

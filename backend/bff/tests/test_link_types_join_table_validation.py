@@ -80,7 +80,9 @@ async def test_join_table_missing_target_column_is_rejected():
         )
 
     assert exc_info.value.status_code == 400
-    assert exc_info.value.detail == "target_key_column missing"
+    detail = exc_info.value.detail
+    assert detail["code"] == "OBJECTIFY_MAPPING_ERROR"
+    assert detail["message"] == "target_key_column missing"
 
 
 @pytest.mark.asyncio
@@ -146,4 +148,5 @@ async def test_join_table_source_type_mismatch_is_rejected():
 
     detail = exc_info.value.detail
     assert exc_info.value.status_code == 409
-    assert detail["code"] == "RELATIONSHIP_JOIN_SOURCE_TYPE_MISMATCH"
+    assert detail["code"] == "OBJECTIFY_CONTRACT_ERROR"
+    assert detail["error_code"] == "RELATIONSHIP_JOIN_SOURCE_TYPE_MISMATCH"

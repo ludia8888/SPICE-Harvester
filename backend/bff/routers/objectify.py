@@ -9,12 +9,10 @@ sub-router focused and maintainable.
 from fastapi import APIRouter
 
 from bff.routers import (
-    objectify_changelog,
     objectify_dag,
     objectify_enterprise,
     objectify_incremental,
     objectify_mapping_specs,
-    objectify_reconcile,
     objectify_runs,
 )
 from bff.routers.objectify_deps import (
@@ -31,8 +29,6 @@ router.include_router(objectify_runs.router)
 router.include_router(objectify_dag.router)
 router.include_router(objectify_enterprise.router)
 router.include_router(objectify_incremental.router)
-router.include_router(objectify_reconcile.router)
-router.include_router(objectify_changelog.router)
 
 __all__ = [
     "router",
@@ -42,4 +38,3 @@ __all__ = [
     "get_pipeline_registry",
     "get_objectify_job_queue",
 ]
-

@@ -24,10 +24,10 @@ for _path in (str(_backend_root), str(_repo_root)):
     if _path and _path not in sys.path:
         sys.path.append(_path)
 
-from oms.services.async_terminus import AsyncTerminusService
-from shared.config.settings import get_settings
-from shared.models.config import ConnectionConfig
-from shared.models.ontology import OntologyBase
+from oms.services.async_terminus import AsyncTerminusService  # noqa: E402
+from shared.config.settings import get_settings  # noqa: E402
+from shared.models.config import ConnectionConfig  # noqa: E402
+from shared.models.ontology import OntologyBase  # noqa: E402
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -125,7 +125,7 @@ class TerminusDBMCPServer:
                 },
                 {
                     "name": "execute_query",
-                    "description": "Execute a WOQL query",
+                    "description": "Execute a query-spec object search query",
                     "inputSchema": {
                         "type": "object",
                         "properties": {

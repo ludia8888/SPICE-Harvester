@@ -63,12 +63,10 @@ class MergeRequest(BaseModel):
 class RollbackRequest(BaseModel):
     """롤백 요청"""
 
-    # Accept both `target_commit` (new) and legacy `target` payloads.
-    target_commit: str = Field(..., alias="target")  # 커밋 ID 또는 상대 참조 (예: HEAD~1)
+    target_commit: str = Field(..., description="커밋 ID 또는 상대 참조 (예: HEAD~1)")
     reason: Optional[str] = None
 
     model_config = ConfigDict(
-        populate_by_name=True,
         json_schema_extra={"example": {"target_commit": "HEAD~1", "reason": "Rollback to stable commit"}},
     )
 
@@ -606,7 +604,7 @@ async def rollback(
 
         if "not found" in str(e).lower():
             raise classified_http_exception(
-                status.HTTP_404_NOT_FOUND, f"대상을 찾을 수 없습니다",
+                status.HTTP_404_NOT_FOUND, "대상을 찾을 수 없습니다",
                 code=ErrorCode.RESOURCE_NOT_FOUND,
             )
 

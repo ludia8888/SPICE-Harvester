@@ -42,9 +42,8 @@ async def execute_graph_query(
     lineage_store: LineageStoreDep,
     graph_service: GraphFederationServiceES = Depends(get_graph_federation_service),
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
-    base_branch: str = Query("main", description="Base branch (Terminus) (default: main)"),
+    base_branch: str = Query("main", description="Base branch (default: main)"),
     overlay_branch: Optional[str] = Query(default=None, description="ES overlay branch (writeback)"),
-    branch: Optional[str] = Query(default=None, description="Deprecated alias for base_branch"),
 ):
     return await execute_graph_query_service(
         db_name=db_name,
@@ -55,7 +54,6 @@ async def execute_graph_query(
         dataset_registry=dataset_registry,
         base_branch=base_branch,
         overlay_branch=overlay_branch,
-        branch=branch,
     )
 
 
@@ -67,9 +65,8 @@ async def execute_simple_graph_query(
     request: Request,
     graph_service: GraphFederationServiceES = Depends(get_graph_federation_service),
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
-    base_branch: str = Query("main", description="Base branch (Terminus) (default: main)"),
+    base_branch: str = Query("main", description="Base branch (default: main)"),
     overlay_branch: Optional[str] = Query(default=None, description="ES overlay branch (writeback)"),
-    branch: Optional[str] = Query(default=None, description="Deprecated alias for base_branch"),
 ):
     return await execute_simple_graph_query_service(
         db_name=db_name,
@@ -79,7 +76,6 @@ async def execute_simple_graph_query(
         dataset_registry=dataset_registry,
         base_branch=base_branch,
         overlay_branch=overlay_branch,
-        branch=branch,
     )
 
 
@@ -91,9 +87,8 @@ async def execute_multi_hop_query(
     request: Request,
     graph_service: GraphFederationServiceES = Depends(get_graph_federation_service),
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
-    base_branch: str = Query("main", description="Base branch (Terminus) (default: main)"),
+    base_branch: str = Query("main", description="Base branch (default: main)"),
     overlay_branch: Optional[str] = Query(default=None, description="ES overlay branch (writeback)"),
-    branch: Optional[str] = Query(default=None, description="Deprecated alias for base_branch"),
 ):
     return await execute_multi_hop_query_service(
         db_name=db_name,
@@ -103,7 +98,6 @@ async def execute_multi_hop_query(
         dataset_registry=dataset_registry,
         base_branch=base_branch,
         overlay_branch=overlay_branch,
-        branch=branch,
     )
 
 

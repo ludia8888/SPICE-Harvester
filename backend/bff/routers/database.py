@@ -34,7 +34,7 @@ async def list_databases(
     response_model=ApiResponse,
     status_code=status.HTTP_202_ACCEPTED,
     responses={
-        status.HTTP_201_CREATED: {"model": ApiResponse, "description": "Direct mode (legacy)"},
+        status.HTTP_201_CREATED: {"model": ApiResponse, "description": "Direct mode"},
         status.HTTP_202_ACCEPTED: {"model": ApiResponse, "description": "Event-sourcing mode (async)"},
         status.HTTP_409_CONFLICT: {"description": "Conflict (already exists / OCC)"},
     },
@@ -50,7 +50,7 @@ async def create_database(request: DatabaseCreateRequest, http_request: Request,
     response_model=ApiResponse,
     status_code=status.HTTP_202_ACCEPTED,
     responses={
-        status.HTTP_200_OK: {"model": ApiResponse, "description": "Direct mode (legacy)"},
+        status.HTTP_200_OK: {"model": ApiResponse, "description": "Direct mode"},
         status.HTTP_202_ACCEPTED: {"model": ApiResponse, "description": "Event-sourcing mode (async)"},
         status.HTTP_409_CONFLICT: {"description": "OCC conflict"},
     },
