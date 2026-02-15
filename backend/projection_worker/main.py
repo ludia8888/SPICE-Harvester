@@ -21,6 +21,10 @@ from shared.config.search_config import (
 from shared.config.app_config import AppConfig
 from shared.config.settings import get_settings
 from shared.models.event_envelope import EventEnvelope
+from shared.models.lineage_edge_types import (
+    EDGE_EVENT_DELETED_ES_DOCUMENT,
+    EDGE_EVENT_MATERIALIZED_ES_DOCUMENT,
+)
 from shared.models.events import (
     EventType,
 )
@@ -289,6 +293,13 @@ class ProjectionWorker(StrictHeartbeatEventEnvelopeKafkaWorker[None]):
         occurred_at = datetime.now(timezone.utc)
         meta = self._extract_envelope_metadata(event_data)
         seq = self._parse_sequence(event_data.get("sequence_number"))
+        branch: Optional[str] = None
+        if isinstance(event_data, dict):
+            raw_branch = event_data.get("branch")
+            if raw_branch is None and isinstance(event_data.get("data"), dict):
+                raw_branch = event_data["data"].get("branch")
+            if raw_branch is not None and str(raw_branch).strip():
+                branch = str(raw_branch).strip()
         ontology_payload: Dict[str, str] = {}
         if meta.get("ontology_ref"):
             ontology_payload["ref"] = str(meta["ontology_ref"])
@@ -298,6 +309,7 @@ class ProjectionWorker(StrictHeartbeatEventEnvelopeKafkaWorker[None]):
         action = "PROJECTION_ES_INDEX" if operation == "index" else "PROJECTION_ES_DELETE"
         audit_metadata = {
             "db_name": db_name,
+            "branch": branch,
             "index": index_name,
             "doc_id": doc_id,
             "operation": operation,
@@ -334,15 +346,21 @@ class ProjectionWorker(StrictHeartbeatEventEnvelopeKafkaWorker[None]):
         )
 
         if record_lineage:
-            edge_type = "event_deleted_es_document" if operation == "delete" else "event_materialized_es_document"
+            edge_type = (
+                EDGE_EVENT_DELETED_ES_DOCUMENT
+                if operation == "delete"
+                else EDGE_EVENT_MATERIALIZED_ES_DOCUMENT
+            )
             await self.observability.record_link(
                 from_node_id=LineageStore.node_event(str(event_id)),
                 to_node_id=LineageStore.node_artifact("es", index_name, doc_id),
                 edge_type=edge_type,
                 occurred_at=occurred_at,
+                branch=branch,
                 to_label=f"es:{index_name}/{doc_id}",
                 edge_metadata={
                     "db_name": db_name,
+                    "branch": branch,
                     "index": index_name,
                     "doc_id": doc_id,
                     "operation": operation,

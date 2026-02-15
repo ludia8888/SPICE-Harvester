@@ -1318,10 +1318,73 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
         url = f"{BFF_URL}{op.path}"
         return RequestPlan(op.method, op.path, url, (200,))
 
+    if key == ("GET", "/api/v1/lineage/timeline"):
+        url = f"{BFF_URL}{op.path}"
+        return RequestPlan(op.method, op.path, url, (200, 400), params={"db_name": ctx.db_name, "bucket_minutes": 15})
+
+    if key == ("GET", "/api/v1/lineage/out-of-date"):
+        url = f"{BFF_URL}{op.path}"
+        return RequestPlan(
+            op.method,
+            op.path,
+            url,
+            (200, 400),
+            params={"db_name": ctx.db_name, "freshness_slo_minutes": 120},
+        )
+
+    if key == ("GET", "/api/v1/lineage/runs"):
+        url = f"{BFF_URL}{op.path}"
+        return RequestPlan(
+            op.method,
+            op.path,
+            url,
+            (200, 400),
+            params={"db_name": ctx.db_name, "run_limit": 50},
+        )
+
+    if key == ("GET", "/api/v1/lineage/run-impact"):
+        url = f"{BFF_URL}{op.path}"
+        return RequestPlan(
+            op.method,
+            op.path,
+            url,
+            (200, 400),
+            params={"db_name": ctx.db_name, "run_id": "openapi-smoke-run"},
+        )
+
     if key in {("GET", "/api/v1/lineage/graph"), ("GET", "/api/v1/lineage/impact")}:
         url = f"{BFF_URL}{op.path}"
         root = ctx.command_ids.get("create_database") or next(iter(ctx.command_ids.values()))
         return RequestPlan(op.method, op.path, url, (200, 400), params={"root": root, "db_name": ctx.db_name})
+
+    if key == ("GET", "/api/v1/lineage/path"):
+        url = f"{BFF_URL}{op.path}"
+        root = ctx.command_ids.get("create_database") or next(iter(ctx.command_ids.values()))
+        return RequestPlan(
+            op.method,
+            op.path,
+            url,
+            (200, 400),
+            params={"source": root, "target": root, "db_name": ctx.db_name},
+        )
+
+    if key == ("GET", "/api/v1/lineage/diff"):
+        url = f"{BFF_URL}{op.path}"
+        root = ctx.command_ids.get("create_database") or next(iter(ctx.command_ids.values()))
+        now = datetime.now(timezone.utc)
+        from_as_of = (now - timedelta(minutes=30)).isoformat()
+        return RequestPlan(
+            op.method,
+            op.path,
+            url,
+            (200, 400),
+            params={
+                "root": root,
+                "db_name": ctx.db_name,
+                "from_as_of": from_as_of,
+                "to_as_of": now.isoformat(),
+            },
+        )
 
     # ---------- Audit ----------
     if key == ("GET", "/api/v1/audit/logs"):

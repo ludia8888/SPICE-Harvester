@@ -51,6 +51,7 @@ from shared.errors.error_envelope import build_error_envelope
 from shared.errors.error_types import ErrorCategory, ErrorCode
 from shared.errors.runtime_exception_policy import RuntimeZone, log_exception_rate_limited, record_lineage_or_raise
 from shared.models.pipeline_job import PipelineJob
+from shared.models.lineage_edge_types import EDGE_PIPELINE_OUTPUT_STORED
 from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
 from shared.services.kafka.processed_event_worker import HeartbeatOptions, ProcessedEventKafkaWorker, RegistryKey
@@ -2739,7 +2740,7 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                         await self.lineage.record_link(  # type: ignore[union-attr]
                             from_node_id=LineageStore.node_aggregate("Pipeline", pipeline_ref),
                             to_node_id=LineageStore.node_artifact("s3", bucket, key),
-                            edge_type="pipeline_output_stored",
+                            edge_type=EDGE_PIPELINE_OUTPUT_STORED,
                             occurred_at=utcnow(),
                             db_name=job.db_name,
                             edge_metadata={

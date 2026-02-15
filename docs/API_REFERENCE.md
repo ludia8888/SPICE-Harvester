@@ -173,9 +173,15 @@
 - `POST /api/v1/databases/{db_name}/mappings/validate`
 
 ### Lineage
+- `GET /api/v1/lineage/diff`
 - `GET /api/v1/lineage/graph`
 - `GET /api/v1/lineage/impact`
 - `GET /api/v1/lineage/metrics`
+- `GET /api/v1/lineage/out-of-date`
+- `GET /api/v1/lineage/path`
+- `GET /api/v1/lineage/run-impact`
+- `GET /api/v1/lineage/runs`
+- `GET /api/v1/lineage/timeline`
 
 ### Monitoring
 - `GET /api/v1/monitoring/background-tasks/active`

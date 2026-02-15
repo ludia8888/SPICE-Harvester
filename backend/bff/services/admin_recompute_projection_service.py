@@ -11,7 +11,7 @@ import logging
 import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Dict, Iterable, Literal, Optional, Protocol, Tuple
+from typing import Any, Dict, Iterable, Literal, Optional, Protocol
 from uuid import uuid4
 
 from fastapi import BackgroundTasks, Request, status
@@ -26,6 +26,7 @@ from shared.config.search_config import (
 )
 from shared.dependencies.providers import BackgroundTaskManagerDep
 from shared.models.background_task import TaskStatus
+from shared.models.lineage_edge_types import EDGE_EVENT_MATERIALIZED_ES_DOCUMENT
 from shared.security.input_sanitizer import validate_branch_name, validate_db_name
 from shared.services.registries.lineage_store import LineageStore
 from shared.services.storage.elasticsearch_service import ElasticsearchService, promote_alias_to_index
@@ -400,6 +401,7 @@ async def _maybe_record_lineage(
     lineage_store: LineageStore,
     envelope: Any,
     db_name: str,
+    branch: str,
     index_name: str,
     doc_id: str,
     seq: Optional[int],
@@ -410,34 +412,20 @@ async def _maybe_record_lineage(
     await lineage_store.record_link(
         from_node_id=lineage_store.node_event(str(envelope.event_id)),
         to_node_id=lineage_store.node_artifact("es", index_name, doc_id),
-        edge_type="event_materialized_es_document",
+        edge_type=EDGE_EVENT_MATERIALIZED_ES_DOCUMENT,
         occurred_at=event_ts,
         db_name=db_name,
+        branch=branch,
         edge_metadata={
             "projection_name": "recompute",
             "db_name": db_name,
+            "branch": branch,
             "index": index_name,
             "doc_id": doc_id,
             "sequence_number": seq,
             "ontology_ref": ontology_ref,
             "ontology_commit": ontology_commit,
         },
-    )
-
-
-async def _promote_alias_to_index(
-    *,
-    elasticsearch_service: ElasticsearchService,
-    base_index: str,
-    new_index: str,
-    allow_delete_base_index: bool,
-) -> Tuple[bool, Optional[str]]:
-    """Thin wrapper around shared.promote_alias_to_index for backward compatibility."""
-    return await promote_alias_to_index(
-        elasticsearch_service=elasticsearch_service,
-        base_index=base_index,
-        new_index=new_index,
-        allow_delete_base_index=allow_delete_base_index,
     )
 
 
@@ -573,6 +561,7 @@ async def recompute_projection_task(  # noqa: PLR0915
                     lineage_store=lineage_store,
                     envelope=envelope,
                     db_name=db_name,
+                    branch=branch,
                     index_name=new_index,
                     doc_id=decision.doc_id,
                     seq=seq,
@@ -600,7 +589,7 @@ async def recompute_projection_task(  # noqa: PLR0915
     promoted = False
     promote_error: Optional[str] = None
     if request.promote:
-        promoted, promote_error = await _promote_alias_to_index(
+        promoted, promote_error = await promote_alias_to_index(
             elasticsearch_service=elasticsearch_service,
             base_index=base_index,
             new_index=new_index,

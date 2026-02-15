@@ -1,13 +1,13 @@
 # Backend Design Reference
 
-> Generated: 2026-02-15T15:46:14+09:00
+> Generated: 2026-02-15T16:07:16+09:00
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 > Source: AST + docstring extraction (module/class/function) via `scripts/generate_backend_methods.py`.
 
 ## Coverage Summary
 
-- Modules scanned: **967**
-- Modules with module docstring: **556/967**
+- Modules scanned: **975**
+- Modules with module docstring: **559/975**
 - Modules with broad `except Exception`: **287**
 - Modules with bare `except:`: **0**
 - Modules with `return` inside `finally`: **0**
@@ -785,12 +785,12 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
-- API surface: public=3 | top-level functions=5 | classes=0 | methods=0
-- Runtime signals: async_functions=3 | try=3 | raise=5 | broad_except=3 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=3/5 (60%) | classes=0/0 (n/a) | methods=0/0 (n/a)
-- Internal imports (6): shared.dependencies.providers; shared.errors.error_types; shared.models.lineage; shared.models.requests; shared.observability.tracing; shared.security.input_sanitizer
-- External imports (3): datetime; fastapi; typing
-- Public API names: get_lineage_graph; get_lineage_impact; get_lineage_metrics
+- API surface: public=9 | top-level functions=40 | classes=0 | methods=0
+- Runtime signals: async_functions=13 | try=10 | raise=19 | broad_except=9 | bare_except=0 | finally_return=0
+- Doc coverage: module=yes | top-level functions=9/40 (22%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Internal imports (8): shared.config.settings; shared.dependencies.providers; shared.errors.error_types; shared.models.lineage; shared.models.lineage_edge_types; shared.models.requests; shared.observability.tracing; shared.security.input_sanitizer
+- External imports (5): collections; datetime; fastapi; statistics; typing
+- Public API names: get_lineage_diff; get_lineage_graph; get_lineage_impact; get_lineage_metrics; get_lineage_out_of_date; get_lineage_path; get_lineage_run_impact; get_lineage_runs; get_lineage_timeline
 
 ### `backend/bff/routers/link_types.py`
 - Module summary: Link types router composition (BFF).
@@ -2129,10 +2129,10 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
-- API surface: public=7 | top-level functions=12 | classes=4 | methods=10
-- Runtime signals: async_functions=10 | try=1 | raise=7 | broad_except=1 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=1/12 (8%) | classes=0/4 (0%) | methods=0/10 (0%)
-- Internal imports (13): bff.routers.admin_task_monitor; bff.schemas.admin_projection_requests; shared.config.search_config; shared.dependencies.providers; shared.errors.error_types; shared.models.background_task; shared.observability.tracing; shared.security.input_sanitizer (+5 more)
+- API surface: public=7 | top-level functions=11 | classes=4 | methods=10
+- Runtime signals: async_functions=9 | try=1 | raise=7 | broad_except=1 | bare_except=0 | finally_return=0
+- Doc coverage: module=yes | top-level functions=0/11 (0%) | classes=0/4 (0%) | methods=0/10 (0%)
+- Internal imports (14): bff.routers.admin_task_monitor; bff.schemas.admin_projection_requests; shared.config.search_config; shared.dependencies.providers; shared.errors.error_types; shared.models.background_task; shared.models.lineage_edge_types; shared.observability.tracing (+6 more)
 - External imports (9): __future__; dataclasses; datetime; fastapi; json; logging; os; typing (+1 more)
 - Public API names: IndexDecision; InstancesProjectionStrategy; OntologiesProjectionStrategy; ProjectionStrategy; get_recompute_projection_result; recompute_projection_task; start_recompute_projection
 
@@ -2398,7 +2398,7 @@
 - API surface: public=6 | top-level functions=14 | classes=1 | methods=0
 - Runtime signals: async_functions=7 | try=18 | raise=15 | broad_except=18 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=7/14 (50%) | classes=0/1 (0%) | methods=0/0 (n/a)
-- Internal imports (13): shared.config.app_config; shared.config.settings; shared.errors.error_types; shared.models.graph_query; shared.observability.tracing; shared.security.input_sanitizer; shared.services.core.graph_federation_service_es; shared.services.core.writeback_merge_service (+5 more)
+- Internal imports (14): shared.config.app_config; shared.config.settings; shared.errors.error_types; shared.models.graph_query; shared.models.lineage_edge_types; shared.observability.tracing; shared.security.input_sanitizer; shared.services.core.graph_federation_service_es (+6 more)
 - External imports (5): dataclasses; datetime; fastapi; logging; typing
 - Public API names: GraphBranchContext; execute_graph_query; execute_multi_hop_query; execute_simple_graph_query; find_relationship_paths; graph_service_health
 
@@ -2846,7 +2846,7 @@
 - API surface: public=3 | top-level functions=6 | classes=0 | methods=0
 - Runtime signals: async_functions=3 | try=15 | raise=71 | broad_except=11 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/6 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
-- Internal imports (26): bff.routers.pipeline_ops; bff.routers.pipeline_shared; bff.services.oms_client; bff.services.ontology_occ_guard_service; shared.dependencies.providers; shared.errors.error_envelope; shared.errors.error_types; shared.models.pipeline_job (+18 more)
+- Internal imports (27): bff.routers.pipeline_ops; bff.routers.pipeline_shared; bff.services.oms_client; bff.services.ontology_occ_guard_service; shared.dependencies.providers; shared.errors.error_envelope; shared.errors.error_types; shared.models.lineage_edge_types (+19 more)
 - External imports (5): fastapi; httpx; logging; typing; uuid
 - Public API names: build_pipeline; deploy_pipeline; preview_pipeline
 
@@ -4262,7 +4262,7 @@
 - API surface: public=2 | top-level functions=1 | classes=3 | methods=43
 - Runtime signals: async_functions=27 | try=42 | raise=69 | broad_except=35 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=1/1 (100%) | classes=1/3 (33%) | methods=18/43 (41%)
-- Internal imports (31): objectify_worker.write_paths; oms.services.event_store; shared.config.app_config; shared.config.search_config; shared.config.settings; shared.errors.runtime_exception_policy; shared.models.event_envelope; shared.observability.metrics (+23 more)
+- Internal imports (32): objectify_worker.write_paths; oms.services.event_store; shared.config.app_config; shared.config.search_config; shared.config.settings; shared.errors.runtime_exception_policy; shared.models.event_envelope; shared.models.lineage_edge_types (+24 more)
 - External imports (11): asyncio; boto3; botocore; dataclasses; datetime; httpx; json; logging (+3 more)
 - Public API names: StrictInstanceWorker; main
 
@@ -4592,7 +4592,7 @@
 - API surface: public=3 | top-level functions=4 | classes=2 | methods=58
 - Runtime signals: async_functions=38 | try=32 | raise=36 | broad_except=24 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=3/4 (75%) | classes=1/2 (50%) | methods=3/58 (5%)
-- Internal imports (41): objectify_worker.validation_codes; objectify_worker.write_paths; shared.config.app_config; shared.config.search_config; shared.config.settings; shared.errors.error_envelope; shared.errors.error_types; shared.errors.runtime_exception_policy (+33 more)
+- Internal imports (42): objectify_worker.validation_codes; objectify_worker.write_paths; shared.config.app_config; shared.config.search_config; shared.config.settings; shared.errors.error_envelope; shared.errors.error_types; shared.errors.runtime_exception_policy (+34 more)
 - External imports (13): __future__; asyncio; confluent_kafka; csv; datetime; hashlib; httpx; io (+5 more)
 - Public API names: ObjectifyNonRetryableError; ObjectifyWorker; main
 
@@ -5352,7 +5352,7 @@
 - API surface: public=1 | top-level functions=0 | classes=3 | methods=28
 - Runtime signals: async_functions=15 | try=30 | raise=28 | broad_except=28 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=1/3 (33%) | methods=12/28 (42%)
-- Internal imports (26): oms.services.event_store; oms.services.ontology_resources; shared.config.app_config; shared.config.settings; shared.models.commands; shared.models.event_envelope; shared.models.events; shared.observability.metrics (+18 more)
+- Internal imports (27): oms.services.event_store; oms.services.ontology_resources; shared.config.app_config; shared.config.settings; shared.models.commands; shared.models.event_envelope; shared.models.events; shared.models.lineage_edge_types (+19 more)
 - External imports (8): asyncio; confluent_kafka; dataclasses; datetime; json; logging; os; typing
 - Public API names: OntologyWorker
 
@@ -5414,7 +5414,7 @@
 - API surface: public=2 | top-level functions=4 | classes=2 | methods=100
 - Runtime signals: async_functions=44 | try=62 | raise=81 | broad_except=47 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/4 (0%) | classes=0/2 (0%) | methods=5/100 (5%)
-- Internal imports (51): data_connector.google_sheets.service; pipeline_worker.spark_schema_helpers; pipeline_worker.spark_transform_engine; pipeline_worker.worker_helpers; shared.config.app_config; shared.config.settings; shared.errors.error_envelope; shared.errors.error_types (+43 more)
+- Internal imports (52): data_connector.google_sheets.service; pipeline_worker.spark_schema_helpers; pipeline_worker.spark_transform_engine; pipeline_worker.worker_helpers; shared.config.app_config; shared.config.settings; shared.errors.error_envelope; shared.errors.error_types (+44 more)
 - External imports (17): __future__; asyncio; base64; concurrent; confluent_kafka; datetime; functools; httpx (+9 more)
 - Public API names: PipelineWorker; main
 
@@ -5486,7 +5486,7 @@
 - API surface: public=1 | top-level functions=0 | classes=1 | methods=43
 - Runtime signals: async_functions=26 | try=29 | raise=28 | broad_except=26 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=1/1 (100%) | methods=21/43 (48%)
-- Internal imports (29): shared.config.app_config; shared.config.search_config; shared.config.settings; shared.models.event_envelope; shared.models.events; shared.observability.metrics; shared.observability.tracing; shared.services.core.audit_log_store (+21 more)
+- Internal imports (30): shared.config.app_config; shared.config.search_config; shared.config.settings; shared.models.event_envelope; shared.models.events; shared.models.lineage_edge_types; shared.observability.metrics; shared.observability.tracing (+22 more)
 - External imports (7): asyncio; confluent_kafka; datetime; json; logging; os; typing
 - Public API names: ProjectionWorker
 
@@ -5603,6 +5603,34 @@
 - Internal imports (0): not documented
 - External imports (2): os; re
 - Public API names: fix_datetime_in_file; main
+
+### `backend/scripts/migrations/migrate_lineage_es_aliases_to_canonical.py`
+- Module summary: One-time migration: normalize legacy ES lineage aliases to canonical names.
+- Responsibilities: not documented
+- Invariants: not documented
+- Failure modes: not documented
+- Extension points: not documented
+- Dependencies (doc): not documented
+- API surface: public=1 | top-level functions=3 | classes=0 | methods=0
+- Runtime signals: async_functions=1 | try=1 | raise=1 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=yes | top-level functions=0/3 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Internal imports (0): not documented
+- External imports (5): __future__; argparse; asyncio; asyncpg; os
+- Public API names: main
+
+### `backend/scripts/migrations/migrate_lineage_s3_edge_alias_to_canonical.py`
+- Module summary: One-time migration: normalize legacy S3 lineage edge alias to canonical name.
+- Responsibilities: not documented
+- Invariants: not documented
+- Failure modes: not documented
+- Extension points: not documented
+- Dependencies (doc): not documented
+- API surface: public=1 | top-level functions=3 | classes=0 | methods=0
+- Runtime signals: async_functions=1 | try=1 | raise=1 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=yes | top-level functions=0/3 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Internal imports (0): not documented
+- External imports (5): __future__; argparse; asyncio; asyncpg; os
+- Public API names: main
 
 ### `backend/scripts/migrations/update_imports.py`
 - Module summary: 🔥 THINK ULTRA!! Import Update Script
@@ -6333,6 +6361,20 @@
 - Internal imports (0): not documented
 - External imports (4): __future__; datetime; pydantic; typing
 - Public API names: LineageEdge; LineageGraph; LineageNode
+
+### `backend/shared/models/lineage_edge_types.py`
+- Module summary: Canonical lineage edge type constants.
+- Responsibilities: not documented
+- Invariants: not documented
+- Failure modes: not documented
+- Extension points: not documented
+- Dependencies (doc): not documented
+- API surface: public=0 | top-level functions=0 | classes=0 | methods=0
+- Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Internal imports (0): not documented
+- External imports (0): not documented
+- Public API names: not documented
 
 ### `backend/shared/models/objectify_job.py`
 - Module summary: Objectify job payload shared between BFF and objectify worker.
@@ -8287,10 +8329,10 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
-- API surface: public=2 | top-level functions=1 | classes=1 | methods=23
-- Runtime signals: async_functions=14 | try=6 | raise=3 | broad_except=6 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=0/1 (0%) | classes=1/1 (100%) | methods=6/23 (26%)
-- Internal imports (6): shared.config.settings; shared.models.event_envelope; shared.models.lineage; shared.services.registries.postgres_schema_registry; shared.utils.ontology_version; shared.utils.sql_filter_builder
+- API surface: public=2 | top-level functions=1 | classes=1 | methods=34
+- Runtime signals: async_functions=20 | try=8 | raise=8 | broad_except=8 | bare_except=0 | finally_return=0
+- Doc coverage: module=yes | top-level functions=0/1 (0%) | classes=1/1 (100%) | methods=12/34 (35%)
+- Internal imports (7): shared.config.settings; shared.models.event_envelope; shared.models.lineage; shared.models.lineage_edge_types; shared.services.registries.postgres_schema_registry; shared.utils.ontology_version; shared.utils.sql_filter_builder
 - External imports (7): __future__; asyncpg; datetime; json; logging; typing; uuid
 - Public API names: LineageStore; create_lineage_store
 
@@ -11054,6 +11096,48 @@
 - External imports (1): __future__
 - Public API names: test_suggest_remediation_actions_uses_graph_target_kind
 
+### `backend/tests/unit/routers/test_lineage_router_out_of_date.py`
+- Module summary: no docstring
+- Responsibilities: not documented
+- Invariants: not documented
+- Failure modes: not documented
+- Extension points: not documented
+- Dependencies (doc): not documented
+- API surface: public=18 | top-level functions=18 | classes=1 | methods=4
+- Runtime signals: async_functions=5 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/18 (0%) | classes=0/1 (0%) | methods=0/4 (0%)
+- Internal imports (1): bff.routers.lineage
+- External imports (4): __future__; datetime; pytest; typing
+- Public API names: test_artifact_latest_writer_state; test_batched_latest_edges_helpers_chunk_large_inputs; test_chunked_helper; test_edge_cause_payload_extracts_latest_writer_context; test_edge_cause_payload_returns_none_for_invalid_input; test_enrich_artifacts_with_latest_writer; test_event_node_id_from_latest_writer; test_extract_impacted_artifacts_from_edges_keeps_latest_per_artifact; test_freshness_status_healthy_warning_critical; test_freshness_status_no_data; test_normalize_window_defaults_and_order; test_out_of_date_scope_resolution (+6 more)
+
+### `backend/tests/unit/routers/test_lineage_router_path_diff.py`
+- Module summary: no docstring
+- Responsibilities: not documented
+- Invariants: not documented
+- Failure modes: not documented
+- Extension points: not documented
+- Dependencies (doc): not documented
+- API surface: public=4 | top-level functions=4 | classes=0 | methods=0
+- Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/4 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Internal imports (2): bff.routers.lineage; shared.models.lineage
+- External imports (1): __future__
+- Public API names: test_count_artifact_kinds; test_edge_signature_uses_projection_name_metadata; test_find_shortest_path_downstream; test_find_shortest_path_upstream_uses_reverse_traversal
+
+### `backend/tests/unit/routers/test_lineage_router_timeline.py`
+- Module summary: no docstring
+- Responsibilities: not documented
+- Invariants: not documented
+- Failure modes: not documented
+- Extension points: not documented
+- Dependencies (doc): not documented
+- API surface: public=3 | top-level functions=3 | classes=0 | methods=0
+- Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Internal imports (1): bff.routers.lineage
+- External imports (2): __future__; datetime
+- Public API names: test_bucket_start_floors_to_interval; test_build_timeline_summary_counts_and_spikes; test_compact_edge_metadata_whitelists_keys
+
 ### `backend/tests/unit/routers/test_monitoring_router_deprecation_headers.py`
 - Module summary: no docstring
 - Responsibilities: not documented
@@ -11767,6 +11851,34 @@
 - Internal imports (2): shared.services.storage.lakefs_branch_utils; shared.services.storage.lakefs_client
 - External imports (1): pytest
 - Public API names: test_ensure_lakefs_branch_creates_branch; test_ensure_lakefs_branch_ignores_conflict; test_ensure_lakefs_branch_requires_client
+
+### `backend/tests/unit/services/test_lineage_store_es_alias_normalization.py`
+- Module summary: no docstring
+- Responsibilities: not documented
+- Invariants: not documented
+- Failure modes: not documented
+- Extension points: not documented
+- Dependencies (doc): not documented
+- API surface: public=7 | top-level functions=7 | classes=1 | methods=3
+- Runtime signals: async_functions=4 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/7 (0%) | classes=0/1 (0%) | methods=0/3 (0%)
+- Internal imports (1): shared.services.registries.lineage_store
+- External imports (4): __future__; datetime; pytest; uuid
+- Public API names: test_canonicalize_edge_type_keeps_canonical_value; test_canonicalize_edge_type_rejects_legacy_alias; test_canonicalize_edge_type_rejects_legacy_s3_alias; test_infer_branch_from_es_node_id; test_parse_node_id_rejects_legacy_es_artifact_kind; test_record_link_accepts_canonical_es_ids_and_edge_type; test_record_link_rejects_legacy_es_ids_and_edge_type
+
+### `backend/tests/unit/services/test_lineage_store_latest_projection_edges.py`
+- Module summary: no docstring
+- Responsibilities: not documented
+- Invariants: not documented
+- Failure modes: not documented
+- Extension points: not documented
+- Dependencies (doc): not documented
+- API surface: public=3 | top-level functions=3 | classes=3 | methods=7
+- Runtime signals: async_functions=6 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/3 (0%) | methods=0/7 (0%)
+- Internal imports (1): shared.services.registries.lineage_store
+- External imports (4): __future__; datetime; pytest; typing
+- Public API names: test_get_latest_edges_for_projections_returns_empty_for_blank_names; test_get_latest_edges_for_projections_returns_latest_writer_context; test_get_latest_edges_from_returns_latest_per_parent_node
 
 ### `backend/tests/unit/services/test_llm_gateway_resilience.py`
 - Module summary: no docstring

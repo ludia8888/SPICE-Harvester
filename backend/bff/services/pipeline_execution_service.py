@@ -33,6 +33,7 @@ from bff.services.ontology_occ_guard_service import (
 from shared.dependencies.providers import AuditLogStoreDep, LineageStoreDep
 from shared.errors.error_envelope import build_error_envelope
 from shared.errors.error_types import ErrorCategory, ErrorCode, classified_http_exception
+from shared.models.lineage_edge_types import EDGE_PIPELINE_OUTPUT_STORED
 from shared.models.pipeline_job import PipelineJob
 from shared.models.requests import ApiResponse
 from shared.security.input_sanitizer import sanitize_input, validate_db_name
@@ -1590,11 +1591,13 @@ async def deploy_pipeline(
                 await lineage_store.record_link(
                     from_node_id=lineage_store.node_aggregate("Pipeline", str(pipeline_id)),
                     to_node_id=lineage_store.node_artifact("s3", bucket, key),
-                    edge_type="pipeline_output_stored",
+                    edge_type=EDGE_PIPELINE_OUTPUT_STORED,
                     occurred_at=utcnow(),
                     db_name=db_name,
+                    branch=resolved_branch,
                     edge_metadata={
                         "db_name": db_name,
+                        "branch": resolved_branch,
                         "pipeline_id": str(pipeline_id),
                         "artifact_key": promoted_artifact_key,
                         "dataset_name": item.get("dataset_name"),

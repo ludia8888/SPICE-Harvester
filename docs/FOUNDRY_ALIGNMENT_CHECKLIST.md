@@ -91,6 +91,24 @@ Phase 2: Remove ontology runtime dependency on TerminusDB (high impact)
 - [x] Shared relationship extraction utility no longer uses Terminus-specific schema naming (`_extract_from_graph_schema` only; legacy alias removed).
 - [x] Graph query provenance and lineage remediation are graph-only (`artifact:graph:*`, `event_wrote_graph_document`); Terminus lineage alias keys are removed.
 - [x] AI graph query grounding no longer reads legacy `provenance.terminus`; graph provenance is canonical.
+- [x] ES lineage naming is canonicalized to Foundry-neutral forms (`artifact:es:*`, `event_materialized_es_document`) across writers and storage; runtime rejects legacy aliases and one-time DB rewrite is handled by migration script (`backend/scripts/migrations/migrate_lineage_es_aliases_to_canonical.py`).
+- [x] Lineage read APIs support branch-scoped and as-of traversal (`/api/v1/lineage/graph`, `/api/v1/lineage/impact` with `branch`, `as_of`), and lineage storage persists `branch` as a first-class column for nodes/edges.
+- [x] Lineage writers for instance/projection/objectify/pipeline promote paths now persist `branch` metadata/column to improve branch-scoped impact analysis fidelity.
+- [x] Lineage navigation now includes Foundry-style operational analysis endpoints: shortest-path tracing (`/api/v1/lineage/path`) and as-of graph diff (`/api/v1/lineage/diff`) for change impact investigation.
+- [x] Lineage timeline endpoint (`/api/v1/lineage/timeline`) provides build-window trend buckets, spike detection, and top edge/projection/service contributors for ops triage.
+- [x] Lineage out-of-date diagnostics endpoint (`/api/v1/lineage/out-of-date`) classifies stale artifacts/projections against freshness SLO and returns remediation hints.
+- [x] Lineage out-of-date diagnostics now includes latest writer cause context (`event_id`, `run_id`, producer metadata) for stale artifacts/projections to support root-cause triage.
+- [x] Lineage out-of-date diagnostics now includes upstream freshness drift signals (`upstream_latest_event_at`, `upstream_gap_minutes`, `staleness_reason`) to identify whether stale outputs are lagging behind newer upstream events.
+- [x] Lineage out-of-date diagnostics now distinguishes stale scope (`out_of_date_scope`: `parent|ancestor|none`) using aggregate-emitted lineage edges (direct parent drift vs upstream ancestor drift), with scope counts for triage.
+- [x] Lineage out-of-date diagnostics now separates stale reason by lineage scope (`parent_has_newer_events`, `ancestor_has_newer_events`) and provides update type hints (`update_type`: `data|logic|none`) using projection writer code-sha drift.
+- [x] Lineage out-of-date diagnostics now evaluates full stale sets with batched cause/scope lookup (not preview-only), then applies preview truncation only to response payload rows.
+- [x] Lineage run-impact endpoint (`/api/v1/lineage/run-impact`) supports run/build-scoped blast-radius analysis from lineage edges.
+- [x] Lineage run-impact and runs impact previews now attach latest writer cause context per impacted artifact for faster triage.
+- [x] Lineage run-impact and runs impact previews now classify impacted artifacts by latest-writer state (`current|superseded|unknown`) relative to the selected run.
+- [x] Lineage runs endpoint (`/api/v1/lineage/runs`) provides run/build timeline summaries with per-run impacted artifact/projection counts and optional impact previews.
+- [x] Lineage backfill queue runner supports branch-scoped claims (`backend/scripts/backfill_lineage.py --branch`) for branch-isolated recovery operations.
+- [x] Instance-worker S3 lineage edge type is canonicalized to `event_stored_in_object_store` (legacy `event_wrote_s3_object` writer usage removed), and one-time DB rewrite is available via `backend/scripts/migrations/migrate_lineage_s3_edge_alias_to_canonical.py`.
+- [x] Runtime lineage edge type literals are centralized in `shared/models/lineage_edge_types.py` to eliminate duplicated string implementations across workers/services.
 - [x] Type-inference mapping request default target is Foundry (`target_system=foundry`), not legacy Terminus.
 - [x] Error taxonomy no longer emits Terminus-specific runtime codes (`TERMINUS_CONFLICT`, `TERMINUS_UNAVAILABLE`); upstream failures are classified with generic Foundry-neutral codes.
 - [x] Legacy Terminus service modules (`oms/services/async_terminus.py`, `oms/services/terminus/*`) and branch-name adapter helpers were removed from backend runtime.

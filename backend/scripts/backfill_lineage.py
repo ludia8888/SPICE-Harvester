@@ -29,14 +29,14 @@ def _parse_dt(value: str) -> datetime:
     return dt.astimezone(timezone.utc)
 
 
-async def _run_queue(*, limit: int, db_name: Optional[str]) -> None:
+async def _run_queue(*, limit: int, db_name: Optional[str], branch: Optional[str]) -> None:
     lineage = LineageStore()
     await lineage.initialize()
 
     event_store = EventStore()
     await event_store.connect()
 
-    batch = await lineage.claim_backfill_batch(limit=limit, db_name=db_name)
+    batch = await lineage.claim_backfill_batch(limit=limit, db_name=db_name, branch=branch)
     if not batch:
         print("No pending lineage backfills.")
         return
@@ -105,13 +105,14 @@ async def main() -> None:
     parser.add_argument("--mode", choices=["queue", "replay"], default="queue")
     parser.add_argument("--limit", type=int, default=200)
     parser.add_argument("--db-name", type=str, default=None)
+    parser.add_argument("--branch", type=str, default=None)
     parser.add_argument("--from", dest="from_ts", type=str, default=None, help="ISO timestamp (required for replay)")
     parser.add_argument("--to", dest="to_ts", type=str, default=None, help="ISO timestamp (optional for replay)")
 
     args = parser.parse_args()
 
     if args.mode == "queue":
-        await _run_queue(limit=int(args.limit), db_name=args.db_name)
+        await _run_queue(limit=int(args.limit), db_name=args.db_name, branch=args.branch)
         return
 
     if not args.from_ts:

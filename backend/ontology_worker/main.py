@@ -26,6 +26,10 @@ from shared.models.events import (
     CommandFailedEvent
 )
 from shared.models.event_envelope import EventEnvelope
+from shared.models.lineage_edge_types import (
+    EDGE_EVENT_DELETED_GRAPH_DOCUMENT,
+    EDGE_EVENT_WROTE_GRAPH_DOCUMENT,
+)
 from oms.services.event_store import EventStore
 from shared.services.storage.redis_service import RedisService, create_redis_service
 from shared.services.core.command_status_service import CommandStatus, CommandStatusService
@@ -469,7 +473,7 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
                 await self.observability.record_link(
                     from_node_id=LineageStore.node_event(str(command_id)),
                     to_node_id=LineageStore.node_artifact("graph", db_name, branch, f"ontology:{class_id}"),
-                    edge_type="event_wrote_graph_document",
+                    edge_type=EDGE_EVENT_WROTE_GRAPH_DOCUMENT,
                     occurred_at=datetime.now(timezone.utc),
                     to_label=f"graph:{db_name}:{branch}:ontology:{class_id}",
                     edge_metadata={
@@ -676,7 +680,7 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
                 await self.observability.record_link(
                     from_node_id=LineageStore.node_event(str(command_id)),
                     to_node_id=LineageStore.node_artifact("graph", db_name, branch, f"ontology:{class_id}"),
-                    edge_type="event_wrote_graph_document",
+                    edge_type=EDGE_EVENT_WROTE_GRAPH_DOCUMENT,
                     occurred_at=datetime.now(timezone.utc),
                     to_label=f"graph:{db_name}:{branch}:ontology:{class_id}",
                     edge_metadata={
@@ -866,7 +870,7 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
                 await self.observability.record_link(
                     from_node_id=LineageStore.node_event(str(command_id)),
                     to_node_id=LineageStore.node_artifact("graph", db_name, branch, f"ontology:{class_id}"),
-                    edge_type="event_deleted_graph_document",
+                    edge_type=EDGE_EVENT_DELETED_GRAPH_DOCUMENT,
                     occurred_at=datetime.now(timezone.utc),
                     to_label=f"graph:{db_name}:{branch}:ontology:{class_id}",
                     edge_metadata={

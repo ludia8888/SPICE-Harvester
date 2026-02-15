@@ -36,6 +36,7 @@ from shared.services.kafka.safe_consumer import SafeKafkaConsumer
 from shared.config.app_config import AppConfig
 from shared.config.search_config import get_instances_index_name
 from shared.config.settings import get_settings
+from shared.models.lineage_edge_types import EDGE_DATASET_VERSION_OBJECTIFIED
 from shared.models.objectify_job import ObjectifyJob
 from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
@@ -3822,11 +3823,13 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
 
         async def _record_header_links() -> str:
             job_node = LineageStore.node_aggregate("ObjectifyJob", job.job_id)
+            lineage_branch = job.dataset_branch or job.ontology_branch or "main"
             if input_type == "artifact":
                 source_node = LineageStore.node_aggregate("PipelineArtifact", str(job.artifact_id))
                 edge_type = "pipeline_artifact_objectify_job"
                 edge_metadata = {
                     "db_name": job.db_name,
+                    "branch": lineage_branch,
                     "dataset_id": job.dataset_id,
                     "artifact_id": job.artifact_id,
                     "artifact_output_name": artifact_output_name or job.artifact_output_name,
@@ -3839,6 +3842,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                 edge_type = "dataset_version_objectify_job"
                 edge_metadata = {
                     "db_name": job.db_name,
+                    "branch": lineage_branch,
                     "dataset_id": job.dataset_id,
                     "dataset_version_id": job.dataset_version_id,
                     "mapping_spec_id": job.mapping_spec_id,
@@ -3851,6 +3855,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                 edge_type=edge_type,
                 occurred_at=datetime.now(timezone.utc),
                 db_name=job.db_name,
+                branch=lineage_branch,
                 edge_metadata=edge_metadata,
             )
 
@@ -3862,8 +3867,10 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                 edge_type="objectify_job_mapping_spec",
                 occurred_at=datetime.now(timezone.utc),
                 db_name=job.db_name,
+                branch=lineage_branch,
                 edge_metadata={
                     "db_name": job.db_name,
+                    "branch": lineage_branch,
                     "mapping_spec_id": mapping_spec.mapping_spec_id,
                     "mapping_spec_version": mapping_spec.version,
                     "dataset_id": job.dataset_id,
@@ -3880,6 +3887,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                     edge_type="objectify_job_ontology_version",
                     occurred_at=datetime.now(timezone.utc),
                     db_name=job.db_name,
+                    branch=branch,
                     edge_metadata={
                         "db_name": job.db_name,
                         "branch": branch,
@@ -3928,8 +3936,10 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
         if input_type == "artifact":
             source_node = LineageStore.node_aggregate("PipelineArtifact", str(job.artifact_id))
             edge_type = "pipeline_artifact_objectified"
+            lineage_branch = job.dataset_branch or job.ontology_branch or "main"
             edge_metadata = {
                 "db_name": job.db_name,
+                "branch": lineage_branch,
                 "dataset_id": job.dataset_id,
                 "artifact_id": job.artifact_id,
                 "artifact_output_name": artifact_output_name or job.artifact_output_name,
@@ -3940,9 +3950,11 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
             }
         else:
             source_node = LineageStore.node_aggregate("DatasetVersion", str(job.dataset_version_id))
-            edge_type = "dataset_version_objectified"
+            edge_type = EDGE_DATASET_VERSION_OBJECTIFIED
+            lineage_branch = job.dataset_branch or job.ontology_branch or "main"
             edge_metadata = {
                 "db_name": job.db_name,
+                "branch": lineage_branch,
                 "dataset_id": job.dataset_id,
                 "dataset_version_id": job.dataset_version_id,
                 "mapping_spec_id": mapping_spec_id,
@@ -3963,6 +3975,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                     edge_type=edge_type,
                     occurred_at=datetime.now(timezone.utc),
                     db_name=job.db_name,
+                    branch=lineage_branch,
                     edge_metadata=edge_metadata,
                 )
                 if job_node_id:
@@ -3972,8 +3985,10 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                         edge_type="objectify_job_created_instance",
                         occurred_at=datetime.now(timezone.utc),
                         db_name=job.db_name,
+                        branch=lineage_branch,
                         edge_metadata={
                             "db_name": job.db_name,
+                            "branch": lineage_branch,
                             "dataset_id": job.dataset_id,
                             "dataset_version_id": job.dataset_version_id,
                             "artifact_id": job.artifact_id,

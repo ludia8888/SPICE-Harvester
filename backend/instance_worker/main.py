@@ -34,6 +34,11 @@ from shared.services.core.command_status_service import (
 )
 from shared.config.settings import get_settings
 from shared.models.event_envelope import EventEnvelope
+from shared.models.lineage_edge_types import (
+    EDGE_EVENT_DELETED_ES_DOCUMENT,
+    EDGE_EVENT_MATERIALIZED_ES_DOCUMENT,
+    EDGE_EVENT_STORED_IN_OBJECT_STORE,
+)
 from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
 from shared.security.auth_utils import BFF_TOKEN_ENV_KEYS, get_expected_token
@@ -661,7 +666,7 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
         await self.observability.record_link(
             from_node_id=LineageStore.node_event(str(command_id)),
             to_node_id=LineageStore.node_artifact("s3", self.instance_bucket, s3_path),
-            edge_type="event_wrote_s3_object",
+            edge_type=EDGE_EVENT_STORED_IN_OBJECT_STORE,
             occurred_at=datetime.now(timezone.utc),
             db_name=db_name,
             to_label=f"s3://{self.instance_bucket}/{s3_path}",
@@ -734,8 +739,8 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
 
             await self.observability.record_link(
                 from_node_id=LineageStore.node_event(str(command_id)),
-                to_node_id=LineageStore.node_artifact("elasticsearch", db_name, branch, instance_id),
-                edge_type="event_wrote_es_document",
+                to_node_id=LineageStore.node_artifact("es", db_name, branch, instance_id),
+                edge_type=EDGE_EVENT_MATERIALIZED_ES_DOCUMENT,
                 occurred_at=datetime.now(timezone.utc),
                 db_name=db_name,
                 to_label=f"es:{db_name}:{branch}:{instance_id}",
@@ -1482,7 +1487,7 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
                 await self.observability.record_link(
                     from_node_id=LineageStore.node_event(str(command_id)),
                     to_node_id=LineageStore.node_artifact("s3", self.instance_bucket, s3_path),
-                    edge_type="event_wrote_s3_object",
+                    edge_type=EDGE_EVENT_STORED_IN_OBJECT_STORE,
                     occurred_at=datetime.now(timezone.utc),
                     db_name=db_name,
                     to_label=f"s3://{self.instance_bucket}/{s3_path}",
@@ -1596,8 +1601,8 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
             if command_id:
                 await self.observability.record_link(
                     from_node_id=LineageStore.node_event(str(command_id)),
-                    to_node_id=LineageStore.node_artifact("elasticsearch", db_name, branch, instance_id),
-                    edge_type="event_wrote_es_document",
+                    to_node_id=LineageStore.node_artifact("es", db_name, branch, instance_id),
+                    edge_type=EDGE_EVENT_MATERIALIZED_ES_DOCUMENT,
                     occurred_at=datetime.now(timezone.utc),
                     db_name=db_name,
                     to_label=f"es:{db_name}:{branch}:{instance_id}",
@@ -1782,8 +1787,8 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
         if command_id and es_deleted:
             await self.observability.record_link(
                 from_node_id=LineageStore.node_event(str(command_id)),
-                to_node_id=LineageStore.node_artifact("elasticsearch", db_name, branch, instance_id),
-                edge_type="event_deleted_es_document",
+                to_node_id=LineageStore.node_artifact("es", db_name, branch, instance_id),
+                edge_type=EDGE_EVENT_DELETED_ES_DOCUMENT,
                 occurred_at=datetime.now(timezone.utc),
                 db_name=db_name,
                 to_label=f"es:{db_name}:{branch}:{instance_id}",
@@ -1876,7 +1881,7 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
             await self.observability.record_link(
                 from_node_id=LineageStore.node_event(str(command_id)),
                 to_node_id=LineageStore.node_artifact("s3", self.instance_bucket, s3_path),
-                edge_type="event_wrote_s3_object",
+                edge_type=EDGE_EVENT_STORED_IN_OBJECT_STORE,
                 occurred_at=datetime.now(timezone.utc),
                 db_name=db_name,
                 to_label=f"s3://{self.instance_bucket}/{s3_path}",

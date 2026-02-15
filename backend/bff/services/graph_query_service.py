@@ -16,6 +16,10 @@ from shared.errors.error_types import ErrorCode, classified_http_exception
 
 from shared.config.app_config import AppConfig
 from shared.config.settings import get_settings
+from shared.models.lineage_edge_types import (
+    EDGE_EVENT_MATERIALIZED_ES_DOCUMENT,
+    EDGE_EVENT_WROTE_GRAPH_DOCUMENT,
+)
 from shared.models.graph_query import (
     GraphEdge,
     GraphNode,
@@ -485,16 +489,18 @@ async def execute_graph_query(
 
                 latest_by_type = await lineage_store.get_latest_edges_to(
                     to_node_ids=list({*graph_artifacts}),
-                    edge_type="event_wrote_graph_document",
+                    edge_type=EDGE_EVENT_WROTE_GRAPH_DOCUMENT,
                     db_name=db_name,
+                    branch=ctx.graph_branch,
                 )
                 for to_node_id, edge_payload in (latest_by_type or {}).items():
                     graph_latest.setdefault(str(to_node_id), edge_payload)
 
                 es_latest = await lineage_store.get_latest_edges_to(
                     to_node_ids=list({*es_artifacts}),
-                    edge_type="event_materialized_es_document",
+                    edge_type=EDGE_EVENT_MATERIALIZED_ES_DOCUMENT,
                     db_name=db_name,
+                    branch=ctx.graph_branch,
                 )
             except Exception as exc:
                 logger.debug("Provenance lookup failed (non-fatal): %s", exc)

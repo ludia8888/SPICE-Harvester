@@ -92,8 +92,9 @@ class _LineageStoreStub:
         to_node_ids: list[str],
         edge_type: str,
         db_name: str,
+        branch: str | None = None,
     ) -> Dict[str, Dict[str, Any]]:
-        _ = db_name
+        _ = (db_name, branch)
         if edge_type == "event_wrote_graph_document":
             return {
                 node_id: {"event_id": "evt-graph-1", "occurred_at": "2026-01-01T00:00:00+00:00"}
