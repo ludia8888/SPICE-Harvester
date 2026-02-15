@@ -111,15 +111,10 @@
 - `POST /api/v1/databases`
 - `GET /api/v1/databases/{db_name}`
 - `DELETE /api/v1/databases/{db_name}`
-- `GET /api/v1/databases/{db_name}/branches`
-- `POST /api/v1/databases/{db_name}/branches`
-- `GET /api/v1/databases/{db_name}/branches/{branch_name}`
-- `DELETE /api/v1/databases/{db_name}/branches/{branch_name}`
 - `GET /api/v1/databases/{db_name}/classes`
 - `POST /api/v1/databases/{db_name}/classes`
 - `GET /api/v1/databases/{db_name}/classes/{class_id}`
 - `GET /api/v1/databases/{db_name}/expected-seq`
-- `GET /api/v1/databases/{db_name}/versions`
 
 ### Document Bundles
 - `POST /api/v1/document-bundles/{bundle_id}/search`
@@ -131,7 +126,11 @@
 - `GET /api/v2/ontologies/{ontology}/objectTypes/{objectType}`
 - `GET /api/v2/ontologies/{ontology}/objectTypes/{objectType}/outgoingLinkTypes`
 - `GET /api/v2/ontologies/{ontology}/objectTypes/{objectType}/outgoingLinkTypes/{linkType}`
+- `GET /api/v2/ontologies/{ontology}/objects/{objectType}`
 - `POST /api/v2/ontologies/{ontology}/objects/{objectType}/search`
+- `GET /api/v2/ontologies/{ontology}/objects/{objectType}/{primaryKey}`
+- `GET /api/v2/ontologies/{ontology}/objects/{objectType}/{primaryKey}/links/{linkType}`
+- `GET /api/v2/ontologies/{ontology}/objects/{objectType}/{primaryKey}/links/{linkType}/{linkedObjectPrimaryKey}`
 
 ### Governance
 - `GET /api/v1/access-policies`
@@ -178,10 +177,6 @@
 - `GET /api/v1/lineage/impact`
 - `GET /api/v1/lineage/metrics`
 
-### Merge Conflict Resolution
-- `POST /api/v1/databases/{db_name}/merge/resolve`
-- `POST /api/v1/databases/{db_name}/merge/simulate`
-
 ### Monitoring
 - `GET /api/v1/monitoring/background-tasks/active`
 - `GET /api/v1/monitoring/background-tasks/health`
@@ -212,8 +207,6 @@
 - `GET /api/v1/databases/{db_name}/ontology/action-types/{resource_id}`
 - `PUT /api/v1/databases/{db_name}/ontology/action-types/{resource_id}`
 - `DELETE /api/v1/databases/{db_name}/ontology/action-types/{resource_id}`
-- `GET /api/v1/databases/{db_name}/ontology/branches`
-- `POST /api/v1/databases/{db_name}/ontology/branches`
 - `POST /api/v1/databases/{db_name}/ontology/deploy`
 - `GET /api/v1/databases/{db_name}/ontology/functions`
 - `POST /api/v1/databases/{db_name}/ontology/functions`

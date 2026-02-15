@@ -1,6 +1,9 @@
 """
 Ontology Worker Service
-Command를 처리하여 실제 TerminusDB 작업을 수행하는 워커 서비스
+Command를 처리하는 온톨로지 워커 서비스.
+
+Foundry/Postgres 런타임에 고정되어 동작한다.
+Database command와 ontology command 모두 Postgres registry를 기준으로 상태를 기록한다.
 """
 
 import asyncio
@@ -23,8 +26,6 @@ from shared.models.events import (
     CommandFailedEvent
 )
 from shared.models.event_envelope import EventEnvelope
-from shared.models.config import ConnectionConfig
-from oms.services.async_terminus import AsyncTerminusService
 from oms.services.event_store import EventStore
 from shared.services.storage.redis_service import RedisService, create_redis_service
 from shared.services.core.command_status_service import CommandStatus, CommandStatusService
@@ -48,10 +49,14 @@ from shared.services.core.audit_log_store import AuditLogStore
 from shared.services.registries.ontology_key_spec_registry import OntologyKeySpecRegistry
 from shared.services.core.worker_stores import WorkerObservability, initialize_worker_stores
 from shared.security.input_sanitizer import validate_branch_name
+from shared.security.database_access import (
+    delete_database_access_entries,
+    upsert_database_owner,
+)
 from shared.utils.spice_event_ids import spice_event_id
 from shared.utils.ontology_version import resolve_ontology_version
 from shared.utils.worker_runner import run_worker_until_stopped
-from oms.exceptions import DuplicateOntologyError, DatabaseError
+from oms.services.ontology_resources import OntologyResourceService
 
 # Observability imports
 from shared.observability.tracing import get_tracing_service
@@ -84,6 +89,7 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
     def __init__(self):
         settings = get_settings()
         worker_cfg = settings.workers.ontology
+        self.ontology_resource_backend = "postgres"
 
         self._bootstrap_worker_runtime(
             config=WorkerRuntimeConfig(
@@ -111,7 +117,6 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
             flush_timeout_seconds=self.dlq_flush_timeout_seconds,
         )
         self.db_ready_poll_seconds = float(worker_cfg.db_ready_poll_seconds)
-        self.terminus_service: Optional[AsyncTerminusService] = None
         self.redis_service: Optional[RedisService] = None
         self.command_status_service: Optional[CommandStatusService] = None
         self.event_store: Optional[EventStore] = None
@@ -169,21 +174,53 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
                 title_fields = [str(v).strip() for v in raw_title if str(v).strip()]
         return pk_fields, title_fields
 
-    async def _wait_for_database_exists(self, *, db_name: str, expected: bool, timeout_seconds: int = 20) -> None:
-        if not self.terminus_service:
-            return
-        loop = asyncio.get_running_loop()
-        deadline = loop.time() + float(timeout_seconds)
-        poll = float(self.db_ready_poll_seconds)
-        last = None
-        while loop.time() < deadline:
-            last = await self.terminus_service.database_exists(db_name)
-            if bool(last) is bool(expected):
-                return
-            await asyncio.sleep(poll)
-        raise RuntimeError(
-            f"Database '{db_name}' existence check timed out (expected={expected}, last_exists={last})"
-        )
+    @property
+    def _uses_resource_registry_for_ontology(self) -> bool:
+        return True
+
+    def _ontology_resource_service(self) -> OntologyResourceService:
+        return OntologyResourceService(backend=self.ontology_resource_backend)
+
+    @staticmethod
+    def _ontology_resource_payload(payload: Dict[str, Any], *, class_id: str) -> Dict[str, Any]:
+        metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+        label = payload.get("label")
+        if label is None:
+            label = class_id
+        description = payload.get("description")
+        spec = {
+            "id": class_id,
+            "label": label,
+            "description": description,
+            "parent_class": payload.get("parent_class"),
+            "abstract": bool(payload.get("abstract", False)),
+            "properties": list(payload.get("properties") or []),
+            "relationships": list(payload.get("relationships") or []),
+        }
+        return {
+            "id": class_id,
+            "label": label,
+            "description": description,
+            "metadata": metadata,
+            "spec": spec,
+        }
+
+    @staticmethod
+    def _ontology_from_resource(resource: Dict[str, Any], *, class_id: str) -> Dict[str, Any]:
+        spec = resource.get("spec") if isinstance(resource.get("spec"), dict) else {}
+        metadata = resource.get("metadata") if isinstance(resource.get("metadata"), dict) else {}
+        return {
+            "id": str(resource.get("id") or class_id),
+            "label": resource.get("label") if resource.get("label") is not None else spec.get("label"),
+            "description": (
+                resource.get("description") if resource.get("description") is not None else spec.get("description")
+            ),
+            "parent_class": spec.get("parent_class") or spec.get("parentClass"),
+            "abstract": bool(spec.get("abstract", False)),
+            "properties": list(spec.get("properties") or []),
+            "relationships": list(spec.get("relationships") or []),
+            "metadata": metadata,
+        }
 
     async def initialize(self):
         """워커 초기화"""
@@ -205,15 +242,11 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
         )
         self.dlq_producer = self.producer
         
-        # TerminusDB 연결 설정 - 올바른 인증 정보 사용
-        connection_info = ConnectionConfig(
-            server_url=settings.database.terminus_url.rstrip("/"),
-            user=settings.database.terminus_user,
-            account=settings.database.terminus_account,
-            key=settings.database.terminus_password,
+        logger.info(
+            "Skipping legacy ontology adapter initialization in ontology-worker "
+            "(runtime backend=%s)",
+            self.ontology_resource_backend,
         )
-        self.terminus_service = AsyncTerminusService(connection_info)
-        await self.terminus_service.connect()
         
         # Redis 연결 설정 (선택적 - 실패해도 계속 진행)
         try:
@@ -345,6 +378,9 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
         db_name = payload.get('db_name') or command_data.get("db_name")  # payload-first (historical)
         command_id = command_data.get('command_id')
         branch = validate_branch_name(payload.get("branch") or command_data.get("branch") or "main")
+        class_id = str(payload.get("class_id") or "").strip()
+        if not class_id:
+            raise ValueError("class_id is required")
         
         sys.stdout.flush()
         sys.stdout.flush()
@@ -352,54 +388,43 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
         
         
         try:
-            # TerminusDB에 온톨로지 생성
-            from shared.models.ontology import OntologyBase
-            ontology_obj = OntologyBase(
-                id=payload.get('class_id'),
-                label=payload.get('label'),
-                description=payload.get('description'),
-                properties=payload.get('properties', []),
-                relationships=payload.get('relationships', []),
-                parent_class=payload.get('parent_class'),
-                abstract=payload.get('abstract', False),
-                metadata=payload.get('metadata') if isinstance(payload.get('metadata'), dict) else {},
-            )
-            
+            resource_service: Optional[OntologyResourceService] = None
+
             # Idempotent create: if it already exists, treat as success.
             try:
-                advanced = payload.get("advanced_options") or {}
-                if advanced:
-                    await self.terminus_service.create_ontology_with_advanced_relationships(
-                        db_name=db_name,
-                        ontology_data=ontology_obj,
-                        branch=branch,
-                        auto_generate_inverse=bool(advanced.get("auto_generate_inverse", False)),
-                        validate_relationships=bool(advanced.get("validate_relationships", True)),
-                        check_circular_references=bool(advanced.get("check_circular_references", True)),
-                    )
-                else:
-                    await self.terminus_service.create_ontology(
-                        db_name, ontology_obj, branch=branch
-                    )  # Fixed: call create_ontology with OntologyBase
-            except Exception as e:
-                existing = await self.terminus_service.get_ontology(
-                    db_name, payload.get("class_id"), branch=branch
+                resource_service = self._ontology_resource_service()
+                await resource_service.create_resource(
+                    db_name,
+                    branch=branch,
+                    resource_type="object_type",
+                    resource_id=class_id,
+                    payload=self._ontology_resource_payload(payload, class_id=class_id),
                 )
+            except Exception as e:
+                if resource_service is None:
+                    resource_service = self._ontology_resource_service()
+                existing = await resource_service.get_resource(
+                    db_name,
+                    branch=branch,
+                    resource_type="object_type",
+                    resource_id=class_id,
+                )
+
                 if existing:
-                    logger.info(f"Ontology '{payload.get('class_id')}' already exists; treating create as idempotent success")
+                    logger.info("Ontology '%s' already exists; treating create as idempotent success", class_id)
                 else:
                     if command_id and self.audit_store:
                         try:
                             await self.audit_store.log(
                                 partition_key=f"db:{db_name}",
                                 actor="ontology_worker",
-                                action="ONTOLOGY_TERMINUS_WRITE",
+                                action="ONTOLOGY_GRAPH_WRITE",
                                 status="failure",
-                                resource_type="terminus_schema",
-                                resource_id=f"terminus:{db_name}:{branch}:ontology:{payload.get('class_id')}",
+                                resource_type="graph_schema",
+                                resource_id=f"graph:{db_name}:{branch}:ontology:{class_id}",
                                 event_id=str(command_id),
                                 command_id=str(command_id),
-                                metadata={"db_name": db_name, "branch": branch, "class_id": payload.get("class_id"), "operation": "create"},
+                                metadata={"db_name": db_name, "branch": branch, "class_id": class_id, "operation": "create"},
                                 error=str(e),
                                 occurred_at=datetime.now(timezone.utc),
                             )
@@ -408,13 +433,12 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
                                 "Audit log write failed (operation=create status=failure db=%s branch=%s class_id=%s): %s",
                                 db_name,
                                 branch,
-                                payload.get("class_id"),
+                                class_id,
                                 exc,
                                 exc_info=True,
                             )
                     raise
 
-            class_id = payload.get("class_id")
             if db_name and class_id and self.key_spec_registry:
                 try:
                     pk_fields, title_fields = self._extract_key_spec_from_payload(payload)
@@ -427,7 +451,7 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
                     )
                 except Exception as exc:
                     # Hard fail: without key_spec we cannot provide a reliable primaryKey/titleKey contract.
-                    # This is retry-safe because Terminus writes are idempotent and the next retry will
+                    # This is retry-safe because ontology writes are idempotent and the next retry will
                     # re-attempt the key_spec upsert.
                     logger.error(
                         "Failed to upsert ontology key_spec (db=%s branch=%s class_id=%s): %s",
@@ -439,15 +463,15 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
                     )
                     raise RuntimeError("ontology_key_spec_upsert_failed") from exc
             ontology_version = await resolve_ontology_version(
-                self.terminus_service, db_name=db_name, branch=branch, logger=logger
+                None, db_name=db_name, branch=branch, logger=logger
             )
             if command_id and class_id:
                 await self.observability.record_link(
                     from_node_id=LineageStore.node_event(str(command_id)),
-                    to_node_id=LineageStore.node_artifact("terminus", db_name, branch, f"ontology:{class_id}"),
-                    edge_type="event_wrote_terminus_document",
+                    to_node_id=LineageStore.node_artifact("graph", db_name, branch, f"ontology:{class_id}"),
+                    edge_type="event_wrote_graph_document",
                     occurred_at=datetime.now(timezone.utc),
-                    to_label=f"terminus:{db_name}:{branch}:ontology:{class_id}",
+                    to_label=f"graph:{db_name}:{branch}:ontology:{class_id}",
                     edge_metadata={
                         "db_name": db_name,
                         "branch": branch,
@@ -462,10 +486,10 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
                     await self.audit_store.log(
                         partition_key=f"db:{db_name}",
                         actor="ontology_worker",
-                        action="ONTOLOGY_TERMINUS_WRITE",
+                        action="ONTOLOGY_GRAPH_WRITE",
                         status="success",
-                        resource_type="terminus_schema",
-                        resource_id=f"terminus:{db_name}:{branch}:ontology:{class_id}",
+                        resource_type="graph_schema",
+                        resource_id=f"graph:{db_name}:{branch}:ontology:{class_id}",
                         event_id=str(command_id),
                         command_id=str(command_id),
                         metadata={
@@ -493,13 +517,13 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
                 event_type=EventType.ONTOLOGY_CLASS_CREATED,
                 db_name=db_name,
                 branch=branch,
-                class_id=payload.get('class_id'),
+                class_id=class_id,
                 command_id=command_id,
                 metadata={"ontology": ontology_version},
                 data={
                     "db_name": db_name,
                     "branch": branch,
-                    "class_id": payload.get('class_id'),
+                    "class_id": class_id,
                     "label": payload.get('label'),
                     "description": payload.get('description'),
                     "properties": payload.get('properties', []),
@@ -518,12 +542,12 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
                 await self.command_status_service.complete_command(
                     command_id=command_id,
                     result={
-                        "class_id": payload.get('class_id'),
-                        "message": f"Successfully created ontology class: {payload.get('class_id')}"
+                        "class_id": class_id,
+                        "message": f"Successfully created ontology class: {class_id}"
                         }
                 )
             
-            logger.info(f"Successfully created ontology class: {payload.get('class_id')}")
+            logger.info(f"Successfully created ontology class: {class_id}")
             
         except Exception as e:
             logger.error(f"Failed to create ontology class: {e}")
@@ -534,21 +558,26 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
         payload = command_data.get('payload', {}) or {}
         db_name = payload.get('db_name') or command_data.get("db_name")
         branch = validate_branch_name(payload.get("branch") or command_data.get("branch") or "main")
-        class_id = payload.get('class_id')
+        class_id = str(payload.get('class_id') or "").strip()
+        if not class_id:
+            raise ValueError("class_id is required")
         updates = payload.get('updates', {})
         command_id = command_data.get('command_id')
         
         logger.info(f"Updating ontology class: {class_id} in database: {db_name}")
         
         try:
-            # 기존 데이터 조회
-            existing = await self.terminus_service.get_ontology(db_name, class_id, branch=branch)
-            if not existing:
-                raise Exception(f"Ontology class '{class_id}' not found")
-
-            existing_dict = (
-                existing.model_dump() if hasattr(existing, "model_dump") else existing
+            resource_service: Optional[OntologyResourceService] = None
+            resource_service = self._ontology_resource_service()
+            existing_resource = await resource_service.get_resource(
+                db_name,
+                branch=branch,
+                resource_type="object_type",
+                resource_id=class_id,
             )
+            if not existing_resource:
+                raise Exception(f"Ontology class '{class_id}' not found")
+            existing_dict = self._ontology_from_resource(existing_resource, class_id=class_id)
             
             # 업데이트 데이터 병합
             merged_data = {**existing_dict, **updates}
@@ -563,15 +592,27 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
                     merged.update(incoming)
                     merged_data[key] = merged
             
-            # TerminusDB 업데이트
-            from shared.models.ontology import OntologyBase
-            ontology_obj = OntologyBase(**merged_data)
             try:
-                await self.terminus_service.update_ontology(db_name, class_id, ontology_obj, branch=branch)
+                await resource_service.update_resource(
+                    db_name,
+                    branch=branch,
+                    resource_type="object_type",
+                    resource_id=class_id,
+                    payload=self._ontology_resource_payload(merged_data, class_id=class_id),
+                )
             except Exception as e:
                 # Best-effort idempotency: if the current ontology already reflects the requested update, continue.
-                current = await self.terminus_service.get_ontology(db_name, class_id, branch=branch)
-                current_dict = current.model_dump() if hasattr(current, "model_dump") else (current or {})
+                current_resource = await resource_service.get_resource(
+                    db_name,
+                    branch=branch,
+                    resource_type="object_type",
+                    resource_id=class_id,
+                )
+                current_dict = (
+                    self._ontology_from_resource(current_resource, class_id=class_id)
+                    if current_resource
+                    else {}
+                )
                 already_applied = True
                 if isinstance(updates, dict):
                     for k, v in updates.items():
@@ -586,10 +627,10 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
                             await self.audit_store.log(
                                 partition_key=f"db:{db_name}",
                                 actor="ontology_worker",
-                                action="ONTOLOGY_TERMINUS_WRITE",
+                                action="ONTOLOGY_GRAPH_WRITE",
                                 status="failure",
-                                resource_type="terminus_schema",
-                                resource_id=f"terminus:{db_name}:{branch}:ontology:{class_id}",
+                                resource_type="graph_schema",
+                                resource_id=f"graph:{db_name}:{branch}:ontology:{class_id}",
                                 event_id=str(command_id),
                                 command_id=str(command_id),
                                 metadata={"db_name": db_name, "branch": branch, "class_id": class_id, "operation": "update"},
@@ -608,7 +649,7 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
                     raise
 
             ontology_version = await resolve_ontology_version(
-                self.terminus_service, db_name=db_name, branch=branch, logger=logger
+                None, db_name=db_name, branch=branch, logger=logger
             )
 
             if db_name and class_id and self.key_spec_registry:
@@ -634,10 +675,10 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
             if command_id and class_id:
                 await self.observability.record_link(
                     from_node_id=LineageStore.node_event(str(command_id)),
-                    to_node_id=LineageStore.node_artifact("terminus", db_name, branch, f"ontology:{class_id}"),
-                    edge_type="event_wrote_terminus_document",
+                    to_node_id=LineageStore.node_artifact("graph", db_name, branch, f"ontology:{class_id}"),
+                    edge_type="event_wrote_graph_document",
                     occurred_at=datetime.now(timezone.utc),
-                    to_label=f"terminus:{db_name}:{branch}:ontology:{class_id}",
+                    to_label=f"graph:{db_name}:{branch}:ontology:{class_id}",
                     edge_metadata={
                         "db_name": db_name,
                         "branch": branch,
@@ -652,10 +693,10 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
                     await self.audit_store.log(
                         partition_key=f"db:{db_name}",
                         actor="ontology_worker",
-                        action="ONTOLOGY_TERMINUS_WRITE",
+                        action="ONTOLOGY_GRAPH_WRITE",
                         status="success",
-                        resource_type="terminus_schema",
-                        resource_id=f"terminus:{db_name}:{branch}:ontology:{class_id}",
+                        resource_type="graph_schema",
+                        resource_id=f"graph:{db_name}:{branch}:ontology:{class_id}",
                         event_id=str(command_id),
                         command_id=str(command_id),
                         metadata={
@@ -720,22 +761,41 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
         payload = command_data.get('payload', {}) or {}
         db_name = payload.get('db_name') or command_data.get("db_name")
         branch = validate_branch_name(payload.get("branch") or command_data.get("branch") or "main")
-        class_id = payload.get('class_id')
+        class_id = str(payload.get('class_id') or "").strip()
+        if not class_id:
+            raise ValueError("class_id is required")
         command_id = command_data.get('command_id')
         
         logger.info(f"Deleting ontology class: {class_id} from database: {db_name}")
         
         try:
-            # TerminusDB에서 삭제
+            resource_service: Optional[OntologyResourceService] = None
             # Idempotent delete: "not found" is success (already deleted).
             try:
-                success = await self.terminus_service.delete_ontology(db_name, class_id, branch=branch)
+                resource_service = self._ontology_resource_service()
+                existing_resource = await resource_service.get_resource(
+                    db_name,
+                    branch=branch,
+                    resource_type="object_type",
+                    resource_id=class_id,
+                )
+                if existing_resource:
+                    await resource_service.delete_resource(
+                        db_name,
+                        branch=branch,
+                        resource_type="object_type",
+                        resource_id=class_id,
+                    )
+                    success = True
+                else:
+                    success = False
             except Exception as exc:
                 logger.warning(
-                    "Failed to delete ontology class via Terminus (db=%s class_id=%s branch=%s): %s",
+                    "Failed to delete ontology class via backend (db=%s class_id=%s branch=%s backend=%s): %s",
                     db_name,
                     class_id,
                     branch,
+                    self.ontology_resource_backend,
                     exc,
                     exc_info=True,
                 )
@@ -743,17 +803,24 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
 
             already_missing = False
             if not success:
-                existing = await self.terminus_service.get_ontology(db_name, class_id, branch=branch)
+                if resource_service is None:
+                    resource_service = self._ontology_resource_service()
+                existing = await resource_service.get_resource(
+                    db_name,
+                    branch=branch,
+                    resource_type="object_type",
+                    resource_id=class_id,
+                )
                 if existing:
                     if command_id and self.audit_store:
                         try:
                             await self.audit_store.log(
                                 partition_key=f"db:{db_name}",
                                 actor="ontology_worker",
-                                action="ONTOLOGY_TERMINUS_DELETE",
+                                action="ONTOLOGY_GRAPH_DELETE",
                                 status="failure",
-                                resource_type="terminus_schema",
-                                resource_id=f"terminus:{db_name}:{branch}:ontology:{class_id}",
+                                resource_type="graph_schema",
+                                resource_id=f"graph:{db_name}:{branch}:ontology:{class_id}",
                                 event_id=str(command_id),
                                 command_id=str(command_id),
                                 metadata={"db_name": db_name, "branch": branch, "class_id": class_id, "operation": "delete"},
@@ -774,7 +841,7 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
                 already_missing = True
 
             ontology_version = await resolve_ontology_version(
-                self.terminus_service, db_name=db_name, branch=branch, logger=logger
+                None, db_name=db_name, branch=branch, logger=logger
             )
 
             if db_name and class_id and self.key_spec_registry:
@@ -798,10 +865,10 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
             if command_id and class_id:
                 await self.observability.record_link(
                     from_node_id=LineageStore.node_event(str(command_id)),
-                    to_node_id=LineageStore.node_artifact("terminus", db_name, branch, f"ontology:{class_id}"),
-                    edge_type="event_deleted_terminus_document",
+                    to_node_id=LineageStore.node_artifact("graph", db_name, branch, f"ontology:{class_id}"),
+                    edge_type="event_deleted_graph_document",
                     occurred_at=datetime.now(timezone.utc),
-                    to_label=f"terminus:{db_name}:{branch}:ontology:{class_id}",
+                    to_label=f"graph:{db_name}:{branch}:ontology:{class_id}",
                     edge_metadata={
                         "db_name": db_name,
                         "branch": branch,
@@ -816,10 +883,10 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
                     await self.audit_store.log(
                         partition_key=f"db:{db_name}",
                         actor="ontology_worker",
-                        action="ONTOLOGY_TERMINUS_DELETE",
+                        action="ONTOLOGY_GRAPH_DELETE",
                         status="success",
-                        resource_type="terminus_schema",
-                        resource_id=f"terminus:{db_name}:{branch}:ontology:{class_id}",
+                        resource_type="graph_schema",
+                        resource_id=f"graph:{db_name}:{branch}:ontology:{class_id}",
                         event_id=str(command_id),
                         command_id=str(command_id),
                         metadata={
@@ -889,30 +956,16 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
         logger.info(f"Creating database: {db_name}")
         
         try:
-            # Idempotent create: if it already exists, treat as success.
-            try:
-                created = await self.terminus_service.create_database(
-                    db_name,
-                    payload.get('description', '')  # Fixed: only pass 2 args, no label
-                )
-            except DuplicateOntologyError:
-                # Already exists -> treat as idempotent success
-                created = False
-            except DatabaseError as exc:
-                if "already exists" in str(exc).lower():
-                    created = False
-                else:
-                    raise
-
-            if not created:
-                exists = await self.terminus_service.database_exists(db_name)
-                if not exists:
-                    raise Exception(f"Failed to create database '{db_name}'")
-                logger.info(f"Database '{db_name}' already exists; treating create as idempotent success")
-
-            # TerminusDB can be briefly eventually-consistent right after creation; ensure it is visible
-            # before marking the async command COMPLETED.
-            await self._wait_for_database_exists(db_name=db_name, expected=True)
+            logger.info(
+                "Skipping legacy database create adapter in postgres runtime (db=%s)",
+                db_name,
+            )
+            await upsert_database_owner(
+                db_name=db_name,
+                principal_type="user",
+                principal_id="system",
+                principal_name="system",
+            )
             
             # 성공 이벤트 생성
             event = DatabaseEvent(
@@ -957,15 +1010,11 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
         logger.info(f"Deleting database: {db_name}")
         
         try:
-            # Idempotent delete: "not found" is success (already deleted).
-            success = await self.terminus_service.delete_database(db_name)
-            if not success:
-                exists = await self.terminus_service.database_exists(db_name)
-                if exists:
-                    raise Exception(f"Failed to delete database '{db_name}'")
-                logger.info(f"Database '{db_name}' already deleted; treating delete as idempotent success")
-
-            await self._wait_for_database_exists(db_name=db_name, expected=False)
+            logger.info(
+                "Skipping legacy database delete adapter in postgres runtime (db=%s)",
+                db_name,
+            )
+            await delete_database_access_entries(db_name=db_name)
             
             # 성공 이벤트 생성
             event = DatabaseEvent(
@@ -1292,9 +1341,6 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
         self.running = False
         
         await self._close_consumer_runtime()
-            
-        if self.terminus_service:
-            await self.terminus_service.disconnect()
             
         if self.redis_service:
             await self.redis_service.disconnect()

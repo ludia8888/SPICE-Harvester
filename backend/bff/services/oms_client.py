@@ -59,10 +59,6 @@ class OMSClient(ManagedAsyncClient):
         token = get_settings().clients.oms_client_token
         return (token or "").strip() or None
 
-    @staticmethod
-    def _branch_base_path(db_name: str) -> str:
-        return f"/api/v1/branch/{db_name}"
-
     # -----------------------------
     # Generic HTTP helpers
     # -----------------------------
@@ -104,8 +100,7 @@ class OMSClient(ManagedAsyncClient):
         try:
             response = await self.client.get("/health")
             response.raise_for_status()
-            # OMS가 실행 중이면 성공으로 처리 (TerminusDB 연결 여부와 무관)
-            # 200 OK를 받았다는 것은 OMS 서비스 자체는 정상 작동 중
+            # OMS 서비스 자체의 health endpoint가 정상이면 연결 성공으로 간주한다.
             return True
         except Exception as e:
             logger.error(f"OMS 헬스 체크 실패: {e}")
@@ -286,27 +281,6 @@ class OMSClient(ManagedAsyncClient):
 
         return refs
 
-    async def list_branches(self, db_name: str) -> Dict[str, Any]:
-        """브랜치 목록 조회"""
-        try:
-            response = await self.client.get(f"{self._branch_base_path(db_name)}/list")
-            response.raise_for_status()
-            return response.json()
-        except Exception as e:
-            logger.error(f"브랜치 목록 조회 실패 ({db_name}): {e}")
-            raise
-
-    async def get_branch_info(self, db_name: str, branch_name: str) -> Dict[str, Any]:
-        try:
-            response = await self.client.get(
-                f"{self._branch_base_path(db_name)}/branch/{branch_name}/info"
-            )
-            response.raise_for_status()
-            return response.json()
-        except Exception as e:
-            logger.error(f"브랜치 정보 조회 실패 ({db_name}/{branch_name}): {e}")
-            raise
-
     async def list_ontology_resources(
         self,
         db_name: str,
@@ -430,29 +404,6 @@ class OMSClient(ManagedAsyncClient):
             logger.error(f"Ontology resource delete failed ({db_name}): {e}")
             raise
 
-    async def list_ontology_branches(self, db_name: str) -> Dict[str, Any]:
-        """온톨로지 브랜치 목록 조회"""
-        try:
-            response = await self.client.get(f"/api/v1/database/{db_name}/ontology/branches")
-            response.raise_for_status()
-            return response.json()
-        except Exception as e:
-            logger.error(f"Ontology branch list failed ({db_name}): {e}")
-            raise
-
-    async def create_ontology_branch(self, db_name: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-        """온톨로지 브랜치 생성"""
-        try:
-            response = await self.client.post(
-                f"/api/v1/database/{db_name}/ontology/branches",
-                json=payload,
-            )
-            response.raise_for_status()
-            return response.json()
-        except Exception as e:
-            logger.error(f"Ontology branch create failed ({db_name}): {e}")
-            raise
-
     async def list_ontology_proposals(
         self, db_name: str, *, status_filter: Optional[str] = None, limit: int = 100
     ) -> Dict[str, Any]:
@@ -523,64 +474,6 @@ class OMSClient(ManagedAsyncClient):
             return response.json()
         except Exception as e:
             logger.error(f"Ontology health failed ({db_name}): {e}")
-            raise
-
-    async def create_branch(
-        self,
-        db_name: str,
-        branch_data: Dict[str, Any] | str,
-        *,
-        from_branch: str = "main",
-    ) -> Dict[str, Any]:
-        """브랜치 생성"""
-        try:
-            payload = (
-                {"branch_name": branch_data, "from_branch": from_branch}
-                if isinstance(branch_data, str)
-                else dict(branch_data)
-            )
-            response = await self.client.post(f"{self._branch_base_path(db_name)}/create", json=payload)
-            response.raise_for_status()
-            return response.json()
-        except Exception as e:
-            logger.error(f"브랜치 생성 실패 ({db_name}): {e}")
-            raise
-
-    async def delete_branch(self, db_name: str, branch_name: str, *, force: bool = False) -> Dict[str, Any]:
-        try:
-            response = await self.client.delete(
-                f"{self._branch_base_path(db_name)}/branch/{branch_name}",
-                params={"force": force},
-            )
-            response.raise_for_status()
-            if not response.text:
-                return {}
-            return response.json()
-        except Exception as e:
-            logger.error(f"브랜치 삭제 실패 ({db_name}/{branch_name}): {e}")
-            raise
-
-    async def get_version_history(self, db_name: str) -> Dict[str, Any]:
-        """버전 히스토리 조회"""
-        try:
-            response = await self.client.get(f"/api/v1/version/{db_name}/history")
-            response.raise_for_status()
-            return response.json()
-        except Exception as e:
-            logger.error(f"버전 히스토리 조회 실패 ({db_name}): {e}")
-            raise
-
-    async def get_version_head(self, db_name: str, *, branch: str = "main") -> Dict[str, Any]:
-        """브랜치 head 커밋 ID 조회 (deploy gate)."""
-        try:
-            response = await self.client.get(
-                f"/api/v1/version/{db_name}/head",
-                params={"branch": branch},
-            )
-            response.raise_for_status()
-            return response.json()
-        except Exception as e:
-            logger.error(f"브랜치 head 커밋 조회 실패 ({db_name}, branch={branch}): {e}")
             raise
 
     async def update_ontology(

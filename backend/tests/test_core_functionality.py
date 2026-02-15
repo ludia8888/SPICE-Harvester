@@ -25,7 +25,6 @@ BFF_URL = (os.getenv("BFF_BASE_URL") or os.getenv("BFF_URL") or "http://localhos
 FUNNEL_URL = (os.getenv("FUNNEL_BASE_URL") or os.getenv("FUNNEL_URL") or "http://localhost:8003").rstrip("/")
 
 # Test configuration
-TERMINUS_URL = (os.getenv("TERMINUS_SERVER_URL") or "http://localhost:6363").rstrip("/")
 REDIS_URL = os.getenv("REDIS_URL", "redis://:spicepass123@localhost:6380/0")
 def _get_postgres_url_candidates() -> list[str]:
     """Return Postgres DSN candidates (env override first, then common local ports)."""

@@ -297,27 +297,6 @@ services:
     networks:
       - spice_network
 
-  # TerminusDB - 표준화된 인증 정보
-  terminusdb:
-    image: terminusdb/terminusdb-server:latest
-    container_name: spice_terminusdb
-    environment:
-      - TERMINUSDB_ADMIN_PASS=${TERMINUS_KEY:-admin}
-      - TERMINUSDB_SERVER_NAME=SpiceTerminusDB
-      - TERMINUSDB_AUTOLOGIN=false
-    ports:
-      - "6363:6363"
-    volumes:
-      - terminusdb_data:/app/terminusdb/storage
-    networks:
-      - spice_network
-    healthcheck:
-      # terminusdb-server image doesn't ship with curl; use bash TCP check.
-      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/127.0.0.1/6363'"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-
   # OMS (Ontology Management Service) - 표준화된 인증 정보
   oms:
     build:
@@ -325,11 +304,8 @@ services:
       dockerfile: ./oms/Dockerfile
     container_name: spice_oms
     environment:
-      # TerminusDB
-      - TERMINUS_SERVER_URL=http://terminusdb:6363
-      - TERMINUS_USER=admin
-      - TERMINUS_ACCOUNT=admin
-      - TERMINUS_KEY=${TERMINUS_KEY:-admin}
+      # Foundry-style ontology resource backend
+      - ONTOLOGY_RESOURCE_STORAGE_BACKEND=${ONTOLOGY_RESOURCE_STORAGE_BACKEND:-postgres}
       # PostgreSQL
       - POSTGRES_HOST=postgres
       - POSTGRES_PORT=5432
@@ -371,8 +347,6 @@ services:
     depends_on:
       db-migrations:
         condition: service_completed_successfully
-      terminusdb:
-        condition: service_healthy
       postgres:
         condition: service_healthy
       redis:
@@ -823,10 +797,7 @@ services:
     environment:
       - KAFKA_HOST=kafka
       - KAFKA_PORT=29092
-      - TERMINUS_SERVER_URL=http://terminusdb:6363
-      - TERMINUS_USER=admin
-      - TERMINUS_ACCOUNT=admin
-      - TERMINUS_KEY=${TERMINUS_KEY:-admin}
+      - ONTOLOGY_RESOURCE_STORAGE_BACKEND=${ONTOLOGY_RESOURCE_STORAGE_BACKEND:-postgres}
       - POSTGRES_HOST=postgres
       - POSTGRES_PORT=5432
       - POSTGRES_USER=${POSTGRES_USER:-spiceadmin}
@@ -840,7 +811,6 @@ services:
       - LOG_LEVEL=INFO
       - DOCKER_CONTAINER=true
     depends_on:
-      - terminusdb
       - kafka
       - redis
     networks:
@@ -856,10 +826,6 @@ services:
     environment:
       - KAFKA_HOST=kafka
       - KAFKA_PORT=29092
-      - TERMINUS_SERVER_URL=http://terminusdb:6363
-      - TERMINUS_USER=admin
-      - TERMINUS_ACCOUNT=admin
-      - TERMINUS_KEY=${TERMINUS_KEY:-admin}
       - POSTGRES_HOST=postgres
       - POSTGRES_PORT=5432
       - POSTGRES_USER=${POSTGRES_USER:-spiceadmin}
@@ -889,7 +855,6 @@ services:
       - LOG_LEVEL=INFO
       - DOCKER_CONTAINER=true
     depends_on:
-      - terminusdb
       - kafka
       - elasticsearch
       - minio
@@ -949,10 +914,6 @@ services:
     environment:
       - KAFKA_HOST=kafka
       - KAFKA_PORT=29092
-      - TERMINUS_SERVER_URL=http://terminusdb:6363
-      - TERMINUS_USER=admin
-      - TERMINUS_ACCOUNT=admin
-      - TERMINUS_KEY=${TERMINUS_KEY:-admin}
       - POSTGRES_HOST=postgres
       - POSTGRES_PORT=5432
       - POSTGRES_USER=${POSTGRES_USER:-spiceadmin}
@@ -974,7 +935,6 @@ services:
       - ACTION_WORKER_MAX_RETRY_ATTEMPTS=${ACTION_WORKER_MAX_RETRY_ATTEMPTS:-5}
       - ACTION_COMMANDS_DLQ_TOPIC=${ACTION_COMMANDS_DLQ_TOPIC:-action-commands-dlq}
     depends_on:
-      - terminusdb
       - kafka
       - postgres
       - minio
@@ -1065,7 +1025,6 @@ volumes:
   redis_data:
   elasticsearch_data:
   minio_data:
-  terminusdb_data:
   bff_data:
 
 networks:

@@ -237,7 +237,7 @@ class InputSanitizer:
             raise SecurityViolationError("LDAP injection pattern detected")
 
         # HTML 인코딩 제거 - 다국어 입력을 손상시킴
-        # TerminusDB는 자체적으로 안전한 저장을 보장
+        # 저장 계층은 별도 검증/직렬화 규칙으로 안전하게 처리
         sanitized = value
 
         # 제어 문자만 제거 (다국어 문자는 보존)
@@ -771,19 +771,20 @@ class InputSanitizer:
         return class_id
 
     def validate_branch_name(self, branch_name: str) -> str:
-        """브랜치 이름 검증"""
+        """브랜치 이름/RID 검증"""
         if not branch_name or not isinstance(branch_name, str):
             raise SecurityViolationError("Branch name must be a non-empty string")
 
-        # 브랜치 이름은 영숫자, 하이픈, 언더스코어, 슬래시만 허용
-        if not re.match(r"^[a-zA-Z0-9_/-]+$", branch_name):
+        # Foundry branch parameter accepts branch names and RID-like identifiers.
+        # Allow dots for RID segments (e.g. ri.ontology.main.branch.<id>).
+        if not re.match(r"^[a-zA-Z0-9._/-]+$", branch_name):
             raise SecurityViolationError("Branch name contains invalid characters")
 
         if len(branch_name) > 100:
             raise SecurityViolationError("Branch name too long")
 
         # 예약된 이름 확인
-        reserved_names = {"HEAD", "refs", "objects", "info", "hooks"}
+        reserved_names = {"head", "refs", "objects", "info", "hooks"}
         if branch_name.lower() in reserved_names:
             raise SecurityViolationError(f"'{branch_name}' is a reserved branch name")
 

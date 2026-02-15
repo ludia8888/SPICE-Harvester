@@ -216,7 +216,6 @@ _RETRYABLE_ERROR_CODES: FrozenSet[ErrorCode] = frozenset({
     ErrorCode.ES_UNAVAILABLE,
     ErrorCode.STORAGE_UNAVAILABLE,
     ErrorCode.OMS_UNAVAILABLE,
-    ErrorCode.TERMINUS_UNAVAILABLE,
     ErrorCode.RATE_LIMITED,
     # Transient infra
     ErrorCode.KAFKA_PRODUCE_FAILED,

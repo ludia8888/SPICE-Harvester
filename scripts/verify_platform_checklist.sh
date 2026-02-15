@@ -381,7 +381,6 @@ checks = [
     ContainerCheck("spice-harvester-elasticsearch"),
     ContainerCheck("spice-harvester-minio"),
     ContainerCheck("spice-harvester-lakefs"),
-    ContainerCheck("spice_terminusdb"),
     ContainerCheck("spice-harvester-zookeeper"),
     ContainerCheck("spice-harvester-kafka"),
     ContainerCheck("spice_oms"),
@@ -401,12 +400,10 @@ print("expected_kafka_bootstrap=", f"127.0.0.1:{kafka_host_port}")
 postgres_host_port = int(os.getenv("POSTGRES_PORT_HOST", "5433"))
 redis_host_port = int(os.getenv("REDIS_PORT_HOST", "6379"))
 minio_host_port = int(os.getenv("MINIO_PORT_HOST", "9000"))
-terminus_host_port = int(os.getenv("TERMINUS_PORT_HOST", "6363"))
 lakefs_host_port = int(os.getenv("LAKEFS_PORT_HOST", "48080"))
 print("expected_postgres_tcp=", f"127.0.0.1:{postgres_host_port}")
 print("expected_redis_tcp=", f"127.0.0.1:{redis_host_port}")
 print("expected_minio_tcp=", f"127.0.0.1:{minio_host_port}")
-print("expected_terminus_tcp=", f"127.0.0.1:{terminus_host_port}")
 print("expected_lakefs_tcp=", f"127.0.0.1:{lakefs_host_port}")
 
 # Validate kafka advertised listeners matches the host bootstrap we rely on for host-run tests.
@@ -475,7 +472,6 @@ while True:
         ("postgres_tcp", postgres_host_port),
         ("redis_tcp", redis_host_port),
         ("minio_tcp", minio_host_port),
-        ("terminus_tcp", terminus_host_port),
         ("lakefs_tcp", lakefs_host_port),
     ):
         try:

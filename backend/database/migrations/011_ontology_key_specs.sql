@@ -1,6 +1,6 @@
 -- Ontology key_spec registry (Postgres SSoT)
 --
--- TerminusDB schema documents may discard per-property metadata (primaryKey/titleKey),
+-- Legacy schema documents may discard per-property metadata (primaryKey/titleKey),
 -- so we persist the ordered key spec for each ontology class and overlay it on reads.
 
 CREATE TABLE IF NOT EXISTS ontology_key_specs (
@@ -16,4 +16,3 @@ CREATE TABLE IF NOT EXISTS ontology_key_specs (
 
 CREATE INDEX IF NOT EXISTS idx_ontology_key_specs_db_branch
   ON ontology_key_specs(db_name, branch);
-

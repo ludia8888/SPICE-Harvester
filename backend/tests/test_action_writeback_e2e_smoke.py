@@ -596,7 +596,7 @@ async def test_action_writeback_e2e_smoke() -> None:
     backend_dir = Path(__file__).resolve().parents[1]
     actor_id = f"smoke_user_{uuid.uuid4().hex[:8]}"
     db_name = f"e2e_writeback_{uuid.uuid4().hex[:10]}"
-    base_branch = f"smoke-{uuid.uuid4().hex[:8]}"
+    base_branch = "main"
 
     class_id = "Ticket"
     instance_id = f"ticket_{uuid.uuid4().hex[:8]}"
@@ -634,16 +634,7 @@ async def test_action_writeback_e2e_smoke() -> None:
 
             db_headers = _base_headers(db_name=db_name, actor_id=actor_id)
 
-            # 2) Create a writable base branch (avoid protected main branch).
-            resp = await session.post(
-                f"{BFF_URL}/api/v1/databases/{db_name}/ontology/branches",
-                headers=db_headers,
-                json={"branch_name": base_branch, "from_branch": "main"},
-            )
-            branch_payload = await resp.json()
-            assert resp.status in {200, 201}, branch_payload
-
-            # 3) Create base ontology class (Ticket)
+            # 2) Create base ontology class (Ticket)
             ontology_payload = {
                 "id": class_id,
                 "label": {"en": "Ticket", "ko": "티켓"},
@@ -862,7 +853,7 @@ async def test_action_writeback_e2e_verification_suite() -> None:
     owner_id = f"smoke_owner_{uuid.uuid4().hex[:8]}"
     unauthorized_id = f"smoke_unauth_{uuid.uuid4().hex[:8]}"
     db_name = f"e2e_writeback_verify_{uuid.uuid4().hex[:10]}"
-    base_branch = f"verify-{uuid.uuid4().hex[:8]}"
+    base_branch = "main"
 
     class_id = "Ticket"
 
@@ -911,16 +902,7 @@ async def test_action_writeback_e2e_verification_suite() -> None:
 
             db_headers = _base_headers(db_name=db_name, actor_id=owner_id)
 
-            # 2) Create a writable base branch
-            resp = await session.post(
-                f"{BFF_URL}/api/v1/databases/{db_name}/ontology/branches",
-                headers=db_headers,
-                json={"branch_name": base_branch, "from_branch": "main"},
-            )
-            branch_payload = await resp.json()
-            assert resp.status in {200, 201}, branch_payload
-
-            # 3) Create base ontology class (Ticket)
+            # 2) Create base ontology class (Ticket)
             ontology_payload = {
                 "id": class_id,
                 "label": {"en": "Ticket", "ko": "티켓"},

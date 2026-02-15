@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 from fastapi.testclient import TestClient
 
 from bff.main import app
-from bff.dependencies import get_label_mapper, get_oms_client, get_terminus_service
+from bff.dependencies import get_foundry_query_service, get_label_mapper, get_oms_client
 from shared.dependencies.providers import (
     get_audit_log_store,
     get_lineage_store,
@@ -105,7 +105,7 @@ def _install_common_overrides(*, llm_gateway):
     app.dependency_overrides[get_oms_client] = lambda: _FakeOMSClient()
     # These deps are resolved even when the planner returns "unsupported".
     app.dependency_overrides[get_label_mapper] = lambda: AsyncMock()
-    app.dependency_overrides[get_terminus_service] = lambda: AsyncMock()
+    app.dependency_overrides[get_foundry_query_service] = lambda: AsyncMock()
     app.dependency_overrides[ai_router.get_agent_session_registry] = lambda: fake_sessions
     app.dependency_overrides[ai_router.get_dataset_registry] = lambda: fake_dataset_registry
 
@@ -231,11 +231,11 @@ def test_ai_query_label_query_executes_and_answers(client):
     }
     fake_mapper.convert_to_display_batch.return_value = [{"Name": "Alice"}]
 
-    fake_terminus = AsyncMock()
-    fake_terminus.query_database.return_value = {"data": [{"name": "Alice"}], "count": 1}
+    fake_query_service = AsyncMock()
+    fake_query_service.query_database.return_value = {"data": [{"name": "Alice"}], "count": 1}
 
     app.dependency_overrides[get_label_mapper] = lambda: fake_mapper
-    app.dependency_overrides[get_terminus_service] = lambda: fake_terminus
+    app.dependency_overrides[get_foundry_query_service] = lambda: fake_query_service
     try:
         res = client.post(
             "/api/v1/ai/query/testdb",

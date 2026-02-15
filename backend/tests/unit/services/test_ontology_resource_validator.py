@@ -9,12 +9,15 @@ from oms.services.ontology_resource_validator import (
 )
 
 
-class _FakeTerminus:
+class _FakeResourceService:
     def __init__(self, existing):
         self._existing = existing
 
-    async def get_ontology(self, db_name, class_id, *, branch="main"):
-        return self._existing.get(class_id)
+    async def get_resource(self, db_name, *, branch, resource_type, resource_id):  # noqa: ANN001
+        _ = (db_name, branch)
+        if resource_type != "object_type":
+            return None
+        return self._existing.get(resource_id)
 
 
 def test_action_type_requires_input_schema_and_policy():
@@ -132,9 +135,9 @@ def test_relationship_spec_join_table_requires_dataset_or_auto_create():
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_link_type_missing_refs_are_reported():
-    terminus = _FakeTerminus({"Customer": {"id": "Customer"}})
+    resources = _FakeResourceService({"Customer": {"id": "Customer"}})
     missing = await _find_missing_link_type_refs(
-        terminus=terminus,
+        resources=resources,
         db_name="demo",
         branch="main",
         spec={"from": "Customer", "to": "Order", "predicate": "has_order", "cardinality": "1:n"},

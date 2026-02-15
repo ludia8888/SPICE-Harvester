@@ -1,30 +1,6 @@
 version: '3.8'
 
 services:
-  # TerminusDB
-  terminusdb:
-    image: terminusdb/terminusdb:v11.1.14
-    container_name: spice_terminusdb
-    environment:
-      - TERMINUSDB_ADMIN_PASS=${TERMINUSDB_ADMIN_PASS:-admin123}
-      - TERMINUSDB_SERVER_NAME=${TERMINUSDB_SERVER_NAME:-SpiceTerminusDB}
-      - TERMINUSDB_AUTOLOGIN=false
-      - USE_HTTPS=${USE_HTTPS:-true}
-      - SSL_CERT_PATH=/ssl/terminusdb/server.crt
-      - SSL_KEY_PATH=/ssl/terminusdb/server.key
-    ports:
-      - "6363:6363"
-    volumes:
-      - terminusdb_data:/app/terminusdb/storage
-      - ./ssl:/ssl:ro
-    networks:
-      - spice_network
-    healthcheck:
-      test: ["CMD", "curl", "-f", "-k", "https://localhost:6363/api/"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-
   # OMS (Ontology Management Service)
   oms:
     build:
@@ -32,10 +8,6 @@ services:
       dockerfile: ./oms/Dockerfile
     container_name: spice_oms
     environment:
-      - TERMINUS_SERVER_URL=${TERMINUS_SERVER_URL:-https://terminusdb:6363}
-      - TERMINUS_USER=${TERMINUS_USER:-admin}
-      - TERMINUS_ACCOUNT=${TERMINUS_ACCOUNT:-admin}
-      - TERMINUS_KEY=${TERMINUS_KEY:-admin123}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - OMS_REQUIRE_AUTH=${OMS_REQUIRE_AUTH:-true}
       - ADMIN_TOKEN=${ADMIN_TOKEN:?ADMIN_TOKEN is required}
@@ -44,9 +16,6 @@ services:
       - SSL_KEY_PATH=/ssl/oms/server.key
       - SSL_CA_PATH=/ssl/ca.crt
       - VERIFY_SSL=${VERIFY_SSL:-false}
-    depends_on:
-      terminusdb:
-        condition: service_healthy
     networks:
       - spice_network
     volumes:
@@ -136,7 +105,6 @@ services:
       - spice_network
 
 volumes:
-  terminusdb_data:
   bff_data:
 
 networks:

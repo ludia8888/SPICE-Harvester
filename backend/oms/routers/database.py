@@ -9,14 +9,17 @@ import logging
 from fastapi import APIRouter, HTTPException, status, Query
 from fastapi.responses import JSONResponse
 
-from oms.dependencies import TerminusServiceDep, EventStoreDep, CommandStatusServiceDep
+from oms.dependencies import EventStoreDep, CommandStatusServiceDep
 from oms.routers._event_sourcing import append_event_sourcing_command, build_command_status_metadata
-from oms.services.async_terminus import AsyncTerminusService
 from shared.models.requests import ApiResponse
 from shared.models.commands import DatabaseCommand, CommandType
 from shared.security.input_sanitizer import SecurityViolationError, sanitize_input, validate_db_name
+from shared.security.database_access import (
+    has_database_access_config,
+    list_database_names,
+    upsert_database_owner,
+)
 from shared.config.app_config import AppConfig
-from shared.config.settings import get_settings
 from shared.errors.error_types import ErrorCode, classified_http_exception
 from shared.observability.tracing import trace_endpoint
 
@@ -27,18 +30,21 @@ router = APIRouter(prefix="/database", tags=["Database Management"])
 
 @router.get("/list")
 @trace_endpoint("oms.database.list")
-async def list_databases(terminus_service: AsyncTerminusService = TerminusServiceDep):
+async def list_databases():
     """
     데이터베이스 목록 조회
 
     모든 데이터베이스의 이름 목록을 반환합니다.
     """
     try:
-        databases = await terminus_service.list_databases()
+        db_names = await list_database_names()
+        databases = [{"name": name} for name in db_names]
         return ApiResponse.success(
             message=f"데이터베이스 목록 조회 완료 ({len(databases)}개)",
             data={"databases": databases}
         ).to_dict()
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to list databases: {e}")
         raise classified_http_exception(
@@ -51,10 +57,9 @@ async def list_databases(terminus_service: AsyncTerminusService = TerminusServic
 @router.post("/create")
 @trace_endpoint("oms.database.create")
 async def create_database(
-    request: dict, 
+    request: dict,
     event_store=EventStoreDep,
     command_status_service=CommandStatusServiceDep,
-    terminus_service: AsyncTerminusService = TerminusServiceDep,
 ):
     """
     새 데이터베이스 생성
@@ -104,31 +109,13 @@ async def create_database(
             ),
         )
 
-        # Best-effort synchronous fallback to keep E2E flows unblocked even if workers lag.
-        sync_fallback_enabled = bool(get_settings().features.enable_sync_database_create_fallback)
-        if sync_fallback_enabled:
-            try:
-                created = await terminus_service.create_database(db_name, description or "")
-                if not created:
-                    exists = await terminus_service.database_exists(db_name)
-                    if not exists:
-                        raise RuntimeError(f"Database '{db_name}' did not materialize")
-                if command_status_service:
-                    try:
-                        await command_status_service.start_processing(command_id=str(command.command_id))
-                    except Exception:
-                        # Ignore best-effort start update
-                        logging.getLogger(__name__).warning("Broad exception fallback at oms/routers/database.py:120", exc_info=True)
-                        pass
-                    await command_status_service.complete_command(
-                        command_id=str(command.command_id),
-                        result={
-                            "db_name": db_name,
-                            "message": f"Successfully created database: {db_name} (sync fallback)",
-                        },
-                    )
-            except Exception as e:
-                logger.warning(f"Sync database create fallback failed (non-fatal): {e}")
+        # Foundry-style runtime stores project namespace/access in Postgres.
+        await upsert_database_owner(
+            db_name=db_name,
+            principal_type="user",
+            principal_id="system",
+            principal_name="system",
+        )
 
         return JSONResponse(
             status_code=status.HTTP_202_ACCEPTED,
@@ -263,9 +250,7 @@ async def delete_database(
 
 @router.get("/exists/{db_name}")
 @trace_endpoint("oms.database.exists")
-async def database_exists(
-    db_name: str, terminus_service: AsyncTerminusService = TerminusServiceDep
-):
+async def database_exists(db_name: str):
     """
     데이터베이스 존재 여부 확인
 
@@ -276,7 +261,7 @@ async def database_exists(
         # 입력 데이터 보안 검증
         db_name = validate_db_name(db_name)
 
-        exists = await terminus_service.database_exists(db_name)
+        exists = await has_database_access_config(db_name=db_name)
         
         return ApiResponse.success(
             message=f"데이터베이스 '{db_name}' 존재 여부: {exists}",
@@ -289,6 +274,8 @@ async def database_exists(
             "입력 데이터에 보안 위반이 감지되었습니다",
             code=ErrorCode.INPUT_SANITIZATION_FAILED,
         )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to check database existence for '{db_name}': {e}")
         raise classified_http_exception(

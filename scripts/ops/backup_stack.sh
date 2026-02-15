@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=/dev/null
 source "${SCRIPT_DIR}/_common.sh"
 
-COMPONENTS="${COMPONENTS:-postgres,minio,terminusdb}"
+COMPONENTS="${COMPONENTS:-postgres,minio}"
 
 log "Starting stack backup (components=${COMPONENTS})"
 
@@ -20,14 +20,10 @@ for part in "${parts[@]}"; do
     minio)
       "${SCRIPT_DIR}/backup_minio.sh"
       ;;
-    terminusdb)
-      "${SCRIPT_DIR}/backup_terminusdb_volume.sh"
-      ;;
     *)
-      die "Unknown component: ${part} (expected: postgres|minio|terminusdb)"
+      die "Unknown component: ${part} (expected: postgres|minio)"
       ;;
   esac
 done
 
 log "Stack backup finished."
-

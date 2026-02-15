@@ -21,7 +21,6 @@ import ast
 import asyncio
 import contextlib
 import os
-import socket
 import time
 import uuid
 from typing import Dict
@@ -54,7 +53,6 @@ INGEST_RECONCILER_URL = (
 MINIO_ENDPOINT_URL = (os.getenv("MINIO_ENDPOINT_URL") or _settings.storage.minio_endpoint_url).rstrip("/")
 LAKEFS_API_URL = (os.getenv("LAKEFS_API_URL") or _settings.storage.lakefs_api_url or "").rstrip("/")
 ELASTICSEARCH_URL = (os.getenv("ELASTICSEARCH_URL") or _settings.database.elasticsearch_url).rstrip("/")
-TERMINUS_URL = (os.getenv("TERMINUS_SERVER_URL") or _settings.database.terminus_url).rstrip("/")
 
 KAFKA_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS") or os.getenv("KAFKA_SERVERS") or "localhost:39092"
 POSTGRES_DSN = os.getenv("POSTGRES_URL") or os.getenv("POSTGRES_DSN") or "postgresql://spiceadmin:spicepass123@localhost:5433/spicedb"
@@ -653,7 +651,7 @@ class TestDatabaseConnectivity:
 
 
 class TestInfraConnectivity:
-    """Verify non-DB infra dependencies (S3/MinIO, lakeFS, Elasticsearch, TerminusDB)."""
+    """Verify non-DB infra dependencies (S3/MinIO, lakeFS, Elasticsearch)."""
 
     @pytest.mark.asyncio
     @pytest.mark.requires_infra
@@ -681,18 +679,6 @@ class TestInfraConnectivity:
                 assert resp.status == 200
                 data = await resp.json()
                 assert data.get("status") in {"yellow", "green"}, f"Elasticsearch unhealthy: {data!r}"
-
-    @pytest.mark.requires_infra
-    def test_terminusdb_port_open(self) -> None:
-        parsed = urlparse(TERMINUS_URL)
-        host = parsed.hostname or "127.0.0.1"
-        port = parsed.port or 6363
-        try:
-            with socket.create_connection((host, port), timeout=3.0):
-                pass
-        except Exception as e:
-            pytest.fail(f"TerminusDB not reachable on {host}:{port} ({TERMINUS_URL!r}): {e}")
-
 
 class TestSystemWiring:
     """

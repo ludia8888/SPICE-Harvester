@@ -45,26 +45,28 @@ class TestApplicationSettings(ApplicationSettings):
             "environment": Environment.TEST,
             "debug": True,
             "database": DatabaseSettings(
-                host="localhost",
-                port=5432,
-                name="spice_harvester_test",
-                user="test_user",
-                password="test_password"
-            ),  
-            "services": ServiceSettings(
-                terminus_url="http://localhost:6363",
-                terminus_user="test_admin",
-                terminus_account="test_admin", 
-                terminus_key="test_key",
-                oms_base_url="http://localhost:8001",
-                bff_base_url="http://localhost:8000",
+                postgres_host="localhost",
+                postgres_port=5432,
+                postgres_db="spice_harvester_test",
+                postgres_user="test_user",
+                postgres_password="test_password",
                 redis_host="localhost",
                 redis_port=6379,
-                redis_db=1,  # Use different DB for tests
+                redis_password="",
                 elasticsearch_host="localhost",
                 elasticsearch_port=9200,
                 elasticsearch_username="elastic",
-                elasticsearch_password="test_password"
+                elasticsearch_password="test_password",
+            ),  
+            "services": ServiceSettings(
+                oms_host="localhost",
+                oms_port=8001,
+                bff_host="localhost",
+                bff_port=8000,
+                funnel_host="localhost",
+                funnel_port=8003,
+                agent_host="localhost",
+                agent_port=8004,
             )
         }
         

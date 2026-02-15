@@ -136,7 +136,6 @@ start_services() {
     echo "✅ All services are running!"
     echo ""
     echo "📍 Service URLs:"
-    echo "   - TerminusDB: http://localhost:6363"
     echo "   - OMS API: ${OMS_URL%/}"
     echo "   - BFF API: ${BFF_URL%/}"
     echo "   - Funnel API: ${FUNNEL_URL%/}"

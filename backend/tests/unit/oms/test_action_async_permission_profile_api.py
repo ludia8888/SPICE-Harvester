@@ -51,7 +51,7 @@ def _install_deployment_and_resource_mocks(
             return {"ontology_commit_id": "commit-1"}
 
     class _FakeResourceService:
-        def __init__(self, _terminus: Any) -> None:
+        def __init__(self, *_args: Any, **_kwargs: Any) -> None:
             return None
 
         async def get_resource(
@@ -81,25 +81,10 @@ def action_async_app() -> FastAPI:
     async def _fake_db_name(db_name: str) -> str:
         return db_name
 
-    class _FakeTerminus:
-        async def get_ontology(
-            self,
-            db_name: str,  # noqa: ARG002
-            class_id: str | None = None,  # noqa: ARG002
-            raise_if_missing: bool = True,  # noqa: ARG002
-            *,
-            branch: str = "main",  # noqa: ARG002
-        ) -> Any:
-            return SimpleNamespace(metadata={}, properties=[])
-
-    async def _fake_terminus() -> object:
-        return _FakeTerminus()
-
     async def _fake_event_store() -> _FakeEventStore:
         return _FakeEventStore()
 
     app.dependency_overrides[action_async.ensure_database_exists] = _fake_db_name
-    app.dependency_overrides[OMSDependencyProvider.get_terminus_service] = _fake_terminus
     app.dependency_overrides[OMSDependencyProvider.get_event_store] = _fake_event_store
     return app
 
@@ -166,12 +151,6 @@ async def test_simulate_returns_503_when_datasource_derived_data_access_is_unver
 
     class _FakeDatasetRegistry:
         async def connect(self) -> None:
-            return None
-
-        async def close(self) -> None:
-            return None
-
-        async def close(self) -> None:
             return None
 
         async def close(self) -> None:
@@ -304,3 +283,73 @@ async def test_submit_returns_503_when_target_edit_access_is_unverifiable(
         )
 
     assert response.status_code == 503, response.text
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_simulate_use_branch_head_no_longer_requires_terminus(
+    action_async_app: FastAPI,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_deployment_and_resource_mocks(monkeypatch, action_spec=_build_action_spec())
+
+    async def _fake_role(*, db_name: str, principal_type: str, principal_id: str) -> str:  # noqa: ARG001
+        return "DataEngineer"
+
+    class _FakeSimulationRegistry:
+        async def connect(self) -> None:
+            return None
+
+        async def close(self) -> None:
+            return None
+
+        async def get_simulation(self, *, simulation_id: str):  # noqa: ARG002
+            return None
+
+        async def create_simulation(self, **kwargs: Any) -> None:  # noqa: ANN401, ARG002
+            return None
+
+        async def next_version(self, *, simulation_id: str) -> int:  # noqa: ARG002
+            return 1
+
+        async def create_version(self, **kwargs: Any) -> None:  # noqa: ANN401, ARG002
+            return None
+
+    class _FakeDatasetRegistry:
+        async def connect(self) -> None:
+            return None
+
+        async def close(self) -> None:
+            return None
+
+    async def _fake_preflight(**kwargs: Any):  # noqa: ANN401
+        raise action_async.ActionSimulationRejected(
+            {
+                "error": "probe",
+                "ontology_commit_id": kwargs.get("ontology_commit_id"),
+            },
+            status_code=503,
+        )
+
+    monkeypatch.setattr(simulation_service, "get_database_access_role", _fake_role)
+    monkeypatch.setattr(action_async, "ActionSimulationRegistry", _FakeSimulationRegistry)
+    monkeypatch.setattr(action_async, "DatasetRegistry", _FakeDatasetRegistry)
+    monkeypatch.setattr(action_async, "create_storage_service", lambda _settings: object())
+    monkeypatch.setattr(action_async, "create_lakefs_storage_service", lambda _settings: object())
+    monkeypatch.setattr(action_async, "preflight_action_writeback", _fake_preflight)
+
+    transport = ASGITransport(app=action_async_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/actions/demo/async/ApproveTicket/simulate",
+            json={
+                "input": {"ticket": {"class_id": "Ticket", "instance_id": "t1"}},
+                "metadata": {"user_id": "alice", "user_type": "user"},
+                "base_branch": "main",
+                "use_branch_head": True,
+                "include_effects": False,
+            },
+        )
+
+    assert response.status_code == 503, response.text
+    assert "branch:main" in response.text

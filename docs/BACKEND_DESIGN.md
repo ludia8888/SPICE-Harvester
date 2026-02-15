@@ -1,14 +1,14 @@
 # Backend Design Reference
 
-> Generated: 2026-02-14T13:03:07+09:00
+> Generated: 2026-02-15T10:29:47+09:00
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 > Source: AST + docstring extraction (module/class/function) via `scripts/generate_backend_methods.py`.
 
 ## Coverage Summary
 
-- Modules scanned: **984**
-- Modules with module docstring: **593/984**
-- Modules with broad `except Exception`: **312**
+- Modules scanned: **967**
+- Modules with module docstring: **556/967**
+- Modules with broad `except Exception`: **287**
 - Modules with bare `except:`: **0**
 - Modules with `return` inside `finally`: **0**
 
@@ -68,7 +68,7 @@
 - API surface: public=2 | top-level functions=1 | classes=4 | methods=23
 - Runtime signals: async_functions=18 | try=24 | raise=56 | broad_except=13 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/1 (0%) | classes=1/4 (25%) | methods=0/23 (0%)
-- Internal imports (45): oms.services.async_terminus; oms.services.ontology_resources; shared.config.app_config; shared.config.settings; shared.errors.enterprise_catalog; shared.errors.error_types; shared.models.event_envelope; shared.models.events (+37 more)
+- Internal imports (44): oms.services.ontology_resources; shared.config.app_config; shared.config.settings; shared.errors.enterprise_catalog; shared.errors.error_types; shared.models.event_envelope; shared.models.events; shared.observability.metrics (+36 more)
 - External imports (7): __future__; asyncio; collections; dataclasses; json; logging; typing
 - Public API names: ActionWorker; main
 
@@ -253,12 +253,12 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
-- API surface: public=4 | top-level functions=2 | classes=2 | methods=27
-- Runtime signals: async_functions=25 | try=17 | raise=22 | broad_except=7 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=2/2 (100%) | classes=2/2 (100%) | methods=24/27 (88%)
-- Internal imports (12): bff.services.oms_client; shared.config.settings; shared.dependencies; shared.dependencies.providers; shared.errors.error_envelope; shared.errors.error_types; shared.observability.request_context; shared.services.registries.action_log_registry (+4 more)
+- API surface: public=4 | top-level functions=2 | classes=2 | methods=16
+- Runtime signals: async_functions=14 | try=8 | raise=13 | broad_except=7 | bare_except=0 | finally_return=0
+- Doc coverage: module=yes | top-level functions=2/2 (100%) | classes=2/2 (100%) | methods=13/16 (81%)
+- Internal imports (11): bff.services.oms_client; shared.config.settings; shared.dependencies; shared.dependencies.providers; shared.errors.error_envelope; shared.errors.error_types; shared.observability.request_context; shared.services.registries.action_log_registry (+3 more)
 - External imports (5): base64; fastapi; httpx; logging; typing
-- Public API names: BFFDependencyProvider; TerminusService; check_bff_dependencies_health; get_terminus_service
+- Public API names: BFFDependencyProvider; FoundryQueryService; check_bff_dependencies_health; get_foundry_query_service
 
 ### `backend/bff/main.py`
 - Module summary: BFF (Backend for Frontend) Service - Modernized Version
@@ -673,12 +673,12 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
-- API surface: public=13 | top-level functions=13 | classes=0 | methods=0
-- Runtime signals: async_functions=13 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=13/13 (100%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- API surface: public=8 | top-level functions=8 | classes=0 | methods=0
+- Runtime signals: async_functions=8 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=yes | top-level functions=8/8 (100%) | classes=0/0 (n/a) | methods=0/0 (n/a)
 - Internal imports (7): bff.dependencies; bff.routers.registry_deps; bff.services; bff.services.oms_client; shared.models.requests; shared.observability.tracing; shared.services.registries.dataset_registry
 - External imports (2): fastapi; typing
-- Public API names: create_branch; create_class; create_database; delete_branch; delete_database; get_branch_info; get_class; get_database; get_database_expected_seq; get_versions; list_branches; list_classes (+1 more)
+- Public API names: create_class; create_database; delete_database; get_class; get_database; get_database_expected_seq; list_classes; list_databases
 
 ### `backend/bff/routers/document_bundles.py`
 - Module summary: no docstring
@@ -701,12 +701,12 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
-- API surface: public=8 | top-level functions=15 | classes=1 | methods=0
-- Runtime signals: async_functions=9 | try=17 | raise=10 | broad_except=16 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=0/15 (0%) | classes=0/1 (0%) | methods=0/0 (n/a)
+- API surface: public=12 | top-level functions=24 | classes=1 | methods=0
+- Runtime signals: async_functions=14 | try=32 | raise=26 | broad_except=31 | bare_except=0 | finally_return=0
+- Doc coverage: module=yes | top-level functions=0/24 (0%) | classes=0/1 (0%) | methods=0/0 (n/a)
 - Internal imports (7): bff.dependencies; bff.routers.link_types_read; bff.routers.object_types; bff.services.oms_client; shared.observability.tracing; shared.security.database_access; shared.security.input_sanitizer
 - External imports (6): base64; fastapi; httpx; logging; typing; uuid
-- Public API names: OntologyNotFoundError; get_object_type_v2; get_ontology_v2; get_outgoing_link_type_v2; list_object_types_v2; list_ontologies_v2; list_outgoing_link_types_v2; search_objects_v2
+- Public API names: OntologyNotFoundError; get_linked_object_v2; get_object_type_v2; get_object_v2; get_ontology_v2; get_outgoing_link_type_v2; list_linked_objects_v2; list_object_types_v2; list_objects_v2; list_ontologies_v2; list_outgoing_link_types_v2; search_objects_v2
 
 ### `backend/bff/routers/governance.py`
 - Module summary: Governance endpoints (BFF).
@@ -889,20 +889,6 @@
 - Internal imports (4): bff.dependencies; bff.services; shared.models.requests; shared.observability.tracing
 - External imports (2): fastapi; logging
 - Public API names: clear_mappings; export_mappings; get_mappings_summary; import_mappings; validate_mappings
-
-### `backend/bff/routers/merge_conflict.py`
-- Module summary: Merge conflict resolution endpoints (BFF).
-- Responsibilities: not documented
-- Invariants: not documented
-- Failure modes: not documented
-- Extension points: not documented
-- Dependencies (doc): not documented
-- API surface: public=2 | top-level functions=2 | classes=0 | methods=0
-- Runtime signals: async_functions=2 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
-- Internal imports (4): bff.dependencies; bff.services; shared.models.requests; shared.observability.tracing
-- External imports (2): fastapi; typing
-- Public API names: resolve_merge_conflicts; simulate_merge
 
 ### `backend/bff/routers/object_types.py`
 - Module summary: Object type contract endpoints (BFF).
@@ -1121,12 +1107,12 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
-- API surface: public=7 | top-level functions=8 | classes=0 | methods=0
-- Runtime signals: async_functions=12 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=0/8 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
-- Internal imports (6): bff.dependencies; bff.schemas.ontology_extensions_requests; bff.services; bff.services.oms_client; shared.models.requests; shared.observability.tracing
+- API surface: public=5 | top-level functions=6 | classes=0 | methods=0
+- Runtime signals: async_functions=10 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=yes | top-level functions=0/6 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Internal imports (5): bff.dependencies; bff.schemas.ontology_extensions_requests; bff.services; bff.services.oms_client; shared.observability.tracing
 - External imports (2): fastapi; typing
-- Public API names: approve_ontology_proposal; create_ontology_branch; create_ontology_proposal; deploy_ontology; list_ontology_branches; list_ontology_proposals; ontology_health
+- Public API names: approve_ontology_proposal; create_ontology_proposal; deploy_ontology; list_ontology_proposals; ontology_health
 
 ### `backend/bff/routers/ontology_imports.py`
 - Module summary: Ontology import endpoints (BFF).
@@ -1850,10 +1836,10 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
-- Runtime signals: async_functions=1 | try=4 | raise=3 | broad_except=3 | bare_except=0 | finally_return=0
+- Runtime signals: async_functions=1 | try=2 | raise=0 | broad_except=2 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=1/1 (100%) | classes=0/0 (n/a) | methods=0/0 (n/a)
-- Internal imports (8): bff.dependencies; bff.services.oms_client; shared.dependencies.providers; shared.errors.error_types; shared.models.requests; shared.observability.tracing; shared.security.input_sanitizer; shared.utils.branch_utils
-- External imports (4): fastapi; httpx; logging; typing
+- Internal imports (5): shared.dependencies.providers; shared.models.requests; shared.observability.tracing; shared.security.input_sanitizer; shared.utils.branch_utils
+- External imports (3): fastapi; logging; typing
 - Public API names: get_summary
 
 ### `backend/bff/routers/tasks.py`
@@ -1981,20 +1967,6 @@
 - Internal imports (0): not documented
 - External imports (3): __future__; pydantic; typing
 - Public API names: BulkInstanceCreateRequest; InstanceCreateRequest; InstanceUpdateRequest
-
-### `backend/bff/schemas/label_mapping_schema.py`
-- Module summary: 레이블 매핑 스키마 정의
-- Responsibilities: not documented
-- Invariants: not documented
-- Failure modes: not documented
-- Extension points: not documented
-- Dependencies (doc): not documented
-- API surface: public=3 | top-level functions=3 | classes=0 | methods=0
-- Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=3/3 (100%) | classes=0/0 (n/a) | methods=0/0 (n/a)
-- Internal imports (0): not documented
-- External imports (1): typing
-- Public API names: get_label_mapping_ontology; get_label_mapping_properties; get_label_mapping_schema
 
 ### `backend/bff/schemas/link_types_requests.py`
 - Module summary: Link type request schemas (BFF).
@@ -2283,12 +2255,12 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
-- API surface: public=13 | top-level functions=19 | classes=0 | methods=0
-- Runtime signals: async_functions=14 | try=19 | raise=37 | broad_except=17 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=13/19 (68%) | classes=0/0 (n/a) | methods=0/0 (n/a)
-- Internal imports (10): bff.services.database_error_policy; bff.services.oms_client; shared.config.settings; shared.errors.error_types; shared.models.requests; shared.observability.tracing; shared.security.database_access; shared.security.input_sanitizer (+2 more)
+- API surface: public=8 | top-level functions=13 | classes=0 | methods=0
+- Runtime signals: async_functions=9 | try=14 | raise=23 | broad_except=12 | bare_except=0 | finally_return=0
+- Doc coverage: module=yes | top-level functions=8/13 (61%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Internal imports (9): bff.services.database_error_policy; bff.services.oms_client; shared.config.settings; shared.errors.error_types; shared.models.requests; shared.observability.tracing; shared.security.database_access; shared.security.input_sanitizer (+1 more)
 - External imports (6): asyncpg; fastapi; httpx; logging; re; typing
-- Public API names: create_branch; create_class; create_database; delete_branch; delete_database; get_branch_info; get_class; get_database; get_database_expected_seq; get_versions; list_branches; list_classes (+1 more)
+- Public API names: create_class; create_database; delete_database; get_class; get_database; get_database_expected_seq; list_classes; list_databases
 
 ### `backend/bff/services/dataset_ingest_commit_service.py`
 - Module summary: Shared dataset ingest commit helpers.
@@ -2542,20 +2514,6 @@
 - External imports (9): collections; dataclasses; difflib; logging; math; re; statistics; typing (+1 more)
 - Public API names: MappingCandidate; MappingSuggestion; MappingSuggestionService
 
-### `backend/bff/services/merge_conflict_service.py`
-- Module summary: Merge conflict service (BFF).
-- Responsibilities: not documented
-- Invariants: not documented
-- Failure modes: not documented
-- Extension points: not documented
-- Dependencies (doc): not documented
-- API surface: public=2 | top-level functions=5 | classes=0 | methods=0
-- Runtime signals: async_functions=5 | try=8 | raise=13 | broad_except=8 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=2/5 (40%) | classes=0/0 (n/a) | methods=0/0 (n/a)
-- Internal imports (8): bff.dependencies; bff.utils.conflict_converter; shared.errors.error_types; shared.models.requests; shared.observability.tracing; shared.security.input_sanitizer; shared.utils.async_utils; shared.utils.diff_utils
-- External imports (5): __future__; fastapi; httpx; logging; typing
-- Public API names: resolve_merge_conflicts; simulate_merge
-
 ### `backend/bff/services/object_type_contract_service.py`
 - Module summary: Object type contract service (BFF).
 - Responsibilities: not documented
@@ -2633,9 +2591,9 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
-- API surface: public=2 | top-level functions=0 | classes=2 | methods=41
-- Runtime signals: async_functions=38 | try=31 | raise=32 | broad_except=30 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=2/2 (100%) | methods=34/41 (82%)
+- API surface: public=2 | top-level functions=0 | classes=2 | methods=32
+- Runtime signals: async_functions=30 | try=23 | raise=24 | broad_except=22 | bare_except=0 | finally_return=0
+- Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=2/2 (100%) | methods=28/32 (87%)
 - Internal imports (2): bff.services.base_http_client; shared.config.settings
 - External imports (4): dataclasses; httpx; logging; typing
 - Public API names: OMSClient; OntologyRef
@@ -2689,12 +2647,12 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
-- API surface: public=12 | top-level functions=13 | classes=0 | methods=0
-- Runtime signals: async_functions=13 | try=1 | raise=4 | broad_except=1 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=0/13 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
-- Internal imports (8): bff.schemas.ontology_extensions_requests; bff.services.oms_client; bff.services.ontology_occ_guard_service; bff.utils.httpx_exceptions; shared.errors.error_types; shared.models.requests; shared.observability.tracing; shared.security.input_sanitizer
+- API surface: public=10 | top-level functions=11 | classes=0 | methods=0
+- Runtime signals: async_functions=11 | try=1 | raise=4 | broad_except=1 | bare_except=0 | finally_return=0
+- Doc coverage: module=yes | top-level functions=0/11 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Internal imports (7): bff.schemas.ontology_extensions_requests; bff.services.oms_client; bff.services.ontology_occ_guard_service; bff.utils.httpx_exceptions; shared.errors.error_types; shared.observability.tracing; shared.security.input_sanitizer
 - External imports (5): __future__; fastapi; httpx; logging; typing
-- Public API names: approve_ontology_proposal; create_ontology_branch; create_ontology_proposal; create_resource; delete_resource; deploy_ontology; get_resource; list_ontology_branches; list_ontology_proposals; list_resources; ontology_health; update_resource
+- Public API names: approve_ontology_proposal; create_ontology_proposal; create_resource; delete_resource; deploy_ontology; get_resource; list_ontology_proposals; list_resources; ontology_health; update_resource
 
 ### `backend/bff/services/ontology_imports_service.py`
 - Module summary: Ontology import service (BFF).
@@ -2731,11 +2689,11 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
-- API surface: public=3 | top-level functions=5 | classes=0 | methods=0
-- Runtime signals: async_functions=3 | try=4 | raise=4 | broad_except=1 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=0/5 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
-- Internal imports (3): bff.services.oms_client; shared.errors.error_types; shared.observability.tracing
-- External imports (5): __future__; asyncio; httpx; logging; typing
+- API surface: public=3 | top-level functions=4 | classes=0 | methods=0
+- Runtime signals: async_functions=3 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=yes | top-level functions=0/4 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Internal imports (2): bff.services.oms_client; shared.observability.tracing
+- External imports (2): __future__; typing
 - Public API names: fetch_branch_head_commit_id; resolve_branch_head_commit_with_bootstrap; resolve_expected_head_commit
 
 ### `backend/bff/services/ontology_ops_service.py`
@@ -2885,9 +2843,9 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
-- API surface: public=3 | top-level functions=5 | classes=0 | methods=0
-- Runtime signals: async_functions=3 | try=16 | raise=75 | broad_except=12 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=0/5 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- API surface: public=3 | top-level functions=6 | classes=0 | methods=0
+- Runtime signals: async_functions=3 | try=15 | raise=71 | broad_except=11 | bare_except=0 | finally_return=0
+- Doc coverage: module=yes | top-level functions=0/6 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
 - Internal imports (26): bff.routers.pipeline_ops; bff.routers.pipeline_shared; bff.services.oms_client; bff.services.ontology_occ_guard_service; shared.dependencies.providers; shared.errors.error_envelope; shared.errors.error_types; shared.models.pipeline_job (+18 more)
 - External imports (5): fastapi; httpx; logging; typing; uuid
 - Public API names: build_pipeline; deploy_pipeline; preview_pipeline
@@ -3011,9 +2969,9 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
-- API surface: public=5 | top-level functions=6 | classes=0 | methods=0
+- API surface: public=5 | top-level functions=7 | classes=0 | methods=0
 - Runtime signals: async_functions=5 | try=5 | raise=18 | broad_except=4 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=0/6 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Doc coverage: module=yes | top-level functions=0/7 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
 - Internal imports (9): bff.routers.pipeline_shared; shared.errors.error_types; shared.models.requests; shared.observability.tracing; shared.security.input_sanitizer; shared.services.registries.pipeline_registry; shared.services.storage.lakefs_client; shared.utils.schema_hash (+1 more)
 - External imports (3): fastapi; logging; typing
 - Public API names: approve_pipeline_proposal; list_pipeline_proposals; normalize_mapping_spec_ids; reject_pipeline_proposal; submit_pipeline_proposal
@@ -3186,20 +3144,6 @@
 - External imports (1): pytest
 - Public API names: DummyOMSClient; test_command_status_proxies_to_api_v1_commands_status_path
 
-### `backend/bff/tests/test_conflict_converter_unit.py`
-- Module summary: Unit Tests for Conflict Converter
-- Responsibilities: not documented
-- Invariants: not documented
-- Failure modes: not documented
-- Extension points: not documented
-- Dependencies (doc): not documented
-- API surface: public=1 | top-level functions=0 | classes=1 | methods=17
-- Runtime signals: async_functions=15 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=1/1 (100%) | methods=17/17 (100%)
-- Internal imports (1): bff.utils.conflict_converter
-- External imports (3): asyncio; pytest; typing
-- Public API names: TestConflictConverter
-
 ### `backend/bff/tests/test_context_tools_router.py`
 - Module summary: no docstring
 - Responsibilities: not documented
@@ -3263,12 +3207,12 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
-- API surface: public=9 | top-level functions=10 | classes=1 | methods=6
-- Runtime signals: async_functions=16 | try=7 | raise=1 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=no | top-level functions=0/10 (0%) | classes=0/1 (0%) | methods=0/6 (0%)
+- API surface: public=17 | top-level functions=18 | classes=2 | methods=8
+- Runtime signals: async_functions=25 | try=14 | raise=1 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/18 (0%) | classes=0/2 (0%) | methods=0/8 (0%)
 - Internal imports (1): bff.routers
 - External imports (5): __future__; fastapi; json; pytest; starlette
-- Public API names: test_get_object_type_v2_returns_foundry_raw_shape; test_get_ontology_v2_resolves_rid_identifier; test_get_ontology_v2_returns_foundry_raw_shape; test_get_outgoing_link_type_v2_returns_foundry_raw_shape; test_list_object_types_v2_returns_foundry_raw_shape; test_list_ontologies_v2_returns_foundry_raw_shape; test_list_outgoing_link_types_v2_returns_foundry_raw_shape; test_search_objects_v2_passthrough_foundry_shape; test_v2_invalid_ontology_returns_foundry_error_envelope
+- Public API names: test_get_linked_object_v2_not_found_returns_foundry_error; test_get_linked_object_v2_returns_foundry_raw_shape; test_get_object_type_v2_returns_foundry_raw_shape; test_get_object_v2_not_found_returns_foundry_error; test_get_object_v2_returns_foundry_raw_shape; test_get_ontology_v2_resolves_rid_identifier; test_get_ontology_v2_returns_foundry_raw_shape; test_get_outgoing_link_type_v2_returns_foundry_raw_shape; test_list_linked_objects_v2_returns_foundry_raw_shape; test_list_object_types_v2_returns_foundry_raw_shape; test_list_objects_v2_passthrough_foundry_shape_and_orderby_parse; test_list_objects_v2_rejects_invalid_orderby_expression (+5 more)
 
 ### `backend/bff/tests/test_funnel_client_structure_selection.py`
 - Module summary: no docstring
@@ -3438,20 +3382,6 @@
 - External imports (0): not documented
 - Public API names: test_label_is_used_for_matching_but_id_is_returned; test_semantic_match_disabled_by_default; test_semantic_match_is_opt_in_and_domain_neutral
 
-### `backend/bff/tests/test_merge_conflict_integration.py`
-- Module summary: Integration Tests for Merge Conflict Resolution (UI-friendly conflict format)
-- Responsibilities: not documented
-- Invariants: not documented
-- Failure modes: not documented
-- Extension points: not documented
-- Dependencies (doc): not documented
-- API surface: public=2 | top-level functions=0 | classes=2 | methods=14
-- Runtime signals: async_functions=9 | try=5 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=2/2 (100%) | methods=14/14 (100%)
-- Internal imports (2): bff.dependencies; bff.main
-- External imports (5): fastapi; httpx; pytest; typing; unittest
-- Public API names: TestFullStackMergeConflictFlow; TestMergeConflictIntegration
-
 ### `backend/bff/tests/test_object_types_backing_retrieval.py`
 - Module summary: no docstring
 - Responsibilities: not documented
@@ -3606,20 +3536,6 @@
 - External imports (5): __future__; dataclasses; datetime; pytest; typing
 - Public API names: test_create_dataset_version_materializes_manual_sample_to_artifact
 
-### `backend/bff/tests/test_pipeline_ontology_gate.py`
-- Module summary: no docstring
-- Responsibilities: not documented
-- Invariants: not documented
-- Failure modes: not documented
-- Extension points: not documented
-- Dependencies (doc): not documented
-- API surface: public=3 | top-level functions=3 | classes=9 | methods=18
-- Runtime signals: async_functions=18 | try=0 | raise=1 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/9 (0%) | methods=0/18 (0%)
-- Internal imports (1): bff.routers.pipeline_execution
-- External imports (5): __future__; dataclasses; fastapi; pytest; typing
-- Public API names: test_promote_build_rejects_missing_ontology_commit; test_promote_build_rejects_ontology_commit_mismatch; test_promote_build_returns_503_when_ontology_gate_unavailable
-
 ### `backend/bff/tests/test_pipeline_permissions_enforced.py`
 - Module summary: no docstring
 - Responsibilities: not documented
@@ -3641,12 +3557,12 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
-- API surface: public=9 | top-level functions=11 | classes=10 | methods=30
-- Runtime signals: async_functions=38 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=no | top-level functions=0/11 (0%) | classes=0/10 (0%) | methods=0/30 (0%)
+- API surface: public=10 | top-level functions=13 | classes=11 | methods=33
+- Runtime signals: async_functions=40 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/13 (0%) | classes=0/11 (0%) | methods=0/33 (0%)
 - Internal imports (1): bff.routers.pipeline_execution
 - External imports (5): __future__; dataclasses; fastapi; pytest; typing
-- Public API names: lakefs_merge_stub; test_build_enqueues_job_and_records_run; test_preview_enqueues_job_with_node_id_and_records_preview_and_run; test_promote_build_allows_breaking_schema_changes_with_replay_flag; test_promote_build_blocks_deploy_when_expectations_failed; test_promote_build_merges_build_branch_to_main_and_registers_version; test_promote_build_rejects_non_staged_artifact_key; test_promote_build_requires_replay_for_breaking_schema_changes; test_promote_build_surfaces_build_errors_when_build_failed
+- Public API names: lakefs_merge_stub; test_build_enqueues_job_and_records_run; test_build_postgres_profile_uses_branch_ref_when_head_commit_unavailable; test_preview_enqueues_job_with_node_id_and_records_preview_and_run; test_promote_build_allows_breaking_schema_changes_with_replay_flag; test_promote_build_blocks_deploy_when_expectations_failed; test_promote_build_merges_build_branch_to_main_and_registers_version; test_promote_build_rejects_non_staged_artifact_key; test_promote_build_requires_replay_for_breaking_schema_changes; test_promote_build_surfaces_build_errors_when_build_failed
 
 ### `backend/bff/tests/test_pipeline_proposal_governance.py`
 - Module summary: no docstring
@@ -3756,7 +3672,7 @@
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
-- Internal imports (1): bff.utils.conflict_converter
+- Internal imports (0): not documented
 - External imports (0): not documented
 - Public API names: not documented
 
@@ -3773,20 +3689,6 @@
 - Internal imports (1): shared.services.registries.action_log_registry
 - External imports (3): __future__; logging; typing
 - Public API names: dt_iso; serialize_action_log_record
-
-### `backend/bff/utils/conflict_converter.py`
-- Module summary: TerminusDB Conflict Format Converter
-- Responsibilities: not documented
-- Invariants: not documented
-- Failure modes: not documented
-- Extension points: not documented
-- Dependencies (doc): not documented
-- API surface: public=5 | top-level functions=0 | classes=5 | methods=19
-- Runtime signals: async_functions=4 | try=1 | raise=0 | broad_except=1 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=5/5 (100%) | methods=18/19 (94%)
-- Internal imports (0): not documented
-- External imports (6): dataclasses; enum; json; logging; re; typing
-- Public API names: ConflictAnalysis; ConflictConverter; ConflictSeverity; JsonLdPath; PathType
 
 ### `backend/bff/utils/httpx_exceptions.py`
 - Module summary: HTTPX error helpers (BFF).
@@ -3815,20 +3717,6 @@
 - Internal imports (0): not documented
 - External imports (3): __future__; starlette; typing
 - Public API names: extract_forward_headers
-
-### `backend/bff/verify_implementation.py`
-- Module summary: 실제 구현 검증 스크립트
-- Responsibilities: not documented
-- Invariants: not documented
-- Failure modes: not documented
-- Extension points: not documented
-- Dependencies (doc): not documented
-- API surface: public=2 | top-level functions=2 | classes=0 | methods=0
-- Runtime signals: async_functions=3 | try=5 | raise=0 | broad_except=5 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=2/2 (100%) | classes=0/0 (n/a) | methods=0/0 (n/a)
-- Internal imports (0): not documented
-- External imports (2): asyncio; logging
-- Public API names: test_core_conflict_system; test_real_world_scenario
 
 ## conftest.py
 
@@ -4365,14 +4253,14 @@
 - Public API names: not documented
 
 ### `backend/instance_worker/main.py`
-- Module summary: Instance Worker — Direct ES Write (Phase 2: TerminusDB-free)
+- Module summary: Instance Worker — Direct ES Write (Foundry-aligned runtime)
 - Responsibilities: not documented
 - Invariants: not documented
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
 - API surface: public=2 | top-level functions=1 | classes=3 | methods=43
-- Runtime signals: async_functions=27 | try=43 | raise=69 | broad_except=36 | bare_except=0 | finally_return=0
+- Runtime signals: async_functions=27 | try=42 | raise=69 | broad_except=35 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=1/1 (100%) | classes=1/3 (33%) | methods=18/43 (41%)
 - Internal imports (31): objectify_worker.write_paths; oms.services.event_store; shared.config.app_config; shared.config.search_config; shared.config.settings; shared.errors.runtime_exception_policy; shared.models.event_envelope; shared.observability.metrics (+23 more)
 - External imports (11): asyncio; boto3; botocore; dataclasses; datetime; httpx; json; logging (+3 more)
@@ -4632,20 +4520,6 @@
 - External imports (3): __future__; logging; typing
 - Public API names: build_schema_tool_handlers
 
-### `backend/mcp_servers/terminus_mcp_server.py`
-- Module summary: TerminusDB MCP Server
-- Responsibilities: not documented
-- Invariants: not documented
-- Failure modes: not documented
-- Extension points: not documented
-- Dependencies (doc): not documented
-- API surface: public=2 | top-level functions=1 | classes=1 | methods=4
-- Runtime signals: async_functions=7 | try=3 | raise=0 | broad_except=3 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=1/1 (100%) | classes=1/1 (100%) | methods=3/4 (75%)
-- Internal imports (4): oms.services.async_terminus; shared.config.settings; shared.models.config; shared.models.ontology
-- External imports (8): asyncio; json; logging; mcp; os; pathlib; sys; typing
-- Public API names: TerminusDBMCPServer; main
-
 ## message_relay
 
 ### `backend/message_relay/__init__.py`
@@ -4715,9 +4589,9 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
-- API surface: public=3 | top-level functions=4 | classes=2 | methods=59
-- Runtime signals: async_functions=39 | try=32 | raise=36 | broad_except=24 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=3/4 (75%) | classes=1/2 (50%) | methods=3/59 (5%)
+- API surface: public=3 | top-level functions=4 | classes=2 | methods=58
+- Runtime signals: async_functions=38 | try=32 | raise=36 | broad_except=24 | bare_except=0 | finally_return=0
+- Doc coverage: module=yes | top-level functions=3/4 (75%) | classes=1/2 (50%) | methods=3/58 (5%)
 - Internal imports (41): objectify_worker.validation_codes; objectify_worker.write_paths; shared.config.app_config; shared.config.search_config; shared.config.settings; shared.errors.error_envelope; shared.errors.error_types; shared.errors.runtime_exception_policy (+33 more)
 - External imports (13): __future__; asyncio; confluent_kafka; csv; datetime; hashlib; httpx; io (+5 more)
 - Public API names: ObjectifyNonRetryableError; ObjectifyWorker; main
@@ -4843,10 +4717,10 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
-- API surface: public=5 | top-level functions=4 | classes=1 | methods=4
-- Runtime signals: async_functions=6 | try=11 | raise=5 | broad_except=11 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=4/4 (100%) | classes=1/1 (100%) | methods=3/4 (75%)
-- Internal imports (17): oms.services.async_terminus; oms.services.event_store; shared.config.settings; shared.dependencies; shared.dependencies.providers; shared.errors.error_envelope; shared.errors.error_types; shared.models.config (+9 more)
+- API surface: public=5 | top-level functions=4 | classes=1 | methods=3
+- Runtime signals: async_functions=5 | try=9 | raise=3 | broad_except=9 | bare_except=0 | finally_return=0
+- Doc coverage: module=yes | top-level functions=4/4 (100%) | classes=1/1 (100%) | methods=2/3 (66%)
+- Internal imports (16): oms.services.event_store; shared.config.settings; shared.dependencies; shared.dependencies.providers; shared.errors.error_envelope; shared.errors.error_types; shared.observability.request_context; shared.security.database_access (+8 more)
 - External imports (3): fastapi; logging; typing
 - Public API names: OMSDependencyProvider; ValidatedClassId; ValidatedDatabaseName; check_oms_dependencies_health; ensure_database_exists
 
@@ -4863,20 +4737,6 @@
 - Internal imports (0): not documented
 - External imports (0): not documented
 - Public API names: not documented
-
-### `backend/oms/entities/label_mapping.py`
-- Module summary: 레이블 매핑 엔티티 정의
-- Responsibilities: not documented
-- Invariants: not documented
-- Failure modes: not documented
-- Extension points: not documented
-- Dependencies (doc): not documented
-- API surface: public=1 | top-level functions=0 | classes=1 | methods=6
-- Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=1/1 (100%) | methods=6/6 (100%)
-- Internal imports (0): not documented
-- External imports (3): dataclasses; datetime; typing
-- Public API names: LabelMapping
 
 ### `backend/oms/entities/ontology.py`
 - Module summary: 온톨로지 도메인 엔티티
@@ -4913,12 +4773,12 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
-- API surface: public=6 | top-level functions=6 | classes=1 | methods=17
-- Runtime signals: async_functions=17 | try=19 | raise=8 | broad_except=19 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=6/6 (100%) | classes=1/1 (100%) | methods=16/17 (94%)
-- Internal imports (25): oms.database.postgres; oms.exceptions; oms.middleware.auth; oms.routers; oms.services.async_terminus; oms.services.event_store; oms.services.ontology_deploy_outbox; oms.services.ontology_deployment_registry (+17 more)
+- API surface: public=5 | top-level functions=6 | classes=1 | methods=15
+- Runtime signals: async_functions=15 | try=15 | raise=5 | broad_except=15 | bare_except=0 | finally_return=0
+- Doc coverage: module=yes | top-level functions=5/6 (83%) | classes=1/1 (100%) | methods=14/15 (93%)
+- Internal imports (23): oms.database.postgres; oms.exceptions; oms.middleware.auth; oms.routers; oms.services.event_store; oms.services.ontology_deploy_outbox; oms.services.ontology_deployment_registry; oms.services.ontology_deployment_registry_v2 (+15 more)
 - External imports (5): asyncio; contextlib; fastapi; logging; typing
-- Public API names: OMSServiceContainer; container_health_check; get_terminus_service; health_check; lifespan; root
+- Public API names: OMSServiceContainer; container_health_check; health_check; lifespan; root
 
 ### `backend/oms/middleware/__init__.py`
 - Module summary: OMS Middleware package.
@@ -4958,7 +4818,7 @@
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
-- Internal imports (5): .branch; .database; .ontology; .ontology_extensions; .version
+- Internal imports (3): .database; .ontology; .ontology_extensions
 - External imports (0): not documented
 - Public API names: not documented
 
@@ -4984,25 +4844,11 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - API surface: public=10 | top-level functions=3 | classes=8 | methods=0
-- Runtime signals: async_functions=3 | try=12 | raise=33 | broad_except=4 | bare_except=0 | finally_return=0
+- Runtime signals: async_functions=3 | try=12 | raise=32 | broad_except=4 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=2/3 (66%) | classes=2/8 (25%) | methods=0/0 (n/a)
 - Internal imports (31): oms.dependencies; oms.services.action_simulation_service; oms.services.ontology_deployment_registry_v2; oms.services.ontology_resources; shared.config.app_config; shared.config.settings; shared.errors.error_types; shared.models.commands (+23 more)
 - External imports (7): __future__; datetime; fastapi; logging; pydantic; typing; uuid
 - Public API names: ActionSimulateAssumptions; ActionSimulateObservedBaseOverrides; ActionSimulateRequest; ActionSimulateScenarioRequest; ActionSimulateStatePatch; ActionSimulateTargetAssumption; ActionSubmitRequest; ActionSubmitResponse; simulate_action_async; submit_action_async
-
-### `backend/oms/routers/branch.py`
-- Module summary: 브랜치 관리 라우터
-- Responsibilities: not documented
-- Invariants: not documented
-- Failure modes: not documented
-- Extension points: not documented
-- Dependencies (doc): not documented
-- API surface: public=5 | top-level functions=5 | classes=0 | methods=0
-- Runtime signals: async_functions=5 | try=7 | raise=23 | broad_except=7 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=5/5 (100%) | classes=0/0 (n/a) | methods=0/0 (n/a)
-- Internal imports (9): oms.dependencies; oms.services.async_terminus; shared.config.search_config; shared.dependencies.providers; shared.errors.error_types; shared.models.requests; shared.observability.tracing; shared.security.input_sanitizer (+1 more)
-- External imports (2): fastapi; logging
-- Public API names: checkout; create_branch; delete_branch; get_branch_info; list_branches
 
 ### `backend/oms/routers/command_status.py`
 - Module summary: Command status router (read-only).
@@ -5026,9 +4872,9 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - API surface: public=4 | top-level functions=4 | classes=0 | methods=0
-- Runtime signals: async_functions=4 | try=7 | raise=14 | broad_except=7 | bare_except=0 | finally_return=0
+- Runtime signals: async_functions=4 | try=5 | raise=15 | broad_except=5 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=4/4 (100%) | classes=0/0 (n/a) | methods=0/0 (n/a)
-- Internal imports (10): oms.dependencies; oms.routers._event_sourcing; oms.services.async_terminus; shared.config.app_config; shared.config.settings; shared.errors.error_types; shared.models.commands; shared.models.requests (+2 more)
+- Internal imports (9): oms.dependencies; oms.routers._event_sourcing; shared.config.app_config; shared.errors.error_types; shared.models.commands; shared.models.requests; shared.observability.tracing; shared.security.database_access (+1 more)
 - External imports (2): fastapi; logging
 - Public API names: create_database; database_exists; delete_database; list_databases
 
@@ -5068,9 +4914,9 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - API surface: public=6 | top-level functions=23 | classes=0 | methods=0
-- Runtime signals: async_functions=11 | try=10 | raise=41 | broad_except=10 | bare_except=0 | finally_return=0
+- Runtime signals: async_functions=11 | try=10 | raise=37 | broad_except=10 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=6/23 (26%) | classes=0/0 (n/a) | methods=0/0 (n/a)
-- Internal imports (26): oms.dependencies; oms.routers._event_sourcing; oms.services.async_terminus; oms.services.ontology_interface_contract; oms.services.ontology_resources; oms.services.property_to_relationship_converter; oms.validation_codes; shared.config.app_config (+18 more)
+- Internal imports (24): oms.dependencies; oms.routers._event_sourcing; oms.services.ontology_interface_contract; oms.services.ontology_resources; oms.services.property_to_relationship_converter; oms.validation_codes; shared.config.app_config; shared.config.settings (+16 more)
 - External imports (4): fastapi; hmac; logging; typing
 - Public API names: create_ontology; delete_ontology; get_ontology; list_ontologies; update_ontology; validate_ontology_create
 
@@ -5081,12 +4927,12 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
-- API surface: public=17 | top-level functions=28 | classes=4 | methods=0
-- Runtime signals: async_functions=16 | try=13 | raise=48 | broad_except=13 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=0/28 (0%) | classes=0/4 (0%) | methods=0/0 (n/a)
-- Internal imports (23): oms.database.postgres; oms.dependencies; oms.exceptions; oms.services.async_terminus; oms.services.ontology_deployment_registry_v2; oms.services.ontology_health_issue_registry; oms.services.ontology_interface_contract; oms.services.ontology_resource_validator (+15 more)
+- API surface: public=15 | top-level functions=26 | classes=4 | methods=0
+- Runtime signals: async_functions=14 | try=11 | raise=47 | broad_except=11 | bare_except=0 | finally_return=0
+- Doc coverage: module=yes | top-level functions=0/26 (0%) | classes=0/4 (0%) | methods=0/0 (n/a)
+- Internal imports (19): oms.database.postgres; oms.exceptions; oms.services.ontology_deployment_registry_v2; oms.services.ontology_health_issue_registry; oms.services.ontology_interface_contract; oms.services.ontology_resource_validator; oms.services.ontology_resources; oms.services.pull_request_service (+11 more)
 - External imports (5): fastapi; json; logging; pydantic; typing
-- Public API names: OntologyApproveRequest; OntologyDeployRequest; OntologyProposalRequest; OntologyResourceRequest; approve_ontology_proposal; create_ontology_branch; create_ontology_proposal; create_resource; delete_resource; deploy_ontology; get_resource; list_ontology_branches (+5 more)
+- Public API names: OntologyApproveRequest; OntologyDeployRequest; OntologyProposalRequest; OntologyResourceRequest; approve_ontology_proposal; create_ontology_proposal; create_resource; delete_resource; deploy_ontology; get_resource; list_ontology_proposals; list_resources (+3 more)
 
 ### `backend/oms/routers/pull_request.py`
 - Module summary: Pull Request Router for OMS
@@ -5130,20 +4976,6 @@
 - External imports (2): fastapi; typing
 - Public API names: cleanup_old_tasks; get_active_tasks; get_internal_task_status; task_service_health
 
-### `backend/oms/routers/version.py`
-- Module summary: 버전 관리 라우터
-- Responsibilities: not documented
-- Invariants: not documented
-- Failure modes: not documented
-- Extension points: not documented
-- Dependencies (doc): not documented
-- API surface: public=11 | top-level functions=9 | classes=3 | methods=0
-- Runtime signals: async_functions=8 | try=12 | raise=41 | broad_except=12 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=9/9 (100%) | classes=3/3 (100%) | methods=0/0 (n/a)
-- Internal imports (11): oms.dependencies; oms.services.async_terminus; shared.config.settings; shared.dependencies.providers; shared.errors.error_types; shared.models.requests; shared.observability.tracing; shared.security.input_sanitizer (+3 more)
-- External imports (4): fastapi; logging; pydantic; typing
-- Public API names: CommitRequest; MergeRequest; RollbackRequest; create_commit; get_branch_head_commit; get_commit_history; get_common_ancestor; get_diff; merge_branches; rebase_branch; rollback
-
 ### `backend/oms/services/__init__.py`
 - Module summary: no docstring
 - Responsibilities: not documented
@@ -5168,23 +5000,9 @@
 - API surface: public=8 | top-level functions=13 | classes=4 | methods=1
 - Runtime signals: async_functions=5 | try=15 | raise=66 | broad_except=7 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/13 (0%) | classes=0/4 (0%) | methods=0/1 (0%)
-- Internal imports (28): oms.services.async_terminus; oms.services.ontology_resources; shared.config.app_config; shared.errors.enterprise_catalog; shared.errors.error_types; shared.observability.tracing; shared.security.database_access; shared.services.core.object_type_meta_resolver (+20 more)
+- Internal imports (27): oms.services.ontology_resources; shared.config.app_config; shared.errors.enterprise_catalog; shared.errors.error_types; shared.observability.tracing; shared.security.database_access; shared.services.core.object_type_meta_resolver; shared.services.core.writeback_merge_service (+19 more)
 - External imports (4): __future__; dataclasses; logging; typing
 - Public API names: ActionPreflight; ActionSimulationRejected; ActionSimulationScenario; TargetPreflight; build_patchset_for_scenario; enforce_action_permission; preflight_action_writeback; simulate_effects_for_patchset
-
-### `backend/oms/services/async_terminus.py`
-- Module summary: Async TerminusDB 서비스 모듈 - Clean Facade
-- Responsibilities: not documented
-- Invariants: not documented
-- Failure modes: not documented
-- Extension points: not documented
-- Dependencies (doc): not documented
-- API surface: public=7 | top-level functions=0 | classes=7 | methods=44
-- Runtime signals: async_functions=39 | try=3 | raise=3 | broad_except=3 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=7/7 (100%) | methods=42/44 (95%)
-- Internal imports (8): .property_to_relationship_converter; .terminus; oms.exceptions; oms.utils.terminus_retry; oms.validators.relationship_validator; shared.models.config; shared.models.ontology; shared.observability.tracing
-- External imports (4): asyncio; httpx; logging; typing
-- Public API names: AsyncTerminusService; AtomicUpdateError; BackupCreationError; BackupRestoreError; PatchUpdateError; RestoreError; TransactionUpdateError
 
 ### `backend/oms/services/event_store.py`
 - Module summary: Backward-compatibility shim for Event Store.
@@ -5308,22 +5126,22 @@
 - API surface: public=6 | top-level functions=20 | classes=2 | methods=0
 - Runtime signals: async_functions=4 | try=5 | raise=4 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/20 (0%) | classes=2/2 (100%) | methods=0/0 (n/a)
-- Internal imports (9): oms.services.async_terminus; oms.services.ontology_resources; oms.validation_codes; shared.observability.tracing; shared.utils.action_input_schema; shared.utils.action_permission_profile; shared.utils.action_template_engine; shared.utils.key_spec (+1 more)
+- Internal imports (8): oms.services.ontology_resources; oms.validation_codes; shared.observability.tracing; shared.utils.action_input_schema; shared.utils.action_permission_profile; shared.utils.action_template_engine; shared.utils.key_spec; shared.utils.safe_bool_expression
 - External imports (4): __future__; logging; re; typing
 - Public API names: ResourceReferenceError; ResourceSpecError; check_required_fields; collect_reference_values; find_missing_references; validate_resource
 
 ### `backend/oms/services/ontology_resources.py`
-- Module summary: Ontology resource storage service (shared properties, value types, interfaces, groups, functions, action types).
+- Module summary: Ontology resource storage service.
 - Responsibilities: not documented
 - Invariants: not documented
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
-- API surface: public=2 | top-level functions=3 | classes=1 | methods=9
-- Runtime signals: async_functions=6 | try=1 | raise=4 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=0/3 (0%) | classes=1/1 (100%) | methods=0/9 (0%)
-- Internal imports (3): oms.exceptions; oms.services.async_terminus; shared.observability.tracing
-- External imports (4): __future__; datetime; logging; typing
+- API surface: public=2 | top-level functions=7 | classes=1 | methods=19
+- Runtime signals: async_functions=15 | try=6 | raise=8 | broad_except=3 | bare_except=0 | finally_return=0
+- Doc coverage: module=yes | top-level functions=0/7 (0%) | classes=1/1 (100%) | methods=0/19 (0%)
+- Internal imports (3): oms.exceptions; shared.config.settings; shared.observability.tracing
+- External imports (7): __future__; asyncio; asyncpg; datetime; json; logging; typing
 - Public API names: OntologyResourceService; normalize_resource_type
 
 ### `backend/oms/services/property_to_relationship_converter.py`
@@ -5348,9 +5166,9 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - API surface: public=2 | top-level functions=0 | classes=2 | methods=8
-- Runtime signals: async_functions=7 | try=8 | raise=11 | broad_except=8 | bare_except=0 | finally_return=0
+- Runtime signals: async_functions=7 | try=5 | raise=8 | broad_except=5 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=2/2 (100%) | methods=8/8 (100%)
-- Internal imports (11): oms.database.decorators; oms.database.mvcc; oms.exceptions; oms.services.terminus.base; oms.services.terminus.version_control; shared.models.base; shared.observability.tracing; shared.utils.commit_utils (+3 more)
+- Internal imports (7): oms.database.decorators; oms.database.mvcc; oms.exceptions; shared.models.base; shared.observability.tracing; shared.utils.diff_utils; shared.utils.json_utils
 - External imports (5): datetime; json; logging; typing; uuid
 - Public API names: PullRequestService; PullRequestStatus
 
@@ -5367,132 +5185,6 @@
 - Internal imports (1): shared.models.ontology
 - External imports (3): dataclasses; logging; typing
 - Public API names: RelationshipManager; RelationshipPair
-
-### `backend/oms/services/terminus/__init__.py`
-- Module summary: TerminusDB service modules
-- Responsibilities: not documented
-- Invariants: not documented
-- Failure modes: not documented
-- Extension points: not documented
-- Dependencies (doc): not documented
-- API surface: public=0 | top-level functions=0 | classes=0 | methods=0
-- Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
-- Internal imports (7): .base; .database; .document; .instance; .ontology; .query; .version_control
-- External imports (0): not documented
-- Public API names: not documented
-
-### `backend/oms/services/terminus/base.py`
-- Module summary: Base TerminusDB Service
-- Responsibilities: not documented
-- Invariants: not documented
-- Failure modes: not documented
-- Extension points: not documented
-- Dependencies (doc): not documented
-- API surface: public=1 | top-level functions=0 | classes=1 | methods=11
-- Runtime signals: async_functions=8 | try=5 | raise=6 | broad_except=3 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=1/1 (100%) | methods=11/11 (100%)
-- Internal imports (5): oms.exceptions; oms.utils.terminus_retry; shared.config.settings; shared.models.config; shared.utils.terminus_branch
-- External imports (4): httpx; json; logging; typing
-- Public API names: BaseTerminusService
-
-### `backend/oms/services/terminus/database.py`
-- Module summary: Database Service for TerminusDB
-- Responsibilities: not documented
-- Invariants: not documented
-- Failure modes: not documented
-- Extension points: not documented
-- Dependencies (doc): not documented
-- API surface: public=1 | top-level functions=0 | classes=1 | methods=8
-- Runtime signals: async_functions=6 | try=7 | raise=11 | broad_except=7 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=1/1 (100%) | methods=7/8 (87%)
-- Internal imports (2): .base; oms.exceptions
-- External imports (3): datetime; logging; typing
-- Public API names: DatabaseService
-
-### `backend/oms/services/terminus/db_backed.py`
-- Module summary: Database-backed Terminus service base.
-- Responsibilities: not documented
-- Invariants: not documented
-- Failure modes: not documented
-- Extension points: not documented
-- Dependencies (doc): not documented
-- API surface: public=1 | top-level functions=0 | classes=1 | methods=2
-- Runtime signals: async_functions=1 | try=1 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=1/1 (100%) | methods=0/2 (0%)
-- Internal imports (2): .base; .database
-- External imports (1): __future__
-- Public API names: DatabaseBackedTerminusService
-
-### `backend/oms/services/terminus/document.py`
-- Module summary: Document Service for TerminusDB
-- Responsibilities: not documented
-- Invariants: not documented
-- Failure modes: not documented
-- Extension points: not documented
-- Dependencies (doc): not documented
-- API surface: public=1 | top-level functions=0 | classes=1 | methods=12
-- Runtime signals: async_functions=12 | try=10 | raise=14 | broad_except=9 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=1/1 (100%) | methods=12/12 (100%)
-- Internal imports (2): .db_backed; oms.exceptions
-- External imports (3): datetime; logging; typing
-- Public API names: DocumentService
-
-### `backend/oms/services/terminus/instance.py`
-- Module summary: Instance Service for TerminusDB
-- Responsibilities: not documented
-- Invariants: not documented
-- Failure modes: not documented
-- Extension points: not documented
-- Dependencies (doc): not documented
-- API surface: public=1 | top-level functions=0 | classes=1 | methods=3
-- Runtime signals: async_functions=3 | try=6 | raise=4 | broad_except=3 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=1/1 (100%) | methods=3/3 (100%)
-- Internal imports (2): .db_backed; oms.exceptions
-- External imports (3): json; logging; typing
-- Public API names: InstanceService
-
-### `backend/oms/services/terminus/ontology.py`
-- Module summary: Ontology Service for TerminusDB
-- Responsibilities: not documented
-- Invariants: not documented
-- Failure modes: not documented
-- Extension points: not documented
-- Dependencies (doc): not documented
-- API surface: public=1 | top-level functions=0 | classes=1 | methods=14
-- Runtime signals: async_functions=8 | try=12 | raise=11 | broad_except=10 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=1/1 (100%) | methods=12/14 (85%)
-- Internal imports (6): .db_backed; oms.exceptions; shared.models.common; shared.models.ontology; shared.services.registries.ontology_key_spec_registry; shared.utils.language
-- External imports (3): datetime; logging; typing
-- Public API names: OntologyService
-
-### `backend/oms/services/terminus/query.py`
-- Module summary: Query Service for TerminusDB
-- Responsibilities: not documented
-- Invariants: not documented
-- Failure modes: not documented
-- Extension points: not documented
-- Dependencies (doc): not documented
-- API surface: public=1 | top-level functions=0 | classes=1 | methods=5
-- Runtime signals: async_functions=1 | try=4 | raise=5 | broad_except=1 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=1/1 (100%) | methods=1/5 (20%)
-- Internal imports (4): .base; oms.exceptions; shared.config.settings; shared.utils.collection_utils
-- External imports (2): logging; typing
-- Public API names: QueryService
-
-### `backend/oms/services/terminus/version_control.py`
-- Module summary: Version Control Service for TerminusDB
-- Responsibilities: not documented
-- Invariants: not documented
-- Failure modes: not documented
-- Extension points: not documented
-- Dependencies (doc): not documented
-- API surface: public=1 | top-level functions=0 | classes=1 | methods=22
-- Runtime signals: async_functions=17 | try=15 | raise=18 | broad_except=15 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=1/1 (100%) | methods=18/22 (81%)
-- Internal imports (4): .db_backed; oms.exceptions; shared.config.settings; shared.utils.terminus_branch
-- External imports (5): asyncio; datetime; logging; typing; uuid
-- Public API names: VersionControlService
 
 ### `backend/oms/utils/__init__.py`
 - Module summary: no docstring
@@ -5550,20 +5242,6 @@
 - External imports (1): __future__
 - Public API names: map_registry_status
 
-### `backend/oms/utils/constraint_extractor.py`
-- Module summary: 🔥 ULTRA! 속성/관계 제약조건 및 기본값 추출 로직
-- Responsibilities: not documented
-- Invariants: not documented
-- Failure modes: not documented
-- Extension points: not documented
-- Dependencies (doc): not documented
-- API surface: public=6 | top-level functions=3 | classes=3 | methods=7
-- Runtime signals: async_functions=0 | try=2 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=3/3 (100%) | classes=3/3 (100%) | methods=6/7 (85%)
-- Internal imports (0): not documented
-- External imports (4): enum; json; logging; typing
-- Public API names: ConstraintExtractor; ConstraintType; DefaultValueType; extract_all_constraints; extract_property_constraints; extract_relationship_constraints
-
 ### `backend/oms/utils/deprecation.py`
 - Module summary: Deprecation utilities for marking obsolete methods
 - Responsibilities: not documented
@@ -5605,34 +5283,6 @@
 - Internal imports (2): oms.utils.cardinality_utils; shared.models.ontology
 - External imports (6): collections; dataclasses; enum; heapq; logging; typing
 - Public API names: PathQuery; PathType; RelationshipHop; RelationshipPath; RelationshipPathTracker; TraversalDirection
-
-### `backend/oms/utils/terminus_retry.py`
-- Module summary: no docstring
-- Responsibilities: not documented
-- Invariants: not documented
-- Failure modes: not documented
-- Extension points: not documented
-- Dependencies (doc): not documented
-- API surface: public=1 | top-level functions=1 | classes=0 | methods=0
-- Runtime signals: async_functions=1 | try=1 | raise=3 | broad_except=1 | bare_except=0 | finally_return=0
-- Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
-- Internal imports (0): not documented
-- External imports (6): __future__; asyncio; functools; httpx; logging; typing
-- Public API names: build_async_retry
-
-### `backend/oms/utils/terminus_schema_types.py`
-- Module summary: 🔥 THINK ULTRA! TerminusDB v11.x 복잡한 스키마 타입 완전 지원 모듈
-- Responsibilities: not documented
-- Invariants: not documented
-- Failure modes: not documented
-- Extension points: not documented
-- Dependencies (doc): not documented
-- API surface: public=7 | top-level functions=3 | classes=4 | methods=23
-- Runtime signals: async_functions=0 | try=0 | raise=2 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=3/3 (100%) | classes=4/4 (100%) | methods=22/23 (95%)
-- Internal imports (0): not documented
-- External imports (3): enum; logging; typing
-- Public API names: TerminusConstraintProcessor; TerminusSchemaBuilder; TerminusSchemaConverter; TerminusSchemaType; convert_simple_schema; create_basic_class_schema; create_subdocument_schema
 
 ### `backend/oms/validation_codes.py`
 - Module summary: Formal enum for ontology validation and health issue codes.
@@ -5699,10 +5349,10 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
-- API surface: public=1 | top-level functions=0 | classes=3 | methods=25
-- Runtime signals: async_functions=16 | try=31 | raise=29 | broad_except=28 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=1/3 (33%) | methods=12/25 (48%)
-- Internal imports (27): oms.exceptions; oms.services.async_terminus; oms.services.event_store; shared.config.app_config; shared.config.settings; shared.models.commands; shared.models.config; shared.models.event_envelope (+19 more)
+- API surface: public=1 | top-level functions=0 | classes=3 | methods=28
+- Runtime signals: async_functions=15 | try=30 | raise=28 | broad_except=28 | bare_except=0 | finally_return=0
+- Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=1/3 (33%) | methods=12/28 (42%)
+- Internal imports (26): oms.services.event_store; oms.services.ontology_resources; shared.config.app_config; shared.config.settings; shared.models.commands; shared.models.event_envelope; shared.models.events; shared.observability.metrics (+18 more)
 - External imports (8): asyncio; confluent_kafka; dataclasses; datetime; json; logging; os; typing
 - Public API names: OntologyWorker
 
@@ -5881,7 +5531,7 @@
 - Runtime signals: async_functions=0 | try=1 | raise=0 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=3/3 (100%) | classes=0/0 (n/a) | methods=0/0 (n/a)
 - Internal imports (0): not documented
-- External imports (8): importlib; json; os; pathlib; scripts; subprocess; sys; typing
+- External imports (4): pathlib; scripts; sys; typing
 - Public API names: audit_service; check_service_imports; main
 
 ### `backend/scripts/import_performance_test.py`
@@ -5897,90 +5547,6 @@
 - Internal imports (0): not documented
 - External imports (5): importlib; pathlib; sys; time; tracemalloc
 - Public API names: main; measure_import_performance; test_bulk_import_simulation; test_direct_import; test_single_service_need
-
-### `backend/scripts/migrations/add_lightweight_system_fields.py`
-- Module summary: 🔥 THINK ULTRA: Add system fields to TerminusDB schemas (lightweight graph)
-- Responsibilities: not documented
-- Invariants: not documented
-- Failure modes: not documented
-- Extension points: not documented
-- Dependencies (doc): not documented
-- API surface: public=3 | top-level functions=3 | classes=0 | methods=0
-- Runtime signals: async_functions=3 | try=2 | raise=0 | broad_except=2 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=3/3 (100%) | classes=0/0 (n/a) | methods=0/0 (n/a)
-- Internal imports (3): shared.errors.error_envelope; shared.errors.error_types; shared.observability.request_context
-- External imports (4): asyncio; datetime; logging; typing
-- Public API names: add_system_fields_to_all_ontologies; add_system_fields_to_ontology; verify_lightweight_architecture
-
-### `backend/scripts/migrations/add_system_fields_direct.py`
-- Module summary: Directly add system fields to known classes via OMS API
-- Responsibilities: not documented
-- Invariants: not documented
-- Failure modes: not documented
-- Extension points: not documented
-- Dependencies (doc): not documented
-- API surface: public=1 | top-level functions=1 | classes=0 | methods=0
-- Runtime signals: async_functions=1 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=1/1 (100%) | classes=0/0 (n/a) | methods=0/0 (n/a)
-- Internal imports (0): not documented
-- External imports (3): aiohttp; asyncio; json
-- Public API names: update_ontology_with_system_fields
-
-### `backend/scripts/migrations/add_system_fields_to_schema.py`
-- Module summary: Add system fields to TerminusDB schema for lightweight nodes
-- Responsibilities: not documented
-- Invariants: not documented
-- Failure modes: not documented
-- Extension points: not documented
-- Dependencies (doc): not documented
-- API surface: public=3 | top-level functions=3 | classes=0 | methods=0
-- Runtime signals: async_functions=3 | try=1 | raise=0 | broad_except=1 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=3/3 (100%) | classes=0/0 (n/a) | methods=0/0 (n/a)
-- Internal imports (0): not documented
-- External imports (3): asyncio; httpx; typing
-- Public API names: add_system_fields_to_class; get_all_classes; main
-
-### `backend/scripts/migrations/clean_terminus_reference.py`
-- Module summary: ULTRA FIX: Clean TerminusDB Stale Reference
-- Responsibilities: not documented
-- Invariants: not documented
-- Failure modes: not documented
-- Extension points: not documented
-- Dependencies (doc): not documented
-- API surface: public=1 | top-level functions=1 | classes=0 | methods=0
-- Runtime signals: async_functions=1 | try=3 | raise=0 | broad_except=3 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
-- Internal imports (2): shared.config.settings; shared.models.config
-- External imports (4): asyncio; base64; httpx; json
-- Public API names: clean_stale_reference
-
-### `backend/scripts/migrations/create_db_and_schema_direct.py`
-- Module summary: Create database and schema directly using TerminusDB API
-- Responsibilities: not documented
-- Invariants: not documented
-- Failure modes: not documented
-- Extension points: not documented
-- Dependencies (doc): not documented
-- API surface: public=4 | top-level functions=4 | classes=0 | methods=0
-- Runtime signals: async_functions=4 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=4/4 (100%) | classes=0/0 (n/a) | methods=0/0 (n/a)
-- Internal imports (0): not documented
-- External imports (3): asyncio; httpx; json
-- Public API names: create_database_direct; create_schema_with_system_fields; main; verify_schema
-
-### `backend/scripts/migrations/create_integration_schema.py`
-- Module summary: Create IntegrationProduct schema in TerminusDB
-- Responsibilities: not documented
-- Invariants: not documented
-- Failure modes: not documented
-- Extension points: not documented
-- Dependencies (doc): not documented
-- API surface: public=1 | top-level functions=1 | classes=0 | methods=0
-- Runtime signals: async_functions=1 | try=1 | raise=0 | broad_except=1 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
-- Internal imports (3): oms.services.async_terminus; shared.models.config; shared.models.ontology
-- External imports (3): asyncio; os; sys
-- Public API names: create_schema
 
 ### `backend/scripts/migrations/create_minio_bucket.py`
 - Module summary: Create MinIO events bucket with correct credentials
@@ -6035,50 +5601,8 @@
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=2/2 (100%) | classes=0/0 (n/a) | methods=0/0 (n/a)
 - Internal imports (0): not documented
-- External imports (3): os; pathlib; re
+- External imports (2): os; re
 - Public API names: fix_datetime_in_file; main
-
-### `backend/scripts/migrations/fix_terminus_schema.py`
-- Module summary: Fix TerminusDB schemas to be truly lightweight
-- Responsibilities: not documented
-- Invariants: not documented
-- Failure modes: not documented
-- Extension points: not documented
-- Dependencies (doc): not documented
-- API surface: public=1 | top-level functions=1 | classes=0 | methods=0
-- Runtime signals: async_functions=1 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
-- Internal imports (0): not documented
-- External imports (3): asyncio; httpx; json
-- Public API names: fix_schemas
-
-### `backend/scripts/migrations/implement_lightweight_schema.py`
-- Module summary: 🔥 THINK ULTRA: Implement TRUE lightweight schemas for TerminusDB
-- Responsibilities: not documented
-- Invariants: not documented
-- Failure modes: not documented
-- Extension points: not documented
-- Dependencies (doc): not documented
-- API surface: public=1 | top-level functions=1 | classes=0 | methods=0
-- Runtime signals: async_functions=1 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
-- Internal imports (0): not documented
-- External imports (4): aiohttp; asyncio; json; time
-- Public API names: implement_lightweight_architecture
-
-### `backend/scripts/migrations/migrate_es_to_terminus_lightweight.py`
-- Module summary: Migrate Elasticsearch Data to TerminusDB Lightweight Nodes
-- Responsibilities: not documented
-- Invariants: not documented
-- Failure modes: not documented
-- Extension points: not documented
-- Dependencies (doc): not documented
-- API surface: public=3 | top-level functions=2 | classes=1 | methods=7
-- Runtime signals: async_functions=6 | try=2 | raise=0 | broad_except=2 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=2/2 (100%) | classes=1/1 (100%) | methods=6/7 (85%)
-- Internal imports (2): oms.services.async_terminus; shared.models.config
-- External imports (8): aiohttp; asyncio; datetime; json; logging; os; sys; typing
-- Public API names: ESToTerminusMigrator; main; verify_migration
 
 ### `backend/scripts/migrations/update_imports.py`
 - Module summary: 🔥 THINK ULTRA!! Import Update Script
@@ -6185,11 +5709,11 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
-- API surface: public=2 | top-level functions=3 | classes=1 | methods=13
-- Runtime signals: async_functions=8 | try=8 | raise=1 | broad_except=8 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=0/3 (0%) | classes=0/1 (0%) | methods=0/13 (0%)
+- API surface: public=2 | top-level functions=2 | classes=1 | methods=12
+- Runtime signals: async_functions=7 | try=7 | raise=1 | broad_except=7 | bare_except=0 | finally_return=0
+- Doc coverage: module=yes | top-level functions=0/2 (0%) | classes=0/1 (0%) | methods=0/12 (0%)
 - Internal imports (1): shared.config.settings
-- External imports (11): __future__; aiohttp; asyncio; asyncpg; base64; confluent_kafka; elasticsearch; os (+3 more)
+- External imports (10): __future__; aiohttp; asyncio; asyncpg; confluent_kafka; elasticsearch; os; redis (+2 more)
 - Public API names: EnvironmentValidator; main
 
 ### `backend/scripts/verify-imports.py`
@@ -6205,6 +5729,20 @@
 - Internal imports (0): not documented
 - External imports (6): ast; importlib; os; pathlib; sys; typing
 - Public API names: ImportChecker; check_conditional_imports; extract_imports; main; verify_import; verify_service
+
+### `backend/scripts/verify_projection_consistency.py`
+- Module summary: Verify projection consistency between Event Store (durable source) and Elasticsearch.
+- Responsibilities: not documented
+- Invariants: not documented
+- Failure modes: not documented
+- Extension points: not documented
+- Dependencies (doc): not documented
+- API surface: public=1 | top-level functions=6 | classes=0 | methods=0
+- Runtime signals: async_functions=2 | try=2 | raise=1 | broad_except=1 | bare_except=0 | finally_return=0
+- Doc coverage: module=yes | top-level functions=0/6 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Internal imports (5): shared.config.search_config; shared.config.settings; shared.services.core.projection_consistency; shared.services.storage.elasticsearch_service; shared.services.storage.event_store
+- External imports (9): __future__; argparse; asyncio; collections; datetime; json; pathlib; sys (+1 more)
+- Public API names: main
 
 ## shared
 
@@ -6229,9 +5767,9 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
-- API surface: public=1 | top-level functions=1 | classes=1 | methods=12
+- API surface: public=1 | top-level functions=1 | classes=1 | methods=11
 - Runtime signals: async_functions=0 | try=1 | raise=1 | broad_except=1 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=1/1 (100%) | classes=1/1 (100%) | methods=12/12 (100%)
+- Doc coverage: module=yes | top-level functions=1/1 (100%) | classes=1/1 (100%) | methods=11/11 (100%)
 - Internal imports (4): .app_config; .search_config; .service_config; .settings
 - External imports (1): logging
 - Public API names: Config
@@ -6313,9 +5851,9 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
-- API surface: public=5 | top-level functions=4 | classes=2 | methods=48
+- API surface: public=5 | top-level functions=4 | classes=2 | methods=47
 - Runtime signals: async_functions=0 | try=1 | raise=1 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=4/4 (100%) | classes=1/2 (50%) | methods=47/48 (97%)
+- Doc coverage: module=yes | top-level functions=4/4 (100%) | classes=1/2 (50%) | methods=46/47 (97%)
 - Internal imports (1): shared.config.settings
 - External imports (3): logging; pydantic; typing
 - Public API names: ServiceConfig; get_agent_url; get_bff_url; get_funnel_url; get_oms_url
@@ -6327,9 +5865,9 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
-- API surface: public=53 | top-level functions=18 | classes=46 | methods=210
+- API surface: public=53 | top-level functions=18 | classes=46 | methods=207
 - Runtime signals: async_functions=0 | try=13 | raise=4 | broad_except=1 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=6/18 (33%) | classes=46/46 (100%) | methods=17/210 (8%)
+- Doc coverage: module=yes | top-level functions=6/18 (33%) | classes=46/46 (100%) | methods=17/207 (8%)
 - Internal imports (0): not documented
 - External imports (7): enum; json; logging; os; pydantic; pydantic_settings; typing
 - Public API names: ActionOutboxSettings; ActionWorkerSettings; AgentPlanSettings; AgentRetentionWorkerSettings; AgentRuntimeSettings; ApplicationSettings; AuthSettings; BranchVirtualizationSettings; CacheSettings; ChaosSettings; ClientSettings; ConnectorSyncSettings (+41 more)
@@ -6610,7 +6148,7 @@
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
-- Internal imports (6): .common; .config; .google_sheets; .ontology; .ontology_resources; .pipeline_job
+- Internal imports (5): .common; .google_sheets; .ontology; .ontology_resources; .pipeline_job
 - External imports (0): not documented
 - Public API names: not documented
 
@@ -6711,20 +6249,6 @@
 - Internal imports (2): .query_operator_mixin; .responses
 - External imports (5): dataclasses; enum; logging; typing; warnings
 - Public API names: BaseResponse; Cardinality; DataType; QueryOperator
-
-### `backend/shared/models/config.py`
-- Module summary: Configuration models for SPICE HARVESTER
-- Responsibilities: not documented
-- Invariants: not documented
-- Failure modes: not documented
-- Extension points: not documented
-- Dependencies (doc): not documented
-- API surface: public=2 | top-level functions=0 | classes=2 | methods=8
-- Runtime signals: async_functions=0 | try=0 | raise=5 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=2/2 (100%) | methods=8/8 (100%)
-- Internal imports (1): shared.config.settings
-- External imports (3): dataclasses; datetime; typing
-- Public API names: AsyncConnectionInfo; ConnectionConfig
 
 ### `backend/shared/models/event_envelope.py`
 - Module summary: Event envelope model used across services.
@@ -7237,12 +6761,12 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
-- API surface: public=10 | top-level functions=10 | classes=0 | methods=0
-- Runtime signals: async_functions=7 | try=8 | raise=3 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=no | top-level functions=0/10 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- API surface: public=12 | top-level functions=12 | classes=0 | methods=0
+- Runtime signals: async_functions=9 | try=12 | raise=3 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/12 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
 - Internal imports (1): shared.config.settings
 - External imports (4): __future__; asyncpg; collections; typing
-- Public API names: enforce_database_role; ensure_database_access_table; fetch_database_access_entries; get_database_access_role; has_database_access_config; normalize_database_role; resolve_database_actor; resolve_database_actor_with_name; upsert_database_access_entry; upsert_database_owner
+- Public API names: delete_database_access_entries; enforce_database_role; ensure_database_access_table; fetch_database_access_entries; get_database_access_role; has_database_access_config; list_database_names; normalize_database_role; resolve_database_actor; resolve_database_actor_with_name; upsert_database_access_entry; upsert_database_owner
 
 ### `backend/shared/security/input_sanitizer.py`
 - Module summary: Comprehensive Input Sanitization Module
@@ -7412,20 +6936,6 @@
 - External imports (0): not documented
 - Public API names: not documented
 
-### `backend/shared/services/core/async_terminus.py`
-- Module summary: Async TerminusDB Service for BFF
-- Responsibilities: not documented
-- Invariants: not documented
-- Failure modes: not documented
-- Extension points: not documented
-- Dependencies (doc): not documented
-- API surface: public=1 | top-level functions=0 | classes=1 | methods=4
-- Runtime signals: async_functions=3 | try=1 | raise=0 | broad_except=1 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=1/1 (100%) | methods=3/4 (75%)
-- Internal imports (1): shared.models.config
-- External imports (2): httpx; logging
-- Public API names: AsyncTerminusService
-
 ### `backend/shared/services/core/audit_log_store.py`
 - Module summary: First-class audit log store (Postgres).
 - Responsibilities: not documented
@@ -7468,20 +6978,6 @@
 - External imports (4): datetime; enum; logging; typing
 - Public API names: CommandStatus; CommandStatusService
 
-### `backend/shared/services/core/consistency_checker.py`
-- Module summary: TDB-ES Consistency Checker
-- Responsibilities: not documented
-- Invariants: not documented
-- Failure modes: not documented
-- Extension points: not documented
-- Dependencies (doc): not documented
-- API surface: public=2 | top-level functions=1 | classes=1 | methods=8
-- Runtime signals: async_functions=8 | try=6 | raise=0 | broad_except=6 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=1/1 (100%) | classes=1/1 (100%) | methods=7/8 (87%)
-- Internal imports (0): not documented
-- External imports (10): aiohttp; asyncio; boto3; botocore; datetime; hashlib; json; logging (+2 more)
-- Public API names: ConsistencyChecker; run_consistency_check
-
 ### `backend/shared/services/core/consistency_token.py`
 - Module summary: Consistency Token Service
 - Responsibilities: not documented
@@ -7517,12 +7013,12 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
-- API surface: public=11 | top-level functions=0 | classes=11 | methods=32
-- Runtime signals: async_functions=8 | try=8 | raise=0 | broad_except=8 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=11/11 (100%) | methods=15/32 (46%)
+- API surface: public=10 | top-level functions=0 | classes=10 | methods=28
+- Runtime signals: async_functions=7 | try=6 | raise=0 | broad_except=6 | bare_except=0 | finally_return=0
+- Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=10/10 (100%) | methods=14/28 (50%)
 - Internal imports (0): not documented
 - External imports (8): abc; asyncio; dataclasses; datetime; enum; logging; time; typing
-- Public API names: AggregatedHealthStatus; DatabaseHealthCheck; ElasticsearchHealthCheck; HealthCheckAggregator; HealthCheckInterface; HealthCheckResult; HealthStatus; RedisHealthCheck; ServiceType; StorageHealthCheck; TerminusDBHealthCheck
+- Public API names: AggregatedHealthStatus; DatabaseHealthCheck; ElasticsearchHealthCheck; HealthCheckAggregator; HealthCheckInterface; HealthCheckResult; HealthStatus; RedisHealthCheck; ServiceType; StorageHealthCheck
 
 ### `backend/shared/services/core/instance_index_rebuild_service.py`
 - Module summary: Instance index rebuild service.
@@ -7565,6 +7061,20 @@
 - Internal imports (5): shared.config.settings; shared.i18n; shared.models.ontology; shared.models.ontology_lint; shared.utils.branch_utils
 - External imports (4): __future__; dataclasses; re; typing
 - Public API names: OntologyLinterConfig; compute_risk_score; lint_ontology_create; lint_ontology_update; risk_level
+
+### `backend/shared/services/core/projection_consistency.py`
+- Module summary: Projection consistency helpers.
+- Responsibilities: not documented
+- Invariants: not documented
+- Failure modes: not documented
+- Extension points: not documented
+- Dependencies (doc): not documented
+- API surface: public=7 | top-level functions=7 | classes=3 | methods=0
+- Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=yes | top-level functions=4/7 (57%) | classes=0/3 (0%) | methods=0/0 (n/a)
+- Internal imports (1): shared.models.event_envelope
+- External imports (4): __future__; dataclasses; datetime; typing
+- Public API names: ExpectationBuildResult; InstanceProjectionExpectation; InstanceProjectionKey; build_instance_expectations; evaluate_projection_document; key_from_instance_event; parse_instance_aggregate_id
 
 ### `backend/shared/services/core/projection_position_tracker.py`
 - Module summary: Projection Position Tracker.
@@ -8931,12 +8441,12 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
-- API surface: public=4 | top-level functions=3 | classes=1 | methods=20
+- API surface: public=3 | top-level functions=2 | classes=1 | methods=20
 - Runtime signals: async_functions=19 | try=20 | raise=18 | broad_except=4 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=3/3 (100%) | classes=1/1 (100%) | methods=19/20 (95%)
+- Doc coverage: module=yes | top-level functions=2/2 (100%) | classes=1/1 (100%) | methods=19/20 (95%)
 - Internal imports (2): shared.observability.tracing; shared.services.storage.connectivity
 - External imports (3): elasticsearch; logging; typing
-- Public API names: ElasticsearchService; create_elasticsearch_service; create_elasticsearch_service_legacy; promote_alias_to_index
+- Public API names: ElasticsearchService; create_elasticsearch_service; promote_alias_to_index
 
 ### `backend/shared/services/storage/event_store.py`
 - Module summary: 🔥 THINK ULTRA! Shared Event Store (S3/MinIO)
@@ -9029,12 +8539,12 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
-- API surface: public=3 | top-level functions=2 | classes=1 | methods=22
+- API surface: public=2 | top-level functions=1 | classes=1 | methods=22
 - Runtime signals: async_functions=18 | try=15 | raise=17 | broad_except=2 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=2/2 (100%) | classes=1/1 (100%) | methods=22/22 (100%)
+- Doc coverage: module=yes | top-level functions=1/1 (100%) | classes=1/1 (100%) | methods=22/22 (100%)
 - Internal imports (3): shared.models.commands; shared.observability.tracing; shared.services.storage.s3_client_config
 - External imports (6): asyncio; datetime; hashlib; json; logging; typing
-- Public API names: StorageService; create_storage_service; create_storage_service_legacy
+- Public API names: StorageService; create_storage_service
 
 ### `backend/shared/setup.py`
 - Module summary: Setup script for spice-shared package
@@ -9134,20 +8644,6 @@
 - External imports (4): __future__; dataclasses; pathlib; typing
 - Public API names: FunctionCompatibility; default_snapshot_path; filter_functions; load_default_foundry_functions_snapshot; load_foundry_functions_snapshot
 
-### `backend/shared/tools/registry_cleanup.py`
-- Module summary: Dev-only cleanup for TerminusDB databases created by tests/smoke runs.
-- Responsibilities: not documented
-- Invariants: not documented
-- Failure modes: not documented
-- Extension points: not documented
-- Dependencies (doc): not documented
-- API surface: public=3 | top-level functions=16 | classes=1 | methods=0
-- Runtime signals: async_functions=4 | try=4 | raise=5 | broad_except=3 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=0/16 (0%) | classes=0/1 (0%) | methods=0/0 (n/a)
-- Internal imports (2): shared.config.settings; shared.tools.bff_admin_api
-- External imports (11): __future__; argparse; asyncio; asyncpg; dataclasses; datetime; httpx; logging (+3 more)
-- Public API names: CleanupPlan; build_parser; main
-
 ### `backend/shared/utils/__init__.py`
 - Module summary: Utility functions for SPICE HARVESTER services
 - Responsibilities: not documented
@@ -9239,9 +8735,9 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
-- API surface: public=6 | top-level functions=5 | classes=1 | methods=0
+- API surface: public=6 | top-level functions=8 | classes=1 | methods=0
 - Runtime signals: async_functions=1 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=no | top-level functions=0/5 (0%) | classes=0/1 (0%) | methods=0/0 (n/a)
+- Doc coverage: module=no | top-level functions=0/8 (0%) | classes=0/1 (0%) | methods=0/0 (n/a)
 - Internal imports (1): shared.utils.ontology_type_normalization
 - External imports (3): __future__; dataclasses; typing
 - Public API names: ActionTargetRuntimeContract; build_property_type_map_from_properties; extract_interfaces_from_metadata; extract_required_action_interfaces; load_action_target_runtime_contract; strip_interface_prefix
@@ -9674,9 +9170,9 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - API surface: public=5 | top-level functions=5 | classes=0 | methods=0
-- Runtime signals: async_functions=1 | try=1 | raise=0 | broad_except=1 | bare_except=0 | finally_return=0
+- Runtime signals: async_functions=1 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=3/5 (60%) | classes=0/0 (n/a) | methods=0/0 (n/a)
-- Internal imports (1): shared.utils.commit_utils
+- Internal imports (0): not documented
 - External imports (3): __future__; logging; typing
 - Public API names: build_ontology_version; extract_ontology_version; normalize_ontology_version; resolve_ontology_version; split_ref_commit
 
@@ -9889,20 +9385,6 @@
 - Internal imports (0): not documented
 - External imports (3): __future__; ast; typing
 - Public API names: infer_submission_criteria_failure_reason
-
-### `backend/shared/utils/terminus_branch.py`
-- Module summary: TerminusDB branch name encoding helpers.
-- Responsibilities: not documented
-- Invariants: not documented
-- Failure modes: not documented
-- Extension points: not documented
-- Dependencies (doc): not documented
-- API surface: public=2 | top-level functions=2 | classes=0 | methods=0
-- Runtime signals: async_functions=0 | try=1 | raise=1 | broad_except=1 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
-- Internal imports (0): not documented
-- External imports (3): __future__; base64; logging
-- Public API names: decode_branch_name; encode_branch_name
 
 ### `backend/shared/utils/time_utils.py`
 - Module summary: no docstring
@@ -10417,12 +9899,12 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
-- API surface: public=9 | top-level functions=38 | classes=1 | methods=0
-- Runtime signals: async_functions=0 | try=8 | raise=28 | broad_except=4 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=1/38 (2%) | classes=0/1 (0%) | methods=0/0 (n/a)
+- API surface: public=8 | top-level functions=37 | classes=1 | methods=0
+- Runtime signals: async_functions=0 | try=7 | raise=27 | broad_except=3 | bare_except=0 | finally_return=0
+- Doc coverage: module=yes | top-level functions=1/37 (2%) | classes=0/1 (0%) | methods=0/0 (n/a)
 - Internal imports (0): not documented
 - External imports (12): __future__; argparse; dataclasses; json; os; pathlib; random; subprocess (+4 more)
-- Public API names: Endpoints; main; scenario_es_down_then_recover; scenario_instance_worker_crash_after_claim; scenario_kafka_down_then_recover; scenario_out_of_order_delivery; scenario_redis_down_then_recover; scenario_soak_random_failures; scenario_terminus_down_then_recover
+- Public API names: Endpoints; main; scenario_es_down_then_recover; scenario_instance_worker_crash_after_claim; scenario_kafka_down_then_recover; scenario_out_of_order_delivery; scenario_redis_down_then_recover; scenario_soak_random_failures
 
 ### `backend/tests/conftest.py`
 - Module summary: no docstring
@@ -10509,7 +9991,7 @@
 - Public API names: test_auth_disabled_requires_explicit_allow; test_oms_write_requires_auth
 
 ### `backend/tests/test_branch_virtualization_e2e.py`
-- Module summary: E2E test for branch-based data virtualization (copy-on-write semantics).
+- Module summary: E2E test for legacy branch-based data virtualization (copy-on-write semantics).
 - Responsibilities: not documented
 - Invariants: not documented
 - Failure modes: not documented
@@ -10543,11 +10025,11 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
-- API surface: public=14 | top-level functions=4 | classes=14 | methods=51
-- Runtime signals: async_functions=19 | try=26 | raise=0 | broad_except=11 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=3/4 (75%) | classes=14/14 (100%) | methods=41/51 (80%)
+- API surface: public=14 | top-level functions=4 | classes=14 | methods=50
+- Runtime signals: async_functions=19 | try=25 | raise=0 | broad_except=10 | bare_except=0 | finally_return=0
+- Doc coverage: module=yes | top-level functions=3/4 (75%) | classes=14/14 (100%) | methods=41/50 (82%)
 - Internal imports (1): shared.config.settings
-- External imports (13): __future__; aiohttp; ast; asyncio; confluent_kafka; contextlib; os; pytest (+5 more)
+- External imports (12): __future__; aiohttp; ast; asyncio; confluent_kafka; contextlib; os; pytest (+4 more)
 - Public API names: TestBFFHealth; TestConsistencySummary; TestDatabaseConnectivity; TestEndToEndFlowSimulation; TestInfraConnectivity; TestKafkaConnectivity; TestKafkaProducerConfiguration; TestMSAServiceHealth; TestOutboxPatternVerification; TestPipelineJobQueue; TestProcessedEventRegistryIdempotency; TestSafeKafkaConsumerConfiguration (+2 more)
 
 ### `backend/tests/test_core_functionality.py`
@@ -10642,7 +10124,7 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - API surface: public=4 | top-level functions=22 | classes=3 | methods=3
-- Runtime signals: async_functions=7 | try=15 | raise=39 | broad_except=12 | bare_except=0 | finally_return=0
+- Runtime signals: async_functions=7 | try=15 | raise=40 | broad_except=12 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=4/22 (18%) | classes=0/3 (0%) | methods=0/3 (0%)
 - Internal imports (1): tests.utils.auth
 - External imports (13): __future__; aiohttp; asyncio; dataclasses; io; jose; json; os (+5 more)
@@ -10732,20 +10214,6 @@
 - External imports (5): __future__; asyncio; os; pytest; uuid
 - Public API names: test_allocator_catches_up_when_seed_is_ahead_of_db_state; test_allocator_concurrent_reservation_is_unique_and_monotonic; test_allocator_occ_reserves_only_when_expected_matches; test_allocator_seeding_starts_after_existing_stream_max
 
-### `backend/tests/test_terminus_version_control.py`
-- Module summary: TerminusDB Version Control integration tests.
-- Responsibilities: not documented
-- Invariants: not documented
-- Failure modes: not documented
-- Extension points: not documented
-- Dependencies (doc): not documented
-- API surface: public=1 | top-level functions=1 | classes=0 | methods=0
-- Runtime signals: async_functions=1 | try=3 | raise=0 | broad_except=2 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
-- Internal imports (2): oms.services.terminus.database; oms.services.terminus.version_control
-- External imports (3): __future__; pytest; uuid
-- Public API names: test_terminus_branch_lifecycle_v12
-
 ### `backend/tests/test_websocket_auth_e2e.py`
 - Module summary: WebSocket auth E2E tests (no mocks).
 - Responsibilities: not documented
@@ -10815,6 +10283,20 @@
 - Internal imports (1): shared.config.kafka_config
 - External imports (2): __future__; pytest
 - Public API names: test_kafka_eos_consumer_config; test_kafka_eos_producer_config; test_transactional_producer_batch_no_transactions; test_transactional_producer_batch_success
+
+### `backend/tests/unit/config/test_ontology_settings_backend_normalization.py`
+- Module summary: no docstring
+- Responsibilities: not documented
+- Invariants: not documented
+- Failure modes: not documented
+- Extension points: not documented
+- Dependencies (doc): not documented
+- API surface: public=1 | top-level functions=1 | classes=0 | methods=0
+- Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Internal imports (1): shared.config.settings
+- External imports (1): __future__
+- Public API names: test_ontology_settings_backend_normalization_forces_postgres
 
 ### `backend/tests/unit/config/test_settings_ssot.py`
 - Module summary: no docstring
@@ -11180,6 +10662,20 @@
 - External imports (7): contextlib; datetime; fastapi; jose; os; pytest; types
 - Public API names: test_bff_admin_guard_allows_dev_master_without_token_in_development; test_bff_admin_guard_requires_token_in_production_even_with_dev_master_flag; test_bff_admin_token_requires_user_jwt_for_agent_endpoints_when_enabled; test_bff_agent_auth_accepts_rotated_agent_tokens; test_bff_agent_auth_requires_delegated_user_jwt_when_enabled; test_bff_agent_auth_requires_user_jwt_enabled_for_agent_calls; test_bff_agent_tool_idempotency_replays_without_reexecution; test_bff_agent_tool_policy_enforced_via_tool_registry; test_bff_agent_tool_policy_enforces_action_type_and_ontology_abac; test_bff_agent_tool_policy_enforces_session_enabled_tools_and_abac; test_bff_auth_accepts_rotated_admin_tokens; test_bff_auth_allows_user_jwt_when_enabled (+9 more)
 
+### `backend/tests/unit/models/test_type_inference_model_defaults.py`
+- Module summary: no docstring
+- Responsibilities: not documented
+- Invariants: not documented
+- Failure modes: not documented
+- Extension points: not documented
+- Dependencies (doc): not documented
+- API surface: public=1 | top-level functions=1 | classes=0 | methods=0
+- Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Internal imports (1): shared.models.type_inference
+- External imports (1): __future__
+- Public API names: test_type_mapping_request_default_target_system_is_foundry
+
 ### `backend/tests/unit/monitoring/test_monitoring_configs.py`
 - Module summary: no docstring
 - Responsibilities: not documented
@@ -11271,12 +10767,68 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
-- API surface: public=5 | top-level functions=7 | classes=1 | methods=1
-- Runtime signals: async_functions=29 | try=0 | raise=1 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=no | top-level functions=0/7 (0%) | classes=0/1 (0%) | methods=0/1 (0%)
+- API surface: public=6 | top-level functions=8 | classes=1 | methods=1
+- Runtime signals: async_functions=36 | try=0 | raise=2 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/8 (0%) | classes=0/1 (0%) | methods=0/1 (0%)
 - Internal imports (3): oms.dependencies; oms.routers.action_async; oms.services.action_simulation_service
 - External imports (6): __future__; fastapi; httpx; pytest; types; typing
-- Public API names: action_async_app; test_simulate_returns_503_when_datasource_derived_data_access_is_unverifiable; test_submit_returns_403_for_datasource_derived_without_data_engineer_role; test_submit_returns_403_when_target_class_misses_required_interface; test_submit_returns_503_when_target_edit_access_is_unverifiable
+- Public API names: action_async_app; test_simulate_returns_503_when_datasource_derived_data_access_is_unverifiable; test_simulate_use_branch_head_no_longer_requires_terminus; test_submit_returns_403_for_datasource_derived_without_data_engineer_role; test_submit_returns_403_when_target_class_misses_required_interface; test_submit_returns_503_when_target_edit_access_is_unverifiable
+
+### `backend/tests/unit/oms/test_database_router_backend_profile.py`
+- Module summary: no docstring
+- Responsibilities: not documented
+- Invariants: not documented
+- Failure modes: not documented
+- Extension points: not documented
+- Dependencies (doc): not documented
+- API surface: public=1 | top-level functions=1 | classes=0 | methods=0
+- Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Internal imports (1): oms.routers
+- External imports (1): __future__
+- Public API names: test_oms_database_routes_are_foundry_style_without_profile_gates
+
+### `backend/tests/unit/oms/test_dependencies_database_exists.py`
+- Module summary: no docstring
+- Responsibilities: not documented
+- Invariants: not documented
+- Failure modes: not documented
+- Extension points: not documented
+- Dependencies (doc): not documented
+- API surface: public=4 | top-level functions=4 | classes=0 | methods=0
+- Runtime signals: async_functions=7 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/4 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Internal imports (1): oms.dependencies
+- External imports (3): __future__; fastapi; pytest
+- Public API names: test_ensure_database_exists_raises_404_when_missing; test_ensure_database_exists_raises_404_when_missing_in_postgres_registry; test_ensure_database_exists_returns_name_when_present; test_ensure_database_exists_uses_postgres_registry_when_terminus_missing
+
+### `backend/tests/unit/oms/test_dependencies_terminus_profile_gate.py`
+- Module summary: no docstring
+- Responsibilities: not documented
+- Invariants: not documented
+- Failure modes: not documented
+- Extension points: not documented
+- Dependencies (doc): not documented
+- API surface: public=1 | top-level functions=1 | classes=0 | methods=0
+- Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Internal imports (1): oms.dependencies
+- External imports (1): __future__
+- Public API names: test_legacy_terminus_dependency_accessors_are_removed
+
+### `backend/tests/unit/oms/test_instance_async_permission_profile.py`
+- Module summary: no docstring
+- Responsibilities: not documented
+- Invariants: not documented
+- Failure modes: not documented
+- Extension points: not documented
+- Dependencies (doc): not documented
+- API surface: public=1 | top-level functions=1 | classes=0 | methods=0
+- Runtime signals: async_functions=2 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Internal imports (2): oms.routers; shared.models.commands
+- External imports (2): __future__; pytest
+- Public API names: test_create_instance_async_allows_missing_terminus_in_postgres_profile
 
 ### `backend/tests/unit/oms/test_instance_router.py`
 - Module summary: Tests for OMS instance router (ES-backed, Phase 2).
@@ -11292,6 +10844,20 @@
 - External imports (5): __future__; fastapi; httpx; pytest; unittest
 - Public API names: mock_es; override_deps; test_get_class_instance_count; test_get_class_instances; test_get_class_instances_with_search; test_get_instance; test_get_instance_class_mismatch; test_get_instance_not_found; test_sparql_endpoint_removed_returns_404
 
+### `backend/tests/unit/oms/test_main_backend_profile.py`
+- Module summary: no docstring
+- Responsibilities: not documented
+- Invariants: not documented
+- Failure modes: not documented
+- Extension points: not documented
+- Dependencies (doc): not documented
+- API surface: public=2 | top-level functions=2 | classes=0 | methods=0
+- Runtime signals: async_functions=2 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Internal imports (1): oms
+- External imports (3): __future__; pytest; types
+- Public API names: test_root_forces_postgres_backend_when_legacy_profile_is_configured; test_root_reports_postgres_profile_features
+
 ### `backend/tests/unit/oms/test_object_search_router.py`
 - Module summary: Tests for OMS Foundry-style object search router.
 - Responsibilities: not documented
@@ -11299,28 +10865,42 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
-- API surface: public=14 | top-level functions=14 | classes=0 | methods=0
-- Runtime signals: async_functions=13 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=0/14 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- API surface: public=16 | top-level functions=16 | classes=0 | methods=0
+- Runtime signals: async_functions=15 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=yes | top-level functions=0/16 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
 - Internal imports (3): oms.dependencies; oms.routers.query; shared.dependencies.providers
 - External imports (5): __future__; fastapi; httpx; pytest; unittest
-- Public API names: mock_es; override_deps; test_search_objects_v2_accepts_contains_any_term_operator; test_search_objects_v2_accepts_in_operator; test_search_objects_v2_accepts_non_deprecated_operator; test_search_objects_v2_allows_missing_where_with_match_all_fallback; test_search_objects_v2_invalid_page_token_returns_foundry_error; test_search_objects_v2_rejects_deprecated_startswith_operator; test_search_objects_v2_rejects_excessive_nesting_depth; test_search_objects_v2_rejects_in_operator_with_non_list; test_search_objects_v2_rejects_non_foundry_anyterm_alias; test_search_objects_v2_rejects_select_and_select_v2_together (+2 more)
+- Public API names: mock_es; override_deps; test_search_objects_v2_accepts_contains_any_term_operator; test_search_objects_v2_accepts_foundry_branch_rid; test_search_objects_v2_accepts_non_deprecated_operator; test_search_objects_v2_allows_missing_where_with_match_all_fallback; test_search_objects_v2_invalid_page_token_returns_foundry_error; test_search_objects_v2_is_null_false_maps_to_exists_clause; test_search_objects_v2_rejects_deprecated_startswith_operator; test_search_objects_v2_rejects_excessive_nesting_depth; test_search_objects_v2_rejects_is_null_with_non_boolean_value; test_search_objects_v2_rejects_non_foundry_anyterm_alias (+4 more)
 
-### `backend/tests/unit/oms/test_version_request_models.py`
-- Module summary: Unit tests for OMS version router request models.
+### `backend/tests/unit/oms/test_ontology_extensions_health.py`
+- Module summary: no docstring
 - Responsibilities: not documented
 - Invariants: not documented
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
-- API surface: public=2 | top-level functions=2 | classes=0 | methods=0
-- Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
-- Internal imports (1): oms.routers.version
-- External imports (3): __future__; pydantic; pytest
-- Public API names: test_rollback_request_accepts_target_commit; test_rollback_request_rejects_legacy_target_alias
+- API surface: public=1 | top-level functions=1 | classes=0 | methods=0
+- Runtime signals: async_functions=2 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Internal imports (1): oms.routers.ontology_extensions
+- External imports (2): __future__; pytest
+- Public API names: test_compute_ontology_health_supports_resource_only_mode
 
-### `backend/tests/unit/openapi/test_foundry_ontology_v2_contract.py`
+### `backend/tests/unit/oms/test_ontology_extensions_occ.py`
+- Module summary: no docstring
+- Responsibilities: not documented
+- Invariants: not documented
+- Failure modes: not documented
+- Extension points: not documented
+- Dependencies (doc): not documented
+- API surface: public=3 | top-level functions=3 | classes=0 | methods=0
+- Runtime signals: async_functions=3 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Internal imports (1): oms.routers.ontology_extensions
+- External imports (2): __future__; pytest
+- Public API names: test_assert_expected_head_commit_returns_trimmed_token; test_assert_expected_head_commit_skips_when_blank; test_assert_expected_head_commit_skips_when_unset
+
+### `backend/tests/unit/oms/test_ontology_router_resource_helpers.py`
 - Module summary: no docstring
 - Responsibilities: not documented
 - Invariants: not documented
@@ -11330,9 +10910,51 @@
 - API surface: public=2 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Internal imports (1): oms.routers.ontology
+- External imports (2): __future__; pytest
+- Public API names: test_is_internal_ontology_detects_internal_dict_payload; test_ontology_from_resource_payload_maps_object_type_contract
+
+### `backend/tests/unit/oms/test_ontology_router_write_backend.py`
+- Module summary: no docstring
+- Responsibilities: not documented
+- Invariants: not documented
+- Failure modes: not documented
+- Extension points: not documented
+- Dependencies (doc): not documented
+- API surface: public=1 | top-level functions=1 | classes=1 | methods=1
+- Runtime signals: async_functions=2 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/1 (0%) | methods=0/1 (0%)
+- Internal imports (1): oms.routers
+- External imports (2): __future__; pytest
+- Public API names: test_load_existing_ontology_for_write_reads_from_resource_registry_without_terminus
+
+### `backend/tests/unit/oms/test_openapi_legacy_visibility.py`
+- Module summary: no docstring
+- Responsibilities: not documented
+- Invariants: not documented
+- Failure modes: not documented
+- Extension points: not documented
+- Dependencies (doc): not documented
+- API surface: public=1 | top-level functions=1 | classes=0 | methods=0
+- Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Internal imports (1): oms.main
+- External imports (1): __future__
+- Public API names: test_oms_legacy_routes_removed_from_openapi
+
+### `backend/tests/unit/openapi/test_foundry_ontology_v2_contract.py`
+- Module summary: no docstring
+- Responsibilities: not documented
+- Invariants: not documented
+- Failure modes: not documented
+- Extension points: not documented
+- Dependencies (doc): not documented
+- API surface: public=5 | top-level functions=6 | classes=0 | methods=0
+- Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/6 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
 - Internal imports (1): bff.routers
 - External imports (2): fastapi; pytest
-- Public API names: test_foundry_v2_object_type_list_keeps_pagination_params; test_foundry_v2_ontology_list_has_no_pagination_params
+- Public API names: test_foundry_v2_list_linked_objects_includes_foundry_query_params; test_foundry_v2_list_objects_includes_foundry_query_params; test_foundry_v2_object_type_list_keeps_pagination_and_branch_params; test_foundry_v2_ontology_list_has_no_pagination_params; test_foundry_v2_ontology_read_paths_include_branch_when_supported
 
 ### `backend/tests/unit/openapi/test_wip_hidden.py`
 - Module summary: no docstring
@@ -11390,6 +11012,48 @@
 - External imports (6): __future__; importlib; os; pyspark; pytest; sys
 - Public API names: spark; test_functions_spark_supported_matrix_contract; worker
 
+### `backend/tests/unit/routers/test_database_router_openapi_visibility.py`
+- Module summary: no docstring
+- Responsibilities: not documented
+- Invariants: not documented
+- Failure modes: not documented
+- Extension points: not documented
+- Dependencies (doc): not documented
+- API surface: public=1 | top-level functions=1 | classes=0 | methods=0
+- Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Internal imports (1): bff.main
+- External imports (1): __future__
+- Public API names: test_removed_legacy_routes_not_exposed_in_openapi
+
+### `backend/tests/unit/routers/test_legacy_router_backend_profile.py`
+- Module summary: no docstring
+- Responsibilities: not documented
+- Invariants: not documented
+- Failure modes: not documented
+- Extension points: not documented
+- Dependencies (doc): not documented
+- API surface: public=1 | top-level functions=1 | classes=0 | methods=0
+- Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Internal imports (1): bff.main
+- External imports (1): __future__
+- Public API names: test_removed_legacy_ontology_merge_routes_not_mounted
+
+### `backend/tests/unit/routers/test_lineage_router_naming.py`
+- Module summary: no docstring
+- Responsibilities: not documented
+- Invariants: not documented
+- Failure modes: not documented
+- Extension points: not documented
+- Dependencies (doc): not documented
+- API surface: public=1 | top-level functions=1 | classes=0 | methods=0
+- Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Internal imports (1): bff.routers.lineage
+- External imports (1): __future__
+- Public API names: test_suggest_remediation_actions_uses_graph_target_kind
+
 ### `backend/tests/unit/routers/test_monitoring_router_deprecation_headers.py`
 - Module summary: no docstring
 - Responsibilities: not documented
@@ -11417,6 +11081,20 @@
 - Internal imports (1): bff.routers.schema_changes
 - External imports (4): __future__; datetime; pytest; unittest
 - Public API names: TestMappingCompatibility; TestSchemaChangesEndpoints; TestSchemaChangesModels
+
+### `backend/tests/unit/routers/test_summary_backend_profile.py`
+- Module summary: no docstring
+- Responsibilities: not documented
+- Invariants: not documented
+- Failure modes: not documented
+- Extension points: not documented
+- Dependencies (doc): not documented
+- API surface: public=2 | top-level functions=2 | classes=2 | methods=5
+- Runtime signals: async_functions=7 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/2 (0%) | methods=0/5 (0%)
+- Internal imports (1): bff.routers.summary
+- External imports (2): __future__; pytest
+- Public API names: test_summary_keeps_branch_info_disabled_in_hybrid_profile; test_summary_skips_legacy_branch_info_in_postgres_profile
 
 ### `backend/tests/unit/security/__init__.py`
 - Module summary: Unit tests for security modules
@@ -11459,6 +11137,20 @@
 - Internal imports (1): shared.security.database_access
 - External imports (2): asyncpg; pytest
 - Public API names: test_enforce_database_role_allows_when_unconfigured_and_flag_unset; test_enforce_database_role_denies_when_flag_true_and_no_role; test_get_database_access_role_returns_none_when_table_missing; test_has_database_access_config_returns_false_when_table_missing
+
+### `backend/tests/unit/security/test_input_sanitizer_branch.py`
+- Module summary: no docstring
+- Responsibilities: not documented
+- Invariants: not documented
+- Failure modes: not documented
+- Extension points: not documented
+- Dependencies (doc): not documented
+- API surface: public=2 | top-level functions=2 | classes=0 | methods=0
+- Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Internal imports (1): shared.security.input_sanitizer
+- External imports (2): __future__; pytest
+- Public API names: test_validate_branch_name_accepts_foundry_branch_rid; test_validate_branch_name_rejects_reserved_head
 
 ### `backend/tests/unit/security/test_principal_utils.py`
 - Module summary: no docstring
@@ -11740,19 +11432,19 @@
 - External imports (2): __future__; pytest
 - Public API names: test_validate_session_status_transition_allows_valid_transitions; test_validate_session_status_transition_rejects_invalid_transitions; test_validate_session_status_transition_rejects_unknown_states
 
-### `backend/tests/unit/services/test_async_terminus_branch_info.py`
+### `backend/tests/unit/services/test_ai_service_graph_provenance.py`
 - Module summary: no docstring
 - Responsibilities: not documented
 - Invariants: not documented
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
-- API surface: public=2 | top-level functions=2 | classes=0 | methods=0
-- Runtime signals: async_functions=2 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
-- Internal imports (1): oms.services.async_terminus
-- External imports (3): __future__; pytest; unittest
-- Public API names: test_get_branch_info_raises_for_unknown_branch; test_get_branch_info_returns_current_and_protection_flags
+- API surface: public=2 | top-level functions=3 | classes=0 | methods=0
+- Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Internal imports (2): bff.services.ai_service; shared.models.graph_query
+- External imports (1): __future__
+- Public API names: test_ground_graph_query_result_ignores_legacy_terminus_key; test_ground_graph_query_result_prefers_graph_provenance
 
 ### `backend/tests/unit/services/test_changelog_store.py`
 - Module summary: Tests for ChangelogStore.
@@ -11809,20 +11501,6 @@
 - Internal imports (1): bff.services.database_error_policy
 - External imports (4): __future__; fastapi; logging; pytest
 - Public API names: test_apply_message_error_policies_raises_policy_http_exception; test_apply_message_error_policies_returns_fallback_when_configured
-
-### `backend/tests/unit/services/test_database_service_error_mapping.py`
-- Module summary: no docstring
-- Responsibilities: not documented
-- Invariants: not documented
-- Failure modes: not documented
-- Extension points: not documented
-- Dependencies (doc): not documented
-- API surface: public=3 | top-level functions=3 | classes=1 | methods=4
-- Runtime signals: async_functions=6 | try=0 | raise=3 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/1 (0%) | methods=0/4 (0%)
-- Internal imports (1): bff.services.database_service
-- External imports (3): __future__; fastapi; pytest
-- Public API names: test_create_branch_maps_duplicate_to_409; test_get_versions_returns_empty_on_empty_history; test_list_branches_maps_not_found_to_404
 
 ### `backend/tests/unit/services/test_dataset_ingest_commit_service.py`
 - Module summary: no docstring
@@ -11977,6 +11655,20 @@
 - Internal imports (1): bff.services.graph_query_service
 - External imports (1): __future__
 - Public API names: test_normalize_es_doc_id_strips_class_prefix; test_normalize_paths_converts_list_paths_to_object_shape; test_normalize_paths_preserves_existing_object_paths
+
+### `backend/tests/unit/services/test_graph_query_service_naming.py`
+- Module summary: no docstring
+- Responsibilities: not documented
+- Invariants: not documented
+- Failure modes: not documented
+- Extension points: not documented
+- Dependencies (doc): not documented
+- API surface: public=3 | top-level functions=3 | classes=5 | methods=5
+- Runtime signals: async_functions=8 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/5 (0%) | methods=0/5 (0%)
+- Internal imports (2): bff.services.graph_query_service; shared.models.graph_query
+- External imports (3): __future__; pytest; typing
+- Public API names: test_execute_graph_query_provenance_uses_graph_key; test_execute_multi_hop_query_uses_foundry_naming; test_execute_simple_graph_query_uses_foundry_naming
 
 ### `backend/tests/unit/services/test_graph_service_health.py`
 - Module summary: Tests for graph_service_health (ES-only, no TerminusDB).
@@ -12160,20 +11852,6 @@
 - External imports (2): __future__; pytest
 - Public API names: TestOCCConflictError; TestOCCPatternIntegration; TestObjectifyJobRecordOCC; TestOntologyMappingSpecRecordOCC
 
-### `backend/tests/unit/services/test_oms_client_branch_api.py`
-- Module summary: no docstring
-- Responsibilities: not documented
-- Invariants: not documented
-- Failure modes: not documented
-- Extension points: not documented
-- Dependencies (doc): not documented
-- API surface: public=3 | top-level functions=4 | classes=2 | methods=7
-- Runtime signals: async_functions=6 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=no | top-level functions=0/4 (0%) | classes=0/2 (0%) | methods=0/7 (0%)
-- Internal imports (1): bff.services.oms_client
-- External imports (3): __future__; pytest; typing
-- Public API names: test_create_branch_accepts_dict_input_for_backward_compatibility; test_create_branch_accepts_string_input; test_get_and_delete_branch_use_typed_paths
-
 ### `backend/tests/unit/services/test_oms_error_policy.py`
 - Module summary: no docstring
 - Responsibilities: not documented
@@ -12251,12 +11929,26 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
-- API surface: public=8 | top-level functions=9 | classes=2 | methods=5
-- Runtime signals: async_functions=11 | try=0 | raise=3 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=no | top-level functions=0/9 (0%) | classes=0/2 (0%) | methods=0/5 (0%)
+- API surface: public=4 | top-level functions=4 | classes=1 | methods=3
+- Runtime signals: async_functions=6 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/4 (0%) | classes=0/1 (0%) | methods=0/3 (0%)
 - Internal imports (1): bff.services.ontology_occ_guard_service
-- External imports (4): __future__; fastapi; httpx; pytest
-- Public API names: test_fetch_branch_head_commit_id_extracts_from_head_payload; test_resolve_branch_head_commit_with_bootstrap_accepts_branch_conflict; test_resolve_branch_head_commit_with_bootstrap_retries_after_branch_create; test_resolve_branch_head_commit_with_bootstrap_returns_none_when_unresolved; test_resolve_expected_head_commit_allows_none_when_configured; test_resolve_expected_head_commit_falls_back_to_commit_keys; test_resolve_expected_head_commit_raises_when_unresolved; test_resolve_expected_head_commit_uses_given_value_without_calling_oms
+- External imports (2): __future__; pytest
+- Public API names: test_fetch_branch_head_commit_id_is_disabled_in_foundry_profile; test_resolve_branch_head_commit_with_bootstrap_is_disabled; test_resolve_expected_head_commit_prefers_explicit_value; test_resolve_expected_head_commit_returns_none_without_legacy_lookup
+
+### `backend/tests/unit/services/test_ontology_resource_service_versioning.py`
+- Module summary: no docstring
+- Responsibilities: not documented
+- Invariants: not documented
+- Failure modes: not documented
+- Extension points: not documented
+- Dependencies (doc): not documented
+- API surface: public=2 | top-level functions=2 | classes=0 | methods=0
+- Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Internal imports (1): oms.services.ontology_resources
+- External imports (2): __future__; pytest
+- Public API names: test_payload_to_document_increments_version_and_rev_from_existing; test_payload_to_document_sets_initial_version_and_rev
 
 ### `backend/tests/unit/services/test_ontology_resource_validator.py`
 - Module summary: no docstring
@@ -12279,12 +11971,12 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
-- API surface: public=6 | top-level functions=6 | classes=2 | methods=4
-- Runtime signals: async_functions=7 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=no | top-level functions=0/6 (0%) | classes=0/2 (0%) | methods=0/4 (0%)
+- API surface: public=5 | top-level functions=5 | classes=1 | methods=2
+- Runtime signals: async_functions=5 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/5 (0%) | classes=0/1 (0%) | methods=0/2 (0%)
 - Internal imports (2): oms.routers.ontology; shared.models.ontology
-- External imports (2): json; pytest
-- Public API names: test_apply_shared_properties_merges_and_tracks_duplicates; test_collect_interface_issues_reports_missing_property; test_extract_group_refs_dedupes; test_validate_group_refs_reports_missing; test_validate_relationships_gate_returns_422; test_validate_value_type_refs_detects_base_type_mismatch
+- External imports (1): pytest
+- Public API names: test_apply_shared_properties_merges_and_tracks_duplicates; test_collect_interface_issues_reports_missing_property; test_extract_group_refs_dedupes; test_validate_group_refs_reports_missing; test_validate_value_type_refs_detects_base_type_mismatch
 
 ### `backend/tests/unit/services/test_ontology_value_type_immutability.py`
 - Module summary: no docstring
@@ -12622,6 +12314,20 @@
 - External imports (1): pytest
 - Public API names: test_compute_column_stats_numeric_min_max_mean_from_mixed_values; test_compute_column_stats_string_column_counts_null_empty_whitespace_and_top_values
 
+### `backend/tests/unit/services/test_pipeline_proposal_bundle_ontology_ref.py`
+- Module summary: no docstring
+- Responsibilities: not documented
+- Invariants: not documented
+- Failure modes: not documented
+- Extension points: not documented
+- Dependencies (doc): not documented
+- API surface: public=2 | top-level functions=2 | classes=4 | methods=6
+- Runtime signals: async_functions=7 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/4 (0%) | methods=0/6 (0%)
+- Internal imports (1): bff.services.pipeline_proposal_service
+- External imports (4): __future__; dataclasses; pytest; typing
+- Public API names: test_build_proposal_bundle_adds_ontology_ref_fallback_when_commit_missing; test_build_proposal_bundle_preserves_ontology_ref_when_present
+
 ### `backend/tests/unit/services/test_pipeline_registry_branch_idempotency.py`
 - Module summary: no docstring
 - Responsibilities: not documented
@@ -12818,6 +12524,20 @@
 - External imports (2): __future__; pytest
 - Public API names: test_health_check_connects_when_pool_missing; test_health_check_returns_false_on_query_failure
 
+### `backend/tests/unit/services/test_projection_consistency.py`
+- Module summary: no docstring
+- Responsibilities: not documented
+- Invariants: not documented
+- Failure modes: not documented
+- Extension points: not documented
+- Dependencies (doc): not documented
+- API surface: public=5 | top-level functions=6 | classes=0 | methods=0
+- Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/6 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Internal imports (2): shared.models.event_envelope; shared.services.core.projection_consistency
+- External imports (2): __future__; datetime
+- Public API names: test_build_instance_expectations_prefers_higher_sequence_number; test_build_instance_expectations_uses_aggregate_id_fallback; test_evaluate_projection_document_detects_deleted_document_present; test_evaluate_projection_document_reports_missing_document; test_parse_instance_aggregate_id_handles_instance_id_with_colon
+
 ### `backend/tests/unit/services/test_projection_position_tracker.py`
 - Module summary: Tests for ProjectionPositionTracker.
 - Responsibilities: not documented
@@ -12944,20 +12664,6 @@
 - External imports (5): __future__; asyncio; dataclasses; pytest; typing
 - Public API names: test_execute_sync_calls_wait; test_wait_for_command_failure; test_wait_for_command_success; test_wait_for_command_timeout
 
-### `backend/tests/unit/services/test_terminus_query_service_foundry_only.py`
-- Module summary: no docstring
-- Responsibilities: not documented
-- Invariants: not documented
-- Failure modes: not documented
-- Extension points: not documented
-- Dependencies (doc): not documented
-- API surface: public=2 | top-level functions=3 | classes=0 | methods=0
-- Runtime signals: async_functions=2 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
-- Internal imports (2): oms.exceptions; oms.services.terminus.query
-- External imports (4): __future__; pytest; types; unittest
-- Public API names: test_execute_query_accepts_class_type_alias_and_applies_filters_and_select; test_execute_query_rejects_legacy_woql_payload
-
 ### `backend/tests/unit/services/test_watermark_monitor.py`
 - Module summary: no docstring
 - Responsibilities: not documented
@@ -13077,12 +12783,12 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
-- API surface: public=5 | top-level functions=5 | classes=0 | methods=0
-- Runtime signals: async_functions=4 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=no | top-level functions=0/5 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- API surface: public=7 | top-level functions=7 | classes=0 | methods=0
+- Runtime signals: async_functions=8 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/7 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
 - Internal imports (1): shared.utils.action_runtime_contracts
 - External imports (3): __future__; pytest; types
-- Public API names: test_build_property_type_map_from_properties_handles_models_and_dicts; test_extract_interfaces_from_metadata_supports_aliases; test_extract_required_action_interfaces_normalizes_prefix_and_dedupes; test_load_action_target_runtime_contract_extracts_metadata_and_properties; test_load_action_target_runtime_contract_returns_none_when_class_missing
+- Public API names: test_build_property_type_map_from_properties_handles_models_and_dicts; test_extract_interfaces_from_metadata_supports_aliases; test_extract_required_action_interfaces_normalizes_prefix_and_dedupes; test_load_action_target_runtime_contract_extracts_metadata_and_properties; test_load_action_target_runtime_contract_reads_object_type_resource_first; test_load_action_target_runtime_contract_returns_none_when_class_missing; test_load_action_target_runtime_contract_returns_none_when_resource_missing
 
 ### `backend/tests/unit/utils/test_action_template_engine.py`
 - Module summary: no docstring
@@ -13251,6 +12957,20 @@
 - Internal imports (1): oms.utils.ontology_stamp
 - External imports (1): __future__
 - Public API names: test_merge_ontology_stamp_fills_missing; test_merge_ontology_stamp_prefers_existing
+
+### `backend/tests/unit/utils/test_ontology_version.py`
+- Module summary: no docstring
+- Responsibilities: not documented
+- Invariants: not documented
+- Failure modes: not documented
+- Extension points: not documented
+- Dependencies (doc): not documented
+- API surface: public=5 | top-level functions=5 | classes=3 | methods=4
+- Runtime signals: async_functions=9 | try=0 | raise=2 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/5 (0%) | classes=0/3 (0%) | methods=0/4 (0%)
+- Internal imports (1): shared.utils.ontology_version
+- External imports (2): __future__; pytest
+- Public API names: test_resolve_ontology_version_falls_back_to_ref_on_source_failures; test_resolve_ontology_version_ignores_branch_info_source; test_resolve_ontology_version_ignores_branch_list_source; test_resolve_ontology_version_ignores_legacy_like_source; test_resolve_ontology_version_without_source_returns_ref_only
 
 ### `backend/tests/unit/utils/test_principal_policy.py`
 - Module summary: no docstring
@@ -13700,6 +13420,20 @@
 - External imports (3): __future__; pytest; typing
 - Public API names: test_build_document_populates_properties_from_flat_instance; test_build_document_preserves_existing_properties; test_build_document_skips_none_values; test_dataset_primary_finalize_prunes_stale_docs_on_full; test_dataset_primary_write_path_indexes_instances_directly; test_write_instances_passes_target_field_types
 
+### `backend/tests/unit/workers/test_ontology_worker_graph_lineage_naming.py`
+- Module summary: no docstring
+- Responsibilities: not documented
+- Invariants: not documented
+- Failure modes: not documented
+- Extension points: not documented
+- Dependencies (doc): not documented
+- API surface: public=2 | top-level functions=3 | classes=3 | methods=8
+- Runtime signals: async_functions=7 | try=0 | raise=1 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/3 (0%) | methods=0/8 (0%)
+- Internal imports (1): ontology_worker.main
+- External imports (4): __future__; pytest; typing; unittest
+- Public API names: test_create_ontology_records_graph_lineage_and_audit_naming; test_delete_ontology_records_graph_lineage_and_audit_naming
+
 ### `backend/tests/unit/workers/test_ontology_worker_helpers.py`
 - Module summary: no docstring
 - Responsibilities: not documented
@@ -13707,12 +13441,40 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
-- API surface: public=4 | top-level functions=4 | classes=1 | methods=2
-- Runtime signals: async_functions=5 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=no | top-level functions=0/4 (0%) | classes=0/1 (0%) | methods=0/2 (0%)
+- API surface: public=3 | top-level functions=3 | classes=0 | methods=0
+- Runtime signals: async_functions=3 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
 - Internal imports (2): ontology_worker.main; shared.services.kafka.consumer_ops
 - External imports (3): __future__; asyncio; pytest
-- Public API names: test_consumer_ops_defaults_to_inline; test_heartbeat_loop_no_registry; test_wait_for_database_exists_success; test_wait_for_database_exists_timeout
+- Public API names: test_consumer_ops_defaults_to_inline; test_heartbeat_loop_no_registry; test_resource_registry_mode_is_default_and_active
+
+### `backend/tests/unit/workers/test_ontology_worker_legacy_backend.py`
+- Module summary: no docstring
+- Responsibilities: not documented
+- Invariants: not documented
+- Failure modes: not documented
+- Extension points: not documented
+- Dependencies (doc): not documented
+- API surface: public=2 | top-level functions=2 | classes=0 | methods=0
+- Runtime signals: async_functions=2 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Internal imports (2): ontology_worker.main; shared.models.commands
+- External imports (3): __future__; pytest; unittest
+- Public API names: test_process_command_allows_database_command_without_adapter_in_postgres_profile; test_process_command_allows_ontology_command_without_adapter_in_postgres_profile
+
+### `backend/tests/unit/workers/test_ontology_worker_resource_registry.py`
+- Module summary: no docstring
+- Responsibilities: not documented
+- Invariants: not documented
+- Failure modes: not documented
+- Extension points: not documented
+- Dependencies (doc): not documented
+- API surface: public=3 | top-level functions=4 | classes=3 | methods=9
+- Runtime signals: async_functions=9 | try=0 | raise=2 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/4 (0%) | classes=0/3 (0%) | methods=0/9 (0%)
+- Internal imports (1): ontology_worker.main
+- External imports (4): __future__; pytest; typing; unittest
+- Public API names: test_create_ontology_uses_object_type_resource_registry_in_postgres_profile; test_delete_ontology_uses_object_type_resource_registry_in_postgres_profile; test_update_ontology_uses_object_type_resource_registry_in_postgres_profile
 
 ### `backend/tests/unit/workers/test_pipeline_worker_helpers.py`
 - Module summary: no docstring

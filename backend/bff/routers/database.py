@@ -75,25 +75,6 @@ async def delete_database(
     )
 
 
-@router.get("/{db_name}/branches/{branch_name:path}")
-@trace_endpoint("bff.database.get_branch_info")
-async def get_branch_info(db_name: str, branch_name: str, oms: OMSClient = OMSClientDep) -> Dict[str, Any]:
-    """브랜치 정보 조회 (프론트엔드용 BFF 래핑)"""
-    return await database_service.get_branch_info(db_name=db_name, branch_name=branch_name, oms=oms)
-
-
-@router.delete("/{db_name}/branches/{branch_name:path}")
-@trace_endpoint("bff.database.delete_branch")
-async def delete_branch(
-    db_name: str,
-    branch_name: str,
-    force: bool = False,
-    oms: OMSClient = OMSClientDep,
-) -> Dict[str, Any]:
-    """브랜치 삭제 (프론트엔드용 BFF 래핑)"""
-    return await database_service.delete_branch(db_name=db_name, branch_name=branch_name, force=force, oms=oms)
-
-
 @router.get("/{db_name}")
 @trace_endpoint("bff.database.get_database")
 async def get_database(db_name: str, oms: OMSClient = OMSClientDep):
@@ -143,26 +124,3 @@ async def get_class(
     """특정 클래스 조회"""
     _ = request
     return await database_service.get_class(db_name=db_name, class_id=class_id, oms=oms)
-
-
-@router.get("/{db_name}/branches")
-@trace_endpoint("bff.database.list_branches")
-async def list_branches(db_name: str, oms: OMSClient = OMSClientDep):
-    """브랜치 목록 조회"""
-    return await database_service.list_branches(db_name=db_name, oms=oms)
-
-
-@router.post("/{db_name}/branches")
-@trace_endpoint("bff.database.create_branch")
-async def create_branch(
-    db_name: str, branch_data: Dict[str, Any], oms: OMSClient = OMSClientDep
-):
-    """새 브랜치 생성"""
-    return await database_service.create_branch(db_name=db_name, branch_data=branch_data, oms=oms)
-
-
-@router.get("/{db_name}/versions")
-@trace_endpoint("bff.database.get_versions")
-async def get_versions(db_name: str, oms: OMSClient = OMSClientDep):
-    """버전 히스토리 조회"""
-    return await database_service.get_versions(db_name=db_name, oms=oms)

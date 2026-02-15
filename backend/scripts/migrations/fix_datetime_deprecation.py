@@ -6,7 +6,6 @@ Replace with timezone-aware datetime.now(datetime.UTC)
 
 import os
 import re
-from pathlib import Path
 
 def fix_datetime_in_file(filepath):
     """Fix datetime deprecation in a single file"""
@@ -59,7 +58,6 @@ def main():
         'oms/services/pull_request_service.py',
         'oms/services/corrected_command_handler.py',
         'oms/services/event_store.py',
-        'oms/services/terminus/ontology.py',
         'shared/services/storage_service.py',
         'shared/services/redis_service.py',
         'bff/middleware/rbac.py',

@@ -5,7 +5,7 @@ Shared library used by:
 - objectify_worker: extract relationships during ES indexing
 - instance_worker: extract relationships for CRUD operations (Phase 2)
 
-No TerminusDB dependency — accepts ontology data directly.
+Accepts ontology data directly without legacy graph adapter dependencies.
 """
 
 from __future__ import annotations
@@ -93,13 +93,13 @@ def _extract_from_relationship_list(
             relationships[str(field_name)] = _normalize_ref(value)
 
 
-def _extract_from_terminus_schema(
+def _extract_from_graph_schema(
     schema: Dict[str, Any],
     payload: Dict[str, Any],
     relationships: Dict[str, Union[str, List[str]]],
     known_fields: Set[str],
 ) -> None:
-    """Extract relationships from TerminusDB-style schema (properties with @class)."""
+    """Extract relationships from legacy graph-schema style definitions (`@class`)."""
     for key, value_def in schema.items():
         if isinstance(value_def, dict) and "@class" in value_def:
             known_fields.add(str(key))
@@ -163,7 +163,7 @@ def extract_relationships(
     Args:
         payload: The instance data dictionary.
         ontology_data: Ontology schema data (OntologyResponse pydantic model, OMS dict,
-                       or TerminusDB schema dict). Optional if rel_map is provided.
+                       or legacy graph schema dict). Optional if rel_map is provided.
         rel_map: Pre-parsed relationship map from _extract_ontology_fields().
                  Keys are predicate names, values are relationship definition dicts.
                  When provided, ontology_data is ignored.
@@ -192,7 +192,7 @@ def extract_relationships(
                         ontology_data["relationships"], payload, relationships, known_fields
                     )
                 else:
-                    _extract_from_terminus_schema(ontology_data, payload, relationships, known_fields)
+                    _extract_from_graph_schema(ontology_data, payload, relationships, known_fields)
         except Exception as e:
             logger.warning("Could not extract relationships from ontology data: %s", e)
 

@@ -10,7 +10,7 @@ Source: `docker-compose.full.yml` (with extends resolved).
 | Service | Ports | Depends On |
 | --- | --- | --- |
 | `action-outbox-worker` | - | kafka<br/>postgres<br/>minio<br/>lakefs<br/>otel-collector |
-| `action-worker` | - | terminusdb<br/>kafka<br/>postgres<br/>minio<br/>lakefs<br/>message-relay<br/>otel-collector |
+| `action-worker` | - | kafka<br/>postgres<br/>minio<br/>lakefs<br/>message-relay<br/>otel-collector |
 | `agent` | ${AGENT_PORT_HOST:-8004}:8004 | bff<br/>postgres<br/>minio<br/>otel-collector |
 | `alertmanager` | 19093:9093 | - |
 | `bff` | 8002:8002 | db-migrations<br/>oms<br/>postgres<br/>redis<br/>elasticsearch<br/>kafka<br/>minio<br/>lakefs<br/>funnel<br/>otel-collector |
@@ -21,7 +21,7 @@ Source: `docker-compose.full.yml` (with extends resolved).
 | `funnel` | ${FUNNEL_PORT_HOST:-8003}:8003 | otel-collector |
 | `grafana` | 13000:3000 | prometheus |
 | `ingest-reconciler-worker` | ${INGEST_RECONCILER_PORT_HOST:-8012}:8012 | postgres<br/>otel-collector |
-| `instance-worker` | - | terminusdb<br/>kafka<br/>elasticsearch<br/>minio<br/>message-relay<br/>postgres<br/>otel-collector |
+| `instance-worker` | - | kafka<br/>elasticsearch<br/>minio<br/>message-relay<br/>postgres<br/>otel-collector |
 | `jaeger` | 16686:16686 | - |
 | `kafka` | ${KAFKA_PORT_HOST:-39092}:9092<br/>${KAFKA_PORT_INTERNAL_HOST:-29092}:29092 | zookeeper |
 | `kafka-ui` | ${KAFKA_UI_PORT_HOST:-8080}:8080 | kafka<br/>zookeeper |
@@ -31,8 +31,8 @@ Source: `docker-compose.full.yml` (with extends resolved).
 | `minio` | ${MINIO_PORT_HOST:-9000}:9000<br/>${MINIO_CONSOLE_PORT_HOST:-9001}:9001 | - |
 | `minio-init` | - | minio |
 | `objectify-worker` | - | kafka<br/>postgres<br/>lakefs<br/>oms<br/>otel-collector |
-| `oms` | ${OMS_PORT_HOST:-8000}:8000<br/>8000:8000 | db-migrations<br/>terminusdb<br/>postgres<br/>redis<br/>elasticsearch<br/>minio<br/>otel-collector |
-| `ontology-worker` | - | terminusdb<br/>kafka<br/>redis<br/>message-relay<br/>postgres<br/>otel-collector |
+| `oms` | ${OMS_PORT_HOST:-8000}:8000<br/>8000:8000 | db-migrations<br/>postgres<br/>redis<br/>elasticsearch<br/>minio<br/>otel-collector |
+| `ontology-worker` | - | kafka<br/>redis<br/>message-relay<br/>postgres<br/>otel-collector |
 | `otel-collector` | 4317:4317<br/>4318:4318<br/>8889:8889 | jaeger |
 | `pipeline-scheduler` | - | kafka<br/>postgres<br/>lakefs<br/>otel-collector |
 | `pipeline-worker` | - | kafka<br/>postgres<br/>minio<br/>lakefs<br/>otel-collector |
@@ -40,9 +40,6 @@ Source: `docker-compose.full.yml` (with extends resolved).
 | `projection-worker` | - | kafka<br/>elasticsearch<br/>redis<br/>message-relay<br/>postgres<br/>otel-collector |
 | `prometheus` | 19090:9090 | otel-collector<br/>alertmanager |
 | `redis` | ${REDIS_PORT_HOST:-6379}:6379 | - |
-| `registry-cleaner` | - | bff<br/>postgres |
-| `search-projection-worker` | - | elasticsearch<br/>kafka<br/>otel-collector |
-| `terminusdb` | 6363:6363 | - |
 | `writeback-materializer-worker` | - | minio<br/>lakefs<br/>otel-collector |
 | `zookeeper` | ${ZOOKEEPER_PORT_HOST:-2181}:2181 | - |
 
@@ -81,9 +78,6 @@ graph TD
   svc_projection_worker[projection-worker]
   svc_prometheus[prometheus]
   svc_redis[redis]
-  svc_registry_cleaner[registry-cleaner]
-  svc_search_projection_worker[search-projection-worker]
-  svc_terminusdb[terminusdb]
   svc_writeback_materializer_worker[writeback-materializer-worker]
   svc_zookeeper[zookeeper]
   svc_action_outbox_worker --> svc_kafka
@@ -91,7 +85,6 @@ graph TD
   svc_action_outbox_worker --> svc_minio
   svc_action_outbox_worker --> svc_lakefs
   svc_action_outbox_worker --> svc_otel_collector
-  svc_action_worker --> svc_terminusdb
   svc_action_worker --> svc_kafka
   svc_action_worker --> svc_postgres
   svc_action_worker --> svc_minio
@@ -124,7 +117,6 @@ graph TD
   svc_grafana --> svc_prometheus
   svc_ingest_reconciler_worker --> svc_postgres
   svc_ingest_reconciler_worker --> svc_otel_collector
-  svc_instance_worker --> svc_terminusdb
   svc_instance_worker --> svc_kafka
   svc_instance_worker --> svc_elasticsearch
   svc_instance_worker --> svc_minio
@@ -149,13 +141,11 @@ graph TD
   svc_objectify_worker --> svc_oms
   svc_objectify_worker --> svc_otel_collector
   svc_oms --> svc_db_migrations
-  svc_oms --> svc_terminusdb
   svc_oms --> svc_postgres
   svc_oms --> svc_redis
   svc_oms --> svc_elasticsearch
   svc_oms --> svc_minio
   svc_oms --> svc_otel_collector
-  svc_ontology_worker --> svc_terminusdb
   svc_ontology_worker --> svc_kafka
   svc_ontology_worker --> svc_redis
   svc_ontology_worker --> svc_message_relay
@@ -179,11 +169,6 @@ graph TD
   svc_projection_worker --> svc_otel_collector
   svc_prometheus --> svc_otel_collector
   svc_prometheus --> svc_alertmanager
-  svc_registry_cleaner --> svc_bff
-  svc_registry_cleaner --> svc_postgres
-  svc_search_projection_worker --> svc_elasticsearch
-  svc_search_projection_worker --> svc_kafka
-  svc_search_projection_worker --> svc_otel_collector
   svc_writeback_materializer_worker --> svc_minio
   svc_writeback_materializer_worker --> svc_lakefs
   svc_writeback_materializer_worker --> svc_otel_collector
@@ -235,7 +220,6 @@ graph TD
 | `lineage.router` | `/api/v1` | - |
 | `link_types.router` | `/api/v1` | - |
 | `mapping.router` | `/api/v1` | - |
-| `merge_conflict.router` | `/api/v1` | - |
 | `monitoring.router` | `/api/v1/monitoring` | - |
 | `object_types.router` | `/api/v1` | - |
 | `objectify.router` | `/api/v1` | - |
@@ -256,7 +240,6 @@ graph TD
 | Router | Prefix | Tags |
 | --- | --- | --- |
 | `action_async.router` | `/api/v1` | async-actions |
-| `branch.router` | `/api/v1` | branch |
 | `command_status.router` | `/api/v1` | command-status |
 | `config_monitoring.router` | `/api/v1/config` | config-monitoring |
 | `database.router` | `/api/v1` | database |
@@ -267,7 +250,6 @@ graph TD
 | `ontology_extensions.router` | `/api/v1` | ontology |
 | `pull_request.router` | `/api/v1` | pull-requests |
 | `query.router` | `/api/v1` | object-search |
-| `version.router` | `/api/v1` | version |
 
 ## Router Inventory (Funnel)
 

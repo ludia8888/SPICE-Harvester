@@ -71,7 +71,6 @@ class SearchJsonQueryV2(BaseModel):
 
     type: Literal[
         "eq",
-        "in",
         "gt",
         "lt",
         "gte",
@@ -104,12 +103,13 @@ class SearchJsonQueryV2(BaseModel):
         if not isinstance(self.field, str) or not self.field.strip():
             raise ValueError(f"{self.type} query requires field")
 
-        if self.type != "isNull" and self.value is None:
-            raise ValueError(f"{self.type} query requires value")
+        if self.type == "isNull":
+            if self.value is not None and not isinstance(self.value, bool):
+                raise ValueError("isNull query value must be a boolean when provided")
+            return self
 
-        if self.type == "in":
-            if not isinstance(self.value, list) or not self.value:
-                raise ValueError("in query requires a non-empty list value")
+        if self.value is None:
+            raise ValueError(f"{self.type} query requires value")
 
         if self.type in {
             "containsAnyTerm",
@@ -328,8 +328,6 @@ def _to_es_query(query: Any, *, depth: int = 0) -> Dict[str, Any]:
 
     if q.type == "eq":
         return {"term": {field_path: q.value}}
-    if q.type == "in":
-        return {"terms": {field_path: list(q.value)}}
     if q.type == "gt":
         return {"range": {field_path: {"gt": q.value}}}
     if q.type == "lt":
@@ -339,7 +337,10 @@ def _to_es_query(query: Any, *, depth: int = 0) -> Dict[str, Any]:
     if q.type == "lte":
         return {"range": {field_path: {"lte": q.value}}}
     if q.type == "isNull":
-        return {"bool": {"must_not": [{"exists": {"field": field_path}}]}}
+        is_null = True if q.value is None else bool(q.value)
+        if is_null:
+            return {"bool": {"must_not": [{"exists": {"field": field_path}}]}}
+        return {"exists": {"field": field_path}}
 
     if q.type == "contains":
         # Foundry semantics: array contains the provided value.

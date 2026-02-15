@@ -634,40 +634,6 @@ def create_elasticsearch_service(settings: 'ApplicationSettings') -> Elasticsear
     )
 
 
-def create_elasticsearch_service_legacy(
-    host: Optional[str] = None,
-    port: Optional[int] = None,
-    username: Optional[str] = None,
-    password: Optional[str] = None
-) -> ElasticsearchService:
-    """
-    레거시 Elasticsearch 서비스 팩토리 함수 (하위 호환성)
-    
-    이 함수는 기존 코드와의 호환성을 위해 유지되며,
-    마이그레이션 완료 후 제거될 예정입니다.
-    
-    Args:
-        host: Elasticsearch host (defaults to env var or 'elasticsearch')
-        port: Elasticsearch port (defaults to env var or 9200)
-        username: Elasticsearch username (defaults to env var)
-        password: Elasticsearch password (defaults to env var)
-        
-    Returns:
-        ElasticsearchService instance
-    """
-    from shared.config.settings import get_settings
-
-    settings = get_settings()
-    
-    return ElasticsearchService(
-        host=host or settings.database.elasticsearch_host,
-        port=port or settings.database.elasticsearch_port,
-        username=username or settings.database.elasticsearch_username,
-        password=password or settings.database.elasticsearch_password,
-        request_timeout=settings.database.elasticsearch_request_timeout,
-    )
-
-
 async def promote_alias_to_index(
     *,
     elasticsearch_service: ElasticsearchService,

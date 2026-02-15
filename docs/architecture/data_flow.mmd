@@ -1,6 +1,6 @@
 graph TB
     %% Data Flow Architecture
-    %% Last Updated: 2025-07-20
+    %% Last Updated: 2026-02-15
     
     subgraph "Client Layer"
         Web[Web Application]
@@ -23,10 +23,12 @@ graph TB
     end
     
     subgraph "Data Layer"
-        Terminus["TerminusDB<br/>(Port 6363)"]
+        Registry["Ontology Registry<br/>(Postgres)"]
+        EventStore["Durable Event Store<br/>(S3/MinIO)"]
         Cache[Redis Cache]
-        Search[Search Index]
+        Search["Object Read Model<br/>(Elasticsearch)"]
         LabelDB[Label Mapping DB]
+        LegacyTerminus["TerminusDB<br/>(Legacy Profile)"]
     end
     
     subgraph "External Sources"
@@ -52,8 +54,10 @@ graph TB
     Query --> Validator
     Funnel --> Validator
     
-    OMS --> Terminus
-    Query --> Terminus
+    OMS --> Registry
+    OMS --> EventStore
+    OMS --> Search
+    Query --> Search
     Query --> Cache
     BFF --> LabelDB
     
@@ -61,7 +65,8 @@ graph TB
     Funnel --> CSV
     Funnel --> ExtAPI
     
-    Terminus --> Search
+    Query -.-> LegacyTerminus
+    OMS -.-> LegacyTerminus
     
     %% Type Inference Flow
     BFF -.-> Funnel

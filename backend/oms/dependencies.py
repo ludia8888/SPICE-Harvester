@@ -18,7 +18,7 @@ Key improvements:
 
 import logging
 from typing import Annotated, Optional
-from fastapi import HTTPException, status, Path, Depends
+from fastapi import status, Path, Depends
 
 # Modern dependency injection imports
 from shared.dependencies import get_container, ServiceContainer
@@ -28,7 +28,7 @@ from shared.dependencies.providers import (
     RedisServiceDep,
     ElasticsearchServiceDep
 )
-from shared.config.settings import ApplicationSettings, get_settings
+from shared.config.settings import get_settings
 from shared.errors.error_envelope import build_error_envelope
 from shared.errors.error_types import ErrorCategory, ErrorCode, classified_http_exception
 from shared.observability.request_context import get_correlation_id, get_request_id
@@ -41,12 +41,11 @@ from shared.services.registries.processed_event_registry import ProcessedEventRe
 from shared.services.registries.processed_event_registry_factory import create_processed_event_registry
 
 # OMS specific imports
-from oms.services.async_terminus import AsyncTerminusService
 from oms.services.event_store import EventStore, event_store
-from shared.models.config import ConnectionConfig
 
 # Import validation functions
 from shared.security.input_sanitizer import validate_db_name, validate_class_id
+from shared.security.database_access import has_database_access_config
 
 SERVICE_NAME = "OMS"
 
@@ -58,37 +57,6 @@ class OMSDependencyProvider:
     This class replaces the global variables and setter/getter pattern
     with a container-based approach that's type-safe and test-friendly.
     """
-    
-    @staticmethod
-    async def get_terminus_service(
-        container: ServiceContainer = Depends(get_container)
-    ) -> AsyncTerminusService:
-        """
-        Get AsyncTerminusService from container
-        
-        This replaces the global terminus_service variable and get_terminus_service() function.
-        """
-        # Register AsyncTerminusService factory if not already registered
-        if not container.has(AsyncTerminusService):
-            def create_terminus_service(settings: ApplicationSettings) -> AsyncTerminusService:
-                connection_info = ConnectionConfig(
-                    server_url=settings.database.terminus_url,
-                    user=settings.database.terminus_user,
-                    account=settings.database.terminus_account,
-                    key=settings.database.terminus_password,  # Use actual password from settings
-                )
-                return AsyncTerminusService(connection_info)
-            
-            container.register_singleton(AsyncTerminusService, create_terminus_service)
-        
-        try:
-            return await container.get(AsyncTerminusService)
-        except Exception as e:
-            raise classified_http_exception(
-                status.HTTP_503_SERVICE_UNAVAILABLE,
-                f"TerminusDB 서비스가 초기화되지 않았습니다: {str(e)}",
-                code=ErrorCode.UPSTREAM_UNAVAILABLE,
-            )
     
     @staticmethod
     async def get_event_store(
@@ -186,7 +154,6 @@ class OMSDependencyProvider:
 
 
 # Type-safe dependency annotations for cleaner injection
-TerminusServiceDep = Depends(OMSDependencyProvider.get_terminus_service)
 JSONLDConverterDep = Depends(get_shared_jsonld_converter)
 LabelMapperDep = Depends(get_shared_label_mapper)
 EventStoreDep = Depends(OMSDependencyProvider.get_event_store)
@@ -222,35 +189,18 @@ def ValidatedClassId(class_id: str = Path(..., description="클래스 ID")) -> s
 # Combined validation for database existence check - Modernized version
 async def ensure_database_exists(
     db_name: Annotated[str, ValidatedDatabaseName],
-    terminus: AsyncTerminusService = Depends(OMSDependencyProvider.get_terminus_service)
 ) -> str:
     """데이터베이스 존재 확인 및 검증된 이름 반환 - Modernized version"""
-    try:
-        dbs = await terminus.list_databases()
-        # 올바른 방식: 딕셔너리 리스트에서 name 필드 확인
-        db_exists = any(db.get('name') == db_name for db in dbs if isinstance(db, dict))
-        if not db_exists:
-            raise classified_http_exception(
-                status.HTTP_404_NOT_FOUND,
-                f"데이터베이스 '{db_name}'이(가) 존재하지 않습니다",
-                code=ErrorCode.RESOURCE_NOT_FOUND,
-            )
+    if await has_database_access_config(db_name=db_name):
         return db_name
-    except HTTPException:
-        raise
-    except Exception as e:
-        # TerminusDB outage should not prevent command acceptance in an event-sourced system.
-        # We still validate the db_name format, but defer existence verification to the workers.
-        import logging
-
-        logging.getLogger(__name__).warning(
-            f"TerminusDB unavailable while verifying database '{db_name}' (continuing): {e}"
-        )
-        return db_name
+    raise classified_http_exception(
+        status.HTTP_404_NOT_FOUND,
+        f"데이터베이스 '{db_name}'이(가) 존재하지 않습니다",
+        code=ErrorCode.RESOURCE_NOT_FOUND,
+    )
 
 
 # Convenience dependency annotations for backward compatibility
-get_terminus_service = OMSDependencyProvider.get_terminus_service
 get_jsonld_converter = get_shared_jsonld_converter
 get_label_mapper = get_shared_label_mapper
 get_redis_service = RedisServiceDep
@@ -273,7 +223,6 @@ async def check_oms_dependencies_health(
     try:
         # Check each service
         services_to_check = [
-            ("terminus_service", AsyncTerminusService),
             ("jsonld_converter", JSONToJSONLDConverter),
             ("label_mapper", LabelMapper),
             ("elasticsearch_service", ElasticsearchService),

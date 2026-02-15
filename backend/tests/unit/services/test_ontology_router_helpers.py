@@ -1,5 +1,3 @@
-import json
-
 import pytest
 
 from oms.routers.ontology import (
@@ -7,7 +5,6 @@ from oms.routers.ontology import (
     _collect_interface_issues,
     _extract_group_refs,
     _validate_group_refs,
-    _validate_relationships_gate,
     _validate_value_type_refs,
 )
 from shared.models.ontology import Property
@@ -19,14 +16,6 @@ class _FakeResourceService:
 
     async def get_resource(self, db_name, *, branch, resource_type, resource_id):
         return self._resources.get((resource_type, resource_id))
-
-
-class _FakeTerminus:
-    def __init__(self, response):
-        self._response = response
-
-    async def validate_relationships(self, db_name, ontology_payload, *, branch="main"):
-        return self._response
 
 
 def test_extract_group_refs_dedupes():
@@ -44,7 +33,6 @@ def test_extract_group_refs_dedupes():
 async def test_validate_group_refs_reports_missing():
     service = _FakeResourceService({("group", "g1"): {"id": "g1"}})
     missing = await _validate_group_refs(
-        terminus=None,
         db_name="demo",
         branch="main",
         metadata={"groups": ["g1", "g2"]},
@@ -70,7 +58,6 @@ async def test_apply_shared_properties_merges_and_tracks_duplicates():
     )
     properties = [Property(name="id", type="xsd:string", label="ID")]
     merged, issues = await _apply_shared_properties(
-        terminus=None,
         db_name="demo",
         branch="main",
         properties=properties,
@@ -99,7 +86,6 @@ async def test_validate_value_type_refs_detects_base_type_mismatch():
         )
     ]
     issues = await _validate_value_type_refs(
-        terminus=None,
         db_name="demo",
         branch="main",
         properties=properties,
@@ -120,7 +106,6 @@ async def test_collect_interface_issues_reports_missing_property():
         }
     )
     issues = await _collect_interface_issues(
-        terminus=None,
         db_name="demo",
         branch="main",
         ontology_id="User",
@@ -130,20 +115,3 @@ async def test_collect_interface_issues_reports_missing_property():
         resource_service=service,
     )
     assert any(issue.get("code") == "IFACE_MISSING_PROPERTY" for issue in issues)
-
-
-@pytest.mark.unit
-@pytest.mark.asyncio
-async def test_validate_relationships_gate_returns_422():
-    terminus = _FakeTerminus({"ok": False, "errors": [{"message": "boom"}]})
-    response = await _validate_relationships_gate(
-        terminus=terminus,
-        db_name="demo",
-        branch="main",
-        ontology_payload={"id": "Thing"},
-        enabled=True,
-    )
-    assert response is not None
-    assert response.status_code == 422
-    payload = json.loads(response.body.decode("utf-8"))
-    assert payload["errors"] == ["boom"]

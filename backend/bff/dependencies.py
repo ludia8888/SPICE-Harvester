@@ -37,7 +37,6 @@ from shared.errors.error_types import ErrorCategory, ErrorCode, classified_http_
 from shared.observability.request_context import get_correlation_id, get_request_id
 from shared.utils.label_mapper import LabelMapper
 from shared.utils.jsonld import JSONToJSONLDConverter
-from shared.utils.async_utils import raise_for_status_async, response_json_async
 from shared.services.storage.elasticsearch_service import ElasticsearchService
 from shared.services.registries.action_log_registry import ActionLogRegistry
 
@@ -110,15 +109,12 @@ class BFFDependencyProvider:
 OMSClientDep = Depends(BFFDependencyProvider.get_oms_client)
 LabelMapperDep = Depends(get_shared_label_mapper)
 JSONLDConverterDep = Depends(get_shared_jsonld_converter)
-# TerminusServiceDep is defined after get_terminus_service function
+# FoundryQueryServiceDep is defined after get_foundry_query_service function
 
 
-class TerminusService:
+class FoundryQueryService:
     """
-    OMS client wrapper for TerminusService compatibility - Modernized version
-    
-    This class wraps the OMS client to provide TerminusDB-compatible interface
-    without relying on global variables.
+    OMS client wrapper for Foundry-style ontology/query operations.
     """
 
     def __init__(self, oms_client: OMSClient):
@@ -316,7 +312,7 @@ class TerminusService:
         for f in filters:
             if not isinstance(f, dict):
                 continue
-            clauses.append(TerminusService._map_filter_to_foundry(f))
+            clauses.append(FoundryQueryService._map_filter_to_foundry(f))
 
         if not clauses:
             return {"type": "not", "value": {"type": "isNull", "field": "instance_id"}}
@@ -365,192 +361,16 @@ class TerminusService:
 
         raise ValueError(f"Unsupported query operator: {operator}")
 
-    # Branch management methods (실제 OMS API 호출)
-    async def create_branch(
-        self, db_name: str, branch_name: str, from_branch: Optional[str] = None
-    ):
-        """브랜치 생성 - 실제 OMS API 호출"""
-        branch_data = {"branch_name": branch_name}
-        if from_branch:
-            branch_data["from_branch"] = from_branch
-
-        response = await self.oms_client.create_branch(db_name, branch_data)
-        return response
-
-    async def delete_branch(self, db_name: str, branch_name: str):
-        """브랜치 삭제 - 실제 OMS API 호출"""
-        try:
-            response = await self.oms_client.client.delete(f"/api/v1/branch/{db_name}/branch/{branch_name}")
-            response.raise_for_status()
-            return response.json()
-        except (httpx.HTTPError, httpx.TimeoutException, ValueError) as e:
-            raise RuntimeError(f"브랜치 삭제 실패 ({db_name}/{branch_name}): {e}")
-
-    async def checkout(self, db_name: str, target: str, target_type: str):
-        """체크아웃 - 실제 OMS API 호출"""
-        checkout_data = {"target": target, "target_type": target_type}
-        try:
-            response = await self.oms_client.client.post(
-                f"/api/v1/branch/{db_name}/checkout", json=checkout_data
-            )
-            response.raise_for_status()
-            return response.json()
-        except (httpx.HTTPError, httpx.TimeoutException, ValueError) as e:
-            raise RuntimeError(f"체크아웃 실패 ({db_name}): {e}")
-
-    async def commit_changes(
-        self, db_name: str, message: str, author: str, branch: Optional[str] = None
-    ):
-        """변경사항 커밋 - 실제 OMS API 호출"""
-        commit_data = {"message": message, "author": author}
-        if branch:
-            commit_data["branch"] = branch
-
-        try:
-            response = await self.oms_client.client.post(
-                f"/api/v1/version/{db_name}/commit", json=commit_data
-            )
-            response.raise_for_status()
-            return response.json()
-        except (httpx.HTTPError, httpx.TimeoutException, ValueError) as e:
-            raise RuntimeError(f"커밋 실패 ({db_name}): {e}")
-
-    async def get_commit_history(
-        self, db_name: str, branch: Optional[str] = None, limit: int = 50, offset: int = 0
-    ):
-        """커밋 히스토리 조회 - 실제 OMS API 호출"""
-        response = await self.oms_client.get_version_history(db_name)
-        return response
-
-    async def get_diff(self, db_name: str, base: str, compare: str):
-        """차이 비교 - 실제 OMS API 호출"""
-        params = {"from_ref": base, "to_ref": compare}
-        try:
-            response = await self.oms_client.client.get(f"/api/v1/version/{db_name}/diff", params=params)
-            response.raise_for_status()
-            return response.json()
-        except (httpx.HTTPError, httpx.TimeoutException, ValueError) as e:
-            raise RuntimeError(f"차이 비교 실패 ({db_name}): {e}")
-
-    async def merge_branches(
-        self,
-        db_name: str,
-        source: str,
-        target: str,
-        strategy: str = "merge",
-        message: Optional[str] = None,
-        author: Optional[str] = None,
-    ):
-        """브랜치 병합 - 실제 OMS API 호출"""
-        merge_data = {"source": source, "target": target, "strategy": strategy}
-        if message:
-            merge_data["message"] = message
-        if author:
-            merge_data["author"] = author
-
-        try:
-            response = await self.oms_client.client.post(f"/api/v1/version/{db_name}/merge", json=merge_data)
-            response.raise_for_status()
-            return response.json()
-        except (httpx.HTTPError, httpx.TimeoutException, ValueError) as e:
-            raise RuntimeError(f"브랜치 병합 실패 ({db_name}): {e}")
-
-    async def rollback(
-        self,
-        db_name: str,
-        target_commit: str,
-        create_branch: bool = True,
-        branch_name: Optional[str] = None,
-    ):
-        """롤백 - 실제 OMS API 호출"""
-        rollback_data = {"target_commit": target_commit, "create_branch": create_branch}
-        if branch_name:
-            rollback_data["branch_name"] = branch_name
-
-        try:
-            response = await self.oms_client.client.post(
-                f"/api/v1/version/{db_name}/rollback", json=rollback_data
-            )
-            await raise_for_status_async(response)
-            return await response_json_async(response)
-        except (httpx.HTTPError, httpx.TimeoutException, ValueError) as e:
-            raise RuntimeError(f"롤백 실패 ({db_name}): {e}")
-
-    async def get_branch_info(self, db_name: str, branch_name: str):
-        """브랜치 정보 조회 - 실제 OMS API 호출"""
-        try:
-            response = await self.oms_client.client.get(
-                f"/api/v1/branch/{db_name}/branch/{branch_name}/info"
-            )
-            await raise_for_status_async(response)
-            return await response_json_async(response)
-        except (httpx.HTTPError, httpx.TimeoutException, ValueError) as e:
-            raise RuntimeError(f"브랜치 정보 조회 실패 ({db_name}/{branch_name}): {e}")
-
-    # Merge conflict related methods
-    async def simulate_merge(
-        self, db_name: str, source_branch: str, target_branch: str, strategy: str = "merge"
-    ):
-        """병합 시뮬레이션 - 충돌 감지 without 실제 병합"""
-        merge_data = {
-            "source_branch": source_branch,
-            "target_branch": target_branch,
-            "strategy": strategy,
-        }
-        try:
-            response = await self.oms_client.client.post(
-                f"/api/v1/database/{db_name}/merge/simulate", json=merge_data
-            )
-            await raise_for_status_async(response)
-            return await response_json_async(response)
-        except (httpx.HTTPError, httpx.TimeoutException, ValueError) as e:
-            raise RuntimeError(f"병합 시뮬레이션 실패 ({db_name}): {e}")
-
-    async def resolve_merge_conflicts(
-        self,
-        db_name: str,
-        source_branch: str,
-        target_branch: str,
-        resolutions: List[Dict[str, Any]],
-        strategy: str = "merge",
-        message: Optional[str] = None,
-        author: Optional[str] = None,
-    ):
-        """수동 충돌 해결 및 병합 실행"""
-        resolve_data = {
-            "source_branch": source_branch,
-            "target_branch": target_branch,
-            "resolutions": resolutions,
-            "strategy": strategy,
-        }
-        if message:
-            resolve_data["message"] = message
-        if author:
-            resolve_data["author"] = author
-
-        try:
-            response = await self.oms_client.client.post(
-                f"/api/v1/database/{db_name}/merge/resolve", json=resolve_data
-            )
-            await raise_for_status_async(response)
-            return await response_json_async(response)
-        except (httpx.HTTPError, httpx.TimeoutException, ValueError) as e:
-            raise RuntimeError(f"충돌 해결 실패 ({db_name}): {e}")
-
-async def get_terminus_service(
+async def get_foundry_query_service(
     oms_client: OMSClient = Depends(BFFDependencyProvider.get_oms_client)
-) -> TerminusService:
+) -> FoundryQueryService:
     """
-    Get TerminusService with modern dependency injection
-    
-    This replaces the old get_terminus_service() function that created
-    a new instance every time, with a proper dependency-injected version.
+    Get FoundryQueryService with modern dependency injection.
     """
-    return TerminusService(oms_client)
+    return FoundryQueryService(oms_client)
 
 
-# Type-safe dependency annotation for TerminusService (defined after function)
-TerminusServiceDep = Depends(get_terminus_service)
+FoundryQueryServiceDep = Depends(get_foundry_query_service)
 
 # Convenience dependency annotations for backward compatibility
 get_oms_client = BFFDependencyProvider.get_oms_client

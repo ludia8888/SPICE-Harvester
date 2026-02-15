@@ -36,9 +36,6 @@ setup(
         # 📬 Message Queue
         "confluent-kafka==2.3.0",
         
-        # 🧠 Graph Database
-        "terminusdb-client==10.2.0",
-        
         # ☁️ Storage
         "boto3==1.38.27",
         "botocore==1.38.27",

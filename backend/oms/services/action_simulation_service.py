@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
-from oms.services.async_terminus import AsyncTerminusService
 from oms.services.ontology_resources import OntologyResourceService
 from shared.config.app_config import AppConfig
 from shared.errors.enterprise_catalog import is_external_code, resolve_enterprise_error
@@ -672,7 +671,7 @@ async def _check_writeback_dataset_acl_alignment(
 @trace_external_call("oms.action_simulation.preflight_action_writeback")
 async def preflight_action_writeback(
     *,
-    terminus: AsyncTerminusService,
+    resources: Optional[OntologyResourceService] = None,
     base_storage: StorageService,
     dataset_registry: Optional[DatasetRegistry],
     db_name: str,
@@ -689,7 +688,7 @@ async def preflight_action_writeback(
     base_branch: str,
     overlay_branch: Optional[str],
 ) -> ActionPreflight:
-    resources = OntologyResourceService(terminus)
+    resource_service = resources or OntologyResourceService()
 
     # Input schema validation.
     try:
@@ -804,14 +803,14 @@ async def preflight_action_writeback(
             submitted_by_type=submitted_by_type,
             actor_role=actor_role,
             ontology_commit_id=ontology_commit_id,
-            resources=resources,
+            resources=resource_service,
             dataset_registry=dataset_registry,
             class_ids={t.class_id for t in compiled_shape if t.class_id},
         )
 
     action_conflict_policy = parse_conflict_policy(action_spec.get("conflict_policy"))
     get_object_type_meta = build_object_type_meta_resolver(
-        resources=resources,
+        resources=resource_service,
         db_name=db_name,
         branch=ontology_commit_id,
     )
@@ -824,10 +823,10 @@ async def preflight_action_writeback(
         if class_id in class_interface_refs:
             return
         contract = await load_action_target_runtime_contract(
-            terminus=terminus,
             db_name=db_name,
             class_id=class_id,
             branch=ontology_commit_id,
+            resources=resource_service,
         )
         if contract is None:
             raise ActionSimulationRejected(

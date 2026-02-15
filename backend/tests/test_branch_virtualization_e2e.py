@@ -1,8 +1,8 @@
 """
-E2E test for branch-based data virtualization (copy-on-write semantics).
+E2E test for legacy branch-based data virtualization (copy-on-write semantics).
 
 Goal:
-- Create data in main (graph in TerminusDB + payload in Elasticsearch)
+- Create data in main (graph + payload in Elasticsearch)
 - Create a branch from main (no data copy)
 - Apply an update in the branch (patch update)
 - Verify:
@@ -11,7 +11,7 @@ Goal:
   - untouched nodes in the branch fall back to main payload (base index)
   - branch overlay keeps base fields (no accidental "partial replace")
 
-This test requires the full stack (OMS + workers + Kafka + MinIO + ES + TerminusDB) running.
+This suite is valid only for legacy branching profiles (`terminus`/`hybrid`).
 """
 
 from __future__ import annotations
@@ -38,6 +38,14 @@ if os.getenv("RUN_LIVE_BRANCH_VIRTUALIZATION", "").strip().lower() not in {
     pytest.skip(
         "RUN_LIVE_BRANCH_VIRTUALIZATION must be enabled for this test run. "
         "Set RUN_LIVE_BRANCH_VIRTUALIZATION=true.",
+        allow_module_level=True,
+    )
+
+_resource_backend = (os.getenv("ONTOLOGY_RESOURCE_STORAGE_BACKEND") or "postgres").strip().lower()
+if _resource_backend not in {"terminus", "hybrid"}:
+    pytest.skip(
+        "Branch virtualization e2e targets legacy branching backends only "
+        "(set ONTOLOGY_RESOURCE_STORAGE_BACKEND=terminus|hybrid).",
         allow_module_level=True,
     )
 

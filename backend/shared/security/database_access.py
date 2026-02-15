@@ -94,6 +94,30 @@ async def fetch_database_access_entries(*, db_names: Iterable[str]) -> Dict[str,
     return dict(grouped)
 
 
+async def list_database_names() -> List[str]:
+    conn = await asyncpg.connect(get_settings().database.postgres_url)
+    try:
+        try:
+            rows = await conn.fetch(
+                """
+                SELECT DISTINCT db_name
+                FROM database_access
+                ORDER BY db_name ASC
+                """
+            )
+        except asyncpg.UndefinedTableError:
+            return []
+    finally:
+        await conn.close()
+
+    names: List[str] = []
+    for row in rows or []:
+        raw = str(row["db_name"]).strip()
+        if raw:
+            names.append(raw)
+    return names
+
+
 async def upsert_database_access_entry(
     *,
     db_name: str,
@@ -235,6 +259,20 @@ async def has_database_access_config(*, db_name: str) -> bool:
     finally:
         await conn.close()
     return bool(row)
+
+
+async def delete_database_access_entries(*, db_name: str) -> None:
+    conn = await asyncpg.connect(get_settings().database.postgres_url)
+    try:
+        try:
+            await conn.execute(
+                "DELETE FROM database_access WHERE db_name = $1",
+                db_name,
+            )
+        except asyncpg.UndefinedTableError:
+            return
+    finally:
+        await conn.close()
 
 
 async def enforce_database_role(

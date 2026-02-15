@@ -1,13 +1,12 @@
 """
 ES-Native Graph Federation Service — Search Arounds (Link Traversal).
 
-Replaces GraphFederationServiceWOQL: performs multi-hop relationship
-traversal entirely within Elasticsearch.  No TerminusDB dependency.
+Performs multi-hop relationship traversal entirely within Elasticsearch.
 
-Algorithm (hop-by-hop):
-    Hop 0: ES search(class_id=StartClass + filters)  →  start docs
-    Hop 1: extract relationships.{predicate} targets  →  ES mget/search
-    Hop N: repeat …                                   →  build graph
+    Algorithm (hop-by-hop):
+        Hop 0: ES search(class_id=StartClass + filters)  -> start docs
+        Hop 1: extract relationships.{predicate} targets  -> ES mget/search
+        Hop N: repeat ...                                 -> build graph
 
 Reverse traversal:
     ES terms query on ``relationships.{predicate}`` to find docs that
@@ -40,7 +39,7 @@ _DEFAULT_MAX_FAN_OUT = 1000
 
 
 class GraphFederationServiceES:
-    """ES-native graph traversal — Search Arounds without TerminusDB."""
+    """ES-native graph traversal service for Search Arounds."""
 
     def __init__(
         self,
@@ -59,7 +58,7 @@ class GraphFederationServiceES:
             self._connected = True
 
     # ------------------------------------------------------------------
-    # Public: multi-hop query (same signature as WOQL version)
+    # Public: multi-hop query
     # ------------------------------------------------------------------
 
     async def multi_hop_query(
@@ -70,7 +69,7 @@ class GraphFederationServiceES:
         hops: List[Any],
         base_branch: str = "main",
         overlay_branch: Optional[str] = None,
-        terminus_branch: Optional[str] = None,  # ignored — backward compat
+        graph_branch: Optional[str] = None,
         strict_overlay: bool = False,
         filters: Optional[Dict[str, Any]] = None,
         limit: int = 100,
@@ -86,13 +85,14 @@ class GraphFederationServiceES:
         """Execute multi-hop graph query entirely within Elasticsearch."""
         await self._ensure_connected()
         base_branch = validate_branch_name(base_branch or "main")
+        effective_graph_branch = str(graph_branch or "").strip() or None
         if strict_overlay and overlay_branch and overlay_branch != base_branch:
             logger.warning(
                 "strict_overlay requested but ES federation currently queries base branch only "
-                "(base=%s overlay=%s, terminus=%s)",
+                "(base=%s overlay=%s, graph=%s)",
                 base_branch,
                 overlay_branch,
-                terminus_branch,
+                effective_graph_branch,
             )
         index_name = get_instances_index_name(db_name, branch=base_branch)
 
@@ -202,7 +202,7 @@ class GraphFederationServiceES:
                     break
                 all_paths.append(path)
 
-        # ---- Build response (same shape as WOQL version) --------------------
+        # ---- Build response --------------------------------------------------
         nodes_list = list(all_nodes.values())
         return {
             "nodes": nodes_list,
@@ -224,7 +224,7 @@ class GraphFederationServiceES:
         class_name: str,
         base_branch: str = "main",
         overlay_branch: Optional[str] = None,
-        terminus_branch: Optional[str] = None,
+        graph_branch: Optional[str] = None,
         strict_overlay: bool = False,
         filters: Optional[Dict[str, Any]] = None,
         include_documents: bool = True,
@@ -233,13 +233,14 @@ class GraphFederationServiceES:
         """Single-class ES search — no hops."""
         await self._ensure_connected()
         base_branch = validate_branch_name(base_branch or "main")
+        effective_graph_branch = str(graph_branch or "").strip() or None
         if strict_overlay and overlay_branch and overlay_branch != base_branch:
             logger.warning(
                 "strict_overlay requested but ES federation currently queries base branch only "
-                "(base=%s overlay=%s, terminus=%s)",
+                "(base=%s overlay=%s, graph=%s)",
                 base_branch,
                 overlay_branch,
-                terminus_branch,
+                effective_graph_branch,
             )
         index_name = get_instances_index_name(db_name, branch=base_branch)
 

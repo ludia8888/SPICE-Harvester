@@ -5,9 +5,8 @@ This is the Single Source of Truth (SSoT) for all events.
 
 Aligned with the system architecture:
 - S3/MinIO = Immutable event log (SSoT)
-- TerminusDB = Graph relationships  
 - Elasticsearch = Search indexes
-- PostgreSQL = Processed-event registry + relational features
+- PostgreSQL = Processed-event registry + ontology/resource relational storage
 
 This module lives in `shared` so every service (OMS/BFF/workers) can read/write
 the canonical SSoT without importing other service packages.

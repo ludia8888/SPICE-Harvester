@@ -46,9 +46,6 @@ dependencies = [
     # 📬 Message Queue - GHOST DEPENDENCY RESOLVED  
     "confluent-kafka==2.3.0", # ✅ 모든 워커 서비스의 메시지 큐 처리
     
-    # 🧠 Graph Database - GHOST DEPENDENCY RESOLVED
-    "terminusdb-client==10.2.0", # ✅ 온톨로지/인스턴스 워커의 그래프 DB 연결
-    
     # ☁️ Storage - GHOST DEPENDENCY RESOLVED
     "boto3==1.38.27",         # ✅ S3 스토리지 서비스 (aligned with aioboto3/aiobotocore)
     "botocore==1.38.27",      # boto3 코어 의존성 (aligned with aioboto3/aiobotocore)

@@ -4,14 +4,14 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from bff.dependencies import TerminusService
+from bff.dependencies import FoundryQueryService
 
 
 @pytest.mark.asyncio
 async def test_get_database_info_uses_oms_get_database() -> None:
     oms = AsyncMock()
     oms.get_database = AsyncMock(return_value={"status": "success", "data": {"exists": True}})
-    service = TerminusService(oms)
+    service = FoundryQueryService(oms)
 
     result = await service.get_database_info("demo_db")
 

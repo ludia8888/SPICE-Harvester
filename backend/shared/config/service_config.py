@@ -138,11 +138,6 @@ class ServiceConfig:
         return app_settings.services.agent_base_url
 
     @staticmethod
-    def get_terminus_url() -> str:
-        """Get TerminusDB URL from environment or default."""
-        return app_settings.database.terminus_url.rstrip("/")
-    
-    @staticmethod
     def get_postgres_url() -> str:
         """Get PostgreSQL connection URL from environment or default."""
         return app_settings.database.postgres_url
@@ -250,7 +245,6 @@ class ServiceConfig:
             "bff": ServiceConfig.get_bff_url,
             "funnel": ServiceConfig.get_funnel_url,
             "agent": ServiceConfig.get_agent_url,
-            "terminus": ServiceConfig.get_terminus_url,
         }
 
         if service_name.lower() not in service_map:
@@ -266,7 +260,6 @@ class ServiceConfig:
             "bff": ServiceConfig.get_bff_url(),
             "funnel": ServiceConfig.get_funnel_url(),
             "agent": ServiceConfig.get_agent_url(),
-            "terminus": ServiceConfig.get_terminus_url(),
         }
 
     @staticmethod
@@ -519,7 +512,6 @@ if __name__ == "__main__":
     print(f"Funnel URL: {ServiceConfig.get_funnel_url()}")
     print(f"Agent Port: {ServiceConfig.get_agent_port()}")
     print(f"Agent URL: {ServiceConfig.get_agent_url()}")
-    print(f"TerminusDB URL: {ServiceConfig.get_terminus_url()}")
     print(f"Docker Environment: {ServiceConfig.is_docker_environment()}")
     print("=" * 50)
     if ServiceConfig.use_https():

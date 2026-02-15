@@ -22,7 +22,6 @@ from bff.schemas.ontology_extensions_requests import (
 from bff.services.oms_client import OMSClient
 from bff.services.ontology_occ_guard_service import resolve_expected_head_commit
 from bff.utils.httpx_exceptions import raise_httpx_as_http_exception
-from shared.models.requests import BranchCreateRequest
 from shared.security.input_sanitizer import SecurityViolationError, sanitize_input, validate_db_name
 from shared.observability.tracing import trace_external_call
 
@@ -185,25 +184,6 @@ async def delete_resource(
             resource_id=resource_id,
             branch=branch,
             expected_head_commit=resolved_expected_head,
-        ),
-    )
-
-
-@trace_external_call("bff.ontology_extensions.list_ontology_branches")
-async def list_ontology_branches(*, oms_client: OMSClient, db_name: str) -> Dict[str, Any]:
-    return await _call_oms(
-        action="list ontology branches",
-        func=lambda: oms_client.list_ontology_branches(validate_db_name(db_name)),
-    )
-
-
-@trace_external_call("bff.ontology_extensions.create_ontology_branch")
-async def create_ontology_branch(*, oms_client: OMSClient, db_name: str, request: BranchCreateRequest) -> Dict[str, Any]:
-    return await _call_oms(
-        action="create ontology branch",
-        func=lambda: oms_client.create_ontology_branch(
-            validate_db_name(db_name),
-            sanitize_input(request.model_dump(mode="json")),
         ),
     )
 

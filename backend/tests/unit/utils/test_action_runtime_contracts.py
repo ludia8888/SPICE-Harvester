@@ -45,12 +45,19 @@ def test_build_property_type_map_from_properties_handles_models_and_dicts() -> N
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_load_action_target_runtime_contract_returns_none_when_class_missing() -> None:
-    class _Terminus:
-        async def get_ontology(self, *args, **kwargs):  # noqa: ANN002, ANN003
+    class _Resources:
+        async def get_resource(
+            self,
+            db_name: str,  # noqa: ARG002
+            *,
+            branch: str,  # noqa: ARG002
+            resource_type: str,  # noqa: ARG002
+            resource_id: str,  # noqa: ARG002
+        ):
             return None
 
     contract = await load_action_target_runtime_contract(
-        terminus=_Terminus(),
+        resources=_Resources(),
         db_name="demo",
         class_id="Ticket",
         branch="main",
@@ -61,15 +68,27 @@ async def test_load_action_target_runtime_contract_returns_none_when_class_missi
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_load_action_target_runtime_contract_extracts_metadata_and_properties() -> None:
-    class _Terminus:
-        async def get_ontology(self, *args, **kwargs):  # noqa: ANN002, ANN003
-            return SimpleNamespace(
-                metadata={"interfaces": ["interface:IApproval"], "interfaceRefs": ["IAudit"]},
-                properties=[{"name": "receipt", "type": "attachment"}, {"name": "status", "type": "xsd:string"}],
-            )
+    class _Resources:
+        async def get_resource(
+            self,
+            db_name: str,  # noqa: ARG002
+            *,
+            branch: str,  # noqa: ARG002
+            resource_type: str,  # noqa: ARG002
+            resource_id: str,  # noqa: ARG002
+        ):
+            return {
+                "metadata": {"interfaces": ["interface:IApproval"], "interfaceRefs": ["IAudit"]},
+                "spec": {
+                    "properties": [
+                        {"name": "receipt", "type": "attachment"},
+                        {"name": "status", "type": "xsd:string"},
+                    ]
+                },
+            }
 
     contract = await load_action_target_runtime_contract(
-        terminus=_Terminus(),
+        resources=_Resources(),
         db_name="demo",
         class_id="Ticket",
         branch="main",
@@ -77,3 +96,59 @@ async def test_load_action_target_runtime_contract_extracts_metadata_and_propert
     assert contract is not None
     assert contract.interfaces == ["IApproval", "IAudit"]
     assert contract.field_types == {"receipt": "attachment", "status": "string"}
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_load_action_target_runtime_contract_reads_object_type_resource_first() -> None:
+    class _Resources:
+        async def get_resource(
+            self,
+            db_name: str,  # noqa: ARG002
+            *,
+            branch: str,  # noqa: ARG002
+            resource_type: str,  # noqa: ARG002
+            resource_id: str,  # noqa: ARG002
+        ):
+            return {
+                "metadata": {"interfaces": ["interface:IApproval"]},
+                "spec": {
+                    "required_properties": [
+                        {"name": "receipt", "type": "attachment"},
+                        {"name": "status", "type": "xsd:string"},
+                    ]
+                },
+            }
+
+    contract = await load_action_target_runtime_contract(
+        resources=_Resources(),
+        db_name="demo",
+        class_id="Ticket",
+        branch="main",
+    )
+    assert contract is not None
+    assert contract.interfaces == ["IApproval"]
+    assert contract.field_types == {"receipt": "attachment", "status": "string"}
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_load_action_target_runtime_contract_returns_none_when_resource_missing() -> None:
+    class _Resources:
+        async def get_resource(
+            self,
+            db_name: str,  # noqa: ARG002
+            *,
+            branch: str,  # noqa: ARG002
+            resource_type: str,  # noqa: ARG002
+            resource_id: str,  # noqa: ARG002
+        ):
+            return None
+
+    contract = await load_action_target_runtime_contract(
+        resources=_Resources(),
+        db_name="demo",
+        class_id="Ticket",
+        branch="main",
+    )
+    assert contract is None

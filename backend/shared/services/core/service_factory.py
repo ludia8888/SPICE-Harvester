@@ -530,7 +530,7 @@ def get_bff_service_info() -> ServiceInfo:
             {"name": "Query", "description": "Query builder + raw queries"},
             {"name": "Graph", "description": "Federated graph queries (multi-hop)"},
             {"name": "Projections (WIP)", "description": "🚧 Materialized view APIs (skeleton/fallback; do not use for FE yet)"},
-            {"name": "Instance Management", "description": "Read-side instance retrieval (ES-first; Terminus fallback)"},
+            {"name": "Instance Management", "description": "Read-side instance retrieval (ES read model)"},
             {"name": "Async Instance Management", "description": "Write-side instance commands (async; idempotent)"},
             {"name": "Command Status", "description": "Async command status polling (command_id → status/result)"},
             {"name": "Label Mappings", "description": "Label mapping import/export/validate"},

@@ -4,8 +4,7 @@
 # - confluent-kafka (Kafka consumer)
 # - asyncpg (Postgres ActionLog registry)
 # - boto3/aioboto3 (S3/MinIO + lakeFS S3 gateway)
-# - terminusdb-client + httpx (ontology resources)
+# - httpx (OMS/resource service calls)
 #
 # Keep service-specific requirements empty unless action_worker adds unique deps.
 -e ../shared
-

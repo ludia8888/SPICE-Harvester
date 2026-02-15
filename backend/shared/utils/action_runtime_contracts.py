@@ -107,24 +107,84 @@ def build_property_type_map_from_properties(properties: Any) -> Dict[str, str]:
     return out
 
 
-async def load_action_target_runtime_contract(
-    *,
-    terminus: Any,
-    db_name: str,
-    class_id: str,
-    branch: str,
-) -> Optional[ActionTargetRuntimeContract]:
-    ontology = await terminus.get_ontology(
-        db_name,
-        class_id,
-        raise_if_missing=False,
-        branch=branch,
-    )
-    if ontology is None:
-        return None
-    metadata = ontology.metadata if isinstance(getattr(ontology, "metadata", None), Mapping) else {}
-    properties = getattr(ontology, "properties", [])
+def _pick_properties_from_record(record: Any) -> Any:
+    if isinstance(record, Mapping):
+        direct = record.get("properties")
+        if isinstance(direct, list):
+            return direct
+        spec = record.get("spec")
+        if isinstance(spec, Mapping):
+            for key in ("properties", "required_properties", "fields"):
+                raw = spec.get(key)
+                if isinstance(raw, list):
+                    return raw
+        return []
+
+    direct = getattr(record, "properties", None)
+    if isinstance(direct, list):
+        return direct
+    spec = getattr(record, "spec", None)
+    if isinstance(spec, Mapping):
+        for key in ("properties", "required_properties", "fields"):
+            raw = spec.get(key)
+            if isinstance(raw, list):
+                return raw
+    return []
+
+
+def _pick_interface_metadata_from_record(record: Any) -> Mapping[str, Any]:
+    if isinstance(record, Mapping):
+        metadata = record.get("metadata")
+        if isinstance(metadata, Mapping):
+            interfaces = extract_interfaces_from_metadata(metadata)
+            if interfaces:
+                return metadata
+        spec = record.get("spec")
+        if isinstance(spec, Mapping):
+            interfaces = extract_interfaces_from_metadata(spec)
+            if interfaces:
+                return spec
+        return metadata if isinstance(metadata, Mapping) else {}
+
+    metadata = getattr(record, "metadata", None)
+    if isinstance(metadata, Mapping):
+        interfaces = extract_interfaces_from_metadata(metadata)
+        if interfaces:
+            return metadata
+
+    spec = getattr(record, "spec", None)
+    if isinstance(spec, Mapping):
+        interfaces = extract_interfaces_from_metadata(spec)
+        if interfaces:
+            return spec
+    return metadata if isinstance(metadata, Mapping) else {}
+
+
+def _build_contract_from_record(record: Any) -> ActionTargetRuntimeContract:
+    metadata = _pick_interface_metadata_from_record(record)
+    properties = _pick_properties_from_record(record)
     return ActionTargetRuntimeContract(
         interfaces=extract_interfaces_from_metadata(metadata),
         field_types=build_property_type_map_from_properties(properties),
     )
+
+
+async def load_action_target_runtime_contract(
+    *,
+    db_name: str,
+    class_id: str,
+    branch: str,
+    resources: Any | None = None,
+) -> Optional[ActionTargetRuntimeContract]:
+    if resources is not None:
+        object_resource = await resources.get_resource(
+            db_name,
+            branch=branch,
+            resource_type="object_type",
+            resource_id=class_id,
+        )
+        if object_resource is None:
+            return None
+        return _build_contract_from_record(object_resource)
+
+    return None

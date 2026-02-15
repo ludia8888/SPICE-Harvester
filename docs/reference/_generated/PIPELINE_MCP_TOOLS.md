@@ -1,8 +1,8 @@
 # Pipeline MCP Tool Catalog
 
 <!-- BEGIN AUTO-GENERATED: pipeline_tooling_reference -->
-> Updated: 2026-02-14T10:12:35+09:00
-> Revision: `07bcfddd6a9a0c66a3c66601640ec76fb3c234aa`
+> Updated: 2026-02-15T10:29:47+09:00
+> Revision: `ac288c206443744f186819633fa25f039bc6b1c5`
 > Source of truth: `backend/mcp_servers/pipeline_mcp_server.py` (parsed from the `tool_specs` literal).
 > Regenerate: `python scripts/generate_pipeline_tooling_reference.py`
 

@@ -8,29 +8,11 @@ from ontology_worker.main import OntologyWorker
 from shared.services.kafka.consumer_ops import InlineKafkaConsumerOps
 
 
-class _StubTerminus:
-    def __init__(self, exists: bool) -> None:
-        self._exists = exists
-
-    async def database_exists(self, db_name: str) -> bool:
-        return self._exists
-
-
 @pytest.mark.asyncio
-async def test_wait_for_database_exists_success() -> None:
+async def test_resource_registry_mode_is_default_and_active() -> None:
     worker = OntologyWorker()
-    worker.terminus_service = _StubTerminus(True)
-
-    await worker._wait_for_database_exists(db_name="db", expected=True, timeout_seconds=0.1)
-
-
-@pytest.mark.asyncio
-async def test_wait_for_database_exists_timeout() -> None:
-    worker = OntologyWorker()
-    worker.terminus_service = _StubTerminus(False)
-
-    with pytest.raises(RuntimeError):
-        await worker._wait_for_database_exists(db_name="db", expected=True, timeout_seconds=0.1)
+    assert worker.ontology_resource_backend == "postgres"
+    assert worker._uses_resource_registry_for_ontology is True
 
 
 @pytest.mark.asyncio

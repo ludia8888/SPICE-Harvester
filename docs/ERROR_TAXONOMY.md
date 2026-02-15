@@ -66,8 +66,6 @@ Run: `python scripts/generate_error_taxonomy.py`.
 | RESOURCE_NOT_FOUND | SHV-{SUBSYS}-RES-NOT-0001 | resource | not_found | error | Resource not found | false | none | 1 | 0 | 0 | none | false | true | RESOURCE_NOT_FOUND | request_human | 404 |
 | STORAGE_ERROR | SHV-{SUBSYS}-STO-INT-0001 | upstream | internal | error | Storage operation failed | false | none | 1 | 0 | 0 | none | false | true | STORAGE_ERROR | request_human | 500 |
 | STORAGE_UNAVAILABLE | SHV-{SUBSYS}-STO-UNA-0001 | upstream | unavailable | critical | Storage service unavailable | true | backoff | 3 | 500 | 10000 | deterministic_equal_jitter | false | false | STORAGE_UNAVAILABLE | retry_backoff | 503 |
-| TERMINUS_CONFLICT | SHV-{SUBSYS}-UPS-CON-0001 | upstream | conflict | error | Upstream conflict | false | none | 1 | 0 | 0 | none | false | true | TERMINUS_CONFLICT | request_human | 409 |
-| TERMINUS_UNAVAILABLE | SHV-{SUBSYS}-UPS-UNA-0002 | upstream | unavailable | error | Upstream service unavailable | true | backoff | 3 | 500 | 10000 | deterministic_equal_jitter | false | false | TERMINUS_UNAVAILABLE | retry_backoff | 503 |
 | UPSTREAM_ERROR | SHV-{SUBSYS}-UPS-INTG-0001 | upstream | integration | error | Upstream service error | false | none | 1 | 0 | 0 | none | false | true | UPSTREAM_ERROR | request_human | 502 |
 | UPSTREAM_TIMEOUT | SHV-{SUBSYS}-UPS-TMO-0001 | upstream | timeout | error | Upstream request timed out | true | backoff | 3 | 500 | 10000 | deterministic_equal_jitter | false | false | UPSTREAM_TIMEOUT | retry_backoff | 504 |
 | UPSTREAM_UNAVAILABLE | SHV-{SUBSYS}-UPS-UNA-0001 | upstream | unavailable | error | Upstream service unavailable | true | backoff | 3 | 500 | 10000 | deterministic_equal_jitter | false | false | UPSTREAM_UNAVAILABLE | retry_backoff | 503 |

@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from bff.dependencies import TerminusService
+from bff.dependencies import FoundryQueryService
 
 
 @pytest.mark.asyncio
@@ -17,7 +17,7 @@ async def test_query_database_adapts_to_foundry_where_and_page_token() -> None:
             "nextPageToken": "MTI1",
         }
     )
-    service = TerminusService(oms)
+    service = FoundryQueryService(oms)
 
     result = await service.query_database(
         "demo_db",
@@ -59,7 +59,7 @@ async def test_query_database_maps_not_in_and_not_null_filters() -> None:
             "nextPageToken": None,
         }
     )
-    service = TerminusService(oms)
+    service = FoundryQueryService(oms)
 
     await service.query_database(
         "demo_db",
@@ -85,7 +85,7 @@ async def test_query_database_maps_not_in_and_not_null_filters() -> None:
 @pytest.mark.asyncio
 async def test_query_database_rejects_invalid_order_direction() -> None:
     oms = AsyncMock()
-    service = TerminusService(oms)
+    service = FoundryQueryService(oms)
 
     with pytest.raises(ValueError, match="order_direction must be 'asc' or 'desc'"):
         await service.query_database(

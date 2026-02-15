@@ -8,13 +8,11 @@
 # - redis[hiredis]: RedisService 사용
 # - confluent-kafka: 메시지 큐 처리
 # - asyncpg: PostgreSQL 연결
-# - terminusdb-client: TerminusDB 그래프 DB 연결
 # - 기타 모든 공통 유틸리티
 
 # 개별 서비스 의존성은 제거됨 - shared에서 모두 관리
 # confluent-kafka==2.3.0    → shared에서 관리
 # asyncpg==0.29.0           → shared에서 관리
-# terminusdb-client==10.2.0 → shared에서 관리
 
 # Shared package (includes all dependencies above)
 -e ../shared

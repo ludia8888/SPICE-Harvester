@@ -22,7 +22,6 @@ from bff.schemas.ontology_extensions_requests import (
 )
 from bff.services import ontology_extensions_service
 from bff.services.oms_client import OMSClient
-from shared.models.requests import BranchCreateRequest
 
 router = APIRouter(prefix="/databases/{db_name}/ontology", tags=["Ontology Extensions"])
 
@@ -134,25 +133,6 @@ for _resource_type in (
     router.add_api_route(f"/{_resource_type}/{{resource_id}}", _get, methods=["GET"])
     router.add_api_route(f"/{_resource_type}/{{resource_id}}", _update, methods=["PUT"])
     router.add_api_route(f"/{_resource_type}/{{resource_id}}", _delete, methods=["DELETE"])
-
-
-@router.get("/branches")
-@trace_endpoint("bff.ontology.list_ontology_branches")
-async def list_ontology_branches(
-    db_name: str,
-    oms_client: OMSClient = OMSClientDep,
-):
-    return await ontology_extensions_service.list_ontology_branches(oms_client=oms_client, db_name=db_name)
-
-
-@router.post("/branches", status_code=status.HTTP_201_CREATED)
-@trace_endpoint("bff.ontology.create_ontology_branch")
-async def create_ontology_branch(
-    db_name: str,
-    request: BranchCreateRequest,
-    oms_client: OMSClient = OMSClientDep,
-):
-    return await ontology_extensions_service.create_ontology_branch(oms_client=oms_client, db_name=db_name, request=request)
 
 
 @router.get("/proposals")

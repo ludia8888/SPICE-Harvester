@@ -13,9 +13,8 @@ Security posture:
 from __future__ import annotations
 
 import asyncio
-import base64
 import os
-from typing import Any, Optional
+from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 import aiohttp
@@ -44,17 +43,6 @@ def _redact_url(url: str) -> str:
         return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
     except Exception:
         return "<redacted-url>"
-
-
-def _redact_secret(value: Optional[str], *, show: int = 2) -> str:
-    if value is None:
-        return ""
-    raw = str(value)
-    if not raw:
-        return ""
-    if len(raw) <= show * 2:
-        return "***"
-    return f"{raw[:show]}***{raw[-show:]}"
 
 
 class EnvironmentValidator:
@@ -99,11 +87,6 @@ class EnvironmentValidator:
         self.check_result("Redis URL", True, _redact_url(db.redis_url))
         self.check_result("Kafka Bootstrap", True, db.kafka_servers)
         self.check_result("Elasticsearch URL", True, _redact_url(db.elasticsearch_url))
-
-        self.check_result("Terminus URL", True, db.terminus_url.rstrip("/"))
-        self.check_result("Terminus User", True, db.terminus_user)
-        self.check_result("Terminus Account", True, db.terminus_account)
-        self.check_result("Terminus Key", True, _redact_secret(db.terminus_password))
 
         self.check_result("MinIO Endpoint", True, storage.minio_endpoint_url)
         self.check_result("Event Store Bucket", True, storage.event_store_bucket)
@@ -224,43 +207,6 @@ class EnvironmentValidator:
         except Exception as exc:
             self.check_result("Kafka Connection", False, str(exc))
 
-    async def check_terminus(self) -> None:
-        self.print_header("TERMINUSDB CONNECTION CHECK")
-
-        db = self.settings.database
-        server_url = db.terminus_url.rstrip("/")
-
-        try:
-            async with aiohttp.ClientSession() as session:
-                auth_str = f"{db.terminus_user}:{db.terminus_password}"
-                auth_header = f"Basic {base64.b64encode(auth_str.encode()).decode()}"
-
-                async with session.get(
-                    f"{server_url}/api/info",
-                    headers={"Authorization": auth_header},
-                    timeout=aiohttp.ClientTimeout(total=db.terminus_read_timeout_seconds),
-                ) as resp:
-                    if resp.status == 200:
-                        info = await resp.json()
-                        version = info.get("api:info", {}).get("terminusdb", {}).get("version", "unknown")
-                        self.check_result("TerminusDB Connection", True, f"Version {version}")
-                    else:
-                        self.check_result("TerminusDB Connection", False, f"Status {resp.status}")
-
-                async with session.get(
-                    f"{server_url}/api/db/{db.terminus_account}",
-                    headers={"Authorization": auth_header},
-                    timeout=aiohttp.ClientTimeout(total=db.terminus_read_timeout_seconds),
-                ) as resp:
-                    if resp.status == 200:
-                        dbs = await resp.json()
-                        db_count = len(dbs) if isinstance(dbs, list) else 0
-                        self.check_result("TerminusDB Databases", True, f"{db_count} databases")
-                    else:
-                        self.check_result("TerminusDB Databases", False, f"Status {resp.status}")
-        except Exception as exc:
-            self.check_result("TerminusDB Connection", False, str(exc))
-
     async def check_services(self) -> None:
         self.print_header("MICROSERVICES HEALTH CHECK")
 
@@ -297,7 +243,6 @@ class EnvironmentValidator:
             ("Redis Port", "6379:6379" in content or "REDIS_PORT_HOST" in content),
             ("Elasticsearch Port", "9200:9200" in content),
             ("Kafka Port", ":9092" in content and ("39092" in content or "KAFKA_PORT_HOST" in content)),
-            ("TerminusDB Port", "6363:6363" in content),
             ("MinIO Port", ":9000" in content and ("MINIO_PORT_HOST" in content or "9000:9000" in content)),
         ]
         for name, ok in checks:
@@ -339,7 +284,6 @@ class EnvironmentValidator:
         await self.check_postgresql()
         await self.check_redis()
         await self.check_elasticsearch()
-        await self.check_terminus()
         await self.check_services()
         await self.check_workers()
 
@@ -367,4 +311,3 @@ async def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(asyncio.run(main()))
-

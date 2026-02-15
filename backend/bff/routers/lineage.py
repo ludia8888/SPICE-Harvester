@@ -70,11 +70,11 @@ def _suggest_remediation_actions(*, artifacts: list[Dict[str, Any]]) -> list[Dic
                     "rationale": "Prefer projection rebuild over ad-hoc deletes to avoid consistency gaps",
                 }
             )
-        elif kind == "terminus":
+        elif kind == "graph":
             actions.append(
                 {
                     "action": "REPLAY_TO_TARGET",
-                    "target_kind": "terminus",
+                    "target_kind": "graph",
                     "target": node_id,
                     "rationale": "Prefer reset/re-materialize from event store over manual graph edits",
                 }
@@ -140,7 +140,7 @@ async def get_lineage_impact(
     db_name: Optional[str] = Query(None, description="Optional database scope (recommended)"),
     direction: LineageDirection = Query("downstream", description="Impact direction (usually downstream)"),
     max_depth: int = Query(10, ge=0, le=50),
-    artifact_kind: Optional[str] = Query(None, description="Filter by artifact kind (es|s3|terminus|...)"),
+    artifact_kind: Optional[str] = Query(None, description="Filter by artifact kind (es|s3|graph|...)"),
     max_nodes: int = Query(2000, ge=1, le=20000),
     max_edges: int = Query(5000, ge=1, le=50000),
     *,

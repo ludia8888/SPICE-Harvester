@@ -28,6 +28,17 @@ from shared.observability.tracing import trace_db_operation
 logger = logging.getLogger(__name__)
 
 
+def _normalize_ontology_bundle(*, ontology_meta: dict[str, Any], build_branch: str) -> dict[str, Optional[str]]:
+    branch_value = str(ontology_meta.get("branch") or "").strip() or build_branch
+    ref_value = str(ontology_meta.get("ref") or "").strip() or f"branch:{build_branch}"
+    commit_value = str(ontology_meta.get("commit") or "").strip() or ref_value
+    return {
+        "branch": branch_value or None,
+        "ref": ref_value or None,
+        "commit": commit_value or None,
+    }
+
+
 def normalize_mapping_spec_ids(raw: Any) -> list[str]:
     if raw is None:
         return []
@@ -109,6 +120,10 @@ async def _build_proposal_bundle(
         build_branch = str(output_json.get("branch") or pipeline.branch or "main").strip() or "main"
         lakefs_meta = output_json.get("lakefs") if isinstance(output_json.get("lakefs"), dict) else {}
         ontology_meta = output_json.get("ontology") if isinstance(output_json.get("ontology"), dict) else {}
+        normalized_ontology = _normalize_ontology_bundle(
+            ontology_meta=ontology_meta,
+            build_branch=build_branch,
+        )
 
         bundle.update(
             {
@@ -121,10 +136,7 @@ async def _build_proposal_bundle(
                     "build_branch": str(lakefs_meta.get("build_branch") or "").strip() or None,
                     "commit_id": str(lakefs_meta.get("commit_id") or "").strip() or None,
                 },
-                "ontology": {
-                    "branch": str(ontology_meta.get("branch") or "").strip() or None,
-                    "commit": str(ontology_meta.get("commit") or "").strip() or None,
-                },
+                "ontology": normalized_ontology,
             }
         )
 

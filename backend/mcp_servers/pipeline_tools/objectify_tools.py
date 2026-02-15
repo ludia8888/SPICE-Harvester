@@ -224,43 +224,30 @@ async def _objectify_create_mapping_spec(server: Any, arguments: Dict[str, Any])
     oms_synced = False
     try:
         branch = dataset_branch or dataset.branch or "main"
-        head_resp = await oms_json(
+        ot_resp = await oms_json(
             "GET",
-            f"/api/v1/version/{db_name}/head",
+            f"/api/v1/database/{db_name}/ontology/resources/object_type/{target_class_id}",
             params={"branch": branch},
         )
-        head_data = head_resp.get("data") if isinstance(head_resp.get("data"), dict) else {}
-        head_commit = (
-            head_data.get("head_commit_id")
-            or head_data.get("commit")
-            or head_data.get("head_commit")
-            or ""
-        )
-        if head_commit:
-            ot_resp = await oms_json(
-                "GET",
+        ot_data = ot_resp.get("data") if isinstance(ot_resp.get("data"), dict) else ot_resp
+        ot_spec = (ot_data.get("spec") if isinstance(ot_data, dict) else {}) or {}
+        backing = (ot_spec.get("backing_source") if isinstance(ot_spec, dict) else {}) or {}
+        if backing:
+            backing["property_mappings"] = normalized_mappings
+            if target_field_types:
+                backing["target_field_types"] = target_field_types
+            backing["auto_sync"] = auto_sync
+            backing["mapping_version"] = mapping_spec.version if hasattr(mapping_spec, "version") else 1
+            ot_spec["backing_source"] = backing
+            ot_data["spec"] = ot_spec
+            await oms_json(
+                "PUT",
                 f"/api/v1/database/{db_name}/ontology/resources/object_type/{target_class_id}",
                 params={"branch": branch},
+                json_body=ot_data,
+                timeout_seconds=30.0,
             )
-            ot_data = ot_resp.get("data") if isinstance(ot_resp.get("data"), dict) else ot_resp
-            ot_spec = (ot_data.get("spec") if isinstance(ot_data, dict) else {}) or {}
-            backing = (ot_spec.get("backing_source") if isinstance(ot_spec, dict) else {}) or {}
-            if backing:
-                backing["property_mappings"] = normalized_mappings
-                if target_field_types:
-                    backing["target_field_types"] = target_field_types
-                backing["auto_sync"] = auto_sync
-                backing["mapping_version"] = mapping_spec.version if hasattr(mapping_spec, "version") else 1
-                ot_spec["backing_source"] = backing
-                ot_data["spec"] = ot_spec
-                await oms_json(
-                    "PUT",
-                    f"/api/v1/database/{db_name}/ontology/resources/object_type/{target_class_id}",
-                    params={"branch": branch, "expected_head_commit": head_commit},
-                    json_body=ot_data,
-                    timeout_seconds=30.0,
-                )
-                oms_synced = True
+            oms_synced = True
     except Exception as oms_exc:
         logger.warning("OMS dual-write for mapping_spec failed (non-fatal): %s", oms_exc)
 

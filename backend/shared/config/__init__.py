@@ -63,11 +63,6 @@ class Config(AppConfig):
         return get_settings().database.kafka_servers
     
     @staticmethod
-    def get_terminus_url() -> str:
-        """TerminusDB 연결 URL"""
-        return get_settings().database.terminus_url
-    
-    @staticmethod
     def get_minio_url() -> str:
         """MinIO 연결 URL"""
         return get_settings().storage.minio_endpoint_url
@@ -121,7 +116,6 @@ class Config(AppConfig):
                 "redis": bool(cls.get_redis_url()),
                 "elasticsearch": bool(cls.get_elasticsearch_url()),
                 "kafka": bool(cls.get_kafka_bootstrap_servers()),
-                "terminus": bool(cls.get_terminus_url()),
                 "minio": bool(cls.get_minio_url())
             }
         except Exception as e:
@@ -146,7 +140,6 @@ class Config(AppConfig):
             "redis": cls.get_redis_url(),
             "elasticsearch": cls.get_elasticsearch_url(),
             "kafka": cls.get_kafka_bootstrap_servers(),
-            "terminus": cls.get_terminus_url(),
             "minio": cls.get_minio_url()
         }
         

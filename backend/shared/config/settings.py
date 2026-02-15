@@ -121,94 +121,6 @@ class DatabaseSettings(BaseSettings):
         extra="ignore"
     )
     
-    # TerminusDB Configuration
-    terminus_url: str = Field(
-        default_factory=lambda: (
-            "http://terminusdb:6363" if _is_docker_environment() else "http://127.0.0.1:6363"
-        ),
-        description="TerminusDB server URL"
-    )
-    terminus_user: str = Field(
-        default="admin",
-        description="TerminusDB username"
-    )
-    terminus_password: str = Field(
-        default="admin",
-        description="TerminusDB password/key"
-    )
-    terminus_account: str = Field(
-        default="admin",
-        description="TerminusDB account"
-    )
-    
-    @field_validator("terminus_url", mode="before")
-    @classmethod
-    def get_terminus_url(cls, v):
-        return os.getenv("TERMINUS_SERVER_URL", v or "http://localhost:6363")
-
-    @field_validator("terminus_user", mode="before")
-    @classmethod
-    def get_terminus_user(cls, v):
-        return os.getenv("TERMINUS_USER", v or "anonymous")
-
-    @field_validator("terminus_password", mode="before")
-    @classmethod
-    def get_terminus_password(cls, v):
-        return os.getenv("TERMINUS_KEY", v or "admin")
-
-    @field_validator("terminus_account", mode="before")
-    @classmethod
-    def get_terminus_account(cls, v):
-        return os.getenv("TERMINUS_ACCOUNT", v or "admin")
-    terminus_timeout: int = Field(
-        default=30,
-        description="TerminusDB connection timeout in seconds"
-    )
-    terminus_retry_attempts: int = Field(
-        default=3,
-        description="TerminusDB retry attempts"
-    )
-    terminus_retry_delay: float = Field(
-        default=1.0,
-        description="TerminusDB retry delay in seconds"
-    )
-    terminus_ssl_verify: bool = Field(
-        default=True,
-        description="Verify SSL certificates for TerminusDB"
-    )
-    terminus_use_ssl: bool = Field(
-        default=False,
-        description="Use SSL for TerminusDB connections"
-    )
-
-    # TerminusDB client timeout tuning (httpx)
-    terminus_connect_timeout_seconds: float = Field(
-        default=10.0,
-        description="TerminusDB connect timeout seconds (TERMINUS_CONNECT_TIMEOUT_SECONDS)",
-    )
-    terminus_read_timeout_seconds: float = Field(
-        default=120.0,
-        description="TerminusDB read timeout seconds (TERMINUS_READ_TIMEOUT_SECONDS)",
-    )
-    terminus_write_timeout_seconds: float = Field(
-        default=120.0,
-        description="TerminusDB write timeout seconds (TERMINUS_WRITE_TIMEOUT_SECONDS)",
-    )
-    terminus_pool_timeout_seconds: float = Field(
-        default=5.0,
-        description="TerminusDB connection pool timeout seconds (TERMINUS_POOL_TIMEOUT_SECONDS)",
-    )
-
-    # TerminusDB retry tuning (version control / commits)
-    terminus_commits_retry_attempts: int = Field(
-        default=5,
-        description="Retry attempts for commit-related operations (TERMINUS_COMMITS_RETRY_ATTEMPTS)",
-    )
-    terminus_commits_retry_delay_seconds: float = Field(
-        default=0.4,
-        description="Base delay seconds for commit retries (TERMINUS_COMMITS_RETRY_DELAY_SECONDS)",
-    )
-
     # Query guardrails
     query_max_scan_docs: int = Field(
         default=5000,
@@ -1368,6 +1280,13 @@ class OntologySettings(BaseSettings):
         default=True,
         description="Require health gate for destructive ops (ONTOLOGY_REQUIRE_HEALTH_GATE)",
     )
+    resource_storage_backend: str = Field(
+        default="postgres",
+        description=(
+            "Ontology resource storage backend "
+            "(ONTOLOGY_RESOURCE_STORAGE_BACKEND: postgres)"
+        ),
+    )
 
     # Linter strictness defaults (domain-neutral)
     require_primary_key: bool = Field(
@@ -1410,6 +1329,17 @@ class OntologySettings(BaseSettings):
     @classmethod
     def parse_optional_bool(cls, v):  # noqa: ANN001
         return _parse_boolish(v)
+
+    @field_validator("resource_storage_backend", mode="before")
+    @classmethod
+    def normalize_resource_storage_backend(cls, v):  # noqa: ANN001
+        backend = str(v or "").strip().lower()
+        if backend and backend != "postgres":
+            logger.warning(
+                "Ignoring legacy ontology backend profile (%s); runtime backend is fixed to postgres",
+                backend,
+            )
+        return "postgres"
 
     @property
     def protected_branches_set(self) -> set[str]:

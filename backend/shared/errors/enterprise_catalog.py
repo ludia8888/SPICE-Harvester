@@ -443,20 +443,6 @@ _ERROR_CODE_SPECS: Dict[ErrorCode, EnterpriseErrorSpec] = {
         title="Upstream service unavailable",
         severity=EnterpriseSeverity.ERROR,
     ),
-    ErrorCode.TERMINUS_CONFLICT: EnterpriseErrorSpec(
-        code_template="SHV-{subsystem}-UPS-CON-0001",
-        domain=EnterpriseDomain.UPSTREAM,
-        error_class=EnterpriseClass.CONFLICT,
-        title="Upstream conflict",
-        severity=EnterpriseSeverity.ERROR,
-    ),
-    ErrorCode.TERMINUS_UNAVAILABLE: EnterpriseErrorSpec(
-        code_template="SHV-{subsystem}-UPS-UNA-0002",
-        domain=EnterpriseDomain.UPSTREAM,
-        error_class=EnterpriseClass.UNAVAILABLE,
-        title="Upstream service unavailable",
-        severity=EnterpriseSeverity.ERROR,
-    ),
     ErrorCode.OMS_UNAVAILABLE: EnterpriseErrorSpec(
         code_template="SHV-{subsystem}-UPS-UNA-0003",
         domain=EnterpriseDomain.UPSTREAM,

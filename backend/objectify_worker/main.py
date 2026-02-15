@@ -433,10 +433,8 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
             spec["backing_source"] = backing_source
             resource["spec"] = spec
 
-            expected_head = await self._fetch_ontology_head_commit(job)
-            if not expected_head:
-                return
             branch = job.ontology_branch or job.dataset_branch or "main"
+            expected_head = f"branch:{branch}"
             resp = await self.http.put(
                 f"/api/v1/database/{job.db_name}/ontology/resources/object_type/{job.target_class_id}",
                 params={"branch": branch, "expected_head_commit": expected_head},
@@ -2373,41 +2371,9 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
         return defs, missing
 
     async def _fetch_ontology_version(self, job: ObjectifyJob) -> Dict[str, str]:
-        if not self.http:
-            return {}
         branch = job.ontology_branch or job.dataset_branch or "main"
-        resp = await self.http.get(
-            f"/api/v1/version/{job.db_name}/head",
-            params={"branch": branch},
-        )
-        if resp.status_code == 404:
-            return {"ref": f"branch:{branch}"}
-        resp.raise_for_status()
-        payload = resp.json() if resp.text else {}
-        data = payload.get("data") if isinstance(payload, dict) else {}
-        head_commit = None
-        if isinstance(data, dict):
-            head_commit = data.get("head_commit_id") or data.get("commit")
-        if head_commit:
-            return {"ref": f"branch:{branch}", "commit": str(head_commit)}
-        return {"ref": f"branch:{branch}"}
-
-    async def _fetch_ontology_head_commit(self, job: ObjectifyJob) -> Optional[str]:
-        if not self.http:
-            return None
-        branch = job.ontology_branch or job.dataset_branch or "main"
-        resp = await self.http.get(
-            f"/api/v1/version/{job.db_name}/head",
-            params={"branch": branch},
-        )
-        if resp.status_code == 404:
-            return None
-        resp.raise_for_status()
-        payload = resp.json() if resp.text else {}
-        data = payload.get("data") if isinstance(payload, dict) else {}
-        if isinstance(data, dict):
-            return data.get("head_commit_id") or data.get("commit") or data.get("head_commit")
-        return None
+        ref = f"branch:{branch}"
+        return {"ref": ref, "commit": ref}
 
     @staticmethod
     def _normalize_pk_fields(value: Any) -> List[str]:

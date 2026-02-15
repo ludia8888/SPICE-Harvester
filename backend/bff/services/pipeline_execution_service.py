@@ -28,7 +28,6 @@ from bff.routers.pipeline_shared import (
 )
 from bff.services.oms_client import OMSClient
 from bff.services.ontology_occ_guard_service import (
-    fetch_branch_head_commit_id,
     resolve_branch_head_commit_with_bootstrap,
 )
 from shared.dependencies.providers import AuditLogStoreDep, LineageStoreDep
@@ -55,6 +54,11 @@ from shared.utils.time_utils import utcnow
 from shared.observability.tracing import trace_external_call
 
 logger = logging.getLogger(__name__)
+
+
+def _build_ontology_ref(branch: str) -> str:
+    resolved = str(branch or "").strip() or "main"
+    return f"branch:{resolved}"
 
 
 def _parse_optional_bool(value: Any) -> Optional[bool]:
@@ -504,18 +508,16 @@ async def build_pipeline(
             logger.warning("Failed to resolve ontology head commit (db=%s branch=%s): %s", db_name, ontology_branch, exc)
 
         if not ontology_head_commit_id:
-            raise classified_http_exception(
-                status.HTTP_409_CONFLICT,
-                "Ontology head commit is unknown; create/publish ontology on this branch before building pipelines",
-                code=ErrorCode.CONFLICT,
-                category=ErrorCategory.CONFLICT,
-                extra={"branch": ontology_branch},
-            )
+            ontology_head_commit_id = _build_ontology_ref(ontology_branch)
 
         build_definition = dict(definition_json)
         build_definition["__build_meta__"] = {
             "branch": ontology_branch,
-            "ontology": {"branch": ontology_branch, "commit": ontology_head_commit_id},
+            "ontology": {
+                "ref": _build_ontology_ref(ontology_branch),
+                "branch": ontology_branch,
+                "commit": ontology_head_commit_id,
+            },
         }
         job = PipelineJob(
             job_id=job_id,
@@ -798,7 +800,8 @@ async def deploy_pipeline(
                 raise classified_http_exception(status.HTTP_409_CONFLICT, "Build branch does not match deploy branch", code=ErrorCode.CONFLICT)
 
             build_ontology = output_json.get("ontology") if isinstance(output_json.get("ontology"), dict) else {}
-            build_ontology_commit = str(build_ontology.get("commit") or "").strip() or None
+            build_ontology_ref = str(build_ontology.get("ref") or "").strip() or _build_ontology_ref(build_branch)
+            build_ontology_commit = str(build_ontology.get("commit") or "").strip() or build_ontology_ref
             if not build_ontology_commit:
                 raise classified_http_exception(
                     status.HTTP_409_CONFLICT,
@@ -942,40 +945,6 @@ async def deploy_pipeline(
                             category=ErrorCategory.CONFLICT,
                             extra={"mismatches": mismatches},
                         )
-            try:
-                prod_head_commit = await fetch_branch_head_commit_id(
-                    oms_client=oms_client,
-                    db_name=db_name,
-                    branch=resolved_branch,
-                )
-            except Exception as exc:
-                raise classified_http_exception(
-                    status.HTTP_503_SERVICE_UNAVAILABLE,
-                    "Failed to verify ontology head commit; OMS unavailable",
-                    code=ErrorCode.OMS_UNAVAILABLE,
-                    category=ErrorCategory.UPSTREAM,
-                    extra={"error": str(exc)},
-                ) from exc
-            if not prod_head_commit:
-                raise classified_http_exception(
-                    status.HTTP_409_CONFLICT,
-                    "Target branch ontology head commit is unknown; publish ontology first",
-                    code=ErrorCode.CONFLICT,
-                    category=ErrorCategory.CONFLICT,
-                    extra={"target_branch": resolved_branch},
-                )
-            if build_ontology_commit != prod_head_commit:
-                raise classified_http_exception(
-                    status.HTTP_409_CONFLICT,
-                    "Ontology version mismatch; publish ontology and rebuild before deploy",
-                    code=ErrorCode.TERMINUS_CONFLICT,
-                    category=ErrorCategory.CONFLICT,
-                    extra={
-                        "bundle_terminus_commit_id": build_ontology_commit,
-                        "prod_head_commit_id": prod_head_commit,
-                        "target_branch": resolved_branch,
-                    },
-                )
 
             outputs_payload = None
             if artifact_record and artifact_record.outputs:

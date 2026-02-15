@@ -70,7 +70,7 @@ class TestExtractRelationshipsWithOntologyData:
         result = extract_relationships(payload, ontology_data=ontology, allow_pattern_fallback=False)
         assert result == {"placed_by": "Customer/cust_1"}
 
-    def test_terminus_schema_format(self) -> None:
+    def test_legacy_graph_schema_format(self) -> None:
         ontology = {
             "placed_by": {"@class": "Customer", "@type": "Optional"},
             "items": {"@class": "OrderItem", "@type": "Set"},

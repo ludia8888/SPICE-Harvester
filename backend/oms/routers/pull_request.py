@@ -348,14 +348,14 @@ async def close_pull_request(
 async def get_pull_request_diff(
     db_name: str,
     pr_id: str,
-    refresh: bool = Query(False, description="Refresh diff from TerminusDB"),
+    refresh: bool = Query(False, description="Refresh diff from ontology registry"),
     pr_service: PullRequestService = Depends(get_pr_service)
 ):
     """
     Get diff for a pull request
     
     Returns the diff between source and target branches.
-    Can optionally refresh the diff from TerminusDB.
+    Can optionally refresh the diff from the ontology registry backend.
     """
     try:
         # Validate inputs

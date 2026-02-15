@@ -1,7 +1,7 @@
 """
 Ontology KeySpec Registry (Postgres SSoT).
 
-TerminusDB schema documents may discard custom per-property metadata such as
+Some legacy schema documents may discard custom per-property metadata such as
 primaryKey/titleKey flags. To make ontology primary keys authoritative and
 round-trip safe, we persist the ordered key spec in Postgres and overlay it
 back into ontology reads.

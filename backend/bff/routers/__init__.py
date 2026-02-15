@@ -7,7 +7,6 @@ __all__ = [
     "database",
     "health", 
     "mapping",
-    "merge_conflict",
     "ontology",
     "ontology_extensions",
     "query",

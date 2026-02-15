@@ -29,11 +29,9 @@ from shared.security.database_access import (
 from shared.security.input_sanitizer import (
     SecurityViolationError,
     sanitize_input,
-    validate_branch_name,
     validate_db_name,
 )
 from shared.services.registries.dataset_registry import DatasetRegistry
-from shared.utils.branch_utils import protected_branch_write_message
 from shared.observability.tracing import trace_external_call, trace_db_operation
 
 logger = logging.getLogger(__name__)
@@ -82,10 +80,6 @@ def _coerce_db_entry(entry: Any) -> Dict[str, Any]:
     if name and "name" not in payload:
         payload["name"] = name
     return payload
-
-
-def _validate_db_branch_pair(*, db_name: str, branch_name: str) -> tuple[str, str]:
-    return validate_db_name(db_name), validate_branch_name(branch_name)
 
 
 def _database_not_found_policy(*, db_name: str) -> MessageErrorPolicy:
@@ -357,57 +351,6 @@ async def delete_database(
         )
 
 
-@trace_external_call("bff.database.get_branch_info")
-async def get_branch_info(*, db_name: str, branch_name: str, oms: OMSClient) -> Dict[str, Any]:
-    """브랜치 정보 조회 (프론트엔드용 BFF 래핑)"""
-    try:
-        db_name, branch_name = _validate_db_branch_pair(db_name=db_name, branch_name=branch_name)
-        return await oms.get_branch_info(db_name, branch_name)
-    except SecurityViolationError as exc:
-        logger.warning("Security validation failed for branch info (%s/%s): %s", db_name, branch_name, exc)
-        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, str(exc), code=ErrorCode.INPUT_SANITIZATION_FAILED) from exc
-    except httpx.HTTPStatusError as exc:
-        resp = getattr(exc, "response", None)
-        if resp is not None and resp.status_code == 404:
-            raise classified_http_exception(status.HTTP_404_NOT_FOUND, "브랜치를 찾을 수 없습니다", code=ErrorCode.RESOURCE_NOT_FOUND) from exc
-        raise classified_http_exception(status.HTTP_502_BAD_GATEWAY, "OMS 브랜치 조회 실패", code=ErrorCode.UPSTREAM_ERROR) from exc
-    except httpx.HTTPError as exc:
-        raise classified_http_exception(status.HTTP_502_BAD_GATEWAY, "OMS 브랜치 조회 실패", code=ErrorCode.UPSTREAM_ERROR) from exc
-    except Exception as exc:
-        logger.error("Failed to get branch info (%s/%s): %s", db_name, branch_name, exc)
-        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc), code=ErrorCode.INTERNAL_ERROR) from exc
-
-
-@trace_external_call("bff.database.delete_branch")
-async def delete_branch(*, db_name: str, branch_name: str, force: bool, oms: OMSClient) -> Dict[str, Any]:
-    """브랜치 삭제 (프론트엔드용 BFF 래핑)"""
-    try:
-        db_name, branch_name = _validate_db_branch_pair(db_name=db_name, branch_name=branch_name)
-        return await oms.delete_branch(db_name, branch_name, force=force)
-    except SecurityViolationError as exc:
-        logger.warning("Security validation failed for branch delete (%s/%s): %s", db_name, branch_name, exc)
-        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, str(exc), code=ErrorCode.INPUT_SANITIZATION_FAILED) from exc
-    except httpx.HTTPStatusError as exc:
-        resp = getattr(exc, "response", None)
-        if resp is not None:
-            if resp.status_code == 404:
-                raise classified_http_exception(status.HTTP_404_NOT_FOUND, "브랜치를 찾을 수 없습니다", code=ErrorCode.RESOURCE_NOT_FOUND) from exc
-            if resp.status_code == 403:
-                raise classified_http_exception(
-                    status.HTTP_403_FORBIDDEN,
-                    protected_branch_write_message(),
-                    code=ErrorCode.PERMISSION_DENIED,
-                ) from exc
-            if resp.status_code == 400:
-                raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "현재 브랜치는 삭제할 수 없습니다", code=ErrorCode.REQUEST_VALIDATION_FAILED) from exc
-        raise classified_http_exception(status.HTTP_502_BAD_GATEWAY, "OMS 브랜치 삭제 실패", code=ErrorCode.UPSTREAM_ERROR) from exc
-    except httpx.HTTPError as exc:
-        raise classified_http_exception(status.HTTP_502_BAD_GATEWAY, "OMS 브랜치 삭제 실패", code=ErrorCode.UPSTREAM_ERROR) from exc
-    except Exception as exc:
-        logger.error("Failed to delete branch (%s/%s): %s", db_name, branch_name, exc)
-        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc), code=ErrorCode.INTERNAL_ERROR) from exc
-
-
 @trace_external_call("bff.database.get_database")
 async def get_database(*, db_name: str, oms: OMSClient) -> Dict[str, Any]:
     """데이터베이스 정보 조회"""
@@ -637,106 +580,3 @@ async def get_class(*, db_name: str, class_id: str, oms: OMSClient) -> Dict[str,
             default_detail=str(exc),
         )
 
-
-@trace_external_call("bff.database.list_branches")
-async def list_branches(*, db_name: str, oms: OMSClient) -> Dict[str, Any]:
-    """브랜치 목록 조회"""
-    try:
-        db_name = validate_db_name(db_name)
-
-        result = await oms.list_branches(db_name)
-        branches = result.get("data", {}).get("branches", [])
-
-        return {"branches": branches, "count": len(branches)}
-    except Exception as exc:
-        logging.getLogger(__name__).warning("Broad exception fallback at bff/services/database_service.py:667", exc_info=True)
-        apply_message_error_policies(
-            exc=exc,
-            logger=logger,
-            log_message=f"Failed to list branches for database {db_name!r}: %s",
-            policies=(
-                _database_not_found_policy(db_name=db_name),
-                MessageErrorPolicy(
-                    patterns=("access denied", "unauthorized"),
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="브랜치 목록 조회 권한이 없습니다",
-                ),
-            ),
-            default_status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            default_detail=f"브랜치 목록 조회 실패: {str(exc)}",
-        )
-
-
-@trace_external_call("bff.database.create_branch")
-async def create_branch(*, db_name: str, branch_data: Dict[str, Any], oms: OMSClient) -> Dict[str, Any]:
-    """새 브랜치 생성"""
-    try:
-        db_name = validate_db_name(db_name)
-        branch_data = sanitize_input(branch_data)
-
-        branch_name = branch_data.get("name")
-        if not branch_name:
-            raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "브랜치 이름이 필요합니다", code=ErrorCode.REQUEST_VALIDATION_FAILED)
-        branch_name = validate_branch_name(branch_name)
-
-        from_branch = branch_data.get("from_branch", "main")
-        if from_branch:
-            from_branch = validate_branch_name(from_branch)
-
-        result = await oms.create_branch(db_name, branch_name, from_branch=from_branch)
-
-        return {"status": "success", "name": branch_name, "data": result}
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logging.getLogger(__name__).warning("Broad exception fallback at bff/services/database_service.py:706", exc_info=True)
-        apply_message_error_policies(
-            exc=exc,
-            logger=logger,
-            log_message=f"Failed to create branch in database {db_name!r}: %s",
-            policies=(
-                MessageErrorPolicy(
-                    patterns=("branch already exists", "already exists"),
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail=f"브랜치 '{branch_data.get('name')}'이(가) 이미 존재합니다",
-                ),
-                _database_not_found_policy(db_name=db_name),
-            ),
-            default_status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            default_detail=f"브랜치 생성 실패: {str(exc)}",
-        )
-
-
-@trace_external_call("bff.database.get_versions")
-async def get_versions(*, db_name: str, oms: OMSClient) -> Dict[str, Any]:
-    """버전 히스토리 조회"""
-    try:
-        db_name = validate_db_name(db_name)
-
-        result = await oms.get_version_history(db_name)
-        versions = result.get("data", {}).get("versions", [])
-
-        return {"versions": versions, "count": len(versions)}
-    except Exception as exc:
-        logging.getLogger(__name__).warning("Broad exception fallback at bff/services/database_service.py:734", exc_info=True)
-        return apply_message_error_policies(
-            exc=exc,
-            logger=logger,
-            log_message=f"Failed to get versions for database {db_name!r}: %s",
-            policies=(
-                _database_not_found_policy(db_name=db_name),
-                MessageErrorPolicy(
-                    patterns=("access denied", "unauthorized"),
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="버전 히스토리 조회 권한이 없습니다",
-                ),
-                MessageErrorPolicy(
-                    patterns=("no commits", "empty history"),
-                    status_code=status.HTTP_200_OK,
-                    detail="",
-                    fallback_return={"versions": [], "count": 0},
-                ),
-            ),
-            default_status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            default_detail=f"버전 히스토리 조회 실패: {str(exc)}",
-        )

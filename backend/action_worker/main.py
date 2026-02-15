@@ -20,7 +20,6 @@ from typing import Any, Dict, List, Optional, Tuple
 from shared.services.kafka.producer_factory import create_kafka_dlq_producer
 from shared.services.kafka.producer_ops import close_kafka_producer
 
-from oms.services.async_terminus import AsyncTerminusService
 from oms.services.ontology_resources import OntologyResourceService
 from shared.config.app_config import AppConfig
 from shared.config.settings import get_settings
@@ -128,6 +127,7 @@ class ActionWorker(StrictHeartbeatKafkaWorker[_ActionCommandPayload, None]):
     def __init__(self) -> None:
         settings = get_settings()
         cfg = settings.workers.action
+        self.ontology_resource_backend = "postgres"
 
         self._bootstrap_worker_runtime(
             config=WorkerRuntimeConfig(
@@ -160,7 +160,7 @@ class ActionWorker(StrictHeartbeatKafkaWorker[_ActionCommandPayload, None]):
         self.lakefs_client: Optional[LakeFSClient] = None
         self.lakefs_storage: Optional[LakeFSStorageService] = None
         self.base_storage: Optional[StorageService] = None
-        self.terminus: Optional[AsyncTerminusService] = None
+        self.ontology_resources: Optional[OntologyResourceService] = None
 
     async def initialize(self) -> None:
         self.processed_event_registry = await create_processed_event_registry()
@@ -205,16 +205,7 @@ class ActionWorker(StrictHeartbeatKafkaWorker[_ActionCommandPayload, None]):
         if not self.base_storage:
             raise RuntimeError("StorageService unavailable (boto3 missing?)")
 
-        # TerminusDB client (for loading action definitions).
-        from shared.models.config import ConnectionConfig
-
-        connection_info = ConnectionConfig(
-            server_url=settings.database.terminus_url.rstrip("/"),
-            user=settings.database.terminus_user,
-            account=settings.database.terminus_account,
-            key=settings.database.terminus_password,
-        )
-        self.terminus = AsyncTerminusService(connection_info)
+        self.ontology_resources = OntologyResourceService(backend=self.ontology_resource_backend)
 
     async def shutdown(self) -> None:
         self.running = False
@@ -231,8 +222,6 @@ class ActionWorker(StrictHeartbeatKafkaWorker[_ActionCommandPayload, None]):
         await self.action_logs.close()
         if self.dataset_registry:
             await self.dataset_registry.close()
-        if self.terminus:
-            await self.terminus.close()
 
     def _parse_payload(self, payload: Any) -> _ActionCommandPayload:  # type: ignore[override]
         if not isinstance(payload, (bytes, bytearray)):
@@ -765,7 +754,7 @@ class ActionWorker(StrictHeartbeatKafkaWorker[_ActionCommandPayload, None]):
         command: Dict[str, Any],
         envelope: EventEnvelope,
     ) -> None:
-        if not self.lakefs_client or not self.lakefs_storage or not self.base_storage or not self.terminus:
+        if not self.lakefs_client or not self.lakefs_storage or not self.base_storage or not self.ontology_resources:
             raise RuntimeError("ActionWorker not initialized")
 
         log_rec = await self.action_logs.get_log(action_log_id=action_log_id)
@@ -788,7 +777,7 @@ class ActionWorker(StrictHeartbeatKafkaWorker[_ActionCommandPayload, None]):
         ontology_commit_id = log_rec.ontology_commit_id or safe_str(command.get("ontology_commit_id"))
         if not ontology_commit_id:
             raise RuntimeError("ontology_commit_id is required for action execution")
-        resources = OntologyResourceService(self.terminus)
+        resources = self.ontology_resources
         action_resource = await resources.get_resource(
             db_name,
             branch=ontology_commit_id,
@@ -966,10 +955,10 @@ class ActionWorker(StrictHeartbeatKafkaWorker[_ActionCommandPayload, None]):
                     if class_id in class_interface_refs:
                         return
                     contract = await load_action_target_runtime_contract(
-                        terminus=self.terminus,
                         db_name=db_name,
                         class_id=class_id,
                         branch=ontology_commit_id,
+                        resources=resources,
                     )
                     if contract is None:
                         raise RuntimeError(f"Target class not found at ontology commit (class_id={class_id})")

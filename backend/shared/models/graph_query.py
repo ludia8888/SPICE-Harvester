@@ -51,7 +51,7 @@ class GraphNode(BaseModel):
     db_name: str
     es_ref: Dict[str, str]
     data_status: str  # FULL|PARTIAL|MISSING
-    display: Optional[Dict[str, Any]] = None  # Stable UI fields from Terminus graph
+    display: Optional[Dict[str, Any]] = None  # Stable UI fields from graph backend
     data: Optional[Dict[str, Any]] = None  # Document payload from ES
     index_status: Optional[Dict[str, Any]] = None
     provenance: Optional[Dict[str, Any]] = None

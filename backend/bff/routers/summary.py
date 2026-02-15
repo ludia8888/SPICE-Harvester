@@ -7,22 +7,18 @@ signals so the UI doesn't need to reconstruct state from multiple backends.
 
 from shared.observability.tracing import trace_endpoint
 
+import logging
 from typing import Any, Dict, Optional
 
-import httpx
-from fastapi import APIRouter, Query, status
+from fastapi import APIRouter, Query
 
-from shared.errors.error_types import ErrorCode, classified_http_exception
-
-from bff.dependencies import OMSClientDep
-from bff.services.oms_client import OMSClient
 from shared.dependencies.providers import ElasticsearchServiceDep, RedisServiceDep
 from shared.models.requests import ApiResponse
 from shared.security.input_sanitizer import validate_branch_name, validate_db_name
 from shared.utils.branch_utils import get_protected_branches
-import logging
 
 router = APIRouter(prefix="/summary", tags=["Summary"])
+
 
 @router.get("")
 @trace_endpoint("bff.summary.get_summary")
@@ -30,7 +26,6 @@ async def get_summary(
     db: Optional[str] = Query(None, description="Database (project) name"),
     branch: Optional[str] = Query(None, description="Branch name"),
     *,
-    oms: OMSClient = OMSClientDep,
     redis_service: RedisServiceDep,
     es_service: ElasticsearchServiceDep,
 ) -> Dict[str, Any]:
@@ -45,24 +40,10 @@ async def get_summary(
 
     protected_branches = get_protected_branches()
     is_protected_branch = bool(branch_name and branch_name in protected_branches)
+    ontology_backend = "postgres"
 
-    terminus_info: Optional[Dict[str, Any]] = None
-    if db_name and branch_name:
-        try:
-            terminus_info = await oms.get(f"/api/v1/branch/{db_name}/branch/{branch_name}/info")
-        except httpx.HTTPStatusError as e:
-            resp = getattr(e, "response", None)
-            detail: Any = None
-            if resp is not None:
-                try:
-                    detail = resp.json()
-                except Exception:
-                    logging.getLogger(__name__).warning("Broad exception fallback at bff/routers/summary.py:60", exc_info=True)
-                    detail = resp.text
-                raise classified_http_exception(resp.status_code, str(detail), code=ErrorCode.UPSTREAM_ERROR) from e
-            raise classified_http_exception(status.HTTP_502_BAD_GATEWAY, "OMS branch info 조회 실패", code=ErrorCode.UPSTREAM_ERROR) from e
-        except httpx.HTTPError as e:
-            raise classified_http_exception(status.HTTP_502_BAD_GATEWAY, "OMS branch info 조회 실패", code=ErrorCode.UPSTREAM_ERROR) from e
+    # Legacy branch-info API is removed in Foundry-style profile.
+    branch_info: Optional[Dict[str, Any]] = None
 
     redis_ok = await redis_service.ping()
 
@@ -91,11 +72,12 @@ async def get_summary(
             "policy": {
                 "protected_branches": sorted(protected_branches),
                 "is_protected_branch": is_protected_branch,
+                "ontology_backend": ontology_backend,
             },
             "services": {
                 "redis": {"ok": bool(redis_ok)},
                 "elasticsearch": {"ok": bool(es_ok), "health": es_health, "error": es_error},
             },
-            "terminus": terminus_info,
+            "branch_info": branch_info,
         },
     ).to_dict()

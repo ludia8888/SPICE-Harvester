@@ -169,7 +169,7 @@ class TypeMappingRequest(BaseModel):
     """Request for mapping inferred types to target schema"""
 
     inferred_types: Dict[str, str] = Field(..., description="Column name to inferred type mapping")
-    target_system: str = Field(default="terminus", description="Target system for type mapping")
+    target_system: str = Field(default="foundry", description="Target system for type mapping")
     custom_mappings: Optional[Dict[str, str]] = None
 
 

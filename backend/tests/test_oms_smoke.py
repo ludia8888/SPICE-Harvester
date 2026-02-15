@@ -322,7 +322,7 @@ async def test_oms_end_to_end_smoke():
             await _wait_for_ontology_present(session, db_name=db_name, ontology_id=class_id, branch=write_branch)
 
             # Enterprise contract:
-            # TerminusDB schema documents may discard custom per-property metadata, so OMS overlays
+            # Some legacy schema documents may discard custom per-property metadata, so OMS overlays
             # key_spec from a separate registry to preserve primaryKey/titleKey on reads.
             async with session.get(
                 f"{OMS_URL}/api/v1/database/{db_name}/ontology/{class_id}",

@@ -305,11 +305,6 @@ async def get_configuration_overview(
                 "port": settings.database.elasticsearch_port,
                 "username": settings.database.elasticsearch_username,
             },
-            "terminusdb": {
-                "url": settings.database.terminus_url,
-                "user": settings.database.terminus_user,
-                "account": settings.database.terminus_account,
-            },
             "kafka": {
                 "servers": settings.database.kafka_servers,
             },
@@ -331,7 +326,6 @@ async def get_configuration_overview(
         config_data["database"]["postgres"]["password"] = settings.database.postgres_password
         config_data["database"]["redis"]["password"] = settings.database.redis_password
         config_data["database"]["elasticsearch"]["password"] = settings.database.elasticsearch_password
-        config_data["database"]["terminusdb"]["password"] = settings.database.terminus_password
         config_data["storage"]["minio_access_key"] = settings.storage.minio_access_key
         config_data["storage"]["minio_secret_key"] = settings.storage.minio_secret_key
         config_data["_warning"] = "Sensitive values included (development mode only)"

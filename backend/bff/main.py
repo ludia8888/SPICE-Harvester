@@ -99,7 +99,6 @@ from bff.routers import (
     lineage,
     link_types,
     mapping,
-    merge_conflict,
     object_types,
     objectify,
     ontology,
@@ -1028,7 +1027,7 @@ async def get_pipeline_executor() -> PipelineExecutor:
 app.include_router(database.router, prefix="/api/v1")
 # NOTE: Ontology extensions must be registered before generic ontology routes because
 # `/ontology/{class_id}` would otherwise greedily capture subpaths like
-# `/ontology/branches` or `/ontology/action-types`.
+# `/ontology/action-types` or `/ontology/shared-properties`.
 app.include_router(ontology_extensions.router, prefix="/api/v1")
 app.include_router(ontology.router, prefix="/api/v1")
 app.include_router(object_types.router, prefix="/api/v1")
@@ -1037,7 +1036,6 @@ app.include_router(foundry_ontology_v2.router, prefix="/api")
 app.include_router(query.router, prefix="/api/v1")
 app.include_router(mapping.router, prefix="/api/v1")
 app.include_router(health.router, prefix="/api/v1")
-app.include_router(merge_conflict.router, prefix="/api/v1")
 app.include_router(instances.router, prefix="/api/v1")
 app.include_router(instance_async.router, prefix="/api/v1")
 app.include_router(actions.router, prefix="/api/v1")

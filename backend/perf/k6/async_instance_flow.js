@@ -139,8 +139,8 @@ export function setup() {
     label: "LoadTestItem",
     description: "k6 perf load test class",
     properties: [
-      // InstanceWorker always writes `{class_id.lower()}_id` into TerminusDB nodes.
-      // If the ontology doesn't declare it, Terminus rejects inserts (schema check failure).
+      // InstanceWorker writes normalized key fields into indexed instance documents.
+      // If the ontology doesn't declare them, validation fails before indexing.
       { name: "loadtestitem_id", type: "xsd:string", label: "LoadTestItem ID", required: true },
       { name: "name", type: "xsd:string", label: "Name", required: false },
     ],

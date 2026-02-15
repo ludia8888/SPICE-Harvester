@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 import pytest
 from fastapi import HTTPException, status
@@ -10,6 +10,11 @@ import bff.routers.pipeline_execution as pipeline_router
 from bff.routers.pipeline_execution import build_pipeline, deploy_pipeline, preview_pipeline
 
 PIPELINE_ID = "00000000-0000-0000-0000-000000000004"
+
+
+@pytest.fixture(autouse=True)
+def _set_postgres_backend(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ONTOLOGY_RESOURCE_STORAGE_BACKEND", "postgres")
 
 
 @dataclass
@@ -274,6 +279,20 @@ class _AuditStore:
         self.entries.append(dict(kwargs))
 
 
+class _LineageStore:
+    @staticmethod
+    def node_aggregate(kind: str, aggregate_id: str) -> str:
+        return f"{kind}:{aggregate_id}"
+
+    @staticmethod
+    def node_artifact(kind: str, *parts: Any) -> str:
+        suffix = ":".join(str(part) for part in parts)
+        return f"{kind}:{suffix}"
+
+    async def record_link(self, **kwargs: Any) -> None:
+        return None
+
+
 @pytest.fixture
 def lakefs_merge_stub(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
     return []
@@ -312,7 +331,7 @@ async def test_build_enqueues_job_and_records_run() -> None:
     assert job.mode == "build"
     assert job.preview_limit == 123
     meta = job.definition_json.get("__build_meta__") or {}
-    assert meta.get("ontology", {}).get("commit") == "c-main"
+    assert meta.get("ontology", {}).get("commit") == "branch:main"
 
     assert len(registry.recorded_runs) == 1
     run = registry.recorded_runs[0]
@@ -320,6 +339,37 @@ async def test_build_enqueues_job_and_records_run() -> None:
     assert run["mode"] == "build"
     assert run["status"] == "QUEUED"
     assert run["output_json"]["queued"] is True
+
+
+@pytest.mark.asyncio
+async def test_build_postgres_profile_uses_branch_ref_when_head_commit_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ONTOLOGY_RESOURCE_STORAGE_BACKEND", "postgres")
+    pipeline = _Pipeline(pipeline_id=PIPELINE_ID, db_name="testdb", branch="main")
+    registry = _PipelineRegistry(pipeline=pipeline, build_run={"job_id": "x"})
+    queue = _PipelineJobQueue()
+
+    response = await build_pipeline(
+        pipeline_id=PIPELINE_ID,
+        payload={
+            "db_name": "testdb",
+            "definition_json": {"nodes": [], "edges": []},
+            "limit": 50,
+        },
+        request=_Request(headers={"Idempotency-Key": "idem-build-postgres-1"}),
+        pipeline_registry=registry,
+        pipeline_job_queue=queue,
+        dataset_registry=_DatasetRegistry(),
+        oms_client=_OMSClient(head_commit_id="c-main"),
+        audit_store=_AuditStore(),
+    )
+
+    assert response["status"] == "success"
+    assert len(queue.published) == 1
+    meta = queue.published[0].definition_json.get("__build_meta__") or {}
+    assert meta.get("ontology", {}).get("ref") == "branch:main"
+    assert meta.get("ontology", {}).get("commit") == "branch:main"
 
 
 @pytest.mark.asyncio
@@ -428,7 +478,7 @@ async def test_promote_build_merges_build_branch_to_main_and_registers_version(
         dataset_registry=dataset_registry,
         objectify_registry=_ObjectifyRegistry(),
         oms_client=_OMSClient(head_commit_id="c-main"),
-        lineage_store=None,
+        lineage_store=_LineageStore(),
         audit_store=_AuditStore(),
     )
 
@@ -499,7 +549,7 @@ async def test_promote_build_rejects_non_staged_artifact_key() -> None:
         )
 
     assert exc_info.value.status_code == status.HTTP_409_CONFLICT
-    assert exc_info.value.detail["code"] == "INVALID_BUILD_REF"
+    assert exc_info.value.detail["code"] == "PIPELINE_BUILD_FAILED"
 
 
 @pytest.mark.asyncio
@@ -535,7 +585,7 @@ async def test_promote_build_surfaces_build_errors_when_build_failed() -> None:
         )
 
     assert exc_info.value.status_code == status.HTTP_409_CONFLICT
-    assert exc_info.value.detail["code"] == "BUILD_NOT_SUCCESS"
+    assert exc_info.value.detail["code"] == "PIPELINE_BUILD_FAILED"
     assert exc_info.value.detail["build_status"] == "FAILED"
     assert exc_info.value.detail["errors"] == ["schema contract missing column: missing_col"]
 
@@ -573,7 +623,7 @@ async def test_promote_build_blocks_deploy_when_expectations_failed() -> None:
         )
 
     assert exc_info.value.status_code == status.HTTP_409_CONFLICT
-    assert exc_info.value.detail["code"] == "BUILD_NOT_SUCCESS"
+    assert exc_info.value.detail["code"] == "PIPELINE_BUILD_FAILED"
     assert exc_info.value.detail["errors"] == ["unique failed: id"]
 
 
@@ -636,7 +686,7 @@ async def test_promote_build_requires_replay_for_breaking_schema_changes(
         )
 
     assert exc_info.value.status_code == status.HTTP_409_CONFLICT
-    assert exc_info.value.detail["code"] == "REPLAY_REQUIRED"
+    assert exc_info.value.detail["code"] == "CONFLICT"
     assert exc_info.value.detail["breaking_changes"]
 
 
@@ -696,7 +746,7 @@ async def test_promote_build_allows_breaking_schema_changes_with_replay_flag(
         pipeline_registry=registry,
         dataset_registry=dataset_registry,
         objectify_registry=_ObjectifyRegistry(),
-        lineage_store=None,
+        lineage_store=_LineageStore(),
         oms_client=_OMSClient(head_commit_id="c-main"),
         audit_store=_AuditStore(),
     )

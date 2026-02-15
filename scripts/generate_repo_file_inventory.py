@@ -83,7 +83,8 @@ def _iter_files_fallback() -> Iterable[str]:
 def _iter_repo_files() -> List[str]:
     tracked = _run_git_lines(["git", "-c", "core.quotePath=false", "ls-files"])
     if tracked is not None:
-        return sorted(tracked)
+        # Exclude tracked entries deleted from the current working tree.
+        return sorted(path for path in tracked if (REPO_ROOT / path).is_file())
     return sorted(_iter_files_fallback())
 
 

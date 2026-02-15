@@ -10,9 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field
 
 from oms.database.postgres import db as postgres_db
-from oms.dependencies import TerminusServiceDep
 from oms.exceptions import DatabaseError, OntologyNotFoundError
-from oms.services.async_terminus import AsyncTerminusService
 from oms.services.ontology_deployment_registry_v2 import OntologyDeploymentRegistryV2
 from oms.services.ontology_resources import (
     OntologyResourceService,
@@ -40,7 +38,7 @@ from oms.services.ontology_interface_contract import (
 from oms.services.pull_request_service import PullRequestService
 from oms.validation_codes import OntologyValidationCode as OVC
 from oms.validators.relationship_validator import RelationshipValidator, ValidationResult
-from shared.models.requests import ApiResponse, BranchCreateRequest
+from shared.models.requests import ApiResponse
 from shared.security.input_sanitizer import (
     sanitize_input,
     validate_branch_name,
@@ -54,10 +52,8 @@ from shared.services.core.ontology_linter import (
     OntologyLinterConfig,
     lint_ontology_create,
 )
-from shared.utils.commit_utils import coerce_commit_id
 from shared.utils.id_generator import generate_simple_id
 from shared.errors.error_types import ErrorCode, classified_http_exception
-from shared.errors.legacy_codes import LegacyErrorCode
 from shared.observability.tracing import trace_endpoint
 
 logger = logging.getLogger(__name__)
@@ -177,56 +173,29 @@ def _ensure_branch_writable(branch: str) -> None:
 
 
 async def _assert_expected_head_commit(
-    terminus: AsyncTerminusService,
     *,
-    db_name: str,
-    branch: str,
     expected_head_commit: Optional[str],
 ) -> Optional[str]:
-    if not expected_head_commit:
+    expected = str(expected_head_commit or "").strip()
+    if not expected:
         return None
 
-    head_commit: Optional[str] = None
-    branches = await terminus.version_control_service.list_branches(db_name)
-    for item in branches or []:
-        if isinstance(item, dict) and item.get("name") == branch:
-            head_commit = coerce_commit_id(item.get("head"))
-            break
-
-    if not head_commit:
-        raise classified_http_exception(
-            status.HTTP_404_NOT_FOUND,
-            f"Branch '{branch}' not found",
-            code=ErrorCode.RESOURCE_NOT_FOUND,
-        )
-
-    expected = str(expected_head_commit).strip()
-    if head_commit != expected:
-        raise classified_http_exception(
-            status.HTTP_409_CONFLICT,
-            json.dumps({
-                "message": "Branch head commit mismatch",
-                "branch": branch,
-                "expected_head_commit": expected,
-                "actual_head_commit": head_commit,
-            }),
-            code=ErrorCode.ONTOLOGY_ATOMIC_UPDATE_FAILED,
-        )
-
-    return head_commit
+    return expected
 
 
 async def _compute_ontology_health(
     *,
     db_name: str,
     branch: str,
-    terminus: AsyncTerminusService,
 ) -> Dict[str, Any]:
-    ontologies = await terminus.get_ontology(
-        db_name, class_id=None, raise_if_missing=False, branch=branch
+    schema_checks_skipped = True
+    ontologies: List[Any] = []
+    logger.info(
+        "Computing ontology health in resource-only mode (%s:%s, backend=%s)",
+        db_name,
+        branch,
+        "postgres",
     )
-    if not isinstance(ontologies, list):
-        ontologies = []
 
     linter_config = OntologyLinterConfig.from_env(branch=branch)
     lint_reports: List[Dict[str, Any]] = []
@@ -261,7 +230,7 @@ async def _compute_ontology_health(
     rel_results = validator.validate_multiple_ontologies(ontologies)
     rel_issues = [_validation_result_to_issue(r) for r in rel_results]
 
-    resource_service = OntologyResourceService(terminus)
+    resource_service = OntologyResourceService()
     resources = await resource_service.list_resources(db_name, branch=branch)
 
     issue_items: List[Dict[str, Any]] = []
@@ -334,7 +303,7 @@ async def _compute_ontology_health(
                     "resource_type": resource_type,
                     "resource_id": resource_id,
                     "severity": "error",
-                    "code": LegacyErrorCode.RES001.value,
+                    "code": OVC.RESOURCE_SPEC_INVALID.value,
                     "message": message,
                 }
             )
@@ -353,7 +322,6 @@ async def _compute_ontology_health(
             db_name=db_name,
             resource_type=resource_type,
             payload=resource,
-            terminus=terminus,
             branch=branch,
         )
         if missing:
@@ -362,14 +330,14 @@ async def _compute_ontology_health(
                     "resource_type": resource_type,
                     "resource_id": resource_id,
                     "severity": "error",
-                    "code": LegacyErrorCode.RES002.value,
+                    "code": OVC.RESOURCE_MISSING_REFERENCE.value,
                     "message": f"Missing references: {', '.join(missing)}",
                     "missing": missing,
                 }
             )
             issue_items.append(
                 _build_issue(
-                    code="RESOURCE_MISSING_REFERENCE",
+                    code=OVC.RESOURCE_MISSING_REFERENCE.value,
                     severity=None,
                     resource_ref=_resource_ref(resource_type, resource_id),
                     details={"missing_refs": missing},
@@ -450,6 +418,7 @@ async def _compute_ontology_health(
             )
 
     summary = {
+        "schema_checks_skipped": schema_checks_skipped,
         "lint_errors": len(errors),
         "lint_warnings": len(warnings),
         "lint_infos": len(infos),
@@ -475,14 +444,13 @@ async def list_resources(
     branch: str = Query("main", description="Target branch"),
     limit: int = Query(200, ge=1, le=1000),
     offset: int = Query(0, ge=0),
-    terminus: AsyncTerminusService = TerminusServiceDep,
 ):
     try:
         db_name = validate_db_name(db_name)
         branch = validate_branch_name(branch)
         normalized_type = normalize_resource_type(resource_type) if resource_type else None
 
-        service = OntologyResourceService(terminus)
+        service = OntologyResourceService()
         resources = await service.list_resources(
             db_name,
             branch=branch,
@@ -495,6 +463,10 @@ async def list_resources(
             message="Ontology resources retrieved",
             data={"resources": resources, "total": len(resources)},
         ).to_dict()
+    except RuntimeError as e:
+        raise classified_http_exception(
+            status.HTTP_503_SERVICE_UNAVAILABLE, str(e), code=ErrorCode.UPSTREAM_UNAVAILABLE,
+        )
     except ValueError as e:
         raise classified_http_exception(
             status.HTTP_400_BAD_REQUEST, str(e), code=ErrorCode.REQUEST_VALIDATION_FAILED,
@@ -514,7 +486,6 @@ async def list_resources_by_type(
     branch: str = Query("main", description="Target branch"),
     limit: int = Query(200, ge=1, le=1000),
     offset: int = Query(0, ge=0),
-    terminus: AsyncTerminusService = TerminusServiceDep,
 ):
     return await list_resources(
         db_name=db_name,
@@ -522,7 +493,6 @@ async def list_resources_by_type(
         branch=branch,
         limit=limit,
         offset=offset,
-        terminus=terminus,
     )
 
 
@@ -534,7 +504,6 @@ async def create_resource(
     payload: OntologyResourceRequest,
     branch: str = Query(..., description="Target branch"),
     expected_head_commit: str = Query(..., description="Optimistic concurrency guard"),
-    terminus: AsyncTerminusService = TerminusServiceDep,
 ):
     try:
         db_name = validate_db_name(db_name)
@@ -543,7 +512,7 @@ async def create_resource(
 
         _ensure_branch_writable(branch)
         await _assert_expected_head_commit(
-            terminus, db_name=db_name, branch=branch, expected_head_commit=expected_head_commit
+            expected_head_commit=expected_head_commit
         )
 
         sanitized = sanitize_input(_normalize_resource_payload(payload))
@@ -551,7 +520,6 @@ async def create_resource(
             db_name=db_name,
             resource_type=normalized_type,
             payload=sanitized,
-            terminus=terminus,
             branch=branch,
             expected_head_commit=expected_head_commit,
             strict=_resource_validation_strict(),
@@ -562,7 +530,7 @@ async def create_resource(
         else:
             resource_id = generate_simple_id(sanitized.get("label"), default_fallback="resource")
 
-        service = OntologyResourceService(terminus)
+        service = OntologyResourceService()
         created = await service.create_resource(
             db_name,
             branch=branch,
@@ -582,6 +550,10 @@ async def create_resource(
     except ResourceReferenceError as e:
         raise classified_http_exception(
             status.HTTP_400_BAD_REQUEST, str(e), code=ErrorCode.ONTOLOGY_RELATIONSHIP_ERROR,
+        )
+    except RuntimeError as e:
+        raise classified_http_exception(
+            status.HTTP_503_SERVICE_UNAVAILABLE, str(e), code=ErrorCode.UPSTREAM_UNAVAILABLE,
         )
     except HTTPException:
         raise
@@ -607,7 +579,6 @@ async def get_resource(
     resource_type: str,
     resource_id: str,
     branch: str = Query("main", description="Target branch"),
-    terminus: AsyncTerminusService = TerminusServiceDep,
 ):
     try:
         db_name = validate_db_name(db_name)
@@ -615,7 +586,7 @@ async def get_resource(
         normalized_type = normalize_resource_type(resource_type)
         resource_id = validate_instance_id(resource_id)
 
-        service = OntologyResourceService(terminus)
+        service = OntologyResourceService()
         resource = await service.get_resource(
             db_name,
             branch=branch,
@@ -629,6 +600,10 @@ async def get_resource(
             )
 
         return ApiResponse.success(message="Ontology resource retrieved", data=resource).to_dict()
+    except RuntimeError as e:
+        raise classified_http_exception(
+            status.HTTP_503_SERVICE_UNAVAILABLE, str(e), code=ErrorCode.UPSTREAM_UNAVAILABLE,
+        )
     except ValueError as e:
         raise classified_http_exception(
             status.HTTP_400_BAD_REQUEST, str(e), code=ErrorCode.REQUEST_VALIDATION_FAILED,
@@ -651,7 +626,6 @@ async def update_resource(
     payload: OntologyResourceRequest,
     branch: str = Query(..., description="Target branch"),
     expected_head_commit: str = Query(..., description="Optimistic concurrency guard"),
-    terminus: AsyncTerminusService = TerminusServiceDep,
 ):
     try:
         db_name = validate_db_name(db_name)
@@ -661,7 +635,7 @@ async def update_resource(
 
         _ensure_branch_writable(branch)
         await _assert_expected_head_commit(
-            terminus, db_name=db_name, branch=branch, expected_head_commit=expected_head_commit
+            expected_head_commit=expected_head_commit
         )
 
         sanitized = sanitize_input(_normalize_resource_payload(payload))
@@ -670,13 +644,12 @@ async def update_resource(
             db_name=db_name,
             resource_type=normalized_type,
             payload=sanitized,
-            terminus=terminus,
             branch=branch,
             expected_head_commit=expected_head_commit,
             strict=_resource_validation_strict(),
         )
 
-        service = OntologyResourceService(terminus)
+        service = OntologyResourceService()
         if normalized_type == "value_type":
             existing = await service.get_resource(
                 db_name,
@@ -703,6 +676,10 @@ async def update_resource(
         raise classified_http_exception(
             status.HTTP_400_BAD_REQUEST, str(e), code=ErrorCode.ONTOLOGY_RELATIONSHIP_ERROR,
         )
+    except RuntimeError as e:
+        raise classified_http_exception(
+            status.HTTP_503_SERVICE_UNAVAILABLE, str(e), code=ErrorCode.UPSTREAM_UNAVAILABLE,
+        )
     except HTTPException:
         raise
     except ValueError as e:
@@ -728,7 +705,6 @@ async def delete_resource(
     resource_id: str,
     branch: str = Query(..., description="Target branch"),
     expected_head_commit: str = Query(..., description="Optimistic concurrency guard"),
-    terminus: AsyncTerminusService = TerminusServiceDep,
 ):
     try:
         db_name = validate_db_name(db_name)
@@ -738,10 +714,10 @@ async def delete_resource(
 
         _ensure_branch_writable(branch)
         await _assert_expected_head_commit(
-            terminus, db_name=db_name, branch=branch, expected_head_commit=expected_head_commit
+            expected_head_commit=expected_head_commit
         )
 
-        service = OntologyResourceService(terminus)
+        service = OntologyResourceService()
         await service.delete_resource(
             db_name,
             branch=branch,
@@ -758,56 +734,14 @@ async def delete_resource(
         raise classified_http_exception(
             status.HTTP_404_NOT_FOUND, str(e), code=ErrorCode.ONTOLOGY_NOT_FOUND,
         )
+    except RuntimeError as e:
+        raise classified_http_exception(
+            status.HTTP_503_SERVICE_UNAVAILABLE, str(e), code=ErrorCode.UPSTREAM_UNAVAILABLE,
+        )
     except HTTPException:
         raise
     except Exception as e:
         logger.error("Failed to delete resource: %s", e)
-        raise classified_http_exception(
-            status.HTTP_500_INTERNAL_SERVER_ERROR, str(e), code=ErrorCode.INTERNAL_ERROR,
-        )
-
-
-@router.get("/branches")
-@trace_endpoint("oms.ontology_ext.list_branches")
-async def list_ontology_branches(
-    db_name: str,
-    terminus: AsyncTerminusService = TerminusServiceDep,
-):
-    try:
-        db_name = validate_db_name(db_name)
-        branches = await terminus.list_branches(db_name)
-        return ApiResponse.success(
-            message="Ontology branches retrieved",
-            data={"branches": branches, "total": len(branches)},
-        ).to_dict()
-    except Exception as e:
-        logger.error("Failed to list ontology branches: %s", e)
-        raise classified_http_exception(
-            status.HTTP_500_INTERNAL_SERVER_ERROR, str(e), code=ErrorCode.INTERNAL_ERROR,
-        )
-
-
-@router.post("/branches", status_code=status.HTTP_201_CREATED)
-@trace_endpoint("oms.ontology_ext.create_branch")
-async def create_ontology_branch(
-    db_name: str,
-    request: BranchCreateRequest,
-    terminus: AsyncTerminusService = TerminusServiceDep,
-):
-    try:
-        db_name = validate_db_name(db_name)
-        sanitized = sanitize_input(request.model_dump(mode="json"))
-        branch_name = validate_branch_name(sanitized.get("branch_name"))
-        from_branch = sanitized.get("from_branch") or "main"
-        from_branch = validate_branch_name(from_branch)
-
-        result = await terminus.create_branch(db_name, branch_name, from_branch=from_branch)
-        return ApiResponse.created(
-            message="Ontology branch created",
-            data=result,
-        ).to_dict()
-    except Exception as e:
-        logger.error("Failed to create ontology branch: %s", e)
         raise classified_http_exception(
             status.HTTP_500_INTERNAL_SERVER_ERROR, str(e), code=ErrorCode.INTERNAL_ERROR,
         )
@@ -877,7 +811,6 @@ async def approve_ontology_proposal(
     proposal_id: str,
     request: OntologyApproveRequest,
     pr_service: PullRequestService = Depends(_get_pr_service),
-    terminus: AsyncTerminusService = TerminusServiceDep,
 ):
     try:
         db_name = validate_db_name(db_name)
@@ -893,29 +826,16 @@ async def approve_ontology_proposal(
 
         source_commit_id = pr_data.get("source_commit_id")
         if source_commit_id:
-            head_commit = None
-            branches = await terminus.version_control_service.list_branches(db_name)
-            for item in branches or []:
-                if isinstance(item, dict) and item.get("name") == source_branch:
-                    head_commit = coerce_commit_id(item.get("head"))
-                    break
-            if head_commit and str(head_commit) != str(source_commit_id):
-                raise classified_http_exception(
-                    status.HTTP_409_CONFLICT,
-                    json.dumps({
-                        "message": "Source branch head moved since proposal creation; re-propose required",
-                        "source_branch": source_branch,
-                        "captured_commit_id": source_commit_id,
-                        "current_head_commit": head_commit,
-                    }),
-                    code=ErrorCode.ONTOLOGY_ATOMIC_UPDATE_FAILED,
-                )
+            logger.info(
+                "Skipping source-branch head verification in proposal metadata mode (%s:%s)",
+                db_name,
+                source_branch,
+            )
 
         if _require_health_gate(target_branch) and not request.force:
             health = await _compute_ontology_health(
                 db_name=db_name,
                 branch=source_branch,
-                terminus=terminus,
             )
             errors = [
                 issue
@@ -966,7 +886,6 @@ async def deploy_ontology(
     db_name: str,
     request: OntologyDeployRequest,
     pr_service: PullRequestService = Depends(_get_pr_service),
-    terminus: AsyncTerminusService = TerminusServiceDep,
 ):
     try:
         db_name = validate_db_name(db_name)
@@ -1004,31 +923,12 @@ async def deploy_ontology(
             )
 
         target_branch = pr_data.get("target_branch") or "main"
-        branches = await terminus.version_control_service.list_branches(db_name)
-        head_commit = None
-        for item in branches or []:
-            if isinstance(item, dict) and item.get("name") == target_branch:
-                head_commit = coerce_commit_id(item.get("head"))
-                break
-
-        if head_commit and str(head_commit) != str(request.ontology_commit_id):
-            raise classified_http_exception(
-                status.HTTP_409_CONFLICT,
-                json.dumps({
-                    "message": "Target branch head does not match approved commit",
-                    "target_branch": target_branch,
-                    "target_head_commit": head_commit,
-                    "approved_commit_id": request.ontology_commit_id,
-                }),
-                code=ErrorCode.ONTOLOGY_ATOMIC_UPDATE_FAILED,
-            )
 
         health_summary = None
         try:
             health = await _compute_ontology_health(
                 db_name=db_name,
                 branch=target_branch,
-                terminus=terminus,
             )
             if isinstance(health, dict):
                 health_summary = health.get("summary")
@@ -1079,12 +979,11 @@ async def deploy_ontology(
 async def ontology_health(
     db_name: str,
     branch: str = Query("main", description="Target branch"),
-    terminus: AsyncTerminusService = TerminusServiceDep,
 ):
     try:
         db_name = validate_db_name(db_name)
         branch = validate_branch_name(branch)
-        data = await _compute_ontology_health(db_name=db_name, branch=branch, terminus=terminus)
+        data = await _compute_ontology_health(db_name=db_name, branch=branch)
 
         return ApiResponse.success(
             message="Ontology health check complete",

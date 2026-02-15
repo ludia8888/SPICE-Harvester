@@ -48,26 +48,6 @@
         "connectionTimeout": 30000
       }
     },
-    "terminusdb": {
-      "command": "python",
-      "args": [
-        "/Users/isihyeon/Desktop/SPICE-Harvester/backend/mcp_servers/terminus_mcp_server.py"
-      ],
-      "env": {
-        "TERMINUS_SERVER_URL": "http://localhost:6363",
-        "TERMINUS_USER": "admin",
-        "TERMINUS_KEY": "admin123",
-        "TERMINUS_ACCOUNT": "admin"
-      },
-      "config": {
-        "capabilities": [
-          "ontology_management",
-          "version_control",
-          "query_execution",
-          "instance_management"
-        ]
-      }
-    },
     "pipeline": {
       "command": "python",
       "args": [

@@ -639,40 +639,8 @@ def scenario_es_down_then_recover() -> None:
     )
 
 
-def scenario_terminus_down_then_recover() -> None:
-    print("\n[chaos] scenario 4/5: TerminusDB down -> write-side retries -> recover", flush=True)
-    db = _setup_db_and_ontologies()
-
-    print("Stopping TerminusDB...", flush=True)
-    _docker_compose(["stop", "terminusdb"])
-
-    ids = _create_customer_and_product(db, customer_id="CUST-TD", product_id="PROD-TD", wait_command=False)
-
-    # With Terminus down, instance_worker must NOT complete the commands.
-    time.sleep(3)
-    try:
-        _wait_command_completed(ids["product_command_id"], timeout_s=5)
-        raise AssertionError("command unexpectedly completed while TerminusDB was stopped")
-    except Exception:
-        pass
-
-    print("Starting TerminusDB...", flush=True)
-    _docker_compose(["up", "-d", "terminusdb"])
-
-    _wait_command_completed(ids["customer_command_id"], timeout_s=240)
-    _wait_command_completed(ids["product_command_id"], timeout_s=240)
-
-    _assert_converged(
-        db_name=db,
-        customer_id="CUST-TD",
-        product_id="PROD-TD",
-        customer_command_id=ids["customer_command_id"],
-        product_command_id=ids["product_command_id"],
-    )
-
-
 def scenario_instance_worker_crash_after_claim() -> None:
-    print("\n[chaos] scenario 5/5: instance-worker crash after claim -> lease recovery -> converge", flush=True)
+    print("\n[chaos] scenario 4/4: instance-worker crash after claim -> lease recovery -> converge", flush=True)
     db = _setup_db_and_ontologies()
 
     overrides = {
@@ -816,7 +784,6 @@ def scenario_soak_random_failures(*, duration_s: int, seed: Optional[int] = None
         "kafka_down",
         "redis_down",
         "es_down",
-        "terminus_down",
         "relay_down",
         "restart_instance_worker",
         "restart_projection_worker",
@@ -852,11 +819,6 @@ def scenario_soak_random_failures(*, duration_s: int, seed: Optional[int] = None
                 ids = _create_customer_and_product(db, customer_id=customer_id, product_id=product_id, wait_command=False)
                 time.sleep(2)
                 _docker_compose(["start", "elasticsearch"])
-            elif mode == "terminus_down":
-                _docker_compose(["stop", "terminusdb"])
-                ids = _create_customer_and_product(db, customer_id=customer_id, product_id=product_id, wait_command=False)
-                time.sleep(2)
-                _docker_compose(["start", "terminusdb"])
             elif mode == "relay_down":
                 _docker_compose(["stop", "message-relay"])
                 ids = _create_customer_and_product(db, customer_id=customer_id, product_id=product_id, wait_command=False)
@@ -930,7 +892,6 @@ def main() -> None:
         scenario_kafka_down_then_recover()
         scenario_redis_down_then_recover()
         scenario_es_down_then_recover()
-        scenario_terminus_down_then_recover()
         scenario_instance_worker_crash_after_claim()
 
     if args.out_of_order:

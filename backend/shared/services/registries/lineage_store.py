@@ -734,7 +734,7 @@ class LineageStore(PostgresSchemaRegistry):
         Fetch the latest edge (by occurred_at) for each `to_node_id`.
 
         This is useful for provenance metadata in read APIs:
-        - last event that wrote a Terminus document
+        - last event that wrote a graph record
         - last event that materialized an ES document
         """
         if not self._pool:

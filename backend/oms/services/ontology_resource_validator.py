@@ -8,7 +8,6 @@ import logging
 import re
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from oms.services.async_terminus import AsyncTerminusService
 from oms.services.ontology_resources import OntologyResourceService, normalize_resource_type
 from oms.validation_codes import OntologyValidationCode as OVC
 from shared.observability.tracing import trace_external_call
@@ -172,7 +171,6 @@ async def find_missing_references(
     db_name: str,
     resource_type: str,
     payload: Dict[str, Any],
-    terminus: AsyncTerminusService,
     branch: str,
 ) -> List[str]:
     normalize_resource_type(resource_type)
@@ -183,14 +181,13 @@ async def find_missing_references(
     if isinstance(base_type, str) and base_type.strip() and not _is_primitive_reference(base_type):
         refs.append(base_type.strip())
 
-    resources = OntologyResourceService(terminus)
+    resources = OntologyResourceService()
     missing: List[str] = []
     for raw_ref in refs:
         ref_type, ref = _canonicalize_ref(raw_ref)
         if not ref:
             continue
         exists = await _reference_exists(
-            terminus=terminus,
             resources=resources,
             db_name=db_name,
             branch=branch,
@@ -339,7 +336,7 @@ def _collect_relationship_spec_issues(spec: Dict[str, Any]) -> List[Dict[str, An
 
 async def _find_missing_link_type_refs(
     *,
-    terminus: AsyncTerminusService,
+    resources: Optional[OntologyResourceService] = None,
     db_name: str,
     branch: str,
     spec: Dict[str, Any],
@@ -350,7 +347,16 @@ async def _find_missing_link_type_refs(
         ref = _strip_object_ref(raw)
         if not ref:
             continue
-        exists = await terminus.get_ontology(db_name, ref, branch=branch)
+        exists = False
+        if resources is not None:
+            exists = bool(
+                await resources.get_resource(
+                    db_name,
+                    branch=branch,
+                    resource_type="object_type",
+                    resource_id=ref,
+                )
+            )
         if not exists:
             missing.append(str(raw))
     return sorted(set(missing))
@@ -956,7 +962,6 @@ def _append_spec_issue(
 
 async def _reference_exists(
     *,
-    terminus: AsyncTerminusService,
     resources: OntologyResourceService,
     db_name: str,
     branch: str,
@@ -983,9 +988,12 @@ async def _reference_exists(
             await resources.get_resource(db_name, branch=branch, resource_type="object_type", resource_id=ref)
         )
     if ref_type == "object":
-        return bool(await terminus.get_ontology(db_name, ref, branch=branch))
+        exists = bool(
+            await resources.get_resource(db_name, branch=branch, resource_type="object_type", resource_id=ref)
+        )
+        return exists
 
-    if await terminus.get_ontology(db_name, ref, branch=branch):
+    if await resources.get_resource(db_name, branch=branch, resource_type="object_type", resource_id=ref):
         return True
     if await resources.get_resource(db_name, branch=branch, resource_type="value_type", resource_id=ref):
         return True
@@ -1002,7 +1010,6 @@ async def validate_resource(
     db_name: str,
     resource_type: str,
     payload: Dict[str, Any],
-    terminus: AsyncTerminusService,
     branch: str,
     expected_head_commit: Optional[str] = None,
     strict: bool = True,
@@ -1010,6 +1017,7 @@ async def validate_resource(
     normalized_type = normalize_resource_type(resource_type)
     spec = _merge_payload_spec(payload)
     _validate_required_fields(normalized_type, spec)
+    resources = OntologyResourceService()
 
     extra_issues: List[Dict[str, Any]] = []
     missing: List[str] = []
@@ -1017,14 +1025,16 @@ async def validate_resource(
     if normalized_type == "link_type":
         extra_issues.extend(_collect_link_type_issues(spec))
         missing = await _find_missing_link_type_refs(
-            terminus=terminus, db_name=db_name, branch=branch, spec=spec
+            resources=resources,
+            db_name=db_name,
+            branch=branch,
+            spec=spec,
         )
     else:
         missing = await find_missing_references(
             db_name=db_name,
             resource_type=normalized_type,
             payload=payload,
-            terminus=terminus,
             branch=branch,
         )
 

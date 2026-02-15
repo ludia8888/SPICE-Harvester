@@ -178,14 +178,6 @@ class ConfigurationMonitor:
                 recommendation="Disable debug mode in production for security"
             ),
             ConfigValidationRule(
-                name="terminus_secure_connection",
-                description="TerminusDB should use HTTPS in production",
-                key_pattern="services.terminus_url",
-                validator=lambda x: not self.settings.is_production or (isinstance(x, str) and x.startswith("https://")),
-                severity=ConfigSeverity.ERROR,
-                recommendation="Use HTTPS for TerminusDB connections in production"
-            ),
-            ConfigValidationRule(
                 name="redis_auth_in_prod",
                 description="Redis should have authentication in production",
                 key_pattern="services.redis_password",
@@ -238,9 +230,9 @@ class ConfigurationMonitor:
         # Service settings
         service_settings = self.settings.services
         config_dict["services"] = {
-            "terminus_url": getattr(self.settings.database, "terminus_url", None),
             "oms_base_url": getattr(service_settings, "oms_base_url", None),
             "bff_base_url": getattr(service_settings, "bff_base_url", None),
+            "funnel_base_url": getattr(service_settings, "funnel_base_url", None),
             "redis_host": getattr(self.settings.database, "redis_host", None),
             "redis_port": getattr(self.settings.database, "redis_port", None),
             "redis_db": getattr(self.settings.database, "redis_db", None),
@@ -495,18 +487,19 @@ class ConfigurationMonitor:
         score = 0.0
         
         if self.settings.is_production:
-            # Check TerminusDB connection
-            terminus_url = config.get("services", {}).get("terminus_url", "")
-            if terminus_url and not terminus_url.startswith("https://"):
-                issues.append({
-                    "type": "insecure_terminus_connection",
-                    "severity": "error",
-                    "description": "TerminusDB connection is not using HTTPS in production",
-                    "key_path": "services.terminus_url",
-                    "risk_level": "medium"
-                })
-                recommendations.append("Use HTTPS for TerminusDB connections in production")
-                score += 15.0
+            services_cfg = config.get("services", {})
+            for key in ("oms_base_url", "bff_base_url", "funnel_base_url"):
+                service_url = services_cfg.get(key, "")
+                if service_url and not str(service_url).startswith("https://"):
+                    issues.append({
+                        "type": "insecure_service_connection",
+                        "severity": "error",
+                        "description": f"{key} is not using HTTPS in production",
+                        "key_path": f"services.{key}",
+                        "risk_level": "medium"
+                    })
+                    recommendations.append(f"Use HTTPS for {key} in production")
+                    score += 10.0
         
         return issues, recommendations, score
     

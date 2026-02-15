@@ -1,5 +1,5 @@
 """
-Instance Worker — Direct ES Write (Phase 2: TerminusDB-free)
+Instance Worker — Direct ES Write (Foundry-aligned runtime)
 
 Kafka message contract:
 - Commands arrive as EventEnvelope JSON (metadata.kind == "command")
@@ -10,7 +10,7 @@ Write path:
 2. Elasticsearch: Direct instance index/update/delete (ephemeral, rebuildable)
 3. Event Store: Domain events (INSTANCE_CREATED/UPDATED/DELETED)
 
-Ontology schema resolved via OMS HTTP API (no TerminusDB dependency).
+Ontology schema resolved via OMS HTTP API.
 """
 
 import asyncio
@@ -363,7 +363,7 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
     async def _fetch_class_schema_via_oms(
         self, db_name: str, class_id: str, branch: str = "main"
     ) -> Optional[Dict[str, Any]]:
-        """Fetch ontology schema from OMS HTTP API (replaces TerminusDB get_ontology)."""
+        """Fetch ontology schema from OMS HTTP API."""
         if not self.oms_http:
             return None
         try:
@@ -382,21 +382,9 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
     async def _resolve_ontology_version_via_oms(
         self, *, db_name: str, branch: str
     ) -> Dict[str, str]:
-        """Resolve ontology version from OMS HTTP API (replaces TerminusDB version_control)."""
+        """Resolve ontology version stamp in Foundry-style ref form."""
         from shared.utils.ontology_version import build_ontology_version
-        if not self.oms_http:
-            return build_ontology_version(branch=branch, commit=None)
-        try:
-            resp = await self.oms_http.get(
-                f"/api/v1/version/{db_name}/head",
-                params={"branch": branch},
-            )
-            if resp.status_code == 200:
-                data = resp.json()
-                commit = data.get("commit") or data.get("head")
-                return build_ontology_version(branch=branch, commit=str(commit) if commit else None)
-        except Exception as exc:
-            logger.debug("OMS version resolve failed (db=%s, branch=%s): %s", db_name, branch, exc)
+        _ = db_name
         return build_ontology_version(branch=branch, commit=None)
 
     @staticmethod
@@ -585,7 +573,7 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
     ) -> Dict[str, Union[str, List[str]]]:
         """
         Extract ONLY relationship fields from payload via shared library.
-        Ontology schema fetched from OMS HTTP API (replaces TerminusDB get_ontology).
+        Ontology schema fetched from OMS HTTP API.
         """
         branch = validate_branch_name(branch)
         ontology_data = await self._fetch_class_schema_via_oms(db_name, class_id, branch)
@@ -717,7 +705,7 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
             strict_schema=self.strict_relationship_schema,
         )
 
-        # 3) Index instance document to Elasticsearch (replaces TerminusDB graph write)
+        # 3) Index instance document to Elasticsearch.
         now_iso = datetime.now(timezone.utc).isoformat()
         event_sequence = int(datetime.now(timezone.utc).timestamp() * 1000)
         index_name = await self._ensure_instances_index(db_name=db_name, branch=branch)
@@ -1552,7 +1540,7 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
                     error=str(e),
                 )
 
-        # Update instance in Elasticsearch (replaces TerminusDB graph write)
+        # Update instance in Elasticsearch.
         relationships = await self.extract_relationships(
             db_name,
             class_id,
@@ -1767,7 +1755,7 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
                 f"expected={expected_aggregate_id}"
             )
 
-        # Delete instance from Elasticsearch (replaces TerminusDB graph delete)
+        # Delete instance from Elasticsearch.
         index_name = await self._ensure_instances_index(db_name=db_name, branch=branch)
         es_deleted = False
         es_already_missing = False

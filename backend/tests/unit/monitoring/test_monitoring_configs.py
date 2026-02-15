@@ -133,4 +133,4 @@ def test_operations_doc_mentions_backup_scripts() -> None:
     text = ops_doc.read_text(encoding="utf-8")
     assert "scripts/ops/backup_postgres.sh" in text
     assert "scripts/ops/backup_minio.sh" in text
-    assert "scripts/ops/backup_terminusdb_volume.sh" in text
+    assert "scripts/ops/backup_terminusdb_volume.sh" not in text

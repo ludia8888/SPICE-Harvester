@@ -202,6 +202,8 @@ async def _get_ontology_head_commit(
         params={"branch": branch},
         headers=BFF_HEADERS,
     ) as resp:
+        if resp.status in {404, 410}:
+            return f"branch:{branch}"
         if resp.status != 200:
             raise AssertionError(f"Failed to get ontology head commit (http={resp.status}): {await resp.text()}")
         payload = await resp.json()
@@ -1218,10 +1220,6 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
         url = f"{BFF_URL}{_format_path(op.path, ctx)}"
         return RequestPlan(op.method, op.path, url, (200, 204, 400, 404, 409, 422), json_body=None, note="smoke: validate only")
 
-    if key == ("POST", "/api/v1/databases/{db_name}/ontology/branches"):
-        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
-        return RequestPlan(op.method, op.path, url, (201, 400, 404, 409, 422), json_body=None, note="smoke: validate only")
-
     if key == ("POST", "/api/v1/databases/{db_name}/ontology/proposals"):
         url = f"{BFF_URL}{_format_path(op.path, ctx)}"
         return RequestPlan(op.method, op.path, url, (201, 400, 404, 409, 422), json_body=None, note="smoke: validate only")
@@ -1371,17 +1369,6 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
             content_type="application/json",
         )
         return RequestPlan(op.method, op.path, url, (200,), form=form)
-
-    # ---------- Merge conflicts ----------
-    if key == ("POST", "/api/v1/databases/{db_name}/merge/simulate"):
-        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
-        body = {"source_branch": ctx.branch_name, "target_branch": "main", "strategy": "merge"}
-        return RequestPlan(op.method, op.path, url, (200, 404, 400), json_body=body)
-
-    if key == ("POST", "/api/v1/databases/{db_name}/merge/resolve"):
-        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
-        body = {"source_branch": ctx.branch_name, "target_branch": "main", "resolutions": []}
-        return RequestPlan(op.method, op.path, url, (200, 400, 404), json_body=body)
 
     # ---------- Funnel-backed schema/mapping suggestions ----------
     if key == ("POST", "/api/v1/databases/{db_name}/suggest-schema-from-data"):
@@ -1702,6 +1689,7 @@ async def test_openapi_stable_contract_smoke():
         "/api/v1/databases/{db_name}/branches",
         "/api/v1/database/{db_name}/branches",
     )
+    db_branches_available = db_branches_path in spec_paths
     db_instance_create_path = _pick_spec_path(
         spec_paths,
         "/api/v1/databases/{db_name}/instances/{class_label}/create",
@@ -1787,15 +1775,16 @@ async def test_openapi_stable_contract_smoke():
                 ctx.command_ids["create_database"] = str(command_id)
                 await _wait_for_command_completed(session, command_id=str(command_id))
 
-            # Create branch (for merge simulate, etc)
-            plan = await _build_plan(
-                Operation("POST", db_branches_path, ("Database Management",), "Create Branch"),
-                ctx,
-            )
-            status, text, _ = await _request(session, plan)
-            executed.add((plan.method, plan.path_template))
-            if status not in plan.expected_statuses:
-                raise AssertionError(f"{plan.method} {plan.path_template} unexpected status {status}: {text[:500]}")
+            # Create branch (for merge simulate, etc) when legacy branch API is exposed.
+            if db_branches_available:
+                plan = await _build_plan(
+                    Operation("POST", db_branches_path, ("Database Management",), "Create Branch"),
+                    ctx,
+                )
+                status, text, _ = await _request(session, plan)
+                executed.add((plan.method, plan.path_template))
+                if status not in plan.expected_statuses:
+                    raise AssertionError(f"{plan.method} {plan.path_template} unexpected status {status}: {text[:500]}")
 
             # Create ontology classes (Product + Order) on main. If the stack is running with
             # protected branches (e.g., ONTOLOGY_REQUIRE_PROPOSALS=true), writes to main will 409.
@@ -2115,6 +2104,11 @@ async def test_openapi_stable_contract_smoke():
                     # Some stacks protect ontology resources (including action-types) on main, even if
                     # class creation is allowed (or already happened). In that case, create the action
                     # type on a fresh branch from the current main head and merge+deploy it.
+                    if not db_branches_available:
+                        raise AssertionError(
+                            "Action-type protected-branch fallback requires legacy branch API, "
+                            "but '/databases/{db_name}/branches' is not exposed in this profile."
+                        )
                     action_branch = f"{ctx.branch_name}-action-type"
                     create_branch_plan = RequestPlan(
                         "POST",

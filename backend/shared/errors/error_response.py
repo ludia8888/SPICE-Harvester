@@ -131,15 +131,6 @@ def _classify_upstream_url(url: Optional[str], status_code: Optional[int]) -> Tu
     if not url:
         return None, None
     url_lower = url.lower()
-    if "terminus" in url_lower:
-        if status_code == status.HTTP_409_CONFLICT:
-            return ErrorCode.TERMINUS_CONFLICT, ErrorCategory.CONFLICT
-        if status_code in {
-            status.HTTP_502_BAD_GATEWAY,
-            status.HTTP_503_SERVICE_UNAVAILABLE,
-            status.HTTP_504_GATEWAY_TIMEOUT,
-        }:
-            return ErrorCode.TERMINUS_UNAVAILABLE, ErrorCategory.UPSTREAM
     if "oms" in url_lower and status_code in {
         status.HTTP_502_BAD_GATEWAY,
         status.HTTP_503_SERVICE_UNAVAILABLE,

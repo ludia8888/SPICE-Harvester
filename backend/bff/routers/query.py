@@ -10,7 +10,12 @@ from fastapi import APIRouter, Depends, Request, status
 
 from shared.errors.error_types import ErrorCode, classified_http_exception
 
-from bff.dependencies import LabelMapper, TerminusService, get_label_mapper, get_terminus_service
+from bff.dependencies import (
+    FoundryQueryService,
+    LabelMapper,
+    get_foundry_query_service,
+    get_label_mapper,
+)
 from bff.routers.registry_deps import get_dataset_registry
 from shared.models.ontology import QueryInput, QueryResponse
 from shared.services.registries.dataset_registry import DatasetRegistry
@@ -34,7 +39,7 @@ async def execute_query(
     query: QueryInput,
     request: Request,
     mapper: LabelMapper = Depends(get_label_mapper),
-    terminus: TerminusService = Depends(get_terminus_service),
+    query_service: FoundryQueryService = Depends(get_foundry_query_service),
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
 ):
     """
@@ -69,7 +74,7 @@ async def execute_query(
         internal_query = await mapper.convert_query_to_internal(db_name, query_dict, lang)
 
         # 쿼리 실행 (OMS를 통해)
-        result = await terminus.query_database(db_name, internal_query)
+        result = await query_service.query_database(db_name, internal_query)
 
         raw_results = result.get("data", []) if isinstance(result, dict) else []
         access_filtered = False

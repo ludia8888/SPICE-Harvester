@@ -185,9 +185,23 @@ async def test_search_objects_v2_accepts_contains_any_term_operator(mock_es):
 
 
 @pytest.mark.asyncio
-async def test_search_objects_v2_accepts_in_operator(mock_es):
+async def test_search_objects_v2_rejects_non_foundry_in_operator():
     payload = {
         "where": {"type": "in", "field": "status", "value": ["ACTIVE", "PENDING"]},
+    }
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post("/objects/test_db/Customer/search", json=payload)
+
+    assert resp.status_code == 400
+    body = resp.json()
+    assert body["errorCode"] == "INVALID_ARGUMENT"
+
+
+@pytest.mark.asyncio
+async def test_search_objects_v2_is_null_false_maps_to_exists_clause(mock_es):
+    payload = {
+        "where": {"type": "isNull", "field": "status", "value": False},
         "pageSize": 10,
     }
     transport = ASGITransport(app=app)
@@ -198,13 +212,13 @@ async def test_search_objects_v2_accepts_in_operator(mock_es):
     search_call = mock_es.search.call_args
     search_query = search_call.kwargs["query"]
     must = search_query["bool"]["must"]
-    assert {"terms": {"data.status": ["ACTIVE", "PENDING"]}} in must
+    assert {"exists": {"field": "data.status"}} in must
 
 
 @pytest.mark.asyncio
-async def test_search_objects_v2_rejects_in_operator_with_non_list():
+async def test_search_objects_v2_rejects_is_null_with_non_boolean_value():
     payload = {
-        "where": {"type": "in", "field": "status", "value": "ACTIVE"},
+        "where": {"type": "isNull", "field": "status", "value": "nope"},
     }
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -281,3 +295,23 @@ async def test_search_objects_v2_rejects_excessive_nesting_depth():
     assert resp.status_code == 400
     body = resp.json()
     assert body["errorCode"] == "INVALID_ARGUMENT"
+
+
+@pytest.mark.asyncio
+async def test_search_objects_v2_accepts_foundry_branch_rid(mock_es):
+    payload = {
+        "where": {"type": "eq", "field": "status", "value": "ACTIVE"},
+        "pageSize": 10,
+    }
+    branch_rid = "ri.ontology.main.branch.809f45f2-8f80-4f18-ba5e-34725fb85f65"
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post(
+            f"/objects/test_db/Customer/search?branch={branch_rid}",
+            json=payload,
+        )
+
+    assert resp.status_code == 200
+    search_call = mock_es.search.call_args
+    index_name = search_call.kwargs["index"]
+    assert index_name.startswith("test_db_instances__br_")

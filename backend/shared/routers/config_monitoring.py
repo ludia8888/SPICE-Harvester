@@ -356,17 +356,17 @@ async def analyze_environment_drift(
             "development": {
                 "debug": True,
                 "database": {"host": "localhost"},
-                "services": {"terminus_url": "http://localhost:6363"}
+                "services": {"oms_base_url": "http://localhost:8000"}
             },
             "staging": {
                 "debug": False,
                 "database": {"host": "staging-db"},
-                "services": {"terminus_url": "https://staging-terminus.example.com"}
+                "services": {"oms_base_url": "https://staging-oms.example.com"}
             },
             "production": {
                 "debug": False,
                 "database": {"host": "prod-db"},
-                "services": {"terminus_url": "https://terminus.example.com"}
+                "services": {"oms_base_url": "https://oms.example.com"}
             }
         }
         

@@ -2,8 +2,9 @@
 Shared model definitions for SPICE HARVESTER
 """
 
+# ruff: noqa: F403,F405
+
 from .common import *
-from .config import *
 from .google_sheets import *
 from .pipeline_job import PipelineJob
 from .ontology import *

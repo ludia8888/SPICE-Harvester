@@ -24,8 +24,8 @@ COPY oms/requirements.txt .
 RUN sed -i '/-e .*shared/d' requirements.txt && \
     (if [ -s requirements.txt ]; then pip install --no-cache-dir -r requirements.txt; fi)
 
-# Verify critical dependencies are installed
-RUN python -c "import uvicorn; import fastapi; import terminusdb_client; import asyncpg; import confluent_kafka; print('All critical dependencies installed successfully!')"
+# Verify critical dependencies are installed (Foundry-aligned runtime baseline)
+RUN python -c "import uvicorn; import fastapi; import asyncpg; import confluent_kafka; print('Critical dependencies installed successfully')"
 
 # Copy application code
 COPY oms /app/oms

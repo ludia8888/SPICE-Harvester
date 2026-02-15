@@ -19,7 +19,7 @@ from fastapi import HTTPException, Request, status
 
 from shared.errors.error_types import ErrorCode, classified_http_exception
 
-from bff.dependencies import LabelMapper, TerminusService
+from bff.dependencies import FoundryQueryService, LabelMapper
 from bff.services.oms_client import OMSClient
 from shared.dependencies.providers import AuditLogStoreDep, LLMGatewayDep, LineageStoreDep, RedisServiceDep
 from shared.models.ai import (
@@ -857,7 +857,7 @@ def _build_answer_prompts(*, question: str, grounding: Dict[str, Any]) -> tuple[
         "Grounding requirements:\n"
         "- When grounding includes provenance (event_id/occurred_at), include it in rationale as '출처: event_id=..., occurred_at=...'.\n"
         "- When grounding includes sample_paths, include at least one path using arrow notation in the answer.\n"
-        "- Do not mention internal implementation details like Elasticsearch/TerminusDB/fallback.\n"
+        "- Do not mention internal implementation details like Elasticsearch/graph-store/fallback.\n"
     )
 
     user = (
@@ -911,7 +911,7 @@ async def _execute_label_query(
     query_dict: Dict[str, Any],
     lang: str,
     mapper: LabelMapper,
-    terminus: TerminusService,
+    query_service: FoundryQueryService,
 ) -> Dict[str, Any]:
     """Execute label query by reusing the same deterministic pipeline as /database/{db_name}/query."""
 
@@ -919,7 +919,7 @@ async def _execute_label_query(
     internal_query = await mapper.convert_query_to_internal(db_name, query_dict, lang)
 
     # Execute via OMS
-    result = await terminus.query_database(db_name, internal_query)
+    result = await query_service.query_database(db_name, internal_query)
     raw_results = result.get("data", []) if isinstance(result, dict) else []
     labeled_results = await mapper.convert_to_display_batch(db_name, raw_results, lang)
 
@@ -957,7 +957,7 @@ def _ground_graph_query_result(execution: GraphQueryResponse, *, max_nodes: int 
         prov = getattr(n, "provenance", None)
         if isinstance(prov, dict):
             # Keep only stable identifiers; avoid store-specific details.
-            t = prov.get("terminus") if isinstance(prov.get("terminus"), dict) else None
+            t = prov.get("graph") if isinstance(prov.get("graph"), dict) else None
             e = prov.get("es") if isinstance(prov.get("es"), dict) else None
             d["provenance"] = {
                 "event_id": (t or {}).get("event_id") or (e or {}).get("event_id"),
@@ -1214,7 +1214,7 @@ async def ai_query(
     lineage_store: LineageStoreDep,
     oms: OMSClient,
     mapper: LabelMapper,
-    terminus: TerminusService,
+    query_service: FoundryQueryService,
     sessions: AgentSessionRegistry,
     dataset_registry: DatasetRegistry,
 ) -> AIQueryResponse:
@@ -1453,7 +1453,11 @@ async def ai_query(
         query_dict = sanitize_input(query_dict)
         try:
             execution = await _execute_label_query(
-                db_name=validated_db, query_dict=query_dict, lang=lang, mapper=mapper, terminus=terminus
+                db_name=validated_db,
+                query_dict=query_dict,
+                lang=lang,
+                mapper=mapper,
+                query_service=query_service,
             )
             grounding = _ground_label_query_result(execution)
         except Exception as e:

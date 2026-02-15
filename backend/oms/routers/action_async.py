@@ -15,7 +15,7 @@ from uuid import UUID, uuid4
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from pydantic import BaseModel, Field, field_validator
 
-from oms.dependencies import EventStoreDep, TerminusServiceDep, ensure_database_exists
+from oms.dependencies import EventStoreDep, ensure_database_exists
 from oms.services.ontology_deployment_registry_v2 import OntologyDeploymentRegistryV2
 from oms.services.ontology_resources import OntologyResourceService
 from shared.config.app_config import AppConfig
@@ -192,7 +192,6 @@ async def submit_action_async(
     *,
     request: ActionSubmitRequest,
     base_branch: Optional[str] = Query(default=None, description="Deprecated alias; use base_branch in body"),
-    terminus=TerminusServiceDep,
     event_store=EventStoreDep,
 ) -> ActionSubmitResponse:
     """
@@ -231,7 +230,7 @@ async def submit_action_async(
         ontology_commit_id = str(latest["ontology_commit_id"])
 
         # Load action_type spec at the deployed commit.
-        resources = OntologyResourceService(terminus)
+        resources = OntologyResourceService()
         action_resource = await resources.get_resource(
             db_name,
             branch=ontology_commit_id,
@@ -350,10 +349,10 @@ async def submit_action_async(
                 if class_id in class_interface_refs:
                     return
                 contract = await load_action_target_runtime_contract(
-                    terminus=terminus,
                     db_name=db_name,
                     class_id=class_id,
                     branch=ontology_commit_id,
+                    resources=resources,
                 )
                 if contract is None:
                     raise classified_http_exception(
@@ -557,7 +556,6 @@ async def simulate_action_async(
     action_type_id: str = Path(..., description="Action type identifier"),
     *,
     request: ActionSimulateRequest,
-    terminus=TerminusServiceDep,
 ) -> Dict[str, Any]:
     """
     Simulate an Action writeback (dry-run).
@@ -590,23 +588,8 @@ async def simulate_action_async(
         resolved_base_branch = str(request.base_branch or "").strip() or "main"
 
         if request.use_branch_head:
-            # Dev/test mode: use branch HEAD commit for action type resolution
-            # (allows simulating action types that have not been deployed yet).
-            from shared.utils.commit_utils import coerce_commit_id
-            branches = await terminus.version_control_service.list_branches(db_name)
-            head_commit = None
-            for item in branches or []:
-                if isinstance(item, dict) and item.get("name") == resolved_base_branch:
-                    head_commit = coerce_commit_id(item.get("head"))
-                    break
-            if not head_commit:
-                raise classified_http_exception(
-                    status.HTTP_409_CONFLICT,
-                    f"Branch HEAD not found for '{resolved_base_branch}'",
-                    code=ErrorCode.CONFLICT,
-                )
-            ontology_commit_id = str(head_commit)
-            logger.info("Simulate using branch HEAD: %s (dev mode)", ontology_commit_id)
+            ontology_commit_id = f"branch:{resolved_base_branch}"
+            logger.info("Simulate using branch ref: %s (dev mode)", ontology_commit_id)
         else:
             deployments = OntologyDeploymentRegistryV2()
             latest = await deployments.get_latest_deployed_commit(db_name=db_name, target_branch=resolved_base_branch)
@@ -618,7 +601,7 @@ async def simulate_action_async(
                 )
             ontology_commit_id = str(latest["ontology_commit_id"])
 
-        resources = OntologyResourceService(terminus)
+        resources = OntologyResourceService()
         action_resource = await resources.get_resource(
             db_name,
             branch=ontology_commit_id,
@@ -730,7 +713,7 @@ async def simulate_action_async(
             ) from exc
 
         preflight = await preflight_action_writeback(
-            terminus=terminus,
+            resources=resources,
             base_storage=base_storage,
             dataset_registry=dataset_registry,
             db_name=db_name,

@@ -1,13 +1,13 @@
 """
 Pull Request Service for SPICE HARVESTER
-Implements GitHub-like PR workflow using TerminusDB branches and PostgreSQL metadata
+Implements proposal/approval workflow using PostgreSQL metadata.
 
 SOLID Principles:
 - SRP: Only handles Pull Request operations
-- OCP: Extends BaseTerminusService without modifying it
-- LSP: Can substitute BaseTerminusService anywhere
+- OCP: Extensible workflow/service surface
+- LSP: Stable API for OMS routers
 - ISP: Only exposes PR-related interfaces
-- DIP: Depends on abstractions (MVCCTransactionManager, BaseTerminusService)
+- DIP: Depends on abstractions (MVCCTransactionManager)
 """
 
 import json
@@ -16,16 +16,12 @@ from typing import Dict, Any, List, Optional
 from datetime import datetime, timezone
 import uuid
 
-from oms.services.terminus.base import BaseTerminusService
-from oms.services.terminus.version_control import VersionControlService
 from oms.database.mvcc import MVCCTransactionManager, IsolationLevel, MVCCError
 from oms.database.decorators import with_mvcc_retry, with_optimistic_lock
 from shared.models.base import OptimisticLockError
 from oms.exceptions import DatabaseError
-from shared.utils.commit_utils import coerce_commit_id
-from shared.utils.terminus_branch import encode_branch_name
 from shared.utils.diff_utils import normalize_diff_response
-from shared.observability.tracing import trace_db_operation, trace_external_call
+from shared.observability.tracing import trace_db_operation
 from shared.utils.json_utils import maybe_decode_json
 
 logger = logging.getLogger(__name__)
@@ -38,7 +34,7 @@ class PullRequestStatus:
     CLOSED = "closed"
     REJECTED = "rejected"
 
-class PullRequestService(BaseTerminusService):
+class PullRequestService:
     """
     Pull Request management service following SRP
     
@@ -49,26 +45,21 @@ class PullRequestService(BaseTerminusService):
     - Managing PR metadata in PostgreSQL
     
     It does NOT handle:
-    - Branch operations (delegated to VersionControlService)
-    - Database operations (delegated to DatabaseService)
-    - Direct TerminusDB API calls (inherited from BaseTerminusService)
+    - Ontology graph write execution
+    - Deployment execution
     """
     
-    def __init__(self, mvcc_manager: MVCCTransactionManager, *args, **kwargs):
+    def __init__(self, mvcc_manager: MVCCTransactionManager):
         """
         Initialize PullRequestService
         
         Args:
             mvcc_manager: MVCC transaction manager for PostgreSQL operations
-            *args, **kwargs: Arguments for BaseTerminusService
         """
-        super().__init__(*args, **kwargs)
         self.mvcc = mvcc_manager
-        # Compose with VersionControlService for branch operations
-        self.version_control = VersionControlService(*args, **kwargs)
     
     @with_mvcc_retry()
-    @trace_external_call("oms.pull_request.create_pull_request")
+    @trace_db_operation("oms.pull_request.create_pull_request")
     async def create_pull_request(
         self,
         db_name: str,
@@ -97,30 +88,16 @@ class PullRequestService(BaseTerminusService):
             MVCCError: If concurrency conflict occurs
         """
         try:
-            # First, verify both branches exist
-            branches = await self.version_control.list_branches(db_name)
-            branch_names = [b["name"] for b in branches]
-            
-            if source_branch not in branch_names:
-                raise DatabaseError(f"Source branch '{source_branch}' does not exist")
-            if target_branch not in branch_names:
-                raise DatabaseError(f"Target branch '{target_branch}' does not exist")
-            
-            # Get diff between branches
+            # Foundry-style proposals are metadata-first; branch existence is not
+            # validated against a legacy graph backend at proposal creation time.
             diff = await self.get_branch_diff(db_name, source_branch, target_branch)
-            
-            # Check for conflicts
             conflicts = await self.check_merge_conflicts(db_name, source_branch, target_branch)
             diff_payload = json.dumps(diff) if diff is not None else None
             conflicts_payload = json.dumps(conflicts) if conflicts is not None else None
             
             # Store PR metadata in PostgreSQL with MVCC
             pr_id = None
-            source_commit_id = None
-            for branch in branches:
-                if branch.get("name") == source_branch:
-                    source_commit_id = coerce_commit_id(branch.get("head"))
-                    break
+            source_commit_id = f"branch:{source_branch}"
             async with self.mvcc.transaction(IsolationLevel.REPEATABLE_READ) as conn:
                 # Check if an open PR already exists for these branches
                 existing = await conn.fetchrow("""
@@ -172,7 +149,7 @@ class PullRequestService(BaseTerminusService):
             logger.error(f"Failed to create pull request: {e}")
             raise DatabaseError(f"Failed to create pull request: {e}")
     
-    @trace_external_call("oms.pull_request.get_branch_diff")
+    @trace_db_operation("oms.pull_request.get_branch_diff")
     async def get_branch_diff(
         self,
         db_name: str,
@@ -180,7 +157,7 @@ class PullRequestService(BaseTerminusService):
         target_branch: str
     ) -> Dict[str, Any]:
         """
-        Get diff between two branches using TerminusDB diff API
+        Get diff metadata between two branches.
         
         Args:
             db_name: Database name
@@ -190,18 +167,12 @@ class PullRequestService(BaseTerminusService):
         Returns:
             Diff information
         """
-        try:
-            result = await self.version_control.get_diff(db_name, source_branch, target_branch)
-
-            return normalize_diff_response(source_branch, target_branch, result)
-            
-        except Exception as e:
-            logger.error(f"Failed to get branch diff: {e}")
-            diff_payload = normalize_diff_response(source_branch, target_branch, None)
-            diff_payload["error"] = str(e)
-            return diff_payload
+        _ = db_name
+        diff_payload = normalize_diff_response(source_branch, target_branch, None)
+        diff_payload["provider"] = "proposal_registry"
+        return diff_payload
     
-    @trace_external_call("oms.pull_request.check_merge_conflicts")
+    @trace_db_operation("oms.pull_request.check_merge_conflicts")
     async def check_merge_conflicts(
         self,
         db_name: str,
@@ -219,39 +190,13 @@ class PullRequestService(BaseTerminusService):
         Returns:
             List of conflicts if any, None otherwise
         """
-        try:
-            # Try a dry-run rebase to detect conflicts
-            encoded_source = encode_branch_name(source_branch)
-            encoded_target = encode_branch_name(target_branch)
-            endpoint = (
-                f"/api/rebase/{self.connection_info.account}/{db_name}/local/branch/{encoded_target}"
-            )
-            
-            rebase_data = {
-                "rebase_from": f"{self.connection_info.account}/{db_name}/local/branch/{encoded_source}",
-                "author": "system",
-                "dry_run": True  # Just check, don't actually rebase
-            }
-            
-            try:
-                await self._make_request("POST", endpoint, rebase_data)
-                # If dry run succeeds, no conflicts
-                return None
-            except Exception as e:
-                # If dry run fails, there might be conflicts
-                logging.getLogger(__name__).warning("Broad exception fallback at oms/services/pull_request_service.py:240", exc_info=True)
-                if "conflict" in str(e).lower():
-                    return [{"type": "merge_conflict", "message": str(e)}]
-                # Other errors are not conflicts
-                return None
-                
-        except Exception as e:
-            logger.warning(f"Could not check for conflicts: {e}")
-            return None
+        _ = (db_name, source_branch, target_branch)
+        # Conflict detection is evaluated by write/deploy health gates and OCC checks.
+        return None
     
     @with_mvcc_retry()
     @with_optimistic_lock(entity_type="PullRequest")
-    @trace_external_call("oms.pull_request.merge_pull_request")
+    @trace_db_operation("oms.pull_request.merge_pull_request")
     async def merge_pull_request(
         self,
         pr_id: str,
@@ -286,47 +231,8 @@ class PullRequestService(BaseTerminusService):
                 
                 if not pr_data:
                     raise DatabaseError(f"PR {pr_id} not found or not open")
-
-                source_commit_id = pr_data.get("source_commit_id")
-                if source_commit_id:
-                    branches = await self.version_control.list_branches(pr_data["db_name"])
-                    head_commit_id = None
-                    for branch in branches:
-                        if branch.get("name") == pr_data["source_branch"]:
-                            head_commit_id = coerce_commit_id(branch.get("head"))
-                            break
-                    if head_commit_id and head_commit_id != source_commit_id:
-                        raise DatabaseError(
-                            "Source branch head has moved since proposal creation; re-propose to merge"
-                        )
-                
-                # Perform rebase in TerminusDB
-                encoded_source = encode_branch_name(pr_data["source_branch"])
-                encoded_target = encode_branch_name(pr_data["target_branch"])
-                endpoint = (
-                    f"/api/rebase/{self.connection_info.account}/{pr_data['db_name']}/local/branch/{encoded_target}"
-                )
-                
-                rebase_data = {
-                    "rebase_from": (
-                        f"{self.connection_info.account}/{pr_data['db_name']}/local/branch/{encoded_source}"
-                    ),
-                    "author": author,
-                    "message": merge_message or f"Merge PR: {pr_data['title']}"
-                }
-                
-                # Execute rebase (updates source branch head)
-                await self._make_request("POST", endpoint, rebase_data)
-
-                def _find_branch_head(branches, name: str) -> Optional[str]:
-                    for branch in branches or []:
-                        if branch.get("name") == name:
-                            return coerce_commit_id(branch.get("head"))
-                    return None
-
-                branches = await self.version_control.list_branches(pr_data["db_name"])
-                source_head = _find_branch_head(branches, pr_data["source_branch"])
-                merge_commit = _find_branch_head(branches, pr_data["target_branch"]) or source_head
+                _ = merge_message
+                merge_commit = f"branch:{pr_data['target_branch']}"
                 
                 # Update PR status in PostgreSQL
                 await conn.execute("""

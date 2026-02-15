@@ -83,6 +83,13 @@ LAKEFS_PORT_HOST="${LAKEFS_PORT_HOST:-48080}"
 AGENT_PORT_HOST="${AGENT_PORT_HOST:-8004}"
 INGEST_RECONCILER_PORT_HOST="${INGEST_RECONCILER_PORT_HOST:-8012}"
 
+RESOURCE_STORAGE_BACKEND_RAW="${ONTOLOGY_RESOURCE_STORAGE_BACKEND:-postgres}"
+RESOURCE_STORAGE_BACKEND="$(printf '%s' "${RESOURCE_STORAGE_BACKEND_RAW}" | tr '[:upper:]' '[:lower:]' | xargs)"
+if [[ "$RESOURCE_STORAGE_BACKEND" != "postgres" && -n "$RESOURCE_STORAGE_BACKEND" ]]; then
+  echo "⚠️  Ignoring legacy ONTOLOGY_RESOURCE_STORAGE_BACKEND=${RESOURCE_STORAGE_BACKEND}; runtime is fixed to postgres"
+fi
+RESOURCE_STORAGE_BACKEND="postgres"
+
 REDIS_PASSWORD="${REDIS_PASSWORD:-spicepass123}"
 export POSTGRES_URL="${POSTGRES_URL:-postgresql://spiceadmin:spicepass123@127.0.0.1:${POSTGRES_PORT_HOST}/spicedb}"
 export REDIS_URL="${REDIS_URL:-redis://:${REDIS_PASSWORD}@127.0.0.1:${REDIS_PORT_HOST}/0}"
@@ -116,7 +123,7 @@ Options:
 Notes:
 - Tests live under `backend/tests/` (run from `backend/`).
 - Full suite expects local ports from docker compose:
-  OMS 8000, BFF 8002, Funnel 8003, TerminusDB 6363.
+  OMS 8000, BFF 8002, Funnel 8003.
   Infra ports default to: Postgres 5433, MinIO 9000, Elasticsearch 9200, Kafka 39092.
   If you use repo root `.env` port overrides (recommended), this script will auto-detect them.
 USAGE
@@ -569,21 +576,22 @@ if [[ "$WAIT_FOR_SERVICES" == "true" && "$MODE" == "full" ]]; then
 fi
 
 echo "🧪 Running tests (mode=$MODE)..."
+echo "ℹ️  ONTOLOGY_RESOURCE_STORAGE_BACKEND=${RESOURCE_STORAGE_BACKEND}"
 
 # 1) Postgres-backed correctness layer (idempotency + ordering + seq allocator)
 "$PYTHON_BIN" -m pytest tests/test_sequence_allocator.py -q
 "$PYTHON_BIN" -m pytest tests/test_idempotency_chaos.py -q
 
 if [[ "$MODE" == "full" ]]; then
-  # 2) TerminusDB primitives used by OMS (branch/version control)
-  "$PYTHON_BIN" -m pytest tests/test_terminus_version_control.py -q
+  # 2) Legacy branch/version compatibility suite has been removed in Foundry/Postgres runtime.
+  echo "ℹ️  Legacy branch/version compatibility suite removed"
 
   # 3) OMS live smoke via HTTP (destructive; opt-out via --no-oms-smoke)
   if [[ "$RUN_OMS_SMOKE" == "true" ]]; then
     RUN_LIVE_OMS_SMOKE=true "$PYTHON_BIN" -m pytest tests/test_oms_smoke.py -q
   fi
 
-  # 4) Full stack core flow (OMS/BFF/Funnel + Kafka + ES + Terminus)
+  # 4) Full stack core flow (OMS/BFF/Funnel + Kafka + ES)
   if [[ "$RUN_CORE" == "true" ]]; then
     "$PYTHON_BIN" -m pytest tests/test_core_functionality.py -q
   fi
@@ -592,12 +600,13 @@ if [[ "$MODE" == "full" ]]; then
   "$PYTHON_BIN" -m pytest tests/test_openapi_contract_smoke.py -q
   "$PYTHON_BIN" -m pytest tests/test_auth_hardening_e2e.py -q
   "$PYTHON_BIN" -m pytest tests/test_websocket_auth_e2e.py -q
-  RUN_LIVE_BRANCH_VIRTUALIZATION=true "$PYTHON_BIN" -m pytest tests/test_branch_virtualization_e2e.py -q
+  echo "ℹ️  Skipping tests/test_branch_virtualization_e2e.py (legacy branch virtualization runtime removed)"
   "$PYTHON_BIN" -m pytest tests/test_command_status_ttl_e2e.py -q
   "$PYTHON_BIN" -m pytest tests/test_worker_lease_safety_e2e.py -q
   "$PYTHON_BIN" -m pytest tests/test_event_store_tls_guard.py -q
   "$PYTHON_BIN" -m pytest tests/test_critical_fixes_e2e.py -q
   "$PYTHON_BIN" -m pytest tests/test_consistency_e2e_smoke.py -q
+  "$PYTHON_BIN" scripts/verify_projection_consistency.py --from-minutes-ago 240 --max-events 10000
   RUN_PIPELINE_OBJECTIFY_E2E=true "$PYTHON_BIN" -m pytest tests/test_pipeline_objectify_es_e2e.py -q
   RUN_PIPELINE_TRANSFORM_E2E=true "$PYTHON_BIN" -m pytest tests/test_pipeline_transform_cleansing_e2e.py -q
   "$PYTHON_BIN" -m pytest tests/test_financial_investigation_workflow_e2e.py -q

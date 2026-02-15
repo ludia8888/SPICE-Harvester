@@ -7,7 +7,13 @@ Thin router that delegates domain logic to `bff.services.ai_service`.
 from fastapi import APIRouter, Depends, Request
 from shared.observability.tracing import trace_endpoint
 
-from bff.dependencies import LabelMapper, TerminusService, get_label_mapper, get_oms_client, get_terminus_service
+from bff.dependencies import (
+    FoundryQueryService,
+    LabelMapper,
+    get_foundry_query_service,
+    get_label_mapper,
+    get_oms_client,
+)
 from bff.routers.registry_deps import get_agent_session_registry, get_dataset_registry
 from bff.services import ai_service
 from bff.services.oms_client import OMSClient
@@ -85,7 +91,7 @@ async def ai_query(
     lineage_store: LineageStoreDep,
     oms: OMSClient = Depends(get_oms_client),
     mapper: LabelMapper = Depends(get_label_mapper),
-    terminus: TerminusService = Depends(get_terminus_service),
+    query_service: FoundryQueryService = Depends(get_foundry_query_service),
     sessions: AgentSessionRegistry = Depends(get_agent_session_registry),
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
 ):
@@ -99,7 +105,7 @@ async def ai_query(
         lineage_store=lineage_store,
         oms=oms,
         mapper=mapper,
-        terminus=terminus,
+        query_service=query_service,
         sessions=sessions,
         dataset_registry=dataset_registry,
     )

@@ -12,7 +12,6 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status, 
 from pydantic import BaseModel, Field
 
 from oms.dependencies import (
-    TerminusServiceDep,
     EventStoreDep,  # Added for S3/MinIO Event Store
     CommandStatusServiceDep,
     ProcessedEventRegistryDep,
@@ -216,7 +215,6 @@ async def create_instance_async(
     class_id: str = Depends(ValidatedClassId),
     branch: str = Query("main", description="Target branch (default: main)"),
     request: InstanceCreateRequest = ...,
-    terminus=TerminusServiceDep,
     command_status_service: Optional[CommandStatusService] = CommandStatusServiceDep,
     event_store=EventStoreDep,
     user_id: Optional[str] = None,
@@ -238,7 +236,7 @@ async def create_instance_async(
 
         ontology_version = merge_ontology_stamp(
             (request.metadata or {}).get("ontology"),
-            await resolve_ontology_version(terminus, db_name=db_name, branch=branch, logger=logger),
+            await resolve_ontology_version(None, db_name=db_name, branch=branch, logger=logger),
         )
         
         # Command 생성
@@ -306,7 +304,6 @@ async def update_instance_async(
     branch: str = Query("main", description="Target branch (default: main)"),
     expected_seq: int = Query(..., ge=0, description="Expected current aggregate sequence (OCC)"),
     request: InstanceUpdateRequest = ...,
-    terminus=TerminusServiceDep,
     command_status_service: Optional[CommandStatusService] = CommandStatusServiceDep,
     event_store=EventStoreDep,
     user_id: Optional[str] = None,
@@ -323,7 +320,7 @@ async def update_instance_async(
 
         ontology_version = merge_ontology_stamp(
             (request.metadata or {}).get("ontology"),
-            await resolve_ontology_version(terminus, db_name=db_name, branch=branch, logger=logger),
+            await resolve_ontology_version(None, db_name=db_name, branch=branch, logger=logger),
         )
         
         # Command 생성
@@ -394,7 +391,6 @@ async def delete_instance_async(
     branch: str = Query("main", description="Target branch (default: main)"),
     expected_seq: int = Query(..., ge=0, description="Expected current aggregate sequence (OCC)"),
     request: Optional[InstanceDeleteRequest] = None,
-    terminus=TerminusServiceDep,
     command_status_service: Optional[CommandStatusService] = CommandStatusServiceDep,
     event_store=EventStoreDep,
     user_id: Optional[str] = None,
@@ -411,7 +407,7 @@ async def delete_instance_async(
             metadata=(request.metadata if request else None),
         )
 
-        ontology_version = await resolve_ontology_version(terminus, db_name=db_name, branch=branch, logger=logger)
+        ontology_version = await resolve_ontology_version(None, db_name=db_name, branch=branch, logger=logger)
         
         # Command 생성
         command = InstanceCommand(
@@ -480,7 +476,6 @@ async def bulk_create_instances_async(
     branch: str = Query("main", description="Target branch (default: main)"),
     request: BulkInstanceCreateRequest = ...,
     background_tasks: BackgroundTasks = BackgroundTasks(),
-    terminus=TerminusServiceDep,
     command_status_service: Optional[CommandStatusService] = CommandStatusServiceDep,
     event_store=EventStoreDep,
     user_id: Optional[str] = None,
@@ -499,7 +494,7 @@ async def bulk_create_instances_async(
 
         ontology_version = merge_ontology_stamp(
             (request.metadata or {}).get("ontology"),
-            await resolve_ontology_version(terminus, db_name=db_name, branch=branch, logger=logger),
+            await resolve_ontology_version(None, db_name=db_name, branch=branch, logger=logger),
         )
         
         # Command 생성
@@ -576,7 +571,6 @@ async def bulk_update_instances_async(
     class_id: str = Depends(ValidatedClassId),
     branch: str = Query("main", description="Target branch (default: main)"),
     request: BulkInstanceUpdateRequest = ...,
-    terminus=TerminusServiceDep,
     command_status_service: Optional[CommandStatusService] = CommandStatusServiceDep,
     event_store=EventStoreDep,
     user_id: Optional[str] = None,
@@ -609,7 +603,7 @@ async def bulk_update_instances_async(
 
         ontology_version = merge_ontology_stamp(
             (request.metadata or {}).get("ontology"),
-            await resolve_ontology_version(terminus, db_name=db_name, branch=branch, logger=logger),
+            await resolve_ontology_version(None, db_name=db_name, branch=branch, logger=logger),
         )
 
         command = InstanceCommand(
@@ -830,7 +824,6 @@ async def bulk_create_instances_with_tracking(
     branch: str = Query("main", description="Target branch (default: main)"),
     request: BulkInstanceCreateRequest = ...,
     background_tasks: BackgroundTasks = BackgroundTasks(),
-    terminus=TerminusServiceDep,
     command_status_service: Optional[CommandStatusService] = CommandStatusServiceDep,
     event_store=EventStoreDep,
     user_id: Optional[str] = None,
@@ -851,7 +844,7 @@ async def bulk_create_instances_with_tracking(
 
     ontology_version = merge_ontology_stamp(
         (request.metadata or {}).get("ontology"),
-        await resolve_ontology_version(terminus, db_name=db_name, branch=branch, logger=logger),
+        await resolve_ontology_version(None, db_name=db_name, branch=branch, logger=logger),
     )
     
     # Add the actual bulk creation to background tasks

@@ -1,7 +1,7 @@
 """
 Graph federation dependency provider (BFF).
 
-Provides ``GraphFederationServiceES`` via DI container — no TerminusDB dependency.
+Provides ``GraphFederationServiceES`` via DI container.
 """
 
 import logging

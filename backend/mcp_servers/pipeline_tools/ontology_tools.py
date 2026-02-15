@@ -53,26 +53,6 @@ async def _ontology_register_object_type(_server: Any, arguments: Dict[str, Any]
         return tool_error("title_key must be a non-empty list of field names")
 
     try:
-        head_resp = await oms_json(
-            "GET",
-            f"/api/v1/version/{db_name}/head",
-            params={"branch": branch},
-        )
-        head_data = head_resp.get("data") if isinstance(head_resp.get("data"), dict) else {}
-        head_commit = (
-            head_data.get("head_commit_id")
-            or head_data.get("commit")
-            or head_data.get("head_commit")
-            or ""
-        )
-        if not head_commit:
-            return tool_error(
-                f"No head commit found for branch '{branch}'. Please create an ontology class first.",
-                status_code=404,
-                code=ErrorCode.RESOURCE_NOT_FOUND,
-                category=ErrorCategory.RESOURCE,
-            )
-
         # Build backing_source with optional Foundry-style property mappings
         backing_source_spec: Dict[str, Any] = {"dataset_id": dataset_id}
         if property_mappings and isinstance(property_mappings, list):
@@ -107,30 +87,17 @@ async def _ontology_register_object_type(_server: Any, arguments: Dict[str, Any]
         resp = await oms_json(
             "POST",
             f"/api/v1/database/{db_name}/ontology/resources/object_type",
-            params={"branch": branch, "expected_head_commit": head_commit},
+            params={"branch": branch},
             json_body=object_type_payload,
             timeout_seconds=30.0,
         )
 
         if resp.get("error") and (resp.get("status_code") == 409 or "409" in str(resp.get("error")) or "already exists" in str(resp.get("error")).lower()):
             logger.info("object_type exists, updating with PUT db=%s class=%s", db_name, class_id)
-            # Re-fetch head commit after 409 (the resource creation may have advanced the commit)
-            head_resp2 = await oms_json(
-                "GET",
-                f"/api/v1/version/{db_name}/head",
-                params={"branch": branch},
-            )
-            head_data2 = head_resp2.get("data") if isinstance(head_resp2.get("data"), dict) else {}
-            head_commit2 = (
-                head_data2.get("head_commit_id")
-                or head_data2.get("commit")
-                or head_data2.get("head_commit")
-                or head_commit
-            )
             resp = await oms_json(
                 "PUT",
                 f"/api/v1/database/{db_name}/ontology/resources/object_type/{class_id}",
-                params={"branch": branch, "expected_head_commit": head_commit2},
+                params={"branch": branch},
                 json_body=object_type_payload,
                 timeout_seconds=30.0,
             )
@@ -441,4 +408,3 @@ ONTOLOGY_TOOL_HANDLERS: Dict[str, ToolHandler] = {
 
 def build_ontology_tool_handlers() -> Dict[str, ToolHandler]:
     return dict(ONTOLOGY_TOOL_HANDLERS)
-

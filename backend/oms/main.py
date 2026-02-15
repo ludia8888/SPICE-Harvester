@@ -39,9 +39,7 @@ from shared.services.core.service_factory import create_fastapi_service, get_oms
 from oms.middleware.auth import install_oms_auth_middleware, ensure_oms_auth_configured
 
 # OMS specific imports  
-from oms.services.async_terminus import AsyncTerminusService
 from oms.services.event_store import event_store
-from shared.models.config import ConnectionConfig
 from shared.services.storage.redis_service import RedisService
 from shared.services.core.command_status_service import CommandStatusService
 from shared.services.storage.elasticsearch_service import ElasticsearchService
@@ -60,7 +58,7 @@ from shared.middleware.rate_limiter import RateLimiter
 
 # Router imports
 from oms.routers import (
-    branch, database, ontology, ontology_extensions, version,
+    database, ontology, ontology_extensions,
     instance_async, instance, query, command_status, action_async
 )
 
@@ -79,12 +77,16 @@ install_trace_context_filter()
 logger = logging.getLogger(__name__)
 
 
+def _resource_storage_backend() -> str:
+    return "postgres"
+
+
 class OMSServiceContainer:
     """
     OMS-specific service container to manage OMS services
     
-    This class extends the core service container functionality
-    with OMS-specific services like AsyncTerminusService and the S3/MinIO Event Store.
+    This class extends the core service container functionality with OMS-specific
+    services for the Foundry/Postgres runtime profile.
     """
     
     def __init__(self, container, settings: ApplicationSettings):
@@ -99,25 +101,22 @@ class OMSServiceContainer:
         # 1. Initialize S3/MinIO Event Store (SSoT) - CRITICAL: This goes first!
         await self._initialize_event_store()
         
-        # 2. Initialize TerminusDB service
-        await self._initialize_terminus_service()
-
-        # 3. Initialize Postgres (MVCC) for proposals/pull-requests
+        # 2. Initialize Postgres (MVCC) for proposals/pull-requests
         await self._initialize_postgres()
 
-        # 4. Initialize JSON-LD converter
+        # 3. Initialize JSON-LD converter
         await self._initialize_jsonld_converter()
 
-        # 5. Initialize Label Mapper
+        # 4. Initialize Label Mapper
         await self._initialize_label_mapper()
 
-        # 6. Initialize Redis and Command Status service
+        # 5. Initialize Redis and Command Status service
         await self._initialize_redis_and_command_status()
 
-        # 7. Initialize Elasticsearch service
+        # 6. Initialize Elasticsearch service
         await self._initialize_elasticsearch()
 
-        # 8. Initialize Rate Limiter
+        # 7. Initialize Rate Limiter
         await self._initialize_rate_limiter()
         
         logger.info("OMS services initialized successfully")
@@ -142,32 +141,6 @@ class OMSServiceContainer:
                 "Start MinIO/S3 and verify credentials/endpoints."
             ) from e
     
-    async def _initialize_terminus_service(self) -> None:
-        """Initialize TerminusDB service with health check"""
-        try:
-            connection_info = ConnectionConfig(
-                server_url=self.settings.database.terminus_url,
-                user=self.settings.database.terminus_user,
-                account=self.settings.database.terminus_account,
-                key=self.settings.database.terminus_password,
-            )
-            
-            terminus_service = AsyncTerminusService(connection_info)
-            
-            # Test connection
-            try:
-                await terminus_service.connect()
-                logger.info("TerminusDB 연결 성공")
-            except Exception as e:
-                logger.error(f"TerminusDB 연결 실패: {e}")
-                # Continue - service can start without initial connection
-            
-            self._oms_services['terminus_service'] = terminus_service
-
-        except Exception as e:
-            logger.error(f"TerminusDB service initialization failed: {e}")
-            raise
-
     async def _initialize_postgres(self) -> None:
         """Initialize Postgres MVCC pool (required for pull requests/proposals)."""
         try:
@@ -283,13 +256,6 @@ class OMSServiceContainer:
             except Exception as e:
                 logger.error(f"Error disconnecting Redis service: {e}")
         
-        if 'terminus_service' in self._oms_services and self._oms_services['terminus_service']:
-            try:
-                await self._oms_services['terminus_service'].disconnect()
-                logger.info("TerminusDB service disconnected")
-            except Exception as e:
-                logger.error(f"Error disconnecting TerminusDB service: {e}")
-
         if 'postgres_db' in self._oms_services and self._oms_services['postgres_db']:
             try:
                 await self._oms_services['postgres_db'].disconnect()
@@ -299,12 +265,6 @@ class OMSServiceContainer:
         
         self._oms_services.clear()
         logger.info("OMS services shutdown completed")
-    
-    def get_terminus_service(self) -> AsyncTerminusService:
-        """Get TerminusDB service instance"""
-        if 'terminus_service' not in self._oms_services:
-            raise RuntimeError("TerminusDB service not initialized")
-        return self._oms_services['terminus_service']
     
     def get_jsonld_converter(self) -> JSONToJSONLDConverter:
         """Get JSON-LD converter instance"""
@@ -484,32 +444,26 @@ async def _oms_domain_exception_handler(request: Request, exc: OmsBaseException)
     return JSONResponse(status_code=http_status, content=envelope)
 
 
-# Modern dependency injection functions
-async def get_terminus_service() -> AsyncTerminusService:
-    """Get TerminusDB service from OMS container"""
-    if _oms_container is None:
-        raise RuntimeError("OMS services not initialized")
-    return _oms_container.get_terminus_service()
-
-
 # API endpoints (modernized)
 @app.get("/")
 async def root():
     """루트 엔드포인트 - Modernized version"""
     settings = get_settings()
+    backend = _resource_storage_backend()
+    features = [
+        "내부 ID 기반 온톨로지 CRUD",
+        "Foundry 스타일 Object Storage v2 검색",
+        "SearchJsonQueryV2 DSL 지원",
+        "JSON-LD 변환",
+        "레거시 브랜치/버전 API 제거",
+    ]
     return {
         "message": "Ontology Management Service (OMS)",
         "version": "1.0.0",
         "description": "내부 ID 기반 핵심 온톨로지 관리 서비스",
-        "features": [
-            "내부 ID 기반 온톨로지 CRUD",
-            "Foundry 스타일 Object Storage v2 검색",
-            "SearchJsonQueryV2 DSL 지원",
-            "JSON-LD 변환",
-            "버전 관리",
-            "브랜치 관리",
-        ],
+        "features": features,
         "environment": settings.environment.value,
+        "resource_storage_backend": backend,
         "modernized": True
     }
 
@@ -532,49 +486,23 @@ async def health_check():
                     "service": "OMS",
                     "version": "1.0.0",
                     "status": "unhealthy",
-                    "terminus_connected": False,
                     "environment": settings.environment.value,
+                    "resource_storage_backend": _resource_storage_backend(),
                     "modernized": True,
                 },
             )
             return JSONResponse(status_code=error_payload["http_status"], content=error_payload)
-        
-        terminus_service = _oms_container.get_terminus_service()
-        is_connected = await terminus_service.check_connection()
 
-        if is_connected:
-            # 서비스 정상 상태
-            health_response = ApiResponse.health_check(
-                service_name="OMS",
-                version="1.0.0",
-                description="내부 ID 기반 핵심 온톨로지 관리 서비스",
-            )
-            # TerminusDB 연결 상태 추가
-            health_response.data["terminus_connected"] = True
-            health_response.data["environment"] = settings.environment.value
-            health_response.data["modernized"] = True
-
-            return health_response.to_dict()
-        else:
-            # 서비스 비정상 상태 (연결 실패)
-            error_payload = build_error_envelope(
-                service_name="oms",
-                message="OMS 서비스에 문제가 있습니다",
-                detail="TerminusDB 연결 실패",
-                code=ErrorCode.UPSTREAM_UNAVAILABLE,
-                category=ErrorCategory.UPSTREAM,
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                errors=["TerminusDB 연결 실패"],
-                context={
-                    "service": "OMS",
-                    "version": "1.0.0",
-                    "status": "unhealthy",
-                    "terminus_connected": False,
-                    "environment": settings.environment.value,
-                    "modernized": True,
-                },
-            )
-            return JSONResponse(status_code=error_payload["http_status"], content=error_payload)
+        # 서비스 정상 상태
+        health_response = ApiResponse.health_check(
+            service_name="OMS",
+            version="1.0.0",
+            description="내부 ID 기반 핵심 온톨로지 관리 서비스",
+        )
+        health_response.data["environment"] = settings.environment.value
+        health_response.data["resource_storage_backend"] = _resource_storage_backend()
+        health_response.data["modernized"] = True
+        return health_response.to_dict()
 
     except Exception as e:
         logger.error(f"헬스 체크 실패: {e}")
@@ -591,8 +519,8 @@ async def health_check():
                 "service": "OMS",
                 "version": "1.0.0",
                 "status": "unhealthy",
-                "terminus_connected": False,
                 "environment": settings.environment.value,
+                "resource_storage_backend": _resource_storage_backend(),
                 "modernized": True,
             },
         )
@@ -623,14 +551,6 @@ async def container_health_check():
         oms_services_status = {}
         
         try:
-            terminus_service = _oms_container.get_terminus_service()
-            is_connected = await terminus_service.check_connection()
-            oms_services_status["terminus_service"] = "connected" if is_connected else "disconnected"
-        except Exception as e:
-            logging.getLogger(__name__).warning("Broad exception fallback at oms/main.py:634", exc_info=True)
-            oms_services_status["terminus_service"] = f"unhealthy: {str(e)}"
-        
-        try:
             _oms_container.get_jsonld_converter()
             oms_services_status["jsonld_converter"] = "healthy"
         except Exception as e:
@@ -659,6 +579,7 @@ async def container_health_check():
             "message": "OMS container system operational",
             "container_health": container_health,
             "oms_services": oms_services_status,
+            "resource_storage_backend": _resource_storage_backend(),
             "settings_environment": settings.environment.value,
             "settings_debug": settings.debug
         }
@@ -681,8 +602,7 @@ if get_settings().is_development:
         return {
             "environment": settings.environment.value,
             "debug_mode": settings.debug,
-            "terminus_url": settings.database.terminus_url,
-            "terminus_user": settings.database.terminus_user,
+            "resource_storage_backend": _resource_storage_backend(),
             "database_settings": {
                 "host": settings.database.host,
                 "port": settings.database.port,
@@ -700,9 +620,8 @@ app.include_router(query.router, prefix="/api/v1", tags=["object-search"])
 app.include_router(instance_async.router, prefix="/api/v1", tags=["async-instance"])
 app.include_router(instance.router, prefix="/api/v1", tags=["instance"])
 app.include_router(action_async.router, prefix="/api/v1", tags=["async-actions"])
-app.include_router(branch.router, prefix="/api/v1", tags=["branch"])
-app.include_router(version.router, prefix="/api/v1", tags=["version"])
 app.include_router(command_status.router, prefix="/api/v1", tags=["command-status"])
+logger.info("Legacy /branch and /version routers are permanently disabled (Foundry-style profile)")
 
 # Pull Request endpoints depend on Postgres MVCC; keep them opt-in only.
 if get_settings().features.enable_pull_requests:

@@ -9,17 +9,13 @@
 """
 
 import sys
-import os
-import subprocess
-import importlib.util
 from pathlib import Path
-from typing import Dict, List, Set, Optional, Tuple
-import json
+from typing import Dict, Set
 
 # Add backend directory to path
 backend_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(backend_dir))
-from scripts.dependency_parsing import parse_pyproject_toml, parse_requirements_txt
+from scripts.dependency_parsing import parse_pyproject_toml, parse_requirements_txt  # noqa: E402
 
 def check_service_imports(service_dir: Path) -> Set[str]:
     """Check what external libraries a service actually imports"""
@@ -28,7 +24,7 @@ def check_service_imports(service_dir: Path) -> Set[str]:
     # Known external libraries that might be used
     external_libs = {
         'redis', 'boto3', 'botocore', 'elasticsearch', 'confluent_kafka', 
-        'asyncpg', 'terminusdb_client', 'pydantic', 'httpx', 'fastapi',
+        'asyncpg', 'pydantic', 'httpx', 'fastapi',
         'uvicorn', 'python_dotenv', 'email_validator', 'phonenumbers'
     }
     
@@ -44,7 +40,7 @@ def check_service_imports(service_dir: Path) -> Set[str]:
                 if f"import {lib}" in content or f"from {lib}" in content:
                     imports.add(lib)
                     
-        except Exception as e:
+        except Exception:
             continue
     
     return imports
@@ -82,7 +78,6 @@ def audit_service(service_name: str, service_dir: Path) -> Dict:
         # Map import names to package names
         lib_mapping = {
             'confluent_kafka': 'confluent-kafka',
-            'terminusdb_client': 'terminusdb-client',
             'email_validator': 'email-validator'
         }
         

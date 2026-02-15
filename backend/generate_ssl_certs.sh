@@ -21,8 +21,8 @@ mkdir -p $SSL_DIR
 DAYS=365
 
 # 서비스 목록
-SERVICES=("oms" "bff" "funnel" "terminusdb")
-PORTS=("8000" "8002" "8003" "6363")
+SERVICES=("oms" "bff" "funnel")
+PORTS=("8000" "8002" "8003")
 
 # Root CA 생성
 echo -e "\n${YELLOW}1. Root CA 생성중...${NC}"
@@ -107,7 +107,6 @@ DNS.2 = *.spice-harvester.local
 DNS.3 = oms
 DNS.4 = bff
 DNS.5 = funnel
-DNS.6 = terminusdb
 IP.1 = 127.0.0.1
 IP.2 = ::1
 EOF
@@ -133,7 +132,6 @@ cat > $SSL_DIR/README.md <<EOF
 - **OMS**: ssl/oms/server.crt, ssl/oms/server.key
 - **BFF**: ssl/bff/server.crt, ssl/bff/server.key
 - **Funnel**: ssl/funnel/server.crt, ssl/funnel/server.key
-- **TerminusDB**: ssl/terminusdb/server.crt, ssl/terminusdb/server.key
 - **공통 와일드카드**: ssl/common/server.crt, ssl/common/server.key
 
 ## 사용 방법

@@ -38,9 +38,9 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class GraphBranchContext:
-    terminus_branch: str
-    es_base_branch: str
-    es_overlay_branch: Optional[str]
+    graph_branch: str
+    read_model_base_branch: str
+    read_model_overlay_branch: Optional[str]
     overlay_active: bool
     overlay_required: bool
     overlay_status: str
@@ -57,7 +57,7 @@ def _resolve_graph_branches(
     include_documents: bool,
     classes_in_query: List[str],
 ) -> GraphBranchContext:
-    resolved_terminus_branch = validate_branch_name(branch or base_branch or "main")
+    resolved_graph_branch = validate_branch_name(branch or base_branch or "main")
 
     writeback_enabled = bool(
         AppConfig.WRITEBACK_READ_OVERLAY
@@ -77,21 +77,21 @@ def _resolve_graph_branches(
         logging.getLogger(__name__).warning("Broad exception fallback at bff/services/graph_query_service.py:76", exc_info=True)
         virtualization_base_branch = "main"
 
-    es_base_branch = resolved_terminus_branch
-    es_overlay_branch = resolved_overlay_branch
+    read_model_base_branch = resolved_graph_branch
+    read_model_overlay_branch = resolved_overlay_branch
     branch_virtualization_active = False
-    if resolved_terminus_branch != virtualization_base_branch and not requested_overlay:
+    if resolved_graph_branch != virtualization_base_branch and not requested_overlay:
         branch_virtualization_active = True
-        es_base_branch = virtualization_base_branch
-        es_overlay_branch = resolved_terminus_branch
+        read_model_base_branch = virtualization_base_branch
+        read_model_overlay_branch = resolved_graph_branch
 
-    overlay_active = bool(es_overlay_branch and es_overlay_branch != es_base_branch)
+    overlay_active = bool(read_model_overlay_branch and read_model_overlay_branch != read_model_base_branch)
     overlay_required = bool(overlay_active and include_documents)
     overlay_status = "ACTIVE" if overlay_active else "DISABLED"
     return GraphBranchContext(
-        terminus_branch=resolved_terminus_branch,
-        es_base_branch=es_base_branch,
-        es_overlay_branch=es_overlay_branch,
+        graph_branch=resolved_graph_branch,
+        read_model_base_branch=read_model_base_branch,
+        read_model_overlay_branch=read_model_overlay_branch,
         overlay_active=overlay_active,
         overlay_required=overlay_required,
         overlay_status=overlay_status,
@@ -107,13 +107,13 @@ def _raise_overlay_degraded(*, ctx: GraphBranchContext) -> None:
         code=ErrorCode.UPSTREAM_UNAVAILABLE,
         extra={
             "error": "overlay_degraded",
-            "base_branch": ctx.terminus_branch,
-            "overlay_branch": ctx.es_overlay_branch,
+            "base_branch": ctx.graph_branch,
+            "overlay_branch": ctx.read_model_overlay_branch,
             "overlay_status": "DEGRADED",
             "writeback_enabled": ctx.writeback_enabled,
             "writeback_edits_present": None,
             "branch_virtualization_active": ctx.branch_virtualization_active,
-            "es_base_branch": ctx.es_base_branch,
+            "read_model_base_branch": ctx.read_model_base_branch,
         },
     )
 
@@ -142,8 +142,8 @@ async def _merge_fallback_for_degraded(
 
     merger = WritebackMergeService(base_storage=base_storage, lakefs_storage=lakefs_storage)
     writeback_repo = AppConfig.ONTOLOGY_WRITEBACK_REPO
-    writeback_branch = ctx.es_overlay_branch or AppConfig.get_ontology_writeback_branch(db_name)
-    base_branch = ctx.es_base_branch or "main"
+    writeback_branch = ctx.read_model_overlay_branch or AppConfig.get_ontology_writeback_branch(db_name)
+    base_branch = ctx.read_model_base_branch or "main"
 
     merged_docs: List[Dict[str, Any]] = []
     edits_found = False
@@ -349,7 +349,7 @@ async def execute_graph_query(
     branch: Optional[str] = None,
 ) -> GraphQueryResponse:
     """
-    Execute multi-hop graph query with ES federation (TerminusDB + Elasticsearch).
+    Execute multi-hop graph query with ES federation (graph + Elasticsearch).
     """
     try:
         db_name = validate_db_name(db_name)
@@ -375,9 +375,9 @@ async def execute_graph_query(
         try:
             result = await graph_service.multi_hop_query(
                 db_name=db_name,
-                base_branch=ctx.es_base_branch,
-                overlay_branch=ctx.es_overlay_branch,
-                terminus_branch=ctx.terminus_branch,
+                base_branch=ctx.read_model_base_branch,
+                overlay_branch=ctx.read_model_overlay_branch,
+                graph_branch=ctx.graph_branch,
                 strict_overlay=bool(ctx.overlay_required),
                 start_class=query.start_class,
                 hops=hops_tuples,
@@ -400,9 +400,9 @@ async def execute_graph_query(
             try:
                 result = await graph_service.multi_hop_query(
                     db_name=db_name,
-                    base_branch=ctx.es_base_branch,
+                    base_branch=ctx.read_model_base_branch,
                     overlay_branch=None,
-                    terminus_branch=ctx.terminus_branch,
+                    graph_branch=ctx.graph_branch,
                     strict_overlay=False,
                     start_class=query.start_class,
                     hops=hops_tuples,
@@ -456,21 +456,24 @@ async def execute_graph_query(
         else:
             raw_edges = []
 
-        terminus_latest: Dict[str, Dict[str, Any]] = {}
+        graph_latest: Dict[str, Dict[str, Any]] = {}
         es_latest: Dict[str, Dict[str, Any]] = {}
-        terminus_artifact_by_node_id: Dict[str, str] = {}
+        graph_artifact_candidates_by_node_id: Dict[str, List[str]] = {}
         es_artifact_by_node_id: Dict[str, str] = {}
+
+        def _graph_artifact_candidates(graph_node_id: str) -> List[str]:
+            return [LineageStore.node_artifact("graph", db_name, ctx.graph_branch, graph_node_id)]
 
         if query.include_provenance and raw_nodes:
             try:
-                terminus_artifacts: List[str] = []
+                graph_artifacts: List[str] = []
                 es_artifacts: List[str] = []
                 for node in raw_nodes:
-                    terminus_id = str(node.get("terminus_id") or node.get("id") or "")
-                    if terminus_id:
-                        art = LineageStore.node_artifact("terminus", db_name, ctx.terminus_branch, terminus_id)
-                        terminus_artifact_by_node_id[terminus_id] = art
-                        terminus_artifacts.append(art)
+                    graph_id = str(node.get("graph_id") or node.get("id") or "")
+                    if graph_id:
+                        artifact_candidates = _graph_artifact_candidates(graph_id)
+                        graph_artifact_candidates_by_node_id[graph_id] = artifact_candidates
+                        graph_artifacts.extend(artifact_candidates)
 
                     es_ref = node.get("es_ref") or {}
                     index_name = str(es_ref.get("index") or "")
@@ -480,11 +483,14 @@ async def execute_graph_query(
                         es_artifact_by_node_id[f"{index_name}/{doc_id}"] = art
                         es_artifacts.append(art)
 
-                terminus_latest = await lineage_store.get_latest_edges_to(
-                    to_node_ids=list({*terminus_artifacts}),
-                    edge_type="event_wrote_terminus_document",
+                latest_by_type = await lineage_store.get_latest_edges_to(
+                    to_node_ids=list({*graph_artifacts}),
+                    edge_type="event_wrote_graph_document",
                     db_name=db_name,
                 )
+                for to_node_id, edge_payload in (latest_by_type or {}).items():
+                    graph_latest.setdefault(str(to_node_id), edge_payload)
+
                 es_latest = await lineage_store.get_latest_edges_to(
                     to_node_ids=list({*es_artifacts}),
                     edge_type="event_materialized_es_document",
@@ -495,28 +501,23 @@ async def execute_graph_query(
 
         nodes: List[GraphNode] = []
         for node in filtered_nodes:
-            terminus_id = str(node.get("terminus_id") or node.get("id") or "")
+            graph_id = str(node.get("graph_id") or node.get("id") or "")
             node_id = str(node.get("id") or "")
             es_doc_id = (
                 str(node.get("es_doc_id") or "").strip()
                 or str(node.get("instance_id") or "").strip()
-                or _normalize_es_doc_id(terminus_id)
+                or _normalize_es_doc_id(graph_id)
                 or _normalize_es_doc_id(node_id)
             )
             es_ref = node.get("es_ref") or {
                 "index": f"{db_name}_instances",
-                "id": node_id or terminus_id or str(es_doc_id),
+                "id": node_id or graph_id or str(es_doc_id),
             }
             node_index_status = dict(node.get("index_status") or {})
 
             provenance: Optional[Dict[str, Any]] = None
-            if query.include_provenance and terminus_id:
-                terminus_art = terminus_artifact_by_node_id.get(terminus_id) or LineageStore.node_artifact(
-                    "terminus",
-                    db_name,
-                    ctx.terminus_branch,
-                    terminus_id,
-                )
+            if query.include_provenance and graph_id:
+                graph_artifacts = graph_artifact_candidates_by_node_id.get(graph_id) or _graph_artifact_candidates(graph_id)
                 es_key = f"{es_ref.get('index')}/{es_ref.get('id')}"
                 es_art = es_artifact_by_node_id.get(es_key) or (
                     LineageStore.node_artifact("es", str(es_ref.get("index")), str(es_ref.get("id")))
@@ -524,14 +525,14 @@ async def execute_graph_query(
                     else None
                 )
 
-                terminus_prov = terminus_latest.get(terminus_art)
+                graph_prov = next((graph_latest.get(artifact_id) for artifact_id in graph_artifacts if graph_latest.get(artifact_id)), None)
                 es_prov = es_latest.get(es_art) if es_art else None
-                provenance = {"terminus": terminus_prov, "es": es_prov}
+                provenance = {"graph": graph_prov, "es": es_prov}
 
                 try:
                     t_at = (
-                        datetime.fromisoformat(str(terminus_prov.get("occurred_at")))
-                        if terminus_prov and terminus_prov.get("occurred_at")
+                        datetime.fromisoformat(str(graph_prov.get("occurred_at")))
+                        if graph_prov and graph_prov.get("occurred_at")
                         else None
                     )
                     e_at = (
@@ -570,8 +571,13 @@ async def execute_graph_query(
             if query.include_provenance:
                 from_node = str(edge.get("from") or "")
                 if from_node:
-                    terminus_art = LineageStore.node_artifact("terminus", db_name, ctx.terminus_branch, from_node)
-                    edge_prov = {"terminus": terminus_latest.get(terminus_art)}
+                    graph_artifacts = graph_artifact_candidates_by_node_id.get(from_node) or _graph_artifact_candidates(from_node)
+                    edge_prov = {
+                        "graph": next(
+                            (graph_latest.get(artifact_id) for artifact_id in graph_artifacts if graph_latest.get(artifact_id)),
+                            None,
+                        )
+                    }
             edges.append(
                 GraphEdge(
                     from_node=edge["from"],
@@ -599,8 +605,8 @@ async def execute_graph_query(
             response_warnings.append("overlay_degraded: ES overlay unavailable; results merged server-side from lakeFS writeback queue")
 
         response = GraphQueryResponse(
-            base_branch=ctx.terminus_branch,
-            overlay_branch=ctx.es_overlay_branch,
+            base_branch=ctx.graph_branch,
+            overlay_branch=ctx.read_model_overlay_branch,
             overlay_status=effective_overlay_status,
             writeback_enabled=ctx.writeback_enabled,
             nodes=nodes,
@@ -611,11 +617,11 @@ async def execute_graph_query(
                 "start_class": query.start_class,
                 "hops": [{"predicate": h[0], "target_class": h[1], "reverse": bool(h[2])} for h in hops_tuples],
                 "filters": query.filters,
-                "base_branch": ctx.terminus_branch,
-                "overlay_branch": ctx.es_overlay_branch,
-                "terminus_branch": ctx.terminus_branch,
-                "es_base_branch": ctx.es_base_branch,
-                "es_overlay_branch": ctx.es_overlay_branch,
+                "base_branch": ctx.graph_branch,
+                "overlay_branch": ctx.read_model_overlay_branch,
+                "graph_branch": ctx.graph_branch,
+                "read_model_base_branch": ctx.read_model_base_branch,
+                "read_model_overlay_branch": ctx.read_model_overlay_branch,
                 "branch_virtualization_active": ctx.branch_virtualization_active,
                 "limit": query.limit,
                 "offset": query.offset,
@@ -679,9 +685,9 @@ async def execute_simple_graph_query(
         try:
             result = await graph_service.simple_graph_query(
                 db_name=db_name,
-                base_branch=ctx.es_base_branch,
-                overlay_branch=ctx.es_overlay_branch,
-                terminus_branch=ctx.terminus_branch,
+                base_branch=ctx.read_model_base_branch,
+                overlay_branch=ctx.read_model_overlay_branch,
+                graph_branch=ctx.graph_branch,
                 strict_overlay=bool(ctx.overlay_required),
                 class_name=query.class_name,
                 filters=query.filters,
@@ -694,9 +700,9 @@ async def execute_simple_graph_query(
             try:
                 result = await graph_service.simple_graph_query(
                     db_name=db_name,
-                    base_branch=ctx.es_base_branch,
+                    base_branch=ctx.read_model_base_branch,
                     overlay_branch=None,
-                    terminus_branch=ctx.terminus_branch,
+                    graph_branch=ctx.graph_branch,
                     strict_overlay=False,
                     class_name=query.class_name,
                     filters=query.filters,
@@ -737,14 +743,14 @@ async def execute_simple_graph_query(
                 logger.warning("DEGRADED merge fallback failed (simple); returning base-only: %s", merge_exc)
                 effective_overlay_status = "DEGRADED"
 
-        result["base_branch"] = ctx.terminus_branch
-        result["overlay_branch"] = ctx.es_overlay_branch
+        result["base_branch"] = ctx.graph_branch
+        result["overlay_branch"] = ctx.read_model_overlay_branch
         result["overlay_status"] = effective_overlay_status
         result["writeback_enabled"] = ctx.writeback_enabled
         result["writeback_edits_present"] = writeback_edits_present
-        result["terminus_branch"] = ctx.terminus_branch
-        result["es_base_branch"] = ctx.es_base_branch
-        result["es_overlay_branch"] = ctx.es_overlay_branch
+        result["graph_branch"] = ctx.graph_branch
+        result["read_model_base_branch"] = ctx.read_model_base_branch
+        result["read_model_overlay_branch"] = ctx.read_model_overlay_branch
         result["branch_virtualization_active"] = ctx.branch_virtualization_active
         if degraded_fallback:
             warnings = list(result.get("warnings") or [])
@@ -781,7 +787,7 @@ async def execute_multi_hop_query(
     try:
         db_name = validate_db_name(db_name)
 
-        resolved_terminus_branch = validate_branch_name(branch or base_branch or "main")
+        resolved_graph_branch = validate_branch_name(branch or base_branch or "main")
 
         start_class = query.get("start_class")
         hops = query.get("hops", [])
@@ -796,7 +802,7 @@ async def execute_multi_hop_query(
         classes_in_query = [str(start_class or "").strip()] + _collect_class_ids_from_hops(hops)
         ctx = _resolve_graph_branches(
             db_name=db_name,
-            base_branch=resolved_terminus_branch,
+            base_branch=resolved_graph_branch,
             overlay_branch=overlay_branch,
             branch=None,
             include_documents=include_documents,
@@ -809,9 +815,9 @@ async def execute_multi_hop_query(
         try:
             result = await graph_service.multi_hop_query(
                 db_name=db_name,
-                base_branch=ctx.es_base_branch,
-                overlay_branch=ctx.es_overlay_branch,
-                terminus_branch=ctx.terminus_branch,
+                base_branch=ctx.read_model_base_branch,
+                overlay_branch=ctx.read_model_overlay_branch,
+                graph_branch=ctx.graph_branch,
                 strict_overlay=bool(ctx.overlay_required),
                 start_class=start_class,
                 hops=hops or [],
@@ -828,9 +834,9 @@ async def execute_multi_hop_query(
             try:
                 result = await graph_service.multi_hop_query(
                     db_name=db_name,
-                    base_branch=ctx.es_base_branch,
+                    base_branch=ctx.read_model_base_branch,
                     overlay_branch=None,
-                    terminus_branch=ctx.terminus_branch,
+                    graph_branch=ctx.graph_branch,
                     strict_overlay=False,
                     start_class=start_class,
                     hops=hops or [],
@@ -883,14 +889,14 @@ async def execute_multi_hop_query(
         result["nodes"] = filtered_nodes
         result["edges"] = raw_edges
         result["count"] = len(filtered_nodes)
-        result["base_branch"] = ctx.terminus_branch
-        result["overlay_branch"] = ctx.es_overlay_branch
+        result["base_branch"] = ctx.graph_branch
+        result["overlay_branch"] = ctx.read_model_overlay_branch
         result["overlay_status"] = effective_overlay_status
         result["writeback_enabled"] = ctx.writeback_enabled
         result["writeback_edits_present"] = writeback_edits_present
-        result["terminus_branch"] = ctx.terminus_branch
-        result["es_base_branch"] = ctx.es_base_branch
-        result["es_overlay_branch"] = ctx.es_overlay_branch
+        result["graph_branch"] = ctx.graph_branch
+        result["read_model_base_branch"] = ctx.read_model_base_branch
+        result["read_model_overlay_branch"] = ctx.read_model_overlay_branch
         result["branch_virtualization_active"] = ctx.branch_virtualization_active
         if degraded_fallback:
             warnings = list(result.get("warnings") or [])
@@ -950,7 +956,7 @@ async def find_relationship_paths(
 @trace_external_call("bff.graph_query.graph_service_health")
 async def graph_service_health(*, graph_service: GraphFederationServiceES) -> Dict[str, Any]:
     """
-    Check health of graph federation service (ES-only, no TerminusDB).
+    Check health of graph federation service (ES-only, no legacy graph DB dependency).
 
     Returns a best-effort diagnostic payload (does not raise on failure).
     """
