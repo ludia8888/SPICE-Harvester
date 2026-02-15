@@ -121,17 +121,47 @@ async def compile_plan(
         ),
     }
 
-    if compiled_plan:
-        status_value = "COMPILED" if response_status == "success" else "DRAFT"
-        await plan_registry.upsert_plan(
-            plan_id=result.plan_id,
-            tenant_id=tenant_id,
-            status=status_value,
-            goal=str(compiled_plan.goal or ""),
-            db_name=str(compiled_plan.data_scope.db_name or "") if compiled_plan.data_scope else None,
-            branch=str(compiled_plan.data_scope.branch or "") if compiled_plan.data_scope else None,
-            plan=compiled_plan.model_dump(mode="json"),
-            created_by=actor,
+    # Persist plan state — always create a registry record so that the
+    # plan_id returned to the client is retrievable later.  When the LLM
+    # produces no plan (clarification needed, validation failure, etc.) we
+    # still persist a lightweight PENDING/FAILED record.
+    try:
+        if compiled_plan:
+            status_value = "COMPILED" if response_status == "success" else "DRAFT"
+            await plan_registry.upsert_plan(
+                plan_id=result.plan_id,
+                tenant_id=tenant_id,
+                status=status_value,
+                goal=str(compiled_plan.goal or ""),
+                db_name=str(compiled_plan.data_scope.db_name or "") if compiled_plan.data_scope else None,
+                branch=str(compiled_plan.data_scope.branch or "") if compiled_plan.data_scope else None,
+                plan=compiled_plan.model_dump(mode="json"),
+                created_by=actor,
+            )
+        else:
+            # No plan produced — persist a placeholder so the plan_id is
+            # queryable (status shows why compilation didn't complete).
+            persist_status = (
+                "CLARIFICATION_REQUIRED" if response_status == "clarification_required"
+                else "FAILED"
+            )
+            await plan_registry.upsert_plan(
+                plan_id=result.plan_id,
+                tenant_id=tenant_id,
+                status=persist_status,
+                goal=goal,
+                db_name=db_name,
+                branch=str(data_scope.branch or "") if data_scope else None,
+                plan={"errors": validation_errors} if validation_errors else None,
+                created_by=actor,
+            )
+    except Exception as persist_exc:
+        # Plan persistence failure must not silently swallow — log and
+        # attach a warning so the client knows the plan may not be
+        # retrievable.
+        logger.error("Failed to persist pipeline plan %s: %s", result.plan_id, persist_exc)
+        response_data.setdefault("warnings", []).append(
+            f"Plan compiled but failed to persist: {persist_exc}"
         )
 
     return ApiResponse.success(message="Pipeline plan compiled", data=response_data)

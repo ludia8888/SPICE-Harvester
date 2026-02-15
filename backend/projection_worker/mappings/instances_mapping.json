@@ -26,6 +26,10 @@
             "fields": {
               "keyword": {
                 "type": "keyword"
+              },
+              "numeric": {
+                "type": "double",
+                "ignore_malformed": true
               }
             }
           },

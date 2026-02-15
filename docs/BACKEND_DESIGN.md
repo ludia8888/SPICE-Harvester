@@ -1,6 +1,6 @@
 # Backend Design Reference
 
-> Generated: 2026-02-15T10:29:47+09:00
+> Generated: 2026-02-15T15:46:14+09:00
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 > Source: AST + docstring extraction (module/class/function) via `scripts/generate_backend_methods.py`.
 
@@ -1654,7 +1654,7 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
-- Runtime signals: async_functions=1 | try=2 | raise=5 | broad_except=1 | bare_except=0 | finally_return=0
+- Runtime signals: async_functions=1 | try=3 | raise=5 | broad_except=2 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
 - Internal imports (17): bff.routers.pipeline_deps; bff.routers.pipeline_plans_deps; bff.routers.pipeline_plans_ops; bff.schemas.pipeline_plans_requests; bff.services.pipeline_plan_autonomous_compiler; bff.services.pipeline_plan_models; shared.config.settings; shared.dependencies.providers (+9 more)
 - External imports (2): fastapi; logging
@@ -8441,9 +8441,9 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
-- API surface: public=3 | top-level functions=2 | classes=1 | methods=20
-- Runtime signals: async_functions=19 | try=20 | raise=18 | broad_except=4 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=2/2 (100%) | classes=1/1 (100%) | methods=19/20 (95%)
+- API surface: public=3 | top-level functions=2 | classes=1 | methods=21
+- Runtime signals: async_functions=20 | try=20 | raise=18 | broad_except=4 | bare_except=0 | finally_return=0
+- Doc coverage: module=yes | top-level functions=2/2 (100%) | classes=1/1 (100%) | methods=20/21 (95%)
 - Internal imports (2): shared.observability.tracing; shared.services.storage.connectivity
 - External imports (3): elasticsearch; logging; typing
 - Public API names: ElasticsearchService; create_elasticsearch_service; promote_alias_to_index

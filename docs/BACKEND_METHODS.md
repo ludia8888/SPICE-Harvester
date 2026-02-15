@@ -1,6 +1,6 @@
 # Backend Method Index
 
-> Generated: 2026-02-15T10:29:47+09:00
+> Generated: 2026-02-15T15:46:14+09:00
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 
 ## action_outbox_worker
@@ -3548,13 +3548,13 @@
     - `async write_instances(self, job, instances, ontology_version, objectify_pk_fields, objectify_instance_id_field, instance_relationships, target_field_types)` (line 41): no docstring
     - `async finalize_job(self, job, execution_mode, indexed_instance_ids)` (line 55): no docstring
   - `DatasetPrimaryIndexWritePath` (line 65): Foundry-style path: dataset rows are indexed directly into Elasticsearch.
-    - `__init__(self, elasticsearch_service, storage_service, instance_bucket, chunk_size, refresh, prune_stale_on_full)` (line 121): no docstring
-    - `async write_instances(self, job, instances, ontology_version, objectify_pk_fields, objectify_instance_id_field, instance_relationships, target_field_types)` (line 139): no docstring
-    - `async _write_instance_commands_to_s3(self, job, instances, indexed_instance_ids, branch, now_iso, batch_sequence)` (line 217): Write BULK_CREATE_INSTANCES command files to instance-events S3 for action writeback.
-    - `async finalize_job(self, job, execution_mode, indexed_instance_ids)` (line 288): no docstring
-    - `async _ensure_instances_index(self, db_name, branch)` (line 331): no docstring
-    - `async _find_stale_instance_ids(self, index_name, class_id, active_instance_ids)` (line 357): no docstring
-    - `_build_document(job, instance, instance_id, branch, ontology_version, now_iso, event_sequence, relationships, target_field_types)` (line 414): no docstring
+    - `__init__(self, elasticsearch_service, storage_service, instance_bucket, chunk_size, refresh, prune_stale_on_full)` (line 127): no docstring
+    - `async write_instances(self, job, instances, ontology_version, objectify_pk_fields, objectify_instance_id_field, instance_relationships, target_field_types)` (line 145): no docstring
+    - `async _write_instance_commands_to_s3(self, job, instances, indexed_instance_ids, branch, now_iso, batch_sequence)` (line 223): Write BULK_CREATE_INSTANCES command files to instance-events S3 for action writeback.
+    - `async finalize_job(self, job, execution_mode, indexed_instance_ids)` (line 294): no docstring
+    - `async _ensure_instances_index(self, db_name, branch)` (line 337): no docstring
+    - `async _find_stale_instance_ids(self, index_name, class_id, active_instance_ids)` (line 363): no docstring
+    - `_build_document(job, instance, instance_id, branch, ontology_version, now_iso, event_sequence, relationships, target_field_types)` (line 420): no docstring
 
 ## oms
 
@@ -7918,30 +7918,31 @@
 
 ### `backend/shared/services/storage/elasticsearch_service.py`
 - **Functions**
-  - `create_elasticsearch_service(settings)` (line 614): Elasticsearch 서비스 팩토리 함수 (Anti-pattern 13 해결)
-  - `async promote_alias_to_index(elasticsearch_service, base_index, new_index, allow_delete_base_index)` (line 637): Atomically promote *new_index* behind the *base_index* alias.
+  - `create_elasticsearch_service(settings)` (line 624): Elasticsearch 서비스 팩토리 함수 (Anti-pattern 13 해결)
+  - `async promote_alias_to_index(elasticsearch_service, base_index, new_index, allow_delete_base_index)` (line 647): Atomically promote *new_index* behind the *base_index* alias.
 - **Classes**
   - `ElasticsearchService` (line 29): Async Elasticsearch client service with connection pooling and error handling.
     - `__init__(self, host, port, username, password, use_ssl, verify_certs, request_timeout, max_retries, retry_on_timeout)` (line 45): no docstring
     - `async connect(self)` (line 81): Initialize Elasticsearch connection.
-    - `async disconnect(self)` (line 96): Close Elasticsearch connection.
-    - `client(self)` (line 106): Get Elasticsearch client instance.
-    - `async get_cluster_health(self)` (line 113): Get Elasticsearch cluster health status.
-    - `async create_index(self, index, mappings, settings, aliases)` (line 126): Create an index with optional mappings, settings, and aliases.
-    - `async delete_index(self, index)` (line 165): Delete an index.
-    - `async index_exists(self, index)` (line 187): Check if index exists.
-    - `async update_mapping(self, index, properties)` (line 196): Update index mapping.
-    - `async index_document(self, index, document, doc_id, refresh, version, version_type, op_type)` (line 225): Index a single document.
-    - `async get_document(self, index, doc_id, source_includes, source_excludes)` (line 269): Get a document by ID.
-    - `async update_document(self, index, doc_id, doc, script, upsert, refresh)` (line 303): Update a document.
-    - `async delete_document(self, index, doc_id, refresh, version, version_type)` (line 352): Delete a document.
-    - `async bulk_index(self, index, documents, chunk_size, refresh)` (line 390): Bulk index documents.
-    - `async search(self, index, query, size, from_, sort, source_includes, source_excludes, aggregations)` (line 440): Search documents.
-    - `async count(self, index, query)` (line 494): Count documents matching query.
-    - `async create_alias(self, index, alias, filter)` (line 523): Create an alias for an index with optional filter.
-    - `async delete_alias(self, index, alias)` (line 557): Delete an alias.
-    - `async update_aliases(self, actions)` (line 580): Perform multiple alias operations atomically.
-    - `async refresh_index(self, index)` (line 604): Force refresh an index to make changes searchable.
+    - `async initialize(self)` (line 95): ServiceContainer lifecycle hook — delegates to ``connect()``.
+    - `async disconnect(self)` (line 106): Close Elasticsearch connection.
+    - `client(self)` (line 116): Get Elasticsearch client instance.
+    - `async get_cluster_health(self)` (line 123): Get Elasticsearch cluster health status.
+    - `async create_index(self, index, mappings, settings, aliases)` (line 136): Create an index with optional mappings, settings, and aliases.
+    - `async delete_index(self, index)` (line 175): Delete an index.
+    - `async index_exists(self, index)` (line 197): Check if index exists.
+    - `async update_mapping(self, index, properties)` (line 206): Update index mapping.
+    - `async index_document(self, index, document, doc_id, refresh, version, version_type, op_type)` (line 235): Index a single document.
+    - `async get_document(self, index, doc_id, source_includes, source_excludes)` (line 279): Get a document by ID.
+    - `async update_document(self, index, doc_id, doc, script, upsert, refresh)` (line 313): Update a document.
+    - `async delete_document(self, index, doc_id, refresh, version, version_type)` (line 362): Delete a document.
+    - `async bulk_index(self, index, documents, chunk_size, refresh)` (line 400): Bulk index documents.
+    - `async search(self, index, query, size, from_, sort, source_includes, source_excludes, aggregations)` (line 450): Search documents.
+    - `async count(self, index, query)` (line 504): Count documents matching query.
+    - `async create_alias(self, index, alias, filter)` (line 533): Create an alias for an index with optional filter.
+    - `async delete_alias(self, index, alias)` (line 567): Delete an alias.
+    - `async update_aliases(self, actions)` (line 590): Perform multiple alias operations atomically.
+    - `async refresh_index(self, index)` (line 614): Force refresh an index to make changes searchable.
 
 ### `backend/shared/services/storage/event_store.py`
 - **Functions**

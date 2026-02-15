@@ -81,7 +81,13 @@ class DatasetPrimaryIndexWritePath:
                 "type": "nested",
                 "properties": {
                     "name": {"type": "keyword"},
-                    "value": {"type": "text", "fields": {"keyword": {"type": "keyword"}}},
+                    "value": {
+                        "type": "text",
+                        "fields": {
+                            "keyword": {"type": "keyword"},
+                            "numeric": {"type": "double", "ignore_malformed": True},
+                        },
+                    },
                     "type": {"type": "keyword"},
                 },
             },

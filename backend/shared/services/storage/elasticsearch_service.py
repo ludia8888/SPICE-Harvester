@@ -91,7 +91,17 @@ class ElasticsearchService(AsyncClientPingMixin):
         except ESConnectionError as e:
             logger.error(f"Failed to connect to Elasticsearch: {e}")
             raise
-            
+
+    async def initialize(self) -> None:
+        """ServiceContainer lifecycle hook — delegates to ``connect()``.
+
+        The shared DI container calls ``initialize()`` on newly-created
+        service instances (see ``ServiceContainer.get``).  Without this
+        alias the ES client would be created but never connected, causing
+        ``ElasticsearchServiceDep`` routes to fail with "not connected".
+        """
+        await self.connect()
+
     @trace_storage_operation("es.disconnect", system="elasticsearch")
     async def disconnect(self) -> None:
         """Close Elasticsearch connection."""
