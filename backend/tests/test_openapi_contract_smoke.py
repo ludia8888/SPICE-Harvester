@@ -396,6 +396,18 @@ class Operation:
     summary: str
 
 
+REMOVED_V1_COMPAT_OPERATIONS: set[tuple[str, str]] = {
+    ("GET", "/api/v1/databases/{db_name}/ontology/object-types"),
+    ("GET", "/api/v1/databases/{db_name}/ontology/object-types/{class_id}"),
+    ("GET", "/api/v1/databases/{db_name}/ontology/object-types/{object_type_api_name}/outgoing-link-types"),
+    (
+        "GET",
+        "/api/v1/databases/{db_name}/ontology/object-types/{object_type_api_name}/outgoing-link-types/{link_type_api_name}",
+    ),
+    ("POST", "/api/v1/databases/{db_name}/query"),
+}
+
+
 def _is_wip(op: Operation) -> bool:
     if op.path.startswith("/api/v1/projections"):
         return True
@@ -407,6 +419,8 @@ def _is_wip(op: Operation) -> bool:
 
 
 def _is_ops_only(op: Operation) -> bool:
+    if (op.method, op.path) in REMOVED_V1_COMPAT_OPERATIONS:
+        return True
     if op.path.startswith("/api/v1/admin") or op.path.startswith("/api/v1/monitoring") or op.path.startswith("/api/v1/config"):
         return True
     if any(t in {"Admin Operations", "Monitoring", "Config Monitoring"} for t in op.tags):
@@ -1208,15 +1222,6 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
         url = f"{BFF_URL}{_format_path(op.path, ctx)}"
         return RequestPlan(op.method, op.path, url, (201, 400, 404, 409, 422), json_body=None, note="smoke: validate only")
 
-    if key == ("GET", "/api/v1/databases/{db_name}/ontology/object-types"):
-        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
-        params = {"pageSize": 10}
-        return RequestPlan(op.method, op.path, url, (200, 400, 403, 404), params=params)
-
-    if key == ("GET", "/api/v1/databases/{db_name}/ontology/object-types/{class_id}"):
-        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'class_id': ctx.class_id})}"
-        return RequestPlan(op.method, op.path, url, (200, 404))
-
     if key == ("GET", "/api/v2/ontologies"):
         url = f"{BFF_URL}{op.path}"
         return RequestPlan(op.method, op.path, url, (200, 400, 403, 404))
@@ -1224,6 +1229,11 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
     if key == ("GET", "/api/v2/ontologies/{ontology}"):
         url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'ontology': ctx.db_name})}"
         return RequestPlan(op.method, op.path, url, (200, 400, 403, 404))
+
+    if key == ("GET", "/api/v2/ontologies/{ontology}/fullMetadata"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'ontology': ctx.db_name})}"
+        params = {"branch": "main"}
+        return RequestPlan(op.method, op.path, url, (200, 400, 403, 404), params=params)
 
     if key == ("GET", "/api/v2/ontologies/{ontology}/objectTypes"):
         url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'ontology': ctx.db_name})}"
@@ -1274,18 +1284,6 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
             f"{BFF_URL}{_format_path(op.path, ctx, overrides={'ontology': ctx.db_name, 'objectType': ctx.class_id, 'primaryKey': ctx.instance_id, 'linkType': ctx.link_type_id or 'missing_link_type', 'linkedObjectPrimaryKey': ctx.instance_id})}"
         )
         return RequestPlan(op.method, op.path, url, (200, 400, 403, 404))
-
-    if key == ("GET", "/api/v1/databases/{db_name}/ontology/object-types/{object_type_api_name}/outgoing-link-types"):
-        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'object_type_api_name': ctx.class_id})}"
-        params = {"pageSize": 10}
-        return RequestPlan(op.method, op.path, url, (200, 400, 404), params=params)
-
-    if key == (
-        "GET",
-        "/api/v1/databases/{db_name}/ontology/object-types/{object_type_api_name}/outgoing-link-types/{link_type_api_name}",
-    ):
-        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'object_type_api_name': ctx.class_id, 'link_type_api_name': ctx.link_type_id})}"
-        return RequestPlan(op.method, op.path, url, (200, 400, 404))
 
     if key == ("PUT", "/api/v1/databases/{db_name}/ontology/object-types/{class_id}"):
         url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'class_id': ctx.class_id})}"
@@ -1394,15 +1392,6 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
     if key == ("GET", "/api/v1/databases/{db_name}/query/builder"):
         url = f"{BFF_URL}{_format_path(op.path, ctx)}"
         return RequestPlan(op.method, op.path, url, (200,))
-
-    if key == ("POST", "/api/v1/databases/{db_name}/query"):
-        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
-        body = {
-            "class_id": ctx.class_id,
-            "filters": [{"field": f"{ctx.class_id.lower()}_id", "operator": "eq", "value": ctx.instance_id}],
-            "limit": 5,
-        }
-        return RequestPlan(op.method, op.path, url, (200,), json_body=body)
 
     # ---------- Graph ----------
     if key == ("GET", "/api/v1/graph-query/{db_name}/paths"):

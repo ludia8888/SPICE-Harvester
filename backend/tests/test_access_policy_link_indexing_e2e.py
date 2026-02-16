@@ -644,13 +644,14 @@ async def test_access_policy_filters_and_masks_query_results() -> None:
                 assert resp.status == 200, await resp.text()
 
             async with bff_session.post(
-                f"{BFF_URL}/api/v1/databases/{db_name}/query",
-                json={"class_id": class_id, "limit": 20},
+                f"{BFF_URL}/api/v2/ontologies/{db_name}/objects/{class_id}/search",
+                params={"branch": branch},
+                json={"pageSize": 20},
                 headers={"X-DB-Name": db_name},
             ) as resp:
                 assert resp.status == 200, await resp.text()
                 payload = await resp.json()
-                data = payload.get("results") if isinstance(payload, dict) else None
+                data = payload.get("data") if isinstance(payload, dict) else None
                 assert isinstance(data, list)
                 assert len(data) == 1
                 row = data[0]

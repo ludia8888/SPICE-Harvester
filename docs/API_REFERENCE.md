@@ -22,18 +22,18 @@
 
 ## Endpoint Coverage Summary
 
-- Total documented endpoints: **275**
+- Total documented endpoints: **270**
 - Deprecated endpoints: **0**
 - Security-enabled endpoints: **0**
 
 | API Version | Endpoint Count |
 | --- | --- |
-| `v1` | 251 |
+| `v1` | 246 |
 | `v2` | 24 |
 
 | Top Domains (first path segment) | Endpoint Count |
 | --- | --- |
-| `databases` | 94 |
+| `databases` | 89 |
 | `pipelines` | 35 |
 | `ontologies` | 24 |
 | `admin` | 13 |
@@ -389,8 +389,6 @@
 | `GET` | `/api/v1/databases/{db_name}/ontology/link-types/{link_type_id}/edits` | List Link Edits | `v1` | no | no | `list_link_edits_api_v1_databases__db_name__ontology_link_types__link_type_id__edits_get` |
 | `POST` | `/api/v1/databases/{db_name}/ontology/link-types/{link_type_id}/edits` | Create Link Edit | `v1` | no | no | `create_link_edit_api_v1_databases__db_name__ontology_link_types__link_type_id__edits_post` |
 | `POST` | `/api/v1/databases/{db_name}/ontology/link-types/{link_type_id}/reindex` | Reindex Link Type | `v1` | no | no | `reindex_link_type_api_v1_databases__db_name__ontology_link_types__link_type_id__reindex_post` |
-| `GET` | `/api/v1/databases/{db_name}/ontology/object-types/{object_type_api_name}/outgoing-link-types` | List Outgoing Link Types | `v1` | no | no | `list_outgoing_link_types_api_v1_databases__db_name__ontology_object_types__object_type_api_name__outgoing_link_types_get` |
-| `GET` | `/api/v1/databases/{db_name}/ontology/object-types/{object_type_api_name}/outgoing-link-types/{link_type_api_name}` | Get Outgoing Link Type | `v1` | no | no | `get_outgoing_link_type_api_v1_databases__db_name__ontology_object_types__object_type_api_name__outgoing_link_types__link_type_api_name__get` |
 
 ### Ontology Management
 
@@ -415,9 +413,7 @@
 
 | Method | Path | Summary | Version | Auth | Deprecated | Operation ID |
 | --- | --- | --- | --- | --- | --- | --- |
-| `GET` | `/api/v1/databases/{db_name}/ontology/object-types` | List Object Type Contracts | `v1` | no | no | `list_object_type_contracts_api_v1_databases__db_name__ontology_object_types_get` |
 | `POST` | `/api/v1/databases/{db_name}/ontology/object-types` | Create Object Type Contract | `v1` | no | no | `create_object_type_contract_api_v1_databases__db_name__ontology_object_types_post` |
-| `GET` | `/api/v1/databases/{db_name}/ontology/object-types/{class_id}` | Get Object Type Contract | `v1` | no | no | `get_object_type_contract_api_v1_databases__db_name__ontology_object_types__class_id__get` |
 | `PUT` | `/api/v1/databases/{db_name}/ontology/object-types/{class_id}` | Update Object Type Contract | `v1` | no | no | `update_object_type_contract_api_v1_databases__db_name__ontology_object_types__class_id__put` |
 
 ### Ops
@@ -480,7 +476,6 @@
 
 | Method | Path | Summary | Version | Auth | Deprecated | Operation ID |
 | --- | --- | --- | --- | --- | --- | --- |
-| `POST` | `/api/v1/databases/{db_name}/query` | Execute Query | `v1` | no | no | `execute_query_api_v1_databases__db_name__query_post` |
 | `GET` | `/api/v1/databases/{db_name}/query/builder` | Query Builder Info | `v1` | no | no | `query_builder_info_api_v1_databases__db_name__query_builder_get` |
 
 ### Schema Changes

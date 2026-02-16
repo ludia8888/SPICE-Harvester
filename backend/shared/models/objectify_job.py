@@ -38,8 +38,8 @@ class ObjectifyJob(BaseModel):
 
     # Incremental processing fields
     execution_mode: ExecutionMode = Field(
-        default="incremental",
-        description="Execution mode: 'full', 'incremental' (default, watermark-based), or 'delta' (LakeFS diff-based)",
+        default="full",
+        description="Execution mode: 'full' (default), 'incremental' (watermark-based), or 'delta' (LakeFS diff-based)",
     )
     watermark_column: Optional[str] = Field(
         default=None,

@@ -9,8 +9,7 @@ from shared.observability.tracing import trace_endpoint
 import logging
 from typing import Any, Dict, List, Optional
 
-import httpx
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from fastapi import APIRouter, Depends, Query, Request, status
 
 from shared.errors.error_types import ErrorCode, classified_http_exception
 
@@ -19,13 +18,11 @@ from bff.routers.object_types_deps import get_dataset_registry, get_objectify_re
 from bff.schemas.object_types_requests import ObjectTypeContractRequest, ObjectTypeContractUpdate
 from bff.services import object_type_contract_service
 from bff.services.oms_client import OMSClient
-from bff.utils.deprecation_headers import apply_v1_to_v2_deprecation_headers
 from shared.models.requests import ApiResponse
 from shared.security.database_access import DOMAIN_MODEL_ROLES, enforce_database_role
 from shared.security.input_sanitizer import validate_db_name
 from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.services.registries.objectify_registry import ObjectifyRegistry
-from shared.utils.foundry_page_token import decode_offset_page_token, encode_offset_page_token
 
 logger = logging.getLogger(__name__)
 
@@ -61,26 +58,6 @@ def _extract_resource(payload: Any) -> Dict[str, Any]:
     if isinstance(data, dict):
         return data
     return {}
-
-
-def _decode_page_token(page_token: Optional[str], *, scope: Optional[str] = None) -> int:
-    try:
-        return decode_offset_page_token(page_token, ttl_seconds=60, expected_scope=scope)
-    except ValueError as exc:
-        raise classified_http_exception(
-            status.HTTP_400_BAD_REQUEST,
-            str(exc),
-            code=ErrorCode.REQUEST_VALIDATION_FAILED,
-        ) from exc
-
-
-def _encode_page_token(offset: int, *, scope: Optional[str] = None) -> str:
-    return encode_offset_page_token(offset, scope=scope)
-
-
-def _pagination_scope(*parts: Any) -> str:
-    normalized = [str(part).strip() for part in parts if str(part).strip()]
-    return "|".join(normalized)
 
 
 def _localized_text(value: Any) -> Optional[str]:
@@ -273,63 +250,6 @@ def _to_foundry_object_type(resource: Dict[str, Any], *, ontology_payload: Any) 
     return out
 
 
-@router.get("/object-types", response_model=ApiResponse)
-@trace_endpoint("bff.object_types.list_object_type_contracts")
-async def list_object_type_contracts(
-    db_name: str,
-    request: Request,
-    response: Response = None,
-    branch: str = Query("main", description="Target branch"),
-    page_size: int = Query(500, alias="pageSize", ge=1, le=1000),
-    page_token: Optional[str] = Query(default=None, alias="pageToken"),
-    oms_client: OMSClient = OMSClientDep,
-) -> ApiResponse:
-    db_name = validate_db_name(db_name)
-    if response is not None:
-        apply_v1_to_v2_deprecation_headers(
-            response,
-            successor_path=f"/api/v2/ontologies/{db_name}/objectTypes",
-        )
-    await _require_domain_role(request, db_name=db_name)
-
-    page_scope = _pagination_scope("v1/object-types", db_name, branch, page_size)
-    offset = _decode_page_token(page_token, scope=page_scope)
-    resources_payload = await oms_client.list_ontology_resources(
-        db_name,
-        resource_type="object_type",
-        branch=branch,
-        limit=page_size,
-        offset=offset,
-    )
-    resources = _extract_resources(resources_payload)
-
-    object_types: List[Dict[str, Any]] = []
-    for resource in resources:
-        class_id = str(resource.get("id") or "").strip()
-        if not class_id:
-            continue
-        ontology_payload: Any = None
-        try:
-            ontology_payload = await oms_client.get_ontology(db_name, class_id, branch=branch)
-        except Exception as exc:  # pragma: no cover - enrichment best-effort
-            logger.warning(
-                "Failed to enrich object type metadata (%s/%s): %s",
-                db_name,
-                class_id,
-                exc,
-            )
-        object_types.append(_to_foundry_object_type(resource, ontology_payload=ontology_payload))
-
-    next_page_token = _encode_page_token(offset + len(resources), scope=page_scope) if len(resources) == page_size else None
-    return ApiResponse.success(
-        message="Object types retrieved",
-        data={
-            "data": object_types,
-            "nextPageToken": next_page_token,
-        },
-    )
-
-
 @router.post("/object-types", status_code=status.HTTP_201_CREATED, response_model=ApiResponse)
 @trace_endpoint("bff.object_types.create_object_type_contract")
 async def create_object_type_contract(
@@ -357,70 +277,6 @@ async def create_object_type_contract(
         dataset_registry=dataset_registry,
         objectify_registry=objectify_registry,
     )
-
-
-@router.get("/object-types/{class_id}", response_model=ApiResponse)
-@trace_endpoint("bff.object_types.get_object_type_contract")
-async def get_object_type_contract(
-    db_name: str,
-    class_id: str,
-    request: Request,
-    response: Response = None,
-    branch: str = Query("main", description="Target branch"),
-    oms_client: OMSClient = OMSClientDep,
-) -> ApiResponse:
-    db_name = validate_db_name(db_name)
-    class_id = str(class_id or "").strip()
-    if response is not None:
-        apply_v1_to_v2_deprecation_headers(
-            response,
-            successor_path=f"/api/v2/ontologies/{db_name}/objectTypes/{class_id}",
-        )
-    await _require_domain_role(request, db_name=db_name)
-    if not class_id:
-        raise classified_http_exception(
-            status.HTTP_400_BAD_REQUEST,
-            "class_id is required",
-            code=ErrorCode.REQUEST_VALIDATION_FAILED,
-        )
-
-    try:
-        resource_payload = await oms_client.get_ontology_resource(
-            db_name,
-            resource_type="object_type",
-            resource_id=class_id,
-            branch=branch,
-        )
-        resource = _extract_resource(resource_payload)
-        if not resource:
-            raise classified_http_exception(
-                status.HTTP_404_NOT_FOUND,
-                "Object type not found",
-                code=ErrorCode.RESOURCE_NOT_FOUND,
-            )
-        ontology_payload = await oms_client.get_ontology(db_name, class_id, branch=branch)
-        object_type = _to_foundry_object_type(resource, ontology_payload=ontology_payload)
-        if not object_type.get("apiName"):
-            object_type["apiName"] = class_id
-        return ApiResponse.success(message="Object type retrieved", data=object_type)
-    except httpx.HTTPStatusError as exc:
-        if exc.response is not None and exc.response.status_code == status.HTTP_404_NOT_FOUND:
-            raise classified_http_exception(
-                status.HTTP_404_NOT_FOUND,
-                "Object type not found",
-                code=ErrorCode.RESOURCE_NOT_FOUND,
-            ) from exc
-        try:
-            detail: Any = exc.response.json()
-        except Exception:
-            detail = exc.response.text if exc.response is not None else str(exc)
-        status_code = exc.response.status_code if exc.response is not None else status.HTTP_502_BAD_GATEWAY
-        raise classified_http_exception(status_code, str(detail), code=ErrorCode.UPSTREAM_ERROR) from exc
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logger.error("Failed to get object type: %s", exc)
-        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc), code=ErrorCode.INTERNAL_ERROR)
 
 
 @router.put("/object-types/{class_id}", response_model=ApiResponse)

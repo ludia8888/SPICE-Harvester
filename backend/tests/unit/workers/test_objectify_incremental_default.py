@@ -3,11 +3,18 @@ from __future__ import annotations
 
 import pytest
 
-from shared.models.objectify_job import ObjectifyJob, ExecutionMode
+from shared.models.objectify_job import ObjectifyJob
 
 
-def test_default_execution_mode_is_incremental() -> None:
-    """Default execution mode should be 'incremental' (not 'full')."""
+def _resolve_execution_mode(*, options: dict, job_mode: str | None) -> str:
+    execution_mode = str(options.get("execution_mode") or job_mode or "full").strip().lower() or "full"
+    if execution_mode not in {"full", "incremental", "delta"}:
+        return "full"
+    return execution_mode
+
+
+def test_default_execution_mode_is_full() -> None:
+    """Default execution mode should be 'full'."""
     job = ObjectifyJob(
         job_id="test-1",
         db_name="test_db",
@@ -17,7 +24,7 @@ def test_default_execution_mode_is_incremental() -> None:
         mapping_spec_version=1,
         target_class_id="Customer",
     )
-    assert job.execution_mode == "incremental"
+    assert job.execution_mode == "full"
 
 
 def test_explicit_full_mode() -> None:
@@ -65,6 +72,16 @@ def test_watermark_fields() -> None:
     )
     assert job.watermark_column == "updated_at"
     assert job.previous_watermark == "2026-01-01T00:00:00Z"
+
+
+def test_execution_mode_prefers_options_over_job_mode() -> None:
+    assert _resolve_execution_mode(options={"execution_mode": "delta"}, job_mode="full") == "delta"
+    assert _resolve_execution_mode(options={"execution_mode": "incremental"}, job_mode="delta") == "incremental"
+
+
+def test_execution_mode_falls_back_to_full_for_invalid_values() -> None:
+    assert _resolve_execution_mode(options={"execution_mode": "streaming"}, job_mode="incremental") == "full"
+    assert _resolve_execution_mode(options={}, job_mode=None) == "full"
 
 
 def test_auto_detect_watermark_column() -> None:

@@ -257,6 +257,9 @@ async def run_objectify(
         options = dict(mapping_spec.options or {})
         override_options = body.options if isinstance(body.options, dict) else {}
         options.update(override_options)
+        execution_mode = str(options.get("execution_mode") or "full").strip().lower() or "full"
+        if execution_mode not in {"full", "incremental", "delta"}:
+            execution_mode = "full"
 
         # OMS-sourced: mapping_spec_id=None (can't store "oms:..." in PG uuid column)
         pg_spec_id = None if is_oms else mapping_spec.mapping_spec_id
@@ -276,6 +279,7 @@ async def run_objectify(
             mapping_spec_version=pg_spec_version,
             target_class_id=mapping_spec.target_class_id,
             ontology_branch=options.get("ontology_branch"),
+            execution_mode=execution_mode,
             max_rows=body.max_rows or options.get("max_rows"),
             batch_size=body.batch_size or options.get("batch_size"),
             allow_partial=bool(body.allow_partial or options.get("allow_partial")),

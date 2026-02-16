@@ -379,6 +379,9 @@ class _ObjectifyDagOrchestrator:
         options.setdefault("dag_branch", self.branch)
         options.setdefault("dag_root_classes", list(start))
         options.setdefault("include_dependencies", self.include_dependencies)
+        execution_mode = str(options.get("execution_mode") or "full").strip().lower() or "full"
+        if execution_mode not in {"full", "incremental", "delta"}:
+            execution_mode = "full"
 
         job = ObjectifyJob(
             job_id=job_id,
@@ -393,6 +396,7 @@ class _ObjectifyDagOrchestrator:
             mapping_spec_version=mapping_spec.version,
             target_class_id=class_id,
             ontology_branch=self.branch,
+            execution_mode=execution_mode,
             max_rows=options.get("max_rows"),
             batch_size=options.get("batch_size"),
             allow_partial=bool(options.get("allow_partial")),

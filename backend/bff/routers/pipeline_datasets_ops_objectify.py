@@ -97,6 +97,7 @@ async def _maybe_enqueue_objectify_job(
         mapping_spec_version=mapping_spec.version,
         target_class_id=mapping_spec.target_class_id,
         ontology_branch=options.get("ontology_branch"),
+        execution_mode="full",
         max_rows=options.get("max_rows"),
         batch_size=options.get("batch_size"),
         allow_partial=bool(options.get("allow_partial")),
@@ -107,4 +108,3 @@ async def _maybe_enqueue_objectify_job(
     )
     await job_queue.publish(job, require_delivery=False)
     return job_id
-

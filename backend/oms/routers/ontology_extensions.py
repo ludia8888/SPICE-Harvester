@@ -172,12 +172,90 @@ def _ensure_branch_writable(branch: str) -> None:
         )
 
 
+def _strict_compat_allowlist() -> set[str]:
+    raw = str(get_settings().features.foundry_v2_strict_compat_db_allowlist or "")
+    return {item.strip().lower() for item in raw.split(",") if item.strip()}
+
+
+def _is_foundry_v2_strict_compat_enabled(*, db_name: str) -> bool:
+    features = get_settings().features
+    if bool(features.enable_foundry_v2_strict_compat):
+        return True
+    normalized_db = str(db_name or "").strip().lower()
+    if not normalized_db:
+        return False
+    return normalized_db in _strict_compat_allowlist()
+
+
+def _normalize_occ_branch_token(branch: str) -> str:
+    raw = str(branch or "").strip()
+    if raw.lower().startswith("branch:"):
+        raw = raw.split(":", 1)[1].strip()
+    return raw or "main"
+
+
 async def _assert_expected_head_commit(
     *,
+    db_name: str,
+    branch: str,
     expected_head_commit: Optional[str],
+    strict_mode: bool,
 ) -> Optional[str]:
     expected = str(expected_head_commit or "").strip()
     if not expected:
+        if strict_mode:
+            raise classified_http_exception(
+                status.HTTP_400_BAD_REQUEST,
+                "expected_head_commit is required for strict compat mode",
+                code=ErrorCode.REQUEST_VALIDATION_FAILED,
+                external_code="INVALID_ARGUMENT",
+            )
+        return None
+
+    normalized_branch = _normalize_occ_branch_token(branch)
+    allowed_tokens: set[str] = {
+        str(branch or "").strip(),
+        normalized_branch,
+        f"branch:{normalized_branch}",
+    }
+    try:
+        deployment_registry = OntologyDeploymentRegistryV2()
+        latest = await deployment_registry.get_latest_deployed_commit(
+            db_name=db_name,
+            target_branch=normalized_branch,
+        )
+        deployed_commit = str((latest or {}).get("ontology_commit_id") or "").strip()
+        if deployed_commit:
+            allowed_tokens.add(deployed_commit)
+    except Exception as exc:
+        logger.warning(
+            "Failed to resolve deployed ontology commit for OCC guard (%s/%s): %s",
+            db_name,
+            normalized_branch,
+            exc,
+        )
+
+    if expected not in allowed_tokens:
+        logger.warning(
+            "OCC mismatch for ontology resource write: db=%s branch=%s expected=%s allowed_count=%d",
+            db_name,
+            branch,
+            expected,
+            len(allowed_tokens),
+        )
+        if strict_mode:
+            raise classified_http_exception(
+                status.HTTP_409_CONFLICT,
+                "expected_head_commit does not match allowed branch token/commit",
+                code=ErrorCode.CONFLICT,
+                external_code="CONFLICT",
+                extra={
+                    "db_name": db_name,
+                    "branch": branch,
+                    "expected_head_commit": expected,
+                    "allowed_count": len(allowed_tokens),
+                },
+            )
         return None
 
     return expected
@@ -509,10 +587,14 @@ async def create_resource(
         db_name = validate_db_name(db_name)
         branch = validate_branch_name(branch)
         normalized_type = normalize_resource_type(resource_type)
+        strict_compat = _is_foundry_v2_strict_compat_enabled(db_name=db_name)
 
         _ensure_branch_writable(branch)
-        await _assert_expected_head_commit(
-            expected_head_commit=expected_head_commit
+        resolved_expected_head = await _assert_expected_head_commit(
+            db_name=db_name,
+            branch=branch,
+            expected_head_commit=expected_head_commit,
+            strict_mode=strict_compat,
         )
 
         sanitized = sanitize_input(_normalize_resource_payload(payload))
@@ -521,7 +603,7 @@ async def create_resource(
             resource_type=normalized_type,
             payload=sanitized,
             branch=branch,
-            expected_head_commit=expected_head_commit,
+            expected_head_commit=resolved_expected_head,
             strict=_resource_validation_strict(),
         )
         resource_id = sanitized.get("id")
@@ -632,10 +714,14 @@ async def update_resource(
         branch = validate_branch_name(branch)
         normalized_type = normalize_resource_type(resource_type)
         resource_id = validate_instance_id(resource_id)
+        strict_compat = _is_foundry_v2_strict_compat_enabled(db_name=db_name)
 
         _ensure_branch_writable(branch)
-        await _assert_expected_head_commit(
-            expected_head_commit=expected_head_commit
+        resolved_expected_head = await _assert_expected_head_commit(
+            db_name=db_name,
+            branch=branch,
+            expected_head_commit=expected_head_commit,
+            strict_mode=strict_compat,
         )
 
         sanitized = sanitize_input(_normalize_resource_payload(payload))
@@ -645,7 +731,7 @@ async def update_resource(
             resource_type=normalized_type,
             payload=sanitized,
             branch=branch,
-            expected_head_commit=expected_head_commit,
+            expected_head_commit=resolved_expected_head,
             strict=_resource_validation_strict(),
         )
 
@@ -711,10 +797,14 @@ async def delete_resource(
         branch = validate_branch_name(branch)
         normalized_type = normalize_resource_type(resource_type)
         resource_id = validate_instance_id(resource_id)
+        strict_compat = _is_foundry_v2_strict_compat_enabled(db_name=db_name)
 
         _ensure_branch_writable(branch)
         await _assert_expected_head_commit(
-            expected_head_commit=expected_head_commit
+            db_name=db_name,
+            branch=branch,
+            expected_head_commit=expected_head_commit,
+            strict_mode=strict_compat,
         )
 
         service = OntologyResourceService()

@@ -25,6 +25,7 @@ from bff.routers.object_types import (
     _to_foundry_object_type,
 )
 from bff.services.oms_client import OMSClient
+from shared.config.settings import get_settings
 from shared.observability.tracing import trace_endpoint
 from shared.security.database_access import DOMAIN_MODEL_ROLES, enforce_database_role
 from shared.security.input_sanitizer import (
@@ -37,6 +38,12 @@ from shared.utils.foundry_page_token import decode_offset_page_token, encode_off
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/v2/ontologies", tags=["Foundry Ontologies v2"])
+
+_DEFAULT_OBJECT_TYPE_ICON: Dict[str, str] = {
+    "type": "blueprint",
+    "name": "table",
+    "color": "#4C6A9A",
+}
 
 
 class OntologyNotFoundError(Exception):
@@ -237,6 +244,278 @@ def _parse_order_by(order_by: str | None) -> Dict[str, Any] | None:
 def _pagination_scope(*parts: Any) -> str:
     normalized = [str(part).strip() for part in parts if str(part).strip()]
     return "|".join(normalized)
+
+
+def _strict_compat_allowlist() -> set[str]:
+    raw = str(get_settings().features.foundry_v2_strict_compat_db_allowlist or "")
+    return {item.strip().lower() for item in raw.split(",") if item.strip()}
+
+
+def _is_foundry_v2_strict_compat_enabled(*, db_name: str | None) -> bool:
+    features = get_settings().features
+    if bool(features.enable_foundry_v2_strict_compat):
+        return True
+    normalized_db = str(db_name or "").strip().lower()
+    if not normalized_db:
+        return False
+    return normalized_db in _strict_compat_allowlist()
+
+
+def _rid_component(value: Any, *, fallback: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return fallback
+    normalized = "".join(ch if (ch.isalnum() or ch in {"_", "-", "."}) else "_" for ch in text)
+    normalized = normalized.strip("._-")
+    return normalized or fallback
+
+
+def _default_object_type_rid(*, db_name: str, object_type: str) -> str:
+    return f"ri.spice.main.object-type.{_rid_component(db_name, fallback='db')}.{_rid_component(object_type, fallback='objectType')}"
+
+
+def _default_property_rid(*, db_name: str, object_type: str, property_name: str) -> str:
+    return (
+        f"ri.spice.main.property."
+        f"{_rid_component(db_name, fallback='db')}.{_rid_component(object_type, fallback='objectType')}.{_rid_component(property_name, fallback='property')}"
+    )
+
+
+def _default_link_type_rid(*, db_name: str, source_object_type: str, link_type: str) -> str:
+    return (
+        f"ri.spice.main.link-type."
+        f"{_rid_component(db_name, fallback='db')}.{_rid_component(source_object_type, fallback='objectType')}.{_rid_component(link_type, fallback='linkType')}"
+    )
+
+
+def _default_property_contract(*, db_name: str, object_type: str, property_name: str) -> Dict[str, Any]:
+    return {
+        "dataType": {"type": "string"},
+        "rid": _default_property_rid(db_name=db_name, object_type=object_type, property_name=property_name),
+    }
+
+
+def _strictify_foundry_object_type(
+    object_type: Dict[str, Any],
+    *,
+    db_name: str,
+    object_type_hint: str | None = None,
+) -> tuple[Dict[str, Any], int]:
+    out = dict(object_type or {})
+    fixes = 0
+
+    api_name = str(out.get("apiName") or object_type_hint or "").strip()
+    if not api_name:
+        api_name = _rid_component(object_type_hint, fallback="ObjectType")
+        out["apiName"] = api_name
+        fixes += 1
+
+    display_name = str(out.get("displayName") or "").strip()
+    if not display_name:
+        out["displayName"] = api_name
+        display_name = api_name
+        fixes += 1
+
+    plural_display_name = str(out.get("pluralDisplayName") or "").strip()
+    if not plural_display_name:
+        out["pluralDisplayName"] = display_name
+        fixes += 1
+
+    icon = out.get("icon")
+    if not isinstance(icon, dict):
+        out["icon"] = dict(_DEFAULT_OBJECT_TYPE_ICON)
+        fixes += 1
+    else:
+        normalized_icon = dict(icon)
+        changed = False
+        if str(normalized_icon.get("type") or "").strip().lower() != "blueprint":
+            normalized_icon["type"] = "blueprint"
+            changed = True
+        if not str(normalized_icon.get("name") or "").strip():
+            normalized_icon["name"] = _DEFAULT_OBJECT_TYPE_ICON["name"]
+            changed = True
+        if not str(normalized_icon.get("color") or "").strip():
+            normalized_icon["color"] = _DEFAULT_OBJECT_TYPE_ICON["color"]
+            changed = True
+        if changed:
+            out["icon"] = normalized_icon
+            fixes += 1
+
+    rid = str(out.get("rid") or "").strip()
+    if not rid:
+        out["rid"] = _default_object_type_rid(db_name=db_name, object_type=api_name)
+        fixes += 1
+
+    properties = out.get("properties")
+    if not isinstance(properties, dict):
+        properties = {}
+        out["properties"] = properties
+        fixes += 1
+
+    normalized_properties: Dict[str, Dict[str, Any]] = {}
+    for prop_name, raw_prop in properties.items():
+        prop_api_name = str(prop_name or "").strip()
+        if not prop_api_name:
+            continue
+        prop = dict(raw_prop) if isinstance(raw_prop, dict) else {}
+        if not isinstance(prop.get("dataType"), dict) or not str((prop.get("dataType") or {}).get("type") or "").strip():
+            prop["dataType"] = {"type": "string"}
+            fixes += 1
+        prop_rid = str(prop.get("rid") or "").strip()
+        if not prop_rid:
+            prop["rid"] = _default_property_rid(
+                db_name=db_name,
+                object_type=api_name,
+                property_name=prop_api_name,
+            )
+            fixes += 1
+        normalized_properties[prop_api_name] = prop
+    out["properties"] = normalized_properties
+
+    primary_key = str(out.get("primaryKey") or "").strip()
+    if not primary_key:
+        if "id" in normalized_properties:
+            primary_key = "id"
+        elif normalized_properties:
+            primary_key = next(iter(normalized_properties))
+        else:
+            primary_key = "id"
+        out["primaryKey"] = primary_key
+        fixes += 1
+
+    if primary_key not in normalized_properties:
+        normalized_properties[primary_key] = _default_property_contract(
+            db_name=db_name,
+            object_type=api_name,
+            property_name=primary_key,
+        )
+        fixes += 1
+
+    title_property = str(out.get("titleProperty") or "").strip()
+    if not title_property:
+        if "name" in normalized_properties:
+            title_property = "name"
+        else:
+            title_property = primary_key
+        out["titleProperty"] = title_property
+        fixes += 1
+
+    if title_property not in normalized_properties:
+        normalized_properties[title_property] = _default_property_contract(
+            db_name=db_name,
+            object_type=api_name,
+            property_name=title_property,
+        )
+        fixes += 1
+
+    return out, fixes
+
+
+def _strictify_outgoing_link_type(
+    link_type_payload: Dict[str, Any],
+    *,
+    db_name: str,
+    source_object_type: str,
+) -> tuple[Dict[str, Any], int, bool]:
+    out = dict(link_type_payload or {})
+    fixes = 0
+
+    api_name = str(out.get("apiName") or "").strip()
+    if not api_name:
+        return out, fixes, False
+
+    display_name = str(out.get("displayName") or "").strip()
+    if not display_name:
+        out["displayName"] = api_name
+        fixes += 1
+
+    status_value = str(out.get("status") or "").strip().upper()
+    if not status_value:
+        out["status"] = "ACTIVE"
+        fixes += 1
+
+    cardinality = str(out.get("cardinality") or "").strip().upper()
+    if cardinality not in {"ONE", "MANY"}:
+        out["cardinality"] = "MANY"
+        fixes += 1
+
+    link_type_rid = str(out.get("linkTypeRid") or "").strip()
+    if not link_type_rid:
+        out["linkTypeRid"] = _default_link_type_rid(
+            db_name=db_name,
+            source_object_type=source_object_type,
+            link_type=api_name,
+        )
+        fixes += 1
+
+    object_type_api_name = str(out.get("objectTypeApiName") or "").strip()
+    is_resolved = bool(object_type_api_name)
+    return out, fixes, is_resolved
+
+
+def _strictify_object_type_full_metadata(
+    payload: Dict[str, Any],
+    *,
+    db_name: str,
+    object_type_hint: str,
+) -> tuple[Dict[str, Any], int, int]:
+    out = dict(payload or {})
+    fixes = 0
+    dropped = 0
+
+    object_type = out.get("objectType")
+    if isinstance(object_type, dict):
+        strict_object_type, object_type_fixes = _strictify_foundry_object_type(
+            object_type,
+            db_name=db_name,
+            object_type_hint=object_type_hint,
+        )
+        out["objectType"] = strict_object_type
+        fixes += object_type_fixes
+        source_object_type = str(strict_object_type.get("apiName") or object_type_hint).strip() or object_type_hint
+    else:
+        source_object_type = object_type_hint
+
+    strict_links: list[Dict[str, Any]] = []
+    for link_type in out.get("linkTypes") or []:
+        if not isinstance(link_type, dict):
+            continue
+        strict_link, link_fixes, is_resolved = _strictify_outgoing_link_type(
+            link_type,
+            db_name=db_name,
+            source_object_type=source_object_type,
+        )
+        fixes += link_fixes
+        if not is_resolved:
+            dropped += 1
+            continue
+        strict_links.append(strict_link)
+    out["linkTypes"] = strict_links
+    return out, fixes, dropped
+
+
+def _log_strict_compat_summary(
+    *,
+    route: str,
+    db_name: str,
+    branch: str | None,
+    fixes: int,
+    dropped: int = 0,
+) -> None:
+    if fixes <= 0 and dropped <= 0:
+        return
+    logger.info(
+        "Foundry v2 strict compat normalization: route=%s db=%s branch=%s fixes=%d dropped=%d",
+        route,
+        db_name,
+        branch or "",
+        fixes,
+        dropped,
+    )
+
+
+def _full_metadata_branch_contract(*, branch: str, strict_compat: bool) -> Dict[str, str]:
+    return {"rid": branch} if strict_compat else {"name": branch}
 
 
 def _linked_object_parameters(
@@ -1171,9 +1450,11 @@ async def get_full_metadata_v2(
     branch: str = Query("main", description="Ontology branch name or branch RID"),
     oms_client: OMSClient = OMSClientDep,
 ):
+    strict_compat = False
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         branch = _validate_branch(branch)
+        strict_compat = _is_foundry_v2_strict_compat_enabled(db_name=db_name)
         await _require_domain_role(request, db_name=db_name)
     except Exception as exc:
         return _preflight_error_response(
@@ -1267,6 +1548,8 @@ async def get_full_metadata_v2(
         ontology_payload_by_object_type = dict(zip(object_type_ids, ontology_payloads))
 
         object_types: dict[str, dict[str, Any]] = {}
+        strict_fix_count = 0
+        strict_dropped_count = 0
         for resource in object_resources:
             object_type_id = str(resource.get("id") or "").strip()
             if not object_type_id:
@@ -1276,6 +1559,14 @@ async def get_full_metadata_v2(
                 ontology_payload=ontology_payload_by_object_type.get(object_type_id),
                 link_types=link_types_by_source.get(object_type_id) or [],
             )
+            if strict_compat:
+                mapped, object_fixes, object_dropped = _strictify_object_type_full_metadata(
+                    mapped,
+                    db_name=db_name,
+                    object_type_hint=object_type_id,
+                )
+                strict_fix_count += object_fixes
+                strict_dropped_count += object_dropped
             object_types[object_type_id] = mapped
 
         ontology_contract = _to_foundry_ontology(database_row)
@@ -1284,9 +1575,17 @@ async def get_full_metadata_v2(
         if not ontology_contract.get("displayName"):
             ontology_contract["displayName"] = db_name
 
+        _log_strict_compat_summary(
+            route="get_full_metadata_v2",
+            db_name=db_name,
+            branch=branch,
+            fixes=strict_fix_count,
+            dropped=strict_dropped_count,
+        )
+
         return {
             "ontology": ontology_contract,
-            "branch": {"name": branch},
+            "branch": _full_metadata_branch_contract(branch=branch, strict_compat=strict_compat),
             "objectTypes": object_types,
             "actionTypes": _to_foundry_action_type_map(action_resources),
             "queryTypes": _to_foundry_query_type_metadata_map(query_resources),
@@ -2014,9 +2313,11 @@ async def list_object_types_v2(
     branch: str = Query("main", description="Ontology branch name or branch RID"),
     oms_client: OMSClient = OMSClientDep,
 ):
+    strict_compat = False
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         branch = _validate_branch(branch)
+        strict_compat = _is_foundry_v2_strict_compat_enabled(db_name=db_name)
         await _require_domain_role(request, db_name=db_name)
         page_scope = _pagination_scope("v2/objectTypes", db_name, branch, page_size)
         offset = _decode_page_token(page_token, scope=page_scope)
@@ -2034,6 +2335,7 @@ async def list_object_types_v2(
         resources = _extract_object_resources(resources_payload)
 
         object_types: list[Dict[str, Any]] = []
+        strict_fix_count = 0
         for resource in resources:
             class_id = str(resource.get("id") or "").strip()
             if not class_id:
@@ -2048,7 +2350,22 @@ async def list_object_types_v2(
                     class_id,
                     exc,
                 )
-            object_types.append(_to_foundry_object_type(resource, ontology_payload=ontology_payload))
+            mapped = _to_foundry_object_type(resource, ontology_payload=ontology_payload)
+            if strict_compat:
+                mapped, fixes = _strictify_foundry_object_type(
+                    mapped,
+                    db_name=db_name,
+                    object_type_hint=class_id,
+                )
+                strict_fix_count += fixes
+            object_types.append(mapped)
+
+        _log_strict_compat_summary(
+            route="list_object_types_v2",
+            db_name=db_name,
+            branch=branch,
+            fixes=strict_fix_count,
+        )
 
         next_page_token = _encode_page_token(offset + len(resources), scope=page_scope) if len(resources) == page_size else None
         return {"data": object_types, "nextPageToken": next_page_token}
@@ -2081,9 +2398,11 @@ async def get_object_type_v2(
     branch: str = Query("main", description="Ontology branch name or branch RID"),
     oms_client: OMSClient = OMSClientDep,
 ):
+    strict_compat = False
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         branch = _validate_branch(branch)
+        strict_compat = _is_foundry_v2_strict_compat_enabled(db_name=db_name)
         object_type = str(objectType or "").strip()
         if not object_type:
             raise ValueError("objectType is required")
@@ -2109,6 +2428,18 @@ async def get_object_type_v2(
         out = _to_foundry_object_type(resource, ontology_payload=ontology_payload)
         if not out.get("apiName"):
             out["apiName"] = object_type
+        if strict_compat:
+            out, strict_fix_count = _strictify_foundry_object_type(
+                out,
+                db_name=db_name,
+                object_type_hint=object_type,
+            )
+            _log_strict_compat_summary(
+                route="get_object_type_v2",
+                db_name=db_name,
+                branch=branch,
+                fixes=strict_fix_count,
+            )
         return out
     except httpx.HTTPStatusError as exc:
         status_code = exc.response.status_code if exc.response is not None else status.HTTP_502_BAD_GATEWAY
@@ -2142,9 +2473,11 @@ async def get_object_type_full_metadata_v2(
     sdk_version: str | None = Query(default=None, alias="sdkVersion"),
     oms_client: OMSClient = OMSClientDep,
 ):
+    strict_compat = False
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         branch = _validate_branch(branch)
+        strict_compat = _is_foundry_v2_strict_compat_enabled(db_name=db_name)
         _ = preview, sdk_package_rid, sdk_version
         object_type = str(objectType or "").strip()
         if not object_type:
@@ -2187,11 +2520,25 @@ async def get_object_type_full_metadata_v2(
             oms_client=oms_client,
         )
         link_types = _group_outgoing_link_types_by_source(link_resources).get(object_type) or []
-        return _to_foundry_object_type_full_metadata(
+        out = _to_foundry_object_type_full_metadata(
             resource,
             ontology_payload=ontology_payload,
             link_types=link_types,
         )
+        if strict_compat:
+            out, strict_fix_count, strict_dropped_count = _strictify_object_type_full_metadata(
+                out,
+                db_name=db_name,
+                object_type_hint=object_type,
+            )
+            _log_strict_compat_summary(
+                route="get_object_type_full_metadata_v2",
+                db_name=db_name,
+                branch=branch,
+                fixes=strict_fix_count,
+                dropped=strict_dropped_count,
+            )
+        return out
     except httpx.HTTPStatusError as exc:
         return _upstream_status_error_response(
             exc,
@@ -2224,9 +2571,11 @@ async def list_outgoing_link_types_v2(
     branch: str = Query("main", description="Ontology branch name or branch RID"),
     oms_client: OMSClient = OMSClientDep,
 ):
+    strict_compat = False
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         branch = _validate_branch(branch)
+        strict_compat = _is_foundry_v2_strict_compat_enabled(db_name=db_name)
         source_object_type = str(objectType or "").strip()
         if not source_object_type:
             raise ValueError("objectType is required")
@@ -2246,6 +2595,8 @@ async def list_outgoing_link_types_v2(
         filtered_index = 0
         data: list[dict] = []
         has_more = False
+        strict_fix_count = 0
+        strict_dropped_count = 0
 
         while not has_more:
             payload = await oms_client.list_ontology_resources(
@@ -2262,6 +2613,16 @@ async def list_outgoing_link_types_v2(
                 mapped = _to_foundry_outgoing_link_type(resource, source_object_type=source_object_type)
                 if mapped is None:
                     continue
+                if strict_compat:
+                    mapped, fixes, is_resolved = _strictify_outgoing_link_type(
+                        mapped,
+                        db_name=db_name,
+                        source_object_type=source_object_type,
+                    )
+                    strict_fix_count += fixes
+                    if not is_resolved:
+                        strict_dropped_count += 1
+                        continue
                 if filtered_index < offset:
                     filtered_index += 1
                     continue
@@ -2274,6 +2635,15 @@ async def list_outgoing_link_types_v2(
             scan_offset += len(resources)
             if len(resources) < scan_limit:
                 break
+
+        if strict_compat:
+            _log_strict_compat_summary(
+                route="list_outgoing_link_types_v2",
+                db_name=db_name,
+                branch=branch,
+                fixes=strict_fix_count,
+                dropped=strict_dropped_count,
+            )
 
         next_offset = offset + len(data)
         next_page_token = _encode_page_token(next_offset, scope=page_scope) if has_more else None
@@ -2312,9 +2682,11 @@ async def get_outgoing_link_type_v2(
     branch: str = Query("main", description="Ontology branch name or branch RID"),
     oms_client: OMSClient = OMSClientDep,
 ):
+    strict_compat = False
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         branch = _validate_branch(branch)
+        strict_compat = _is_foundry_v2_strict_compat_enabled(db_name=db_name)
         source_object_type = str(objectType or "").strip()
         link_type = str(linkType or "").strip()
         if not source_object_type:
@@ -2352,6 +2724,26 @@ async def get_outgoing_link_type_v2(
                 object_type=source_object_type,
                 link_type=link_type,
             )
+        if strict_compat:
+            mapped, strict_fix_count, is_resolved = _strictify_outgoing_link_type(
+                mapped,
+                db_name=db_name,
+                source_object_type=source_object_type,
+            )
+            _log_strict_compat_summary(
+                route="get_outgoing_link_type_v2",
+                db_name=db_name,
+                branch=branch,
+                fixes=strict_fix_count,
+                dropped=0 if is_resolved else 1,
+            )
+            if not is_resolved:
+                return _not_found_error(
+                    "LinkTypeNotFound",
+                    ontology=db_name,
+                    object_type=source_object_type,
+                    link_type=link_type,
+                )
         return mapped
     except httpx.HTTPStatusError as exc:
         status_code = exc.response.status_code if exc.response is not None else status.HTTP_502_BAD_GATEWAY

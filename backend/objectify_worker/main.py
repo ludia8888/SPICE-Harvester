@@ -1751,7 +1751,9 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
         seen_row_keys: set[str] = set()
 
         # Incremental processing setup
-        execution_mode = job.execution_mode or options.get("execution_mode", "full")
+        execution_mode = str(options.get("execution_mode") or job.execution_mode or "full").strip().lower() or "full"
+        if execution_mode not in {"full", "incremental", "delta"}:
+            execution_mode = "full"
         watermark_column = job.watermark_column or options.get("watermark_column")
         previous_watermark = job.previous_watermark
         latest_watermark: Optional[str] = None
@@ -2628,7 +2630,9 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
 
         Yields: (columns, rows, row_offset, new_watermark)
         """
-        execution_mode = job.execution_mode or "full"
+        execution_mode = str(options.get("execution_mode") or job.execution_mode or "full").strip().lower() or "full"
+        if execution_mode not in {"full", "incremental", "delta"}:
+            execution_mode = "full"
         watermark_column = job.watermark_column or options.get("watermark_column")
         previous_watermark = job.previous_watermark
 

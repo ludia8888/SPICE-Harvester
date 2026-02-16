@@ -2,13 +2,20 @@
 
 ## Scope
 This guide covers read/query routes and action execution routes that now have Foundry-style v2 successors.
+It also documents the strict-compat rollout mode used to harden v2 wire/behavior parity without breaking legacy clients by default.
 
 ## Deprecation Policy
-- `Deprecation: true` header is returned on v1 compatibility routes.
-- `Sunset: Sun, 28 Feb 2027 23:59:59 GMT` is returned with the same responses.
-- `Link` header includes:
-  - `rel="successor-version"`: v2 replacement route
-  - `rel="deprecation"`: this guide
+- v2 successor가 있는 legacy read/query compat 엔드포인트는 코드에서 완전 제거되었습니다.
+- 제거된 operation은 OpenAPI에서 노출되지 않으며, 런타임에서도 더 이상 제공되지 않습니다.
+- 동일 path에 다른 method가 남아 있는 경우(`object-types`의 `POST/PUT`), 제거된 method 호출은 `405`로 종료될 수 있습니다.
+
+### Removed v1 compatibility routes (code deleted)
+These routes are fully deleted from runtime handlers and OpenAPI:
+- `GET /api/v1/databases/{db_name}/ontology/object-types`
+- `GET /api/v1/databases/{db_name}/ontology/object-types/{class_id}`
+- `GET /api/v1/databases/{db_name}/ontology/object-types/{object_type_api_name}/outgoing-link-types`
+- `GET /api/v1/databases/{db_name}/ontology/object-types/{object_type_api_name}/outgoing-link-types/{link_type_api_name}`
+- `POST /api/v1/databases/{db_name}/query`
 
 ## Endpoint Mapping
 | v1 | v2 successor |
@@ -20,16 +27,16 @@ This guide covers read/query routes and action execution routes that now have Fo
 | `POST /api/v1/databases/{db_name}/query` | `POST /api/v2/ontologies/{ontology}/objects/{objectType}/search` |
 | `POST /api/v1/databases/{db_name}/actions/{action_type_id}/submit` | `POST /api/v1/databases/{db_name}/actions/{action_type_id}/submit-batch` (single item allowed) |
 | (new in v2-like actions) | `POST /api/v1/databases/{db_name}/actions/logs/{action_log_id}/undo` |
-| (new in v2) | `GET /api/v2/ontologies/{ontology}/fullMetadata?preview=true` |
+| (new in v2) | `GET /api/v2/ontologies/{ontology}/fullMetadata` |
 | (new in v2) | `GET /api/v2/ontologies/{ontology}/actionTypes` |
 | (new in v2) | `GET /api/v2/ontologies/{ontology}/actionTypes/{actionType}` |
 | (new in v2) | `GET /api/v2/ontologies/{ontology}/actionTypes/byRid/{actionTypeRid}` |
 | (new in v2) | `GET /api/v2/ontologies/{ontology}/queryTypes` |
 | (new in v2) | `GET /api/v2/ontologies/{ontology}/queryTypes/{queryApiName}` |
-| (new in v2, preview) | `GET /api/v2/ontologies/{ontology}/interfaceTypes?preview=true` |
-| (new in v2, preview) | `GET /api/v2/ontologies/{ontology}/interfaceTypes/{interfaceType}?preview=true` |
-| (new in v2, preview) | `GET /api/v2/ontologies/{ontology}/valueTypes?preview=true` |
-| (new in v2, preview) | `GET /api/v2/ontologies/{ontology}/valueTypes/{valueType}?preview=true` |
+| (new in v2, preview param supported) | `GET /api/v2/ontologies/{ontology}/interfaceTypes` |
+| (new in v2, preview param supported) | `GET /api/v2/ontologies/{ontology}/interfaceTypes/{interfaceType}` |
+| (new in v2, preview param supported) | `GET /api/v2/ontologies/{ontology}/valueTypes` |
+| (new in v2, preview param supported) | `GET /api/v2/ontologies/{ontology}/valueTypes/{valueType}` |
 
 `{ontology}` is the ontology API name (usually same value as `db_name` in current deployments).
 
@@ -56,16 +63,34 @@ This guide covers read/query routes and action execution routes that now have Fo
 ### Parameters
 - v2 object read/search routes는 `branch` 외 `sdkPackageRid`, `sdkVersion`를 허용
 - Action: SDK 기반 호출은 해당 파라미터를 전달 가능하도록 클라이언트 스키마 업데이트
-- `GET /api/v2/ontologies/{ontology}/fullMetadata`는 `preview=true`가 필수
-- `GET /api/v2/ontologies/{ontology}/interfaceTypes*`, `GET /api/v2/ontologies/{ontology}/valueTypes*`는 `preview=true`가 필수
+- `GET /api/v2/ontologies/{ontology}/fullMetadata`는 `preview` 파라미터를 지원하지만 필수는 아님 (기본 `false`)
+- `GET /api/v2/ontologies/{ontology}/interfaceTypes*`, `GET /api/v2/ontologies/{ontology}/valueTypes*`도 `preview` 파라미터를 지원하지만 필수는 아님
 - `GET /api/v2/ontologies/{ontology}/queryTypes`는 `pageSize/pageToken`만 사용 (branch 미사용)
 - `GET /api/v2/ontologies/{ontology}/queryTypes/{queryApiName}`는 `version`, `sdkPackageRid`, `sdkVersion`를 허용
-- `GET /api/v2/ontologies/{ontology}/valueTypes`는 pagination 파라미터 없이 `preview=true`만 사용
-- Action: full metadata 호출 클라이언트는 preview 파라미터를 항상 명시
+- `GET /api/v2/ontologies/{ontology}/valueTypes`는 pagination 파라미터를 받지 않음
+- Action: preview 파라미터 의존 로직이 있다면 "필수"가 아니라 "선택"으로 클라이언트 계약을 수정
 
 ### Full Metadata Shape
-- `GET /api/v2/ontologies/{ontology}/fullMetadata?preview=true` 응답은 top-level `ontology` 객체를 포함
+- `GET /api/v2/ontologies/{ontology}/fullMetadata` 응답은 top-level `ontology` 객체를 포함
+- `branch` 필드는 strict-compat 여부에 따라 달라짐:
+  - legacy(default): `{"name": "<branch>"}`
+  - strict compat: `{"rid": "<branch>"}`
 - `queryTypes` map key는 `VersionedQueryTypeApiName` (`{apiName}:{version}`) 형식 사용
+
+### Strict Compat Rollout (P0 hardening)
+- 목적: Foundry v2 wire/행동 계약을 단계적으로 엄격화하면서 기본 호환성을 유지
+- 게이트:
+  - `ENABLE_FOUNDRY_V2_STRICT_COMPAT` (global)
+  - `FOUNDRY_V2_STRICT_COMPAT_DB_ALLOWLIST` (db allowlist, comma-separated)
+  - 활성 조건: `global=true OR db_name in allowlist`
+- strict mode에서 강화되는 핵심:
+  - v2 object/link 응답 필수 필드 자동 보정
+  - unresolved outgoing link type 처리 엄격화 (list에서 제외, get은 `404 LinkTypeNotFound`)
+  - ontology extension resource OCC 엄격화 (`expected_head_commit` 공백 `400 INVALID_ARGUMENT`, 불일치 `409 CONFLICT`)
+- rollout 권장:
+  1. prod 기본은 strict off 유지
+  2. staging에서 global on 검증
+  3. prod는 allowlist DB 단위로 점진 활성
 
 ### Action Execution (Foundry-style)
 - Batch apply: `POST /actions/{actionType}/submit-batch`는 한 요청에 다수 액션을 제출하고 item별 결과를 반환
@@ -81,4 +106,4 @@ This guide covers read/query routes and action execution routes that now have Fo
 2. v1 page token 생성 로직 삭제
 3. v2 에러 스키마(`errorName`) 기반 처리로 교체
 4. 모니터링에서 v1 호출량을 0으로 수렴
-5. Sunset 이전에 v1 경로 의존성 제거 완료
+5. legacy v1 read/query 의존성 제거 완료

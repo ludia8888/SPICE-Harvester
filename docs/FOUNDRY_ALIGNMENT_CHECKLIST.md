@@ -27,8 +27,10 @@ Current status:
 - [x] BFF Foundry v2 object read surface includes `GET /v2/ontologies/{ontology}/objects/{objectType}` and `GET /v2/ontologies/{ontology}/objects/{objectType}/{primaryKey}` with Foundry-style query params/envelope.
 - [x] BFF Foundry v2 linked-object read surface includes `GET /v2/ontologies/{ontology}/objects/{objectType}/{primaryKey}/links/{linkType}` and `GET /v2/ontologies/{ontology}/objects/{objectType}/{primaryKey}/links/{linkType}/{linkedObjectPrimaryKey}`.
 - [x] Foundry-style API error envelope is implemented for object search and v2 read routers.
-- [x] v1->v2 migration guide is documented (`docs/FOUNDRY_V1_TO_V2_MIGRATION.md`) and v1 compatibility endpoints expose `Deprecation` + `Sunset` + `Link` headers.
-- [x] v1 query compatibility endpoint (`POST /api/v1/databases/{db}/query`) now also emits `Deprecation` + `Sunset` + `Link` headers toward v2 object search.
+- [x] v1->v2 migration guide is documented (`docs/FOUNDRY_V1_TO_V2_MIGRATION.md`) and removed read/query compat operations are synchronized to `code deleted` status.
+- [x] Migration guide and alignment checklist are cross-synced for P0 strict compat semantics (preview optionality, fullMetadata branch shape, strict rollout flags).
+- [x] v2-successor가 존재하는 주요 v1 read/query compat endpoints are code-deleted (operation removed from runtime handlers and OpenAPI).
+- [x] v1 query compatibility endpoint (`POST /api/v1/databases/{db}/query`) is removed from runtime handlers/OpenAPI; callers must use v2 object search.
 - [x] ES-native graph traversal path exists without TerminusDB dependency.
 - [x] Ontology persistence in Postgres profile no longer depends on TerminusDB runtime in OMS (legacy/hybrid adapter retained by feature mode).
 - [x] OMS boot path supports Postgres-first startup without eager Terminus initialization (`resource_storage_backend=postgres`).
@@ -153,3 +155,33 @@ Definition of done:
 - [x] Ontology and object read APIs match Foundry v2 contracts where implemented.
 - [x] All deprecated endpoints either removed or returning explicit 410 with migration path.
 - [x] Replay and projection consistency checks are automated in CI.
+
+P0 strict-compat hardening (2026-02-16):
+- [x] Feature flags added for staged rollout:
+  - `ENABLE_FOUNDRY_V2_STRICT_COMPAT` (global)
+  - `FOUNDRY_V2_STRICT_COMPAT_DB_ALLOWLIST` (comma-separated DB list)
+- [x] Strict gate rule fixed as `global=true OR db_name in allowlist` (case-insensitive, trim-aware).
+- [x] Objectify execution mode precedence is fixed end-to-end:
+  - enqueue default `full`
+  - worker resolution `options.execution_mode -> job.execution_mode -> "full"`
+- [x] v2 strict response normalization is active behind flag:
+  - `GET /api/v2/ontologies/{ontology}/fullMetadata` branch shape: strict=`{"rid": ...}`, legacy=`{"name": ...}`
+  - object/link required fields are synthesized only in strict mode
+  - unresolved outgoing link type entries are dropped in strict list and mapped to `404 LinkTypeNotFound` in strict get
+- [x] OCC expected-head validation now uses deployed commit + branch tokens:
+  - strict mode: blank token -> `400 INVALID_ARGUMENT`, mismatch -> `409 CONFLICT`
+  - legacy mode: blank token remains tolerated
+- [x] Observability added:
+  - v2 strict normalization summary logs (`route`, `db`, `branch`, `fixes`, `dropped`)
+  - OCC mismatch logs (`db`, `branch`, `expected`, `allowed_count`)
+
+Validation commands (latest run: 2026-02-16):
+- `cd backend && pytest -q tests/unit/workers/test_objectify_incremental_default.py tests/unit/openapi/test_foundry_ontology_v2_contract.py tests/unit/oms/test_ontology_extensions_occ.py`
+- `cd backend && pytest -q tests/test_openapi_contract_smoke.py`
+
+Recommended rollout:
+1. Deploy with strict compat off by default.
+2. Enable strict compat in staging (`ENABLE_FOUNDRY_V2_STRICT_COMPAT=true`) and verify v2 consumers.
+3. In production, keep global off and enable per DB using `FOUNDRY_V2_STRICT_COMPAT_DB_ALLOWLIST`.
+4. Observe logs for at least 48 hours before expanding allowlist.
+5. Rollback policy: set global off and clear allowlist to instantly restore legacy behavior.

@@ -94,6 +94,7 @@ async def trigger_incremental_objectify(
             mapping_spec_id=mapping_spec.mapping_spec_id,
             mapping_spec_version=mapping_spec.version,
             target_class_id=mapping_spec.target_class_id,
+            execution_mode=body.execution_mode,
             max_rows=body.max_rows or options.get("max_rows"),
             batch_size=body.batch_size or options.get("batch_size"),
             options=options,
