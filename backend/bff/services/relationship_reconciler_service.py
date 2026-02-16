@@ -20,6 +20,8 @@ import logging
 from collections import defaultdict
 from typing import Any, Dict, List, Optional, Set
 
+from elasticsearch.exceptions import ApiError as ElasticsearchException
+
 from bff.services.oms_client import OMSClient
 from shared.config.search_config import get_instances_index_name
 from shared.services.registries.objectify_registry import ObjectifyRegistry
@@ -334,7 +336,7 @@ async def _sample_instance(
         hits = result.get("hits") or []
         if hits:
             return hits[0]
-    except Exception:
+    except (ElasticsearchException, RuntimeError, ValueError, TypeError):
         logger.debug("Sample instance fetch failed for %s", class_id)
     return None
 
@@ -355,9 +357,8 @@ async def _get_class_instance_ids(
             iid = hit.get("instance_id") or (hit.get("_source") or {}).get("instance_id")
             if iid:
                 ids.add(str(iid).strip())
-    except Exception:
-        logging.getLogger(__name__).warning("Broad exception fallback at bff/services/relationship_reconciler_service.py:358", exc_info=True)
-        pass
+    except (ElasticsearchException, RuntimeError, ValueError, TypeError):
+        logging.getLogger(__name__).warning("Failed to collect class instance IDs from Elasticsearch", exc_info=True)
     return ids
 
 

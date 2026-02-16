@@ -59,11 +59,7 @@ async def get_summary(
         logging.getLogger(__name__).warning("Broad exception fallback at bff/routers/summary.py:77", exc_info=True)
         es_error = str(e)
     finally:
-        try:
-            await es_service.disconnect()
-        except Exception:
-            logging.getLogger(__name__).warning("Broad exception fallback at bff/routers/summary.py:82", exc_info=True)
-            pass
+        await es_service.disconnect()
 
     return ApiResponse.success(
         message="Summary fetched",

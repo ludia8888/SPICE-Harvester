@@ -74,9 +74,8 @@ async def _save_artifact(
 ) -> None:
     try:
         fileobj.seek(0)
-    except Exception:
-        logging.getLogger(__name__).warning("Broad exception fallback at bff/services/pipeline_dataset_upload_service.py:77", exc_info=True)
-        pass
+    except (AttributeError, OSError, ValueError):
+        logging.getLogger(__name__).warning("Failed to rewind upload artifact stream", exc_info=True)
 
     save_fileobj = getattr(lakefs_storage_service, "save_fileobj", None)
     if callable(save_fileobj):

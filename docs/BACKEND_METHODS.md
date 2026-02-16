@@ -1,6 +1,6 @@
 # Backend Method Index
 
-> Generated: 2026-02-15T18:07:19+09:00
+> Generated: 2026-02-16T11:26:44+09:00
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 
 ## action_outbox_worker
@@ -197,8 +197,8 @@
 
 ### `backend/bff/dependencies.py`
 - **Functions**
-  - `async get_foundry_query_service(oms_client)` (line 363): Get FoundryQueryService with modern dependency injection.
-  - `async check_bff_dependencies_health(container)` (line 385): Check health of all BFF dependencies
+  - `async get_foundry_query_service(oms_client)` (line 365): Get FoundryQueryService with modern dependency injection.
+  - `async check_bff_dependencies_health(container)` (line 387): Check health of all BFF dependencies
 - **Classes**
   - `BFFDependencyProvider` (line 50): Modern dependency provider for BFF services
     - `async get_oms_client(container)` (line 59): Get OMS client from container
@@ -212,12 +212,12 @@
     - `async list_classes(self, db_name, branch)` (line 156): 클래스 목록 조회
     - `async create_class(self, db_name, class_data, branch, headers)` (line 164): 클래스 생성
     - `async get_class(self, db_name, class_id, branch)` (line 179): 클래스 조회
-    - `async update_class(self, db_name, class_id, class_data, expected_seq, branch, headers)` (line 204): 클래스 업데이트
-    - `async delete_class(self, db_name, class_id, expected_seq, branch, headers)` (line 220): 클래스 삭제
-    - `async query_database(self, db_name, query)` (line 235): 데이터베이스 쿼리 (Foundry Search Objects v2 adapter).
-    - `_encode_page_token(offset)` (line 301): no docstring
-    - `_build_foundry_where(filters)` (line 305): no docstring
-    - `_map_filter_to_foundry(filter_item)` (line 323): no docstring
+    - `async update_class(self, db_name, class_id, class_data, expected_seq, branch, headers)` (line 206): 클래스 업데이트
+    - `async delete_class(self, db_name, class_id, expected_seq, branch, headers)` (line 222): 클래스 삭제
+    - `async query_database(self, db_name, query)` (line 237): 데이터베이스 쿼리 (Foundry Search Objects v2 adapter).
+    - `_encode_page_token(offset)` (line 303): no docstring
+    - `_build_foundry_where(filters)` (line 307): no docstring
+    - `_map_filter_to_foundry(filter_item)` (line 325): no docstring
 
 ### `backend/bff/main.py`
 - **Functions**
@@ -483,39 +483,44 @@
 ### `backend/bff/routers/foundry_ontology_v2.py`
 - **Functions**
   - `_foundry_error(status_code, error_code, error_name, parameters)` (line 44): no docstring
-  - `_named_not_found(error_name, parameters)` (line 62): no docstring
-  - `_ontology_not_found(ontology, parameters)` (line 71): no docstring
-  - `_object_type_not_found(ontology, object_type, parameters)` (line 78): no docstring
-  - `_link_type_not_found(ontology, object_type, link_type, parameters)` (line 85): no docstring
-  - `_object_not_found(ontology, object_type, primary_key, parameters)` (line 98): no docstring
-  - `_decode_page_token(page_token, scope)` (line 111): no docstring
-  - `_encode_page_token(offset, scope)` (line 115): no docstring
-  - `_parse_order_by(order_by)` (line 119): no docstring
-  - `_pagination_scope(*parts)` (line 152): no docstring
-  - `_linked_object_not_found(ontology, object_type, primary_key, link_type, linked_primary_key)` (line 157): no docstring
-  - `_linked_object_parameters(ontology, object_type, primary_key, link_type, linked_primary_key)` (line 179): no docstring
-  - `_linked_object_not_found_generic(ontology, object_type, primary_key, link_type, linked_primary_key, error_name)` (line 196): no docstring
-  - `_coerce_primary_key_values(value)` (line 219): no docstring
-  - `_extract_linked_primary_keys(source_row, link_type, foreign_key_property)` (line 246): no docstring
-  - `_build_primary_key_where(primary_key_field, primary_key_values)` (line 274): no docstring
-  - `async _resolve_object_primary_key_field(db_name, object_type, branch, oms_client)` (line 288): no docstring
-  - `async _require_domain_role(request, db_name)` (line 318): no docstring
-  - `_validate_ontology_db_name(ontology)` (line 322): no docstring
-  - `_validate_branch(branch)` (line 326): no docstring
-  - `async _resolve_ontology_db_name(ontology, oms_client)` (line 330): no docstring
-  - `_extract_databases(payload)` (line 361): no docstring
-  - `_to_foundry_ontology(row)` (line 377): no docstring
-  - `async list_ontologies_v2(request, oms_client)` (line 399): no docstring
-  - `async get_ontology_v2(ontology, request, oms_client)` (line 433): no docstring
-  - `async list_object_types_v2(ontology, request, page_size, page_token, branch, oms_client)` (line 491): no docstring
-  - `async get_object_type_v2(ontology, objectType, request, branch, oms_client)` (line 573): no docstring
-  - `async list_outgoing_link_types_v2(ontology, objectType, request, page_size, page_token, branch, oms_client)` (line 641): no docstring
-  - `async get_outgoing_link_type_v2(ontology, objectType, linkType, request, branch, oms_client)` (line 726): no docstring
-  - `async search_objects_v2(ontology, objectType, payload, request, branch, sdk_package_rid, sdk_version, oms_client)` (line 817): no docstring
-  - `async list_objects_v2(ontology, objectType, request, page_size, page_token, select, order_by, exclude_rid, snapshot, branch, sdk_package_rid, sdk_version, oms_client)` (line 895): no docstring
-  - `async get_object_v2(ontology, objectType, primaryKey, request, select, exclude_rid, branch, sdk_package_rid, sdk_version, oms_client)` (line 991): no docstring
-  - `async list_linked_objects_v2(ontology, objectType, primaryKey, linkType, request, page_size, page_token, select, order_by, exclude_rid, snapshot, branch, sdk_package_rid, sdk_version, oms_client)` (line 1139): no docstring
-  - `async get_linked_object_v2(ontology, objectType, primaryKey, linkType, linkedObjectPrimaryKey, request, select, exclude_rid, branch, sdk_package_rid, sdk_version, oms_client)` (line 1413): no docstring
+  - `_passthrough_upstream_error_payload(exc)` (line 62): no docstring
+  - `_named_not_found(error_name, parameters)` (line 76): no docstring
+  - `_ontology_not_found(ontology, parameters)` (line 85): no docstring
+  - `_object_type_not_found(ontology, object_type, parameters)` (line 92): no docstring
+  - `_link_type_not_found(ontology, object_type, link_type, parameters)` (line 99): no docstring
+  - `_object_not_found(ontology, object_type, primary_key, parameters)` (line 112): no docstring
+  - `_decode_page_token(page_token, scope)` (line 125): no docstring
+  - `_encode_page_token(offset, scope)` (line 129): no docstring
+  - `_parse_order_by(order_by)` (line 133): no docstring
+  - `_pagination_scope(*parts)` (line 166): no docstring
+  - `_linked_object_not_found(ontology, object_type, primary_key, link_type, linked_primary_key)` (line 171): no docstring
+  - `_linked_object_parameters(ontology, object_type, primary_key, link_type, linked_primary_key)` (line 193): no docstring
+  - `_linked_object_not_found_generic(ontology, object_type, primary_key, link_type, linked_primary_key, error_name)` (line 210): no docstring
+  - `_iter_primary_key_values(value)` (line 233): no docstring
+  - `_coerce_primary_key_values(value)` (line 254): no docstring
+  - `_extract_linked_primary_keys(source_row, link_type, foreign_key_property)` (line 258): no docstring
+  - `_iter_linked_primary_keys(source_row, link_type, foreign_key_property)` (line 278): no docstring
+  - `_extract_linked_primary_keys_page(source_row, link_type, foreign_key_property, offset, page_size)` (line 295): Extract a deduplicated page without materializing every linked PK.
+  - `_linked_primary_key_exists(source_row, link_type, foreign_key_property, linked_primary_key)` (line 335): no docstring
+  - `_build_primary_key_where(primary_key_field, primary_key_values)` (line 359): no docstring
+  - `async _resolve_object_primary_key_field(db_name, object_type, branch, oms_client)` (line 373): no docstring
+  - `async _require_domain_role(request, db_name)` (line 403): no docstring
+  - `_validate_ontology_db_name(ontology)` (line 407): no docstring
+  - `_validate_branch(branch)` (line 411): no docstring
+  - `async _resolve_ontology_db_name(ontology, oms_client)` (line 415): no docstring
+  - `_extract_databases(payload)` (line 446): no docstring
+  - `_to_foundry_ontology(row)` (line 462): no docstring
+  - `async list_ontologies_v2(request, oms_client)` (line 484): no docstring
+  - `async get_ontology_v2(ontology, request, oms_client)` (line 518): no docstring
+  - `async list_object_types_v2(ontology, request, page_size, page_token, branch, oms_client)` (line 576): no docstring
+  - `async get_object_type_v2(ontology, objectType, request, branch, oms_client)` (line 658): no docstring
+  - `async list_outgoing_link_types_v2(ontology, objectType, request, page_size, page_token, branch, oms_client)` (line 726): no docstring
+  - `async get_outgoing_link_type_v2(ontology, objectType, linkType, request, branch, oms_client)` (line 821): no docstring
+  - `async search_objects_v2(ontology, objectType, payload, request, branch, sdk_package_rid, sdk_version, oms_client)` (line 912): no docstring
+  - `async list_objects_v2(ontology, objectType, request, page_size, page_token, select, order_by, exclude_rid, snapshot, branch, sdk_package_rid, sdk_version, oms_client)` (line 986): no docstring
+  - `async get_object_v2(ontology, objectType, primaryKey, request, select, exclude_rid, branch, sdk_package_rid, sdk_version, oms_client)` (line 1078): no docstring
+  - `async list_linked_objects_v2(ontology, objectType, primaryKey, linkType, request, page_size, page_token, select, order_by, exclude_rid, snapshot, branch, sdk_package_rid, sdk_version, oms_client)` (line 1222): no docstring
+  - `async get_linked_object_v2(ontology, objectType, primaryKey, linkType, linkedObjectPrimaryKey, request, select, exclude_rid, branch, sdk_package_rid, sdk_version, oms_client)` (line 1491): no docstring
 - **Classes**
   - `OntologyNotFoundError` (line 40): no docstring
 
@@ -572,46 +577,53 @@
 
 ### `backend/bff/routers/lineage.py`
 - **Functions**
-  - `_parse_artifact_node_id(node_id)` (line 37): Parse artifact node id: artifact:<kind>:<...>
-  - `_suggest_remediation_actions(artifacts)` (line 55): Recommend safe operational actions.
-  - `_edge_projection_name(edge)` (line 107): no docstring
-  - `_edge_signature(edge)` (line 116): no docstring
-  - `_count_artifact_kinds(nodes)` (line 127): no docstring
-  - `_find_shortest_path(graph, source, target, direction)` (line 138): no docstring
-  - `_to_utc_datetime(value)` (line 189): no docstring
-  - `_bucket_start(ts, bucket_minutes)` (line 206): no docstring
-  - `_compact_edge_metadata(metadata)` (line 214): no docstring
-  - `_build_timeline_summary(edges, bucket_minutes)` (line 237): no docstring
-  - `_freshness_status(last_occurred_at, as_of, freshness_slo_minutes)` (line 305): no docstring
-  - `_status_rank(status)` (line 323): no docstring
-  - `_normalize_scope(db_name, branch)` (line 328): no docstring
-  - `_normalize_window(since, until, default_hours)` (line 338): no docstring
-  - `_extract_impacted_artifacts_from_edges(edges, limit)` (line 354): no docstring
-  - `_summarize_run_rows(run_rows, as_of, freshness_slo_minutes)` (line 385): no docstring
-  - `_edge_cause_payload(edge)` (line 424): no docstring
-  - `_upstream_gap_minutes(last_occurred_at, latest_upstream_occurred_at)` (line 443): no docstring
-  - `_event_node_id_from_latest_writer(latest_writer)` (line 461): no docstring
-  - `_projection_name_from_latest_writer(latest_writer)` (line 473): no docstring
-  - `_writer_code_sha(latest_writer)` (line 482): no docstring
-  - `_out_of_date_scope(status_name, last_occurred_at, parent_latest_occurred_at, latest_upstream_occurred_at)` (line 491): Foundry-style stale scope classification.
-  - `_staleness_reason_with_scope(status_name, out_of_date_scope)` (line 516): no docstring
-  - `_update_type(status_name, out_of_date_scope, last_occurred_at, latest_projection_occurred_at, current_code_sha, latest_projection_code_sha)` (line 532): Foundry-style update type hint:
-  - `_lineage_lookup_batch_size()` (line 563): no docstring
-  - `_chunked(values, size)` (line 567): no docstring
-  - `async _get_latest_edges_to_batched(lineage_store, to_node_ids, edge_type, db_name, branch)` (line 574): no docstring
-  - `async _get_latest_edges_from_batched(lineage_store, from_node_ids, edge_type, db_name, branch)` (line 599): no docstring
-  - `async _get_latest_edges_for_projections_batched(lineage_store, projection_names, db_name, branch)` (line 624): no docstring
-  - `async _enrich_artifacts_with_latest_writer(lineage_store, artifacts, db_name, branch)` (line 647): no docstring
-  - `_artifact_latest_writer_state(run_id, latest_writer)` (line 671): no docstring
-  - `async get_lineage_graph(root, db_name, branch, as_of, direction, max_depth, max_nodes, max_edges, lineage_store)` (line 684): no docstring
-  - `async get_lineage_path(source, target, db_name, branch, as_of, direction, max_depth, max_nodes, max_edges, lineage_store)` (line 720): no docstring
-  - `async get_lineage_impact(root, db_name, branch, as_of, direction, max_depth, artifact_kind, max_nodes, max_edges, lineage_store)` (line 805): no docstring
-  - `async get_lineage_diff(root, from_as_of, to_as_of, db_name, branch, direction, max_depth, max_nodes, max_edges, lineage_store)` (line 870): no docstring
-  - `async get_lineage_metrics(db_name, branch, window_minutes, lineage_store, audit_store)` (line 976): Operational lineage metrics.
-  - `async get_lineage_runs(db_name, branch, since, until, edge_type, run_limit, freshness_slo_minutes, include_impact_preview, impact_preview_runs_limit, impact_preview_artifacts_limit, impact_preview_edge_limit, lineage_store)` (line 1039): Foundry-style build/run timeline:
-  - `async get_lineage_run_impact(run_id, db_name, branch, since, until, event_limit, artifact_preview_limit, lineage_store)` (line 1148): Foundry-style run/build impact diagnostics.
-  - `async get_lineage_timeline(db_name, branch, since, until, edge_type, projection_name, bucket_minutes, event_limit, event_preview_limit, lineage_store)` (line 1232): Foundry-style lineage timeline for operational debugging:
-  - `async get_lineage_out_of_date(db_name, branch, artifact_kind, as_of, freshness_slo_minutes, artifact_limit, stale_preview_limit, projection_limit, projection_preview_limit, lineage_store)` (line 1312): Foundry-style out-of-date diagnostics:
+  - `_parse_artifact_node_id(node_id)` (line 40): Parse artifact node id: artifact:<kind>:<...>
+  - `_suggest_remediation_actions(artifacts)` (line 58): Recommend safe operational actions.
+  - `_edge_projection_name(edge)` (line 110): no docstring
+  - `_edge_signature(edge)` (line 119): no docstring
+  - `_count_artifact_kinds(nodes)` (line 130): no docstring
+  - `_find_shortest_path(graph, source, target, direction)` (line 141): no docstring
+  - `_to_utc_datetime(value)` (line 192): no docstring
+  - `_bucket_start(ts, bucket_minutes)` (line 209): no docstring
+  - `_compact_edge_metadata(metadata)` (line 217): no docstring
+  - `_build_timeline_summary(edges, bucket_minutes)` (line 246): no docstring
+  - `_extract_column_lineage_refs(edges, limit)` (line 314): no docstring
+  - `_coerce_int(value)` (line 349): no docstring
+  - `_parse_objectify_mapping_spec_ref(ref)` (line 356): no docstring
+  - `_extract_column_lineage_ref_entry(metadata)` (line 372): no docstring
+  - `_normalize_mapping_pair(mapping)` (line 415): no docstring
+  - `_extract_column_lineage_pairs_from_metadata(metadata)` (line 431): no docstring
+  - `_freshness_status(last_occurred_at, as_of, freshness_slo_minutes)` (line 450): no docstring
+  - `_status_rank(status)` (line 468): no docstring
+  - `_normalize_scope(db_name, branch)` (line 473): no docstring
+  - `_normalize_window(since, until, default_hours)` (line 483): no docstring
+  - `_extract_impacted_artifacts_from_edges(edges, limit)` (line 499): no docstring
+  - `_summarize_run_rows(run_rows, as_of, freshness_slo_minutes)` (line 530): no docstring
+  - `_edge_cause_payload(edge)` (line 569): no docstring
+  - `_upstream_gap_minutes(last_occurred_at, latest_upstream_occurred_at)` (line 588): no docstring
+  - `_event_node_id_from_latest_writer(latest_writer)` (line 606): no docstring
+  - `_projection_name_from_latest_writer(latest_writer)` (line 618): no docstring
+  - `_writer_code_sha(latest_writer)` (line 627): no docstring
+  - `_out_of_date_scope(status_name, last_occurred_at, parent_latest_occurred_at, latest_upstream_occurred_at)` (line 636): Foundry-style stale scope classification.
+  - `_staleness_reason_with_scope(status_name, out_of_date_scope)` (line 661): no docstring
+  - `_update_type(status_name, out_of_date_scope, last_occurred_at, latest_projection_occurred_at, current_code_sha, latest_projection_code_sha)` (line 677): Foundry-style update type hint:
+  - `_lineage_lookup_batch_size()` (line 708): no docstring
+  - `_chunked(values, size)` (line 712): no docstring
+  - `async _get_latest_edges_to_batched(lineage_store, to_node_ids, edge_type, db_name, branch)` (line 719): no docstring
+  - `async _get_latest_edges_from_batched(lineage_store, from_node_ids, edge_type, db_name, branch)` (line 744): no docstring
+  - `async _get_latest_edges_for_projections_batched(lineage_store, projection_names, db_name, branch)` (line 769): no docstring
+  - `async _enrich_artifacts_with_latest_writer(lineage_store, artifacts, db_name, branch)` (line 792): no docstring
+  - `_artifact_latest_writer_state(run_id, latest_writer)` (line 816): no docstring
+  - `async get_lineage_graph(root, db_name, branch, as_of, direction, max_depth, max_nodes, max_edges, lineage_store)` (line 829): no docstring
+  - `async get_lineage_path(source, target, db_name, branch, as_of, direction, max_depth, max_nodes, max_edges, lineage_store)` (line 865): no docstring
+  - `async get_lineage_impact(root, db_name, branch, as_of, direction, max_depth, artifact_kind, max_nodes, max_edges, lineage_store)` (line 950): no docstring
+  - `async get_lineage_diff(root, from_as_of, to_as_of, db_name, branch, direction, max_depth, max_nodes, max_edges, lineage_store)` (line 1015): no docstring
+  - `async get_lineage_metrics(db_name, branch, window_minutes, lineage_store, audit_store)` (line 1121): Operational lineage metrics.
+  - `async get_lineage_runs(db_name, branch, since, until, edge_type, run_limit, freshness_slo_minutes, include_impact_preview, impact_preview_runs_limit, impact_preview_artifacts_limit, impact_preview_edge_limit, lineage_store)` (line 1184): Foundry-style build/run timeline:
+  - `async get_lineage_run_impact(run_id, db_name, branch, since, until, event_limit, artifact_preview_limit, lineage_store)` (line 1293): Foundry-style run/build impact diagnostics.
+  - `async get_lineage_timeline(db_name, branch, since, until, edge_type, projection_name, bucket_minutes, event_limit, event_preview_limit, lineage_store)` (line 1382): Foundry-style lineage timeline for operational debugging:
+  - `async get_lineage_column_lineage(db_name, branch, run_id, source_field, target_field, target_class_id, since, until, edge_limit, pair_limit, lineage_store, objectify_registry)` (line 1467): Resolve column-level lineage from mapping-spec references embedded in lineage edges.
+  - `async get_lineage_out_of_date(db_name, branch, artifact_kind, as_of, freshness_slo_minutes, artifact_limit, stale_preview_limit, projection_limit, projection_preview_limit, lineage_store)` (line 1814): Foundry-style out-of-date diagnostics:
 
 ### `backend/bff/routers/link_types.py`
 
@@ -626,19 +638,19 @@
 
 ### `backend/bff/routers/link_types_read.py`
 - **Functions**
-  - `_unwrap_data(payload)` (line 32): no docstring
-  - `_extract_resources(payload)` (line 41): no docstring
-  - `_decode_page_token(page_token, scope)` (line 49): no docstring
-  - `_encode_page_token(offset, scope)` (line 60): no docstring
-  - `_pagination_scope(*parts)` (line 64): no docstring
-  - `_normalize_object_ref(raw)` (line 69): no docstring
-  - `_localized_text(value)` (line 84): no docstring
-  - `_map_cardinality(raw)` (line 99): no docstring
-  - `_to_foundry_outgoing_link_type(resource, source_object_type)` (line 110): no docstring
-  - `async list_link_types(db_name, branch, oms_client, dataset_registry)` (line 161): no docstring
-  - `async list_outgoing_link_types(db_name, object_type_api_name, branch, page_size, page_token, oms_client)` (line 197): no docstring
-  - `async get_outgoing_link_type(db_name, object_type_api_name, link_type_api_name, branch, oms_client)` (line 264): no docstring
-  - `async get_link_type(db_name, link_type_id, request, branch, oms_client, dataset_registry, _)` (line 333): no docstring
+  - `_unwrap_data(payload)` (line 33): no docstring
+  - `_extract_resources(payload)` (line 42): no docstring
+  - `_decode_page_token(page_token, scope)` (line 50): no docstring
+  - `_encode_page_token(offset, scope)` (line 61): no docstring
+  - `_pagination_scope(*parts)` (line 65): no docstring
+  - `_normalize_object_ref(raw)` (line 70): no docstring
+  - `_localized_text(value)` (line 85): no docstring
+  - `_map_cardinality(raw)` (line 100): no docstring
+  - `_to_foundry_outgoing_link_type(resource, source_object_type)` (line 111): no docstring
+  - `async list_link_types(db_name, branch, oms_client, dataset_registry)` (line 162): no docstring
+  - `async list_outgoing_link_types(db_name, object_type_api_name, response, branch, page_size, page_token, oms_client)` (line 198): no docstring
+  - `async get_outgoing_link_type(db_name, object_type_api_name, link_type_api_name, response, branch, oms_client)` (line 281): no docstring
+  - `async get_link_type(db_name, link_type_id, request, branch, oms_client, dataset_registry, _)` (line 358): no docstring
 
 ### `backend/bff/routers/link_types_write.py`
 - **Functions**
@@ -656,22 +668,22 @@
 
 ### `backend/bff/routers/object_types.py`
 - **Functions**
-  - `async _require_domain_role(request, db_name)` (line 34): no docstring
-  - `_unwrap_data(payload)` (line 41): no docstring
-  - `_extract_resources(payload)` (line 50): no docstring
-  - `_extract_resource(payload)` (line 58): no docstring
-  - `_decode_page_token(page_token, scope)` (line 65): no docstring
-  - `_encode_page_token(offset, scope)` (line 76): no docstring
-  - `_pagination_scope(*parts)` (line 80): no docstring
-  - `_localized_text(value)` (line 85): no docstring
-  - `_extract_ontology_properties(payload)` (line 100): no docstring
-  - `_normalize_foundry_data_type(value)` (line 108): no docstring
-  - `_to_foundry_data_type(value)` (line 143): no docstring
-  - `_to_foundry_object_type(resource, ontology_payload)` (line 150): no docstring
-  - `async list_object_type_contracts(db_name, request, branch, page_size, page_token, oms_client)` (line 277): no docstring
-  - `async create_object_type_contract(db_name, body, request, branch, expected_head_commit, oms_client, dataset_registry, objectify_registry)` (line 328): no docstring
-  - `async get_object_type_contract(db_name, class_id, request, branch, oms_client)` (line 357): no docstring
-  - `async update_object_type_contract(db_name, class_id, body, request, branch, expected_head_commit, oms_client, dataset_registry, objectify_registry)` (line 415): no docstring
+  - `async _require_domain_role(request, db_name)` (line 35): no docstring
+  - `_unwrap_data(payload)` (line 42): no docstring
+  - `_extract_resources(payload)` (line 51): no docstring
+  - `_extract_resource(payload)` (line 59): no docstring
+  - `_decode_page_token(page_token, scope)` (line 66): no docstring
+  - `_encode_page_token(offset, scope)` (line 77): no docstring
+  - `_pagination_scope(*parts)` (line 81): no docstring
+  - `_localized_text(value)` (line 86): no docstring
+  - `_extract_ontology_properties(payload)` (line 101): no docstring
+  - `_normalize_foundry_data_type(value)` (line 109): no docstring
+  - `_to_foundry_data_type(value)` (line 144): no docstring
+  - `_to_foundry_object_type(resource, ontology_payload)` (line 151): no docstring
+  - `async list_object_type_contracts(db_name, request, response, branch, page_size, page_token, oms_client)` (line 278): no docstring
+  - `async create_object_type_contract(db_name, body, request, branch, expected_head_commit, oms_client, dataset_registry, objectify_registry)` (line 335): no docstring
+  - `async get_object_type_contract(db_name, class_id, request, response, branch, oms_client)` (line 364): no docstring
+  - `async update_object_type_contract(db_name, class_id, body, request, branch, expected_head_commit, oms_client, dataset_registry, objectify_registry)` (line 428): no docstring
 
 ### `backend/bff/routers/object_types_deps.py`
 
@@ -834,11 +846,11 @@
 - **Functions**
   - `_default_dataset_name(filename)` (line 17): no docstring
   - `_convert_xls_to_xlsx_bytes(xls_bytes)` (line 26): no docstring
-  - `_normalize_table_bbox(table_top, table_left, table_bottom, table_right)` (line 74): no docstring
-  - `_detect_csv_delimiter(sample)` (line 98): no docstring
-  - `_parse_csv_rows(reader, has_header, preview_limit)` (line 108): no docstring
-  - `_parse_csv_file(file_obj, delimiter, has_header, preview_limit)` (line 138): no docstring
-  - `_parse_csv_content(content, delimiter, has_header, preview_limit)` (line 208): no docstring
+  - `_normalize_table_bbox(table_top, table_left, table_bottom, table_right)` (line 73): no docstring
+  - `_detect_csv_delimiter(sample)` (line 97): no docstring
+  - `_parse_csv_rows(reader, has_header, preview_limit)` (line 107): no docstring
+  - `_parse_csv_file(file_obj, delimiter, has_header, preview_limit)` (line 137): no docstring
+  - `_parse_csv_content(content, delimiter, has_header, preview_limit)` (line 205): no docstring
 
 ### `backend/bff/routers/pipeline_datasets_uploads.py`
 
@@ -988,8 +1000,8 @@
 
 ### `backend/bff/routers/query.py`
 - **Functions**
-  - `async execute_query(db_name, query, request, mapper, query_service, dataset_registry)` (line 37): 온톨로지 쿼리 실행
-  - `async query_builder_info()` (line 118): 쿼리 빌더 정보
+  - `async execute_query(db_name, query, request, response, mapper, query_service, dataset_registry)` (line 38): 온톨로지 쿼리 실행
+  - `async query_builder_info()` (line 125): 쿼리 빌더 정보
 
 ### `backend/bff/routers/registry_deps.py`
 - **Functions**
@@ -1339,14 +1351,14 @@
     - `async excel_to_structure_preview_stream(self, fileobj, filename, sheet_name, table_id, table_bbox, include_complex_types, max_tables, max_rows, max_cols, options)` (line 409): Excel stream → (grid/merged_cells) → structure analysis → selected table preview.
     - `async analyze_excel_structure(self, xlsx_bytes, filename, sheet_name, include_complex_types, max_tables, max_rows, max_cols, options)` (line 446): Analyze sheet structure via Funnel (Excel bytes → grid/merged_cells → structure analysis).
     - `async analyze_excel_structure_stream(self, fileobj, filename, sheet_name, include_complex_types, max_tables, max_rows, max_cols, options)` (line 491): Analyze sheet structure via Funnel (streaming Excel upload).
-    - `_select_primary_table(structure)` (line 574): Choose a single "primary" table for schema suggestion.
-    - `_select_requested_table(cls, structure, table_id, table_bbox)` (line 608): Select a table from structure analysis output.
-    - `_normalize_bbox_dict(bbox)` (line 656): no docstring
-    - `_structure_table_to_preview(structure, table, sheet_url, worksheet_name)` (line 667): no docstring
-    - `_structure_table_to_excel_preview(structure, table, file_name, sheet_name)` (line 720): no docstring
-    - `async excel_to_schema(self, xlsx_bytes, filename, sheet_name, class_name, table_id, table_bbox, include_complex_types, max_tables, max_rows, max_cols, options)` (line 766): Excel 업로드에서 직접 스키마 생성 (구조 분석 기반).
-    - `async __aenter__(self)` (line 825): no docstring
-    - `async __aexit__(self, _exc_type, _exc_val, _exc_tb)` (line 828): no docstring
+    - `_select_primary_table(structure)` (line 573): Choose a single "primary" table for schema suggestion.
+    - `_select_requested_table(cls, structure, table_id, table_bbox)` (line 607): Select a table from structure analysis output.
+    - `_normalize_bbox_dict(bbox)` (line 655): no docstring
+    - `_structure_table_to_preview(structure, table, sheet_url, worksheet_name)` (line 666): no docstring
+    - `_structure_table_to_excel_preview(structure, table, file_name, sheet_name)` (line 719): no docstring
+    - `async excel_to_schema(self, xlsx_bytes, filename, sheet_name, class_name, table_id, table_bbox, include_complex_types, max_tables, max_rows, max_cols, options)` (line 765): Excel 업로드에서 직접 스키마 생성 (구조 분석 기반).
+    - `async __aenter__(self)` (line 824): no docstring
+    - `async __aexit__(self, _exc_type, _exc_val, _exc_tb)` (line 827): no docstring
 
 ### `backend/bff/services/funnel_type_inference_adapter.py`
 - **Classes**
@@ -1400,10 +1412,10 @@
   - `_normalize_paths_for_response(paths)` (line 289): Normalize graph path payloads to a stable object shape.
   - `_normalize_es_doc_id(raw_id)` (line 326): Normalize graph document identifiers to instance ID form for API compatibility.
   - `async execute_graph_query(db_name, query, request, lineage_store, graph_service, dataset_registry, base_branch, overlay_branch, branch)` (line 343): Execute multi-hop graph query with ES federation (graph + Elasticsearch).
-  - `async execute_simple_graph_query(db_name, query, request, graph_service, dataset_registry, base_branch, overlay_branch, branch)` (line 662): Execute simple single-class graph query.
-  - `async execute_multi_hop_query(db_name, query, request, graph_service, dataset_registry, base_branch, overlay_branch, branch)` (line 779): Execute multi-hop graph query (compat dict payload).
-  - `async find_relationship_paths(db_name, source_class, target_class, max_depth, graph_service, branch)` (line 925): no docstring
-  - `async graph_service_health(graph_service)` (line 963): Check health of graph federation service (ES-only, no external graph DB dependency).
+  - `async execute_simple_graph_query(db_name, query, request, graph_service, dataset_registry, base_branch, overlay_branch, branch)` (line 664): Execute simple single-class graph query.
+  - `async execute_multi_hop_query(db_name, query, request, graph_service, dataset_registry, base_branch, overlay_branch, branch)` (line 781): Execute multi-hop graph query (compat dict payload).
+  - `async find_relationship_paths(db_name, source_class, target_class, max_depth, graph_service, branch)` (line 927): no docstring
+  - `async graph_service_health(graph_service)` (line 965): Check health of graph federation service (ES-only, no external graph DB dependency).
 - **Classes**
   - `GraphBranchContext` (line 44): no docstring
 
@@ -1477,6 +1489,38 @@
     - `async _handle(self, ctx, mapper, oms_client)` (line 363): no docstring
   - `_ValidateProcessor` (line 437): no docstring
     - `async _handle(self, ctx, mapper, oms_client)` (line 438): no docstring
+
+### `backend/bff/services/lineage_out_of_date_service.py`
+- **Functions**
+  - `_parse_artifact_node_id(node_id)` (line 10): no docstring
+  - `_suggest_remediation_actions(artifacts)` (line 23): no docstring
+  - `_to_utc_datetime(value)` (line 69): no docstring
+  - `_freshness_status(last_occurred_at, as_of, freshness_slo_minutes)` (line 86): no docstring
+  - `_status_rank(status)` (line 104): no docstring
+  - `_staleness_reason_with_scope(status_name, out_of_date_scope)` (line 109): no docstring
+  - `_update_type(status_name, out_of_date_scope, last_occurred_at, latest_projection_occurred_at, current_code_sha, latest_projection_code_sha)` (line 125): no docstring
+  - `_lineage_lookup_batch_size()` (line 150): no docstring
+  - `_chunked(values, size)` (line 154): no docstring
+  - `async _get_latest_edges_to_batched(lineage_store, to_node_ids, edge_type, db_name, branch)` (line 161): no docstring
+  - `async _get_latest_edges_from_batched(lineage_store, from_node_ids, edge_type, db_name, branch)` (line 186): no docstring
+  - `async _get_latest_edges_for_projections_batched(lineage_store, projection_names, db_name, branch)` (line 211): no docstring
+  - `_edge_cause_payload(edge)` (line 234): no docstring
+  - `async _enrich_artifacts_with_latest_writer(lineage_store, artifacts, db_name, branch)` (line 253): no docstring
+  - `_upstream_gap_minutes(last_occurred_at, latest_upstream_occurred_at)` (line 277): no docstring
+  - `_event_node_id_from_latest_writer(latest_writer)` (line 295): no docstring
+  - `_projection_name_from_latest_writer(latest_writer)` (line 307): no docstring
+  - `_writer_code_sha(latest_writer)` (line 316): no docstring
+  - `_out_of_date_scope(status_name, last_occurred_at, parent_latest_occurred_at, latest_upstream_occurred_at)` (line 325): no docstring
+- **Classes**
+  - `LineageOutOfDateService` (line 343): Service class for `/lineage/out-of-date` diagnostics.
+    - `__init__(self, lineage_store)` (line 346): no docstring
+    - `async analyze(self, db_name, branch, artifact_kind, as_of, freshness_slo_minutes, artifact_limit, stale_preview_limit, projection_limit, projection_preview_limit)` (line 349): no docstring
+    - `async _latest_upstream_occurred_at(self, db_name, branch, as_of)` (line 456): no docstring
+    - `async _collect_artifacts(self, db_name, branch, artifact_kind, as_of, freshness_slo_minutes, artifact_limit, latest_upstream_occurred_at)` (line 474): no docstring
+    - `async _collect_projections(self, db_name, branch, as_of, freshness_slo_minutes, projection_limit, latest_upstream_occurred_at)` (line 531): no docstring
+    - `async _annotate_scope_and_update_type(self, stale_artifacts_all, stale_projections_all, latest_upstream_occurred_at, db_name, branch)` (line 583): no docstring
+    - `_staleness_reason_counts(artifacts, projections)` (line 714): no docstring
+    - `_warnings(artifact_rows_count, artifact_limit, projection_rows_count, projection_limit, stale_artifact_count, stale_preview_limit, stale_projection_count, projection_preview_limit)` (line 728): no docstring
 
 ### `backend/bff/services/link_types_mapping_service.py`
 - **Functions**
@@ -1825,7 +1869,7 @@
 ### `backend/bff/services/pipeline_dataset_upload_service.py`
 - **Functions**
   - `async _save_artifact(lakefs_storage_service, repo, key, fileobj, content_type, metadata, checksum)` (line 65): no docstring
-  - `async upload_tabular_dataset(inputs, lakefs_client, lakefs_storage_service, dataset_registry, objectify_registry, objectify_job_queue, lineage_store, build_dataset_event_payload, flush_dataset_ingest_outbox)` (line 108): no docstring
+  - `async upload_tabular_dataset(inputs, lakefs_client, lakefs_storage_service, dataset_registry, objectify_registry, objectify_job_queue, lineage_store, build_dataset_event_payload, flush_dataset_ingest_outbox)` (line 107): no docstring
 - **Classes**
   - `TabularDatasetUploadInput` (line 33): no docstring
   - `TabularDatasetUploadResult` (line 57): no docstring
@@ -1943,14 +1987,14 @@
 
 ### `backend/bff/services/relationship_reconciler_service.py`
 - **Functions**
-  - `async reconcile_relationships(db_name, branch, oms_client, es_service, objectify_registry)` (line 36): Reconcile all FK-based relationships for a database.
-  - `async _load_class_defs(oms_client, db_name, branch)` (line 167): Load all class definitions from OMS keyed by class_id.
-  - `_collect_relationships(class_defs)` (line 206): Collect all relationship declarations from class definitions.
-  - `async _detect_fk_field(source_class, target_class, index_name, es_service, objectify_registry, db_name)` (line 238): Detect the FK field in target class instances that references the source class PK.
-  - `async _sample_instance(index_name, class_id, es_service)` (line 323): Get a single instance document for a class.
-  - `async _get_class_instance_ids(index_name, class_id, es_service, limit)` (line 342): Get a sample of instance IDs for a class.
-  - `async _scan_and_group_fk(index_name, target_class, fk_field, es_service)` (line 364): Scan all instances of target_class, grouping by their FK field value.
-  - `async _bulk_update_relationships(index_name, source_class, predicate, target_class, fk_groups, es_service)` (line 419): Bulk update source class instances with relationship references.
+  - `async reconcile_relationships(db_name, branch, oms_client, es_service, objectify_registry)` (line 38): Reconcile all FK-based relationships for a database.
+  - `async _load_class_defs(oms_client, db_name, branch)` (line 169): Load all class definitions from OMS keyed by class_id.
+  - `_collect_relationships(class_defs)` (line 208): Collect all relationship declarations from class definitions.
+  - `async _detect_fk_field(source_class, target_class, index_name, es_service, objectify_registry, db_name)` (line 240): Detect the FK field in target class instances that references the source class PK.
+  - `async _sample_instance(index_name, class_id, es_service)` (line 325): Get a single instance document for a class.
+  - `async _get_class_instance_ids(index_name, class_id, es_service, limit)` (line 344): Get a sample of instance IDs for a class.
+  - `async _scan_and_group_fk(index_name, target_class, fk_field, es_service)` (line 365): Scan all instances of target_class, grouping by their FK field value.
+  - `async _bulk_update_relationships(index_name, source_class, predicate, target_class, fk_groups, es_service)` (line 420): Bulk update source class instances with relationship references.
 
 ### `backend/bff/services/schema_changes_service.py`
 - **Functions**
@@ -2109,15 +2153,15 @@
 - **Functions**
   - `async _noop_require_domain_role(request, db_name)` (line 239): no docstring
   - `async test_list_object_types_foundry_shape()` (line 245): no docstring
-  - `async test_list_object_types_invalid_page_token_rejected()` (line 273): no docstring
-  - `async test_list_object_types_page_token_scope_mismatch_rejected()` (line 294): no docstring
-  - `async test_get_object_type_foundry_shape()` (line 315): no docstring
-  - `async test_get_object_type_infers_primary_key_without_pk_spec()` (line 345): no docstring
-  - `async test_list_outgoing_link_types_foundry_shape_and_filtering()` (line 367): no docstring
-  - `async test_list_outgoing_link_types_invalid_page_token_rejected()` (line 387): no docstring
-  - `async test_list_outgoing_link_types_page_token_scope_mismatch_rejected()` (line 402): no docstring
-  - `async test_list_outgoing_link_types_pagination_uses_filtered_offset_semantics()` (line 420): no docstring
-  - `async test_get_outgoing_link_type_foundry_shape()` (line 448): no docstring
+  - `async test_list_object_types_invalid_page_token_rejected()` (line 278): no docstring
+  - `async test_list_object_types_page_token_scope_mismatch_rejected()` (line 299): no docstring
+  - `async test_get_object_type_foundry_shape()` (line 320): no docstring
+  - `async test_get_object_type_infers_primary_key_without_pk_spec()` (line 354): no docstring
+  - `async test_list_outgoing_link_types_foundry_shape_and_filtering()` (line 376): no docstring
+  - `async test_list_outgoing_link_types_invalid_page_token_rejected()` (line 400): no docstring
+  - `async test_list_outgoing_link_types_page_token_scope_mismatch_rejected()` (line 415): no docstring
+  - `async test_list_outgoing_link_types_pagination_uses_filtered_offset_semantics()` (line 433): no docstring
+  - `async test_get_outgoing_link_type_foundry_shape()` (line 461): no docstring
 - **Classes**
   - `_FakeObjectTypeOMSClient` (line 12): no docstring
     - `async list_ontology_resources(self, db_name, resource_type, branch, limit, offset)` (line 13): no docstring
@@ -2137,31 +2181,33 @@
 
 ### `backend/bff/tests/test_foundry_ontology_v2_router.py`
 - **Functions**
-  - `async _noop_require_domain_role(request, db_name)` (line 236): no docstring
-  - `async test_list_object_types_v2_returns_foundry_raw_shape()` (line 242): no docstring
-  - `async test_list_ontologies_v2_returns_foundry_raw_shape()` (line 266): no docstring
-  - `async test_list_ontologies_v2_accepts_apiname_source_rows()` (line 280): no docstring
-  - `async test_get_ontology_v2_returns_foundry_raw_shape()` (line 292): no docstring
-  - `async test_get_ontology_v2_resolves_rid_identifier()` (line 312): no docstring
-  - `async test_get_ontology_v2_unknown_returns_ontology_not_found()` (line 330): no docstring
-  - `async test_get_object_type_v2_returns_foundry_raw_shape()` (line 351): no docstring
-  - `async test_get_object_type_v2_missing_returns_object_type_not_found()` (line 373): no docstring
-  - `async test_list_outgoing_link_types_v2_returns_foundry_raw_shape()` (line 396): no docstring
-  - `async test_get_outgoing_link_type_v2_returns_foundry_raw_shape()` (line 420): no docstring
-  - `async test_get_outgoing_link_type_v2_missing_returns_link_type_not_found()` (line 443): no docstring
-  - `async test_search_objects_v2_passthrough_foundry_shape()` (line 467): no docstring
-  - `async test_list_objects_v2_passthrough_foundry_shape_and_orderby_parse()` (line 489): no docstring
-  - `async test_get_object_v2_returns_foundry_raw_shape()` (line 532): no docstring
-  - `async test_get_object_v2_not_found_returns_foundry_error()` (line 556): no docstring
-  - `async test_list_linked_objects_v2_returns_foundry_raw_shape()` (line 583): no docstring
-  - `async test_list_linked_objects_v2_missing_link_type_returns_link_type_not_found()` (line 616): no docstring
-  - `async test_get_linked_object_v2_returns_foundry_raw_shape()` (line 647): no docstring
-  - `async test_get_linked_object_v2_not_found_returns_foundry_error()` (line 673): no docstring
-  - `async test_v2_invalid_ontology_returns_foundry_error_envelope()` (line 705): no docstring
-  - `async test_list_objects_v2_rejects_invalid_orderby_expression()` (line 726): no docstring
-  - `async test_list_objects_v2_rejects_invalid_branch()` (line 754): no docstring
-  - `async test_list_object_types_v2_rejects_expired_page_token()` (line 784): no docstring
-  - `async test_list_object_types_v2_rejects_page_token_scope_mismatch()` (line 805): no docstring
+  - `async _noop_require_domain_role(request, db_name)` (line 334): no docstring
+  - `async test_list_object_types_v2_returns_foundry_raw_shape()` (line 340): no docstring
+  - `async test_list_ontologies_v2_returns_foundry_raw_shape()` (line 364): no docstring
+  - `async test_list_ontologies_v2_accepts_apiname_source_rows()` (line 378): no docstring
+  - `async test_get_ontology_v2_returns_foundry_raw_shape()` (line 390): no docstring
+  - `async test_get_ontology_v2_resolves_rid_identifier()` (line 410): no docstring
+  - `async test_get_ontology_v2_unknown_returns_ontology_not_found()` (line 428): no docstring
+  - `async test_get_object_type_v2_returns_foundry_raw_shape()` (line 449): no docstring
+  - `async test_get_object_type_v2_missing_returns_object_type_not_found()` (line 471): no docstring
+  - `async test_list_outgoing_link_types_v2_returns_foundry_raw_shape()` (line 494): no docstring
+  - `async test_list_outgoing_link_types_v2_filters_before_pagination()` (line 518): no docstring
+  - `async test_get_outgoing_link_type_v2_returns_foundry_raw_shape()` (line 552): no docstring
+  - `async test_get_outgoing_link_type_v2_missing_returns_link_type_not_found()` (line 575): no docstring
+  - `async test_search_objects_v2_passthrough_foundry_shape()` (line 599): no docstring
+  - `async test_list_objects_v2_passthrough_foundry_shape_and_orderby_parse()` (line 621): no docstring
+  - `async test_get_object_v2_returns_foundry_raw_shape()` (line 664): no docstring
+  - `async test_get_object_v2_not_found_returns_foundry_error()` (line 688): no docstring
+  - `async test_list_linked_objects_v2_returns_foundry_raw_shape()` (line 715): no docstring
+  - `async test_list_linked_objects_v2_paginates_after_dedup_link_filter()` (line 748): no docstring
+  - `async test_list_linked_objects_v2_missing_link_type_returns_link_type_not_found()` (line 811): no docstring
+  - `async test_get_linked_object_v2_returns_foundry_raw_shape()` (line 842): no docstring
+  - `async test_get_linked_object_v2_not_found_returns_foundry_error()` (line 868): no docstring
+  - `async test_v2_invalid_ontology_returns_foundry_error_envelope()` (line 900): no docstring
+  - `async test_list_objects_v2_rejects_invalid_orderby_expression()` (line 921): no docstring
+  - `async test_list_objects_v2_rejects_invalid_branch()` (line 949): no docstring
+  - `async test_list_object_types_v2_rejects_expired_page_token()` (line 979): no docstring
+  - `async test_list_object_types_v2_rejects_page_token_scope_mismatch()` (line 1000): no docstring
 - **Classes**
   - `_FakeOMSClient` (line 13): no docstring
     - `__init__(self)` (line 14): no docstring
@@ -2175,6 +2221,11 @@
     - `async list_databases(self)` (line 212): no docstring
   - `_MissingObjectTypeOMSClient` (line 216): no docstring
     - `async get_ontology_resource(self, db_name, resource_type, resource_id, branch)` (line 217): no docstring
+  - `_PagedLinkTypesOMSClient` (line 236): no docstring
+    - `__init__(self)` (line 237): no docstring
+    - `async list_ontology_resources(self, db_name, resource_type, branch, limit, offset)` (line 265): no docstring
+  - `_LinkedPaginationOMSClient` (line 287): no docstring
+    - `async post(self, path, **kwargs)` (line 288): no docstring
 
 ### `backend/bff/tests/test_funnel_client_structure_selection.py`
 - **Classes**
@@ -2686,6 +2737,19 @@
   - `async test_query_database_maps_not_in_and_not_null_filters()` (line 54): no docstring
   - `async test_query_database_rejects_invalid_order_direction()` (line 87): no docstring
 
+### `backend/bff/tests/test_query_router_deprecation_headers.py`
+- **Functions**
+  - `_request()` (line 32): no docstring
+  - `async test_execute_query_sets_v1_deprecation_headers()` (line 44): no docstring
+- **Classes**
+  - `_FakeMapper` (line 10): no docstring
+    - `async convert_query_to_internal(self, db_name, query_dict, lang)` (line 11): no docstring
+    - `async convert_to_display_batch(self, db_name, raw_results, lang)` (line 15): no docstring
+  - `_FakeQueryService` (line 20): no docstring
+    - `async query_database(self, db_name, internal_query)` (line 21): no docstring
+  - `_FakeDatasetRegistry` (line 26): no docstring
+    - `async get_access_policy(self, **kwargs)` (line 27): no docstring
+
 ### `backend/bff/tests/test_security_information_leakage.py`
 - **Classes**
   - `_StubDatasetRegistry` (line 19): no docstring
@@ -2719,10 +2783,14 @@
   - `dt_iso(value)` (line 16): no docstring
   - `serialize_action_log_record(record)` (line 26): no docstring
 
+### `backend/bff/utils/deprecation_headers.py`
+- **Functions**
+  - `apply_v1_to_v2_deprecation_headers(response, successor_path)` (line 12): Attach RFC8594-style deprecation metadata for v1 compatibility routes.
+
 ### `backend/bff/utils/httpx_exceptions.py`
 - **Functions**
   - `extract_httpx_detail(exc)` (line 17): no docstring
-  - `raise_httpx_as_http_exception(exc)` (line 33): no docstring
+  - `raise_httpx_as_http_exception(exc)` (line 32): no docstring
 
 ### `backend/bff/utils/request_headers.py`
 - **Functions**
@@ -3537,7 +3605,7 @@
   - `_auto_detect_watermark_column(columns, options)` (line 92): Auto-detect a watermark column from dataset schema or options.
   - `async _compute_lakefs_delta(job, delta_computer, storage)` (line 117): Compute row-level delta between two LakeFS commits using the diff API.
   - `_extract_instance_relationships(instance, rel_map)` (line 176): Thin wrapper: extract relationships for a single instance using pre-parsed rel_map.
-  - `async main()` (line 4072): no docstring
+  - `async main()` (line 4126): no docstring
 - **Classes**
   - `ObjectifyNonRetryableError` (line 191): Raised for objectify failures that should not be retried.
   - `ObjectifyWorker` (line 195): no docstring
@@ -3573,32 +3641,33 @@
     - `async _on_retry_scheduled(self, payload, error, attempt_count, backoff_s, retryable)` (line 910): no docstring
     - `async _on_terminal_failure(self, payload, error, attempt_count, retryable)` (line 935): no docstring
     - `async _process_job(self, job)` (line 957): no docstring
-    - `async _bulk_update_instances(self, job, updates, ontology_version)` (line 2171): no docstring
-    - `async _iter_class_instance_ids(self, db_name, class_id, branch, limit)` (line 2207): no docstring
-    - `async _resolve_artifact_output(self, job)` (line 2246): no docstring
-    - `async _fetch_target_field_types(self, job)` (line 2291): no docstring
-    - `async _fetch_class_schema(self, job)` (line 2315): no docstring
-    - `async _fetch_object_type_contract(self, job)` (line 2326): no docstring
-    - `async _fetch_value_type_defs(self, job, value_type_refs)` (line 2339): no docstring
-    - `async _fetch_ontology_version(self, job)` (line 2374): no docstring
-    - `_normalize_pk_fields(value)` (line 2380): no docstring
-    - `_hash_payload(payload)` (line 2384): no docstring
-    - `_derive_row_key(self, columns, col_index, row, instance, pk_fields, pk_targets)` (line 2388): no docstring
-    - `_derive_unique_key(self, instance, key_fields)` (line 2418): no docstring
-    - `async _iter_dataset_batches(self, job, options, row_batch_size, max_rows)` (line 2426): no docstring
-    - `async _iter_csv_batches(self, bucket, key, delimiter, has_header, row_batch_size, max_rows)` (line 2466): no docstring
-    - `async _iter_json_part_batches(self, bucket, prefix, row_batch_size, max_rows)` (line 2559): no docstring
-    - `async _iter_dataset_batches_incremental(self, job, options, row_batch_size, max_rows, mapping_spec)` (line 2616): Iterate dataset batches with incremental filtering.
-    - `async _update_watermark_after_job(self, job, new_watermark)` (line 2721): Update watermark in registry after successful incremental job.
-    - `_build_instances_with_validation(self, columns, rows, row_offset, mappings, relationship_mappings, relationship_meta, target_field_types, mapping_sources, sources_by_target, required_targets, pk_targets, pk_fields, field_constraints, field_raw_types, seen_row_keys)` (line 2750): no docstring
-    - `async _run_link_index_job(self, job, mapping_spec, options, mappings, mapping_sources, mapping_targets, sources_by_target, prop_map, rel_map, relationship_mappings, stable_seed, row_batch_size, max_rows)` (line 2978): no docstring
-    - `async _validate_batches(self, job, options, mappings, relationship_mappings, relationship_meta, target_field_types, mapping_sources, sources_by_target, required_targets, pk_targets, pk_fields, field_constraints, field_raw_types, row_batch_size, max_rows)` (line 3586): no docstring
-    - `async _scan_key_constraints(self, job, options, mappings, relationship_meta, target_field_types, sources_by_target, required_targets, pk_targets, pk_fields, unique_keys, row_batch_size, max_rows)` (line 3654): no docstring
-    - `_ensure_instance_ids(self, instances, class_id, stable_seed, mapping_spec_version, row_keys, instance_id_field)` (line 3776): no docstring
-    - `async _record_lineage_header(self, job, mapping_spec, ontology_version, input_type, artifact_output_name)` (line 3810): no docstring
-    - `async _record_instance_lineage(self, job, job_node_id, instance_ids, mapping_spec_id, mapping_spec_version, ontology_version, limit_remaining, input_type, artifact_output_name)` (line 3917): no docstring
-    - `async _send_to_dlq(self, msg, payload, raw_payload, error, attempt_count)` (line 4024): no docstring
-    - `_is_retryable_error_impl(exc)` (line 4059): no docstring
+    - `async _bulk_update_instances(self, job, updates, ontology_version)` (line 2172): no docstring
+    - `async _iter_class_instance_ids(self, db_name, class_id, branch, limit)` (line 2208): no docstring
+    - `async _resolve_artifact_output(self, job)` (line 2247): no docstring
+    - `async _fetch_target_field_types(self, job)` (line 2292): no docstring
+    - `async _fetch_class_schema(self, job)` (line 2316): no docstring
+    - `async _fetch_object_type_contract(self, job)` (line 2327): no docstring
+    - `async _fetch_value_type_defs(self, job, value_type_refs)` (line 2340): no docstring
+    - `async _fetch_ontology_version(self, job)` (line 2375): no docstring
+    - `_normalize_pk_fields(value)` (line 2381): no docstring
+    - `_hash_payload(payload)` (line 2385): no docstring
+    - `_derive_row_key(self, columns, col_index, row, instance, pk_fields, pk_targets)` (line 2389): no docstring
+    - `_derive_unique_key(self, instance, key_fields)` (line 2419): no docstring
+    - `async _iter_dataset_batches(self, job, options, row_batch_size, max_rows)` (line 2427): no docstring
+    - `async _iter_csv_batches(self, bucket, key, delimiter, has_header, row_batch_size, max_rows)` (line 2467): no docstring
+    - `async _iter_json_part_batches(self, bucket, prefix, row_batch_size, max_rows)` (line 2560): no docstring
+    - `async _iter_dataset_batches_incremental(self, job, options, row_batch_size, max_rows, mapping_spec)` (line 2617): Iterate dataset batches with incremental filtering.
+    - `async _update_watermark_after_job(self, job, new_watermark)` (line 2722): Update watermark in registry after successful incremental job.
+    - `_build_instances_with_validation(self, columns, rows, row_offset, mappings, relationship_mappings, relationship_meta, target_field_types, mapping_sources, sources_by_target, required_targets, pk_targets, pk_fields, field_constraints, field_raw_types, seen_row_keys)` (line 2751): no docstring
+    - `async _run_link_index_job(self, job, mapping_spec, options, mappings, mapping_sources, mapping_targets, sources_by_target, prop_map, rel_map, relationship_mappings, stable_seed, row_batch_size, max_rows)` (line 2979): no docstring
+    - `async _validate_batches(self, job, options, mappings, relationship_mappings, relationship_meta, target_field_types, mapping_sources, sources_by_target, required_targets, pk_targets, pk_fields, field_constraints, field_raw_types, row_batch_size, max_rows)` (line 3587): no docstring
+    - `async _scan_key_constraints(self, job, options, mappings, relationship_meta, target_field_types, sources_by_target, required_targets, pk_targets, pk_fields, unique_keys, row_batch_size, max_rows)` (line 3655): no docstring
+    - `_ensure_instance_ids(self, instances, class_id, stable_seed, mapping_spec_version, row_keys, instance_id_field)` (line 3777): no docstring
+    - `_build_column_lineage_pairs(mappings, limit)` (line 3812): no docstring
+    - `async _record_lineage_header(self, job, mapping_spec, ontology_version, input_type, artifact_output_name)` (line 3840): no docstring
+    - `async _record_instance_lineage(self, job, job_node_id, instance_ids, mapping_spec_id, mapping_spec_version, column_lineage_pairs, ontology_version, limit_remaining, input_type, artifact_output_name)` (line 3960): no docstring
+    - `async _send_to_dlq(self, msg, payload, raw_payload, error, attempt_count)` (line 4078): no docstring
+    - `_is_retryable_error_impl(exc)` (line 4113): no docstring
 
 ### `backend/objectify_worker/validation_codes.py`
 - **Classes**
@@ -7769,43 +7838,44 @@
 
 ### `backend/shared/services/registries/lineage_store.py`
 - **Functions**
-  - `create_lineage_store(settings)` (line 1808): no docstring
+  - `create_lineage_store(settings)` (line 1857): no docstring
 - **Classes**
   - `LineageStore` (line 32): Postgres-backed lineage store.
-    - `__init__(self, dsn, schema, pool_min, pool_max)` (line 46): no docstring
-    - `async _ensure_tables(self, conn)` (line 65): no docstring
-    - `node_event(event_id)` (line 329): no docstring
-    - `node_aggregate(aggregate_type, aggregate_id)` (line 333): no docstring
-    - `node_artifact(kind, *parts)` (line 337): no docstring
-    - `_validate_no_disallowed_aliases(cls, node_id, edge_type)` (line 342): no docstring
-    - `_canonicalize_node_id(cls, node_id)` (line 351): no docstring
-    - `_canonicalize_edge_type(cls, edge_type)` (line 356): no docstring
-    - `_infer_branch_from_node_id(node_id)` (line 361): no docstring
-    - `_infer_node_type(node_id)` (line 387): no docstring
-    - `_parse_node_id(node_id)` (line 400): Decompose node_id into queryable columns (best-effort).
-    - `_run_context(cls)` (line 461): no docstring
-    - `_deterministic_edge_id(*parts)` (line 466): no docstring
-    - `_coerce_metadata(value)` (line 471): Coerce a Postgres JSONB value into a Python dict.
-    - `async upsert_node(self, node_id, node_type, label, metadata, created_at, recorded_at, db_name, branch, run_id, code_sha, schema_version)` (line 506): no docstring
-    - `async insert_edge(self, from_node_id, to_node_id, edge_type, occurred_at, metadata, projection_name, recorded_at, db_name, branch, run_id, code_sha, schema_version, edge_id)` (line 576): no docstring
-    - `async enqueue_backfill(self, envelope, s3_bucket, s3_key, error)` (line 646): Best-effort enqueue for eventual lineage recovery.
-    - `async mark_backfill_done(self, event_id)` (line 698): no docstring
-    - `async mark_backfill_failed(self, event_id, error)` (line 712): no docstring
-    - `async claim_backfill_batch(self, limit, db_name, branch)` (line 728): Claim a batch of pending backfill rows (best-effort).
-    - `async get_backfill_metrics(self, db_name, branch)` (line 788): no docstring
-    - `async count_edges(self, edge_type, db_name, branch, since, until)` (line 828): no docstring
-    - `_run_id_predicate(cls)` (line 863): no docstring
-    - `async list_edges(self, edge_type, projection_name, db_name, branch, run_id, since, until, limit)` (line 866): List lineage edges in reverse chronological order for timeline/ops analysis.
-    - `async list_run_summaries(self, db_name, branch, edge_type, since, until, limit)` (line 942): Aggregate lineage activity by run/build id.
-    - `async list_artifact_latest_writes(self, db_name, branch, artifact_kind, as_of, limit)` (line 1022): Return latest write timestamp per artifact node for freshness diagnostics.
-    - `async list_projection_latest_writes(self, db_name, branch, as_of, limit)` (line 1103): Return latest write timestamp per projection for freshness diagnostics.
-    - `async get_latest_edges_to(self, to_node_ids, edge_type, projection_name, db_name, branch)` (line 1157): Fetch the latest edge (by occurred_at) for each `to_node_id`.
-    - `async get_latest_edges_from(self, from_node_ids, edge_type, projection_name, db_name, branch)` (line 1252): Fetch the latest edge (by occurred_at) for each `from_node_id`.
-    - `async get_latest_edges_for_projections(self, projection_names, db_name, branch)` (line 1339): Fetch the latest edge (by occurred_at) for each projection.
-    - `async record_link(self, from_node_id, to_node_id, edge_type, occurred_at, edge_metadata, from_label, to_label, from_type, to_type, from_metadata, to_metadata, db_name, branch, projection_name, run_id, code_sha, schema_version, edge_id)` (line 1425): no docstring
-    - `async record_event_envelope(self, envelope, s3_bucket, s3_key)` (line 1517): Record the core lineage relationships for an EventEnvelope:
-    - `normalize_root(root)` (line 1621): no docstring
-    - `async get_graph(self, root, direction, max_depth, max_nodes, max_edges, db_name, branch, as_of)` (line 1634): no docstring
+    - `_is_ignorable_schema_backfill_error(exc)` (line 47): no docstring
+    - `__init__(self, dsn, schema, pool_min, pool_max)` (line 57): no docstring
+    - `async _ensure_tables(self, conn)` (line 76): no docstring
+    - `node_event(event_id)` (line 369): no docstring
+    - `node_aggregate(aggregate_type, aggregate_id)` (line 373): no docstring
+    - `node_artifact(kind, *parts)` (line 377): no docstring
+    - `_validate_no_disallowed_aliases(cls, node_id, edge_type)` (line 382): no docstring
+    - `_canonicalize_node_id(cls, node_id)` (line 391): no docstring
+    - `_canonicalize_edge_type(cls, edge_type)` (line 396): no docstring
+    - `_infer_branch_from_node_id(node_id)` (line 401): no docstring
+    - `_infer_node_type(node_id)` (line 427): no docstring
+    - `_parse_node_id(node_id)` (line 440): Decompose node_id into queryable columns (best-effort).
+    - `_run_context(cls)` (line 501): no docstring
+    - `_deterministic_edge_id(*parts)` (line 506): no docstring
+    - `_coerce_metadata(value)` (line 511): Coerce a Postgres JSONB value into a Python dict.
+    - `async upsert_node(self, node_id, node_type, label, metadata, created_at, recorded_at, db_name, branch, run_id, code_sha, schema_version)` (line 555): no docstring
+    - `async insert_edge(self, from_node_id, to_node_id, edge_type, occurred_at, metadata, projection_name, recorded_at, db_name, branch, run_id, code_sha, schema_version, edge_id)` (line 625): no docstring
+    - `async enqueue_backfill(self, envelope, s3_bucket, s3_key, error)` (line 695): Best-effort enqueue for eventual lineage recovery.
+    - `async mark_backfill_done(self, event_id)` (line 747): no docstring
+    - `async mark_backfill_failed(self, event_id, error)` (line 761): no docstring
+    - `async claim_backfill_batch(self, limit, db_name, branch)` (line 777): Claim a batch of pending backfill rows (best-effort).
+    - `async get_backfill_metrics(self, db_name, branch)` (line 837): no docstring
+    - `async count_edges(self, edge_type, db_name, branch, since, until)` (line 877): no docstring
+    - `_run_id_predicate(cls)` (line 912): no docstring
+    - `async list_edges(self, edge_type, projection_name, db_name, branch, run_id, since, until, limit)` (line 915): List lineage edges in reverse chronological order for timeline/ops analysis.
+    - `async list_run_summaries(self, db_name, branch, edge_type, since, until, limit)` (line 991): Aggregate lineage activity by run/build id.
+    - `async list_artifact_latest_writes(self, db_name, branch, artifact_kind, as_of, limit)` (line 1071): Return latest write timestamp per artifact node for freshness diagnostics.
+    - `async list_projection_latest_writes(self, db_name, branch, as_of, limit)` (line 1152): Return latest write timestamp per projection for freshness diagnostics.
+    - `async get_latest_edges_to(self, to_node_ids, edge_type, projection_name, db_name, branch)` (line 1206): Fetch the latest edge (by occurred_at) for each `to_node_id`.
+    - `async get_latest_edges_from(self, from_node_ids, edge_type, projection_name, db_name, branch)` (line 1301): Fetch the latest edge (by occurred_at) for each `from_node_id`.
+    - `async get_latest_edges_for_projections(self, projection_names, db_name, branch)` (line 1388): Fetch the latest edge (by occurred_at) for each projection.
+    - `async record_link(self, from_node_id, to_node_id, edge_type, occurred_at, edge_metadata, from_label, to_label, from_type, to_type, from_metadata, to_metadata, db_name, branch, projection_name, run_id, code_sha, schema_version, edge_id)` (line 1474): no docstring
+    - `async record_event_envelope(self, envelope, s3_bucket, s3_key)` (line 1566): Record the core lineage relationships for an EventEnvelope:
+    - `normalize_root(root)` (line 1670): no docstring
+    - `async get_graph(self, root, direction, max_depth, max_nodes, max_edges, db_name, branch, as_of)` (line 1683): no docstring
 
 ### `backend/shared/services/registries/objectify_registry.py`
 - **Classes**
@@ -10155,6 +10225,21 @@
 ### `backend/tests/unit/routers/test_legacy_router_backend_profile.py`
 - **Functions**
   - `test_removed_legacy_ontology_merge_routes_not_mounted()` (line 6): no docstring
+
+### `backend/tests/unit/routers/test_lineage_router_column_lineage.py`
+- **Functions**
+  - `test_parse_objectify_mapping_spec_ref()` (line 35): no docstring
+  - `test_extract_column_lineage_ref_entry_from_mapping_spec_fields()` (line 45): no docstring
+  - `async test_get_lineage_column_lineage_resolves_mapping_pairs()` (line 62): no docstring
+  - `async test_get_lineage_column_lineage_marks_version_mismatch_unresolved()` (line 127): no docstring
+  - `async test_get_lineage_column_lineage_uses_inline_pairs_when_ref_unresolved()` (line 180): no docstring
+- **Classes**
+  - `_FakeLineageStore` (line 14): no docstring
+    - `__init__(self, edges)` (line 15): no docstring
+    - `async list_edges(self, **kwargs)` (line 19): no docstring
+  - `_FakeObjectifyRegistry` (line 25): no docstring
+    - `__init__(self, specs_by_id)` (line 26): no docstring
+    - `async get_mapping_spec(self, mapping_spec_id)` (line 30): no docstring
 
 ### `backend/tests/unit/routers/test_lineage_router_naming.py`
 - **Functions**

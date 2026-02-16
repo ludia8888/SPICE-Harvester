@@ -552,9 +552,11 @@ async def execute_graph_query(
                         node_index_status["graph_last_updated_at"] = t_at.isoformat()
                         node_index_status["projection_last_indexed_at"] = e_at.isoformat()
                         node_index_status["projection_lag_seconds"] = max(0.0, (t_at - e_at).total_seconds())
-                except Exception:
-                    logging.getLogger(__name__).warning("Broad exception fallback at bff/services/graph_query_service.py:489", exc_info=True)
-                    pass
+                except (TypeError, ValueError):
+                    logging.getLogger(__name__).warning(
+                        "Failed to compute projection lag from provenance timestamps; skipping lag enrichment",
+                        exc_info=True,
+                    )
 
             nodes.append(
                 GraphNode(

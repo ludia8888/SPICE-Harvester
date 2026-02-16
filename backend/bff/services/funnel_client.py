@@ -566,9 +566,8 @@ class FunnelClient(ManagedAsyncClient):
         response.raise_for_status()
         try:
             fileobj.seek(0)
-        except Exception:
-            logging.getLogger(__name__).warning("Broad exception fallback at bff/services/funnel_client.py:569", exc_info=True)
-            pass
+        except (AttributeError, OSError, ValueError):
+            logging.getLogger(__name__).warning("Failed to rewind file stream after funnel analysis", exc_info=True)
         return response.json(), hasher.hexdigest()
     @staticmethod
     def _select_primary_table(structure: Dict[str, Any]) -> Dict[str, Any]:

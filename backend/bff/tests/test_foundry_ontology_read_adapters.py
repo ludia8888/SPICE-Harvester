@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import pytest
-from fastapi import HTTPException
+from fastapi import HTTPException, Response
 from starlette.requests import Request
 
 from bff.routers import link_types as link_types_router
@@ -244,12 +244,14 @@ async def _noop_require_domain_role(request, *, db_name):  # noqa: ANN001, ANN00
 @pytest.mark.asyncio
 async def test_list_object_types_foundry_shape():
     request = Request({"type": "http", "headers": []})
+    headers = Response()
     original_require = object_types_router._require_domain_role
     object_types_router._require_domain_role = _noop_require_domain_role
     try:
         response = await object_types_router.list_object_type_contracts(
             db_name="test_db",
             request=request,
+            response=headers,
             branch="main",
             page_size=1,
             page_token=None,
@@ -267,6 +269,9 @@ async def test_list_object_types_foundry_shape():
     assert response.data["data"][0]["properties"]["account_id"]["displayName"] == "Account ID"
     assert response.data["data"][0]["properties"]["account_id"]["dataType"]["type"] == "string"
     assert response.data["data"][0]["properties"]["account_id"]["status"] == "ACTIVE"
+    assert headers.headers.get("Deprecation") == "true"
+    assert headers.headers.get("Sunset") is not None
+    assert "successor-version" in str(headers.headers.get("Link"))
 
 
 @pytest.mark.asyncio
@@ -314,6 +319,7 @@ async def test_list_object_types_page_token_scope_mismatch_rejected():
 @pytest.mark.asyncio
 async def test_get_object_type_foundry_shape():
     request = Request({"type": "http", "headers": []})
+    headers = Response()
     original_require = object_types_router._require_domain_role
     object_types_router._require_domain_role = _noop_require_domain_role
     try:
@@ -321,6 +327,7 @@ async def test_get_object_type_foundry_shape():
             db_name="test_db",
             class_id="Account",
             request=request,
+            response=headers,
             branch="main",
             oms_client=_FakeObjectTypeGetOMSClient(),
         )
@@ -339,6 +346,8 @@ async def test_get_object_type_foundry_shape():
     assert row["properties"]["account_id"]["required"] is True
     assert row["properties"]["account_id"]["status"] == "ACTIVE"
     assert "backing_datasource" not in row
+    assert headers.headers.get("Deprecation") == "true"
+    assert "successor-version" in str(headers.headers.get("Link"))
 
 
 @pytest.mark.asyncio
@@ -365,9 +374,11 @@ async def test_get_object_type_infers_primary_key_without_pk_spec():
 
 @pytest.mark.asyncio
 async def test_list_outgoing_link_types_foundry_shape_and_filtering():
+    headers = Response()
     response = await link_types_router.list_outgoing_link_types(
         db_name="test_db",
         object_type_api_name="Account",
+        response=headers,
         branch="main",
         page_size=10,
         page_token=None,
@@ -381,6 +392,8 @@ async def test_list_outgoing_link_types_foundry_shape_and_filtering():
     assert rows[0]["cardinality"] == "ONE"
     assert rows[0]["foreignKeyPropertyApiName"] == "owner_id"
     assert rows[1]["cardinality"] == "MANY"
+    assert headers.headers.get("Deprecation") == "true"
+    assert headers.headers.get("Sunset") is not None
 
 
 @pytest.mark.asyncio
@@ -446,10 +459,12 @@ async def test_list_outgoing_link_types_pagination_uses_filtered_offset_semantic
 
 @pytest.mark.asyncio
 async def test_get_outgoing_link_type_foundry_shape():
+    headers = Response()
     response = await link_types_router.get_outgoing_link_type(
         db_name="test_db",
         object_type_api_name="Account",
         link_type_api_name="owned_by",
+        response=headers,
         branch="main",
         oms_client=_FakeLinkTypeGetOMSClient(),
     )
@@ -458,5 +473,6 @@ async def test_get_outgoing_link_type_foundry_shape():
     assert response.data["apiName"] == "owned_by"
     assert response.data["displayName"] == "Owned By"
     assert response.data["objectTypeApiName"] == "User"
+    assert headers.headers.get("Deprecation") == "true"
     assert response.data["cardinality"] == "ONE"
     assert response.data["status"] == "ACTIVE"

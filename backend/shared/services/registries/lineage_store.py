@@ -43,6 +43,17 @@ class LineageStore(PostgresSchemaRegistry):
     _DISALLOWED_ES_EDGE_TYPE_ALIAS = "event_wrote_es_document"
     _DISALLOWED_S3_EDGE_TYPE_ALIAS = "event_wrote_s3_object"
 
+    @staticmethod
+    def _is_ignorable_schema_backfill_error(exc: asyncpg.PostgresError) -> bool:
+        return isinstance(
+            exc,
+            (
+                asyncpg.UndefinedTableError,
+                asyncpg.UndefinedColumnError,
+                asyncpg.UndefinedFunctionError,
+            ),
+        )
+
     def __init__(
         self,
         *,
@@ -205,9 +216,15 @@ class LineageStore(PostgresSchemaRegistry):
                 WHERE db_name IS NULL AND (metadata ? 'db_name')
                 """
             )
-        except Exception:
-            logging.getLogger(__name__).warning("Broad exception fallback at shared/services/registries/lineage_store.py:183", exc_info=True)
-            pass
+        except asyncpg.PostgresError as exc:
+            if self._is_ignorable_schema_backfill_error(exc):
+                logging.getLogger(__name__).warning(
+                    "Best-effort lineage edge db_name backfill skipped due to schema incompatibility: %s",
+                    exc,
+                    exc_info=True,
+                )
+            else:
+                raise
         try:
             await conn.execute(
                 f"""
@@ -216,9 +233,15 @@ class LineageStore(PostgresSchemaRegistry):
                 WHERE db_name IS NULL AND (metadata ? 'db_name')
                 """
             )
-        except Exception:
-            logging.getLogger(__name__).warning("Broad exception fallback at shared/services/registries/lineage_store.py:193", exc_info=True)
-            pass
+        except asyncpg.PostgresError as exc:
+            if self._is_ignorable_schema_backfill_error(exc):
+                logging.getLogger(__name__).warning(
+                    "Best-effort lineage node db_name backfill skipped due to schema incompatibility: %s",
+                    exc,
+                    exc_info=True,
+                )
+            else:
+                raise
         try:
             await conn.execute(
                 f"""
@@ -227,9 +250,15 @@ class LineageStore(PostgresSchemaRegistry):
                 WHERE branch IS NULL AND (metadata ? 'branch')
                 """
             )
-        except Exception:
-            logging.getLogger(__name__).warning("Broad exception fallback at shared/services/registries/lineage_store.py:203", exc_info=True)
-            pass
+        except asyncpg.PostgresError as exc:
+            if self._is_ignorable_schema_backfill_error(exc):
+                logging.getLogger(__name__).warning(
+                    "Best-effort lineage edge branch backfill skipped due to schema incompatibility: %s",
+                    exc,
+                    exc_info=True,
+                )
+            else:
+                raise
         try:
             await conn.execute(
                 f"""
@@ -238,9 +267,15 @@ class LineageStore(PostgresSchemaRegistry):
                 WHERE branch IS NULL AND (metadata ? 'branch')
                 """
             )
-        except Exception:
-            logging.getLogger(__name__).warning("Broad exception fallback at shared/services/registries/lineage_store.py:213", exc_info=True)
-            pass
+        except asyncpg.PostgresError as exc:
+            if self._is_ignorable_schema_backfill_error(exc):
+                logging.getLogger(__name__).warning(
+                    "Best-effort lineage node branch backfill skipped due to schema incompatibility: %s",
+                    exc,
+                    exc_info=True,
+                )
+            else:
+                raise
         await conn.execute(
             f"CREATE INDEX IF NOT EXISTS idx_lineage_edges_from ON {self._schema}.lineage_edges(from_node_id)"
         )
@@ -270,10 +305,15 @@ class LineageStore(PostgresSchemaRegistry):
                 WHERE edge_id IN (SELECT edge_id FROM ranked WHERE rn > 1)
                 """
             )
-        except Exception:
-            # Best-effort cleanup; index creation will still enforce correctness.
-            logging.getLogger(__name__).warning("Broad exception fallback at shared/services/registries/lineage_store.py:222", exc_info=True)
-            pass
+        except asyncpg.PostgresError as exc:
+            if self._is_ignorable_schema_backfill_error(exc):
+                logging.getLogger(__name__).warning(
+                    "Best-effort lineage edge dedupe skipped due to schema incompatibility: %s",
+                    exc,
+                    exc_info=True,
+                )
+            else:
+                raise
 
         await conn.execute(
             f"""
@@ -488,19 +528,28 @@ class LineageStore(PostgresSchemaRegistry):
                 if isinstance(parsed, dict):
                     return parsed
                 return {"value": parsed}
-            except Exception:
-                logging.getLogger(__name__).warning("Broad exception fallback at shared/services/registries/lineage_store.py:374", exc_info=True)
+            except json.JSONDecodeError:
+                logging.getLogger(__name__).warning(
+                    "Invalid JSON metadata payload in lineage store; preserving raw metadata string",
+                    exc_info=True,
+                )
                 return {"raw": value}
         if isinstance(value, (list, tuple)):
             try:
                 return dict(value)
-            except Exception:
-                logging.getLogger(__name__).warning("Broad exception fallback at shared/services/registries/lineage_store.py:379", exc_info=True)
+            except (TypeError, ValueError):
+                logging.getLogger(__name__).warning(
+                    "Invalid key/value metadata sequence in lineage store; preserving raw metadata value",
+                    exc_info=True,
+                )
                 return {"raw": value}
         try:
             return dict(value)
-        except Exception:
-            logging.getLogger(__name__).warning("Broad exception fallback at shared/services/registries/lineage_store.py:383", exc_info=True)
+        except (TypeError, ValueError):
+            logging.getLogger(__name__).warning(
+                "Metadata coercion failed in lineage store; defaulting metadata to empty dict",
+                exc_info=True,
+            )
             return {}
 
     async def upsert_node(

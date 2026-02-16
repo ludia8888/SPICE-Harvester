@@ -930,8 +930,8 @@ async def _execute_label_query(
                 detail_json = exc.response.json()
                 if isinstance(detail_json, dict):
                     detail = detail_json.get("detail") or detail_json
-            except Exception:
-                pass
+            except ValueError:
+                logger.warning("Failed to parse upstream query error payload as JSON", exc_info=True)
 
         if status_code >= 500:
             raise classified_http_exception(

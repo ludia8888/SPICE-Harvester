@@ -42,6 +42,7 @@ async def test_instance_lineage_records_dataset_version():
         instance_ids=["acc-1"],
         mapping_spec_id="map-1",
         mapping_spec_version=1,
+        column_lineage_pairs=[],
         ontology_version={},
         limit_remaining=10,
         input_type="dataset_version",
@@ -56,3 +57,7 @@ async def test_instance_lineage_records_dataset_version():
     metadata = dataset_links[0]["edge_metadata"]
     assert metadata["dataset_version_id"] == "ver-1"
     assert metadata["dataset_id"] == "ds-1"
+    assert metadata["column_lineage_ref"] == "objectify_mapping_spec:map-1:v1"
+    assert metadata["column_lineage_storage"] == "postgres.objectify_registry"
+    assert metadata["column_lineage_schema_version"] == "v1"
+    assert metadata["column_lineage_pairs"] == []

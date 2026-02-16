@@ -10,7 +10,7 @@ import logging
 from typing import Any, Dict, List, Optional
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 
 from shared.errors.error_types import ErrorCode, classified_http_exception
 
@@ -19,6 +19,7 @@ from bff.routers.object_types_deps import get_dataset_registry, get_objectify_re
 from bff.schemas.object_types_requests import ObjectTypeContractRequest, ObjectTypeContractUpdate
 from bff.services import object_type_contract_service
 from bff.services.oms_client import OMSClient
+from bff.utils.deprecation_headers import apply_v1_to_v2_deprecation_headers
 from shared.models.requests import ApiResponse
 from shared.security.database_access import DOMAIN_MODEL_ROLES, enforce_database_role
 from shared.security.input_sanitizer import validate_db_name
@@ -277,12 +278,18 @@ def _to_foundry_object_type(resource: Dict[str, Any], *, ontology_payload: Any) 
 async def list_object_type_contracts(
     db_name: str,
     request: Request,
+    response: Response = None,
     branch: str = Query("main", description="Target branch"),
     page_size: int = Query(500, alias="pageSize", ge=1, le=1000),
     page_token: Optional[str] = Query(default=None, alias="pageToken"),
     oms_client: OMSClient = OMSClientDep,
 ) -> ApiResponse:
     db_name = validate_db_name(db_name)
+    if response is not None:
+        apply_v1_to_v2_deprecation_headers(
+            response,
+            successor_path=f"/api/v2/ontologies/{db_name}/objectTypes",
+        )
     await _require_domain_role(request, db_name=db_name)
 
     page_scope = _pagination_scope("v1/object-types", db_name, branch)
@@ -358,12 +365,18 @@ async def get_object_type_contract(
     db_name: str,
     class_id: str,
     request: Request,
+    response: Response = None,
     branch: str = Query("main", description="Target branch"),
     oms_client: OMSClient = OMSClientDep,
 ) -> ApiResponse:
     db_name = validate_db_name(db_name)
-    await _require_domain_role(request, db_name=db_name)
     class_id = str(class_id or "").strip()
+    if response is not None:
+        apply_v1_to_v2_deprecation_headers(
+            response,
+            successor_path=f"/api/v2/ontologies/{db_name}/objectTypes/{class_id}",
+        )
+    await _require_domain_role(request, db_name=db_name)
     if not class_id:
         raise classified_http_exception(
             status.HTTP_400_BAD_REQUEST,

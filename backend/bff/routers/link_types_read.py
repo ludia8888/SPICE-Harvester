@@ -7,13 +7,14 @@ import logging
 from shared.observability.tracing import trace_endpoint
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from shared.errors.error_types import ErrorCode, classified_http_exception
 
 from bff.dependencies import OMSClientDep
 from bff.routers.role_deps import require_database_role
 from bff.routers.link_types_deps import get_dataset_registry
 from bff.services.oms_client import OMSClient
+from bff.utils.deprecation_headers import apply_v1_to_v2_deprecation_headers
 from shared.models.requests import ApiResponse
 from shared.security.database_access import DATA_ENGINEER_ROLES, DOMAIN_MODEL_ROLES
 from shared.security.input_sanitizer import validate_db_name
@@ -197,6 +198,7 @@ async def list_link_types(
 async def list_outgoing_link_types(
     db_name: str,
     object_type_api_name: str,
+    response: Response = None,
     branch: str = Query("main", description="Target branch"),
     page_size: int = Query(500, alias="pageSize", ge=1, le=1000),
     page_token: str | None = Query(default=None, alias="pageToken"),
@@ -205,6 +207,11 @@ async def list_outgoing_link_types(
     try:
         db_name = validate_db_name(db_name)
         object_type_api_name = str(object_type_api_name or "").strip()
+        if response is not None:
+            apply_v1_to_v2_deprecation_headers(
+                response,
+                successor_path=f"/api/v2/ontologies/{db_name}/objectTypes/{object_type_api_name}/outgoingLinkTypes",
+            )
         if not object_type_api_name:
             raise classified_http_exception(
                 status.HTTP_400_BAD_REQUEST,
@@ -216,9 +223,11 @@ async def list_outgoing_link_types(
         offset = _decode_page_token(page_token, scope=page_scope)
         scan_limit = min(max(page_size, 500), 1000)
         scan_offset = 0
-        matched: list[dict] = []
+        filtered_index = 0
+        data: list[dict] = []
+        has_more = False
 
-        while True:
+        while not has_more:
             payload = await oms_client.list_ontology_resources(
                 db_name,
                 resource_type="link_type",
@@ -232,16 +241,24 @@ async def list_outgoing_link_types(
 
             for resource in resources:
                 mapped = _to_foundry_outgoing_link_type(resource, source_object_type=object_type_api_name)
-                if mapped is not None:
-                    matched.append(mapped)
+                if mapped is None:
+                    continue
+                if filtered_index < offset:
+                    filtered_index += 1
+                    continue
+                if len(data) < page_size:
+                    data.append(mapped)
+                    filtered_index += 1
+                    continue
+                has_more = True
+                break
 
             scan_offset += len(resources)
             if len(resources) < scan_limit:
                 break
 
-        data = matched[offset : offset + page_size]
         next_offset = offset + len(data)
-        next_page_token = _encode_page_token(next_offset, scope=page_scope) if next_offset < len(matched) else None
+        next_page_token = _encode_page_token(next_offset, scope=page_scope) if has_more else None
         return ApiResponse.success(
             message="Outgoing link types retrieved",
             data={
@@ -265,6 +282,7 @@ async def get_outgoing_link_type(
     db_name: str,
     object_type_api_name: str,
     link_type_api_name: str,
+    response: Response = None,
     branch: str = Query("main", description="Target branch"),
     oms_client: OMSClient = OMSClientDep,
 ) -> ApiResponse:
@@ -272,6 +290,13 @@ async def get_outgoing_link_type(
         db_name = validate_db_name(db_name)
         object_type_api_name = str(object_type_api_name or "").strip()
         link_type_api_name = str(link_type_api_name or "").strip()
+        if response is not None:
+            apply_v1_to_v2_deprecation_headers(
+                response,
+                successor_path=(
+                    f"/api/v2/ontologies/{db_name}/objectTypes/{object_type_api_name}/outgoingLinkTypes/{link_type_api_name}"
+                ),
+            )
         if not object_type_api_name:
             raise classified_http_exception(
                 status.HTTP_400_BAD_REQUEST,

@@ -1019,9 +1019,14 @@ async def simulate_action_async(
                     created_by=submitted_by or "system",
                     created_by_type=submitted_by_type or "user",
                 )
-            except Exception:
-                logging.getLogger(__name__).warning("Broad exception fallback at oms/routers/action_async.py:909", exc_info=True)
-                pass
+            except (RuntimeError, ValueError, TypeError, KeyError) as registry_exc:
+                logger.warning(
+                    "Failed to persist rejected simulation version (simulation_id=%s, version=%s): %s",
+                    simulation_id,
+                    version,
+                    registry_exc,
+                    exc_info=True,
+                )
         raise classified_http_exception(
             exc.status_code,
             str(exc.payload),
@@ -1047,9 +1052,14 @@ async def simulate_action_async(
                     created_by=submitted_by or "system",
                     created_by_type=submitted_by_type or "user",
                 )
-            except Exception:
-                logging.getLogger(__name__).warning("Broad exception fallback at oms/routers/action_async.py:936", exc_info=True)
-                pass
+            except (RuntimeError, ValueError, TypeError, KeyError) as registry_exc:
+                logger.warning(
+                    "Failed to persist failed simulation version (simulation_id=%s, version=%s): %s",
+                    simulation_id,
+                    version,
+                    registry_exc,
+                    exc_info=True,
+                )
         raise
     finally:
         if dataset_registry:

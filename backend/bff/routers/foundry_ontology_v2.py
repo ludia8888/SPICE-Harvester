@@ -59,6 +59,20 @@ def _foundry_error(
     )
 
 
+def _passthrough_upstream_error_payload(exc: httpx.HTTPStatusError) -> JSONResponse | None:
+    response = exc.response
+    if response is None:
+        return None
+    try:
+        payload = response.json()
+    except ValueError:
+        logger.warning("Failed to decode upstream error payload as JSON", exc_info=True)
+        return None
+    if not isinstance(payload, dict):
+        return None
+    return JSONResponse(status_code=response.status_code, content=payload)
+
+
 def _named_not_found(error_name: str, *, parameters: Dict[str, Any]) -> JSONResponse:
     return _foundry_error(
         status.HTTP_404_NOT_FOUND,
@@ -216,17 +230,13 @@ def _linked_object_not_found_generic(
     )
 
 
-def _coerce_primary_key_values(value: Any) -> list[str]:
-    collected: list[str] = []
-
+def _iter_primary_key_values(value: Any):
     if value is None:
-        return collected
-
+        return
     if isinstance(value, list):
         for item in value:
-            collected.extend(_coerce_primary_key_values(item))
-        return collected
-
+            yield from _iter_primary_key_values(item)
+        return
     if isinstance(value, dict):
         for key in ("__primaryKey", "primaryKey", "id", "instance_id"):
             candidate = value.get(key)
@@ -234,13 +244,15 @@ def _coerce_primary_key_values(value: Any) -> list[str]:
                 continue
             text = str(candidate).strip()
             if text:
-                collected.append(text)
-        return collected
-
+                yield text
+        return
     text = str(value).strip()
     if text:
-        collected.append(text)
-    return collected
+        yield text
+
+
+def _coerce_primary_key_values(value: Any) -> list[str]:
+    return list(_iter_primary_key_values(value))
 
 
 def _extract_linked_primary_keys(
@@ -249,26 +261,99 @@ def _extract_linked_primary_keys(
     link_type: str,
     foreign_key_property: str | None,
 ) -> list[str]:
-    values: list[str] = []
-
-    if foreign_key_property:
-        values.extend(_coerce_primary_key_values(source_row.get(foreign_key_property)))
-
-    for key in (link_type, f"{link_type}Ids", f"{link_type}_ids"):
-        values.extend(_coerce_primary_key_values(source_row.get(key)))
-
-    links = source_row.get("links")
-    if isinstance(links, dict):
-        values.extend(_coerce_primary_key_values(links.get(link_type)))
-
     deduped: list[str] = []
     seen: set[str] = set()
-    for value in values:
+    for value in _iter_linked_primary_keys(
+        source_row,
+        link_type=link_type,
+        foreign_key_property=foreign_key_property,
+    ):
         if value in seen:
             continue
         seen.add(value)
         deduped.append(value)
     return deduped
+
+
+def _iter_linked_primary_keys(
+    source_row: dict[str, Any],
+    *,
+    link_type: str,
+    foreign_key_property: str | None,
+):
+    if foreign_key_property:
+        yield from _iter_primary_key_values(source_row.get(foreign_key_property))
+
+    for key in (link_type, f"{link_type}Ids", f"{link_type}_ids"):
+        yield from _iter_primary_key_values(source_row.get(key))
+
+    links = source_row.get("links")
+    if isinstance(links, dict):
+        yield from _iter_primary_key_values(links.get(link_type))
+
+
+def _extract_linked_primary_keys_page(
+    source_row: dict[str, Any],
+    *,
+    link_type: str,
+    foreign_key_property: str | None,
+    offset: int,
+    page_size: int,
+) -> tuple[list[str], bool]:
+    """Extract a deduplicated page without materializing every linked PK."""
+    start = max(0, int(offset))
+    limit = max(1, int(page_size))
+    seen: set[str] = set()
+    page: list[str] = []
+    deduped_index = 0
+    has_more = False
+
+    for value in _iter_linked_primary_keys(
+        source_row,
+        link_type=link_type,
+        foreign_key_property=foreign_key_property,
+    ):
+        if value in seen:
+            continue
+        seen.add(value)
+
+        if deduped_index < start:
+            deduped_index += 1
+            continue
+
+        if len(page) < limit:
+            page.append(value)
+            deduped_index += 1
+            continue
+
+        has_more = True
+        break
+
+    return page, has_more
+
+
+def _linked_primary_key_exists(
+    source_row: dict[str, Any],
+    *,
+    link_type: str,
+    foreign_key_property: str | None,
+    linked_primary_key: str,
+) -> bool:
+    target = str(linked_primary_key or "").strip()
+    if not target:
+        return False
+    seen: set[str] = set()
+    for value in _iter_linked_primary_keys(
+        source_row,
+        link_type=link_type,
+        foreign_key_property=foreign_key_property,
+    ):
+        if value in seen:
+            continue
+        seen.add(value)
+        if value == target:
+            return True
+    return False
 
 
 def _build_primary_key_where(primary_key_field: str, primary_key_values: list[str]) -> dict[str, Any]:
@@ -676,9 +761,11 @@ async def list_outgoing_link_types_v2(
     try:
         scan_limit = min(max(page_size, 500), 1000)
         scan_offset = 0
-        matched: list[dict] = []
+        filtered_index = 0
+        data: list[dict] = []
+        has_more = False
 
-        while True:
+        while not has_more:
             payload = await oms_client.list_ontology_resources(
                 db_name,
                 resource_type="link_type",
@@ -691,15 +778,23 @@ async def list_outgoing_link_types_v2(
                 break
             for resource in resources:
                 mapped = _to_foundry_outgoing_link_type(resource, source_object_type=source_object_type)
-                if mapped is not None:
-                    matched.append(mapped)
+                if mapped is None:
+                    continue
+                if filtered_index < offset:
+                    filtered_index += 1
+                    continue
+                if len(data) < page_size:
+                    data.append(mapped)
+                    filtered_index += 1
+                    continue
+                has_more = True
+                break
             scan_offset += len(resources)
             if len(resources) < scan_limit:
                 break
 
-        data = matched[offset : offset + page_size]
         next_offset = offset + len(data)
-        next_page_token = _encode_page_token(next_offset, scope=page_scope) if next_offset < len(matched) else None
+        next_page_token = _encode_page_token(next_offset, scope=page_scope) if has_more else None
         return {"data": data, "nextPageToken": next_page_token}
     except httpx.HTTPStatusError as exc:
         status_code = exc.response.status_code if exc.response is not None else status.HTTP_502_BAD_GATEWAY
@@ -865,13 +960,9 @@ async def search_objects_v2(
         return result
     except httpx.HTTPStatusError as exc:
         status_code = exc.response.status_code if exc.response is not None else status.HTTP_502_BAD_GATEWAY
-        if exc.response is not None:
-            try:
-                upstream_payload = exc.response.json()
-                if isinstance(upstream_payload, dict):
-                    return JSONResponse(status_code=status_code, content=upstream_payload)
-            except Exception:
-                pass
+        passthrough = _passthrough_upstream_error_payload(exc)
+        if passthrough is not None:
+            return passthrough
         if status_code == status.HTTP_404_NOT_FOUND:
             return _object_type_not_found(ontology=db_name, object_type=object_type)
         return _foundry_error(
@@ -961,13 +1052,9 @@ async def list_objects_v2(
         return result
     except httpx.HTTPStatusError as exc:
         status_code = exc.response.status_code if exc.response is not None else status.HTTP_502_BAD_GATEWAY
-        if exc.response is not None:
-            try:
-                upstream_payload = exc.response.json()
-                if isinstance(upstream_payload, dict):
-                    return JSONResponse(status_code=status_code, content=upstream_payload)
-            except Exception:
-                pass
+        passthrough = _passthrough_upstream_error_payload(exc)
+        if passthrough is not None:
+            return passthrough
         if status_code == status.HTTP_404_NOT_FOUND:
             return _object_type_not_found(ontology=db_name, object_type=object_type)
         return _foundry_error(
@@ -1105,13 +1192,9 @@ async def get_object_v2(
         return row
     except httpx.HTTPStatusError as exc:
         status_code = exc.response.status_code if exc.response is not None else status.HTTP_502_BAD_GATEWAY
-        if exc.response is not None:
-            try:
-                upstream_payload = exc.response.json()
-                if isinstance(upstream_payload, dict):
-                    return JSONResponse(status_code=status_code, content=upstream_payload)
-            except Exception:
-                pass
+        passthrough = _passthrough_upstream_error_payload(exc)
+        if passthrough is not None:
+            return passthrough
         if status_code == status.HTTP_404_NOT_FOUND:
             return _object_not_found(
                 ontology=db_name,
@@ -1339,15 +1422,14 @@ async def list_linked_objects_v2(
             parameters={"ontology": db_name, "objectType": object_type, "primaryKey": primary_key_value, "linkType": link_type},
         )
 
-    linked_primary_keys = _extract_linked_primary_keys(
+    foreign_key_property = str(link_type_side.get("foreignKeyPropertyApiName") or "").strip() or None
+    paged_primary_keys, has_more = _extract_linked_primary_keys_page(
         source_row,
         link_type=link_type,
-        foreign_key_property=str(link_type_side.get("foreignKeyPropertyApiName") or "").strip() or None,
+        foreign_key_property=foreign_key_property,
+        offset=offset,
+        page_size=page_size,
     )
-    if not linked_primary_keys:
-        return {"data": [], "nextPageToken": None}
-
-    paged_primary_keys = linked_primary_keys[offset : offset + page_size]
     if not paged_primary_keys:
         return {"data": [], "nextPageToken": None}
 
@@ -1374,17 +1456,13 @@ async def list_linked_objects_v2(
         if not isinstance(data, list):
             data = []
         next_offset = offset + len(paged_primary_keys)
-        next_page_token = _encode_page_token(next_offset, scope=page_scope) if next_offset < len(linked_primary_keys) else None
+        next_page_token = _encode_page_token(next_offset, scope=page_scope) if has_more else None
         return {"data": data, "nextPageToken": next_page_token}
     except httpx.HTTPStatusError as exc:
         status_code = exc.response.status_code if exc.response is not None else status.HTTP_502_BAD_GATEWAY
-        if exc.response is not None:
-            try:
-                upstream_payload = exc.response.json()
-                if isinstance(upstream_payload, dict):
-                    return JSONResponse(status_code=status_code, content=upstream_payload)
-            except Exception:
-                pass
+        passthrough = _passthrough_upstream_error_payload(exc)
+        if passthrough is not None:
+            return passthrough
         if status_code == status.HTTP_404_NOT_FOUND:
             return _link_type_not_found(
                 ontology=db_name,
@@ -1633,12 +1711,13 @@ async def get_linked_object_v2(
             parameters=error_parameters,
         )
 
-    linked_primary_keys = _extract_linked_primary_keys(
+    foreign_key_property = str(link_type_side.get("foreignKeyPropertyApiName") or "").strip() or None
+    if not _linked_primary_key_exists(
         source_row,
         link_type=link_type,
-        foreign_key_property=str(link_type_side.get("foreignKeyPropertyApiName") or "").strip() or None,
-    )
-    if linked_primary_key_value not in linked_primary_keys:
+        foreign_key_property=foreign_key_property,
+        linked_primary_key=linked_primary_key_value,
+    ):
         return _linked_object_not_found(
             ontology=db_name,
             object_type=object_type,

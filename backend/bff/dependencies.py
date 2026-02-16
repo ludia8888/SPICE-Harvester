@@ -193,9 +193,11 @@ class FoundryQueryService:
                 detail_json = e.response.json()
                 if isinstance(detail_json, dict):
                     detail = detail_json.get("detail") or detail_json
-            except Exception:
-                logging.getLogger(__name__).warning("Broad exception fallback at bff/dependencies.py:202", exc_info=True)
-                pass
+            except ValueError:
+                logging.getLogger(__name__).warning(
+                    "Failed to parse upstream ontology error payload as JSON",
+                    exc_info=True,
+                )
             raise classified_http_exception(e.response.status_code, str(detail), code=ErrorCode.UPSTREAM_ERROR) from e
         except Exception:
             # Re-raise other exceptions

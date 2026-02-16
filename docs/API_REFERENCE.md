@@ -173,6 +173,7 @@
 - `POST /api/v1/databases/{db_name}/mappings/validate`
 
 ### Lineage
+- `GET /api/v1/lineage/column-lineage`
 - `GET /api/v1/lineage/diff`
 - `GET /api/v1/lineage/graph`
 - `GET /api/v1/lineage/impact`

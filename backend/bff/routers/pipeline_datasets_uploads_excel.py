@@ -85,9 +85,8 @@ async def upload_excel_dataset(
             raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "Empty file", code=ErrorCode.REQUEST_VALIDATION_FAILED)
         try:
             file.file.seek(0)
-        except Exception:
-            logging.getLogger(__name__).warning("Broad exception fallback at bff/routers/pipeline_datasets_uploads_excel.py:88", exc_info=True)
-            pass
+        except (AttributeError, OSError, ValueError):
+            logging.getLogger(__name__).warning("Failed to rewind uploaded Excel stream", exc_info=True)
         upload_stream: Any = file.file
         if is_xls:
             raw_bytes = await asyncio.to_thread(file.file.read)
@@ -95,9 +94,8 @@ async def upload_excel_dataset(
                 raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "Empty file", code=ErrorCode.REQUEST_VALIDATION_FAILED)
             try:
                 file.file.seek(0)
-            except Exception:
-                logging.getLogger(__name__).warning("Broad exception fallback at bff/routers/pipeline_datasets_uploads_excel.py:97", exc_info=True)
-                pass
+            except (AttributeError, OSError, ValueError):
+                logging.getLogger(__name__).warning("Failed to rewind legacy XLS stream", exc_info=True)
             converted = await asyncio.to_thread(_convert_xls_to_xlsx_bytes, raw_bytes)
             stem = filename.rsplit(".", 1)[0].strip() or "upload"
             filename = f"{stem}.xlsx"

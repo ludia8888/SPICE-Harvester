@@ -2092,6 +2092,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                 instance_ids=instance_ids,
                 mapping_spec_id=mapping_spec.mapping_spec_id,
                 mapping_spec_version=mapping_spec.version,
+                column_lineage_pairs=self._build_column_lineage_pairs(getattr(mapping_spec, "mappings", None)),
                 ontology_version=ontology_version,
                 limit_remaining=lineage_remaining,
                 input_type=input_type,
@@ -3807,6 +3808,35 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
             instance_ids.append(str_candidate)
         return instances, instance_ids
 
+    @staticmethod
+    def _build_column_lineage_pairs(mappings: Any, *, limit: int = 1000) -> List[Dict[str, str]]:
+        if not isinstance(mappings, list):
+            return []
+        pairs: List[Dict[str, str]] = []
+        seen: set[tuple[str, str]] = set()
+        max_pairs = max(1, int(limit))
+        for mapping in mappings:
+            if not isinstance(mapping, dict):
+                continue
+            source_field = mapping.get("source_field")
+            if source_field is None:
+                source_field = mapping.get("sourceField")
+            target_field = mapping.get("target_field")
+            if target_field is None:
+                target_field = mapping.get("targetField")
+            source = str(source_field or "").strip()
+            target = str(target_field or "").strip()
+            if not source or not target:
+                continue
+            key = (source, target)
+            if key in seen:
+                continue
+            seen.add(key)
+            pairs.append({"source_field": source, "target_field": target})
+            if len(pairs) >= max_pairs:
+                break
+        return pairs
+
     async def _record_lineage_header(
         self,
         *,
@@ -3824,6 +3854,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
         async def _record_header_links() -> str:
             job_node = LineageStore.node_aggregate("ObjectifyJob", job.job_id)
             lineage_branch = job.dataset_branch or job.ontology_branch or "main"
+            column_lineage_pairs = self._build_column_lineage_pairs(getattr(mapping_spec, "mappings", None))
             if input_type == "artifact":
                 source_node = LineageStore.node_aggregate("PipelineArtifact", str(job.artifact_id))
                 edge_type = "pipeline_artifact_objectify_job"
@@ -3836,6 +3867,9 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                     "mapping_spec_id": job.mapping_spec_id,
                     "mapping_spec_version": job.mapping_spec_version,
                     "target_class_id": job.target_class_id,
+                    "column_lineage_ref": f"objectify_mapping_spec:{mapping_spec.mapping_spec_id}:v{int(mapping_spec.version)}",
+                    "column_lineage_storage": "postgres.objectify_registry",
+                    "column_lineage_schema_version": "v1",
                 }
             else:
                 source_node = LineageStore.node_aggregate("DatasetVersion", str(job.dataset_version_id))
@@ -3848,7 +3882,12 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                     "mapping_spec_id": job.mapping_spec_id,
                     "mapping_spec_version": job.mapping_spec_version,
                     "target_class_id": job.target_class_id,
+                    "column_lineage_ref": f"objectify_mapping_spec:{mapping_spec.mapping_spec_id}:v{int(mapping_spec.version)}",
+                    "column_lineage_storage": "postgres.objectify_registry",
+                    "column_lineage_schema_version": "v1",
                 }
+            if column_lineage_pairs is not None:
+                edge_metadata["column_lineage_pairs"] = column_lineage_pairs
             await self.lineage_store.record_link(  # type: ignore[union-attr]
                 from_node_id=source_node,
                 to_node_id=job_node,
@@ -3874,6 +3913,10 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                     "mapping_spec_id": mapping_spec.mapping_spec_id,
                     "mapping_spec_version": mapping_spec.version,
                     "dataset_id": job.dataset_id,
+                    "target_class_id": job.target_class_id,
+                    "column_lineage_ref": f"objectify_mapping_spec:{mapping_spec.mapping_spec_id}:v{int(mapping_spec.version)}",
+                    "column_lineage_storage": "postgres.objectify_registry",
+                    "column_lineage_schema_version": "v1",
                 },
             )
 
@@ -3922,6 +3965,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
         instance_ids: List[str],
         mapping_spec_id: str,
         mapping_spec_version: int,
+        column_lineage_pairs: Optional[List[Dict[str, str]]],
         ontology_version: Optional[Dict[str, str]],
         limit_remaining: int,
         input_type: str,
@@ -3933,6 +3977,13 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
             return limit_remaining
         if limit_remaining <= 0:
             return limit_remaining
+        column_lineage_metadata = {
+            "column_lineage_ref": f"objectify_mapping_spec:{mapping_spec_id}:v{int(mapping_spec_version)}",
+            "column_lineage_storage": "postgres.objectify_registry",
+            "column_lineage_schema_version": "v1",
+        }
+        if column_lineage_pairs is not None:
+            column_lineage_metadata["column_lineage_pairs"] = column_lineage_pairs
         if input_type == "artifact":
             source_node = LineageStore.node_aggregate("PipelineArtifact", str(job.artifact_id))
             edge_type = "pipeline_artifact_objectified"
@@ -3947,6 +3998,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                 "mapping_spec_version": mapping_spec_version,
                 "target_class_id": job.target_class_id,
                 "ontology": ontology_version or {},
+                **column_lineage_metadata,
             }
         else:
             source_node = LineageStore.node_aggregate("DatasetVersion", str(job.dataset_version_id))
@@ -3961,6 +4013,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                 "mapping_spec_version": mapping_spec_version,
                 "target_class_id": job.target_class_id,
                 "ontology": ontology_version or {},
+                **column_lineage_metadata,
             }
         for instance_id in instance_ids:
             if limit_remaining <= 0:
@@ -3997,6 +4050,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                             "mapping_spec_version": mapping_spec_version,
                             "target_class_id": job.target_class_id,
                             "ontology": ontology_version or {},
+                            **column_lineage_metadata,
                         },
                     )
                 return True

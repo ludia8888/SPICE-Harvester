@@ -24,9 +24,8 @@ def extract_httpx_detail(exc: httpx.HTTPStatusError) -> Any:
         detail_json = resp.json()
         if isinstance(detail_json, dict):
             detail = detail_json.get("detail") or detail_json.get("message") or detail_json.get("error") or detail_json
-    except Exception:
-        logging.getLogger(__name__).warning("Broad exception fallback at bff/utils/httpx_exceptions.py:26", exc_info=True)
-        pass
+    except ValueError:
+        logging.getLogger(__name__).warning("Failed to parse upstream HTTPX error payload as JSON", exc_info=True)
     return detail
 
 

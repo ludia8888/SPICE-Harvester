@@ -27,6 +27,8 @@ Current status:
 - [x] BFF Foundry v2 object read surface includes `GET /v2/ontologies/{ontology}/objects/{objectType}` and `GET /v2/ontologies/{ontology}/objects/{objectType}/{primaryKey}` with Foundry-style query params/envelope.
 - [x] BFF Foundry v2 linked-object read surface includes `GET /v2/ontologies/{ontology}/objects/{objectType}/{primaryKey}/links/{linkType}` and `GET /v2/ontologies/{ontology}/objects/{objectType}/{primaryKey}/links/{linkType}/{linkedObjectPrimaryKey}`.
 - [x] Foundry-style API error envelope is implemented for object search and v2 read routers.
+- [x] v1->v2 migration guide is documented (`docs/FOUNDRY_V1_TO_V2_MIGRATION.md`) and v1 compatibility endpoints expose `Deprecation` + `Sunset` + `Link` headers.
+- [x] v1 query compatibility endpoint (`POST /api/v1/databases/{db}/query`) now also emits `Deprecation` + `Sunset` + `Link` headers toward v2 object search.
 - [x] ES-native graph traversal path exists without TerminusDB dependency.
 - [x] Ontology persistence in Postgres profile no longer depends on TerminusDB runtime in OMS (legacy/hybrid adapter retained by feature mode).
 - [x] OMS boot path supports Postgres-first startup without eager Terminus initialization (`resource_storage_backend=postgres`).
@@ -102,6 +104,10 @@ Phase 2: Remove ontology runtime dependency on TerminusDB (high impact)
 - [x] Lineage out-of-date diagnostics now distinguishes stale scope (`out_of_date_scope`: `parent|ancestor|none`) using aggregate-emitted lineage edges (direct parent drift vs upstream ancestor drift), with scope counts for triage.
 - [x] Lineage out-of-date diagnostics now separates stale reason by lineage scope (`parent_has_newer_events`, `ancestor_has_newer_events`) and provides update type hints (`update_type`: `data|logic|none`) using projection writer code-sha drift.
 - [x] Lineage out-of-date diagnostics now evaluates full stale sets with batched cause/scope lookup (not preview-only), then applies preview truncation only to response payload rows.
+- [x] Lineage out-of-date diagnostics computation has been moved to a dedicated service module (`bff/services/lineage_out_of_date_service.py`) so router endpoints remain thin.
+- [x] Lineage column-level diagnostics endpoint is available (`/api/v1/lineage/column-lineage`) and resolves mapping-spec references from lineage edge metadata.
+- [x] Objectify lineage writers now stamp Foundry-style column-lineage metadata references (`column_lineage_ref`, storage/schema markers) on header and instance edges.
+- [x] Linked-object and outgoing-link-type v2 pagination is filter-first (apply type/link filtering before page window) with dedicated regression tests.
 - [x] Lineage run-impact endpoint (`/api/v1/lineage/run-impact`) supports run/build-scoped blast-radius analysis from lineage edges.
 - [x] Lineage run-impact and runs impact previews now attach latest writer cause context per impacted artifact for faster triage.
 - [x] Lineage run-impact and runs impact previews now classify impacted artifacts by latest-writer state (`current|superseded|unknown`) relative to the selected run.

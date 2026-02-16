@@ -139,9 +139,8 @@ async def save_mapping_metadata(
                     detail_json = e.response.json()
                     if isinstance(detail_json, dict):
                         detail = detail_json.get("detail") or detail_json
-                except Exception:
-                    logging.getLogger(__name__).warning("Broad exception fallback at bff/routers/ontology_metadata.py:143", exc_info=True)
-                    pass
+                except ValueError:
+                    logging.getLogger(__name__).warning("Failed to parse ontology metadata error payload as JSON", exc_info=True)
                 raise classified_http_exception(status_code, str(detail), code=ErrorCode.UPSTREAM_ERROR) from e
         
         logger.info(f"Saved mapping metadata for class {class_id}: {new_mapping_entry['mappings_count']} mappings from {new_mapping_entry['source_file']}")

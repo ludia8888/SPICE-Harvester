@@ -11,16 +11,19 @@ from datetime import datetime, timedelta, timezone
 from statistics import median
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
-from fastapi import APIRouter, Query, status
+from fastapi import APIRouter, Depends, Query, status
 from shared.config.settings import get_settings
 from shared.errors.error_types import ErrorCode, classified_http_exception
 
+from bff.routers.registry_deps import get_objectify_registry
+from bff.services.lineage_out_of_date_service import LineageOutOfDateService
 from shared.dependencies.providers import LineageStoreDep
 from shared.dependencies.providers import AuditLogStoreDep
 from shared.models.lineage_edge_types import EDGE_AGGREGATE_EMITTED_EVENT
 from shared.models.lineage import LineageDirection
 from shared.models.requests import ApiResponse
 from shared.security.input_sanitizer import validate_branch_name, validate_db_name
+from shared.services.registries.objectify_registry import ObjectifyRegistry
 
 router = APIRouter(prefix="/lineage", tags=["Lineage"])
 
@@ -225,6 +228,12 @@ def _compact_edge_metadata(metadata: Dict[str, Any]) -> Dict[str, Any]:
         "schema_version",
         "ontology",
         "projection_name",
+        "column_lineage_ref",
+        "column_lineage_storage",
+        "column_lineage_schema_version",
+        "provenance_ref",
+        "provenance_storage",
+        "provenance_schema_version",
     )
     compact: Dict[str, Any] = {}
     for key in keep_keys:
@@ -300,6 +309,142 @@ def _build_timeline_summary(
         "spikes": spikes,
         "total_edges": len(edges),
     }
+
+
+def _extract_column_lineage_refs(
+    *,
+    edges: Sequence[Dict[str, Any]],
+    limit: int = 200,
+) -> Tuple[List[Dict[str, Any]], int]:
+    refs: Dict[str, Dict[str, Any]] = {}
+    for edge in edges:
+        metadata = edge.get("metadata") if isinstance(edge.get("metadata"), dict) else {}
+        ref = metadata.get("column_lineage_ref") or metadata.get("provenance_ref")
+        if not isinstance(ref, str) or not ref.strip():
+            continue
+        key = ref.strip()
+        occurred_at = _to_utc_datetime(edge.get("occurred_at"))
+        current = refs.get(key)
+        if current is None:
+            refs[key] = {
+                "ref": key,
+                "storage": metadata.get("column_lineage_storage") or metadata.get("provenance_storage"),
+                "schema_version": metadata.get("column_lineage_schema_version")
+                or metadata.get("provenance_schema_version"),
+                "latest_occurred_at": occurred_at.isoformat() if occurred_at else None,
+                "edge_count": 1,
+            }
+            continue
+
+        current["edge_count"] = int(current.get("edge_count") or 0) + 1
+        current_ts = _to_utc_datetime(current.get("latest_occurred_at"))
+        if current_ts is None or (occurred_at and occurred_at > current_ts):
+            current["latest_occurred_at"] = occurred_at.isoformat() if occurred_at else None
+
+    values = list(refs.values())
+    values.sort(key=lambda item: str(item.get("latest_occurred_at") or ""), reverse=True)
+    return values[: max(1, int(limit))], len(refs)
+
+
+def _coerce_int(value: Any) -> Optional[int]:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _parse_objectify_mapping_spec_ref(ref: str) -> Tuple[str, Optional[int]]:
+    raw = str(ref or "").strip()
+    if not raw:
+        return "", None
+    prefix = "objectify_mapping_spec:"
+    if not raw.startswith(prefix):
+        return raw, None
+    payload = raw[len(prefix) :].strip()
+    if not payload:
+        return "", None
+    spec_id, sep, version_token = payload.rpartition(":v")
+    if sep and spec_id:
+        return spec_id.strip(), _coerce_int(version_token.strip())
+    return payload, None
+
+
+def _extract_column_lineage_ref_entry(metadata: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    if not isinstance(metadata, dict):
+        return None
+
+    raw_ref = metadata.get("column_lineage_ref") or metadata.get("provenance_ref")
+    spec_id_raw = metadata.get("mapping_spec_id")
+    spec_version_raw = metadata.get("mapping_spec_version")
+
+    spec_id: Optional[str] = None
+    spec_version: Optional[int] = None
+    ref: Optional[str] = None
+
+    if isinstance(raw_ref, str) and raw_ref.strip():
+        ref = raw_ref.strip()
+        parsed_spec_id, parsed_spec_version = _parse_objectify_mapping_spec_ref(ref)
+        if parsed_spec_id:
+            spec_id = parsed_spec_id
+            spec_version = parsed_spec_version
+
+    if spec_id is None and isinstance(spec_id_raw, str) and spec_id_raw.strip():
+        spec_id = spec_id_raw.strip()
+    if spec_version is None:
+        spec_version = _coerce_int(spec_version_raw)
+
+    if not spec_id:
+        return None
+    if ref is None:
+        if spec_version is None:
+            ref = f"objectify_mapping_spec:{spec_id}"
+        else:
+            ref = f"objectify_mapping_spec:{spec_id}:v{spec_version}"
+
+    target_class_id = metadata.get("target_class_id")
+    return {
+        "ref": ref,
+        "mapping_spec_id": spec_id,
+        "mapping_spec_version": spec_version,
+        "target_class_id": str(target_class_id).strip() if isinstance(target_class_id, str) and target_class_id.strip() else None,
+        "storage": metadata.get("column_lineage_storage") or metadata.get("provenance_storage"),
+        "schema_version": metadata.get("column_lineage_schema_version") or metadata.get("provenance_schema_version"),
+    }
+
+
+def _normalize_mapping_pair(mapping: Dict[str, Any]) -> Optional[Tuple[str, str]]:
+    if not isinstance(mapping, dict):
+        return None
+    source_field = mapping.get("source_field")
+    if source_field is None:
+        source_field = mapping.get("sourceField")
+    target_field = mapping.get("target_field")
+    if target_field is None:
+        target_field = mapping.get("targetField")
+    source = str(source_field or "").strip()
+    target = str(target_field or "").strip()
+    if not source or not target:
+        return None
+    return source, target
+
+
+def _extract_column_lineage_pairs_from_metadata(metadata: Dict[str, Any]) -> List[Tuple[str, str]]:
+    if not isinstance(metadata, dict):
+        return []
+    raw_pairs = metadata.get("column_lineage_pairs")
+    if not isinstance(raw_pairs, list):
+        return []
+    pairs: List[Tuple[str, str]] = []
+    seen: set[Tuple[str, str]] = set()
+    for raw_pair in raw_pairs:
+        pair = _normalize_mapping_pair(raw_pair if isinstance(raw_pair, dict) else {})
+        if pair is None:
+            continue
+        if pair in seen:
+            continue
+        seen.add(pair)
+        pairs.append(pair)
+    return pairs
 
 
 def _freshness_status(
@@ -1173,6 +1318,7 @@ async def get_lineage_run_impact(
             limit=event_limit,
         )
         summary = _build_timeline_summary(edges=edges, bucket_minutes=15)
+        column_lineage_refs, column_lineage_ref_count = _extract_column_lineage_refs(edges=edges, limit=200)
 
         root_nodes = sorted({str(edge.get("from_node_id")) for edge in edges if edge.get("from_node_id")})
         impacted_artifacts, impacted_artifact_count = _extract_impacted_artifacts_from_edges(
@@ -1200,6 +1346,8 @@ async def get_lineage_run_impact(
         warnings: List[str] = []
         if len(edges) >= int(event_limit):
             warnings.append(f"event_limit_reached(limit={int(event_limit)})")
+        if column_lineage_ref_count > len(column_lineage_refs):
+            warnings.append(f"column_lineage_ref_preview_truncated(limit={len(column_lineage_refs)})")
 
         return ApiResponse.success(
             message="Lineage run impact fetched",
@@ -1216,6 +1364,8 @@ async def get_lineage_run_impact(
                 "impacted_artifact_count": impacted_artifact_count,
                 "impacted_artifact_with_cause_count": impacted_artifact_with_cause_count,
                 "latest_writer_state_counts": dict(sorted(latest_writer_state_counts.items(), key=lambda item: item[0])),
+                "column_lineage_ref_count": column_lineage_ref_count,
+                "column_lineage_refs": column_lineage_refs,
                 "recommended_actions": remediation,
                 "summary": summary,
                 "warnings": warnings,
@@ -1261,6 +1411,7 @@ async def get_lineage_timeline(
             limit=event_limit,
         )
         summary = _build_timeline_summary(edges=edges, bucket_minutes=bucket_minutes)
+        column_lineage_refs, column_lineage_ref_count = _extract_column_lineage_refs(edges=edges, limit=200)
 
         preview_rows: List[Dict[str, Any]] = []
         for edge in edges[:event_preview_limit]:
@@ -1282,6 +1433,8 @@ async def get_lineage_timeline(
         warnings: List[str] = []
         if len(edges) >= int(event_limit):
             warnings.append(f"event_limit_reached(limit={int(event_limit)})")
+        if column_lineage_ref_count > len(column_lineage_refs):
+            warnings.append(f"column_lineage_ref_preview_truncated(limit={len(column_lineage_refs)})")
 
         return ApiResponse.success(
             message="Lineage timeline fetched",
@@ -1296,6 +1449,8 @@ async def get_lineage_timeline(
                 "event_limit": int(event_limit),
                 "event_preview_limit": int(event_preview_limit),
                 "event_count_loaded": len(edges),
+                "column_lineage_ref_count": column_lineage_ref_count,
+                "column_lineage_refs": column_lineage_refs,
                 "events": preview_rows,
                 "summary": summary,
                 "warnings": warnings,
@@ -1305,6 +1460,353 @@ async def get_lineage_timeline(
         raise classified_http_exception(status.HTTP_400_BAD_REQUEST, str(e), code=ErrorCode.REQUEST_VALIDATION_FAILED) from e
     except Exception as e:
         raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(e), code=ErrorCode.INTERNAL_ERROR) from e
+
+
+@router.get("/column-lineage")
+@trace_endpoint("bff.lineage.get_lineage_column_lineage")
+async def get_lineage_column_lineage(
+    db_name: Optional[str] = Query(None, description="Database scope (recommended)"),
+    branch: Optional[str] = Query(None, description="Optional branch scope"),
+    run_id: Optional[str] = Query(None, description="Optional run id filter"),
+    source_field: Optional[str] = Query(None, description="Optional source column filter"),
+    target_field: Optional[str] = Query(None, description="Optional target field filter"),
+    target_class_id: Optional[str] = Query(None, description="Optional target class filter"),
+    since: Optional[datetime] = Query(None, description="Window start (ISO-8601), default now-24h"),
+    until: Optional[datetime] = Query(None, description="Window end (ISO-8601), default now"),
+    edge_limit: int = Query(5000, ge=1, le=20000, description="Max lineage edges loaded"),
+    pair_limit: int = Query(2000, ge=1, le=10000, description="Max column lineage pairs returned"),
+    *,
+    lineage_store: LineageStoreDep,
+    objectify_registry: ObjectifyRegistry = Depends(get_objectify_registry),
+):
+    """
+    Resolve column-level lineage from mapping-spec references embedded in lineage edges.
+
+    This provides a Foundry-style "which source columns mapped to which target fields"
+    view without exploding the graph into per-column nodes.
+    """
+    try:
+        db_name, branch = _normalize_scope(db_name=db_name, branch=branch)
+        since_ts, until_ts = _normalize_window(since=since, until=until, default_hours=24)
+        source_field_filter = str(source_field or "").strip() or None
+        target_field_filter = str(target_field or "").strip() or None
+        target_class_filter = str(target_class_id or "").strip() or None
+        run_id_filter = str(run_id or "").strip() or None
+
+        edges = await lineage_store.list_edges(
+            db_name=db_name,
+            branch=branch,
+            run_id=run_id_filter,
+            since=since_ts,
+            until=until_ts,
+            limit=edge_limit,
+        )
+
+        ref_usage_by_key: Dict[str, Dict[str, Any]] = {}
+        inline_pair_rows_by_key: Dict[str, Dict[str, Any]] = {}
+        for edge in edges:
+            metadata = edge.get("metadata") if isinstance(edge.get("metadata"), dict) else {}
+            ref_entry = _extract_column_lineage_ref_entry(metadata)
+            inline_pairs = _extract_column_lineage_pairs_from_metadata(metadata)
+            edge_occurred_at = _to_utc_datetime(edge.get("occurred_at"))
+            edge_type = str(edge.get("edge_type") or "").strip()
+            target_class_value = str(metadata.get("target_class_id") or "").strip()
+            dataset_id_value = str(metadata.get("dataset_id") or "").strip()
+            dataset_branch_value = str(metadata.get("dataset_branch") or metadata.get("branch") or "").strip()
+            inline_mapping_spec_id = (
+                str((ref_entry or {}).get("mapping_spec_id") or metadata.get("mapping_spec_id") or "").strip()
+            )
+            inline_mapping_spec_version = _coerce_int(
+                (ref_entry or {}).get("mapping_spec_version") if ref_entry is not None else metadata.get("mapping_spec_version")
+            )
+            inline_ref_value = str((ref_entry or {}).get("ref") or "").strip()
+            for source_col, target_col in inline_pairs:
+                if source_field_filter and source_col != source_field_filter:
+                    continue
+                if target_field_filter and target_col != target_field_filter:
+                    continue
+                if target_class_filter and target_class_value != target_class_filter:
+                    continue
+                pair_key = "|".join([source_col, target_col, target_class_value])
+                inline_row = inline_pair_rows_by_key.get(pair_key)
+                if inline_row is None:
+                    inline_row = {
+                        "source_field": source_col,
+                        "target_field": target_col,
+                        "target_class_id": target_class_value or None,
+                        "dataset_id": dataset_id_value or None,
+                        "dataset_branch": dataset_branch_value or None,
+                        "edge_count": 0,
+                        "latest_occurred_at": None,
+                        "mapping_spec_ids": set(),
+                        "mapping_spec_versions": set(),
+                        "refs": set(),
+                        "edge_types": set(),
+                    }
+                    inline_pair_rows_by_key[pair_key] = inline_row
+                inline_row["edge_count"] = int(inline_row.get("edge_count") or 0) + 1
+                if inline_mapping_spec_id:
+                    inline_row["mapping_spec_ids"].add(inline_mapping_spec_id)
+                if inline_mapping_spec_version is not None:
+                    inline_row["mapping_spec_versions"].add(inline_mapping_spec_version)
+                if inline_ref_value:
+                    inline_row["refs"].add(inline_ref_value)
+                if edge_type:
+                    inline_row["edge_types"].add(edge_type)
+                current_latest = inline_row.get("latest_occurred_at")
+                if edge_occurred_at and (current_latest is None or edge_occurred_at > current_latest):
+                    inline_row["latest_occurred_at"] = edge_occurred_at
+
+            if not isinstance(ref_entry, dict):
+                continue
+
+            mapping_spec_id = str(ref_entry.get("mapping_spec_id") or "").strip()
+            mapping_spec_version = _coerce_int(ref_entry.get("mapping_spec_version"))
+            if not mapping_spec_id:
+                continue
+            key = f"{mapping_spec_id}|{'' if mapping_spec_version is None else mapping_spec_version}"
+            usage = ref_usage_by_key.get(key)
+            if usage is None:
+                usage = {
+                    "key": key,
+                    "ref": ref_entry.get("ref"),
+                    "mapping_spec_id": mapping_spec_id,
+                    "mapping_spec_version": mapping_spec_version,
+                    "target_class_id": ref_entry.get("target_class_id"),
+                    "storage": ref_entry.get("storage"),
+                    "schema_version": ref_entry.get("schema_version"),
+                    "edge_count": 0,
+                    "edge_types": set(),
+                    "latest_occurred_at": None,
+                }
+                ref_usage_by_key[key] = usage
+
+            usage["edge_count"] = int(usage.get("edge_count") or 0) + 1
+            edge_type = str(edge.get("edge_type") or "").strip()
+            if edge_type:
+                usage["edge_types"].add(edge_type)
+            occurred_at = _to_utc_datetime(edge.get("occurred_at"))
+            latest_occurred_at = usage.get("latest_occurred_at")
+            if occurred_at and (latest_occurred_at is None or occurred_at > latest_occurred_at):
+                usage["latest_occurred_at"] = occurred_at
+
+        resolution_by_key: Dict[str, Dict[str, Any]] = {}
+        pair_rows_by_key: Dict[str, Dict[str, Any]] = {}
+        for key, usage in ref_usage_by_key.items():
+            mapping_spec_id = str(usage.get("mapping_spec_id") or "").strip()
+            expected_version = _coerce_int(usage.get("mapping_spec_version"))
+            try:
+                mapping_spec = await objectify_registry.get_mapping_spec(mapping_spec_id=mapping_spec_id)
+            except Exception as exc:
+                resolution_by_key[key] = {"status": "unresolved", "reason": f"lookup_error:{exc}"}
+                continue
+
+            if mapping_spec is None:
+                resolution_by_key[key] = {"status": "unresolved", "reason": "mapping_spec_not_found"}
+                continue
+
+            actual_version = _coerce_int(getattr(mapping_spec, "version", None))
+            if expected_version is not None and actual_version is not None and expected_version != actual_version:
+                resolution_by_key[key] = {
+                    "status": "unresolved",
+                    "reason": f"version_mismatch(expected={expected_version},actual={actual_version})",
+                }
+                continue
+
+            mappings = getattr(mapping_spec, "mappings", None)
+            if not isinstance(mappings, list):
+                resolution_by_key[key] = {"status": "unresolved", "reason": "invalid_mapping_spec_mappings"}
+                continue
+
+            resolution_by_key[key] = {"status": "resolved"}
+
+            resolved_target_class_id = str(usage.get("target_class_id") or "").strip() or str(
+                getattr(mapping_spec, "target_class_id", "") or ""
+            ).strip()
+            resolved_dataset_id = str(getattr(mapping_spec, "dataset_id", "") or "").strip()
+            resolved_dataset_branch = str(getattr(mapping_spec, "dataset_branch", "") or "").strip()
+
+            for mapping in mappings:
+                pair = _normalize_mapping_pair(mapping if isinstance(mapping, dict) else {})
+                if pair is None:
+                    continue
+                source_col, target_col = pair
+                if source_field_filter and source_col != source_field_filter:
+                    continue
+                if target_field_filter and target_col != target_field_filter:
+                    continue
+                if target_class_filter and resolved_target_class_id != target_class_filter:
+                    continue
+
+                pair_key = "|".join(
+                    [
+                        source_col,
+                        target_col,
+                        resolved_target_class_id,
+                    ]
+                )
+                pair_row = pair_rows_by_key.get(pair_key)
+                if pair_row is None:
+                    pair_row = {
+                        "source_field": source_col,
+                        "target_field": target_col,
+                        "target_class_id": resolved_target_class_id or None,
+                        "dataset_id": resolved_dataset_id or None,
+                        "dataset_branch": resolved_dataset_branch or None,
+                        "edge_count": 0,
+                        "latest_occurred_at": None,
+                        "mapping_spec_ids": set(),
+                        "mapping_spec_versions": set(),
+                        "refs": set(),
+                        "edge_types": set(),
+                    }
+                    pair_rows_by_key[pair_key] = pair_row
+
+                pair_row["edge_count"] = int(pair_row.get("edge_count") or 0) + int(usage.get("edge_count") or 0)
+                if mapping_spec_id:
+                    pair_row["mapping_spec_ids"].add(mapping_spec_id)
+                if actual_version is not None:
+                    pair_row["mapping_spec_versions"].add(actual_version)
+                ref_value = str(usage.get("ref") or "").strip()
+                if ref_value:
+                    pair_row["refs"].add(ref_value)
+                pair_row["edge_types"].update(set(usage.get("edge_types") or set()))
+                latest_occurred_at = usage.get("latest_occurred_at")
+                current_latest = pair_row.get("latest_occurred_at")
+                if latest_occurred_at and (current_latest is None or latest_occurred_at > current_latest):
+                    pair_row["latest_occurred_at"] = latest_occurred_at
+
+        for pair_key, inline_row in inline_pair_rows_by_key.items():
+            pair_row = pair_rows_by_key.get(pair_key)
+            if pair_row is None:
+                pair_rows_by_key[pair_key] = inline_row
+                continue
+            pair_row["edge_count"] = int(pair_row.get("edge_count") or 0) + int(inline_row.get("edge_count") or 0)
+            pair_row["mapping_spec_ids"].update(set(inline_row.get("mapping_spec_ids") or set()))
+            pair_row["mapping_spec_versions"].update(set(inline_row.get("mapping_spec_versions") or set()))
+            pair_row["refs"].update(set(inline_row.get("refs") or set()))
+            pair_row["edge_types"].update(set(inline_row.get("edge_types") or set()))
+            current_latest = pair_row.get("latest_occurred_at")
+            inline_latest = inline_row.get("latest_occurred_at")
+            if inline_latest and (current_latest is None or inline_latest > current_latest):
+                pair_row["latest_occurred_at"] = inline_latest
+
+        refs_payload: List[Dict[str, Any]] = []
+        for usage in ref_usage_by_key.values():
+            key = str(usage.get("key") or "")
+            resolution = resolution_by_key.get(key) or {"status": "unresolved", "reason": "not_resolved"}
+            latest_occurred_at = usage.get("latest_occurred_at")
+            refs_payload.append(
+                {
+                    "ref": usage.get("ref"),
+                    "mapping_spec_id": usage.get("mapping_spec_id"),
+                    "mapping_spec_version": usage.get("mapping_spec_version"),
+                    "target_class_id": usage.get("target_class_id"),
+                    "storage": usage.get("storage"),
+                    "schema_version": usage.get("schema_version"),
+                    "edge_count": int(usage.get("edge_count") or 0),
+                    "edge_types": sorted(str(value) for value in (usage.get("edge_types") or set()) if str(value)),
+                    "latest_occurred_at": latest_occurred_at.isoformat() if latest_occurred_at else None,
+                    "status": resolution.get("status"),
+                    "reason": resolution.get("reason"),
+                }
+            )
+        refs_payload.sort(key=lambda item: str(item.get("latest_occurred_at") or ""), reverse=True)
+
+        pair_rows: List[Dict[str, Any]] = []
+        for row in pair_rows_by_key.values():
+            latest_occurred_at = row.get("latest_occurred_at")
+            pair_rows.append(
+                {
+                    "source_field": row.get("source_field"),
+                    "target_field": row.get("target_field"),
+                    "target_class_id": row.get("target_class_id"),
+                    "dataset_id": row.get("dataset_id"),
+                    "dataset_branch": row.get("dataset_branch"),
+                    "edge_count": int(row.get("edge_count") or 0),
+                    "latest_occurred_at": latest_occurred_at.isoformat() if latest_occurred_at else None,
+                    "mapping_spec_ids": sorted(str(value) for value in (row.get("mapping_spec_ids") or set()) if str(value)),
+                    "mapping_spec_versions": sorted(int(value) for value in (row.get("mapping_spec_versions") or set())),
+                    "refs": sorted(str(value) for value in (row.get("refs") or set()) if str(value)),
+                    "edge_types": sorted(str(value) for value in (row.get("edge_types") or set()) if str(value)),
+                }
+            )
+        pair_rows.sort(
+            key=lambda item: (
+                -int(item.get("edge_count") or 0),
+                str(item.get("latest_occurred_at") or ""),
+                str(item.get("source_field") or ""),
+                str(item.get("target_field") or ""),
+            )
+        )
+
+        pair_count_total = len(pair_rows)
+        pair_rows = pair_rows[: int(pair_limit)]
+        warnings: List[str] = []
+        if len(edges) >= int(edge_limit):
+            warnings.append(f"edge_limit_reached(limit={int(edge_limit)})")
+        if pair_count_total > len(pair_rows):
+            warnings.append(f"pair_preview_truncated(limit={len(pair_rows)})")
+
+        resolved_ref_count = len([row for row in refs_payload if row.get("status") == "resolved"])
+        unresolved_ref_count = len(refs_payload) - resolved_ref_count
+
+        unique_source_fields = sorted(
+            {
+                str(row.get("source_field") or "").strip()
+                for row in pair_rows
+                if str(row.get("source_field") or "").strip()
+            }
+        )
+        unique_target_fields = sorted(
+            {
+                str(row.get("target_field") or "").strip()
+                for row in pair_rows
+                if str(row.get("target_field") or "").strip()
+            }
+        )
+        unique_target_classes = sorted(
+            {
+                str(row.get("target_class_id") or "").strip()
+                for row in pair_rows
+                if str(row.get("target_class_id") or "").strip()
+            }
+        )
+
+        return ApiResponse.success(
+            message="Lineage column-level mapping fetched",
+            data={
+                "db_name": db_name,
+                "branch": branch,
+                "run_id": run_id_filter,
+                "since": since_ts.isoformat(),
+                "until": until_ts.isoformat(),
+                "source_field_filter": source_field_filter,
+                "target_field_filter": target_field_filter,
+                "target_class_id_filter": target_class_filter,
+                "edge_count_loaded": len(edges),
+                "column_lineage_ref_count": len(refs_payload),
+                "resolved_ref_count": resolved_ref_count,
+                "unresolved_ref_count": unresolved_ref_count,
+                "pair_count": pair_count_total,
+                "pairs": pair_rows,
+                "refs": refs_payload,
+                "summary": {
+                    "unique_source_field_count": len(unique_source_fields),
+                    "unique_target_field_count": len(unique_target_fields),
+                    "unique_target_class_count": len(unique_target_classes),
+                    "unique_source_fields": unique_source_fields,
+                    "unique_target_fields": unique_target_fields,
+                    "unique_target_classes": unique_target_classes,
+                },
+                "warnings": warnings,
+            },
+        ).to_dict()
+    except ValueError as e:
+        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, str(e), code=ErrorCode.REQUEST_VALIDATION_FAILED) from e
+    except Exception as e:
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(e), code=ErrorCode.INTERNAL_ERROR) from e
+
 
 
 @router.get("/out-of-date")
@@ -1329,301 +1831,21 @@ async def get_lineage_out_of_date(
     """
     try:
         db_name, branch = _normalize_scope(db_name=db_name, branch=branch)
-
-        as_of_ts = as_of or datetime.now(timezone.utc)
-        as_of_ts = as_of_ts if as_of_ts.tzinfo else as_of_ts.replace(tzinfo=timezone.utc)
-        latest_upstream_edges = await lineage_store.list_edges(
-            edge_type=EDGE_AGGREGATE_EMITTED_EVENT,
-            db_name=db_name,
-            branch=branch,
-            until=as_of_ts,
-            limit=1,
-        )
-        latest_upstream_occurred_at = (
-            _to_utc_datetime(latest_upstream_edges[0].get("occurred_at")) if latest_upstream_edges else None
-        )
-
-        artifact_rows = await lineage_store.list_artifact_latest_writes(
+        service = LineageOutOfDateService(lineage_store=lineage_store)
+        payload = await service.analyze(
             db_name=db_name,
             branch=branch,
             artifact_kind=artifact_kind,
-            as_of=as_of_ts,
-            limit=artifact_limit,
+            as_of=as_of,
+            freshness_slo_minutes=freshness_slo_minutes,
+            artifact_limit=artifact_limit,
+            stale_preview_limit=stale_preview_limit,
+            projection_limit=projection_limit,
+            projection_preview_limit=projection_preview_limit,
         )
-        artifacts: List[Dict[str, Any]] = []
-        artifact_counts: Dict[str, int] = {"healthy": 0, "warning": 0, "critical": 0, "no_data": 0}
-        for row in artifact_rows:
-            last_occurred_at = _to_utc_datetime(row.get("last_occurred_at"))
-            status_name, age_minutes = _freshness_status(
-                last_occurred_at=last_occurred_at,
-                as_of=as_of_ts,
-                freshness_slo_minutes=int(freshness_slo_minutes),
-            )
-            artifact_counts[status_name] = artifact_counts.get(status_name, 0) + 1
-            artifacts.append(
-                {
-                    "node_id": row.get("node_id"),
-                    "label": row.get("label"),
-                    "kind": row.get("artifact_kind"),
-                    "status": status_name,
-                    "staleness_reason": _staleness_reason_with_scope(status_name=status_name, out_of_date_scope="none"),
-                    "update_type": "none",
-                    "age_minutes": age_minutes,
-                    "upstream_gap_minutes": _upstream_gap_minutes(
-                        last_occurred_at=last_occurred_at,
-                        latest_upstream_occurred_at=latest_upstream_occurred_at,
-                    ),
-                    "upstream_latest_event_at": (
-                        latest_upstream_occurred_at.isoformat() if latest_upstream_occurred_at else None
-                    ),
-                    "last_occurred_at": last_occurred_at.isoformat() if last_occurred_at else None,
-                    "write_count": int(row.get("write_count") or 0),
-                    "metadata": row.get("metadata") if isinstance(row.get("metadata"), dict) else {},
-                }
-            )
-
-        artifacts.sort(
-            key=lambda item: (
-                _status_rank(str(item.get("status"))),
-                -float(item.get("age_minutes") or 0.0),
-            )
-        )
-        stale_artifacts_all = [item for item in artifacts if item.get("status") != "healthy"]
-        await _enrich_artifacts_with_latest_writer(
-            lineage_store=lineage_store,
-            artifacts=stale_artifacts_all,
-            db_name=db_name,
-            branch=branch,
-        )
-
-        projection_rows = await lineage_store.list_projection_latest_writes(
-            db_name=db_name,
-            branch=branch,
-            as_of=as_of_ts,
-            limit=projection_limit,
-        )
-        projections: List[Dict[str, Any]] = []
-        projection_counts: Dict[str, int] = {"healthy": 0, "warning": 0, "critical": 0, "no_data": 0}
-        for row in projection_rows:
-            last_occurred_at = _to_utc_datetime(row.get("last_occurred_at"))
-            status_name, age_minutes = _freshness_status(
-                last_occurred_at=last_occurred_at,
-                as_of=as_of_ts,
-                freshness_slo_minutes=int(freshness_slo_minutes),
-            )
-            projection_counts[status_name] = projection_counts.get(status_name, 0) + 1
-            projections.append(
-                {
-                    "projection_name": row.get("projection_name"),
-                    "status": status_name,
-                    "staleness_reason": _staleness_reason_with_scope(status_name=status_name, out_of_date_scope="none"),
-                    "update_type": "none",
-                    "age_minutes": age_minutes,
-                    "upstream_gap_minutes": _upstream_gap_minutes(
-                        last_occurred_at=last_occurred_at,
-                        latest_upstream_occurred_at=latest_upstream_occurred_at,
-                    ),
-                    "upstream_latest_event_at": (
-                        latest_upstream_occurred_at.isoformat() if latest_upstream_occurred_at else None
-                    ),
-                    "last_occurred_at": last_occurred_at.isoformat() if last_occurred_at else None,
-                    "edge_count": int(row.get("edge_count") or 0),
-                }
-            )
-        projections.sort(
-            key=lambda item: (
-                _status_rank(str(item.get("status"))),
-                -float(item.get("age_minutes") or 0.0),
-            )
-        )
-        stale_projections_all = [item for item in projections if item.get("status") != "healthy"]
-
-        stale_projection_names = [
-            str(item.get("projection_name") or "") for item in stale_projections_all if item.get("projection_name")
-        ]
-        stale_artifact_projection_names = [
-            projection_name
-            for projection_name in (
-                _projection_name_from_latest_writer(item.get("latest_writer")) for item in stale_artifacts_all
-            )
-            if projection_name
-        ]
-        projection_names_for_latest_writer_lookup = list(
-            dict.fromkeys([*stale_projection_names, *stale_artifact_projection_names])
-        )
-        projection_latest_writers = await _get_latest_edges_for_projections_batched(
-            lineage_store=lineage_store,
-            projection_names=projection_names_for_latest_writer_lookup,
-            db_name=db_name,
-            branch=branch,
-        )
-        for item in stale_projections_all:
-            projection_name = str(item.get("projection_name") or "")
-            item["latest_writer"] = _edge_cause_payload(projection_latest_writers.get(projection_name))
-
-        stale_items_for_scope: List[Dict[str, Any]] = [*stale_artifacts_all, *stale_projections_all]
-        writer_event_node_ids = [
-            event_node_id
-            for event_node_id in (
-                _event_node_id_from_latest_writer(item.get("latest_writer")) for item in stale_items_for_scope
-            )
-            if event_node_id
-        ]
-        writer_event_node_ids = list(dict.fromkeys(writer_event_node_ids))
-
-        parent_edges_by_event = await _get_latest_edges_to_batched(
-            lineage_store=lineage_store,
-            to_node_ids=writer_event_node_ids,
-            edge_type=EDGE_AGGREGATE_EMITTED_EVENT,
-            db_name=db_name,
-            branch=branch,
-        )
-        aggregate_node_ids = [
-            str(edge.get("from_node_id") or "")
-            for edge in parent_edges_by_event.values()
-            if isinstance(edge, dict) and str(edge.get("from_node_id") or "").startswith("agg:")
-        ]
-        aggregate_node_ids = list(dict.fromkeys([node_id for node_id in aggregate_node_ids if node_id]))
-        parent_latest_edges_by_aggregate = await _get_latest_edges_from_batched(
-            lineage_store=lineage_store,
-            from_node_ids=aggregate_node_ids,
-            edge_type=EDGE_AGGREGATE_EMITTED_EVENT,
-            db_name=db_name,
-            branch=branch,
-        )
-
-        out_of_date_scope_counts: Dict[str, int] = {"parent": 0, "ancestor": 0, "none": 0}
-        update_type_counts: Dict[str, int] = {"data": 0, "logic": 0, "none": 0}
-        for item in stale_items_for_scope:
-            status_name = str(item.get("status") or "")
-            last_occurred_at = _to_utc_datetime(item.get("last_occurred_at"))
-            writer_event_node_id = _event_node_id_from_latest_writer(item.get("latest_writer"))
-            projection_name = _projection_name_from_latest_writer(item.get("latest_writer"))
-            current_code_sha = _writer_code_sha(item.get("latest_writer"))
-            parent_aggregate_node_id: Optional[str] = None
-            parent_latest_occurred_at: Optional[datetime] = None
-
-            if writer_event_node_id:
-                parent_edge = parent_edges_by_event.get(writer_event_node_id)
-                if isinstance(parent_edge, dict):
-                    candidate_parent_node_id = str(parent_edge.get("from_node_id") or "")
-                    if candidate_parent_node_id.startswith("agg:"):
-                        parent_aggregate_node_id = candidate_parent_node_id
-                        parent_latest_edge = parent_latest_edges_by_aggregate.get(parent_aggregate_node_id)
-                        if isinstance(parent_latest_edge, dict):
-                            parent_latest_occurred_at = _to_utc_datetime(parent_latest_edge.get("occurred_at"))
-
-            out_of_date_scope = _out_of_date_scope(
-                status_name=status_name,
-                last_occurred_at=last_occurred_at,
-                parent_latest_occurred_at=parent_latest_occurred_at,
-                latest_upstream_occurred_at=latest_upstream_occurred_at,
-            )
-            out_of_date_scope_counts[out_of_date_scope] = out_of_date_scope_counts.get(out_of_date_scope, 0) + 1
-            item["out_of_date_scope"] = out_of_date_scope
-            item["writer_event_node_id"] = writer_event_node_id
-            item["parent_aggregate_node_id"] = parent_aggregate_node_id
-            item["parent_latest_event_at"] = parent_latest_occurred_at.isoformat() if parent_latest_occurred_at else None
-            item["parent_gap_minutes"] = _upstream_gap_minutes(
-                last_occurred_at=last_occurred_at,
-                latest_upstream_occurred_at=parent_latest_occurred_at,
-            )
-            item["staleness_reason"] = _staleness_reason_with_scope(
-                status_name=status_name,
-                out_of_date_scope=out_of_date_scope,
-            )
-
-            latest_projection_occurred_at: Optional[datetime] = None
-            latest_projection_code_sha: Optional[str] = None
-            if projection_name:
-                latest_projection_edge = projection_latest_writers.get(projection_name)
-                if isinstance(latest_projection_edge, dict):
-                    latest_projection_payload = _edge_cause_payload(latest_projection_edge)
-                    latest_projection_occurred_at = _to_utc_datetime(latest_projection_edge.get("occurred_at"))
-                    latest_projection_code_sha = _writer_code_sha(latest_projection_payload)
-                    item["latest_projection_event_at"] = (
-                        latest_projection_occurred_at.isoformat() if latest_projection_occurred_at else None
-                    )
-                    item["latest_projection_code_sha"] = latest_projection_code_sha
-                    item["latest_projection_gap_minutes"] = _upstream_gap_minutes(
-                        last_occurred_at=last_occurred_at,
-                        latest_upstream_occurred_at=latest_projection_occurred_at,
-                    )
-
-            update_type = _update_type(
-                status_name=status_name,
-                out_of_date_scope=out_of_date_scope,
-                last_occurred_at=last_occurred_at,
-                latest_projection_occurred_at=latest_projection_occurred_at,
-                current_code_sha=current_code_sha,
-                latest_projection_code_sha=latest_projection_code_sha,
-            )
-            item["update_type"] = update_type
-            update_type_counts[update_type] = update_type_counts.get(update_type, 0) + 1
-
-        stale_artifacts = stale_artifacts_all[:stale_preview_limit]
-        stale_projections = stale_projections_all[:projection_preview_limit]
-        remediation_actions = _suggest_remediation_actions(
-            artifacts=[
-                {
-                    "kind": item.get("kind"),
-                    "node_id": item.get("node_id"),
-                    "label": item.get("label"),
-                }
-                for item in stale_artifacts
-            ]
-        )
-
-        staleness_reason_counts: Dict[str, int] = {}
-        for item in [*artifacts, *projections]:
-            reason = str(item.get("staleness_reason") or "")
-            if not reason:
-                continue
-            staleness_reason_counts[reason] = staleness_reason_counts.get(reason, 0) + 1
-
-        warnings: List[str] = []
-        if len(artifact_rows) >= int(artifact_limit):
-            warnings.append(f"artifact_limit_reached(limit={int(artifact_limit)})")
-        if len(projection_rows) >= int(projection_limit):
-            warnings.append(f"projection_limit_reached(limit={int(projection_limit)})")
-        if len(stale_artifacts_all) > int(stale_preview_limit):
-            warnings.append(f"stale_artifact_preview_truncated(limit={int(stale_preview_limit)})")
-        if len(stale_projections_all) > int(projection_preview_limit):
-            warnings.append(f"stale_projection_preview_truncated(limit={int(projection_preview_limit)})")
-
         return ApiResponse.success(
             message="Lineage out-of-date diagnostics fetched",
-            data={
-                "db_name": db_name,
-                "branch": branch,
-                "artifact_kind": artifact_kind,
-                "as_of": as_of_ts.isoformat(),
-                "upstream_latest_event_at": latest_upstream_occurred_at.isoformat() if latest_upstream_occurred_at else None,
-                "freshness_slo_minutes": int(freshness_slo_minutes),
-                "artifact_counts": artifact_counts,
-                "projection_counts": projection_counts,
-                "staleness_reason_counts": dict(sorted(staleness_reason_counts.items(), key=lambda item: item[0])),
-                "out_of_date_scope_counts": dict(sorted(out_of_date_scope_counts.items(), key=lambda item: item[0])),
-                "update_type_counts": dict(sorted(update_type_counts.items(), key=lambda item: item[0])),
-                "stale_artifacts": stale_artifacts,
-                "stale_projections": stale_projections,
-                "recommended_actions": remediation_actions,
-                "summary": {
-                    "artifacts_evaluated": len(artifact_rows),
-                    "projections_evaluated": len(projection_rows),
-                    "stale_artifact_count": len([item for item in artifacts if item.get("status") != "healthy"]),
-                    "stale_projection_count": len([item for item in projections if item.get("status") != "healthy"]),
-                    "stale_artifact_with_cause_count": len(
-                        [item for item in stale_artifacts if isinstance(item.get("latest_writer"), dict)]
-                    ),
-                    "stale_projection_with_cause_count": len(
-                        [item for item in stale_projections if isinstance(item.get("latest_writer"), dict)]
-                    ),
-                    "stale_data_update_count": int(update_type_counts.get("data", 0)),
-                    "stale_logic_update_count": int(update_type_counts.get("logic", 0)),
-                },
-                "warnings": warnings,
-            },
+            data=payload,
         ).to_dict()
     except ValueError as e:
         raise classified_http_exception(status.HTTP_400_BAD_REQUEST, str(e), code=ErrorCode.REQUEST_VALIDATION_FAILED) from e

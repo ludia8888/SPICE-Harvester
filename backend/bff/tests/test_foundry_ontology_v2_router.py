@@ -233,6 +233,104 @@ class _MissingObjectTypeOMSClient(_FakeOMSClient):
         )
 
 
+class _PagedLinkTypesOMSClient(_FakeOMSClient):
+    def __init__(self) -> None:
+        super().__init__()
+        self._resources: list[dict] = []
+        for index in range(510):
+            if index in {498, 501, 504}:
+                self._resources.append(
+                    {
+                        "id": f"rel_{index}",
+                        "spec": {
+                            "from": "Account",
+                            "to": "User",
+                            "cardinality": "n:1",
+                            "relationship_spec": {"fk_column": "owner_id"},
+                        },
+                    }
+                )
+            else:
+                self._resources.append(
+                    {
+                        "id": f"other_{index}",
+                        "spec": {
+                            "from": "Order",
+                            "to": "Product",
+                            "cardinality": "1:n",
+                        },
+                    }
+                )
+
+    async def list_ontology_resources(
+        self,
+        db_name,
+        *,
+        resource_type,
+        branch="main",
+        limit=200,
+        offset=0,
+    ):  # noqa: ANN001, ANN003
+        _ = db_name, branch
+        if resource_type == "link_type":
+            sliced = self._resources[offset : offset + limit]
+            return {"data": {"resources": sliced}}
+        return await super().list_ontology_resources(
+            db_name,
+            resource_type=resource_type,
+            branch=branch,
+            limit=limit,
+            offset=offset,
+        )
+
+
+class _LinkedPaginationOMSClient(_FakeOMSClient):
+    async def post(self, path, **kwargs):  # noqa: ANN001, ANN003
+        self.last_post = (path, kwargs)
+        payload = kwargs.get("json") if isinstance(kwargs, dict) else None
+        where = payload.get("where") if isinstance(payload, dict) else None
+
+        if path.endswith("/objects/test_db/Account/search"):
+            if isinstance(where, dict) and where.get("type") == "eq" and where.get("field") == "account_id":
+                return {
+                    "data": [
+                        {
+                            "account_id": "acc-1",
+                            "owner_id": "u-1",
+                            "owned_by": ["u-1", "u-2", {"id": "u-3"}, "u-4"],
+                            "links": {"owned_by": ["u-4", "u-5"]},
+                        }
+                    ],
+                    "nextPageToken": None,
+                    "totalCount": "1",
+                }
+
+        if path.endswith("/objects/test_db/User/search"):
+            if isinstance(where, dict) and where.get("type") == "eq" and where.get("field") == "user_id":
+                value = str(where.get("value") or "").strip()
+                if not value:
+                    return {"data": [], "nextPageToken": None, "totalCount": "0"}
+                return {
+                    "data": [{"instance_id": value, "user_id": value, "name": f"User {value}"}],
+                    "nextPageToken": None,
+                    "totalCount": "1",
+                }
+            if isinstance(where, dict) and where.get("type") == "or":
+                rows: list[dict] = []
+                for clause in where.get("value") or []:
+                    if not isinstance(clause, dict):
+                        continue
+                    if clause.get("type") != "eq" or clause.get("field") != "user_id":
+                        continue
+                    value = str(clause.get("value") or "").strip()
+                    if not value:
+                        continue
+                    rows.append({"instance_id": value, "user_id": value, "name": f"User {value}"})
+                return {"data": rows, "nextPageToken": None, "totalCount": str(len(rows))}
+
+        return await super().post(path, **kwargs)
+
+
 async def _noop_require_domain_role(request, *, db_name):  # noqa: ANN001, ANN003
     _ = request, db_name
     return None
@@ -414,6 +512,40 @@ async def test_list_outgoing_link_types_v2_returns_foundry_raw_shape():
     assert [row["apiName"] for row in response["data"]] == ["owned_by"]
     assert response["data"][0]["objectTypeApiName"] == "User"
     assert response["data"][0]["cardinality"] == "ONE"
+
+
+@pytest.mark.asyncio
+async def test_list_outgoing_link_types_v2_filters_before_pagination():
+    request = Request({"type": "http", "headers": []})
+    original_require = router_v2._require_domain_role
+    client = _PagedLinkTypesOMSClient()
+    router_v2._require_domain_role = _noop_require_domain_role
+    try:
+        first = await router_v2.list_outgoing_link_types_v2(
+            ontology="test_db",
+            objectType="Account",
+            request=request,
+            page_size=2,
+            page_token=None,
+            branch="main",
+            oms_client=client,
+        )
+        second = await router_v2.list_outgoing_link_types_v2(
+            ontology="test_db",
+            objectType="Account",
+            request=request,
+            page_size=2,
+            page_token=first.get("nextPageToken"),
+            branch="main",
+            oms_client=client,
+        )
+    finally:
+        router_v2._require_domain_role = original_require
+
+    assert [row["apiName"] for row in first["data"]] == ["rel_498", "rel_501"]
+    assert first.get("nextPageToken")
+    assert [row["apiName"] for row in second["data"]] == ["rel_504"]
+    assert second.get("nextPageToken") is None
 
 
 @pytest.mark.asyncio
@@ -610,6 +742,69 @@ async def test_list_linked_objects_v2_returns_foundry_raw_shape():
     assert fake.last_post is not None
     _, kwargs = fake.last_post
     assert kwargs["json"]["where"] == {"type": "eq", "field": "user_id", "value": "u-1"}
+
+
+@pytest.mark.asyncio
+async def test_list_linked_objects_v2_paginates_after_dedup_link_filter():
+    request = Request({"type": "http", "headers": []})
+    original_require = router_v2._require_domain_role
+    fake = _LinkedPaginationOMSClient()
+    router_v2._require_domain_role = _noop_require_domain_role
+    try:
+        first = await router_v2.list_linked_objects_v2(
+            ontology="test_db",
+            objectType="Account",
+            primaryKey="acc-1",
+            linkType="owned_by",
+            request=request,
+            page_size=2,
+            page_token=None,
+            select=None,
+            order_by=None,
+            exclude_rid=None,
+            snapshot=None,
+            branch="main",
+            oms_client=fake,
+        )
+        second = await router_v2.list_linked_objects_v2(
+            ontology="test_db",
+            objectType="Account",
+            primaryKey="acc-1",
+            linkType="owned_by",
+            request=request,
+            page_size=2,
+            page_token=first.get("nextPageToken"),
+            select=None,
+            order_by=None,
+            exclude_rid=None,
+            snapshot=None,
+            branch="main",
+            oms_client=fake,
+        )
+        third = await router_v2.list_linked_objects_v2(
+            ontology="test_db",
+            objectType="Account",
+            primaryKey="acc-1",
+            linkType="owned_by",
+            request=request,
+            page_size=2,
+            page_token=second.get("nextPageToken"),
+            select=None,
+            order_by=None,
+            exclude_rid=None,
+            snapshot=None,
+            branch="main",
+            oms_client=fake,
+        )
+    finally:
+        router_v2._require_domain_role = original_require
+
+    assert [row["user_id"] for row in first["data"]] == ["u-1", "u-2"]
+    assert [row["user_id"] for row in second["data"]] == ["u-3", "u-4"]
+    assert [row["user_id"] for row in third["data"]] == ["u-5"]
+    assert first.get("nextPageToken")
+    assert second.get("nextPageToken")
+    assert third.get("nextPageToken") is None
 
 
 @pytest.mark.asyncio

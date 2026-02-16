@@ -6,7 +6,7 @@ Foundry Search Objects v2 기반 데이터 쿼리를 담당
 import logging
 from shared.observability.tracing import trace_endpoint
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 
 from shared.errors.error_types import ErrorCode, classified_http_exception
 
@@ -17,6 +17,7 @@ from bff.dependencies import (
     get_label_mapper,
 )
 from bff.routers.registry_deps import get_dataset_registry
+from bff.utils.deprecation_headers import apply_v1_to_v2_deprecation_headers
 from shared.models.ontology import QueryInput, QueryResponse
 from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.utils.access_policy import apply_access_policy
@@ -38,6 +39,7 @@ async def execute_query(
     db_name: str,
     query: QueryInput,
     request: Request,
+    response: Response = None,
     mapper: LabelMapper = Depends(get_label_mapper),
     query_service: FoundryQueryService = Depends(get_foundry_query_service),
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
@@ -67,6 +69,11 @@ async def execute_query(
     try:
         # 입력 데이터 보안 검증
         db_name = validate_db_name(db_name)
+        if response is not None:
+            apply_v1_to_v2_deprecation_headers(
+                response,
+                successor_path="/api/v2/ontologies/{ontology}/objects/{objectType}/search",
+            )
         # 쿼리 입력을 딕셔너리로 변환
         query_dict = query.model_dump(exclude_unset=True)
 
