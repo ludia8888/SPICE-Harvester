@@ -1,0 +1,16 @@
+{
+  "projectId": "prj_B8WO1c26F4j8GSRFXRWuaHn71Qeb",
+  "orgId": "team_fJ8opjxenoy2c2rLA8bAT5BP",
+  "projectName": "spice-harvester-docs",
+  "settings": {
+    "createdAt": 1771231159874,
+    "framework": "docusaurus-2",
+    "devCommand": null,
+    "installCommand": null,
+    "buildCommand": "npm run build",
+    "outputDirectory": "build",
+    "rootDirectory": null,
+    "directoryListing": false,
+    "nodeVersion": "24.x"
+  }
+}
