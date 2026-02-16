@@ -1,6 +1,6 @@
 """Ontology optimistic concurrency guard helpers.
 
-Foundry-style profile no longer depends on legacy ontology branch/version head
+Foundry-style profile no longer depends on ontology branch/version head commit
 contracts. These helpers keep a stable call signature for callers while
 normalizing to optional OCC tokens.
 """
@@ -26,7 +26,7 @@ async def fetch_branch_head_commit_id(
     branch: str,
 ) -> Optional[str]:
     _ = oms_client, db_name, branch
-    # Foundry-style profile: no legacy branch head commit contract.
+    # Foundry-style profile: no branch head commit contract.
     return None
 
 
@@ -70,5 +70,5 @@ async def resolve_branch_head_commit_with_bootstrap(
         max_backoff_seconds,
         warning_logger,
     )
-    # Foundry-style profile does not bootstrap legacy ontology branches.
+    # Foundry-style profile does not bootstrap ontology branches.
     return None

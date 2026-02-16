@@ -6,7 +6,7 @@ Foundry Search Objects v2 기반 데이터 쿼리를 담당
 import logging
 from shared.observability.tracing import trace_endpoint
 
-from fastapi import APIRouter, Depends, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from shared.errors.error_types import ErrorCode, classified_http_exception
 
@@ -103,6 +103,8 @@ async def execute_query(
     except ValueError as e:
         # 레이블을 찾을 수 없는 경우
         raise classified_http_exception(status.HTTP_400_BAD_REQUEST, str(e), code=ErrorCode.REQUEST_VALIDATION_FAILED)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to execute query: {e}")
         raise classified_http_exception(
@@ -126,13 +128,13 @@ async def query_builder_info():
         "dsl": "SearchJsonQueryV2",
         "operators": [
             "eq",
-            "in",
             "gt",
             "lt",
             "gte",
             "lte",
             "isNull",
             "contains",
+            "startsWith",
             "containsAnyTerm",
             "containsAllTerms",
             "containsAllTermsInOrder",
@@ -141,9 +143,15 @@ async def query_builder_info():
             "or",
             "not",
         ],
+        "aliases": {
+            "startsWith": "containsAllTermsInOrderPrefixLastTerm",
+        },
+        "notes": [
+            "startsWith is a Foundry-deprecated alias; prefer containsAllTermsInOrderPrefixLastTerm",
+        ],
         "pagination": {
             "pageSize": "1..1000",
-            "pageToken": "base64-encoded offset",
+            "pageToken": "opaque token from previous response (expires)",
         },
         "request_fields": [
             "where",
@@ -181,7 +189,7 @@ async def query_builder_info():
                     ],
                 },
                 "pageSize": 50,
-                "pageToken": "MTAw",
+                "pageToken": "opaque-page-token",
             },
         },
     }

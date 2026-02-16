@@ -403,7 +403,7 @@ async def get_database_expected_seq(*, db_name: str) -> Dict[str, Any]:
 async def list_classes(
     *,
     db_name: str,
-    type: Optional[str],  # noqa: A002 - Keep API surface (legacy query param).
+    type: Optional[str],  # noqa: A002 - Keep API surface (compatibility query param).
     limit: Optional[int],
     oms: OMSClient,
 ) -> Dict[str, Any]:
@@ -579,4 +579,3 @@ async def get_class(*, db_name: str, class_id: str, oms: OMSClient) -> Dict[str,
             default_status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             default_detail=str(exc),
         )
-

@@ -1336,7 +1336,7 @@ class OntologySettings(BaseSettings):
         backend = str(v or "").strip().lower()
         if backend and backend != "postgres":
             logger.warning(
-                "Ignoring legacy ontology backend profile (%s); runtime backend is fixed to postgres",
+                "Ignoring unsupported ontology backend profile (%s); runtime backend is fixed to postgres",
                 backend,
             )
         return "postgres"

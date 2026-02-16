@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from bff.dependencies import FoundryQueryService
+from shared.utils.foundry_page_token import encode_offset_page_token
 
 
 @pytest.mark.asyncio
@@ -42,7 +43,7 @@ async def test_query_database_adapts_to_foundry_where_and_page_token() -> None:
     assert kwargs["object_type"] == "Customer"
     assert kwargs["where"] == {"type": "eq", "field": "status", "value": "ACTIVE"}
     assert kwargs["page_size"] == 25
-    assert kwargs["page_token"] == "MTAw"
+    assert kwargs["page_token"] == encode_offset_page_token(100)
     assert kwargs["select"] == ["customer_id", "status"]
     assert kwargs["order_by"] == "customer_id"
     assert kwargs["order_direction"] == "asc"

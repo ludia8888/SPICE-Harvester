@@ -69,6 +69,16 @@ def _resource_doc_id(resource_type: str, resource_id: str) -> str:
     return f"{RESOURCE_DOC_PREFIX}/{resource_type}:{resource_id}"
 
 
+def _strip_branch_ref(branch: str) -> str:
+    raw = str(branch or "").strip()
+    if not raw:
+        return ""
+    if raw.lower().startswith("branch:"):
+        _, suffix = raw.split(":", 1)
+        return suffix.strip()
+    return raw
+
+
 def _localized_to_string(value: Any) -> Tuple[Optional[str], Optional[Dict[str, str]]]:
     if value is None:
         return None, None
@@ -92,11 +102,6 @@ def _localized_to_string(value: Any) -> Tuple[Optional[str], Optional[Dict[str, 
         return next(iter(lang_map.values())), lang_map
     text = str(value).strip()
     return text or None, None
-
-
-def _normalize_backend(value: Optional[str]) -> str:
-    _ = value
-    return "postgres"
 
 
 def _json_like_to_dict(value: Any, *, default: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
@@ -157,18 +162,12 @@ class OntologyResourceService:
 
     def __init__(
         self,
-        legacy_adapter: Optional[Any] = None,
         *,
-        backend: Optional[str] = None,
         postgres_url: Optional[str] = None,
         pool_min: int = 1,
         pool_max: int = 5,
     ):
         settings = get_settings()
-
-        _ = backend
-        self.backend = _normalize_backend(settings.ontology.resource_storage_backend)
-        _ = legacy_adapter
 
         self._postgres_url = str(postgres_url or settings.database.postgres_url).strip()
         self._pool_min = max(1, int(pool_min))
@@ -279,6 +278,62 @@ class OntologyResourceService:
         _ = (db_name, branch)
         await self._ensure_postgres_schema()
 
+    @staticmethod
+    def _normalize_branch_for_write(branch: str) -> str:
+        normalized = _strip_branch_ref(branch)
+        return normalized or "main"
+
+    async def _resolve_deployed_target_branch(
+        self,
+        *,
+        db_name: str,
+        ontology_commit_id: str,
+    ) -> Optional[str]:
+        commit_id = str(ontology_commit_id or "").strip()
+        if not commit_id:
+            return None
+        pool = await self._ensure_pool()
+        try:
+            async with pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    """
+                    SELECT target_branch
+                    FROM ontology_deployments_v2
+                    WHERE db_name = $1
+                      AND ontology_commit_id = $2
+                      AND status = 'succeeded'
+                    ORDER BY deployed_at DESC
+                    LIMIT 1
+                    """,
+                    str(db_name),
+                    commit_id,
+                )
+        except asyncpg.UndefinedTableError:
+            return None
+        if not row:
+            return None
+        resolved = _strip_branch_ref(str(row["target_branch"] or "").strip())
+        return resolved or None
+
+    async def _resolve_read_branches(self, *, db_name: str, branch: str) -> List[str]:
+        raw_branch = str(branch or "").strip() or "main"
+        candidates: List[str] = []
+
+        def _add(value: Optional[str]) -> None:
+            key = str(value or "").strip()
+            if key and key not in candidates:
+                candidates.append(key)
+
+        _add(raw_branch)
+        _add(_strip_branch_ref(raw_branch))
+        deployed_target = await self._resolve_deployed_target_branch(
+            db_name=db_name,
+            ontology_commit_id=raw_branch,
+        )
+        _add(deployed_target)
+        _add(_strip_branch_ref(str(deployed_target or "")))
+        return candidates
+
     @trace_external_call("oms.ontology_resources.create_resource")
     async def create_resource(
         self,
@@ -290,10 +345,11 @@ class OntologyResourceService:
         payload: Dict[str, Any],
     ) -> Dict[str, Any]:
         normalized_type = normalize_resource_type(resource_type)
+        write_branch = self._normalize_branch_for_write(branch)
         await self._ensure_postgres_schema()
         existing = await self.get_resource(
             db_name,
-            branch=branch,
+            branch=write_branch,
             resource_type=normalized_type,
             resource_id=resource_id,
         )
@@ -304,7 +360,7 @@ class OntologyResourceService:
         doc = self._payload_to_document(normalized_type, resource_id, payload, doc_id=doc_id, is_create=True)
         persisted = await self._insert_resource_document_postgres(
             db_name=db_name,
-            branch=branch,
+            branch=write_branch,
             doc=doc,
         )
         return self._document_to_payload(persisted)
@@ -320,10 +376,11 @@ class OntologyResourceService:
         payload: Dict[str, Any],
     ) -> Dict[str, Any]:
         normalized_type = normalize_resource_type(resource_type)
+        write_branch = self._normalize_branch_for_write(branch)
         await self._ensure_postgres_schema()
         existing = await self._get_resource_document_postgres(
             db_name=db_name,
-            branch=branch,
+            branch=write_branch,
             resource_type=normalized_type,
             resource_id=resource_id,
         )
@@ -341,7 +398,7 @@ class OntologyResourceService:
         )
         persisted = await self._upsert_resource_document_postgres(
             db_name=db_name,
-            branch=branch,
+            branch=write_branch,
             doc=doc,
         )
         return self._document_to_payload(persisted)
@@ -356,10 +413,11 @@ class OntologyResourceService:
         resource_id: str,
     ) -> None:
         normalized_type = normalize_resource_type(resource_type)
+        write_branch = self._normalize_branch_for_write(branch)
         await self._ensure_postgres_schema()
         await self._delete_resource_postgres(
             db_name=db_name,
-            branch=branch,
+            branch=write_branch,
             resource_type=normalized_type,
             resource_id=resource_id,
         )
@@ -376,14 +434,16 @@ class OntologyResourceService:
         normalized_type = normalize_resource_type(resource_type)
 
         await self._ensure_postgres_schema()
-        doc = await self._get_resource_document_postgres(
-            db_name=db_name,
-            branch=branch,
-            resource_type=normalized_type,
-            resource_id=resource_id,
-        )
-        if doc:
-            return self._document_to_payload(doc)
+        candidates = await self._resolve_read_branches(db_name=db_name, branch=branch)
+        for candidate in candidates:
+            doc = await self._get_resource_document_postgres(
+                db_name=db_name,
+                branch=candidate,
+                resource_type=normalized_type,
+                resource_id=resource_id,
+            )
+            if doc:
+                return self._document_to_payload(doc)
         return None
 
     @trace_external_call("oms.ontology_resources.list_resources")
@@ -398,14 +458,104 @@ class OntologyResourceService:
     ) -> List[Dict[str, Any]]:
         normalized_type = normalize_resource_type(resource_type) if resource_type else None
         await self._ensure_postgres_schema()
-        docs = await self._list_resource_documents_postgres(
-            db_name=db_name,
-            branch=branch,
-            resource_type=normalized_type,
-            limit=limit,
-            offset=offset,
+        candidates = await self._resolve_read_branches(db_name=db_name, branch=branch)
+        for candidate in candidates:
+            docs = await self._list_resource_documents_postgres(
+                db_name=db_name,
+                branch=candidate,
+                resource_type=normalized_type,
+                limit=limit,
+                offset=offset,
+            )
+            if docs:
+                return [self._document_to_payload(doc) for doc in docs]
+        return []
+
+    @trace_external_call("oms.ontology_resources.promote_branch_resources")
+    async def promote_branch_resources(
+        self,
+        db_name: str,
+        *,
+        source_branch: str,
+        target_branch: str,
+    ) -> int:
+        source = self._normalize_branch_for_write(source_branch)
+        target = self._normalize_branch_for_write(target_branch)
+        if source == target:
+            return 0
+
+        await self._ensure_postgres_schema()
+        pool = await self._ensure_pool()
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                rows = await conn.fetch(
+                    """
+                    INSERT INTO ontology_resources (
+                        db_name,
+                        branch,
+                        resource_type,
+                        resource_id,
+                        label,
+                        description,
+                        label_i18n,
+                        description_i18n,
+                        spec,
+                        metadata,
+                        version,
+                        created_at,
+                        updated_at
+                    )
+                    SELECT
+                        db_name,
+                        $3 AS branch,
+                        resource_type,
+                        resource_id,
+                        label,
+                        description,
+                        label_i18n,
+                        description_i18n,
+                        spec,
+                        metadata,
+                        version,
+                        created_at,
+                        NOW()
+                    FROM ontology_resources
+                    WHERE db_name = $1
+                      AND branch = $2
+                    ON CONFLICT (db_name, branch, resource_type, resource_id) DO UPDATE SET
+                        label = EXCLUDED.label,
+                        description = EXCLUDED.description,
+                        label_i18n = EXCLUDED.label_i18n,
+                        description_i18n = EXCLUDED.description_i18n,
+                        spec = EXCLUDED.spec,
+                        metadata = EXCLUDED.metadata,
+                        version = EXCLUDED.version,
+                        created_at = COALESCE(ontology_resources.created_at, EXCLUDED.created_at),
+                        updated_at = EXCLUDED.updated_at
+                    RETURNING resource_type, resource_id
+                    """,
+                    str(db_name),
+                    str(source),
+                    str(target),
+                )
+        return len(rows or [])
+
+    @trace_external_call("oms.ontology_resources.materialize_commit_snapshot")
+    async def materialize_commit_snapshot(
+        self,
+        db_name: str,
+        *,
+        source_branch: str,
+        ontology_commit_id: str,
+    ) -> int:
+        commit_ref = str(ontology_commit_id or "").strip()
+        if not commit_ref:
+            return 0
+        return await self.promote_branch_resources(
+            db_name,
+            source_branch=source_branch,
+            target_branch=commit_ref,
         )
-        return [self._document_to_payload(doc) for doc in docs]
 
     async def _insert_resource_document_postgres(
         self,
@@ -455,8 +605,8 @@ class OntologyResourceService:
                         json.dumps(doc.get("spec") or {}, ensure_ascii=False),
                         json.dumps(doc.get("metadata") or {}, ensure_ascii=False),
                         int(doc.get("version") or 1),
-                        str(doc.get("created_at") or datetime.now(timezone.utc).isoformat()),
-                        str(doc.get("updated_at") or datetime.now(timezone.utc).isoformat()),
+                        _to_datetime(doc.get("created_at") or datetime.now(timezone.utc)),
+                        _to_datetime(doc.get("updated_at") or datetime.now(timezone.utc)),
                     )
                     if not row:
                         raise DatabaseError("Failed to create ontology resource")
@@ -536,8 +686,8 @@ class OntologyResourceService:
                     json.dumps(doc.get("spec") or {}, ensure_ascii=False),
                     json.dumps(doc.get("metadata") or {}, ensure_ascii=False),
                     int(doc.get("version") or 1),
-                    str(doc.get("created_at") or datetime.now(timezone.utc).isoformat()),
-                    str(doc.get("updated_at") or datetime.now(timezone.utc).isoformat()),
+                    _to_datetime(doc.get("created_at") or datetime.now(timezone.utc)),
+                    _to_datetime(doc.get("updated_at") or datetime.now(timezone.utc)),
                 )
                 if not row:
                     raise DatabaseError("Failed to upsert ontology resource")
@@ -759,7 +909,7 @@ class OntologyResourceService:
             version = max(1, existing_version + 1)
             merged_metadata = {**existing_metadata, **(metadata_payload or {})}
 
-        # Keep legacy metadata revision for compatibility with existing clients.
+        # Mirror the canonical version into metadata for RID/version consumers.
         merged_metadata["rev"] = version
 
         if base_payload:

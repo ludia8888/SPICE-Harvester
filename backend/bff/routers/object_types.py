@@ -4,7 +4,6 @@ The router stays thin by delegating business logic to a service module
 (Facade / Service Layer). Test patch points for role enforcement are preserved.
 """
 
-import base64
 from shared.observability.tracing import trace_endpoint
 
 import logging
@@ -25,6 +24,7 @@ from shared.security.database_access import DOMAIN_MODEL_ROLES, enforce_database
 from shared.security.input_sanitizer import validate_db_name
 from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.services.registries.objectify_registry import ObjectifyRegistry
+from shared.utils.foundry_page_token import decode_offset_page_token, encode_offset_page_token
 
 logger = logging.getLogger(__name__)
 
@@ -62,34 +62,24 @@ def _extract_resource(payload: Any) -> Dict[str, Any]:
     return {}
 
 
-def _decode_page_token(page_token: Optional[str]) -> int:
-    if page_token is None:
-        return 0
-    token = str(page_token).strip()
-    if not token:
-        return 0
+def _decode_page_token(page_token: Optional[str], *, scope: Optional[str] = None) -> int:
     try:
-        padding = "=" * (-len(token) % 4)
-        decoded = base64.urlsafe_b64decode(f"{token}{padding}".encode("ascii")).decode("utf-8")
-        offset = int(decoded)
+        return decode_offset_page_token(page_token, ttl_seconds=60, expected_scope=scope)
     except Exception as exc:
         raise classified_http_exception(
             status.HTTP_400_BAD_REQUEST,
-            "pageToken must be base64-encoded non-negative integer offset",
+            str(exc),
             code=ErrorCode.REQUEST_VALIDATION_FAILED,
         ) from exc
-    if offset < 0:
-        raise classified_http_exception(
-            status.HTTP_400_BAD_REQUEST,
-            "pageToken offset must be >= 0",
-            code=ErrorCode.REQUEST_VALIDATION_FAILED,
-        )
-    return offset
 
 
-def _encode_page_token(offset: int) -> str:
-    raw = str(max(0, int(offset))).encode("utf-8")
-    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+def _encode_page_token(offset: int, *, scope: Optional[str] = None) -> str:
+    return encode_offset_page_token(offset, scope=scope)
+
+
+def _pagination_scope(*parts: Any) -> str:
+    normalized = [str(part).strip() for part in parts if str(part).strip()]
+    return "|".join(normalized)
 
 
 def _localized_text(value: Any) -> Optional[str]:
@@ -161,6 +151,7 @@ def _to_foundry_object_type(resource: Dict[str, Any], *, ontology_payload: Any) 
     spec = resource.get("spec") if isinstance(resource.get("spec"), dict) else {}
     pk_spec = spec.get("pk_spec") if isinstance(spec.get("pk_spec"), dict) else {}
     metadata = resource.get("metadata") if isinstance(resource.get("metadata"), dict) else {}
+    class_api_name = str(resource.get("id") or "").strip()
 
     primary_key = None
     raw_primary_keys = pk_spec.get("primary_key")
@@ -180,6 +171,8 @@ def _to_foundry_object_type(resource: Dict[str, Any], *, ontology_payload: Any) 
                 title_property = candidate
                 break
 
+    inferred_primary_keys: List[str] = []
+    inferred_title_keys: List[str] = []
     properties: Dict[str, Dict[str, Any]] = {}
     for prop in _extract_ontology_properties(ontology_payload):
         api_name = str(prop.get("name") or prop.get("id") or "").strip()
@@ -201,6 +194,19 @@ def _to_foundry_object_type(resource: Dict[str, Any], *, ontology_payload: Any) 
         required = prop.get("required")
         if isinstance(required, bool):
             item["required"] = required
+
+        is_primary = prop.get("primary_key")
+        if is_primary is None:
+            is_primary = prop.get("primaryKey")
+        if bool(is_primary):
+            inferred_primary_keys.append(api_name)
+
+        is_title = prop.get("title_key")
+        if is_title is None:
+            is_title = prop.get("titleKey")
+        if bool(is_title):
+            inferred_title_keys.append(api_name)
+
         prop_status = str(prop.get("status") or "ACTIVE").strip().upper()
         if prop_status:
             item["status"] = prop_status
@@ -210,9 +216,28 @@ def _to_foundry_object_type(resource: Dict[str, Any], *, ontology_payload: Any) 
         properties[api_name] = item
 
     out: Dict[str, Any] = {
-        "apiName": str(resource.get("id") or "").strip(),
+        "apiName": class_api_name,
         "status": str(spec.get("status") or "ACTIVE").strip().upper() or "ACTIVE",
     }
+
+    if not primary_key:
+        if inferred_primary_keys:
+            primary_key = inferred_primary_keys[0]
+        else:
+            expected_pk = f"{class_api_name.lower()}_id" if class_api_name else ""
+            if expected_pk and expected_pk in properties:
+                primary_key = expected_pk
+            elif "id" in properties:
+                primary_key = "id"
+
+    if not title_property:
+        if inferred_title_keys:
+            title_property = inferred_title_keys[0]
+        elif "name" in properties:
+            title_property = "name"
+        elif primary_key:
+            title_property = primary_key
+
     display_name = _localized_text(resource.get("label")) or out["apiName"]
     if display_name:
         out["displayName"] = display_name
@@ -260,7 +285,8 @@ async def list_object_type_contracts(
     db_name = validate_db_name(db_name)
     await _require_domain_role(request, db_name=db_name)
 
-    offset = _decode_page_token(page_token)
+    page_scope = _pagination_scope("v1/object-types", db_name, branch)
+    offset = _decode_page_token(page_token, scope=page_scope)
     resources_payload = await oms_client.list_ontology_resources(
         db_name,
         resource_type="object_type",
@@ -287,7 +313,7 @@ async def list_object_type_contracts(
             )
         object_types.append(_to_foundry_object_type(resource, ontology_payload=ontology_payload))
 
-    next_page_token = _encode_page_token(offset + len(resources)) if len(resources) == page_size else None
+    next_page_token = _encode_page_token(offset + len(resources), scope=page_scope) if len(resources) == page_size else None
     return ApiResponse.success(
         message="Object types retrieved",
         data={

@@ -51,6 +51,7 @@ from shared.models.ontology import (
     OntologyCreateRequest,
     OntologyUpdateRequest,
     Property,
+    Relationship,
 )
 
 # Add shared security module to path
@@ -405,6 +406,48 @@ def _ontology_from_resource_payload(
         "created_at": payload.get("created_at"),
         "updated_at": payload.get("updated_at"),
     }
+
+
+def _coerce_property_models(items: List[Any] | None) -> List[Property]:
+    out: List[Property] = []
+    for idx, item in enumerate(items or []):
+        if isinstance(item, Property):
+            out.append(item)
+            continue
+        if not isinstance(item, dict):
+            raise ValueError(f"Invalid property at index {idx}: expected object")
+        payload = dict(item)
+        name = str(payload.get("name") or "").strip()
+        if not name:
+            raise ValueError(f"Invalid property at index {idx}: name is required")
+        if payload.get("label") is None:
+            payload["label"] = name
+        try:
+            out.append(Property.model_validate(payload))
+        except Exception as exc:
+            raise ValueError(f"Invalid property at index {idx}: {exc}") from exc
+    return out
+
+
+def _coerce_relationship_models(items: List[Any] | None) -> List[Relationship]:
+    out: List[Relationship] = []
+    for idx, item in enumerate(items or []):
+        if isinstance(item, Relationship):
+            out.append(item)
+            continue
+        if not isinstance(item, dict):
+            raise ValueError(f"Invalid relationship at index {idx}: expected object")
+        payload = dict(item)
+        predicate = str(payload.get("predicate") or "").strip()
+        if not predicate:
+            raise ValueError(f"Invalid relationship at index {idx}: predicate is required")
+        if payload.get("label") is None:
+            payload["label"] = predicate
+        try:
+            out.append(Relationship.model_validate(payload))
+        except Exception as exc:
+            raise ValueError(f"Invalid relationship at index {idx}: {exc}") from exc
+    return out
 
 
 async def _load_existing_ontology_for_write(
@@ -1087,16 +1130,21 @@ async def update_ontology(
             elif isinstance(description_value, (str, dict)):
                 sanitized_data["description"] = coerce_localized_text(description_value)
 
+        existing_properties = _coerce_property_models(existing_dict.get("properties"))
+        existing_relationships = _coerce_relationship_models(existing_dict.get("relationships"))
+
         updated_properties = (
             ontology_data.properties
             if ontology_data.properties is not None
-            else existing_dict.get("properties")
+            else existing_properties
         )
         updated_relationships = (
             ontology_data.relationships
             if ontology_data.relationships is not None
-            else existing_dict.get("relationships")
+            else existing_relationships
         )
+        updated_properties = _coerce_property_models(list(updated_properties or []))
+        updated_relationships = _coerce_relationship_models(list(updated_relationships or []))
         updated_abstract = (
             ontology_data.abstract
             if ontology_data.abstract is not None
@@ -1209,10 +1257,8 @@ async def update_ontology(
                 )
             converted_properties_raw = converted.get("properties") or []
             converted_relationships = converted.get("relationships") or []
-            expanded_properties = [
-                p if isinstance(p, Property) else Property(**p) for p in converted_properties_raw
-            ]
-            updated_relationships = converted_relationships
+            expanded_properties = _coerce_property_models(converted_properties_raw)
+            updated_relationships = _coerce_relationship_models(converted_relationships)
 
         baseline = lint_ontology_create(
             class_id=class_id,
@@ -1223,10 +1269,10 @@ async def update_ontology(
             config=OntologyLinterConfig.from_env(branch=branch),
         )
         diff = lint_ontology_update(
-            existing_properties=list(existing_dict.get("properties") or []),
-            existing_relationships=list(existing_dict.get("relationships") or []),
+            existing_properties=existing_properties,
+            existing_relationships=existing_relationships,
             updated_properties=expanded_properties,
-            updated_relationships=list(updated_relationships or []),
+            updated_relationships=updated_relationships,
             config=OntologyLinterConfig.from_env(branch=branch),
         )
         merged_lint = _merge_lint_reports(baseline, diff)
@@ -1372,6 +1418,12 @@ async def update_ontology(
         )
     except HTTPException:
         raise
+    except ValueError as e:
+        raise classified_http_exception(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            str(e),
+            code=ErrorCode.REQUEST_VALIDATION_FAILED,
+        )
     except Exception as e:
         logger.error(f"Failed to update ontology: {e}")
         raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(e), code=ErrorCode.INTERNAL_ERROR)

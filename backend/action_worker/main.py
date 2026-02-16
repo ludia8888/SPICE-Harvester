@@ -127,7 +127,6 @@ class ActionWorker(StrictHeartbeatKafkaWorker[_ActionCommandPayload, None]):
     def __init__(self) -> None:
         settings = get_settings()
         cfg = settings.workers.action
-        self.ontology_resource_backend = "postgres"
 
         self._bootstrap_worker_runtime(
             config=WorkerRuntimeConfig(
@@ -205,7 +204,7 @@ class ActionWorker(StrictHeartbeatKafkaWorker[_ActionCommandPayload, None]):
         if not self.base_storage:
             raise RuntimeError("StorageService unavailable (boto3 missing?)")
 
-        self.ontology_resources = OntologyResourceService(backend=self.ontology_resource_backend)
+        self.ontology_resources = OntologyResourceService()
 
     async def shutdown(self) -> None:
         self.running = False

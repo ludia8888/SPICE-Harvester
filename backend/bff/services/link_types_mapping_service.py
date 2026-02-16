@@ -16,7 +16,7 @@ from uuid import uuid4
 from fastapi import Request, status
 
 from shared.errors.error_types import ErrorCode, classified_http_exception
-from shared.errors.legacy_codes import LegacyErrorCode
+from shared.errors.external_codes import ExternalErrorCode
 
 from bff.schemas.link_types_requests import (
     ForeignKeyRelationshipSpec,
@@ -343,7 +343,7 @@ class _ForeignKeyMappingStrategy:
                 status.HTTP_409_CONFLICT,
                 "Relationship foreign key type mismatch",
                 code=ErrorCode.OBJECTIFY_CONTRACT_ERROR,
-                external_code=LegacyErrorCode.RELATIONSHIP_FK_TYPE_MISMATCH,
+                external_code=ExternalErrorCode.RELATIONSHIP_FK_TYPE_MISMATCH,
                 extra={"fk_type": fk_type, "target_pk_type": target_pk_type},
             )
 
@@ -355,7 +355,7 @@ class _ForeignKeyMappingStrategy:
                     status.HTTP_409_CONFLICT,
                     "Relationship source primary key type mismatch",
                     code=ErrorCode.OBJECTIFY_CONTRACT_ERROR,
-                    external_code=LegacyErrorCode.RELATIONSHIP_SOURCE_PK_TYPE_MISMATCH,
+                    external_code=ExternalErrorCode.RELATIONSHIP_SOURCE_PK_TYPE_MISMATCH,
                     extra={"field": field, "observed": source_pk_type, "expected": expected},
                 )
 
@@ -457,7 +457,7 @@ class _JoinTableMappingStrategy:
                 status.HTTP_409_CONFLICT,
                 "Join source type mismatch",
                 code=ErrorCode.OBJECTIFY_CONTRACT_ERROR,
-                external_code=LegacyErrorCode.RELATIONSHIP_JOIN_SOURCE_TYPE_MISMATCH,
+                external_code=ExternalErrorCode.RELATIONSHIP_JOIN_SOURCE_TYPE_MISMATCH,
                 extra={"observed": source_type, "expected": source_pk_type},
             )
         if not target_type or not target_pk_type or not is_type_compatible(target_type, target_pk_type):
@@ -465,7 +465,7 @@ class _JoinTableMappingStrategy:
                 status.HTTP_409_CONFLICT,
                 "Join target type mismatch",
                 code=ErrorCode.OBJECTIFY_CONTRACT_ERROR,
-                external_code=LegacyErrorCode.RELATIONSHIP_JOIN_TARGET_TYPE_MISMATCH,
+                external_code=ExternalErrorCode.RELATIONSHIP_JOIN_TARGET_TYPE_MISMATCH,
                 extra={"observed": target_type, "expected": target_pk_type},
             )
 
@@ -617,7 +617,7 @@ async def build_mapping_request(
             status.HTTP_409_CONFLICT,
             "Object type primary key is missing",
             code=ErrorCode.OBJECTIFY_CONTRACT_ERROR,
-            external_code=LegacyErrorCode.OBJECT_TYPE_PRIMARY_KEY_MISSING,
+            external_code=ExternalErrorCode.OBJECT_TYPE_PRIMARY_KEY_MISSING,
             extra={"source": source_class, "target": target_class},
         )
 

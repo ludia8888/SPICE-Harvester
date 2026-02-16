@@ -4,7 +4,7 @@ import re
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
-from shared.errors.legacy_codes import LegacyErrorCode
+from shared.errors.external_codes import ExternalErrorCode
 from shared.services.pipeline.pipeline_type_utils import (
     parse_datetime_text_with_ambiguity,
     parse_decimal_text,
@@ -336,7 +336,7 @@ def build_funnel_analysis_fallback(
     if error:
         risk_summary.append(
             {
-                "code": LegacyErrorCode.FUNNEL_UNAVAILABLE.value,
+                "code": ExternalErrorCode.FUNNEL_UNAVAILABLE.value,
                 "severity": "warning",
                 "message": "Funnel service unavailable; used local fallback type inference.",
                 "column": None,

@@ -11,7 +11,6 @@ from shared.services.kafka.consumer_ops import InlineKafkaConsumerOps
 @pytest.mark.asyncio
 async def test_resource_registry_mode_is_default_and_active() -> None:
     worker = OntologyWorker()
-    assert worker.ontology_resource_backend == "postgres"
     assert worker._uses_resource_registry_for_ontology is True
 
 

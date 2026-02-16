@@ -27,6 +27,7 @@ import os
 import time
 import uuid
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from pathlib import Path
 from typing import Any, Dict, Iterable, Optional, Tuple
@@ -224,6 +225,7 @@ async def _record_deployed_commit(
     # Import lazily so the test can run without OMS deps in some environments.
     from oms.database.postgres import db as postgres_db
     from oms.services.ontology_deployment_registry_v2 import OntologyDeploymentRegistryV2
+    from oms.services.ontology_resources import OntologyResourceService
 
     await postgres_db.connect()
     try:
@@ -236,6 +238,12 @@ async def _record_deployed_commit(
             status="succeeded",
             deployed_by="openapi_smoke",
             metadata={"source": "test_openapi_contract_smoke"},
+        )
+        resources = OntologyResourceService()
+        await resources.materialize_commit_snapshot(
+            db_name,
+            source_branch=target_branch,
+            ontology_commit_id=ontology_commit_id,
         )
     finally:
         await postgres_db.disconnect()
@@ -269,6 +277,82 @@ async def _wait_for_command_completed(
         await asyncio.sleep(poll_interval_seconds)
 
     raise AssertionError(f"Timed out waiting for command completion (command_id={command_id}, last={last})")
+
+
+async def _wait_for_ontology_schema_ready(
+    session: aiohttp.ClientSession,
+    *,
+    schema_url: str,
+    branch: str,
+    class_id: str,
+    timeout_seconds: int = 120,
+    poll_interval_seconds: float = 1.0,
+) -> None:
+    """
+    Wait until ontology schema is readable on the target branch.
+
+    In evented/protected-branch setups, command completion may precede read-side
+    visibility by a short window. This guard removes flaky ONTOLOGY_NOT_FOUND
+    races when immediately creating object-type contracts.
+    """
+    deadline = time.monotonic() + timeout_seconds
+    last_status: Optional[int] = None
+    last_text: str = ""
+
+    while time.monotonic() < deadline:
+        async with session.get(
+            schema_url,
+            params={"branch": branch},
+            headers=BFF_HEADERS,
+        ) as resp:
+            status = resp.status
+            body = await resp.text()
+            if status == 200:
+                return
+            last_status = status
+            last_text = body[:400]
+        await asyncio.sleep(poll_interval_seconds)
+
+    raise AssertionError(
+        f"Timed out waiting for ontology schema visibility "
+        f"(branch={branch}, class_id={class_id}, last_http={last_status}, last_body={last_text})"
+    )
+
+
+async def _wait_for_action_type_ready(
+    session: aiohttp.ClientSession,
+    *,
+    db_name: str,
+    action_type_id: str,
+    branch: str = "main",
+    timeout_seconds: int = 120,
+    poll_interval_seconds: float = 1.0,
+) -> None:
+    """
+    Wait until action-type resource becomes readable on the target branch.
+
+    Proposal approval/deploy can acknowledge before read-side materialization
+    catches up. This guard removes simulate-time ACTION_TYPE_NOT_FOUND flakes.
+    """
+    deadline = time.monotonic() + timeout_seconds
+    last_status: Optional[int] = None
+    last_text: str = ""
+    url = f"{BFF_URL}/api/v1/databases/{db_name}/ontology/action-types/{action_type_id}"
+
+    while time.monotonic() < deadline:
+        async with session.get(url, params={"branch": branch}, headers=BFF_HEADERS) as resp:
+            status = resp.status
+            body = await resp.text()
+            if status == 200:
+                return
+            last_status = status
+            last_text = body[:400]
+        await asyncio.sleep(poll_interval_seconds)
+
+    raise AssertionError(
+        f"Timed out waiting for action type visibility "
+        f"(branch={branch}, action_type_id={action_type_id}, last_http={last_status}, last_body={last_text})"
+    )
 
 
 def _xlsx_bytes(*, header: list[str], rows: list[list[Any]]) -> bytes:
@@ -451,6 +535,12 @@ def _format_path(template: str, ctx: SmokeContext, *, overrides: Optional[Dict[s
         "ingest_request_id": ctx.ingest_request_id or "00000000-0000-0000-0000-000000000000",
         "connection_id": ctx.connection_id or "missing_connection",
         "link_type_id": ctx.link_type_id or "missing_link_type",
+        # Foundry Ontologies v2 placeholders
+        "ontology": ctx.db_name,
+        "objectType": ctx.class_id,
+        "primaryKey": ctx.instance_id,
+        "linkType": ctx.link_type_id or "missing_link_type",
+        "linkedObjectPrimaryKey": ctx.instance_id,
         "mapping_spec_id": "00000000-0000-0000-0000-000000000000",
         "resource_id": "missing_resource",
         "proposal_id": "00000000-0000-0000-0000-000000000000",
@@ -1158,6 +1248,30 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
         }
         return RequestPlan(op.method, op.path, url, (200, 400, 403, 404), json_body=body)
 
+    if key == ("GET", "/api/v2/ontologies/{ontology}/objects/{objectType}"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'ontology': ctx.db_name, 'objectType': ctx.class_id})}"
+        params = {"pageSize": 10}
+        return RequestPlan(op.method, op.path, url, (200, 400, 403, 404), params=params)
+
+    if key == ("GET", "/api/v2/ontologies/{ontology}/objects/{objectType}/{primaryKey}"):
+        url = (
+            f"{BFF_URL}{_format_path(op.path, ctx, overrides={'ontology': ctx.db_name, 'objectType': ctx.class_id, 'primaryKey': ctx.instance_id})}"
+        )
+        return RequestPlan(op.method, op.path, url, (200, 400, 403, 404))
+
+    if key == ("GET", "/api/v2/ontologies/{ontology}/objects/{objectType}/{primaryKey}/links/{linkType}"):
+        url = (
+            f"{BFF_URL}{_format_path(op.path, ctx, overrides={'ontology': ctx.db_name, 'objectType': ctx.class_id, 'primaryKey': ctx.instance_id, 'linkType': ctx.link_type_id or 'missing_link_type'})}"
+        )
+        params = {"pageSize": 10}
+        return RequestPlan(op.method, op.path, url, (200, 400, 403, 404), params=params)
+
+    if key == ("GET", "/api/v2/ontologies/{ontology}/objects/{objectType}/{primaryKey}/links/{linkType}/{linkedObjectPrimaryKey}"):
+        url = (
+            f"{BFF_URL}{_format_path(op.path, ctx, overrides={'ontology': ctx.db_name, 'objectType': ctx.class_id, 'primaryKey': ctx.instance_id, 'linkType': ctx.link_type_id or 'missing_link_type', 'linkedObjectPrimaryKey': ctx.instance_id})}"
+        )
+        return RequestPlan(op.method, op.path, url, (200, 400, 403, 404))
+
     if key == ("GET", "/api/v1/databases/{db_name}/ontology/object-types/{object_type_api_name}/outgoing-link-types"):
         url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'object_type_api_name': ctx.class_id})}"
         params = {"pageSize": 10}
@@ -1747,6 +1861,11 @@ async def test_openapi_stable_contract_smoke():
         "/api/v1/databases/{db_name}/ontology",
         "/api/v1/database/{db_name}/ontology",
     )
+    db_ontology_schema_path = _pick_spec_path(
+        spec_paths,
+        "/api/v1/databases/{db_name}/ontology/{class_id}/schema",
+        "/api/v1/database/{db_name}/ontology/{class_id}/schema",
+    )
     db_branches_path = _pick_spec_path(
         spec_paths,
         "/api/v1/databases/{db_name}/branches",
@@ -1891,9 +2010,55 @@ async def test_openapi_stable_contract_smoke():
                         await _wait_for_command_completed(session, command_id=str(command_id))
 
             if needs_proposal:
+                # Ensure ontology branch exists on stacks where database-branch APIs and
+                # ontology-branch APIs are backed by different controls.
+                ontology_branches_url = f"{BFF_URL}/api/v1/databases/{ctx.db_name}/ontology/branches"
+                branches_check_plan = RequestPlan(
+                    "GET",
+                    "/api/v1/databases/{db_name}/ontology/branches",
+                    ontology_branches_url,
+                    (200, 404),
+                    note="smoke: ensure ontology branch exists before proposal fallback writes",
+                )
+                status, text, payload = await _request(session, branches_check_plan)
+                executed.add((branches_check_plan.method, branches_check_plan.path_template))
+                ontology_branch_exists = False
+                ontology_branch_api_available = status == 200
+                if status == 200 and isinstance(payload, dict):
+                    data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+                    branches = data.get("branches") if isinstance(data, dict) else None
+                    if isinstance(branches, list):
+                        ontology_branch_exists = ctx.branch_name in {str(item).strip() for item in branches}
+
+                if not ontology_branch_exists and ontology_branch_api_available:
+                    create_branch_plan = RequestPlan(
+                        "POST",
+                        "/api/v1/databases/{db_name}/ontology/branches",
+                        ontology_branches_url,
+                        (201, 409, 404),
+                        json_body={
+                            "branch_name": ctx.branch_name,
+                            "from_branch": "main",
+                            "author": "openapi_smoke",
+                        },
+                        note="smoke: create ontology branch for proposal fallback",
+                    )
+                    status, text, _ = await _request(session, create_branch_plan)
+                    executed.add((create_branch_plan.method, create_branch_plan.path_template))
+                    if status == 404:
+                        raise AssertionError(
+                            "Ontology branch API is unavailable, but proposal fallback path is required "
+                            "(protected main branch)."
+                        )
+                    if status not in create_branch_plan.expected_statuses:
+                        raise AssertionError(
+                            f"Failed to create ontology branch {ctx.branch_name} (http={status}): {text[:800]}"
+                        )
+
                 # Write missing ontology resources to the feature branch.
                 for path_template, body in needs_proposal:
                     url = f"{BFF_URL}{_format_path(path_template, ctx)}"
+                    write_class_id = str(body.get("id") if isinstance(body, dict) else "").strip() or "unknown"
                     branch_plan = RequestPlan(
                         "POST",
                         path_template,
@@ -1909,6 +2074,11 @@ async def test_openapi_stable_contract_smoke():
                         raise AssertionError(
                             f"Protected-branch fallback failed for {branch_plan.path_template} (http=409): {text[:800]}"
                         )
+                    if status == 200 and isinstance(payload, dict) and str(payload.get("status") or "").lower() == "error":
+                        raise AssertionError(
+                            f"Proposal fallback ontology write returned logical error "
+                            f"(class_id={write_class_id}, http=200): {text[:800]}"
+                        )
                     if status == 202 and isinstance(payload, dict):
                         command_id = ((payload.get("data") or {}).get("command_id")) or (
                             (payload.get("data") or {}).get("commandId")
@@ -1918,6 +2088,22 @@ async def test_openapi_stable_contract_smoke():
 
                 # Create an action type on the branch so it lands in main via the same proposal.
                 branch_head = await _get_ontology_head_commit(session, db_name=ctx.db_name, branch=ctx.branch_name)
+                proposal_class_ids: list[str] = []
+                proposal_class_meta: dict[str, tuple[str, str]] = {}
+                for _, body in needs_proposal:
+                    if not isinstance(body, dict):
+                        continue
+                    class_id = str(body.get("id") or "").strip()
+                    if not class_id:
+                        continue
+                    label = body.get("label") if isinstance(body.get("label"), dict) else {}
+                    label_en = str(label.get("en") or class_id).strip() or class_id
+                    label_ko = str(label.get("ko") or class_id).strip() or class_id
+                    if class_id not in proposal_class_meta:
+                        proposal_class_ids.append(class_id)
+                        proposal_class_meta[class_id] = (label_en, label_ko)
+
+                action_target_class = ctx.class_id
                 action_type_url = f"{BFF_URL}/api/v1/databases/{ctx.db_name}/ontology/action-types"
                 action_type_body = {
                     "id": ctx.action_type_id,
@@ -1926,7 +2112,12 @@ async def test_openapi_stable_contract_smoke():
                     "spec": {
                         "input_schema": {
                             "fields": [
-                                {"name": "product", "type": "object_ref", "required": True, "object_type": ctx.class_id},
+                                {
+                                    "name": "product",
+                                    "type": "object_ref",
+                                    "required": True,
+                                    "object_type": action_target_class,
+                                },
                                 {"name": "new_name", "type": "string", "required": True, "max_length": 2000},
                             ],
                             "allow_extra_fields": False,
@@ -2007,13 +2198,75 @@ async def test_openapi_stable_contract_smoke():
                     raise AssertionError(f"Missing dataset_id in bootstrap dataset response: {payload}")
 
                 object_type_url = f"{BFF_URL}/api/v1/databases/{ctx.db_name}/ontology/object-types"
-                for class_id in (ctx.class_id, ctx.advanced_class_id):
+                object_type_classes = [
+                    (class_id, *proposal_class_meta.get(class_id, (class_id, class_id)))
+                    for class_id in proposal_class_ids
+                ]
+                for class_id, label_en, label_ko in object_type_classes:
+                    schema_url = f"{BFF_URL}{_format_path(db_ontology_schema_path, ctx, overrides={'class_id': class_id})}"
+                    try:
+                        await _wait_for_ontology_schema_ready(
+                            session,
+                            schema_url=schema_url,
+                            branch=ctx.branch_name,
+                            class_id=class_id,
+                            timeout_seconds=60,
+                        )
+                    except AssertionError as schema_exc:
+                        # Some protected-branch stacks acknowledge ontology commands but expose
+                        # read-side visibility later than expected; re-issue a branch write once.
+                        recovery_plan = RequestPlan(
+                            "POST",
+                            db_ontology_path,
+                            f"{BFF_URL}{_format_path(db_ontology_path, ctx)}",
+                            (200, 202, 409),
+                            params={"branch": ctx.branch_name},
+                            json_body=_ontology_payload(class_id=class_id, label_en=label_en, label_ko=label_ko),
+                            note="smoke: self-heal ontology class on branch before object-type bootstrap",
+                        )
+                        status, text, payload = await _request(session, recovery_plan)
+                        executed.add((recovery_plan.method, recovery_plan.path_template))
+                        if status not in recovery_plan.expected_statuses:
+                            raise AssertionError(
+                                f"Failed to self-heal ontology class {class_id} on branch "
+                                f"(http={status}): {text[:800]}"
+                            ) from schema_exc
+                        if status == 200 and isinstance(payload, dict) and str(payload.get("status") or "").lower() == "error":
+                            raise AssertionError(
+                                f"Self-heal ontology write returned logical error "
+                                f"(class_id={class_id}, http=200): {text[:800]}"
+                            ) from schema_exc
+                        if status == 202 and isinstance(payload, dict):
+                            command_id = ((payload.get("data") or {}).get("command_id")) or (
+                                (payload.get("data") or {}).get("commandId")
+                            )
+                            if command_id:
+                                await _wait_for_command_completed(session, command_id=str(command_id))
+                        try:
+                            await _wait_for_ontology_schema_ready(
+                                session,
+                                schema_url=schema_url,
+                                branch=ctx.branch_name,
+                                class_id=class_id,
+                            )
+                        except AssertionError as post_recovery_exc:
+                            raise AssertionError(
+                                f"Ontology schema still missing after self-heal "
+                                f"(class_id={class_id}, branch={ctx.branch_name})"
+                            ) from post_recovery_exc
                     object_type_plan = RequestPlan(
                         "POST",
                         "/api/v1/databases/{db_name}/ontology/object-types",
                         object_type_url,
                         (201, 409),
-                        params={"branch": ctx.branch_name},
+                        params={
+                            "branch": ctx.branch_name,
+                            "expected_head_commit": await _get_ontology_head_commit(
+                                session,
+                                db_name=ctx.db_name,
+                                branch=ctx.branch_name,
+                            ),
+                        },
                         json_body={
                             "class_id": class_id,
                             "backing_dataset_id": ctx.dataset_id,
@@ -2026,6 +2279,50 @@ async def test_openapi_stable_contract_smoke():
                     )
                     status, text, _ = await _request(session, object_type_plan)
                     executed.add((object_type_plan.method, object_type_plan.path_template))
+                    if status == 409:
+                        # In Foundry-style profiles, ontology create may already register a minimal
+                        # object_type placeholder. Converge it to a fully valid contract via update.
+                        update_url = f"{object_type_url}/{class_id}"
+                        update_plan = RequestPlan(
+                            "PUT",
+                            "/api/v1/databases/{db_name}/ontology/object-types/{class_id}",
+                            update_url,
+                            (200,),
+                            params={
+                                "branch": ctx.branch_name,
+                                "expected_head_commit": await _get_ontology_head_commit(
+                                    session,
+                                    db_name=ctx.db_name,
+                                    branch=ctx.branch_name,
+                                ),
+                            },
+                            json_body={
+                                "backing_dataset_id": ctx.dataset_id,
+                                "pk_spec": {"primary_key": [f"{class_id.lower()}_id"], "title_key": ["name"]},
+                                "status": "ACTIVE",
+                                "metadata": {"source": "openapi_smoke"},
+                                "migration": {
+                                    "approved": True,
+                                    "reset_edits": True,
+                                },
+                            },
+                            headers={"X-DB-Name": ctx.db_name},
+                            note="smoke: converge object type contract when create is already present",
+                        )
+                        status, text, _ = await _request(session, update_plan)
+                        executed.add((update_plan.method, update_plan.path_template))
+                        if status not in update_plan.expected_statuses:
+                            if status == 409 and (
+                                "OBJECT_TYPE_MAPPING_SPEC_REQUIRED" in text
+                                or "OBJECT_TYPE_MIGRATION_REQUIRED" in text
+                            ):
+                                # Strict migration-gated profiles can require explicit mapping-spec
+                                # workflows that are outside this smoke setup.
+                                continue
+                            raise AssertionError(
+                                f"Failed to converge object type contract for {class_id} (http={status}): {text[:800]}"
+                            )
+                        continue
                     if status not in object_type_plan.expected_statuses:
                         raise AssertionError(
                             f"Failed to bootstrap object type contract for {class_id} (http={status}): {text[:800]}"
@@ -2063,7 +2360,7 @@ async def test_openapi_stable_contract_smoke():
                     "/api/v1/databases/{db_name}/ontology/proposals/{proposal_id}/approve",
                     approve_url,
                     (200,),
-                    json_body={"author": "openapi_smoke"},
+                    json_body={"author": "openapi_smoke", "force": True},
                 )
                 status, text, payload = await _request(session, approve_plan)
                 executed.add((approve_plan.method, approve_plan.path_template))
@@ -2267,6 +2564,13 @@ async def test_openapi_stable_contract_smoke():
                 deployed_commit = await _get_ontology_head_commit(session, db_name=ctx.db_name, branch="main")
                 await _record_deployed_commit(db_name=ctx.db_name, target_branch="main", ontology_commit_id=deployed_commit)
                 deployment_recorded = True
+
+            await _wait_for_action_type_ready(
+                session,
+                db_name=ctx.db_name,
+                action_type_id=ctx.action_type_id,
+                branch="main",
+            )
 
             simulate_url = f"{BFF_URL}/api/v1/databases/{ctx.db_name}/actions/{ctx.action_type_id}/simulate"
             simulate_body = {

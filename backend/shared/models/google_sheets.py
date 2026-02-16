@@ -6,7 +6,7 @@ from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator
 
-from shared.errors.legacy_codes import LegacyErrorCode
+from shared.errors.external_codes import ExternalErrorCode
 
 
 def _validate_google_sheet_url_field(value: HttpUrl) -> HttpUrl:
@@ -102,14 +102,14 @@ class GoogleSheetError(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "error_code": LegacyErrorCode.SHEET_NOT_ACCESSIBLE.value,
+                "error_code": ExternalErrorCode.SHEET_NOT_ACCESSIBLE.value,
                 "message": "Cannot access the Google Sheet. Please ensure it's shared publicly.",
                 "detail": "403 Forbidden: The caller does not have permission",
             }
         }
     )
 
-    error_code: LegacyErrorCode = Field(..., description="Error code")
+    error_code: ExternalErrorCode = Field(..., description="Error code")
     message: str = Field(..., description="Error message")
     detail: Optional[str] = Field(None, description="Detailed error information")
 

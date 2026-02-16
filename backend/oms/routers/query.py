@@ -5,9 +5,10 @@ Provides Foundry Search Objects API v2-compatible read surface on top of the
 instances Elasticsearch index.
 """
 
-import base64
 import logging
 import re
+from hashlib import sha256
+from json import dumps as json_dumps
 from typing import Any, Dict, List, Literal, Optional
 from uuid import uuid4
 
@@ -24,6 +25,7 @@ from shared.security.input_sanitizer import (
     validate_branch_name,
     validate_class_id,
 )
+from shared.utils.foundry_page_token import decode_offset_page_token, encode_offset_page_token
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +79,7 @@ class SearchJsonQueryV2(BaseModel):
         "lte",
         "isNull",
         "contains",
+        "startsWith",
         "containsAnyTerm",
         "containsAllTerms",
         "containsAllTermsInOrder",
@@ -112,6 +115,7 @@ class SearchJsonQueryV2(BaseModel):
             raise ValueError(f"{self.type} query requires value")
 
         if self.type in {
+            "startsWith",
             "containsAnyTerm",
             "containsAllTerms",
             "containsAllTermsInOrder",
@@ -196,28 +200,36 @@ def _resolve_field_path(field: str) -> str:
     return f"data.{validated}"
 
 
-def _decode_page_token(page_token: Optional[str]) -> int:
-    if page_token is None:
-        return 0
-    token = page_token.strip()
-    if not token:
-        return 0
-
-    try:
-        padding = "=" * (-len(token) % 4)
-        decoded = base64.urlsafe_b64decode(f"{token}{padding}".encode("ascii")).decode("utf-8")
-        offset = int(decoded)
-    except Exception as exc:
-        raise ValueError("pageToken must be base64-encoded non-negative integer offset") from exc
-
-    if offset < 0:
-        raise ValueError("pageToken offset must be >= 0")
-    return offset
+def _decode_page_token(page_token: Optional[str], *, scope: Optional[str] = None) -> int:
+    return decode_offset_page_token(page_token, ttl_seconds=60, expected_scope=scope)
 
 
-def _encode_page_token(offset: int) -> str:
-    raw = str(max(0, int(offset))).encode("utf-8")
-    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+def _encode_page_token(offset: int, *, scope: Optional[str] = None) -> str:
+    return encode_offset_page_token(offset, scope=scope)
+
+
+def _pagination_scope_for_search(
+    *,
+    db_name: str,
+    object_type: str,
+    branch: str,
+    request: SearchObjectsRequestV2,
+) -> str:
+    payload = {
+        "api": "v2/searchObjects",
+        "db": db_name,
+        "objectType": object_type,
+        "branch": branch,
+        "where": request.where.model_dump(mode="json") if request.where is not None else None,
+        "orderBy": request.orderBy,
+        "select": request.select,
+        "selectV2": request.selectV2,
+        "excludeRid": request.excludeRid,
+        "snapshot": request.snapshot,
+    }
+    canonical = json_dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    fingerprint = sha256(canonical.encode("utf-8")).hexdigest()
+    return f"v2/searchObjects|{db_name}|{branch}|{object_type}|{fingerprint}"
 
 
 def _coerce_query(value: Any) -> SearchJsonQueryV2:
@@ -345,6 +357,9 @@ def _to_es_query(query: Any, *, depth: int = 0) -> Dict[str, Any]:
     if q.type == "contains":
         # Foundry semantics: array contains the provided value.
         return {"term": {field_path: q.value}}
+    if q.type == "startsWith":
+        # Foundry docs: deprecated alias for containsAllTermsInOrderPrefixLastTerm.
+        return {"match_phrase_prefix": {field_path: str(q.value).strip()}}
     if q.type == "containsAnyTerm":
         return {"match": {field_path: {"query": str(q.value).strip(), "operator": "or"}}}
     if q.type == "containsAllTerms":
@@ -408,7 +423,13 @@ async def search_objects_v2(
         request = SearchObjectsRequestV2.model_validate(payload)
         object_type = validate_class_id(object_type)
         branch = validate_branch_name(branch)
-        offset = _decode_page_token(request.pageToken)
+        page_scope = _pagination_scope_for_search(
+            db_name=db_name,
+            object_type=object_type,
+            branch=branch,
+            request=request,
+        )
+        offset = _decode_page_token(request.pageToken, scope=page_scope)
 
         object_query = _to_es_query(request.where or _default_match_all_where())
         sort_clause = _build_sort_clause(request)
@@ -453,7 +474,7 @@ async def search_objects_v2(
         next_page_token: Optional[str] = None
         next_offset = offset + len(flattened)
         if next_offset < total:
-            next_page_token = _encode_page_token(next_offset)
+            next_page_token = _encode_page_token(next_offset, scope=page_scope)
 
         return SearchObjectsResponseV2(
             data=flattened,

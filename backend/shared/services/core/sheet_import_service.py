@@ -20,7 +20,7 @@ import json
 import re
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-from shared.errors.legacy_codes import LegacyErrorCode
+from shared.errors.external_codes import ExternalErrorCode
 from shared.utils.blank_utils import is_blank_value
 from shared.validators.money_validator import MoneyValidator
 import logging
@@ -297,7 +297,7 @@ class SheetImportService:
                             "row_index": row_idx,
                             "source_field": source_name,
                             "target_field": target_name,
-                            "code": LegacyErrorCode.TARGET_FIELD_UNKNOWN.value,
+                            "code": ExternalErrorCode.TARGET_FIELD_UNKNOWN.value,
                             "message": f"Unknown target_field '{target_name}'",
                         }
                     )
@@ -310,7 +310,7 @@ class SheetImportService:
                             "row_index": row_idx,
                             "source_field": source_name,
                             "target_field": target_name,
-                            "code": LegacyErrorCode.SOURCE_FIELD_UNKNOWN.value,
+                            "code": ExternalErrorCode.SOURCE_FIELD_UNKNOWN.value,
                             "message": f"Unknown source_field '{source_name}'",
                         }
                     )

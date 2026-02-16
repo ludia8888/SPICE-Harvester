@@ -89,7 +89,7 @@ class PullRequestService:
         """
         try:
             # Foundry-style proposals are metadata-first; branch existence is not
-            # validated against a legacy graph backend at proposal creation time.
+            # validated against external graph systems at proposal creation time.
             diff = await self.get_branch_diff(db_name, source_branch, target_branch)
             conflicts = await self.check_merge_conflicts(db_name, source_branch, target_branch)
             diff_payload = json.dumps(diff) if diff is not None else None

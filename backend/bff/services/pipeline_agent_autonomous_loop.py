@@ -1310,7 +1310,7 @@ def _build_system_prompt(*, allowed_tools: List[str]) -> str:
         '  "action": "call_tool|finish|clarify|respond",\n'
         '  "message": "natural language message to user in Korean (optional, required for respond)",\n'
         '  "tool_calls": [{"tool": "string", "args": {...}}],\n'
-        '  "tool": "string (legacy single tool; optional if tool_calls is set)",\n'
+        '  "tool": "string (compat single tool; optional if tool_calls is set)",\n'
         '  "args": {"...": "..."},\n'
         '  "questions": [PipelineClarificationQuestion],\n'
         '  "notes": string[],\n'

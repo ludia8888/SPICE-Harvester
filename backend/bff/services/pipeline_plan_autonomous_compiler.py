@@ -6,7 +6,7 @@ That duplication made enterprise improvements (batching, prompt prefix caching, 
 hard to roll out consistently.
 
 This module now delegates to the Pipeline Agent loop runtime and adapts the result to the
-legacy `PipelinePlanCompileResult` shape for API compatibility.
+compatibility `PipelinePlanCompileResult` shape for API compatibility.
 """
 
 from __future__ import annotations
@@ -182,7 +182,7 @@ async def compile_pipeline_plan_mcp_autonomous(
     planner_confidence, planner_notes = _coerce_planner_fields(payload)
     preflight = payload.get("preflight") if isinstance(payload.get("preflight"), dict) else None
 
-    # Normalize statuses to the legacy compile API surface.
+    # Normalize statuses to the compatibility compile API surface.
     out_status = "error"
     if status_raw == "clarification_required":
         out_status = "clarification_required"

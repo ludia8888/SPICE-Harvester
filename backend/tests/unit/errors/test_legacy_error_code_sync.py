@@ -51,11 +51,11 @@ def _extract_dict_literal_keys(path: Path, *, var_name: str) -> set[str]:
 
 
 @pytest.mark.unit
-def test_legacy_error_code_enum_is_registered_in_catalog() -> None:
+def test_external_error_code_enum_is_registered_in_catalog() -> None:
     backend_dir = Path(__file__).resolve().parents[3]
     enum_values = _extract_enum_values(
-        backend_dir / "shared" / "errors" / "legacy_codes.py",
-        class_name="LegacyErrorCode",
+        backend_dir / "shared" / "errors" / "external_codes.py",
+        class_name="ExternalErrorCode",
     )
     legacy_codes = _extract_dict_literal_keys(
         backend_dir / "shared" / "errors" / "enterprise_catalog.py",
@@ -75,6 +75,6 @@ def test_legacy_error_code_enum_is_registered_in_catalog() -> None:
     if not missing:
         return
 
-    lines = ["LegacyErrorCode values missing from enterprise catalog code maps:"]
+    lines = ["ExternalErrorCode values missing from enterprise catalog code maps:"]
     lines.extend(f"- {code}" for code in missing)
     raise AssertionError("\n".join(lines))

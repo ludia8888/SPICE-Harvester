@@ -4,7 +4,7 @@ import asyncio
 import logging
 from typing import Any, Awaitable, Callable, Dict, Optional
 
-from shared.errors.legacy_codes import LegacyErrorCode
+from shared.errors.external_codes import ExternalErrorCode
 from shared.models.pipeline_plan import PipelinePlan
 from shared.observability.tracing import trace_external_call
 from shared.services.pipeline.pipeline_preview_inspector import inspect_preview
@@ -589,7 +589,7 @@ async def _pipeline_deploy_promote_build(server: Any, arguments: Dict[str, Any])
                     "errors": detail.get("errors"),
                     "message": detail.get("message") or "Build is not successful yet",
                 }
-            if isinstance(detail, dict) and str(detail.get("code") or "").strip() == LegacyErrorCode.REPLAY_REQUIRED.value:
+            if isinstance(detail, dict) and str(detail.get("code") or "").strip() == ExternalErrorCode.REPLAY_REQUIRED.value:
                 return {
                     "status": "replay_required",
                     "pipeline_id": pipeline_id,
@@ -597,7 +597,7 @@ async def _pipeline_deploy_promote_build(server: Any, arguments: Dict[str, Any])
                     "node_id": node_id,
                     "db_name": db_name,
                     "dataset_name": dataset_name,
-                    "code": LegacyErrorCode.REPLAY_REQUIRED.value,
+                    "code": ExternalErrorCode.REPLAY_REQUIRED.value,
                     "message": detail.get("message") or resp.get("error") or "Replay is required to deploy",
                     "detail": detail,
                     "hint": "Retry with replay_on_deploy=true OR deploy to a new dataset_name.",
@@ -606,7 +606,7 @@ async def _pipeline_deploy_promote_build(server: Any, arguments: Dict[str, Any])
                 return {
                     "status": "conflict",
                     "pipeline_id": pipeline_id,
-                    "code": LegacyErrorCode.DEFINITION_MISMATCH.value,
+                    "code": ExternalErrorCode.DEFINITION_MISMATCH.value,
                     "message": detail,
                     "hint": "Pass definition_json (exact build snapshot) or pipeline_spec_commit_id from the build output.",
                 }

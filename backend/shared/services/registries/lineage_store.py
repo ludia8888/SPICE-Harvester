@@ -39,9 +39,9 @@ class LineageStore(PostgresSchemaRegistry):
     - artifact:<kind>:<id...>
     """
 
-    _LEGACY_ES_ARTIFACT_PREFIX = "artifact:elasticsearch:"
-    _LEGACY_ES_EDGE_TYPE = "event_wrote_es_document"
-    _LEGACY_S3_EDGE_TYPE = "event_wrote_s3_object"
+    _DISALLOWED_ES_ARTIFACT_ALIAS_PREFIX = "artifact:elasticsearch:"
+    _DISALLOWED_ES_EDGE_TYPE_ALIAS = "event_wrote_es_document"
+    _DISALLOWED_S3_EDGE_TYPE_ALIAS = "event_wrote_s3_object"
 
     def __init__(
         self,
@@ -339,22 +339,22 @@ class LineageStore(PostgresSchemaRegistry):
         return "artifact:" + ":".join([kind, *safe_parts])
 
     @classmethod
-    def _validate_no_legacy_aliases(cls, *, node_id: Optional[str] = None, edge_type: Optional[str] = None) -> None:
-        if isinstance(node_id, str) and node_id.startswith(cls._LEGACY_ES_ARTIFACT_PREFIX):
-            raise ValueError("legacy lineage node id alias is not supported: artifact:elasticsearch:*")
-        if isinstance(edge_type, str) and edge_type == cls._LEGACY_ES_EDGE_TYPE:
-            raise ValueError("legacy lineage edge type alias is not supported: event_wrote_es_document")
-        if isinstance(edge_type, str) and edge_type == cls._LEGACY_S3_EDGE_TYPE:
-            raise ValueError("legacy lineage edge type alias is not supported: event_wrote_s3_object")
+    def _validate_no_disallowed_aliases(cls, *, node_id: Optional[str] = None, edge_type: Optional[str] = None) -> None:
+        if isinstance(node_id, str) and node_id.startswith(cls._DISALLOWED_ES_ARTIFACT_ALIAS_PREFIX):
+            raise ValueError("deprecated lineage node id alias is not supported: artifact:elasticsearch:*")
+        if isinstance(edge_type, str) and edge_type == cls._DISALLOWED_ES_EDGE_TYPE_ALIAS:
+            raise ValueError("deprecated lineage edge type alias is not supported: event_wrote_es_document")
+        if isinstance(edge_type, str) and edge_type == cls._DISALLOWED_S3_EDGE_TYPE_ALIAS:
+            raise ValueError("deprecated lineage edge type alias is not supported: event_wrote_s3_object")
 
     @classmethod
     def _canonicalize_node_id(cls, node_id: str) -> str:
-        cls._validate_no_legacy_aliases(node_id=node_id)
+        cls._validate_no_disallowed_aliases(node_id=node_id)
         return node_id
 
     @classmethod
     def _canonicalize_edge_type(cls, edge_type: str) -> str:
-        cls._validate_no_legacy_aliases(edge_type=edge_type)
+        cls._validate_no_disallowed_aliases(edge_type=edge_type)
         return edge_type
 
     @staticmethod

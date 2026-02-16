@@ -788,7 +788,7 @@ async def execute_multi_hop_query(
     branch: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
-    Execute multi-hop graph query (legacy dict payload).
+    Execute multi-hop graph query (compat dict payload).
     """
     try:
         db_name = validate_db_name(db_name)
@@ -877,9 +877,9 @@ async def execute_multi_hop_query(
                 effective_overlay_status = "DEGRADED"
                 # Rebuild allowed_ids after merge (tombstoned nodes removed)
                 allowed_ids = {str(n.get("id")) for n in filtered_nodes if isinstance(n, dict)}
-                logger.info("DEGRADED merge fallback (multi-hop legacy): %d nodes, edits_present=%s", len(filtered_nodes), edits_found)
+                logger.info("DEGRADED merge fallback (multi-hop compat): %d nodes, edits_present=%s", len(filtered_nodes), edits_found)
             except Exception as merge_exc:
-                logger.warning("DEGRADED merge fallback failed (multi-hop legacy); returning base-only: %s", merge_exc)
+                logger.warning("DEGRADED merge fallback failed (multi-hop compat); returning base-only: %s", merge_exc)
                 effective_overlay_status = "DEGRADED"
 
         raw_edges = list(result.get("edges", []) or [])
@@ -962,7 +962,7 @@ async def find_relationship_paths(
 @trace_external_call("bff.graph_query.graph_service_health")
 async def graph_service_health(*, graph_service: GraphFederationServiceES) -> Dict[str, Any]:
     """
-    Check health of graph federation service (ES-only, no legacy graph DB dependency).
+    Check health of graph federation service (ES-only, no external graph DB dependency).
 
     Returns a best-effort diagnostic payload (does not raise on failure).
     """

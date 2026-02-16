@@ -27,7 +27,7 @@ from bff.services.objectify_ops_service import (
 from bff.schemas.objectify_requests import CreateMappingSpecRequest
 from bff.services.oms_client import OMSClient
 from shared.errors.error_types import ErrorCode, classified_http_exception
-from shared.errors.legacy_codes import LegacyErrorCode
+from shared.errors.external_codes import ExternalErrorCode
 from shared.models.requests import ApiResponse
 from shared.security.auth_utils import enforce_db_scope
 from shared.security.database_access import DOMAIN_MODEL_ROLES
@@ -132,7 +132,7 @@ async def create_mapping_spec(
                     status.HTTP_409_CONFLICT,
                     "Mapping spec backing schema mismatch",
                     code=ErrorCode.OBJECTIFY_CONTRACT_ERROR,
-                    external_code=LegacyErrorCode.MAPPING_SPEC_BACKING_SCHEMA_MISMATCH,
+                    external_code=ExternalErrorCode.MAPPING_SPEC_BACKING_SCHEMA_MISMATCH,
                     extra={"expected": backing_version.schema_hash, "provided": schema_hash},
                 )
             schema_hash = backing_version.schema_hash
@@ -230,7 +230,7 @@ async def create_mapping_spec(
                 status.HTTP_400_BAD_REQUEST,
                 "Mapping spec source fields are missing",
                 code=ErrorCode.OBJECTIFY_MAPPING_ERROR,
-                external_code=LegacyErrorCode.MAPPING_SPEC_SOURCE_MISSING,
+                external_code=ExternalErrorCode.MAPPING_SPEC_SOURCE_MISSING,
                 extra={"missing_sources": sorted(set(missing_sources))},
             )
 
@@ -261,7 +261,7 @@ async def create_mapping_spec(
                 status.HTTP_409_CONFLICT,
                 "Object type contract missing",
                 code=ErrorCode.OBJECTIFY_CONTRACT_ERROR,
-                external_code=LegacyErrorCode.OBJECT_TYPE_CONTRACT_MISSING,
+                external_code=ExternalErrorCode.OBJECT_TYPE_CONTRACT_MISSING,
                 extra={"class_id": target_class_id},
             )
         object_type_resource = _unwrap_data_payload(object_type_payload)
@@ -273,7 +273,7 @@ async def create_mapping_spec(
                 status.HTTP_409_CONFLICT,
                 "Object type is inactive",
                 code=ErrorCode.OBJECTIFY_CONTRACT_ERROR,
-                external_code=LegacyErrorCode.OBJECT_TYPE_INACTIVE,
+                external_code=ExternalErrorCode.OBJECT_TYPE_INACTIVE,
                 extra={"status": status_value},
             )
         normalized_pk_spec = normalize_key_spec(object_type_spec.get("pk_spec") or {}, columns=list(prop_map.keys()))
@@ -282,7 +282,7 @@ async def create_mapping_spec(
                 status.HTTP_409_CONFLICT,
                 "Object type primary key is missing",
                 code=ErrorCode.OBJECTIFY_CONTRACT_ERROR,
-                external_code=LegacyErrorCode.OBJECT_TYPE_PRIMARY_KEY_MISSING,
+                external_code=ExternalErrorCode.OBJECT_TYPE_PRIMARY_KEY_MISSING,
                 extra={"class_id": target_class_id},
             )
         if not normalized_pk_spec.get("title_key"):
@@ -290,7 +290,7 @@ async def create_mapping_spec(
                 status.HTTP_409_CONFLICT,
                 "Object type title key is missing",
                 code=ErrorCode.OBJECTIFY_CONTRACT_ERROR,
-                external_code=LegacyErrorCode.OBJECT_TYPE_TITLE_KEY_MISSING,
+                external_code=ExternalErrorCode.OBJECT_TYPE_TITLE_KEY_MISSING,
                 extra={"class_id": target_class_id},
             )
 
@@ -308,7 +308,7 @@ async def create_mapping_spec(
                         status.HTTP_409_CONFLICT,
                         "Object type backing datasource mismatch",
                         code=ErrorCode.OBJECTIFY_CONTRACT_ERROR,
-                        external_code=LegacyErrorCode.OBJECT_TYPE_BACKING_MISMATCH,
+                        external_code=ExternalErrorCode.OBJECT_TYPE_BACKING_MISMATCH,
                         extra={"expected": backing_ref, "observed": backing.backing_id},
                     )
             elif backing_kind in {"dataset", "dataset_id", "dataset-id"}:
@@ -317,7 +317,7 @@ async def create_mapping_spec(
                         status.HTTP_409_CONFLICT,
                         "Object type backing dataset mismatch",
                         code=ErrorCode.OBJECTIFY_CONTRACT_ERROR,
-                        external_code=LegacyErrorCode.OBJECT_TYPE_BACKING_DATASET_MISMATCH,
+                        external_code=ExternalErrorCode.OBJECT_TYPE_BACKING_DATASET_MISMATCH,
                         extra={"expected": backing_ref, "observed": dataset.dataset_id},
                     )
         if backing_schema and schema_hash and backing_schema != schema_hash and not link_index_mode:
@@ -325,7 +325,7 @@ async def create_mapping_spec(
                 status.HTTP_409_CONFLICT,
                 "Object type schema hash mismatch",
                 code=ErrorCode.OBJECTIFY_CONTRACT_ERROR,
-                external_code=LegacyErrorCode.OBJECT_TYPE_SCHEMA_HASH_MISMATCH,
+                external_code=ExternalErrorCode.OBJECT_TYPE_SCHEMA_HASH_MISMATCH,
                 extra={"expected": backing_schema, "observed": schema_hash},
             )
 
@@ -336,7 +336,7 @@ async def create_mapping_spec(
                 status.HTTP_400_BAD_REQUEST,
                 "Unknown mapping spec target fields",
                 code=ErrorCode.OBJECTIFY_MAPPING_ERROR,
-                external_code=LegacyErrorCode.MAPPING_SPEC_TARGET_UNKNOWN,
+                external_code=ExternalErrorCode.MAPPING_SPEC_TARGET_UNKNOWN,
                 extra={"missing_targets": sorted(set(unknown_targets))},
             )
         if not link_index_mode:
@@ -351,7 +351,7 @@ async def create_mapping_spec(
                     status.HTTP_400_BAD_REQUEST,
                     "Unsupported relationship cardinality for mapping targets",
                     code=ErrorCode.OBJECTIFY_MAPPING_ERROR,
-                    external_code=LegacyErrorCode.MAPPING_SPEC_RELATIONSHIP_CARDINALITY_UNSUPPORTED,
+                    external_code=ExternalErrorCode.MAPPING_SPEC_RELATIONSHIP_CARDINALITY_UNSUPPORTED,
                     extra={"targets": sorted(set(unsupported_relationships))},
                 )
         elif not relationship_targets:
@@ -359,7 +359,7 @@ async def create_mapping_spec(
                 status.HTTP_400_BAD_REQUEST,
                 "link_index requires relationship targets",
                 code=ErrorCode.OBJECTIFY_MAPPING_ERROR,
-                external_code=LegacyErrorCode.MAPPING_SPEC_RELATIONSHIP_REQUIRED,
+                external_code=ExternalErrorCode.MAPPING_SPEC_RELATIONSHIP_REQUIRED,
             )
 
         required_fields = {name for name, meta in prop_map.items() if bool(meta.get("required"))}
@@ -388,7 +388,7 @@ async def create_mapping_spec(
                 status.HTTP_400_BAD_REQUEST,
                 "Mapping spec primary key targets mismatch",
                 code=ErrorCode.OBJECTIFY_MAPPING_ERROR,
-                external_code=LegacyErrorCode.MAPPING_SPEC_PRIMARY_KEY_MISMATCH,
+                external_code=ExternalErrorCode.MAPPING_SPEC_PRIMARY_KEY_MISMATCH,
                 extra={"expected": object_type_pk_targets, "observed": pk_targets},
             )
 
@@ -407,7 +407,7 @@ async def create_mapping_spec(
                         status.HTTP_400_BAD_REQUEST,
                         "Dataset primary key source fields are missing in mapping spec",
                         code=ErrorCode.OBJECTIFY_MAPPING_ERROR,
-                        external_code=LegacyErrorCode.MAPPING_SPEC_DATASET_PK_MISSING,
+                        external_code=ExternalErrorCode.MAPPING_SPEC_DATASET_PK_MISSING,
                         extra={"missing_sources": missing_pk_sources},
                     )
                 invalid_pk_targets = sorted(
@@ -424,7 +424,7 @@ async def create_mapping_spec(
                         status.HTTP_400_BAD_REQUEST,
                         "Dataset primary key target mapping mismatch",
                         code=ErrorCode.OBJECTIFY_MAPPING_ERROR,
-                        external_code=LegacyErrorCode.MAPPING_SPEC_DATASET_PK_TARGET_MISMATCH,
+                        external_code=ExternalErrorCode.MAPPING_SPEC_DATASET_PK_TARGET_MISMATCH,
                         extra={"targets": invalid_pk_targets},
                     )
             required_sources = set(normalized_spec.get("required_fields") or [])
@@ -435,7 +435,7 @@ async def create_mapping_spec(
                         status.HTTP_400_BAD_REQUEST,
                         "Required source fields are missing in mapping spec",
                         code=ErrorCode.OBJECTIFY_MAPPING_ERROR,
-                        external_code=LegacyErrorCode.MAPPING_SPEC_REQUIRED_SOURCE_MISSING,
+                        external_code=ExternalErrorCode.MAPPING_SPEC_REQUIRED_SOURCE_MISSING,
                         extra={"missing_sources": missing_required_sources},
                     )
             options.setdefault("key_spec_id", key_spec.key_spec_id)
@@ -447,7 +447,7 @@ async def create_mapping_spec(
                     status.HTTP_400_BAD_REQUEST,
                     "Required target fields are missing in mapping spec",
                     code=ErrorCode.OBJECTIFY_MAPPING_ERROR,
-                    external_code=LegacyErrorCode.MAPPING_SPEC_REQUIRED_MISSING,
+                    external_code=ExternalErrorCode.MAPPING_SPEC_REQUIRED_MISSING,
                     extra={"missing_targets": missing_required},
                 )
             missing_title = sorted(set(object_type_title_targets) - set(mapped_targets))
@@ -456,7 +456,7 @@ async def create_mapping_spec(
                     status.HTTP_400_BAD_REQUEST,
                     "Title key targets are missing in mapping spec",
                     code=ErrorCode.OBJECTIFY_MAPPING_ERROR,
-                    external_code=LegacyErrorCode.MAPPING_SPEC_TITLE_KEY_MISSING,
+                    external_code=ExternalErrorCode.MAPPING_SPEC_TITLE_KEY_MISSING,
                     extra={"missing_targets": missing_title},
                 )
             unique_key_fields = {
@@ -472,7 +472,7 @@ async def create_mapping_spec(
                     status.HTTP_400_BAD_REQUEST,
                     "Unique key targets are missing in mapping spec",
                     code=ErrorCode.OBJECTIFY_MAPPING_ERROR,
-                    external_code=LegacyErrorCode.MAPPING_SPEC_UNIQUE_KEY_MISSING,
+                    external_code=ExternalErrorCode.MAPPING_SPEC_UNIQUE_KEY_MISSING,
                     extra={"missing_targets": missing_unique},
                 )
         if not pk_targets:
@@ -483,7 +483,7 @@ async def create_mapping_spec(
                 status.HTTP_400_BAD_REQUEST,
                 "Primary key targets are missing in mapping spec",
                 code=ErrorCode.OBJECTIFY_MAPPING_ERROR,
-                external_code=LegacyErrorCode.MAPPING_SPEC_PRIMARY_KEY_MISSING,
+                external_code=ExternalErrorCode.MAPPING_SPEC_PRIMARY_KEY_MISSING,
                 extra={"missing_targets": missing_pk},
             )
 
@@ -513,7 +513,7 @@ async def create_mapping_spec(
                 status.HTTP_400_BAD_REQUEST,
                 "Unsupported ontology target types in mapping spec",
                 code=ErrorCode.OBJECTIFY_MAPPING_ERROR,
-                external_code=LegacyErrorCode.MAPPING_SPEC_UNSUPPORTED_TYPES,
+                external_code=ExternalErrorCode.MAPPING_SPEC_UNSUPPORTED_TYPES,
                 extra={"targets": sorted(set(unsupported_types))},
             )
 
@@ -551,7 +551,7 @@ async def create_mapping_spec(
                 status.HTTP_400_BAD_REQUEST,
                 "Unknown source types in mapping spec",
                 code=ErrorCode.OBJECTIFY_MAPPING_ERROR,
-                external_code=LegacyErrorCode.MAPPING_SPEC_SOURCE_TYPE_UNKNOWN,
+                external_code=ExternalErrorCode.MAPPING_SPEC_SOURCE_TYPE_UNKNOWN,
                 extra={"missing_sources": sorted(set(missing_source_types))},
             )
         if unsupported_source_types:
@@ -559,7 +559,7 @@ async def create_mapping_spec(
                 status.HTTP_400_BAD_REQUEST,
                 "Unsupported source types in mapping spec",
                 code=ErrorCode.OBJECTIFY_MAPPING_ERROR,
-                external_code=LegacyErrorCode.MAPPING_SPEC_SOURCE_TYPE_UNSUPPORTED,
+                external_code=ExternalErrorCode.MAPPING_SPEC_SOURCE_TYPE_UNSUPPORTED,
                 extra={"sources": unsupported_source_types},
             )
         if incompatible_types:
@@ -567,7 +567,7 @@ async def create_mapping_spec(
                 status.HTTP_400_BAD_REQUEST,
                 "Incompatible source and target types in mapping spec",
                 code=ErrorCode.OBJECTIFY_MAPPING_ERROR,
-                external_code=LegacyErrorCode.MAPPING_SPEC_TYPE_INCOMPATIBLE,
+                external_code=ExternalErrorCode.MAPPING_SPEC_TYPE_INCOMPATIBLE,
                 extra={"mismatches": incompatible_types},
             )
 
@@ -589,7 +589,7 @@ async def create_mapping_spec(
                     status.HTTP_400_BAD_REQUEST,
                     "Provided target field types do not match resolved ontology types",
                     code=ErrorCode.OBJECTIFY_MAPPING_ERROR,
-                    external_code=LegacyErrorCode.MAPPING_SPEC_TARGET_TYPE_MISMATCH,
+                    external_code=ExternalErrorCode.MAPPING_SPEC_TARGET_TYPE_MISMATCH,
                     extra={"mismatches": mismatches},
                 )
 

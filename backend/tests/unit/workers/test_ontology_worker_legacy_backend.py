@@ -11,7 +11,6 @@ from shared.models.commands import CommandType
 @pytest.mark.asyncio
 async def test_process_command_allows_database_command_without_adapter_in_postgres_profile() -> None:
     worker = OntologyWorker()
-    worker.ontology_resource_backend = "postgres"
     worker.handle_create_database = AsyncMock(return_value=None)  # type: ignore[method-assign]
 
     await worker.process_command(
@@ -28,7 +27,6 @@ async def test_process_command_allows_database_command_without_adapter_in_postgr
 @pytest.mark.asyncio
 async def test_process_command_allows_ontology_command_without_adapter_in_postgres_profile() -> None:
     worker = OntologyWorker()
-    worker.ontology_resource_backend = "postgres"
     worker.handle_create_ontology = AsyncMock(return_value=None)  # type: ignore[method-assign]
 
     await worker.process_command(

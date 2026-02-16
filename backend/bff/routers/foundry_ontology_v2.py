@@ -4,7 +4,6 @@ Exposes a Foundry-style `/api/v2/ontologies/...` read surface on top of
 existing OMS/BFF ontology resources.
 """
 
-import base64
 import logging
 from typing import Any, Dict
 from uuid import uuid4
@@ -26,7 +25,12 @@ from bff.routers.object_types import (
 from bff.services.oms_client import OMSClient
 from shared.observability.tracing import trace_endpoint
 from shared.security.database_access import DOMAIN_MODEL_ROLES, enforce_database_role
-from shared.security.input_sanitizer import SecurityViolationError, validate_db_name
+from shared.security.input_sanitizer import (
+    SecurityViolationError,
+    validate_branch_name,
+    validate_db_name,
+)
+from shared.utils.foundry_page_token import decode_offset_page_token, encode_offset_page_token
 
 logger = logging.getLogger(__name__)
 
@@ -55,26 +59,61 @@ def _foundry_error(
     )
 
 
-def _decode_page_token(page_token: str | None) -> int:
-    if page_token is None:
-        return 0
-    token = str(page_token).strip()
-    if not token:
-        return 0
-    try:
-        padding = "=" * (-len(token) % 4)
-        decoded = base64.urlsafe_b64decode(f"{token}{padding}".encode("ascii")).decode("utf-8")
-        offset = int(decoded)
-    except Exception as exc:
-        raise ValueError("pageToken must be base64-encoded non-negative integer offset") from exc
-    if offset < 0:
-        raise ValueError("pageToken offset must be >= 0")
-    return offset
+def _named_not_found(error_name: str, *, parameters: Dict[str, Any]) -> JSONResponse:
+    return _foundry_error(
+        status.HTTP_404_NOT_FOUND,
+        error_code="NOT_FOUND",
+        error_name=error_name,
+        parameters=parameters,
+    )
 
 
-def _encode_page_token(offset: int) -> str:
-    raw = str(max(0, int(offset))).encode("utf-8")
-    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+def _ontology_not_found(*, ontology: str, parameters: Dict[str, Any] | None = None) -> JSONResponse:
+    payload = {"ontology": ontology}
+    if parameters:
+        payload.update(parameters)
+    return _named_not_found("OntologyNotFound", parameters=payload)
+
+
+def _object_type_not_found(*, ontology: str, object_type: str, parameters: Dict[str, Any] | None = None) -> JSONResponse:
+    payload = {"ontology": ontology, "objectType": object_type}
+    if parameters:
+        payload.update(parameters)
+    return _named_not_found("ObjectTypeNotFound", parameters=payload)
+
+
+def _link_type_not_found(
+    *,
+    ontology: str,
+    object_type: str,
+    link_type: str,
+    parameters: Dict[str, Any] | None = None,
+) -> JSONResponse:
+    payload = {"ontology": ontology, "objectType": object_type, "linkType": link_type}
+    if parameters:
+        payload.update(parameters)
+    return _named_not_found("LinkTypeNotFound", parameters=payload)
+
+
+def _object_not_found(
+    *,
+    ontology: str,
+    object_type: str,
+    primary_key: str,
+    parameters: Dict[str, Any] | None = None,
+) -> JSONResponse:
+    payload = {"ontology": ontology, "objectType": object_type, "primaryKey": primary_key}
+    if parameters:
+        payload.update(parameters)
+    return _named_not_found("ObjectNotFound", parameters=payload)
+
+
+def _decode_page_token(page_token: str | None, *, scope: str | None = None) -> int:
+    return decode_offset_page_token(page_token, ttl_seconds=60, expected_scope=scope)
+
+
+def _encode_page_token(offset: int, *, scope: str | None = None) -> str:
+    return encode_offset_page_token(offset, scope=scope)
 
 
 def _parse_order_by(order_by: str | None) -> Dict[str, Any] | None:
@@ -108,6 +147,73 @@ def _parse_order_by(order_by: str | None) -> Dict[str, Any] | None:
     if not fields:
         raise ValueError("orderBy must contain at least one field")
     return {"orderType": "fields", "fields": fields}
+
+
+def _pagination_scope(*parts: Any) -> str:
+    normalized = [str(part).strip() for part in parts if str(part).strip()]
+    return "|".join(normalized)
+
+
+def _linked_object_not_found(
+    *,
+    ontology: str,
+    object_type: str,
+    primary_key: str,
+    link_type: str,
+    linked_primary_key: str,
+) -> JSONResponse:
+    return _foundry_error(
+        status.HTTP_404_NOT_FOUND,
+        error_code="NOT_FOUND",
+        error_name="LinkedObjectNotFound",
+        parameters=_linked_object_parameters(
+            ontology=ontology,
+            object_type=object_type,
+            primary_key=primary_key,
+            link_type=link_type,
+            linked_primary_key=linked_primary_key,
+        ),
+    )
+
+
+def _linked_object_parameters(
+    *,
+    ontology: str,
+    object_type: str,
+    primary_key: str,
+    link_type: str,
+    linked_primary_key: str,
+) -> Dict[str, str]:
+    return {
+        "ontology": ontology,
+        "objectType": object_type,
+        "primaryKey": primary_key,
+        "linkType": link_type,
+        "linkedObjectPrimaryKey": linked_primary_key,
+    }
+
+
+def _linked_object_not_found_generic(
+    *,
+    ontology: str,
+    object_type: str,
+    primary_key: str,
+    link_type: str,
+    linked_primary_key: str,
+    error_name: str = "NotFound",
+) -> JSONResponse:
+    return _foundry_error(
+        status.HTTP_404_NOT_FOUND,
+        error_code="NOT_FOUND",
+        error_name=error_name,
+        parameters=_linked_object_parameters(
+            ontology=ontology,
+            object_type=object_type,
+            primary_key=primary_key,
+            link_type=link_type,
+            linked_primary_key=linked_primary_key,
+        ),
+    )
 
 
 def _coerce_primary_key_values(value: Any) -> list[str]:
@@ -217,13 +323,18 @@ def _validate_ontology_db_name(ontology: str) -> str:
     return validate_db_name(str(ontology or "").strip())
 
 
+def _validate_branch(branch: str) -> str:
+    return validate_branch_name(str(branch or "").strip())
+
+
 async def _resolve_ontology_db_name(*, ontology: str, oms_client: OMSClient) -> str:
     raw = str(ontology or "").strip()
     if not raw:
         raise ValueError("ontology is required")
 
+    normalized_api_name: str | None = None
     try:
-        return _validate_ontology_db_name(raw)
+        normalized_api_name = _validate_ontology_db_name(raw)
     except (ValueError, SecurityViolationError):
         # Fall through to Foundry-style identifier resolution (apiName/rid).
         if any(ch.isspace() for ch in raw):
@@ -232,12 +343,16 @@ async def _resolve_ontology_db_name(*, ontology: str, oms_client: OMSClient) -> 
     payload = await oms_client.list_databases()
     rows = _extract_databases(payload)
     lowered = raw.lower()
+    normalized_lowered = normalized_api_name.lower() if normalized_api_name else None
     for row in rows:
         candidate_name = str(row.get("name") or row.get("db_name") or row.get("apiName") or "").strip()
         candidate_rid = str(row.get("rid") or row.get("ontologyRid") or "").strip()
         if not candidate_name:
             continue
-        if raw == candidate_rid or lowered == candidate_name.lower():
+        candidate_lowered = candidate_name.lower()
+        if raw == candidate_rid or lowered == candidate_lowered:
+            return _validate_ontology_db_name(candidate_name)
+        if normalized_lowered is not None and normalized_lowered == candidate_lowered:
             return _validate_ontology_db_name(candidate_name)
 
     raise OntologyNotFoundError(f"ontology not found: {raw}")
@@ -324,12 +439,7 @@ async def get_ontology_v2(
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         await _require_domain_role(request, db_name=db_name)
     except OntologyNotFoundError:
-        return _foundry_error(
-            status.HTTP_404_NOT_FOUND,
-            error_code="NOT_FOUND",
-            error_name="NotFound",
-            parameters={"ontology": str(ontology)},
-        )
+        return _ontology_not_found(ontology=str(ontology))
     except (ValueError, SecurityViolationError) as exc:
         return _foundry_error(
             status.HTTP_400_BAD_REQUEST,
@@ -359,12 +469,7 @@ async def get_ontology_v2(
     except httpx.HTTPStatusError as exc:
         status_code = exc.response.status_code if exc.response is not None else status.HTTP_502_BAD_GATEWAY
         if status_code == status.HTTP_404_NOT_FOUND:
-            return _foundry_error(
-                status.HTTP_404_NOT_FOUND,
-                error_code="NOT_FOUND",
-                error_name="NotFound",
-                parameters={"ontology": db_name},
-            )
+            return _ontology_not_found(ontology=db_name)
         return _foundry_error(
             status_code,
             error_code="UPSTREAM_ERROR",
@@ -393,15 +498,12 @@ async def list_object_types_v2(
 ):
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
+        branch = _validate_branch(branch)
         await _require_domain_role(request, db_name=db_name)
-        offset = _decode_page_token(page_token)
+        page_scope = _pagination_scope("v2/objectTypes", db_name, branch)
+        offset = _decode_page_token(page_token, scope=page_scope)
     except OntologyNotFoundError:
-        return _foundry_error(
-            status.HTTP_404_NOT_FOUND,
-            error_code="NOT_FOUND",
-            error_name="NotFound",
-            parameters={"ontology": str(ontology)},
-        )
+        return _ontology_not_found(ontology=str(ontology))
     except (ValueError, SecurityViolationError) as exc:
         return _foundry_error(
             status.HTTP_400_BAD_REQUEST,
@@ -444,17 +546,12 @@ async def list_object_types_v2(
                 )
             object_types.append(_to_foundry_object_type(resource, ontology_payload=ontology_payload))
 
-        next_page_token = _encode_page_token(offset + len(resources)) if len(resources) == page_size else None
+        next_page_token = _encode_page_token(offset + len(resources), scope=page_scope) if len(resources) == page_size else None
         return {"data": object_types, "nextPageToken": next_page_token}
     except httpx.HTTPStatusError as exc:
         status_code = exc.response.status_code if exc.response is not None else status.HTTP_502_BAD_GATEWAY
         if status_code == status.HTTP_404_NOT_FOUND:
-            return _foundry_error(
-                status.HTTP_404_NOT_FOUND,
-                error_code="NOT_FOUND",
-                error_name="NotFound",
-                parameters={"ontology": db_name},
-            )
+            return _ontology_not_found(ontology=db_name)
         return _foundry_error(
             status_code,
             error_code="UPSTREAM_ERROR",
@@ -482,17 +579,13 @@ async def get_object_type_v2(
 ):
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
+        branch = _validate_branch(branch)
         object_type = str(objectType or "").strip()
         if not object_type:
             raise ValueError("objectType is required")
         await _require_domain_role(request, db_name=db_name)
     except OntologyNotFoundError:
-        return _foundry_error(
-            status.HTTP_404_NOT_FOUND,
-            error_code="NOT_FOUND",
-            error_name="NotFound",
-            parameters={"ontology": str(ontology), "objectType": str(objectType)},
-        )
+        return _ontology_not_found(ontology=str(ontology), parameters={"objectType": str(objectType)})
     except (ValueError, SecurityViolationError) as exc:
         return _foundry_error(
             status.HTTP_400_BAD_REQUEST,
@@ -517,12 +610,7 @@ async def get_object_type_v2(
         )
         resource = _extract_object_resource(payload)
         if not resource:
-            return _foundry_error(
-                status.HTTP_404_NOT_FOUND,
-                error_code="NOT_FOUND",
-                error_name="NotFound",
-                parameters={"ontology": db_name, "objectType": object_type},
-            )
+            return _object_type_not_found(ontology=db_name, object_type=object_type)
         ontology_payload = await oms_client.get_ontology(db_name, object_type, branch=branch)
         out = _to_foundry_object_type(resource, ontology_payload=ontology_payload)
         if not out.get("apiName"):
@@ -531,12 +619,7 @@ async def get_object_type_v2(
     except httpx.HTTPStatusError as exc:
         status_code = exc.response.status_code if exc.response is not None else status.HTTP_502_BAD_GATEWAY
         if status_code == status.HTTP_404_NOT_FOUND:
-            return _foundry_error(
-                status.HTTP_404_NOT_FOUND,
-                error_code="NOT_FOUND",
-                error_name="NotFound",
-                parameters={"ontology": db_name, "objectType": object_type},
-            )
+            return _object_type_not_found(ontology=db_name, object_type=object_type)
         return _foundry_error(
             status_code,
             error_code="UPSTREAM_ERROR",
@@ -566,18 +649,15 @@ async def list_outgoing_link_types_v2(
 ):
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
+        branch = _validate_branch(branch)
         source_object_type = str(objectType or "").strip()
         if not source_object_type:
             raise ValueError("objectType is required")
         await _require_domain_role(request, db_name=db_name)
-        offset = _decode_page_token(page_token)
+        page_scope = _pagination_scope("v2/outgoingLinkTypes", db_name, branch, source_object_type)
+        offset = _decode_page_token(page_token, scope=page_scope)
     except OntologyNotFoundError:
-        return _foundry_error(
-            status.HTTP_404_NOT_FOUND,
-            error_code="NOT_FOUND",
-            error_name="NotFound",
-            parameters={"ontology": str(ontology), "objectType": str(objectType)},
-        )
+        return _ontology_not_found(ontology=str(ontology), parameters={"objectType": str(objectType)})
     except (ValueError, SecurityViolationError) as exc:
         return _foundry_error(
             status.HTTP_400_BAD_REQUEST,
@@ -619,17 +699,12 @@ async def list_outgoing_link_types_v2(
 
         data = matched[offset : offset + page_size]
         next_offset = offset + len(data)
-        next_page_token = _encode_page_token(next_offset) if next_offset < len(matched) else None
+        next_page_token = _encode_page_token(next_offset, scope=page_scope) if next_offset < len(matched) else None
         return {"data": data, "nextPageToken": next_page_token}
     except httpx.HTTPStatusError as exc:
         status_code = exc.response.status_code if exc.response is not None else status.HTTP_502_BAD_GATEWAY
         if status_code == status.HTTP_404_NOT_FOUND:
-            return _foundry_error(
-                status.HTTP_404_NOT_FOUND,
-                error_code="NOT_FOUND",
-                error_name="NotFound",
-                parameters={"ontology": db_name, "objectType": source_object_type},
-            )
+            return _ontology_not_found(ontology=db_name, parameters={"objectType": source_object_type})
         return _foundry_error(
             status_code,
             error_code="UPSTREAM_ERROR",
@@ -658,6 +733,7 @@ async def get_outgoing_link_type_v2(
 ):
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
+        branch = _validate_branch(branch)
         source_object_type = str(objectType or "").strip()
         link_type = str(linkType or "").strip()
         if not source_object_type:
@@ -666,11 +742,9 @@ async def get_outgoing_link_type_v2(
             raise ValueError("linkType is required")
         await _require_domain_role(request, db_name=db_name)
     except OntologyNotFoundError:
-        return _foundry_error(
-            status.HTTP_404_NOT_FOUND,
-            error_code="NOT_FOUND",
-            error_name="NotFound",
-            parameters={"ontology": str(ontology), "objectType": str(objectType), "linkType": str(linkType)},
+        return _ontology_not_found(
+            ontology=str(ontology),
+            parameters={"objectType": str(objectType), "linkType": str(linkType)},
         )
     except (ValueError, SecurityViolationError) as exc:
         return _foundry_error(
@@ -701,29 +775,26 @@ async def get_outgoing_link_type_v2(
         )
         resource = payload.get("data") if isinstance(payload, dict) else payload
         if not isinstance(resource, dict):
-            return _foundry_error(
-                status.HTTP_404_NOT_FOUND,
-                error_code="NOT_FOUND",
-                error_name="NotFound",
-                parameters={"ontology": db_name, "objectType": source_object_type, "linkType": link_type},
+            return _link_type_not_found(
+                ontology=db_name,
+                object_type=source_object_type,
+                link_type=link_type,
             )
         mapped = _to_foundry_outgoing_link_type(resource, source_object_type=source_object_type)
         if mapped is None:
-            return _foundry_error(
-                status.HTTP_404_NOT_FOUND,
-                error_code="NOT_FOUND",
-                error_name="NotFound",
-                parameters={"ontology": db_name, "objectType": source_object_type, "linkType": link_type},
+            return _link_type_not_found(
+                ontology=db_name,
+                object_type=source_object_type,
+                link_type=link_type,
             )
         return mapped
     except httpx.HTTPStatusError as exc:
         status_code = exc.response.status_code if exc.response is not None else status.HTTP_502_BAD_GATEWAY
         if status_code == status.HTTP_404_NOT_FOUND:
-            return _foundry_error(
-                status.HTTP_404_NOT_FOUND,
-                error_code="NOT_FOUND",
-                error_name="NotFound",
-                parameters={"ontology": db_name, "objectType": source_object_type, "linkType": link_type},
+            return _link_type_not_found(
+                ontology=db_name,
+                object_type=source_object_type,
+                link_type=link_type,
             )
         return _foundry_error(
             status_code,
@@ -749,21 +820,20 @@ async def search_objects_v2(
     payload: Dict[str, Any],
     request: Request,
     branch: str = Query("main", description="Ontology branch name or branch RID"),
+    sdk_package_rid: str | None = Query(default=None, alias="sdkPackageRid"),
+    sdk_version: str | None = Query(default=None, alias="sdkVersion"),
     oms_client: OMSClient = OMSClientDep,
 ):
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
+        branch = _validate_branch(branch)
+        _ = sdk_package_rid, sdk_version
         object_type = str(objectType or "").strip()
         if not object_type:
             raise ValueError("objectType is required")
         await _require_domain_role(request, db_name=db_name)
     except OntologyNotFoundError:
-        return _foundry_error(
-            status.HTTP_404_NOT_FOUND,
-            error_code="NOT_FOUND",
-            error_name="NotFound",
-            parameters={"ontology": str(ontology), "objectType": str(objectType)},
-        )
+        return _ontology_not_found(ontology=str(ontology), parameters={"objectType": str(objectType)})
     except (ValueError, SecurityViolationError) as exc:
         return _foundry_error(
             status.HTTP_400_BAD_REQUEST,
@@ -803,12 +873,7 @@ async def search_objects_v2(
             except Exception:
                 pass
         if status_code == status.HTTP_404_NOT_FOUND:
-            return _foundry_error(
-                status.HTTP_404_NOT_FOUND,
-                error_code="NOT_FOUND",
-                error_name="NotFound",
-                parameters={"ontology": db_name, "objectType": object_type},
-            )
+            return _object_type_not_found(ontology=db_name, object_type=object_type)
         return _foundry_error(
             status_code,
             error_code="UPSTREAM_ERROR",
@@ -838,10 +903,14 @@ async def list_objects_v2(
     exclude_rid: bool | None = Query(default=None, alias="excludeRid"),
     snapshot: bool | None = Query(default=None),
     branch: str = Query("main", description="Ontology branch name or branch RID"),
+    sdk_package_rid: str | None = Query(default=None, alias="sdkPackageRid"),
+    sdk_version: str | None = Query(default=None, alias="sdkVersion"),
     oms_client: OMSClient = OMSClientDep,
 ):
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
+        branch = _validate_branch(branch)
+        _ = sdk_package_rid, sdk_version
         object_type = str(objectType or "").strip()
         if not object_type:
             raise ValueError("objectType is required")
@@ -860,12 +929,7 @@ async def list_objects_v2(
         if snapshot is not None:
             payload["snapshot"] = bool(snapshot)
     except OntologyNotFoundError:
-        return _foundry_error(
-            status.HTTP_404_NOT_FOUND,
-            error_code="NOT_FOUND",
-            error_name="NotFound",
-            parameters={"ontology": str(ontology), "objectType": str(objectType)},
-        )
+        return _ontology_not_found(ontology=str(ontology), parameters={"objectType": str(objectType)})
     except (ValueError, SecurityViolationError) as exc:
         return _foundry_error(
             status.HTTP_400_BAD_REQUEST,
@@ -905,12 +969,7 @@ async def list_objects_v2(
             except Exception:
                 pass
         if status_code == status.HTTP_404_NOT_FOUND:
-            return _foundry_error(
-                status.HTTP_404_NOT_FOUND,
-                error_code="NOT_FOUND",
-                error_name="NotFound",
-                parameters={"ontology": db_name, "objectType": object_type},
-            )
+            return _object_type_not_found(ontology=db_name, object_type=object_type)
         return _foundry_error(
             status_code,
             error_code="UPSTREAM_ERROR",
@@ -937,10 +996,14 @@ async def get_object_v2(
     select: list[str] | None = Query(default=None),
     exclude_rid: bool | None = Query(default=None, alias="excludeRid"),
     branch: str = Query("main", description="Ontology branch name or branch RID"),
+    sdk_package_rid: str | None = Query(default=None, alias="sdkPackageRid"),
+    sdk_version: str | None = Query(default=None, alias="sdkVersion"),
     oms_client: OMSClient = OMSClientDep,
 ):
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
+        branch = _validate_branch(branch)
+        _ = sdk_package_rid, sdk_version
         object_type = str(objectType or "").strip()
         primary_key_value = str(primaryKey or "").strip()
         if not object_type:
@@ -949,11 +1012,9 @@ async def get_object_v2(
             raise ValueError("primaryKey is required")
         await _require_domain_role(request, db_name=db_name)
     except OntologyNotFoundError:
-        return _foundry_error(
-            status.HTTP_404_NOT_FOUND,
-            error_code="NOT_FOUND",
-            error_name="NotFound",
-            parameters={"ontology": str(ontology), "objectType": str(objectType), "primaryKey": str(primaryKey)},
+        return _ontology_not_found(
+            ontology=str(ontology),
+            parameters={"objectType": str(objectType), "primaryKey": str(primaryKey)},
         )
     except (ValueError, SecurityViolationError) as exc:
         return _foundry_error(
@@ -984,11 +1045,10 @@ async def get_object_v2(
         )
         object_type_resource = _extract_object_resource(object_type_payload)
         if not object_type_resource:
-            return _foundry_error(
-                status.HTTP_404_NOT_FOUND,
-                error_code="NOT_FOUND",
-                error_name="NotFound",
-                parameters={"ontology": db_name, "objectType": object_type, "primaryKey": primary_key_value},
+            return _object_type_not_found(
+                ontology=db_name,
+                object_type=object_type,
+                parameters={"primaryKey": primary_key_value},
             )
 
         ontology_payload: Any = None
@@ -1030,19 +1090,17 @@ async def get_object_v2(
             )
         data = result.get("data")
         if not isinstance(data, list) or not data:
-            return _foundry_error(
-                status.HTTP_404_NOT_FOUND,
-                error_code="NOT_FOUND",
-                error_name="NotFound",
-                parameters={"ontology": db_name, "objectType": object_type, "primaryKey": primary_key_value},
+            return _object_not_found(
+                ontology=db_name,
+                object_type=object_type,
+                primary_key=primary_key_value,
             )
         row = data[0]
         if not isinstance(row, dict):
-            return _foundry_error(
-                status.HTTP_404_NOT_FOUND,
-                error_code="NOT_FOUND",
-                error_name="NotFound",
-                parameters={"ontology": db_name, "objectType": object_type, "primaryKey": primary_key_value},
+            return _object_not_found(
+                ontology=db_name,
+                object_type=object_type,
+                primary_key=primary_key_value,
             )
         return row
     except httpx.HTTPStatusError as exc:
@@ -1055,11 +1113,10 @@ async def get_object_v2(
             except Exception:
                 pass
         if status_code == status.HTTP_404_NOT_FOUND:
-            return _foundry_error(
-                status.HTTP_404_NOT_FOUND,
-                error_code="NOT_FOUND",
-                error_name="NotFound",
-                parameters={"ontology": db_name, "objectType": object_type, "primaryKey": primary_key_value},
+            return _object_not_found(
+                ontology=db_name,
+                object_type=object_type,
+                primary_key=primary_key_value,
             )
         return _foundry_error(
             status_code,
@@ -1092,10 +1149,14 @@ async def list_linked_objects_v2(
     exclude_rid: bool | None = Query(default=None, alias="excludeRid"),
     snapshot: bool | None = Query(default=None),
     branch: str = Query("main", description="Ontology branch name or branch RID"),
+    sdk_package_rid: str | None = Query(default=None, alias="sdkPackageRid"),
+    sdk_version: str | None = Query(default=None, alias="sdkVersion"),
     oms_client: OMSClient = OMSClientDep,
 ):
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
+        branch = _validate_branch(branch)
+        _ = sdk_package_rid, sdk_version
         object_type = str(objectType or "").strip()
         primary_key_value = str(primaryKey or "").strip()
         link_type = str(linkType or "").strip()
@@ -1105,14 +1166,26 @@ async def list_linked_objects_v2(
             raise ValueError("primaryKey is required")
         if not link_type:
             raise ValueError("linkType is required")
-        offset = _decode_page_token(page_token)
+        normalized_select = [str(value).strip() for value in (select or []) if str(value).strip()]
+        parsed_order_by = _parse_order_by(order_by)
+        page_scope = _pagination_scope(
+            "v2/linkedObjects",
+            db_name,
+            branch,
+            object_type,
+            primary_key_value,
+            link_type,
+            ",".join(normalized_select),
+            str(order_by or "").strip(),
+            "" if exclude_rid is None else ("1" if exclude_rid else "0"),
+            "" if snapshot is None else ("1" if snapshot else "0"),
+        )
+        offset = _decode_page_token(page_token, scope=page_scope)
         await _require_domain_role(request, db_name=db_name)
     except OntologyNotFoundError:
-        return _foundry_error(
-            status.HTTP_404_NOT_FOUND,
-            error_code="NOT_FOUND",
-            error_name="NotFound",
-            parameters={"ontology": str(ontology), "objectType": str(objectType), "primaryKey": str(primaryKey)},
+        return _ontology_not_found(
+            ontology=str(ontology),
+            parameters={"objectType": str(objectType), "primaryKey": str(primaryKey)},
         )
     except (ValueError, SecurityViolationError) as exc:
         return _foundry_error(
@@ -1143,11 +1216,10 @@ async def list_linked_objects_v2(
             oms_client=oms_client,
         )
     except ValueError:
-        return _foundry_error(
-            status.HTTP_404_NOT_FOUND,
-            error_code="NOT_FOUND",
-            error_name="NotFound",
-            parameters={"ontology": db_name, "objectType": object_type, "primaryKey": primary_key_value},
+        return _object_type_not_found(
+            ontology=db_name,
+            object_type=object_type,
+            parameters={"primaryKey": primary_key_value},
         )
     except Exception as exc:
         logger.error("Failed to resolve source primary key field (v2): %s", exc)
@@ -1170,21 +1242,19 @@ async def list_linked_objects_v2(
         )
         source_rows = source_result.get("data") if isinstance(source_result, dict) else None
         if not isinstance(source_rows, list) or not source_rows or not isinstance(source_rows[0], dict):
-            return _foundry_error(
-                status.HTTP_404_NOT_FOUND,
-                error_code="NOT_FOUND",
-                error_name="NotFound",
-                parameters={"ontology": db_name, "objectType": object_type, "primaryKey": primary_key_value},
+            return _object_not_found(
+                ontology=db_name,
+                object_type=object_type,
+                primary_key=primary_key_value,
             )
         source_row = source_rows[0]
     except httpx.HTTPStatusError as exc:
         status_code = exc.response.status_code if exc.response is not None else status.HTTP_502_BAD_GATEWAY
         if status_code == status.HTTP_404_NOT_FOUND:
-            return _foundry_error(
-                status.HTTP_404_NOT_FOUND,
-                error_code="NOT_FOUND",
-                error_name="NotFound",
-                parameters={"ontology": db_name, "objectType": object_type, "primaryKey": primary_key_value},
+            return _object_not_found(
+                ontology=db_name,
+                object_type=object_type,
+                primary_key=primary_key_value,
             )
         return _foundry_error(
             status_code,
@@ -1210,27 +1280,27 @@ async def list_linked_objects_v2(
         )
         link_resource = link_payload.get("data") if isinstance(link_payload, dict) else link_payload
         if not isinstance(link_resource, dict):
-            return _foundry_error(
-                status.HTTP_404_NOT_FOUND,
-                error_code="NOT_FOUND",
-                error_name="NotFound",
-                parameters={"ontology": db_name, "objectType": object_type, "primaryKey": primary_key_value, "linkType": link_type},
+            return _link_type_not_found(
+                ontology=db_name,
+                object_type=object_type,
+                link_type=link_type,
+                parameters={"primaryKey": primary_key_value},
             )
         link_type_side = _to_foundry_outgoing_link_type(link_resource, source_object_type=object_type)
         if not link_type_side:
-            return _foundry_error(
-                status.HTTP_404_NOT_FOUND,
-                error_code="NOT_FOUND",
-                error_name="NotFound",
-                parameters={"ontology": db_name, "objectType": object_type, "primaryKey": primary_key_value, "linkType": link_type},
+            return _link_type_not_found(
+                ontology=db_name,
+                object_type=object_type,
+                link_type=link_type,
+                parameters={"primaryKey": primary_key_value},
             )
         linked_object_type = str(link_type_side.get("objectTypeApiName") or "").strip()
         if not linked_object_type:
-            return _foundry_error(
-                status.HTTP_404_NOT_FOUND,
-                error_code="NOT_FOUND",
-                error_name="NotFound",
-                parameters={"ontology": db_name, "objectType": object_type, "primaryKey": primary_key_value, "linkType": link_type},
+            return _link_type_not_found(
+                ontology=db_name,
+                object_type=object_type,
+                link_type=link_type,
+                parameters={"primaryKey": primary_key_value},
             )
         linked_primary_key_field = await _resolve_object_primary_key_field(
             db_name=db_name,
@@ -1241,11 +1311,11 @@ async def list_linked_objects_v2(
     except httpx.HTTPStatusError as exc:
         status_code = exc.response.status_code if exc.response is not None else status.HTTP_502_BAD_GATEWAY
         if status_code == status.HTTP_404_NOT_FOUND:
-            return _foundry_error(
-                status.HTTP_404_NOT_FOUND,
-                error_code="NOT_FOUND",
-                error_name="NotFound",
-                parameters={"ontology": db_name, "objectType": object_type, "primaryKey": primary_key_value, "linkType": link_type},
+            return _link_type_not_found(
+                ontology=db_name,
+                object_type=object_type,
+                link_type=link_type,
+                parameters={"primaryKey": primary_key_value},
             )
         return _foundry_error(
             status_code,
@@ -1254,11 +1324,11 @@ async def list_linked_objects_v2(
             parameters={"ontology": db_name, "objectType": object_type, "primaryKey": primary_key_value, "linkType": link_type},
         )
     except ValueError:
-        return _foundry_error(
-            status.HTTP_404_NOT_FOUND,
-            error_code="NOT_FOUND",
-            error_name="NotFound",
-            parameters={"ontology": db_name, "objectType": object_type, "primaryKey": primary_key_value, "linkType": link_type},
+        return _link_type_not_found(
+            ontology=db_name,
+            object_type=object_type,
+            link_type=link_type,
+            parameters={"primaryKey": primary_key_value},
         )
     except Exception as exc:
         logger.error("Failed to resolve link context (v2): %s", exc)
@@ -1285,9 +1355,8 @@ async def list_linked_objects_v2(
         "where": _build_primary_key_where(linked_primary_key_field, paged_primary_keys),
         "pageSize": max(1, len(paged_primary_keys)),
     }
-    if select:
-        search_payload["select"] = [str(value).strip() for value in select if str(value).strip()]
-    parsed_order_by = _parse_order_by(order_by)
+    if normalized_select:
+        search_payload["select"] = normalized_select
     if parsed_order_by is not None:
         search_payload["orderBy"] = parsed_order_by
     if exclude_rid is not None:
@@ -1305,7 +1374,7 @@ async def list_linked_objects_v2(
         if not isinstance(data, list):
             data = []
         next_offset = offset + len(paged_primary_keys)
-        next_page_token = _encode_page_token(next_offset) if next_offset < len(linked_primary_keys) else None
+        next_page_token = _encode_page_token(next_offset, scope=page_scope) if next_offset < len(linked_primary_keys) else None
         return {"data": data, "nextPageToken": next_page_token}
     except httpx.HTTPStatusError as exc:
         status_code = exc.response.status_code if exc.response is not None else status.HTTP_502_BAD_GATEWAY
@@ -1317,11 +1386,11 @@ async def list_linked_objects_v2(
             except Exception:
                 pass
         if status_code == status.HTTP_404_NOT_FOUND:
-            return _foundry_error(
-                status.HTTP_404_NOT_FOUND,
-                error_code="NOT_FOUND",
-                error_name="NotFound",
-                parameters={"ontology": db_name, "objectType": object_type, "primaryKey": primary_key_value, "linkType": link_type},
+            return _link_type_not_found(
+                ontology=db_name,
+                object_type=object_type,
+                link_type=link_type,
+                parameters={"primaryKey": primary_key_value},
             )
         return _foundry_error(
             status_code,
@@ -1351,10 +1420,14 @@ async def get_linked_object_v2(
     select: list[str] | None = Query(default=None),
     exclude_rid: bool | None = Query(default=None, alias="excludeRid"),
     branch: str = Query("main", description="Ontology branch name or branch RID"),
+    sdk_package_rid: str | None = Query(default=None, alias="sdkPackageRid"),
+    sdk_version: str | None = Query(default=None, alias="sdkVersion"),
     oms_client: OMSClient = OMSClientDep,
 ):
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
+        branch = _validate_branch(branch)
+        _ = sdk_package_rid, sdk_version
         object_type = str(objectType or "").strip()
         primary_key_value = str(primaryKey or "").strip()
         link_type = str(linkType or "").strip()
@@ -1369,12 +1442,9 @@ async def get_linked_object_v2(
             raise ValueError("linkedObjectPrimaryKey is required")
         await _require_domain_role(request, db_name=db_name)
     except OntologyNotFoundError:
-        return _foundry_error(
-            status.HTTP_404_NOT_FOUND,
-            error_code="NOT_FOUND",
-            error_name="NotFound",
+        return _ontology_not_found(
+            ontology=str(ontology),
             parameters={
-                "ontology": str(ontology),
                 "objectType": str(objectType),
                 "primaryKey": str(primaryKey),
                 "linkType": str(linkType),
@@ -1403,56 +1473,239 @@ async def get_linked_object_v2(
             parameters={"ontology": str(ontology), "message": str(exc)},
         )
 
-    cursor: str | None = None
-    while True:
-        list_response = await list_linked_objects_v2(
-            ontology=ontology,
-            objectType=objectType,
-            primaryKey=primaryKey,
-            linkType=linkType,
-            request=request,
-            page_size=1000,
-            page_token=cursor,
-            select=None,
-            order_by=None,
-            exclude_rid=None,
-            snapshot=None,
+    error_parameters = _linked_object_parameters(
+        ontology=db_name,
+        object_type=object_type,
+        primary_key=primary_key_value,
+        link_type=link_type,
+        linked_primary_key=linked_primary_key_value,
+    )
+
+    normalized_select = [str(value).strip() for value in (select or []) if str(value).strip()]
+
+    try:
+        source_primary_key_field = await _resolve_object_primary_key_field(
+            db_name=db_name,
+            object_type=object_type,
             branch=branch,
             oms_client=oms_client,
         )
-        if isinstance(list_response, JSONResponse):
-            return list_response
-        rows = list_response.get("data") if isinstance(list_response, dict) else None
-        if not isinstance(rows, list):
-            rows = []
+    except ValueError:
+        return _linked_object_not_found_generic(
+            ontology=db_name,
+            object_type=object_type,
+            primary_key=primary_key_value,
+            link_type=link_type,
+            linked_primary_key=linked_primary_key_value,
+            error_name="ObjectTypeNotFound",
+        )
+    except Exception as exc:
+        logger.error("Failed to resolve source primary key field (v2): %s", exc)
+        return _foundry_error(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            error_code="INTERNAL",
+            error_name="Internal",
+            parameters=error_parameters,
+        )
 
-        for row in rows:
-            if not isinstance(row, dict):
-                continue
-            for key in ("__primaryKey", "primaryKey", "id", "instance_id"):
-                value = row.get(key)
-                if value is None:
-                    continue
-                if str(value).strip() == linked_primary_key_value:
-                    if select:
-                        row = {k: row.get(k) for k in select if k in row}
-                    if exclude_rid:
-                        row.pop("__rid", None)
-                    return row
+    try:
+        source_payload = {
+            "where": {"type": "eq", "field": source_primary_key_field, "value": primary_key_value},
+            "pageSize": 1,
+        }
+        source_result = await oms_client.post(
+            f"/api/v1/objects/{db_name}/{object_type}/search",
+            params={"branch": branch},
+            json=source_payload,
+        )
+        source_rows = source_result.get("data") if isinstance(source_result, dict) else None
+        if not isinstance(source_rows, list) or not source_rows or not isinstance(source_rows[0], dict):
+            return _linked_object_not_found_generic(
+                ontology=db_name,
+                object_type=object_type,
+                primary_key=primary_key_value,
+                link_type=link_type,
+                linked_primary_key=linked_primary_key_value,
+                error_name="ObjectNotFound",
+            )
+        source_row = source_rows[0]
+    except httpx.HTTPStatusError as exc:
+        status_code = exc.response.status_code if exc.response is not None else status.HTTP_502_BAD_GATEWAY
+        if status_code == status.HTTP_404_NOT_FOUND:
+            return _linked_object_not_found_generic(
+                ontology=db_name,
+                object_type=object_type,
+                primary_key=primary_key_value,
+                link_type=link_type,
+                linked_primary_key=linked_primary_key_value,
+                error_name="ObjectNotFound",
+            )
+        return _foundry_error(
+            status_code,
+            error_code="UPSTREAM_ERROR",
+            error_name="UpstreamError",
+            parameters=error_parameters,
+        )
+    except Exception as exc:
+        logger.error("Failed to resolve source object (v2): %s", exc)
+        return _foundry_error(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            error_code="INTERNAL",
+            error_name="Internal",
+            parameters=error_parameters,
+        )
 
-        cursor = list_response.get("nextPageToken") if isinstance(list_response, dict) else None
-        if not cursor:
-            break
+    try:
+        link_payload = await oms_client.get_ontology_resource(
+            db_name,
+            resource_type="link_type",
+            resource_id=link_type,
+            branch=branch,
+        )
+        link_resource = link_payload.get("data") if isinstance(link_payload, dict) else link_payload
+        if not isinstance(link_resource, dict):
+            return _linked_object_not_found_generic(
+                ontology=db_name,
+                object_type=object_type,
+                primary_key=primary_key_value,
+                link_type=link_type,
+                linked_primary_key=linked_primary_key_value,
+                error_name="LinkTypeNotFound",
+            )
+        link_type_side = _to_foundry_outgoing_link_type(link_resource, source_object_type=object_type)
+        if not link_type_side:
+            return _linked_object_not_found_generic(
+                ontology=db_name,
+                object_type=object_type,
+                primary_key=primary_key_value,
+                link_type=link_type,
+                linked_primary_key=linked_primary_key_value,
+                error_name="LinkTypeNotFound",
+            )
+        linked_object_type = str(link_type_side.get("objectTypeApiName") or "").strip()
+        if not linked_object_type:
+            return _linked_object_not_found_generic(
+                ontology=db_name,
+                object_type=object_type,
+                primary_key=primary_key_value,
+                link_type=link_type,
+                linked_primary_key=linked_primary_key_value,
+                error_name="LinkTypeNotFound",
+            )
+        linked_primary_key_field = await _resolve_object_primary_key_field(
+            db_name=db_name,
+            object_type=linked_object_type,
+            branch=branch,
+            oms_client=oms_client,
+        )
+    except httpx.HTTPStatusError as exc:
+        status_code = exc.response.status_code if exc.response is not None else status.HTTP_502_BAD_GATEWAY
+        if status_code == status.HTTP_404_NOT_FOUND:
+            return _linked_object_not_found_generic(
+                ontology=db_name,
+                object_type=object_type,
+                primary_key=primary_key_value,
+                link_type=link_type,
+                linked_primary_key=linked_primary_key_value,
+                error_name="LinkTypeNotFound",
+            )
+        return _foundry_error(
+            status_code,
+            error_code="UPSTREAM_ERROR",
+            error_name="UpstreamError",
+            parameters=error_parameters,
+        )
+    except ValueError:
+        return _linked_object_not_found_generic(
+            ontology=db_name,
+            object_type=object_type,
+            primary_key=primary_key_value,
+            link_type=link_type,
+            linked_primary_key=linked_primary_key_value,
+            error_name="LinkTypeNotFound",
+        )
+    except Exception as exc:
+        logger.error("Failed to resolve link context (v2): %s", exc)
+        return _foundry_error(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            error_code="INTERNAL",
+            error_name="Internal",
+            parameters=error_parameters,
+        )
 
-    return _foundry_error(
-        status.HTTP_404_NOT_FOUND,
-        error_code="NOT_FOUND",
-        error_name="NotFound",
-        parameters={
-            "ontology": db_name,
-            "objectType": object_type,
-            "primaryKey": primary_key_value,
-            "linkType": link_type,
-            "linkedObjectPrimaryKey": linked_primary_key_value,
-        },
+    linked_primary_keys = _extract_linked_primary_keys(
+        source_row,
+        link_type=link_type,
+        foreign_key_property=str(link_type_side.get("foreignKeyPropertyApiName") or "").strip() or None,
     )
+    if linked_primary_key_value not in linked_primary_keys:
+        return _linked_object_not_found(
+            ontology=db_name,
+            object_type=object_type,
+            primary_key=primary_key_value,
+            link_type=link_type,
+            linked_primary_key=linked_primary_key_value,
+        )
+
+    payload: Dict[str, Any] = {
+        "where": {"type": "eq", "field": linked_primary_key_field, "value": linked_primary_key_value},
+        "pageSize": 1,
+    }
+    if normalized_select:
+        payload["select"] = normalized_select
+    if exclude_rid is not None:
+        payload["excludeRid"] = bool(exclude_rid)
+
+    try:
+        linked_result = await oms_client.post(
+            f"/api/v1/objects/{db_name}/{linked_object_type}/search",
+            params={"branch": branch},
+            json=payload,
+        )
+        rows = linked_result.get("data") if isinstance(linked_result, dict) else None
+        if not isinstance(rows, list) or not rows:
+            return _linked_object_not_found(
+                ontology=db_name,
+                object_type=object_type,
+                primary_key=primary_key_value,
+                link_type=link_type,
+                linked_primary_key=linked_primary_key_value,
+            )
+        row = rows[0]
+        if not isinstance(row, dict):
+            return _linked_object_not_found(
+                ontology=db_name,
+                object_type=object_type,
+                primary_key=primary_key_value,
+                link_type=link_type,
+                linked_primary_key=linked_primary_key_value,
+            )
+        if normalized_select:
+            row = {k: row.get(k) for k in normalized_select if k in row}
+        if exclude_rid:
+            row.pop("__rid", None)
+        return row
+    except httpx.HTTPStatusError as exc:
+        status_code = exc.response.status_code if exc.response is not None else status.HTTP_502_BAD_GATEWAY
+        if status_code == status.HTTP_404_NOT_FOUND:
+            return _linked_object_not_found(
+                ontology=db_name,
+                object_type=object_type,
+                primary_key=primary_key_value,
+                link_type=link_type,
+                linked_primary_key=linked_primary_key_value,
+            )
+        return _foundry_error(
+            status_code,
+            error_code="UPSTREAM_ERROR",
+            error_name="UpstreamError",
+            parameters=error_parameters,
+        )
+    except Exception as exc:
+        logger.error("Failed to get linked object (v2): %s", exc)
+        return _foundry_error(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            error_code="INTERNAL",
+            error_name="Internal",
+            parameters=error_parameters,
+        )

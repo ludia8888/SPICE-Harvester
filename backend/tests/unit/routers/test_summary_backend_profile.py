@@ -25,7 +25,7 @@ class _FakeEs:
 
 
 @pytest.mark.asyncio
-async def test_summary_skips_legacy_branch_info_in_postgres_profile(
+async def test_summary_skips_branch_info_in_postgres_profile(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("ONTOLOGY_RESOURCE_STORAGE_BACKEND", "postgres")

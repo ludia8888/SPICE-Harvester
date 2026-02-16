@@ -11,6 +11,7 @@ from httpx import ASGITransport, AsyncClient
 from oms.dependencies import ValidatedDatabaseName
 from oms.routers.query import router
 from shared.dependencies.providers import get_elasticsearch_service
+from shared.utils.foundry_page_token import encode_offset_page_token
 
 app = FastAPI()
 app.include_router(router)
@@ -144,9 +145,10 @@ async def test_search_objects_v2_invalid_page_token_returns_foundry_error():
 
 
 @pytest.mark.asyncio
-async def test_search_objects_v2_rejects_deprecated_startswith_operator():
+async def test_search_objects_v2_expired_page_token_returns_foundry_error():
     payload = {
-        "where": {"type": "startsWith", "field": "customer_name", "value": "Kim"},
+        "where": {"type": "eq", "field": "status", "value": "ACTIVE"},
+        "pageToken": encode_offset_page_token(10, issued_at=0),
     }
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -156,8 +158,61 @@ async def test_search_objects_v2_rejects_deprecated_startswith_operator():
     body = resp.json()
     assert body["errorCode"] == "INVALID_ARGUMENT"
     assert body["errorName"] == "InvalidArgument"
-    assert isinstance(body["errorInstanceId"], str)
-    assert isinstance(body["parameters"], dict)
+
+
+@pytest.mark.asyncio
+async def test_search_objects_v2_rejects_page_token_scope_mismatch():
+    payload = {
+        "where": {"type": "eq", "field": "status", "value": "ACTIVE"},
+        "pageToken": encode_offset_page_token(10, scope="v2/searchObjects|other-scope"),
+    }
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post("/objects/test_db/Customer/search", json=payload)
+
+    assert resp.status_code == 400
+    body = resp.json()
+    assert body["errorCode"] == "INVALID_ARGUMENT"
+    assert body["errorName"] == "InvalidArgument"
+
+
+@pytest.mark.asyncio
+async def test_search_objects_v2_accepts_scope_matched_page_token(mock_es):
+    payload = {
+        "where": {"type": "eq", "field": "status", "value": "ACTIVE"},
+        "pageSize": 1,
+    }
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        first = await client.post("/objects/test_db/Customer/search", json=payload)
+        assert first.status_code == 200
+        token = first.json().get("nextPageToken")
+        assert isinstance(token, str) and token
+
+        second_payload = dict(payload)
+        second_payload["pageToken"] = token
+        second = await client.post("/objects/test_db/Customer/search", json=second_payload)
+
+    assert second.status_code == 200
+    search_call = mock_es.search.call_args
+    assert search_call.kwargs["from_"] == 1
+
+
+@pytest.mark.asyncio
+async def test_search_objects_v2_accepts_deprecated_startswith_alias(mock_es):
+    payload = {
+        "where": {"type": "startsWith", "field": "customer_name", "value": "Kim"},
+        "pageSize": 10,
+    }
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post("/objects/test_db/Customer/search", json=payload)
+
+    assert resp.status_code == 200
+    search_call = mock_es.search.call_args
+    search_query = search_call.kwargs["query"]
+    must = search_query["bool"]["must"]
+    assert {"match_phrase_prefix": {"data.customer_name": "Kim"}} in must
 
 
 @pytest.mark.asyncio

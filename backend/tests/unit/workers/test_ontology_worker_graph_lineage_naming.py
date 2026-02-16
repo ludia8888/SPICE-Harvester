@@ -70,7 +70,6 @@ class _AuditStoreStub:
 
 def _build_worker() -> tuple[OntologyWorker, _InMemoryOntologyResourceService, _ObservabilityStub, _AuditStoreStub]:
     worker = OntologyWorker()
-    worker.ontology_resource_backend = "postgres"
     worker.key_spec_registry = None
     worker.command_status_service = None
     worker.publish_event = AsyncMock(return_value=None)

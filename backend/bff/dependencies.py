@@ -16,7 +16,6 @@ Key improvements:
 6. ✅ Easy testing and mocking
 """
 
-import base64
 from typing import Any, Dict, List, Optional
 
 import httpx
@@ -35,6 +34,7 @@ from shared.config.settings import ApplicationSettings
 from shared.errors.error_envelope import build_error_envelope
 from shared.errors.error_types import ErrorCategory, ErrorCode, classified_http_exception
 from shared.observability.request_context import get_correlation_id, get_request_id
+from shared.utils.foundry_page_token import encode_offset_page_token
 from shared.utils.label_mapper import LabelMapper
 from shared.utils.jsonld import JSONToJSONLDConverter
 from shared.services.storage.elasticsearch_service import ElasticsearchService
@@ -299,8 +299,7 @@ class FoundryQueryService:
 
     @staticmethod
     def _encode_page_token(offset: int) -> str:
-        raw = str(max(0, int(offset))).encode("utf-8")
-        return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+        return encode_offset_page_token(offset)
 
     @staticmethod
     def _build_foundry_where(filters: Any) -> Dict[str, Any]:

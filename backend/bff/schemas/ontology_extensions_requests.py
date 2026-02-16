@@ -33,6 +33,7 @@ class OntologyProposalRequest(BaseModel):
 class OntologyApproveRequest(BaseModel):
     merge_message: Optional[str] = Field(None, description="Merge message override")
     author: str = Field("system", description="Approval author")
+    force: bool = Field(False, description="Skip health gate checks (admin override)")
 
 
 class OntologyDeployRequest(BaseModel):

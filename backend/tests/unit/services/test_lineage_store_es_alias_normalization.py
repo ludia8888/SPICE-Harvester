@@ -22,8 +22,8 @@ class _CaptureLineageStore(LineageStore):
         return kwargs.get("edge_id") or uuid4()
 
 
-def test_parse_node_id_rejects_legacy_es_artifact_kind() -> None:
-    with pytest.raises(ValueError, match="legacy lineage node id alias"):
+def test_parse_node_id_rejects_deprecated_es_artifact_kind() -> None:
+    with pytest.raises(ValueError, match="deprecated lineage node id alias"):
         LineageStore._parse_node_id("artifact:elasticsearch:demo:main:Customer/c1")
 
 
@@ -32,13 +32,13 @@ def test_canonicalize_edge_type_keeps_canonical_value() -> None:
     assert normalized == "event_materialized_es_document"
 
 
-def test_canonicalize_edge_type_rejects_legacy_alias() -> None:
-    with pytest.raises(ValueError, match="legacy lineage edge type alias"):
+def test_canonicalize_edge_type_rejects_deprecated_alias() -> None:
+    with pytest.raises(ValueError, match="deprecated lineage edge type alias"):
         LineageStore._canonicalize_edge_type("event_wrote_es_document")
 
 
-def test_canonicalize_edge_type_rejects_legacy_s3_alias() -> None:
-    with pytest.raises(ValueError, match="legacy lineage edge type alias"):
+def test_canonicalize_edge_type_rejects_deprecated_s3_alias() -> None:
+    with pytest.raises(ValueError, match="deprecated lineage edge type alias"):
         LineageStore._canonicalize_edge_type("event_wrote_s3_object")
 
 
@@ -48,11 +48,11 @@ def test_infer_branch_from_es_node_id() -> None:
 
 
 @pytest.mark.asyncio
-async def test_record_link_rejects_legacy_es_ids_and_edge_type() -> None:
+async def test_record_link_rejects_deprecated_es_ids_and_edge_type() -> None:
     store = _CaptureLineageStore()
     occurred_at = datetime(2026, 2, 15, 0, 0, tzinfo=timezone.utc)
 
-    with pytest.raises(ValueError, match="legacy lineage node id alias"):
+    with pytest.raises(ValueError, match="deprecated lineage node id alias"):
         await store.record_link(
             from_node_id="event:cmd-1",
             to_node_id="artifact:elasticsearch:demo:main:Customer/c1",
@@ -61,7 +61,7 @@ async def test_record_link_rejects_legacy_es_ids_and_edge_type() -> None:
             edge_metadata={"db_name": "demo"},
         )
 
-    with pytest.raises(ValueError, match="legacy lineage edge type alias"):
+    with pytest.raises(ValueError, match="deprecated lineage edge type alias"):
         await store.record_link(
             from_node_id="event:cmd-1",
             to_node_id="artifact:es:demo:main:Customer/c1",
@@ -70,7 +70,7 @@ async def test_record_link_rejects_legacy_es_ids_and_edge_type() -> None:
             edge_metadata={"db_name": "demo"},
         )
 
-    with pytest.raises(ValueError, match="legacy lineage edge type alias"):
+    with pytest.raises(ValueError, match="deprecated lineage edge type alias"):
         await store.record_link(
             from_node_id="event:cmd-1",
             to_node_id="artifact:s3:spice-bucket:demo/main/file.json",

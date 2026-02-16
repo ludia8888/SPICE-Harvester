@@ -7,6 +7,7 @@ from fastapi.responses import JSONResponse
 from starlette.requests import Request
 
 from bff.routers import foundry_ontology_v2 as router_v2
+from shared.utils.foundry_page_token import encode_offset_page_token
 
 
 class _FakeOMSClient:
@@ -212,6 +213,26 @@ class _ApiNameOnlyOMSClient(_FakeOMSClient):
         return {"data": {"databases": [{"apiName": "finance", "displayName": "Finance"}]}}
 
 
+class _MissingObjectTypeOMSClient(_FakeOMSClient):
+    async def get_ontology_resource(  # noqa: ANN001, ANN003
+        self,
+        db_name,
+        *,
+        resource_type,
+        resource_id,
+        branch="main",
+    ):
+        if resource_type == "object_type" and resource_id == "MissingType":
+            _ = db_name, branch
+            return None
+        return await super().get_ontology_resource(
+            db_name,
+            resource_type=resource_type,
+            resource_id=resource_id,
+            branch=branch,
+        )
+
+
 async def _noop_require_domain_role(request, *, db_name):  # noqa: ANN001, ANN003
     _ = request, db_name
     return None
@@ -306,6 +327,27 @@ async def test_get_ontology_v2_resolves_rid_identifier():
 
 
 @pytest.mark.asyncio
+async def test_get_ontology_v2_unknown_returns_ontology_not_found():
+    request = Request({"type": "http", "headers": []})
+    original_require = router_v2._require_domain_role
+    router_v2._require_domain_role = _noop_require_domain_role
+    try:
+        response = await router_v2.get_ontology_v2(
+            ontology="unknown_ontology",
+            request=request,
+            oms_client=_FakeOMSClient(),
+        )
+    finally:
+        router_v2._require_domain_role = original_require
+
+    assert isinstance(response, JSONResponse)
+    assert response.status_code == 404
+    payload = json.loads(response.body.decode("utf-8"))
+    assert payload["errorCode"] == "NOT_FOUND"
+    assert payload["errorName"] == "OntologyNotFound"
+
+
+@pytest.mark.asyncio
 async def test_get_object_type_v2_returns_foundry_raw_shape():
     request = Request({"type": "http", "headers": []})
     original_require = router_v2._require_domain_role
@@ -325,6 +367,29 @@ async def test_get_object_type_v2_returns_foundry_raw_shape():
     assert response["apiName"] == "Account"
     assert response["titleProperty"] == "account_id"
     assert response["visibility"] == "NORMAL"
+
+
+@pytest.mark.asyncio
+async def test_get_object_type_v2_missing_returns_object_type_not_found():
+    request = Request({"type": "http", "headers": []})
+    original_require = router_v2._require_domain_role
+    router_v2._require_domain_role = _noop_require_domain_role
+    try:
+        response = await router_v2.get_object_type_v2(
+            ontology="test_db",
+            objectType="MissingType",
+            request=request,
+            branch="main",
+            oms_client=_MissingObjectTypeOMSClient(),
+        )
+    finally:
+        router_v2._require_domain_role = original_require
+
+    assert isinstance(response, JSONResponse)
+    assert response.status_code == 404
+    payload = json.loads(response.body.decode("utf-8"))
+    assert payload["errorCode"] == "NOT_FOUND"
+    assert payload["errorName"] == "ObjectTypeNotFound"
 
 
 @pytest.mark.asyncio
@@ -372,6 +437,30 @@ async def test_get_outgoing_link_type_v2_returns_foundry_raw_shape():
     assert response["apiName"] == "owned_by"
     assert response["displayName"] == "Owned By"
     assert response["status"] == "ACTIVE"
+
+
+@pytest.mark.asyncio
+async def test_get_outgoing_link_type_v2_missing_returns_link_type_not_found():
+    request = Request({"type": "http", "headers": []})
+    original_require = router_v2._require_domain_role
+    router_v2._require_domain_role = _noop_require_domain_role
+    try:
+        response = await router_v2.get_outgoing_link_type_v2(
+            ontology="test_db",
+            objectType="Account",
+            linkType="unknown_link",
+            request=request,
+            branch="main",
+            oms_client=_FakeOMSClient(),
+        )
+    finally:
+        router_v2._require_domain_role = original_require
+
+    assert isinstance(response, JSONResponse)
+    assert response.status_code == 404
+    payload = json.loads(response.body.decode("utf-8"))
+    assert payload["errorCode"] == "NOT_FOUND"
+    assert payload["errorName"] == "LinkTypeNotFound"
 
 
 @pytest.mark.asyncio
@@ -486,7 +575,7 @@ async def test_get_object_v2_not_found_returns_foundry_error():
     assert response.status_code == 404
     payload = json.loads(response.body.decode("utf-8"))
     assert payload["errorCode"] == "NOT_FOUND"
-    assert payload["errorName"] == "NotFound"
+    assert payload["errorName"] == "ObjectNotFound"
     assert payload["parameters"]["primaryKey"] == "acc-404"
 
 
@@ -524,6 +613,37 @@ async def test_list_linked_objects_v2_returns_foundry_raw_shape():
 
 
 @pytest.mark.asyncio
+async def test_list_linked_objects_v2_missing_link_type_returns_link_type_not_found():
+    request = Request({"type": "http", "headers": []})
+    original_require = router_v2._require_domain_role
+    router_v2._require_domain_role = _noop_require_domain_role
+    try:
+        response = await router_v2.list_linked_objects_v2(
+            ontology="test_db",
+            objectType="Account",
+            primaryKey="acc-1",
+            linkType="unknown_link",
+            request=request,
+            page_size=10,
+            page_token=None,
+            select=None,
+            order_by=None,
+            exclude_rid=None,
+            snapshot=None,
+            branch="main",
+            oms_client=_FakeOMSClient(),
+        )
+    finally:
+        router_v2._require_domain_role = original_require
+
+    assert isinstance(response, JSONResponse)
+    assert response.status_code == 404
+    payload = json.loads(response.body.decode("utf-8"))
+    assert payload["errorCode"] == "NOT_FOUND"
+    assert payload["errorName"] == "LinkTypeNotFound"
+
+
+@pytest.mark.asyncio
 async def test_get_linked_object_v2_returns_foundry_raw_shape():
     request = Request({"type": "http", "headers": []})
     original_require = router_v2._require_domain_role
@@ -553,6 +673,7 @@ async def test_get_linked_object_v2_returns_foundry_raw_shape():
 async def test_get_linked_object_v2_not_found_returns_foundry_error():
     request = Request({"type": "http", "headers": []})
     original_require = router_v2._require_domain_role
+    fake = _FakeOMSClient()
     router_v2._require_domain_role = _noop_require_domain_role
     try:
         response = await router_v2.get_linked_object_v2(
@@ -565,7 +686,7 @@ async def test_get_linked_object_v2_not_found_returns_foundry_error():
             select=None,
             exclude_rid=None,
             branch="main",
-            oms_client=_FakeOMSClient(),
+            oms_client=fake,
         )
     finally:
         router_v2._require_domain_role = original_require
@@ -574,7 +695,10 @@ async def test_get_linked_object_v2_not_found_returns_foundry_error():
     assert response.status_code == 404
     payload = json.loads(response.body.decode("utf-8"))
     assert payload["errorCode"] == "NOT_FOUND"
+    assert payload["errorName"] == "LinkedObjectNotFound"
     assert payload["parameters"]["linkedObjectPrimaryKey"] == "u-404"
+    assert fake.last_post is not None
+    assert fake.last_post[0].endswith("/objects/test_db/Account/search")
 
 
 @pytest.mark.asyncio
@@ -619,6 +743,77 @@ async def test_list_objects_v2_rejects_invalid_orderby_expression():
         )
     finally:
         router_v2._require_domain_role = original_require
+
+    assert isinstance(response, JSONResponse)
+    assert response.status_code == 400
+    payload = json.loads(response.body.decode("utf-8"))
+    assert payload["errorCode"] == "INVALID_ARGUMENT"
+
+
+@pytest.mark.asyncio
+async def test_list_objects_v2_rejects_invalid_branch():
+    request = Request({"type": "http", "headers": []})
+    original_require = router_v2._require_domain_role
+    fake = _FakeOMSClient()
+    router_v2._require_domain_role = _noop_require_domain_role
+    try:
+        response = await router_v2.list_objects_v2(
+            ontology="test_db",
+            objectType="Account",
+            request=request,
+            page_size=10,
+            page_token=None,
+            select=None,
+            order_by=None,
+            exclude_rid=None,
+            snapshot=None,
+            branch="invalid$branch",
+            oms_client=fake,
+        )
+    finally:
+        router_v2._require_domain_role = original_require
+
+    assert isinstance(response, JSONResponse)
+    assert response.status_code == 400
+    payload = json.loads(response.body.decode("utf-8"))
+    assert payload["errorCode"] == "INVALID_ARGUMENT"
+    assert fake.last_post is None
+
+
+@pytest.mark.asyncio
+async def test_list_object_types_v2_rejects_expired_page_token():
+    request = Request({"type": "http", "headers": []})
+    issued_at = 0
+    expired_token = encode_offset_page_token(10, issued_at=issued_at)
+
+    response = await router_v2.list_object_types_v2(
+        ontology="test_db",
+        request=request,
+        page_size=10,
+        page_token=expired_token,
+        branch="main",
+        oms_client=_FakeOMSClient(),
+    )
+
+    assert isinstance(response, JSONResponse)
+    assert response.status_code == 400
+    payload = json.loads(response.body.decode("utf-8"))
+    assert payload["errorCode"] == "INVALID_ARGUMENT"
+
+
+@pytest.mark.asyncio
+async def test_list_object_types_v2_rejects_page_token_scope_mismatch():
+    request = Request({"type": "http", "headers": []})
+    mismatched_scope_token = encode_offset_page_token(10, scope="v2/objectTypes|other_db|main")
+
+    response = await router_v2.list_object_types_v2(
+        ontology="test_db",
+        request=request,
+        page_size=10,
+        page_token=mismatched_scope_token,
+        branch="main",
+        oms_client=_FakeOMSClient(),
+    )
 
     assert isinstance(response, JSONResponse)
     assert response.status_code == 400

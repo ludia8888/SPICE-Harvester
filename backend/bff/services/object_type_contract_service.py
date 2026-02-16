@@ -31,7 +31,7 @@ from shared.utils.key_spec import normalize_key_spec
 from shared.utils.schema_columns import extract_schema_columns
 from shared.utils.schema_hash import compute_schema_hash
 from shared.errors.error_types import ErrorCode, classified_http_exception
-from shared.errors.legacy_codes import LegacyErrorCode
+from shared.errors.external_codes import ExternalErrorCode
 from shared.observability.tracing import trace_external_call
 
 logger = logging.getLogger(__name__)
@@ -181,7 +181,7 @@ def _normalize_and_validate_pk_spec(raw_pk_spec: Any, *, ontology_property_names
             status.HTTP_409_CONFLICT,
             "Object type key fields are missing from ontology properties",
             code=ErrorCode.OBJECTIFY_CONTRACT_ERROR,
-            external_code=LegacyErrorCode.OBJECT_TYPE_KEY_FIELDS_MISSING,
+            external_code=ExternalErrorCode.OBJECT_TYPE_KEY_FIELDS_MISSING,
             extra={"fields": missing_keys},
         )
     return pk_spec
@@ -312,7 +312,7 @@ async def create_object_type_contract(
                     status.HTTP_409_CONFLICT,
                     "Auto-generated mapping is empty",
                     code=ErrorCode.OBJECTIFY_CONTRACT_ERROR,
-                    external_code=LegacyErrorCode.OBJECT_TYPE_AUTO_MAPPING_EMPTY,
+                    external_code=ExternalErrorCode.OBJECT_TYPE_AUTO_MAPPING_EMPTY,
                     extra={"class_id": class_id},
                 )
             auto_body = CreateMappingSpecRequest(
@@ -578,7 +578,7 @@ async def update_object_type_contract(
                     status.HTTP_409_CONFLICT,
                     "Mapping spec is required for object type migration",
                     code=ErrorCode.OBJECTIFY_CONTRACT_ERROR,
-                    external_code=LegacyErrorCode.OBJECT_TYPE_MAPPING_SPEC_REQUIRED,
+                    external_code=ExternalErrorCode.OBJECT_TYPE_MAPPING_SPEC_REQUIRED,
                     extra={"class_id": class_id},
                 )
             mapping_spec_record = await objectify_registry.get_mapping_spec(
@@ -597,7 +597,7 @@ async def update_object_type_contract(
                     status.HTTP_409_CONFLICT,
                     "Object type backing version is required",
                     code=ErrorCode.OBJECTIFY_CONTRACT_ERROR,
-                    external_code=LegacyErrorCode.OBJECT_TYPE_BACKING_VERSION_REQUIRED,
+                    external_code=ExternalErrorCode.OBJECT_TYPE_BACKING_VERSION_REQUIRED,
                     extra={"class_id": class_id},
                 )
             if mapping_spec_record.dataset_id != dataset.dataset_id:
@@ -605,7 +605,7 @@ async def update_object_type_contract(
                     status.HTTP_409_CONFLICT,
                     "Mapping spec dataset does not match object type backing dataset",
                     code=ErrorCode.OBJECTIFY_CONTRACT_ERROR,
-                    external_code=LegacyErrorCode.MAPPING_SPEC_DATASET_MISMATCH,
+                    external_code=ExternalErrorCode.MAPPING_SPEC_DATASET_MISMATCH,
                     extra={
                         "mapping_spec_id": mapping_spec_record.mapping_spec_id,
                         "dataset_id": dataset.dataset_id,
@@ -616,7 +616,7 @@ async def update_object_type_contract(
                     status.HTTP_409_CONFLICT,
                     "Object type backing artifact is required",
                     code=ErrorCode.OBJECTIFY_CONTRACT_ERROR,
-                    external_code=LegacyErrorCode.OBJECT_TYPE_BACKING_ARTIFACT_REQUIRED,
+                    external_code=ExternalErrorCode.OBJECT_TYPE_BACKING_ARTIFACT_REQUIRED,
                     extra={"class_id": class_id},
                 )
 
@@ -676,7 +676,7 @@ async def update_object_type_contract(
                     status.HTTP_409_CONFLICT,
                     "PK 변경 전 편집 이력 초기화가 필요합니다.",
                     code=ErrorCode.CONFLICT,
-                    external_code=LegacyErrorCode.OBJECT_TYPE_EDIT_RESET_REQUIRED,
+                    external_code=ExternalErrorCode.OBJECT_TYPE_EDIT_RESET_REQUIRED,
                     extra={"edit_count": edit_count},
                 )
         if (backing_changed or pk_changed) and not migration_approved:
@@ -695,7 +695,7 @@ async def update_object_type_contract(
                 status.HTTP_409_CONFLICT,
                 "Migration approval required to change backing source or keys",
                 code=ErrorCode.CONFLICT,
-                external_code=LegacyErrorCode.OBJECT_TYPE_MIGRATION_REQUIRED,
+                external_code=ExternalErrorCode.OBJECT_TYPE_MIGRATION_REQUIRED,
                 extra={"backing_changed": backing_changed, "pk_changed": pk_changed},
             )
 

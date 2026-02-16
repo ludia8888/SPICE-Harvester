@@ -863,6 +863,14 @@ async def approve_ontology_proposal(
             merge_message=request.merge_message,
             author=request.author,
         )
+        resource_service = OntologyResourceService()
+        promoted_resource_count = await resource_service.promote_branch_resources(
+            db_name,
+            source_branch=source_branch,
+            target_branch=target_branch,
+        )
+        if isinstance(result, dict):
+            result["promoted_resource_count"] = promoted_resource_count
         return ApiResponse.success(
             message="Ontology proposal approved",
             data=result,
@@ -954,6 +962,12 @@ async def deploy_ontology(
                 "source_branch": pr_data.get("source_branch") or "",
             },
         )
+        resource_service = OntologyResourceService()
+        snapshot_count = await resource_service.materialize_commit_snapshot(
+            db_name,
+            source_branch=target_branch,
+            ontology_commit_id=request.ontology_commit_id,
+        )
         return ApiResponse.success(
             message="Ontology deploy completed",
             data={
@@ -961,6 +975,7 @@ async def deploy_ontology(
                 "proposal_id": request.proposal_id,
                 "target_branch": target_branch,
                 "ontology_commit_id": request.ontology_commit_id,
+                "resource_snapshot_count": snapshot_count,
             },
         ).to_dict()
     except DatabaseError as e:

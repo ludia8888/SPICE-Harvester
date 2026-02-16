@@ -3,7 +3,6 @@
 Composed by `bff.routers.link_types` via router composition (Composite pattern).
 """
 
-import base64
 import logging
 from shared.observability.tracing import trace_endpoint
 
@@ -19,6 +18,7 @@ from shared.models.requests import ApiResponse
 from shared.security.database_access import DATA_ENGINEER_ROLES, DOMAIN_MODEL_ROLES
 from shared.security.input_sanitizer import validate_db_name
 from shared.services.registries.dataset_registry import DatasetRegistry
+from shared.utils.foundry_page_token import decode_offset_page_token, encode_offset_page_token
 
 logger = logging.getLogger(__name__)
 
@@ -46,34 +46,24 @@ def _extract_resources(payload):
     return [entry for entry in resources if isinstance(entry, dict)]
 
 
-def _decode_page_token(page_token: str | None) -> int:
-    if page_token is None:
-        return 0
-    token = str(page_token).strip()
-    if not token:
-        return 0
+def _decode_page_token(page_token: str | None, *, scope: str | None = None) -> int:
     try:
-        padding = "=" * (-len(token) % 4)
-        decoded = base64.urlsafe_b64decode(f"{token}{padding}".encode("ascii")).decode("utf-8")
-        offset = int(decoded)
+        return decode_offset_page_token(page_token, ttl_seconds=60, expected_scope=scope)
     except Exception as exc:
         raise classified_http_exception(
             status.HTTP_400_BAD_REQUEST,
-            "pageToken must be base64-encoded non-negative integer offset",
+            str(exc),
             code=ErrorCode.REQUEST_VALIDATION_FAILED,
         ) from exc
-    if offset < 0:
-        raise classified_http_exception(
-            status.HTTP_400_BAD_REQUEST,
-            "pageToken offset must be >= 0",
-            code=ErrorCode.REQUEST_VALIDATION_FAILED,
-        )
-    return offset
 
 
-def _encode_page_token(offset: int) -> str:
-    raw = str(max(0, int(offset))).encode("utf-8")
-    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+def _encode_page_token(offset: int, *, scope: str | None = None) -> str:
+    return encode_offset_page_token(offset, scope=scope)
+
+
+def _pagination_scope(*parts: object) -> str:
+    normalized = [str(part).strip() for part in parts if str(part).strip()]
+    return "|".join(normalized)
 
 
 def _normalize_object_ref(raw):
@@ -222,7 +212,8 @@ async def list_outgoing_link_types(
                 code=ErrorCode.REQUEST_VALIDATION_FAILED,
             )
 
-        offset = _decode_page_token(page_token)
+        page_scope = _pagination_scope("v1/outgoing-link-types", db_name, branch, object_type_api_name)
+        offset = _decode_page_token(page_token, scope=page_scope)
         scan_limit = min(max(page_size, 500), 1000)
         scan_offset = 0
         matched: list[dict] = []
@@ -250,7 +241,7 @@ async def list_outgoing_link_types(
 
         data = matched[offset : offset + page_size]
         next_offset = offset + len(data)
-        next_page_token = _encode_page_token(next_offset) if next_offset < len(matched) else None
+        next_page_token = _encode_page_token(next_offset, scope=page_scope) if next_offset < len(matched) else None
         return ApiResponse.success(
             message="Outgoing link types retrieved",
             data={

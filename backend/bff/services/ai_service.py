@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from uuid import UUID, uuid4
 
+import httpx
 from fastapi import HTTPException, Request, status
 
 from shared.errors.error_types import ErrorCode, classified_http_exception
@@ -919,7 +920,31 @@ async def _execute_label_query(
     internal_query = await mapper.convert_query_to_internal(db_name, query_dict, lang)
 
     # Execute via OMS
-    result = await query_service.query_database(db_name, internal_query)
+    try:
+        result = await query_service.query_database(db_name, internal_query)
+    except httpx.HTTPStatusError as exc:
+        status_code = exc.response.status_code if exc.response is not None else status.HTTP_502_BAD_GATEWAY
+        detail: Any = exc.response.text if exc.response is not None else str(exc)
+        if exc.response is not None:
+            try:
+                detail_json = exc.response.json()
+                if isinstance(detail_json, dict):
+                    detail = detail_json.get("detail") or detail_json
+            except Exception:
+                pass
+
+        if status_code >= 500:
+            raise classified_http_exception(
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                f"Query backend unavailable: {detail}",
+                code=ErrorCode.UPSTREAM_UNAVAILABLE,
+            ) from exc
+        raise classified_http_exception(
+            status_code,
+            str(detail),
+            code=ErrorCode.UPSTREAM_ERROR,
+        ) from exc
+
     raw_results = result.get("data", []) if isinstance(result, dict) else []
     labeled_results = await mapper.convert_to_display_batch(db_name, raw_results, lang)
 
@@ -1460,6 +1485,8 @@ async def ai_query(
                 query_service=query_service,
             )
             grounding = _ground_label_query_result(execution)
+        except HTTPException:
+            raise
         except Exception as e:
             warnings.append(f"label_query execution failed: {e}")
             logger.exception("query.label_query_error request_id=%s", request_id)
@@ -1489,6 +1516,8 @@ async def ai_query(
             )
             execution = graph_resp.model_dump(mode="json")
             grounding = _ground_graph_query_result(graph_resp)
+        except HTTPException:
+            raise
         except Exception as e:
             warnings.append(f"graph_query execution failed: {e}")
             logger.exception("query.graph_query_error request_id=%s", request_id)
@@ -1504,6 +1533,8 @@ async def ai_query(
         query_limit = _cap_int(dataset_query.limit, lo=1, hi=limit_cap)
         try:
             datasets = await dataset_registry.list_datasets(db_name=validated_db, branch=branch)
+        except HTTPException:
+            raise
         except Exception as e:
             logger.exception("query.dataset_list_error request_id=%s", request_id)
             raise classified_http_exception(

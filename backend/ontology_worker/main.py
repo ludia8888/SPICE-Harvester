@@ -93,7 +93,6 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
     def __init__(self):
         settings = get_settings()
         worker_cfg = settings.workers.ontology
-        self.ontology_resource_backend = "postgres"
 
         self._bootstrap_worker_runtime(
             config=WorkerRuntimeConfig(
@@ -183,7 +182,7 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
         return True
 
     def _ontology_resource_service(self) -> OntologyResourceService:
-        return OntologyResourceService(backend=self.ontology_resource_backend)
+        return OntologyResourceService()
 
     @staticmethod
     def _ontology_resource_payload(payload: Dict[str, Any], *, class_id: str) -> Dict[str, Any]:
@@ -247,9 +246,7 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
         self.dlq_producer = self.producer
         
         logger.info(
-            "Skipping legacy ontology adapter initialization in ontology-worker "
-            "(runtime backend=%s)",
-            self.ontology_resource_backend,
+            "Ontology resource adapter is postgres-native in ontology-worker.",
         )
         
         # Redis 연결 설정 (선택적 - 실패해도 계속 진행)
@@ -795,11 +792,11 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
                     success = False
             except Exception as exc:
                 logger.warning(
-                    "Failed to delete ontology class via backend (db=%s class_id=%s branch=%s backend=%s): %s",
+                    "Failed to delete ontology class via postgres resource registry "
+                    "(db=%s class_id=%s branch=%s): %s",
                     db_name,
                     class_id,
                     branch,
-                    self.ontology_resource_backend,
                     exc,
                     exc_info=True,
                 )
@@ -961,7 +958,7 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
         
         try:
             logger.info(
-                "Skipping legacy database create adapter in postgres runtime (db=%s)",
+                "Database create adapter is postgres-native (db=%s)",
                 db_name,
             )
             await upsert_database_owner(
@@ -1015,7 +1012,7 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
         
         try:
             logger.info(
-                "Skipping legacy database delete adapter in postgres runtime (db=%s)",
+                "Database delete adapter is postgres-native (db=%s)",
                 db_name,
             )
             await delete_database_access_entries(db_name=db_name)

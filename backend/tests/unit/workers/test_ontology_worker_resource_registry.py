@@ -90,7 +90,6 @@ def _build_worker_with_resource_store(
     service: _InMemoryOntologyResourceService,
 ) -> tuple[OntologyWorker, _ObservabilityStub, _AuditStoreStub]:
     worker = OntologyWorker()
-    worker.ontology_resource_backend = "postgres"
     worker.key_spec_registry = None
     worker.command_status_service = None
     worker.publish_event = AsyncMock(return_value=None)

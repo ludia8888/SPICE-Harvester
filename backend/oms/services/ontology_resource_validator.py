@@ -902,16 +902,16 @@ def _collect_permission_policy_issues(policy: Dict[str, Any]) -> List[Dict[str, 
                 invalid_fields=["permission_policy.principals"],
             )
 
-    legacy_alias_fields = [
+    alias_fields = [
         field
         for field in ("roles", "users", "groups", "services")
         if field in policy and policy.get(field) not in (None, "", [], {})
     ]
-    if legacy_alias_fields:
+    if alias_fields:
         _append_spec_issue(
             issues,
-            message="permission_policy legacy aliases are not supported; use permission_policy.principals",
-            invalid_fields=[f"permission_policy.{field}" for field in sorted(legacy_alias_fields)],
+            message="permission_policy alias fields are not supported; use permission_policy.principals",
+            invalid_fields=[f"permission_policy.{field}" for field in sorted(alias_fields)],
         )
 
     unsupported_keys = [

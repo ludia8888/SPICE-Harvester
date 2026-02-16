@@ -1,8 +1,10 @@
 import pytest
+import httpx
 from datetime import datetime, timezone
 from dataclasses import dataclass
 from unittest.mock import AsyncMock
 
+from fastapi import status
 from fastapi.testclient import TestClient
 
 from bff.main import app
@@ -15,6 +17,7 @@ from shared.dependencies.providers import (
 )
 from shared.models.ai import AIAnswer, AIIntentResponse, AIIntentRoute, AIIntentType, AIQueryPlan, AIQueryTool
 from bff.routers import ai as ai_router
+from shared.errors.error_types import ErrorCode, classified_http_exception
 from shared.services.agent.llm_gateway import LLMCallMeta
 
 
@@ -247,6 +250,116 @@ def test_ai_query_label_query_executes_and_answers(client):
     assert res.status_code == 200
     body = res.json()
     assert body["plan"]["tool"] == "label_query"
+
+
+def test_ai_query_label_query_propagates_http_errors(client):
+    plan = AIQueryPlan(
+        tool=AIQueryTool.label_query,
+        interpretation="Customer를 조회합니다.",
+        confidence=0.8,
+        query={
+            "class_id": "Customer",
+            "filters": [{"field": "Name", "operator": "eq", "value": "Alice"}],
+            "select": ["Name"],
+            "limit": 2,
+            "offset": 0,
+            "order_by": None,
+            "order_direction": "asc",
+        },
+        warnings=[],
+    )
+
+    _install_common_overrides(llm_gateway=_FakeGateway(plan=plan))
+
+    fake_mapper = AsyncMock()
+    fake_mapper.convert_query_to_internal.return_value = {
+        "class_id": "Customer",
+        "filters": [{"field": "name", "operator": "eq", "value": "Alice"}],
+        "select": ["name"],
+        "limit": 2,
+        "offset": 0,
+        "order_by": None,
+        "order_direction": "asc",
+    }
+    fake_mapper.convert_to_display_batch.return_value = []
+
+    fake_query_service = AsyncMock()
+    fake_query_service.query_database.side_effect = classified_http_exception(
+        status.HTTP_400_BAD_REQUEST,
+        "invalid query filter",
+        code=ErrorCode.REQUEST_VALIDATION_FAILED,
+    )
+
+    app.dependency_overrides[get_label_mapper] = lambda: fake_mapper
+    app.dependency_overrides[get_foundry_query_service] = lambda: fake_query_service
+    try:
+        res = client.post(
+            "/api/v1/ai/query/testdb",
+            json={"question": "Name이 Alice인 고객 찾아줘", "mode": "auto", "limit": 10},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert res.status_code == 400
+    assert "invalid query filter" in str(res.json())
+
+
+def test_ai_query_label_query_maps_upstream_5xx_to_503(client):
+    plan = AIQueryPlan(
+        tool=AIQueryTool.label_query,
+        interpretation="Customer를 조회합니다.",
+        confidence=0.8,
+        query={
+            "class_id": "Customer",
+            "filters": [{"field": "Name", "operator": "eq", "value": "Alice"}],
+            "select": ["Name"],
+            "limit": 2,
+            "offset": 0,
+            "order_by": None,
+            "order_direction": "asc",
+        },
+        warnings=[],
+    )
+
+    _install_common_overrides(llm_gateway=_FakeGateway(plan=plan))
+
+    fake_mapper = AsyncMock()
+    fake_mapper.convert_query_to_internal.return_value = {
+        "class_id": "Customer",
+        "filters": [{"field": "name", "operator": "eq", "value": "Alice"}],
+        "select": ["name"],
+        "limit": 2,
+        "offset": 0,
+        "order_by": None,
+        "order_direction": "asc",
+    }
+    fake_mapper.convert_to_display_batch.return_value = []
+
+    req = httpx.Request("POST", "http://oms:8000/api/v1/objects/testdb/Customer/search")
+    resp = httpx.Response(
+        status_code=500,
+        request=req,
+        json={"detail": "search backend warming up"},
+    )
+    fake_query_service = AsyncMock()
+    fake_query_service.query_database.side_effect = httpx.HTTPStatusError(
+        "Server error",
+        request=req,
+        response=resp,
+    )
+
+    app.dependency_overrides[get_label_mapper] = lambda: fake_mapper
+    app.dependency_overrides[get_foundry_query_service] = lambda: fake_query_service
+    try:
+        res = client.post(
+            "/api/v1/ai/query/testdb",
+            json={"question": "Name이 Alice인 고객 찾아줘", "mode": "auto", "limit": 10},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert res.status_code == 503
+    assert "Query backend unavailable" in str(res.json())
 
 
 def test_ai_query_dataset_list_executes_and_answers(client, monkeypatch):

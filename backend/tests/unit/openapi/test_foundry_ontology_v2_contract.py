@@ -84,11 +84,27 @@ def test_foundry_v2_ontology_read_paths_include_branch_when_supported():
     assert "branch" in object_type_params
     assert "branch" in outgoing_list_params
     assert "branch" in outgoing_get_params
+    assert "sdkPackageRid" not in object_type_params
+    assert "sdkVersion" not in object_type_params
+    assert "sdkPackageRid" not in outgoing_list_params
+    assert "sdkVersion" not in outgoing_list_params
+    assert "sdkPackageRid" not in outgoing_get_params
+    assert "sdkVersion" not in outgoing_get_params
     assert "branch" in search_params
+    assert "sdkPackageRid" in search_params
+    assert "sdkVersion" in search_params
     assert "branch" in list_objects_params
+    assert "sdkPackageRid" in list_objects_params
+    assert "sdkVersion" in list_objects_params
     assert "branch" in get_object_params
+    assert "sdkPackageRid" in get_object_params
+    assert "sdkVersion" in get_object_params
     assert "branch" in list_linked_params
+    assert "sdkPackageRid" in list_linked_params
+    assert "sdkVersion" in list_linked_params
     assert "branch" in get_linked_params
+    assert "sdkPackageRid" in get_linked_params
+    assert "sdkVersion" in get_linked_params
 
 
 @pytest.mark.unit
@@ -109,6 +125,8 @@ def test_foundry_v2_list_objects_includes_foundry_query_params():
     assert "orderBy" in params
     assert "excludeRid" in params
     assert "snapshot" in params
+    assert "sdkPackageRid" in params
+    assert "sdkVersion" in params
 
 
 @pytest.mark.unit
@@ -129,3 +147,5 @@ def test_foundry_v2_list_linked_objects_includes_foundry_query_params():
     assert "orderBy" in params
     assert "excludeRid" in params
     assert "snapshot" in params
+    assert "sdkPackageRid" in params
+    assert "sdkVersion" in params

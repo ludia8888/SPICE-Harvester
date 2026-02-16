@@ -256,7 +256,7 @@ class FunnelClient(ManagedAsyncClient):
                     raise
                 logger.warning(f"Structure analysis path failed; falling back to simple preview: {e}")
 
-            # Fallback path: legacy preview (assumes header-row table)
+            # Fallback path: compatibility preview (assumes header-row table)
             preview_result = await self.preview_google_sheets(
                 sheet_url=sheet_url,
                 worksheet_name=worksheet_name,

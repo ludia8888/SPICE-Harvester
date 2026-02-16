@@ -6,6 +6,7 @@ from starlette.requests import Request
 
 from bff.routers import link_types as link_types_router
 from bff.routers import object_types as object_types_router
+from shared.utils.foundry_page_token import encode_offset_page_token
 
 
 class _FakeObjectTypeOMSClient:
@@ -87,6 +88,52 @@ class _FakeObjectTypeGetOMSClient:
                         "type": "xsd:string",
                         "required": True,
                     }
+                ]
+            }
+        }
+
+
+class _FakeObjectTypeGetNoPkSpecOMSClient:
+    async def get_ontology_resource(
+        self,
+        db_name,
+        *,
+        resource_type,
+        resource_id,
+        branch="main",
+    ):  # noqa: ANN001, ANN003
+        _ = db_name, branch
+        assert resource_type == "object_type"
+        return {
+            "data": {
+                "id": resource_id,
+                "label": {"en": "Product"},
+                "spec": {
+                    "status": "ACTIVE",
+                    "visibility": "NORMAL",
+                },
+            }
+        }
+
+    async def get_ontology(self, db_name, class_id, *, branch="main"):  # noqa: ANN001, ANN003
+        _ = db_name, class_id, branch
+        return {
+            "data": {
+                "properties": [
+                    {
+                        "name": "product_id",
+                        "label": {"en": "Product ID"},
+                        "type": "xsd:string",
+                        "required": True,
+                        "primaryKey": True,
+                    },
+                    {
+                        "name": "name",
+                        "label": {"en": "Name"},
+                        "type": "xsd:string",
+                        "required": True,
+                        "titleKey": True,
+                    },
                 ]
             }
         }
@@ -244,6 +291,27 @@ async def test_list_object_types_invalid_page_token_rejected():
 
 
 @pytest.mark.asyncio
+async def test_list_object_types_page_token_scope_mismatch_rejected():
+    request = Request({"type": "http", "headers": []})
+    original_require = object_types_router._require_domain_role
+    object_types_router._require_domain_role = _noop_require_domain_role
+    try:
+        with pytest.raises(HTTPException) as exc_info:
+            await object_types_router.list_object_type_contracts(
+                db_name="test_db",
+                request=request,
+                branch="main",
+                page_size=10,
+                page_token=encode_offset_page_token(10, scope="v1/object-types|other_db|main"),
+                oms_client=_FakeObjectTypeOMSClient(),
+            )
+    finally:
+        object_types_router._require_domain_role = original_require
+
+    assert exc_info.value.status_code == 400
+
+
+@pytest.mark.asyncio
 async def test_get_object_type_foundry_shape():
     request = Request({"type": "http", "headers": []})
     original_require = object_types_router._require_domain_role
@@ -271,6 +339,28 @@ async def test_get_object_type_foundry_shape():
     assert row["properties"]["account_id"]["required"] is True
     assert row["properties"]["account_id"]["status"] == "ACTIVE"
     assert "backing_datasource" not in row
+
+
+@pytest.mark.asyncio
+async def test_get_object_type_infers_primary_key_without_pk_spec():
+    request = Request({"type": "http", "headers": []})
+    original_require = object_types_router._require_domain_role
+    object_types_router._require_domain_role = _noop_require_domain_role
+    try:
+        response = await object_types_router.get_object_type_contract(
+            db_name="test_db",
+            class_id="Product",
+            request=request,
+            branch="main",
+            oms_client=_FakeObjectTypeGetNoPkSpecOMSClient(),
+        )
+    finally:
+        object_types_router._require_domain_role = original_require
+
+    assert response.data is not None
+    row = response.data
+    assert row["primaryKey"] == "product_id"
+    assert row["titleProperty"] == "name"
 
 
 @pytest.mark.asyncio
@@ -302,6 +392,24 @@ async def test_list_outgoing_link_types_invalid_page_token_rejected():
             branch="main",
             page_size=10,
             page_token="bad-token",
+            oms_client=_FakeLinkTypeOMSClient(),
+        )
+
+    assert exc_info.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_list_outgoing_link_types_page_token_scope_mismatch_rejected():
+    with pytest.raises(HTTPException) as exc_info:
+        await link_types_router.list_outgoing_link_types(
+            db_name="test_db",
+            object_type_api_name="Account",
+            branch="main",
+            page_size=10,
+            page_token=encode_offset_page_token(
+                10,
+                scope="v1/outgoing-link-types|test_db|main|OtherObjectType",
+            ),
             oms_client=_FakeLinkTypeOMSClient(),
         )
 
