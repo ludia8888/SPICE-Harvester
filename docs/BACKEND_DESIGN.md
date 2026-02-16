@@ -1,6 +1,6 @@
 # Backend Design Reference
 
-> Generated: 2026-02-16T12:49:08+09:00
+> Generated: 2026-02-16T15:02:44+09:00
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 > Source: AST + docstring extraction (module/class/function) via `scripts/generate_backend_methods.py`.
 
@@ -701,12 +701,12 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
-- API surface: public=25 | top-level functions=70 | classes=2 | methods=0
-- Runtime signals: async_functions=30 | try=59 | raise=39 | broad_except=51 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=1/70 (1%) | classes=0/2 (0%) | methods=0/0 (n/a)
+- API surface: public=26 | top-level functions=81 | classes=2 | methods=0
+- Runtime signals: async_functions=31 | try=62 | raise=33 | broad_except=53 | bare_except=0 | finally_return=0
+- Doc coverage: module=yes | top-level functions=1/81 (1%) | classes=0/2 (0%) | methods=0/0 (n/a)
 - Internal imports (8): bff.dependencies; bff.routers.link_types_read; bff.routers.object_types; bff.services.oms_client; shared.observability.tracing; shared.security.database_access; shared.security.input_sanitizer; shared.utils.foundry_page_token
 - External imports (6): asyncio; fastapi; httpx; logging; typing; uuid
-- Public API names: OntologyNotFoundError; PermissionDeniedError; get_action_type_by_rid_v2; get_action_type_v2; get_full_metadata_v2; get_interface_type_v2; get_linked_object_v2; get_object_type_v2; get_object_v2; get_ontology_v2; get_outgoing_link_type_v2; get_query_type_v2 (+13 more)
+- Public API names: OntologyNotFoundError; PermissionDeniedError; get_action_type_by_rid_v2; get_action_type_v2; get_full_metadata_v2; get_interface_type_v2; get_linked_object_v2; get_object_type_full_metadata_v2; get_object_type_v2; get_object_v2; get_ontology_v2; get_outgoing_link_type_v2 (+14 more)
 
 ### `backend/bff/routers/governance.py`
 - Module summary: Governance endpoints (BFF).
@@ -3235,12 +3235,12 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
-- API surface: public=50 | top-level functions=51 | classes=8 | methods=15
-- Runtime signals: async_functions=66 | try=40 | raise=5 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=no | top-level functions=0/51 (0%) | classes=0/8 (0%) | methods=0/15 (0%)
+- API surface: public=52 | top-level functions=53 | classes=8 | methods=15
+- Runtime signals: async_functions=68 | try=46 | raise=5 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/53 (0%) | classes=0/8 (0%) | methods=0/15 (0%)
 - Internal imports (2): bff.routers; shared.utils.foundry_page_token
 - External imports (6): __future__; fastapi; httpx; json; pytest; starlette
-- Public API names: test_get_action_type_by_rid_v2_returns_foundry_raw_shape; test_get_action_type_v2_returns_foundry_raw_shape; test_get_full_metadata_v2_omits_partial_entities_when_upstream_unavailable; test_get_full_metadata_v2_requires_preview_true; test_get_full_metadata_v2_returns_foundry_full_metadata_shape; test_get_linked_object_v2_not_found_returns_foundry_error; test_get_linked_object_v2_returns_foundry_raw_shape; test_get_object_type_v2_missing_returns_object_type_not_found; test_get_object_type_v2_returns_foundry_raw_shape; test_get_object_v2_not_found_returns_foundry_error; test_get_object_v2_returns_foundry_raw_shape; test_get_ontology_v2_non_permission_role_error_returns_invalid_argument (+38 more)
+- Public API names: test_get_action_type_by_rid_v2_returns_foundry_raw_shape; test_get_action_type_v2_returns_foundry_raw_shape; test_get_full_metadata_v2_allows_preview_false; test_get_full_metadata_v2_omits_partial_entities_when_upstream_unavailable; test_get_full_metadata_v2_returns_foundry_full_metadata_shape; test_get_linked_object_v2_not_found_returns_foundry_error; test_get_linked_object_v2_returns_foundry_raw_shape; test_get_object_type_full_metadata_v2_missing_returns_object_type_not_found; test_get_object_type_full_metadata_v2_returns_foundry_shape; test_get_object_type_v2_missing_returns_object_type_not_found; test_get_object_type_v2_returns_foundry_raw_shape; test_get_object_v2_not_found_returns_foundry_error (+40 more)
 
 ### `backend/bff/tests/test_funnel_client_structure_selection.py`
 - Module summary: no docstring
@@ -10996,7 +10996,7 @@
 - Doc coverage: module=yes | top-level functions=0/20 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
 - Internal imports (4): oms.dependencies; oms.routers.query; shared.dependencies.providers; shared.utils.foundry_page_token
 - External imports (5): __future__; fastapi; httpx; pytest; unittest
-- Public API names: mock_es; override_deps; test_search_objects_v2_accepts_contains_any_term_operator; test_search_objects_v2_accepts_foundry_branch_rid; test_search_objects_v2_accepts_non_deprecated_operator; test_search_objects_v2_accepts_scope_matched_page_token; test_search_objects_v2_allows_missing_where_with_match_all_fallback; test_search_objects_v2_expired_page_token_returns_foundry_error; test_search_objects_v2_invalid_page_token_returns_foundry_error; test_search_objects_v2_is_null_false_maps_to_exists_clause; test_search_objects_v2_rejects_deprecated_startswith_alias; test_search_objects_v2_rejects_excessive_nesting_depth (+8 more)
+- Public API names: mock_es; override_deps; test_search_objects_v2_accepts_contains_any_term_operator; test_search_objects_v2_accepts_deprecated_startswith_alias; test_search_objects_v2_accepts_foundry_branch_rid; test_search_objects_v2_accepts_non_deprecated_operator; test_search_objects_v2_accepts_scope_matched_page_token; test_search_objects_v2_allows_missing_where_with_match_all_fallback; test_search_objects_v2_expired_page_token_returns_foundry_error; test_search_objects_v2_invalid_page_token_returns_foundry_error; test_search_objects_v2_is_null_false_maps_to_exists_clause; test_search_objects_v2_rejects_excessive_nesting_depth (+8 more)
 
 ### `backend/tests/unit/oms/test_ontology_extensions_health.py`
 - Module summary: no docstring

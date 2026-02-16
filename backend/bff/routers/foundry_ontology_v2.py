@@ -792,6 +792,204 @@ def _group_outgoing_link_types_by_source(resources: list[dict[str, Any]]) -> dic
     return grouped
 
 
+_INTERFACE_REF_KEYS = (
+    "implementsInterfaces",
+    "implements_interfaces",
+    "interfaceRefs",
+    "interface_refs",
+    "interfaceRef",
+    "interface_ref",
+    "interfaces",
+    "interface",
+)
+
+_INTERFACE_IMPLEMENTATION_KEYS = (
+    "implementsInterfaces2",
+    "implements_interfaces2",
+    "interfaceImplementations",
+    "interface_implementations",
+)
+
+_SHARED_PROPERTY_MAPPING_KEYS = (
+    "sharedPropertyTypeMapping",
+    "shared_property_type_mapping",
+    "sharedPropertyMapping",
+    "shared_property_mapping",
+)
+
+
+def _strip_prefix(text: str, *, prefixes: tuple[str, ...]) -> str:
+    normalized = str(text or "").strip()
+    if not normalized:
+        return ""
+    lowered = normalized.lower()
+    for prefix in prefixes:
+        if lowered.startswith(prefix):
+            return normalized[len(prefix) :].strip()
+    return normalized
+
+
+def _normalize_interface_ref(value: Any) -> str:
+    if not isinstance(value, str):
+        return ""
+    normalized = _strip_prefix(value, prefixes=("interface:", "interfaces:"))
+    return normalized.strip()
+
+
+def _normalize_shared_property_ref(value: Any) -> str:
+    if not isinstance(value, str):
+        return ""
+    normalized = _strip_prefix(
+        value,
+        prefixes=(
+            "shared_property:",
+            "shared_properties:",
+            "shared-property:",
+            "shared-properties:",
+            "shared:",
+        ),
+    )
+    return normalized.strip()
+
+
+def _coerce_string_list(value: Any) -> list[str]:
+    values: list[str] = []
+    if isinstance(value, str):
+        candidate = value.strip()
+        if candidate:
+            values.append(candidate)
+        return values
+    if isinstance(value, list):
+        for item in value:
+            if isinstance(item, str):
+                candidate = item.strip()
+                if candidate:
+                    values.append(candidate)
+                continue
+            if isinstance(item, dict):
+                candidate = (
+                    item.get("apiName")
+                    or item.get("interfaceType")
+                    or item.get("interface")
+                    or item.get("name")
+                    or item.get("id")
+                )
+                if isinstance(candidate, str) and candidate.strip():
+                    values.append(candidate.strip())
+    return values
+
+
+def _ordered_unique(values: list[str]) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        normalized = str(value or "").strip()
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        out.append(normalized)
+    return out
+
+
+def _extract_interface_implementations(resource: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    out: dict[str, dict[str, Any]] = {}
+    spec = resource.get("spec") if isinstance(resource.get("spec"), dict) else {}
+    metadata = resource.get("metadata") if isinstance(resource.get("metadata"), dict) else {}
+    for container in (resource, spec, metadata):
+        if not isinstance(container, dict):
+            continue
+        for key in _INTERFACE_IMPLEMENTATION_KEYS:
+            raw = container.get(key)
+            if not isinstance(raw, dict):
+                continue
+            for raw_name, implementation in raw.items():
+                interface_name = _normalize_interface_ref(raw_name)
+                if not interface_name:
+                    continue
+                out[interface_name] = dict(implementation) if isinstance(implementation, dict) else {}
+    return out
+
+
+def _extract_interface_names(resource: dict[str, Any]) -> list[str]:
+    spec = resource.get("spec") if isinstance(resource.get("spec"), dict) else {}
+    metadata = resource.get("metadata") if isinstance(resource.get("metadata"), dict) else {}
+    refs: list[str] = []
+    for container in (resource, spec, metadata):
+        if not isinstance(container, dict):
+            continue
+        for key in _INTERFACE_REF_KEYS:
+            refs.extend(_coerce_string_list(container.get(key)))
+    refs.extend(list(_extract_interface_implementations(resource).keys()))
+    normalized = [_normalize_interface_ref(ref) for ref in refs]
+    return _ordered_unique([ref for ref in normalized if ref])
+
+
+def _extract_ontology_properties_payload(payload: Any) -> list[dict[str, Any]]:
+    if not isinstance(payload, dict):
+        return []
+    data = payload.get("data") if isinstance(payload.get("data"), dict) else payload
+    properties = data.get("properties") if isinstance(data, dict) else None
+    if not isinstance(properties, list):
+        return []
+    return [property_item for property_item in properties if isinstance(property_item, dict)]
+
+
+def _extract_shared_property_type_mapping(resource: dict[str, Any], *, ontology_payload: Any) -> dict[str, str]:
+    mapping: dict[str, str] = {}
+
+    spec = resource.get("spec") if isinstance(resource.get("spec"), dict) else {}
+    metadata = resource.get("metadata") if isinstance(resource.get("metadata"), dict) else {}
+    for container in (resource, spec, metadata):
+        if not isinstance(container, dict):
+            continue
+        for key in _SHARED_PROPERTY_MAPPING_KEYS:
+            raw_mapping = container.get(key)
+            if not isinstance(raw_mapping, dict):
+                continue
+            for raw_shared_ref, raw_local_property in raw_mapping.items():
+                shared_ref = _normalize_shared_property_ref(raw_shared_ref)
+                local_property = str(raw_local_property or "").strip()
+                if shared_ref and local_property:
+                    mapping[shared_ref] = local_property
+
+    for property_item in _extract_ontology_properties_payload(ontology_payload):
+        local_property = str(property_item.get("name") or property_item.get("id") or "").strip()
+        if not local_property:
+            continue
+        prop_metadata = property_item.get("metadata") if isinstance(property_item.get("metadata"), dict) else {}
+        raw_shared_ref = (
+            property_item.get("shared_property_ref")
+            or property_item.get("sharedPropertyRef")
+            or prop_metadata.get("shared_property_ref")
+            or prop_metadata.get("sharedPropertyRef")
+        )
+        shared_ref = _normalize_shared_property_ref(raw_shared_ref)
+        if shared_ref and shared_ref not in mapping:
+            mapping[shared_ref] = local_property
+
+    return mapping
+
+
+def _to_foundry_object_type_full_metadata(
+    resource: dict[str, Any],
+    *,
+    ontology_payload: Any,
+    link_types: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    object_type = _to_foundry_object_type(resource, ontology_payload=ontology_payload)
+    interface_names = _extract_interface_names(resource)
+    interface_implementations = _extract_interface_implementations(resource)
+    for interface_name in interface_names:
+        interface_implementations.setdefault(interface_name, {})
+    return {
+        "objectType": object_type,
+        "linkTypes": [dict(link_type) for link_type in (link_types or []) if isinstance(link_type, dict)],
+        "implementsInterfaces": interface_names,
+        "implementsInterfaces2": interface_implementations,
+        "sharedPropertyTypeMapping": _extract_shared_property_type_mapping(resource, ontology_payload=ontology_payload),
+    }
+
+
 async def _list_all_resources_for_type(
     *,
     db_name: str,
@@ -974,8 +1172,6 @@ async def get_full_metadata_v2(
     oms_client: OMSClient = OMSClientDep,
 ):
     try:
-        if not preview:
-            raise ValueError("preview=true is required")
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         branch = _validate_branch(branch)
         await _require_domain_role(request, db_name=db_name)
@@ -1075,13 +1271,11 @@ async def get_full_metadata_v2(
             object_type_id = str(resource.get("id") or "").strip()
             if not object_type_id:
                 continue
-            mapped = _to_foundry_object_type(
+            mapped = _to_foundry_object_type_full_metadata(
                 resource,
                 ontology_payload=ontology_payload_by_object_type.get(object_type_id),
+                link_types=link_types_by_source.get(object_type_id) or [],
             )
-            link_types = link_types_by_source.get(object_type_id) or []
-            if link_types:
-                mapped["linkTypes"] = link_types
             object_types[object_type_id] = mapped
 
         ontology_contract = _to_foundry_ontology(database_row)
@@ -1449,12 +1643,10 @@ async def list_interface_types_v2(
     oms_client: OMSClient = OMSClientDep,
 ):
     try:
-        if not preview:
-            raise ValueError("preview=true is required")
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         branch = _validate_branch(branch)
         await _require_domain_role(request, db_name=db_name)
-        page_scope = _pagination_scope("v2/interfaceTypes", db_name, branch, page_size, "preview")
+        page_scope = _pagination_scope("v2/interfaceTypes", db_name, branch, page_size, "1" if preview else "0")
         offset = _decode_page_token(page_token, scope=page_scope)
     except Exception as exc:
         return _preflight_error_response(
@@ -1508,8 +1700,6 @@ async def get_interface_type_v2(
     oms_client: OMSClient = OMSClientDep,
 ):
     try:
-        if not preview:
-            raise ValueError("preview=true is required")
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         branch = _validate_branch(branch)
         _ = sdk_package_rid, sdk_version
@@ -1583,12 +1773,10 @@ async def list_shared_property_types_v2(
     oms_client: OMSClient = OMSClientDep,
 ):
     try:
-        if not preview:
-            raise ValueError("preview=true is required")
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         branch = _validate_branch(branch)
         await _require_domain_role(request, db_name=db_name)
-        page_scope = _pagination_scope("v2/sharedPropertyTypes", db_name, branch, page_size, "preview")
+        page_scope = _pagination_scope("v2/sharedPropertyTypes", db_name, branch, page_size, "1" if preview else "0")
         offset = _decode_page_token(page_token, scope=page_scope)
     except Exception as exc:
         return _preflight_error_response(
@@ -1640,8 +1828,6 @@ async def get_shared_property_type_v2(
     oms_client: OMSClient = OMSClientDep,
 ):
     try:
-        if not preview:
-            raise ValueError("preview=true is required")
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         branch = _validate_branch(branch)
         shared_property_type = str(sharedPropertyType or "").strip()
@@ -1711,8 +1897,6 @@ async def list_value_types_v2(
     oms_client: OMSClient = OMSClientDep,
 ):
     try:
-        if not preview:
-            raise ValueError("preview=true is required")
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         await _require_domain_role(request, db_name=db_name)
     except Exception as exc:
@@ -1761,8 +1945,6 @@ async def get_value_type_v2(
     oms_client: OMSClient = OMSClientDep,
 ):
     try:
-        if not preview:
-            raise ValueError("preview=true is required")
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         value_type = str(valueType or "").strip()
         if not value_type:
@@ -1945,6 +2127,89 @@ async def get_object_type_v2(
             error_code="INTERNAL",
             error_name="Internal",
             parameters={"ontology": db_name, "objectType": object_type},
+        )
+
+
+@router.get("/{ontology}/objectTypes/{objectType}/fullMetadata")
+@trace_endpoint("bff.foundry_v2_ontology.get_object_type_full_metadata")
+async def get_object_type_full_metadata_v2(
+    ontology: str,
+    objectType: str,
+    request: Request,
+    branch: str = Query("main", description="Ontology branch name or branch RID"),
+    preview: bool = Query(False),
+    sdk_package_rid: str | None = Query(default=None, alias="sdkPackageRid"),
+    sdk_version: str | None = Query(default=None, alias="sdkVersion"),
+    oms_client: OMSClient = OMSClientDep,
+):
+    try:
+        db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
+        branch = _validate_branch(branch)
+        _ = preview, sdk_package_rid, sdk_version
+        object_type = str(objectType or "").strip()
+        if not object_type:
+            raise ValueError("objectType is required")
+        await _require_domain_role(request, db_name=db_name)
+    except Exception as exc:
+        return _preflight_error_response(
+            exc,
+            ontology=str(ontology),
+            parameters={"objectType": str(objectType), "preview": preview},
+        )
+
+    try:
+        payload = await oms_client.get_ontology_resource(
+            db_name,
+            resource_type="object_type",
+            resource_id=object_type,
+            branch=branch,
+        )
+        resource = _extract_object_resource(payload)
+        if not resource:
+            return _not_found_error("ObjectTypeNotFound", ontology=db_name, object_type=object_type)
+
+        ontology_payload: Any = None
+        try:
+            ontology_payload = await oms_client.get_ontology(db_name, object_type, branch=branch)
+        except httpx.HTTPError as exc:
+            logger.warning(
+                "Failed to load object type full metadata ontology payload (%s/%s): %s",
+                db_name,
+                object_type,
+                exc,
+            )
+            ontology_payload = None
+
+        link_resources = await _list_all_resources_for_type(
+            db_name=db_name,
+            branch=branch,
+            resource_type="link_type",
+            oms_client=oms_client,
+        )
+        link_types = _group_outgoing_link_types_by_source(link_resources).get(object_type) or []
+        return _to_foundry_object_type_full_metadata(
+            resource,
+            ontology_payload=ontology_payload,
+            link_types=link_types,
+        )
+    except httpx.HTTPStatusError as exc:
+        return _upstream_status_error_response(
+            exc,
+            ontology=db_name,
+            parameters={"objectType": object_type},
+            not_found_response=_not_found_error("ObjectTypeNotFound", ontology=db_name, object_type=object_type),
+        )
+    except httpx.HTTPError:
+        return _upstream_transport_error_response(
+            ontology=db_name,
+            parameters={"objectType": object_type},
+        )
+    except Exception as exc:
+        return _internal_error_response(
+            log_message="Failed to get object type full metadata (v2)",
+            exc=exc,
+            ontology=db_name,
+            parameters={"objectType": object_type},
         )
 
 

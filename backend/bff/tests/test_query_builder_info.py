@@ -16,4 +16,6 @@ async def test_query_builder_info_exposes_canonical_text_operators_only() -> Non
     assert "containsAllTermsInOrder" in operators
     assert "containsAllTermsInOrderPrefixLastTerm" in operators
 
-    assert payload.get("aliases") == {}
+    assert payload.get("aliases") == {
+        "startsWith": "containsAllTermsInOrderPrefixLastTerm",
+    }

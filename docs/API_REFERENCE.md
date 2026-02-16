@@ -132,6 +132,7 @@
 - `GET /api/v2/ontologies/{ontology}/interfaceTypes/{interfaceType}`
 - `GET /api/v2/ontologies/{ontology}/objectTypes`
 - `GET /api/v2/ontologies/{ontology}/objectTypes/{objectType}`
+- `GET /api/v2/ontologies/{ontology}/objectTypes/{objectType}/fullMetadata`
 - `GET /api/v2/ontologies/{ontology}/objectTypes/{objectType}/outgoingLinkTypes`
 - `GET /api/v2/ontologies/{ontology}/objectTypes/{objectType}/outgoingLinkTypes/{linkType}`
 - `GET /api/v2/ontologies/{ontology}/objects/{objectType}`

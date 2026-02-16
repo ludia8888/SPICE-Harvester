@@ -149,8 +149,12 @@ async def query_builder_info():
             "or",
             "not",
         ],
-        "aliases": {},
-        "notes": [],
+        "aliases": {
+            "startsWith": "containsAllTermsInOrderPrefixLastTerm",
+        },
+        "notes": [
+            "startsWith is supported as a deprecated alias for containsAllTermsInOrderPrefixLastTerm.",
+        ],
         "pagination": {
             "pageSize": "1..1000",
             "pageToken": "opaque token from previous response (expires)",

@@ -83,6 +83,7 @@ class SearchJsonQueryV2(BaseModel):
         "containsAllTerms",
         "containsAllTermsInOrder",
         "containsAllTermsInOrderPrefixLastTerm",
+        "startsWith",
         "and",
         "or",
         "not",
@@ -118,6 +119,7 @@ class SearchJsonQueryV2(BaseModel):
             "containsAllTerms",
             "containsAllTermsInOrder",
             "containsAllTermsInOrderPrefixLastTerm",
+            "startsWith",
         }:
             if not isinstance(self.value, str) or not self.value.strip():
                 raise ValueError(f"{self.type} query requires a non-empty string value")
@@ -362,7 +364,7 @@ def _to_es_query(query: Any, *, depth: int = 0) -> Dict[str, Any]:
         return {"match": {field_path: {"query": str(q.value).strip(), "operator": "and"}}}
     if q.type == "containsAllTermsInOrder":
         return {"match_phrase": {field_path: str(q.value).strip()}}
-    if q.type == "containsAllTermsInOrderPrefixLastTerm":
+    if q.type in {"containsAllTermsInOrderPrefixLastTerm", "startsWith"}:
         return {"match_phrase_prefix": {field_path: str(q.value).strip()}}
 
     raise ValueError(f"Unsupported query operator: {q.type}")

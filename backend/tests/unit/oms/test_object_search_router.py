@@ -225,7 +225,7 @@ async def test_search_objects_v2_rejects_page_token_when_page_size_changes():
 
 
 @pytest.mark.asyncio
-async def test_search_objects_v2_rejects_deprecated_startswith_alias(mock_es):
+async def test_search_objects_v2_accepts_deprecated_startswith_alias(mock_es):
     payload = {
         "where": {"type": "startsWith", "field": "customer_name", "value": "Kim"},
         "pageSize": 10,
@@ -234,10 +234,11 @@ async def test_search_objects_v2_rejects_deprecated_startswith_alias(mock_es):
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         resp = await client.post("/objects/test_db/Customer/search", json=payload)
 
-    assert resp.status_code == 400
-    body = resp.json()
-    assert body["errorCode"] == "INVALID_ARGUMENT"
-    assert body["errorName"] == "InvalidArgument"
+    assert resp.status_code == 200
+    search_call = mock_es.search.call_args
+    search_query = search_call.kwargs["query"]
+    must = search_query["bool"]["must"]
+    assert {"match_phrase_prefix": {"data.customer_name": "Kim"}} in must
 
 
 @pytest.mark.asyncio
