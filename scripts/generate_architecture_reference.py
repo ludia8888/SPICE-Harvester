@@ -7,7 +7,7 @@ import argparse
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 ARCH_PATH = REPO_ROOT / "docs" / "ARCHITECTURE.md"
@@ -164,7 +164,7 @@ def _dedupe(items: Iterable[str]) -> List[str]:
     return result
 
 
-def _compose_inventory() -> Tuple[str, str]:
+def _load_resolved_services() -> List[ComposeService]:
     compose_cache: Dict[Path, Dict[str, ComposeService]] = {}
     services = _parse_compose(COMPOSE_MAIN)
     compose_cache[COMPOSE_MAIN] = services
@@ -173,33 +173,192 @@ def _compose_inventory() -> Tuple[str, str]:
     for svc in services.values():
         resolved.append(_resolve_service(svc, COMPOSE_MAIN, compose_cache))
 
-    resolved_sorted = sorted(resolved, key=lambda item: item.name)
+    return sorted(resolved, key=lambda item: item.name)
 
+
+def _render_mermaid_block(lines: List[str]) -> str:
+    return "\n".join(["```mermaid", *lines, "```"]).rstrip() + "\n"
+
+
+def _compose_inventory(services: Sequence[ComposeService]) -> str:
     lines: List[str] = []
     lines.append(f"Source: `{COMPOSE_MAIN.name}` (with extends resolved).")
     lines.append("")
     lines.append("| Service | Ports | Depends On |")
     lines.append("| --- | --- | --- |")
-    for svc in resolved_sorted:
+    for svc in services:
         ports = "<br/>".join(svc.ports) if svc.ports else "-"
         deps = "<br/>".join(svc.depends_on) if svc.depends_on else "-"
         lines.append(f"| `{svc.name}` | {ports} | {deps} |")
 
-    graph_lines = []
-    graph_lines.append("```{mermaid}")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _service_dependency_graph(services: Sequence[ComposeService]) -> str:
+    graph_lines: List[str] = []
     graph_lines.append("graph TD")
-    node_ids = {svc.name: f"svc_{svc.name.replace('-', '_')}" for svc in resolved_sorted}
-    for svc in resolved_sorted:
+    node_ids = {svc.name: f"svc_{svc.name.replace('-', '_')}" for svc in services}
+    for svc in services:
         graph_lines.append(f"  {node_ids[svc.name]}[{svc.name}]")
-    for svc in resolved_sorted:
+    for svc in services:
         for dep in svc.depends_on:
             if dep not in node_ids:
                 node_ids[dep] = f"svc_{dep.replace('-', '_')}"
                 graph_lines.append(f"  {node_ids[dep]}[{dep}]")
             graph_lines.append(f"  {node_ids[svc.name]} --> {node_ids[dep]}")
-    graph_lines.append("```")
+    return _render_mermaid_block(graph_lines)
 
-    return "\n".join(lines).rstrip() + "\n", "\n".join(graph_lines).rstrip() + "\n"
+
+def _classify_service_role(name: str) -> str:
+    lowered = name.lower()
+    if lowered in {"postgres", "redis", "elasticsearch", "kafka", "zookeeper", "minio", "lakefs"}:
+        return "data"
+    if lowered in {"prometheus", "grafana", "jaeger", "otel-collector", "alertmanager", "kafka-ui"}:
+        return "observability"
+    if lowered.endswith("-worker") or lowered.endswith("-scheduler") or lowered.endswith("-service"):
+        return "workers"
+    if lowered.endswith("-init") or lowered.endswith("-migrations") or "migrations" in lowered:
+        return "bootstrap"
+    if lowered in {"bff", "oms", "funnel", "agent"}:
+        return "api"
+    return "other"
+
+
+def _runtime_topology_summary(services: Sequence[ComposeService]) -> str:
+    role_to_services: Dict[str, List[str]] = {
+        "api": [],
+        "workers": [],
+        "data": [],
+        "observability": [],
+        "bootstrap": [],
+        "other": [],
+    }
+    for svc in services:
+        role_to_services[_classify_service_role(svc.name)].append(svc.name)
+
+    lines: List[str] = []
+    lines.append(f"- Total runtime services: **{len(services)}**")
+    lines.append(f"- API services: **{len(role_to_services['api'])}**")
+    lines.append(f"- Background/worker services: **{len(role_to_services['workers'])}**")
+    lines.append(f"- Data platform services: **{len(role_to_services['data'])}**")
+    lines.append(f"- Observability services: **{len(role_to_services['observability'])}**")
+    lines.append("")
+    lines.append("| Role | Count | Services |")
+    lines.append("| --- | --- | --- |")
+    for role in ("api", "workers", "data", "observability", "bootstrap", "other"):
+        names = sorted(role_to_services[role])
+        joined = "<br/>".join(names) if names else "-"
+        lines.append(f"| `{role}` | {len(names)} | {joined} |")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _external_interfaces(services: Sequence[ComposeService]) -> str:
+    lines: List[str] = []
+    lines.append("| Service | Published Ports |")
+    lines.append("| --- | --- |")
+    for svc in services:
+        if not svc.ports:
+            continue
+        lines.append(f"| `{svc.name}` | {'<br/>'.join(svc.ports)} |")
+    if len(lines) == 2:
+        lines.append("| - | - |")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _critical_runtime_paths(services: Sequence[ComposeService]) -> str:
+    names = {svc.name for svc in services}
+    blocks: List[str] = []
+
+    if {"bff", "oms", "elasticsearch", "postgres"}.issubset(names):
+        blocks.append("### Query Path (API -> Object Search)")
+        blocks.append("")
+        blocks.append(
+            _render_mermaid_block(
+                [
+                    "flowchart LR",
+                    "  bff[BFF] --> oms[OMS]",
+                    "  oms --> es[Elasticsearch]",
+                    "  oms --> pg[Postgres]",
+                ]
+            ).rstrip()
+        )
+        blocks.append("")
+
+    if {"bff", "kafka", "action-worker", "lakefs", "postgres"}.issubset(names):
+        blocks.append("### Action Path (Submit -> Async Apply)")
+        blocks.append("")
+        blocks.append(
+            _render_mermaid_block(
+                [
+                    "flowchart LR",
+                    "  bff[BFF] --> kafka[Kafka]",
+                    "  kafka --> aw[action-worker]",
+                    "  aw --> lakefs[LakeFS]",
+                    "  aw --> pg[Postgres]",
+                    "  aw --> relay[message-relay]",
+                ]
+            ).rstrip()
+        )
+        blocks.append("")
+
+    if {"oms", "kafka", "projection-worker", "elasticsearch", "redis"}.issubset(names):
+        blocks.append("### Projection Path (Change -> Read Model)")
+        blocks.append("")
+        blocks.append(
+            _render_mermaid_block(
+                [
+                    "flowchart LR",
+                    "  oms[OMS] --> kafka[Kafka]",
+                    "  kafka --> pw[projection-worker]",
+                    "  pw --> es[Elasticsearch]",
+                    "  pw --> redis[Redis]",
+                ]
+            ).rstrip()
+        )
+        blocks.append("")
+
+    if not blocks:
+        return "- Critical path diagrams are unavailable because required services were not detected.\n"
+    return "\n".join(blocks).rstrip() + "\n"
+
+
+def _onboarding_quick_start() -> str:
+    lines: List[str] = []
+    lines.append("> [!TIP]")
+    lines.append("> First-day onboarding path (recommended)")
+    lines.append("")
+    lines.append("1. Start core runtime services and verify API health.")
+    lines.append("2. Read BFF/OMS entrypoints to understand dependency wiring.")
+    lines.append("3. Follow the Foundry v2 ontology route and OMS object search route end-to-end.")
+    lines.append("4. Validate docs generation to ensure documentation and code stay in lockstep.")
+    lines.append("")
+    lines.append("```bash")
+    lines.append("# 1) Start stack")
+    lines.append("docker compose -f docker-compose.full.yml up -d")
+    lines.append("")
+    lines.append("# 2) Verify docs are in sync")
+    lines.append("python scripts/check_docs.py")
+    lines.append("```")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _onboarding_change_map() -> str:
+    candidates = [
+        ("Add/modify Foundry v2 ontology API", "backend/bff/routers/foundry_ontology_v2.py"),
+        ("Add/modify OMS Object Search DSL", "backend/oms/routers/query.py"),
+        ("BFF query-builder contract/examples", "backend/bff/routers/query.py"),
+        ("Service startup wiring (BFF)", "backend/bff/main.py"),
+        ("Service startup wiring (OMS)", "backend/oms/main.py"),
+        ("Async action execution", "backend/action_worker/main.py"),
+        ("Projection/read-model pipeline", "backend/projection_worker/main.py"),
+        ("Event storage/persistence primitives", "backend/shared/services/storage/event_store.py"),
+    ]
+    lines = ["| Common Task | Primary File |", "| --- | --- |"]
+    for task, rel_path in candidates:
+        path = REPO_ROOT / rel_path
+        if path.exists():
+            lines.append(f"| {task} | `{rel_path}` |")
+    return "\n".join(lines).rstrip() + "\n"
 
 
 def _entrypoints() -> str:
@@ -216,42 +375,92 @@ def _entrypoints() -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
-def _parse_routers(path: Path) -> str:
-    lines = path.read_text(encoding="utf-8").splitlines()
-    entries: List[Tuple[str, str, str]] = []
-    pattern = re.compile(r"app\.include_router\(([^,]+)(.*)\)")
+def _infer_router_source(main_path: Path, router_expr: str) -> str:
+    root_name = router_expr.split(".", 1)[0].strip()
+    if not root_name:
+        return "-"
 
-    for line in lines:
-        match = pattern.search(line)
-        if not match:
+    candidates = [
+        main_path.parent / "routers" / f"{root_name}.py",
+        REPO_ROOT / "backend" / "shared" / "routers" / f"{root_name}.py",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return str(candidate.relative_to(REPO_ROOT))
+    return "-"
+
+
+def _parse_routers(path: Path) -> List[Tuple[str, str, str, str]]:
+    content = path.read_text(encoding="utf-8")
+    entries: List[Tuple[str, str, str, str]] = []
+    pattern = re.compile(r"app\.include_router\((.*?)\)", re.DOTALL)
+
+    for match in pattern.finditer(content):
+        call_expr = match.group(1).strip()
+        if not call_expr:
             continue
-        router = match.group(1).strip()
-        rest = match.group(2)
-        prefix_match = re.search(r'prefix\s*=\s*"([^"]+)"', rest)
-        tags_match = re.search(r"tags\s*=\s*\[([^\]]+)\]", rest)
+        router_expr = call_expr.split(",", 1)[0].strip()
+        prefix_match = re.search(r'prefix\s*=\s*"([^"]+)"', call_expr)
+        tags_match = re.search(r"tags\s*=\s*\[([^\]]+)\]", call_expr)
         prefix = prefix_match.group(1) if prefix_match else "router-defined"
         tags = tags_match.group(1).strip().replace('"', "") if tags_match else "-"
-        entries.append((router, prefix, tags))
+        source = _infer_router_source(path, router_expr)
+        entries.append((router_expr, prefix, tags, source))
 
-    entries = sorted(entries, key=lambda item: item[0])
-    output = ["| Router | Prefix | Tags |", "| --- | --- | --- |"]
-    for router, prefix, tags in entries:
-        output.append(f"| `{router}` | `{prefix}` | {tags} |")
+    return sorted(entries, key=lambda item: item[0])
+
+
+def _render_router_inventory(entries: Sequence[Tuple[str, str, str, str]]) -> str:
+    output = ["| Router | Prefix | Tags | Source File |", "| --- | --- | --- | --- |"]
+    for router, prefix, tags, source in entries:
+        source_cell = f"`{source}`" if source != "-" else "-"
+        output.append(f"| `{router}` | `{prefix}` | {tags} | {source_cell} |")
     return "\n".join(output).rstrip() + "\n"
 
 
+def _render_router_summary(entries: Sequence[Tuple[str, str, str, str]]) -> str:
+    prefixes = {prefix for _, prefix, _, _ in entries}
+    tagged = sum(1 for _, _, tags, _ in entries if tags != "-")
+    with_source = sum(1 for _, _, _, source in entries if source != "-")
+    return (
+        f"- Routers detected: **{len(entries)}**\n"
+        f"- Distinct prefixes: **{len(prefixes)}**\n"
+        f"- Routers with explicit tags: **{tagged}**\n"
+        f"- Routers with resolved source files: **{with_source}**\n"
+    )
+
+
 def _render_architecture_reference() -> str:
-    compose_inventory, compose_graph = _compose_inventory()
+    services = _load_resolved_services()
+    compose_inventory = _compose_inventory(services)
+    compose_graph = _service_dependency_graph(services)
+    topology_summary = _runtime_topology_summary(services)
+    external_interfaces = _external_interfaces(services)
+    critical_paths = _critical_runtime_paths(services)
+    onboarding_quick_start = _onboarding_quick_start()
+    onboarding_change_map = _onboarding_change_map()
     entrypoints = _entrypoints()
-    bff_routers = _parse_routers(REPO_ROOT / "backend" / "bff" / "main.py")
-    oms_routers = _parse_routers(REPO_ROOT / "backend" / "oms" / "main.py")
-    funnel_routers = _parse_routers(REPO_ROOT / "backend" / "funnel" / "main.py")
+    bff_router_entries = _parse_routers(REPO_ROOT / "backend" / "bff" / "main.py")
+    oms_router_entries = _parse_routers(REPO_ROOT / "backend" / "oms" / "main.py")
+    funnel_router_entries = _parse_routers(REPO_ROOT / "backend" / "funnel" / "main.py")
 
     lines: List[str] = []
     lines.append("# Architecture Reference (Auto-Generated)")
     lines.append("")
     lines.append("> Generated by `scripts/generate_architecture_reference.py`.")
     lines.append("> Do not edit manually.")
+    lines.append("")
+    lines.append("## Developer Onboarding Quick Start")
+    lines.append("")
+    lines.append(onboarding_quick_start.rstrip())
+    lines.append("")
+    lines.append("## Runtime Topology Summary")
+    lines.append("")
+    lines.append(topology_summary.rstrip())
+    lines.append("")
+    lines.append("## External Interfaces (Published Ports)")
+    lines.append("")
+    lines.append(external_interfaces.rstrip())
     lines.append("")
     lines.append("## Service Inventory (`docker-compose.full.yml`)")
     lines.append("")
@@ -261,21 +470,35 @@ def _render_architecture_reference() -> str:
     lines.append("")
     lines.append(compose_graph.rstrip())
     lines.append("")
+    lines.append("## Critical Runtime Paths")
+    lines.append("")
+    lines.append(critical_paths.rstrip())
+    lines.append("")
+    lines.append("## Development Change Map")
+    lines.append("")
+    lines.append(onboarding_change_map.rstrip())
+    lines.append("")
     lines.append("## Service Entry Points (`backend/*/main.py`)")
     lines.append("")
     lines.append(entrypoints.rstrip())
     lines.append("")
     lines.append("## Router Inventory (BFF)")
     lines.append("")
-    lines.append(bff_routers.rstrip())
+    lines.append(_render_router_summary(bff_router_entries).rstrip())
+    lines.append("")
+    lines.append(_render_router_inventory(bff_router_entries).rstrip())
     lines.append("")
     lines.append("## Router Inventory (OMS)")
     lines.append("")
-    lines.append(oms_routers.rstrip())
+    lines.append(_render_router_summary(oms_router_entries).rstrip())
+    lines.append("")
+    lines.append(_render_router_inventory(oms_router_entries).rstrip())
     lines.append("")
     lines.append("## Router Inventory (Funnel)")
     lines.append("")
-    lines.append(funnel_routers.rstrip())
+    lines.append(_render_router_summary(funnel_router_entries).rstrip())
+    lines.append("")
+    lines.append(_render_router_inventory(funnel_router_entries).rstrip())
     lines.append("")
     return "\n".join(lines)
 

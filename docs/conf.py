@@ -110,6 +110,8 @@ myst_enable_extensions = [
     "tasklist",
 ]
 myst_heading_anchors = 3
+# Keep Mermaid blocks compatible in both GitHub (` ```mermaid`) and Sphinx.
+myst_fence_as_directive = ["mermaid"]
 
 # Sphinx core quality-of-life options
 autosectionlabel_prefix_document = True

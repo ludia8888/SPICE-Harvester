@@ -61,6 +61,8 @@ class ModuleDesignInfo:
     broad_except_count: int
     bare_except_count: int
     finally_return_count: int
+    source_line_count: int
+    code_line_count: int
     top_level_function_doc_coverage: str
     class_doc_coverage: str
     method_doc_coverage: str
@@ -82,6 +84,19 @@ class DesignTotals:
     modules_with_broad_except: int
     modules_with_bare_except: int
     modules_with_finally_return: int
+
+
+@dataclass
+class GroupDesignSummary:
+    group: str
+    module_count: int
+    module_doc_count: int
+    broad_except_modules: int
+    broad_except_total: int
+    bare_except_total: int
+    total_public_api: int
+    total_async_functions: int
+    total_code_lines: int
 
 
 def iter_python_files(root: Path) -> Iterable[Path]:
@@ -237,6 +252,46 @@ def _collect_finally_return_count(tree: ast.Module) -> int:
     return count
 
 
+def _count_source_lines(source: str) -> tuple[int, int]:
+    lines = source.splitlines()
+    total_lines = len(lines)
+    code_lines = 0
+    for raw in lines:
+        stripped = raw.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        code_lines += 1
+    return total_lines, code_lines
+
+
+def _module_role_hint(path: str) -> str:
+    lowered = path.lower()
+    if "/routers/" in lowered:
+        return "HTTP contract/endpoint routing"
+    if "/services/" in lowered:
+        return "service/domain orchestration"
+    if "/registries/" in lowered:
+        return "persistence/data-access adapter"
+    if lowered.endswith("/main.py"):
+        return "service entrypoint and lifecycle wiring"
+    if "worker" in lowered:
+        return "asynchronous background processing"
+    if "/models" in lowered:
+        return "domain/request-response schema definitions"
+    if "/scripts/" in lowered:
+        return "operational or migration automation"
+    return "general backend module"
+
+
+def _module_risk_score(design: ModuleDesignInfo) -> int:
+    return (
+        design.broad_except_count * 5
+        + design.bare_except_count * 12
+        + design.finally_return_count * 10
+        + max(design.try_count - design.raise_count, 0)
+    )
+
+
 def collect_file_info(root: Path, path: Path, internal_roots: Set[str]) -> FileInfo:
     rel_path = path.relative_to(root)
     group = rel_path.parts[0] if len(rel_path.parts) > 1 else rel_path.name
@@ -244,6 +299,7 @@ def collect_file_info(root: Path, path: Path, internal_roots: Set[str]) -> FileI
 
     source = path.read_text(encoding="utf-8")
     tree = ast.parse(source, filename=str(rel_path))
+    source_line_count, code_line_count = _count_source_lines(source)
 
     module_summary, has_module_doc = summarize_docstring(tree)
     section_data = _parse_design_sections(ast.get_docstring(tree))
@@ -330,6 +386,8 @@ def collect_file_info(root: Path, path: Path, internal_roots: Set[str]) -> FileI
         broad_except_count=broad_except_count,
         bare_except_count=bare_except_count,
         finally_return_count=finally_return_count,
+        source_line_count=source_line_count,
+        code_line_count=code_line_count,
         top_level_function_doc_coverage=_coverage_label(function_doc_count, len(functions)),
         class_doc_coverage=_coverage_label(class_doc_count, len(classes)),
         method_doc_coverage=_coverage_label(method_doc_count, method_count),
@@ -444,8 +502,163 @@ def _design_totals(files: Sequence[FileInfo]) -> DesignTotals:
     )
 
 
+def _group_design_summaries(files: Sequence[FileInfo]) -> List[GroupDesignSummary]:
+    groups: Dict[str, GroupDesignSummary] = {}
+    for info in files:
+        summary = groups.get(info.group)
+        if summary is None:
+            summary = GroupDesignSummary(
+                group=info.group,
+                module_count=0,
+                module_doc_count=0,
+                broad_except_modules=0,
+                broad_except_total=0,
+                bare_except_total=0,
+                total_public_api=0,
+                total_async_functions=0,
+                total_code_lines=0,
+            )
+            groups[info.group] = summary
+        summary.module_count += 1
+        summary.module_doc_count += 1 if info.design.has_module_doc else 0
+        summary.broad_except_modules += 1 if info.design.broad_except_count > 0 else 0
+        summary.broad_except_total += info.design.broad_except_count
+        summary.bare_except_total += info.design.bare_except_count
+        summary.total_public_api += len(info.design.public_api)
+        summary.total_async_functions += info.design.async_function_count
+        summary.total_code_lines += info.design.code_line_count
+
+    return sorted(groups.values(), key=lambda row: row.group)
+
+
+def _top_hotspots(files: Sequence[FileInfo], *, limit: int = 15) -> List[FileInfo]:
+    ranked = sorted(
+        files,
+        key=lambda info: (
+            _module_risk_score(info.design),
+            info.design.broad_except_count,
+            info.design.try_count,
+            info.design.code_line_count,
+        ),
+        reverse=True,
+    )
+    return [info for info in ranked if _module_risk_score(info.design) > 0][:limit]
+
+
+def _entrypoint_modules(files: Sequence[FileInfo]) -> List[FileInfo]:
+    entries = [info for info in files if info.path.endswith("/main.py")]
+    return sorted(entries, key=lambda info: info.path)
+
+
+def _render_package_scoreboard(files: Sequence[FileInfo]) -> str:
+    summaries = _group_design_summaries(files)
+    lines = [
+        "| Package | Modules | Module Doc Coverage | Broad-Except Modules | Broad Except Count | Async Functions | Public API | Code Lines |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    for row in summaries:
+        coverage = _coverage_label(row.module_doc_count, row.module_count)
+        lines.append(
+            f"| `{row.group}` | {row.module_count} | {coverage} | {row.broad_except_modules} | "
+            f"{row.broad_except_total} | {row.total_async_functions} | {row.total_public_api} | {row.total_code_lines} |"
+        )
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _render_hotspots(files: Sequence[FileInfo]) -> str:
+    hotspots = _top_hotspots(files)
+    lines = [
+        "| Module | Risk Score | Broad Except | Bare Except | Finally Return | Try | Raise | Code Lines |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    if not hotspots:
+        lines.append("| - | 0 | 0 | 0 | 0 | 0 | 0 | 0 |")
+        return "\n".join(lines).rstrip() + "\n"
+
+    for info in hotspots:
+        d = info.design
+        lines.append(
+            f"| `{info.path}` | {_module_risk_score(d)} | {d.broad_except_count} | {d.bare_except_count} | "
+            f"{d.finally_return_count} | {d.try_count} | {d.raise_count} | {d.code_line_count} |"
+        )
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _render_entrypoint_risk_map(files: Sequence[FileInfo]) -> str:
+    entries = _entrypoint_modules(files)
+    lines = [
+        "| Entrypoint | Async Functions | Broad Except | Try | Raise | Code Lines |",
+        "| --- | --- | --- | --- | --- | --- |",
+    ]
+    if not entries:
+        lines.append("| - | 0 | 0 | 0 | 0 | 0 |")
+        return "\n".join(lines).rstrip() + "\n"
+    for info in entries:
+        d = info.design
+        lines.append(
+            f"| `{info.path}` | {d.async_function_count} | {d.broad_except_count} | "
+            f"{d.try_count} | {d.raise_count} | {d.code_line_count} |"
+        )
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _onboarding_score(info: FileInfo) -> tuple[int, str]:
+    path = info.path.lower()
+    score = 0
+    reasons: List[str] = []
+
+    if path.endswith("/main.py"):
+        score += 90
+        reasons.append("entrypoint lifecycle")
+    if "/routers/" in path:
+        score += 70
+        reasons.append("API contract surface")
+    if "/services/" in path:
+        score += 45
+        reasons.append("domain/service orchestration")
+    if "/registries/" in path:
+        score += 30
+        reasons.append("storage adapter")
+    if "foundry" in path:
+        score += 40
+        reasons.append("Foundry v2 compatibility")
+    if "ontology" in path:
+        score += 25
+        reasons.append("ontology model contract")
+    if "query" in path:
+        score += 20
+        reasons.append("query/search behavior")
+    if info.design.code_line_count >= 1200:
+        score += 10
+        reasons.append("high-impact module size")
+    if len(info.design.public_api) >= 25:
+        score += 8
+        reasons.append("broad callable surface")
+
+    reason = ", ".join(reasons[:3]) if reasons else "general backend context"
+    return score, reason
+
+
+def _render_onboarding_read_order(files: Sequence[FileInfo], *, limit: int = 20) -> str:
+    ranked: List[tuple[int, str, FileInfo]] = []
+    for info in files:
+        score, reason = _onboarding_score(info)
+        if score <= 0:
+            continue
+        ranked.append((score, reason, info))
+
+    ranked.sort(key=lambda row: (row[0], _module_risk_score(row[2].design), row[2].design.code_line_count), reverse=True)
+    lines = ["| Priority | Module | Why First |", "| --- | --- | --- |"]
+    for index, (_, reason, info) in enumerate(ranked[:limit], start=1):
+        lines.append(f"| {index} | `{info.path}` | {reason} |")
+    if len(lines) == 2:
+        lines.append("| 1 | - | onboarding candidates unavailable |")
+    return "\n".join(lines).rstrip() + "\n"
+
+
 def render_design_reference(files: Sequence[FileInfo], timestamp: str) -> str:
     totals = _design_totals(files)
+    total_code_lines = sum(info.design.code_line_count for info in files)
     lines: List[str] = []
     lines.append("# Backend Design Reference")
     lines.append("")
@@ -461,6 +674,29 @@ def render_design_reference(files: Sequence[FileInfo], timestamp: str) -> str:
     lines.append(f"- Modules with broad `except Exception`: **{totals.modules_with_broad_except}**")
     lines.append(f"- Modules with bare `except:`: **{totals.modules_with_bare_except}**")
     lines.append(f"- Modules with `return` inside `finally`: **{totals.modules_with_finally_return}**")
+    lines.append(f"- Total code lines (non-empty, non-comment): **{total_code_lines}**")
+    lines.append("")
+
+    lines.append("## Package Scoreboard")
+    lines.append("")
+    lines.append(_render_package_scoreboard(files).rstrip())
+    lines.append("")
+
+    lines.append("## Engineering Hotspots")
+    lines.append("")
+    lines.append(_render_hotspots(files).rstrip())
+    lines.append("")
+
+    lines.append("## Entrypoint Risk Map")
+    lines.append("")
+    lines.append(_render_entrypoint_risk_map(files).rstrip())
+    lines.append("")
+    lines.append("## New Developer Read Order (First 60-90 Minutes)")
+    lines.append("")
+    lines.append("> [!TIP]")
+    lines.append("> Start with lifecycle entrypoints, then API routers, then domain services and storage adapters.")
+    lines.append("")
+    lines.append(_render_onboarding_read_order(files).rstrip())
     lines.append("")
 
     files_sorted = sorted(files, key=lambda info: (info.group, info.path))
@@ -479,6 +715,10 @@ def render_design_reference(files: Sequence[FileInfo], timestamp: str) -> str:
         lines.append(f"- Failure modes: {_joined_or_placeholder(d.failure_modes)}")
         lines.append(f"- Extension points: {_joined_or_placeholder(d.extension_points)}")
         lines.append(f"- Dependencies (doc): {_joined_or_placeholder(d.dependencies_doc)}")
+        lines.append(f"- Inferred role: {_module_role_hint(info.path)}")
+        lines.append(
+            f"- Source footprint: total_lines={d.source_line_count} | code_lines={d.code_line_count} | risk_score={_module_risk_score(d)}"
+        )
         lines.append(
             f"- API surface: public={len(d.public_api)} | top-level functions={d.top_level_function_count} | "
             f"classes={d.class_count} | methods={d.method_count}"

@@ -1,6 +1,6 @@
 # Backend Design Reference
 
-> Generated: 2026-02-16T15:02:44+09:00
+> Generated: 2026-02-16T15:26:32+09:00
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 > Source: AST + docstring extraction (module/class/function) via `scripts/generate_backend_methods.py`.
 
@@ -11,6 +11,109 @@
 - Modules with broad `except Exception`: **283**
 - Modules with bare `except:`: **0**
 - Modules with `return` inside `finally`: **0**
+- Total code lines (non-empty, non-comment): **225388**
+
+## Package Scoreboard
+
+| Package | Modules | Module Doc Coverage | Broad-Except Modules | Broad Except Count | Async Functions | Public API | Code Lines |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `action_outbox_worker` | 2 | 2/2 (100%) | 1 | 7 | 9 | 2 | 378 |
+| `action_worker` | 2 | 2/2 (100%) | 1 | 15 | 42 | 2 | 2589 |
+| `agent` | 10 | 4/10 (40%) | 3 | 16 | 16 | 16 | 2771 |
+| `analysis` | 1 | 1/1 (100%) | 0 | 0 | 3 | 2 | 334 |
+| `bff` | 254 | 195/254 (76%) | 92 | 439 | 1073 | 770 | 50705 |
+| `conftest.py` | 1 | 0/1 (0%) | 0 | 0 | 0 | 0 | 65 |
+| `connector_sync_worker` | 2 | 2/2 (100%) | 1 | 5 | 13 | 1 | 456 |
+| `connector_trigger_service` | 2 | 2/2 (100%) | 1 | 9 | 8 | 1 | 305 |
+| `data_connector` | 6 | 4/6 (66%) | 1 | 1 | 12 | 22 | 710 |
+| `examples` | 1 | 1/1 (100%) | 1 | 2 | 0 | 2 | 115 |
+| `funnel` | 22 | 16/22 (72%) | 4 | 35 | 45 | 47 | 6280 |
+| `ingest_reconciler_worker` | 2 | 2/2 (100%) | 1 | 3 | 5 | 3 | 216 |
+| `instance_worker` | 2 | 2/2 (100%) | 1 | 35 | 27 | 2 | 2287 |
+| `mcp_servers` | 18 | 6/18 (33%) | 11 | 56 | 135 | 36 | 7114 |
+| `message_relay` | 2 | 1/2 (50%) | 1 | 13 | 10 | 2 | 664 |
+| `monitoring` | 1 | 1/1 (100%) | 1 | 5 | 9 | 2 | 305 |
+| `objectify_worker` | 4 | 4/4 (100%) | 2 | 26 | 45 | 7 | 4300 |
+| `oms` | 49 | 37/49 (75%) | 19 | 104 | 158 | 193 | 14461 |
+| `ontology_worker` | 2 | 1/2 (50%) | 1 | 28 | 15 | 1 | 1190 |
+| `perf` | 1 | 1/1 (100%) | 1 | 1 | 3 | 1 | 106 |
+| `pipeline_scheduler` | 1 | 1/1 (100%) | 0 | 0 | 1 | 1 | 26 |
+| `pipeline_worker` | 5 | 5/5 (100%) | 3 | 50 | 44 | 3 | 6453 |
+| `projection_worker` | 2 | 1/2 (50%) | 1 | 26 | 26 | 1 | 1793 |
+| `scripts` | 20 | 19/20 (95%) | 12 | 23 | 20 | 41 | 2382 |
+| `shared` | 298 | 202/298 (67%) | 103 | 374 | 851 | 1129 | 79051 |
+| `tests` | 274 | 45/274 (16%) | 20 | 51 | 1168 | 1205 | 40039 |
+| `writeback_materializer_worker` | 2 | 2/2 (100%) | 1 | 4 | 8 | 2 | 293 |
+
+## Engineering Hotspots
+
+| Module | Risk Score | Broad Except | Bare Except | Finally Return | Try | Raise | Code Lines |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `backend/bff/routers/foundry_ontology_v2.py` | 294 | 53 | 0 | 0 | 62 | 33 | 2951 |
+| `backend/pipeline_worker/main.py` | 235 | 47 | 0 | 0 | 62 | 81 | 5250 |
+| `backend/bff/main.py` | 214 | 40 | 0 | 0 | 42 | 28 | 832 |
+| `backend/instance_worker/main.py` | 175 | 35 | 0 | 0 | 42 | 69 | 2283 |
+| `backend/shared/observability/tracing.py` | 174 | 29 | 0 | 0 | 30 | 1 | 516 |
+| `backend/funnel/services/structure_analysis.py` | 144 | 24 | 0 | 0 | 24 | 0 | 2644 |
+| `backend/ontology_worker/main.py` | 142 | 28 | 0 | 0 | 30 | 28 | 1190 |
+| `backend/shared/observability/metrics.py` | 140 | 23 | 0 | 0 | 26 | 1 | 884 |
+| `backend/projection_worker/main.py` | 131 | 26 | 0 | 0 | 29 | 28 | 1793 |
+| `backend/shared/services/kafka/processed_event_worker.py` | 123 | 22 | 0 | 0 | 29 | 16 | 1391 |
+| `backend/objectify_worker/main.py` | 120 | 24 | 0 | 0 | 32 | 36 | 3811 |
+| `backend/bff/services/oms_client.py` | 110 | 22 | 0 | 0 | 23 | 24 | 526 |
+| `backend/shared/services/storage/event_store.py` | 108 | 20 | 0 | 0 | 24 | 16 | 1048 |
+| `backend/bff/services/ai_service.py` | 105 | 21 | 0 | 0 | 25 | 25 | 1571 |
+| `backend/bff/services/graph_query_service.py` | 88 | 17 | 0 | 0 | 18 | 15 | 877 |
+
+## Entrypoint Risk Map
+
+| Entrypoint | Async Functions | Broad Except | Try | Raise | Code Lines |
+| --- | --- | --- | --- | --- | --- |
+| `backend/action_outbox_worker/main.py` | 9 | 7 | 9 | 9 | 377 |
+| `backend/action_worker/main.py` | 42 | 15 | 26 | 51 | 2588 |
+| `backend/agent/main.py` | 1 | 5 | 5 | 1 | 80 |
+| `backend/bff/main.py` | 33 | 40 | 42 | 28 | 832 |
+| `backend/connector_sync_worker/main.py` | 13 | 5 | 5 | 11 | 455 |
+| `backend/connector_trigger_service/main.py` | 8 | 9 | 10 | 3 | 304 |
+| `backend/funnel/main.py` | 3 | 1 | 1 | 0 | 61 |
+| `backend/ingest_reconciler_worker/main.py` | 5 | 3 | 5 | 1 | 215 |
+| `backend/instance_worker/main.py` | 27 | 35 | 42 | 69 | 2283 |
+| `backend/message_relay/main.py` | 10 | 13 | 22 | 10 | 664 |
+| `backend/objectify_worker/main.py` | 38 | 24 | 32 | 36 | 3811 |
+| `backend/oms/main.py` | 15 | 13 | 13 | 5 | 457 |
+| `backend/ontology_worker/main.py` | 15 | 28 | 30 | 28 | 1190 |
+| `backend/pipeline_scheduler/main.py` | 1 | 0 | 0 | 0 | 26 |
+| `backend/pipeline_worker/main.py` | 44 | 47 | 62 | 81 | 5250 |
+| `backend/projection_worker/main.py` | 26 | 26 | 29 | 28 | 1793 |
+| `backend/writeback_materializer_worker/main.py` | 8 | 4 | 6 | 4 | 292 |
+
+## New Developer Read Order (First 60-90 Minutes)
+
+> [!TIP]
+> Start with lifecycle entrypoints, then API routers, then domain services and storage adapters.
+
+| Priority | Module | Why First |
+| --- | --- | --- |
+| 1 | `backend/bff/routers/foundry_ontology_v2.py` | API contract surface, Foundry v2 compatibility, ontology model contract |
+| 2 | `backend/ontology_worker/main.py` | entrypoint lifecycle, ontology model contract |
+| 3 | `backend/oms/routers/ontology.py` | API contract surface, ontology model contract, high-impact module size |
+| 4 | `backend/pipeline_worker/main.py` | entrypoint lifecycle, high-impact module size |
+| 5 | `backend/instance_worker/main.py` | entrypoint lifecycle, high-impact module size |
+| 6 | `backend/projection_worker/main.py` | entrypoint lifecycle, high-impact module size |
+| 7 | `backend/objectify_worker/main.py` | entrypoint lifecycle, high-impact module size |
+| 8 | `backend/action_worker/main.py` | entrypoint lifecycle, high-impact module size |
+| 9 | `backend/shared/services/registries/ontology_key_spec_registry.py` | domain/service orchestration, storage adapter, ontology model contract |
+| 10 | `backend/oms/routers/ontology_extensions.py` | API contract surface, ontology model contract |
+| 11 | `backend/bff/routers/ontology_agent.py` | API contract surface, ontology model contract |
+| 12 | `backend/bff/routers/ontology_metadata.py` | API contract surface, ontology model contract |
+| 13 | `backend/bff/routers/ontology_extensions.py` | API contract surface, ontology model contract |
+| 14 | `backend/bff/routers/ontology_imports.py` | API contract surface, ontology model contract |
+| 15 | `backend/bff/routers/ontology_suggestions.py` | API contract surface, ontology model contract |
+| 16 | `backend/bff/routers/ontology_crud.py` | API contract surface, ontology model contract |
+| 17 | `backend/bff/routers/ontology_ops.py` | API contract surface, ontology model contract |
+| 18 | `backend/bff/routers/ontology.py` | API contract surface, ontology model contract |
+| 19 | `backend/bff/main.py` | entrypoint lifecycle |
+| 20 | `backend/message_relay/main.py` | entrypoint lifecycle |
 
 ## action_outbox_worker
 
@@ -21,6 +124,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: asynchronous background processing
+- Source footprint: total_lines=2 | code_lines=1 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -35,6 +140,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service entrypoint and lifecycle wiring
+- Source footprint: total_lines=432 | code_lines=377 | risk_score=35
 - API surface: public=2 | top-level functions=2 | classes=1 | methods=9
 - Runtime signals: async_functions=9 | try=9 | raise=9 | broad_except=7 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/2 (0%) | classes=0/1 (0%) | methods=0/9 (0%)
@@ -51,6 +158,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: asynchronous background processing
+- Source footprint: total_lines=2 | code_lines=1 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -65,6 +174,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service entrypoint and lifecycle wiring
+- Source footprint: total_lines=2781 | code_lines=2588 | risk_score=75
 - API surface: public=2 | top-level functions=1 | classes=4 | methods=58
 - Runtime signals: async_functions=42 | try=26 | raise=51 | broad_except=15 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/1 (0%) | classes=1/4 (25%) | methods=1/58 (1%)
@@ -81,6 +192,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=1 | code_lines=1 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -95,6 +208,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service entrypoint and lifecycle wiring
+- Source footprint: total_lines=99 | code_lines=80 | risk_score=29
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=1 | try=5 | raise=1 | broad_except=5 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=1/1 (100%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -109,6 +224,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: domain/request-response schema definitions
+- Source footprint: total_lines=51 | code_lines=41 | risk_score=0
 - API surface: public=4 | top-level functions=0 | classes=4 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/0 (n/a) | classes=0/4 (0%) | methods=0/0 (n/a)
@@ -123,6 +240,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: domain/request-response schema definitions
+- Source footprint: total_lines=10 | code_lines=8 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -137,6 +256,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=1 | code_lines=1 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -151,6 +272,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=444 | code_lines=399 | risk_score=20
 - API surface: public=3 | top-level functions=14 | classes=0 | methods=0
 - Runtime signals: async_functions=5 | try=4 | raise=4 | broad_except=4 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/14 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -165,6 +288,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=1 | code_lines=1 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -179,6 +304,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=295 | code_lines=259 | risk_score=1
 - API surface: public=4 | top-level functions=9 | classes=1 | methods=0
 - Runtime signals: async_functions=0 | try=1 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/9 (0%) | classes=0/1 (0%) | methods=0/0 (n/a)
@@ -193,6 +320,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=270 | code_lines=238 | risk_score=4
 - API surface: public=2 | top-level functions=2 | classes=1 | methods=0
 - Runtime signals: async_functions=3 | try=4 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=2/2 (100%) | classes=1/1 (100%) | methods=0/0 (n/a)
@@ -207,6 +336,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=1920 | code_lines=1743 | risk_score=35
 - API surface: public=2 | top-level functions=39 | classes=2 | methods=17
 - Runtime signals: async_functions=7 | try=12 | raise=18 | broad_except=7 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=5/39 (12%) | classes=0/2 (0%) | methods=0/17 (0%)
@@ -223,6 +354,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=377 | code_lines=334 | risk_score=0
 - API surface: public=2 | top-level functions=1 | classes=1 | methods=3
 - Runtime signals: async_functions=3 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=1/1 (100%) | classes=1/1 (100%) | methods=3/3 (100%)
@@ -239,6 +372,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=5 | code_lines=4 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -253,6 +388,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=441 | code_lines=364 | risk_score=30
 - API surface: public=4 | top-level functions=2 | classes=2 | methods=16
 - Runtime signals: async_functions=14 | try=8 | raise=13 | broad_except=6 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=2/2 (100%) | classes=2/2 (100%) | methods=13/16 (81%)
@@ -267,6 +404,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service entrypoint and lifecycle wiring
+- Source footprint: total_lines=1057 | code_lines=832 | risk_score=214
 - API surface: public=15 | top-level functions=14 | classes=1 | methods=34
 - Runtime signals: async_functions=33 | try=42 | raise=28 | broad_except=40 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=10/14 (71%) | classes=1/1 (100%) | methods=33/34 (97%)
@@ -281,6 +420,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=13 | code_lines=11 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -295,6 +436,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=1454 | code_lines=1306 | risk_score=64
 - API surface: public=3 | top-level functions=36 | classes=1 | methods=0
 - Runtime signals: async_functions=18 | try=28 | raise=4 | broad_except=8 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=1/36 (2%) | classes=0/1 (0%) | methods=0/0 (n/a)
@@ -309,6 +452,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=34 | code_lines=33 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -323,6 +468,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=239 | code_lines=212 | risk_score=0
 - API surface: public=10 | top-level functions=10 | classes=0 | methods=0
 - Runtime signals: async_functions=10 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=1/10 (10%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -337,6 +484,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=21 | code_lines=15 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -351,6 +500,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=53 | code_lines=39 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=1 | try=0 | raise=2 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=1/1 (100%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -365,6 +516,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=121 | code_lines=104 | risk_score=6
 - API surface: public=2 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=3 | try=1 | raise=0 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=2/2 (100%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -379,6 +532,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=55 | code_lines=41 | risk_score=0
 - API surface: public=3 | top-level functions=2 | classes=1 | methods=0
 - Runtime signals: async_functions=2 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/2 (0%) | classes=1/1 (100%) | methods=0/0 (n/a)
@@ -393,6 +548,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=101 | code_lines=85 | risk_score=0
 - API surface: public=3 | top-level functions=3 | classes=0 | methods=0
 - Runtime signals: async_functions=3 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=1/3 (33%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -407,6 +564,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=111 | code_lines=96 | risk_score=0
 - API surface: public=4 | top-level functions=4 | classes=0 | methods=0
 - Runtime signals: async_functions=4 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/4 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -421,6 +580,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=55 | code_lines=44 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=1 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -435,6 +596,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=40 | code_lines=29 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=1 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -449,6 +612,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=221 | code_lines=192 | risk_score=10
 - API surface: public=2 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=3 | try=4 | raise=4 | broad_except=2 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=2/2 (100%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -463,6 +628,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=111 | code_lines=101 | risk_score=0
 - API surface: public=3 | top-level functions=3 | classes=0 | methods=0
 - Runtime signals: async_functions=3 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/3 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -477,6 +644,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=78 | code_lines=67 | risk_score=10
 - API surface: public=2 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=2 | try=2 | raise=4 | broad_except=2 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -491,6 +660,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=140 | code_lines=120 | risk_score=10
 - API surface: public=2 | top-level functions=1 | classes=1 | methods=0
 - Runtime signals: async_functions=1 | try=2 | raise=2 | broad_except=2 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/1 (0%) | classes=0/1 (0%) | methods=0/0 (n/a)
@@ -505,6 +676,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=73 | code_lines=62 | risk_score=15
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=1 | try=3 | raise=5 | broad_except=3 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=1/1 (100%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -519,6 +692,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=109 | code_lines=83 | risk_score=10
 - API surface: public=8 | top-level functions=9 | classes=0 | methods=0
 - Runtime signals: async_functions=8 | try=2 | raise=3 | broad_except=2 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/9 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -533,6 +708,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=175 | code_lines=144 | risk_score=5
 - API surface: public=4 | top-level functions=5 | classes=2 | methods=0
 - Runtime signals: async_functions=2 | try=1 | raise=4 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/5 (0%) | classes=0/2 (0%) | methods=0/0 (n/a)
@@ -547,6 +724,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=49 | code_lines=40 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -561,6 +740,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=84 | code_lines=70 | risk_score=0
 - API surface: public=2 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=2 | try=0 | raise=2 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -575,6 +756,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=70 | code_lines=59 | risk_score=0
 - API surface: public=2 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=2 | try=0 | raise=1 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -589,6 +772,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=34 | code_lines=25 | risk_score=0
 - API surface: public=2 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=2 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=2/2 (100%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -603,6 +788,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=114 | code_lines=96 | risk_score=0
 - API surface: public=2 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=2 | try=0 | raise=4 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -617,6 +804,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=103 | code_lines=81 | risk_score=5
 - API surface: public=0 | top-level functions=5 | classes=0 | methods=0
 - Runtime signals: async_functions=2 | try=1 | raise=2 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/5 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -631,6 +820,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=67 | code_lines=59 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=1 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -645,6 +836,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=124 | code_lines=109 | risk_score=0
 - API surface: public=4 | top-level functions=4 | classes=0 | methods=0
 - Runtime signals: async_functions=4 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=4/4 (100%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -659,6 +852,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=124 | code_lines=111 | risk_score=10
 - API surface: public=2 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=2 | try=2 | raise=4 | broad_except=2 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -673,6 +868,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=126 | code_lines=105 | risk_score=0
 - API surface: public=8 | top-level functions=8 | classes=0 | methods=0
 - Runtime signals: async_functions=8 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=8/8 (100%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -687,6 +884,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=142 | code_lines=120 | risk_score=15
 - API surface: public=2 | top-level functions=2 | classes=1 | methods=0
 - Runtime signals: async_functions=1 | try=3 | raise=4 | broad_except=3 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/1 (0%) | methods=0/0 (n/a)
@@ -701,6 +900,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=3208 | code_lines=2951 | risk_score=294
 - API surface: public=26 | top-level functions=81 | classes=2 | methods=0
 - Runtime signals: async_functions=31 | try=62 | raise=33 | broad_except=53 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=1/81 (1%) | classes=0/2 (0%) | methods=0/0 (n/a)
@@ -715,6 +916,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=269 | code_lines=233 | risk_score=0
 - API surface: public=15 | top-level functions=15 | classes=0 | methods=0
 - Runtime signals: async_functions=15 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/15 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -729,6 +932,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=228 | code_lines=198 | risk_score=15
 - API surface: public=10 | top-level functions=8 | classes=2 | methods=0
 - Runtime signals: async_functions=8 | try=3 | raise=3 | broad_except=3 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/8 (0%) | classes=0/2 (0%) | methods=0/0 (n/a)
@@ -743,6 +948,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=70 | code_lines=51 | risk_score=6
 - API surface: public=2 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=2 | try=1 | raise=0 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=2/2 (100%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -757,6 +964,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=164 | code_lines=142 | risk_score=0
 - API surface: public=4 | top-level functions=4 | classes=0 | methods=0
 - Runtime signals: async_functions=4 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=4/4 (100%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -771,6 +980,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=156 | code_lines=141 | risk_score=15
 - API surface: public=3 | top-level functions=4 | classes=0 | methods=0
 - Runtime signals: async_functions=4 | try=4 | raise=6 | broad_except=3 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/4 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -785,6 +996,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=1854 | code_lines=1665 | risk_score=50
 - API surface: public=10 | top-level functions=47 | classes=0 | methods=0
 - Runtime signals: async_functions=14 | try=13 | raise=21 | broad_except=10 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=10/47 (21%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -799,6 +1012,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=59 | code_lines=45 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -813,6 +1028,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=13 | code_lines=9 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -827,6 +1044,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=134 | code_lines=117 | risk_score=10
 - API surface: public=2 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=2 | try=2 | raise=13 | broad_except=2 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -841,6 +1060,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=41 | code_lines=37 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -855,6 +1076,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=398 | code_lines=342 | risk_score=20
 - API surface: public=4 | top-level functions=13 | classes=0 | methods=0
 - Runtime signals: async_functions=4 | try=7 | raise=19 | broad_except=4 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/13 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -869,6 +1092,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=110 | code_lines=98 | risk_score=0
 - API surface: public=3 | top-level functions=3 | classes=0 | methods=0
 - Runtime signals: async_functions=3 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/3 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -883,6 +1108,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=68 | code_lines=52 | risk_score=0
 - API surface: public=5 | top-level functions=5 | classes=0 | methods=0
 - Runtime signals: async_functions=5 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/5 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -897,6 +1124,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=453 | code_lines=393 | risk_score=15
 - API surface: public=4 | top-level functions=16 | classes=0 | methods=0
 - Runtime signals: async_functions=5 | try=5 | raise=8 | broad_except=3 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/16 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -911,6 +1140,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=13 | code_lines=9 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -925,6 +1156,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=40 | code_lines=33 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -939,6 +1172,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=46 | code_lines=36 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=1 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -953,6 +1188,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=34 | code_lines=27 | risk_score=0
 - API surface: public=0 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=1 | try=1 | raise=1 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -967,6 +1204,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=115 | code_lines=98 | risk_score=5
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=1 | try=1 | raise=3 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=1/1 (100%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -981,6 +1220,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=159 | code_lines=134 | risk_score=10
 - API surface: public=2 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=2 | try=2 | raise=6 | broad_except=2 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=2/2 (100%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -995,6 +1236,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=115 | code_lines=102 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=1 | try=0 | raise=1 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -1009,6 +1252,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=15 | code_lines=11 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=1 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -1023,6 +1268,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=61 | code_lines=50 | risk_score=5
 - API surface: public=2 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=2 | try=1 | raise=1 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -1037,6 +1284,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=32 | code_lines=29 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -1051,6 +1300,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=53 | code_lines=44 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=1 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -1065,6 +1316,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=25 | code_lines=18 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -1079,6 +1332,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=223 | code_lines=179 | risk_score=21
 - API surface: public=2 | top-level functions=4 | classes=1 | methods=0
 - Runtime signals: async_functions=1 | try=4 | raise=3 | broad_except=4 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=4/4 (100%) | classes=1/1 (100%) | methods=0/0 (n/a)
@@ -1093,6 +1348,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=93 | code_lines=81 | risk_score=0
 - API surface: public=3 | top-level functions=3 | classes=0 | methods=0
 - Runtime signals: async_functions=3 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/3 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -1107,6 +1364,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=205 | code_lines=180 | risk_score=0
 - API surface: public=5 | top-level functions=6 | classes=0 | methods=0
 - Runtime signals: async_functions=10 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/6 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -1121,6 +1380,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=136 | code_lines=121 | risk_score=0
 - API surface: public=4 | top-level functions=4 | classes=0 | methods=0
 - Runtime signals: async_functions=4 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/4 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -1135,6 +1396,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=167 | code_lines=133 | risk_score=5
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=2 | try=4 | raise=4 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=1/1 (100%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -1149,6 +1412,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=32 | code_lines=29 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -1163,6 +1428,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=132 | code_lines=113 | risk_score=0
 - API surface: public=6 | top-level functions=6 | classes=0 | methods=0
 - Runtime signals: async_functions=6 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/6 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -1177,6 +1444,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=33 | code_lines=25 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=1 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -1191,6 +1460,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=40 | code_lines=29 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -1205,6 +1476,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=192 | code_lines=175 | risk_score=20
 - API surface: public=4 | top-level functions=4 | classes=0 | methods=0
 - Runtime signals: async_functions=4 | try=4 | raise=17 | broad_except=4 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/4 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -1219,6 +1492,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=56 | code_lines=47 | risk_score=0
 - API surface: public=2 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=2 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -1233,6 +1508,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=32 | code_lines=22 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -1247,6 +1524,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=156 | code_lines=137 | risk_score=15
 - API surface: public=2 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=2 | try=5 | raise=11 | broad_except=3 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -1261,6 +1540,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=9 | code_lines=6 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -1275,6 +1556,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=95 | code_lines=85 | risk_score=10
 - API surface: public=2 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=2 | try=4 | raise=9 | broad_except=2 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -1289,6 +1572,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=85 | code_lines=80 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -1303,6 +1588,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=222 | code_lines=191 | risk_score=5
 - API surface: public=0 | top-level functions=9 | classes=0 | methods=0
 - Runtime signals: async_functions=1 | try=1 | raise=2 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/9 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -1317,6 +1604,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=65 | code_lines=50 | risk_score=7
 - API surface: public=0 | top-level functions=5 | classes=0 | methods=0
 - Runtime signals: async_functions=1 | try=2 | raise=0 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/5 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -1331,6 +1620,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=219 | code_lines=196 | risk_score=15
 - API surface: public=0 | top-level functions=8 | classes=0 | methods=0
 - Runtime signals: async_functions=5 | try=6 | raise=7 | broad_except=3 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/8 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -1345,6 +1636,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=110 | code_lines=102 | risk_score=6
 - API surface: public=0 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=1 | try=1 | raise=0 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -1359,6 +1652,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=217 | code_lines=182 | risk_score=6
 - API surface: public=0 | top-level functions=7 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=7 | raise=6 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/7 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -1373,6 +1668,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=33 | code_lines=23 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -1387,6 +1684,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=181 | code_lines=164 | risk_score=10
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=1 | try=2 | raise=6 | broad_except=2 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -1401,6 +1700,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=209 | code_lines=191 | risk_score=10
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=1 | try=4 | raise=6 | broad_except=2 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -1415,6 +1716,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=55 | code_lines=48 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=1 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -1429,6 +1732,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=162 | code_lines=147 | risk_score=20
 - API surface: public=3 | top-level functions=3 | classes=0 | methods=0
 - Runtime signals: async_functions=3 | try=5 | raise=10 | broad_except=4 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/3 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -1443,6 +1748,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=30 | code_lines=20 | risk_score=0
 - API surface: public=2 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=2 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -1457,6 +1764,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=82 | code_lines=69 | risk_score=0
 - API surface: public=3 | top-level functions=3 | classes=0 | methods=0
 - Runtime signals: async_functions=3 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/3 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -1471,6 +1780,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=122 | code_lines=107 | risk_score=0
 - API surface: public=3 | top-level functions=3 | classes=0 | methods=0
 - Runtime signals: async_functions=3 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/3 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -1485,6 +1796,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=140 | code_lines=127 | risk_score=15
 - API surface: public=3 | top-level functions=3 | classes=0 | methods=0
 - Runtime signals: async_functions=3 | try=4 | raise=10 | broad_except=3 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/3 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -1499,6 +1812,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=48 | code_lines=43 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -1513,6 +1828,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=14 | code_lines=9 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -1527,6 +1844,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=12 | code_lines=7 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -1541,6 +1860,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=12 | code_lines=7 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -1555,6 +1876,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=108 | code_lines=90 | risk_score=5
 - API surface: public=0 | top-level functions=6 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=1 | raise=2 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/6 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -1569,6 +1892,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=83 | code_lines=69 | risk_score=5
 - API surface: public=0 | top-level functions=3 | classes=0 | methods=0
 - Runtime signals: async_functions=1 | try=2 | raise=6 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/3 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -1583,6 +1908,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=69 | code_lines=58 | risk_score=10
 - API surface: public=0 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=2 | try=2 | raise=2 | broad_except=2 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -1597,6 +1924,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=19 | code_lines=12 | risk_score=0
 - API surface: public=0 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -1611,6 +1940,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=256 | code_lines=230 | risk_score=6
 - API surface: public=0 | top-level functions=5 | classes=0 | methods=0
 - Runtime signals: async_functions=2 | try=2 | raise=1 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/5 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -1625,6 +1956,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=79 | code_lines=63 | risk_score=0
 - API surface: public=0 | top-level functions=4 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/4 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -1639,6 +1972,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=39 | code_lines=30 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -1653,6 +1988,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=167 | code_lines=142 | risk_score=10
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=1 | try=3 | raise=5 | broad_except=2 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -1667,6 +2004,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=15 | code_lines=8 | risk_score=0
 - API surface: public=2 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=2 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -1681,6 +2020,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=28 | code_lines=25 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -1695,6 +2036,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=84 | code_lines=73 | risk_score=0
 - API surface: public=3 | top-level functions=3 | classes=0 | methods=0
 - Runtime signals: async_functions=3 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/3 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -1709,6 +2052,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=27 | code_lines=20 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=1 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -1723,6 +2068,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=98 | code_lines=84 | risk_score=0
 - API surface: public=4 | top-level functions=4 | classes=0 | methods=0
 - Runtime signals: async_functions=4 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/4 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -1737,6 +2084,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=168 | code_lines=146 | risk_score=0
 - API surface: public=0 | top-level functions=7 | classes=0 | methods=0
 - Runtime signals: async_functions=3 | try=1 | raise=4 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=1/7 (14%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -1751,6 +2100,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=150 | code_lines=132 | risk_score=5
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=1 | try=3 | raise=5 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -1765,6 +2116,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=96 | code_lines=77 | risk_score=0
 - API surface: public=7 | top-level functions=5 | classes=2 | methods=0
 - Runtime signals: async_functions=5 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/5 (0%) | classes=0/2 (0%) | methods=0/0 (n/a)
@@ -1779,6 +2132,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=202 | code_lines=171 | risk_score=5
 - API surface: public=2 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=2 | try=1 | raise=3 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=2/2 (100%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -1793,6 +2148,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=47 | code_lines=28 | risk_score=0
 - API surface: public=5 | top-level functions=5 | classes=0 | methods=0
 - Runtime signals: async_functions=5 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/5 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -1807,6 +2164,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=31 | code_lines=19 | risk_score=0
 - API surface: public=2 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=2 | try=1 | raise=1 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -1821,6 +2180,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=206 | code_lines=173 | risk_score=0
 - API surface: public=7 | top-level functions=7 | classes=0 | methods=0
 - Runtime signals: async_functions=7 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=7/7 (100%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -1835,6 +2196,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=79 | code_lines=64 | risk_score=6
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=1 | try=1 | raise=0 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=1/1 (100%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -1849,6 +2212,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=154 | code_lines=117 | risk_score=0
 - API surface: public=6 | top-level functions=6 | classes=0 | methods=0
 - Runtime signals: async_functions=6 | try=0 | raise=3 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=6/6 (100%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -1863,6 +2228,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=72 | code_lines=57 | risk_score=0
 - API surface: public=3 | top-level functions=3 | classes=0 | methods=0
 - Runtime signals: async_functions=2 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=3/3 (100%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -1877,6 +2244,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=5 | code_lines=4 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -1891,6 +2260,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=121 | code_lines=92 | risk_score=0
 - API surface: public=11 | top-level functions=0 | classes=11 | methods=1
 - Runtime signals: async_functions=0 | try=0 | raise=1 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=2/11 (18%) | methods=0/1 (0%)
@@ -1905,6 +2276,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=44 | code_lines=34 | risk_score=0
 - API surface: public=2 | top-level functions=0 | classes=2 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=2/2 (100%) | methods=0/0 (n/a)
@@ -1919,6 +2292,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=24 | code_lines=16 | risk_score=0
 - API surface: public=2 | top-level functions=0 | classes=2 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=2/2 (100%) | methods=0/0 (n/a)
@@ -1933,6 +2308,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=43 | code_lines=28 | risk_score=0
 - API surface: public=4 | top-level functions=0 | classes=4 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=4/4 (100%) | methods=0/0 (n/a)
@@ -1947,6 +2324,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=50 | code_lines=35 | risk_score=0
 - API surface: public=5 | top-level functions=0 | classes=5 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/5 (0%) | methods=0/0 (n/a)
@@ -1961,6 +2340,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=33 | code_lines=19 | risk_score=0
 - API surface: public=3 | top-level functions=0 | classes=3 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=3/3 (100%) | methods=0/0 (n/a)
@@ -1975,6 +2356,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=80 | code_lines=62 | risk_score=0
 - API surface: public=6 | top-level functions=0 | classes=6 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/6 (0%) | methods=0/0 (n/a)
@@ -1989,6 +2372,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=37 | code_lines=29 | risk_score=0
 - API surface: public=2 | top-level functions=0 | classes=2 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/2 (0%) | methods=0/0 (n/a)
@@ -2003,6 +2388,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=83 | code_lines=63 | risk_score=0
 - API surface: public=7 | top-level functions=0 | classes=7 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=1/7 (14%) | methods=0/0 (n/a)
@@ -2017,6 +2404,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=44 | code_lines=31 | risk_score=0
 - API surface: public=4 | top-level functions=0 | classes=4 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/4 (0%) | methods=0/0 (n/a)
@@ -2031,6 +2420,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=110 | code_lines=73 | risk_score=0
 - API surface: public=7 | top-level functions=0 | classes=7 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=7/7 (100%) | methods=0/0 (n/a)
@@ -2045,6 +2436,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=30 | code_lines=20 | risk_score=0
 - API surface: public=2 | top-level functions=0 | classes=2 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/2 (0%) | methods=0/0 (n/a)
@@ -2059,6 +2452,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=35 | code_lines=23 | risk_score=0
 - API surface: public=4 | top-level functions=0 | classes=4 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/0 (n/a) | classes=0/4 (0%) | methods=0/0 (n/a)
@@ -2073,6 +2468,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=64 | code_lines=48 | risk_score=0
 - API surface: public=6 | top-level functions=0 | classes=6 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/6 (0%) | methods=0/0 (n/a)
@@ -2087,6 +2484,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=48 | code_lines=33 | risk_score=0
 - API surface: public=3 | top-level functions=0 | classes=3 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=3/3 (100%) | methods=0/0 (n/a)
@@ -2101,6 +2500,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=10 | code_lines=9 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -2115,6 +2516,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=437 | code_lines=372 | risk_score=5
 - API surface: public=10 | top-level functions=18 | classes=0 | methods=0
 - Runtime signals: async_functions=13 | try=4 | raise=10 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/18 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -2129,6 +2532,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=638 | code_lines=549 | risk_score=5
 - API surface: public=7 | top-level functions=11 | classes=4 | methods=10
 - Runtime signals: async_functions=9 | try=1 | raise=7 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/11 (0%) | classes=0/4 (0%) | methods=0/10 (0%)
@@ -2143,6 +2548,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=186 | code_lines=157 | risk_score=24
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=1 | try=4 | raise=0 | broad_except=4 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=1/1 (100%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -2157,6 +2564,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=416 | code_lines=344 | risk_score=25
 - API surface: public=5 | top-level functions=13 | classes=0 | methods=0
 - Runtime signals: async_functions=8 | try=5 | raise=7 | broad_except=5 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/13 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -2171,6 +2580,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=1707 | code_lines=1571 | risk_score=105
 - API surface: public=3 | top-level functions=24 | classes=0 | methods=0
 - Runtime signals: async_functions=7 | try=25 | raise=25 | broad_except=21 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=5/24 (20%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -2185,6 +2596,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=12 | code_lines=7 | risk_score=0
 - API surface: public=1 | top-level functions=0 | classes=1 | methods=1
 - Runtime signals: async_functions=1 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/0 (n/a) | classes=0/1 (0%) | methods=0/1 (0%)
@@ -2199,6 +2612,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=139 | code_lines=111 | risk_score=10
 - API surface: public=7 | top-level functions=8 | classes=0 | methods=0
 - Runtime signals: async_functions=8 | try=2 | raise=2 | broad_except=2 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/8 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -2213,6 +2628,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=278 | code_lines=253 | risk_score=25
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=1 | try=5 | raise=5 | broad_except=5 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -2227,6 +2644,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=349 | code_lines=303 | risk_score=20
 - API surface: public=4 | top-level functions=6 | classes=0 | methods=0
 - Runtime signals: async_functions=5 | try=4 | raise=15 | broad_except=4 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/6 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -2241,6 +2660,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=75 | code_lines=62 | risk_score=0
 - API surface: public=2 | top-level functions=2 | classes=1 | methods=1
 - Runtime signals: async_functions=0 | try=0 | raise=4 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/1 (0%) | methods=0/1 (0%)
@@ -2255,6 +2676,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=581 | code_lines=507 | risk_score=60
 - API surface: public=8 | top-level functions=13 | classes=0 | methods=0
 - Runtime signals: async_functions=9 | try=14 | raise=23 | broad_except=12 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=8/13 (61%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -2269,6 +2692,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=117 | code_lines=100 | risk_score=0
 - API surface: public=3 | top-level functions=3 | classes=1 | methods=0
 - Runtime signals: async_functions=2 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/3 (0%) | classes=0/1 (0%) | methods=0/0 (n/a)
@@ -2283,6 +2708,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=39 | code_lines=31 | risk_score=6
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=1 | try=1 | raise=0 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -2297,6 +2724,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=50 | code_lines=36 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=1 | try=0 | raise=3 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=1/1 (100%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -2311,6 +2740,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=118 | code_lines=109 | risk_score=0
 - API surface: public=1 | top-level functions=0 | classes=1 | methods=3
 - Runtime signals: async_functions=0 | try=0 | raise=1 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/1 (0%) | methods=0/3 (0%)
@@ -2325,6 +2756,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=41 | code_lines=31 | risk_score=0
 - API surface: public=1 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=1 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=1/2 (50%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -2339,6 +2772,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=828 | code_lines=731 | risk_score=55
 - API surface: public=1 | top-level functions=0 | classes=1 | methods=22
 - Runtime signals: async_functions=15 | try=12 | raise=13 | broad_except=11 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=1/1 (100%) | methods=15/22 (68%)
@@ -2353,6 +2788,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=229 | code_lines=194 | risk_score=6
 - API surface: public=1 | top-level functions=0 | classes=1 | methods=11
 - Runtime signals: async_functions=8 | try=1 | raise=0 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=1/1 (100%) | methods=8/11 (72%)
@@ -2367,6 +2804,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=437 | code_lines=384 | risk_score=5
 - API surface: public=16 | top-level functions=16 | classes=0 | methods=0
 - Runtime signals: async_functions=16 | try=1 | raise=24 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=1/16 (6%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -2381,6 +2820,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=50 | code_lines=39 | risk_score=1
 - API surface: public=1 | top-level functions=3 | classes=0 | methods=0
 - Runtime signals: async_functions=2 | try=1 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=1/3 (33%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -2395,6 +2836,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=987 | code_lines=877 | risk_score=88
 - API surface: public=6 | top-level functions=14 | classes=1 | methods=0
 - Runtime signals: async_functions=7 | try=18 | raise=15 | broad_except=17 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=7/14 (50%) | classes=0/1 (0%) | methods=0/0 (n/a)
@@ -2409,6 +2852,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=28 | code_lines=19 | risk_score=0
 - API surface: public=2 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=2 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -2423,6 +2868,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=52 | code_lines=37 | risk_score=0
 - API surface: public=4 | top-level functions=5 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=4 | raise=4 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/5 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -2437,6 +2884,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=335 | code_lines=285 | risk_score=10
 - API surface: public=6 | top-level functions=9 | classes=0 | methods=0
 - Runtime signals: async_functions=11 | try=2 | raise=6 | broad_except=2 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=1/9 (11%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -2451,6 +2900,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=1044 | code_lines=954 | risk_score=55
 - API surface: public=4 | top-level functions=13 | classes=1 | methods=0
 - Runtime signals: async_functions=5 | try=16 | raise=40 | broad_except=11 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=1/13 (7%) | classes=0/1 (0%) | methods=0/0 (n/a)
@@ -2465,6 +2916,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=646 | code_lines=548 | risk_score=60
 - API surface: public=7 | top-level functions=15 | classes=5 | methods=4
 - Runtime signals: async_functions=14 | try=15 | raise=26 | broad_except=12 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=9/15 (60%) | classes=2/5 (40%) | methods=0/4 (0%)
@@ -2479,6 +2932,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=810 | code_lines=745 | risk_score=1
 - API surface: public=2 | top-level functions=19 | classes=2 | methods=14
 - Runtime signals: async_functions=15 | try=1 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/19 (0%) | classes=1/2 (50%) | methods=0/14 (0%)
@@ -2493,6 +2948,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=677 | code_lines=601 | risk_score=0
 - API surface: public=14 | top-level functions=15 | classes=5 | methods=4
 - Runtime signals: async_functions=7 | try=0 | raise=29 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/15 (0%) | classes=0/5 (0%) | methods=0/4 (0%)
@@ -2507,6 +2964,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=554 | code_lines=496 | risk_score=15
 - API surface: public=3 | top-level functions=7 | classes=0 | methods=0
 - Runtime signals: async_functions=5 | try=7 | raise=25 | broad_except=3 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/7 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -2521,6 +2980,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=1035 | code_lines=759 | risk_score=2
 - API surface: public=3 | top-level functions=0 | classes=3 | methods=26
 - Runtime signals: async_functions=0 | try=2 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=3/3 (100%) | methods=25/26 (96%)
@@ -2535,6 +2996,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=879 | code_lines=821 | risk_score=45
 - API surface: public=2 | top-level functions=9 | classes=0 | methods=0
 - Runtime signals: async_functions=3 | try=9 | raise=37 | broad_except=9 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/9 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -2549,6 +3012,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=670 | code_lines=601 | risk_score=10
 - API surface: public=1 | top-level functions=1 | classes=2 | methods=18
 - Runtime signals: async_functions=13 | try=6 | raise=21 | broad_except=2 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=1/1 (100%) | classes=0/2 (0%) | methods=0/18 (0%)
@@ -2563,6 +3028,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=638 | code_lines=609 | risk_score=15
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=2 | try=5 | raise=42 | broad_except=3 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=1/1 (100%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -2577,6 +3044,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=126 | code_lines=95 | risk_score=0
 - API surface: public=0 | top-level functions=10 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/10 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -2591,6 +3060,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=305 | code_lines=280 | risk_score=10
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=1 | try=3 | raise=28 | broad_except=2 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -2605,6 +3076,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=595 | code_lines=526 | risk_score=110
 - API surface: public=2 | top-level functions=0 | classes=2 | methods=32
 - Runtime signals: async_functions=30 | try=23 | raise=24 | broad_except=22 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=2/2 (100%) | methods=28/32 (87%)
@@ -2619,6 +3092,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=57 | code_lines=46 | risk_score=0
 - API surface: public=1 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=4 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -2633,6 +3108,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=28 | code_lines=21 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=1 | raise=1 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -2647,6 +3124,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=172 | code_lines=143 | risk_score=16
 - API surface: public=3 | top-level functions=4 | classes=0 | methods=0
 - Runtime signals: async_functions=4 | try=3 | raise=2 | broad_except=3 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=3/4 (75%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -2661,6 +3140,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=264 | code_lines=234 | risk_score=5
 - API surface: public=10 | top-level functions=11 | classes=0 | methods=0
 - Runtime signals: async_functions=11 | try=1 | raise=4 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/11 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -2675,6 +3156,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=665 | code_lines=578 | risk_score=20
 - API surface: public=4 | top-level functions=4 | classes=7 | methods=17
 - Runtime signals: async_functions=10 | try=4 | raise=18 | broad_except=4 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=4/4 (100%) | classes=0/7 (0%) | methods=0/17 (0%)
@@ -2689,6 +3172,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=70 | code_lines=59 | risk_score=0
 - API surface: public=2 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=2 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=2/2 (100%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -2703,6 +3188,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=74 | code_lines=59 | risk_score=0
 - API surface: public=3 | top-level functions=4 | classes=0 | methods=0
 - Runtime signals: async_functions=3 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/4 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -2717,6 +3204,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=286 | code_lines=231 | risk_score=0
 - API surface: public=0 | top-level functions=10 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=2/10 (20%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -2731,6 +3220,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=500 | code_lines=427 | risk_score=35
 - API surface: public=6 | top-level functions=9 | classes=0 | methods=0
 - Runtime signals: async_functions=6 | try=7 | raise=16 | broad_except=7 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=1/9 (11%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -2745,6 +3236,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=3328 | code_lines=2875 | risk_score=73
 - API surface: public=5 | top-level functions=39 | classes=4 | methods=6
 - Runtime signals: async_functions=7 | try=15 | raise=7 | broad_except=13 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=24/39 (61%) | classes=1/4 (25%) | methods=0/6 (0%)
@@ -2759,6 +3252,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=280 | code_lines=263 | risk_score=25
 - API surface: public=2 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=2 | try=5 | raise=12 | broad_except=5 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -2773,6 +3268,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=274 | code_lines=244 | risk_score=0
 - API surface: public=1 | top-level functions=8 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/8 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -2787,6 +3284,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=370 | code_lines=347 | risk_score=5
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=1 | try=2 | raise=7 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -2801,6 +3300,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=90 | code_lines=74 | risk_score=0
 - API surface: public=0 | top-level functions=2 | classes=1 | methods=0
 - Runtime signals: async_functions=1 | try=1 | raise=2 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/2 (0%) | classes=0/1 (0%) | methods=0/0 (n/a)
@@ -2815,6 +3316,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=328 | code_lines=306 | risk_score=5
 - API surface: public=3 | top-level functions=2 | classes=2 | methods=0
 - Runtime signals: async_functions=2 | try=3 | raise=4 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/2 (0%) | classes=0/2 (0%) | methods=0/0 (n/a)
@@ -2829,6 +3332,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=310 | code_lines=292 | risk_score=10
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=1 | try=4 | raise=9 | broad_except=2 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -2843,6 +3348,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=502 | code_lines=464 | risk_score=30
 - API surface: public=3 | top-level functions=3 | classes=0 | methods=0
 - Runtime signals: async_functions=3 | try=6 | raise=18 | broad_except=6 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/3 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -2857,6 +3364,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=1667 | code_lines=1579 | risk_score=55
 - API surface: public=3 | top-level functions=6 | classes=0 | methods=0
 - Runtime signals: async_functions=3 | try=15 | raise=71 | broad_except=11 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/6 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -2871,6 +3380,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=337 | code_lines=284 | risk_score=7
 - API surface: public=2 | top-level functions=5 | classes=1 | methods=0
 - Runtime signals: async_functions=1 | try=2 | raise=0 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/5 (0%) | classes=0/1 (0%) | methods=0/0 (n/a)
@@ -2885,6 +3396,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=212 | code_lines=183 | risk_score=19
 - API surface: public=1 | top-level functions=4 | classes=0 | methods=0
 - Runtime signals: async_functions=1 | try=4 | raise=0 | broad_except=3 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=1/4 (25%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -2899,6 +3412,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=60 | code_lines=48 | risk_score=0
 - API surface: public=2 | top-level functions=0 | classes=2 | methods=1
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/0 (n/a) | classes=0/2 (0%) | methods=1/1 (100%)
@@ -2913,6 +3428,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=339 | code_lines=304 | risk_score=7
 - API surface: public=3 | top-level functions=5 | classes=0 | methods=0
 - Runtime signals: async_functions=5 | try=2 | raise=0 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/5 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -2927,6 +3444,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=207 | code_lines=179 | risk_score=0
 - API surface: public=0 | top-level functions=10 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=12 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/10 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -2941,6 +3460,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=83 | code_lines=66 | risk_score=10
 - API surface: public=1 | top-level functions=5 | classes=1 | methods=0
 - Runtime signals: async_functions=2 | try=2 | raise=5 | broad_except=2 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/5 (0%) | classes=0/1 (0%) | methods=0/0 (n/a)
@@ -2955,6 +3476,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=76 | code_lines=57 | risk_score=5
 - API surface: public=5 | top-level functions=5 | classes=0 | methods=0
 - Runtime signals: async_functions=1 | try=1 | raise=1 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/5 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -2969,6 +3492,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=168 | code_lines=141 | risk_score=0
 - API surface: public=2 | top-level functions=2 | classes=1 | methods=0
 - Runtime signals: async_functions=1 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/2 (0%) | classes=0/1 (0%) | methods=0/0 (n/a)
@@ -2983,6 +3508,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=468 | code_lines=436 | risk_score=20
 - API surface: public=5 | top-level functions=7 | classes=0 | methods=0
 - Runtime signals: async_functions=5 | try=5 | raise=18 | broad_except=4 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/7 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -2997,6 +3524,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=85 | code_lines=78 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=1 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -3011,6 +3540,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=208 | code_lines=185 | risk_score=30
 - API surface: public=5 | top-level functions=6 | classes=0 | methods=0
 - Runtime signals: async_functions=5 | try=8 | raise=16 | broad_except=6 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/6 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -3025,6 +3556,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=466 | code_lines=378 | risk_score=32
 - API surface: public=1 | top-level functions=8 | classes=0 | methods=0
 - Runtime signals: async_functions=7 | try=7 | raise=0 | broad_except=5 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=8/8 (100%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -3039,6 +3572,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=474 | code_lines=410 | risk_score=35
 - API surface: public=7 | top-level functions=7 | classes=0 | methods=0
 - Runtime signals: async_functions=7 | try=7 | raise=15 | broad_except=7 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/7 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -3053,6 +3588,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=105 | code_lines=87 | risk_score=10
 - API surface: public=5 | top-level functions=5 | classes=0 | methods=0
 - Runtime signals: async_functions=1 | try=2 | raise=9 | broad_except=2 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/5 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -3067,6 +3604,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=11 | code_lines=7 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -3081,6 +3620,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=102 | code_lines=80 | risk_score=0
 - API surface: public=5 | top-level functions=6 | classes=0 | methods=0
 - Runtime signals: async_functions=5 | try=0 | raise=4 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/6 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -3095,6 +3636,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=258 | code_lines=221 | risk_score=12
 - API surface: public=3 | top-level functions=8 | classes=0 | methods=0
 - Runtime signals: async_functions=7 | try=2 | raise=0 | broad_except=2 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=1/8 (12%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -3109,6 +3652,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=63 | code_lines=53 | risk_score=2
 - API surface: public=2 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=2 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -3123,6 +3668,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=33 | code_lines=25 | risk_score=1
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=1 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -3137,6 +3684,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=464 | code_lines=402 | risk_score=8
 - API surface: public=10 | top-level functions=11 | classes=2 | methods=3
 - Runtime signals: async_functions=3 | try=9 | raise=1 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/11 (0%) | classes=0/2 (0%) | methods=0/3 (0%)
@@ -3151,6 +3700,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=88 | code_lines=75 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=2 | methods=5
 - Runtime signals: async_functions=4 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/2 (0%) | methods=0/5 (0%)
@@ -3165,6 +3716,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=25 | code_lines=19 | risk_score=0
 - API surface: public=2 | top-level functions=1 | classes=1 | methods=2
 - Runtime signals: async_functions=2 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/1 (0%) | methods=0/2 (0%)
@@ -3179,6 +3732,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=127 | code_lines=103 | risk_score=0
 - API surface: public=3 | top-level functions=4 | classes=4 | methods=6
 - Runtime signals: async_functions=6 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/4 (0%) | classes=0/4 (0%) | methods=0/6 (0%)
@@ -3193,6 +3748,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=345 | code_lines=297 | risk_score=0
 - API surface: public=1 | top-level functions=3 | classes=9 | methods=20
 - Runtime signals: async_functions=19 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/9 (0%) | methods=0/20 (0%)
@@ -3207,6 +3764,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=79 | code_lines=59 | risk_score=0
 - API surface: public=2 | top-level functions=3 | classes=3 | methods=5
 - Runtime signals: async_functions=4 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/3 (0%) | methods=0/5 (0%)
@@ -3221,6 +3780,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=539 | code_lines=478 | risk_score=6
 - API surface: public=12 | top-level functions=13 | classes=6 | methods=9
 - Runtime signals: async_functions=22 | try=6 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/13 (0%) | classes=0/6 (0%) | methods=0/9 (0%)
@@ -3235,6 +3796,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=1843 | code_lines=1648 | risk_score=41
 - API surface: public=52 | top-level functions=53 | classes=8 | methods=15
 - Runtime signals: async_functions=68 | try=46 | raise=5 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/53 (0%) | classes=0/8 (0%) | methods=0/15 (0%)
@@ -3249,6 +3812,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=124 | code_lines=110 | risk_score=1
 - API surface: public=1 | top-level functions=0 | classes=1 | methods=6
 - Runtime signals: async_functions=0 | try=1 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/0 (n/a) | classes=0/1 (0%) | methods=0/6 (0%)
@@ -3263,6 +3828,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=57 | code_lines=41 | risk_score=2
 - API surface: public=2 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=1 | try=2 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -3277,6 +3844,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=122 | code_lines=98 | risk_score=2
 - API surface: public=2 | top-level functions=2 | classes=1 | methods=4
 - Runtime signals: async_functions=4 | try=2 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/1 (0%) | methods=0/4 (0%)
@@ -3291,6 +3860,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=53 | code_lines=41 | risk_score=1
 - API surface: public=1 | top-level functions=1 | classes=1 | methods=2
 - Runtime signals: async_functions=2 | try=1 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/1 (0%) | methods=0/2 (0%)
@@ -3305,6 +3876,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=68 | code_lines=50 | risk_score=2
 - API surface: public=2 | top-level functions=3 | classes=3 | methods=5
 - Runtime signals: async_functions=3 | try=2 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/3 (0%) | methods=0/5 (0%)
@@ -3319,6 +3892,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=109 | code_lines=94 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=1 | methods=7
 - Runtime signals: async_functions=7 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/1 (0%) | methods=0/7 (0%)
@@ -3333,6 +3908,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=124 | code_lines=109 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=1 | methods=7
 - Runtime signals: async_functions=7 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/1 (0%) | methods=0/7 (0%)
@@ -3347,6 +3924,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=152 | code_lines=135 | risk_score=0
 - API surface: public=2 | top-level functions=2 | classes=1 | methods=4
 - Runtime signals: async_functions=5 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/1 (0%) | methods=0/4 (0%)
@@ -3361,6 +3940,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=72 | code_lines=56 | risk_score=1
 - API surface: public=2 | top-level functions=3 | classes=1 | methods=3
 - Runtime signals: async_functions=2 | try=1 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/1 (0%) | methods=0/3 (0%)
@@ -3375,6 +3956,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=88 | code_lines=69 | risk_score=1
 - API surface: public=2 | top-level functions=2 | classes=2 | methods=5
 - Runtime signals: async_functions=6 | try=1 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/2 (0%) | methods=0/5 (0%)
@@ -3389,6 +3972,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=24 | code_lines=18 | risk_score=0
 - API surface: public=1 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -3403,6 +3988,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=33 | code_lines=23 | risk_score=0
 - API surface: public=3 | top-level functions=3 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -3417,6 +4004,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=72 | code_lines=63 | risk_score=1
 - API surface: public=1 | top-level functions=2 | classes=1 | methods=2
 - Runtime signals: async_functions=4 | try=1 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/1 (0%) | methods=0/2 (0%)
@@ -3431,6 +4020,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=174 | code_lines=143 | risk_score=0
 - API surface: public=2 | top-level functions=3 | classes=3 | methods=14
 - Runtime signals: async_functions=14 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/3 (0%) | methods=0/14 (0%)
@@ -3445,6 +4036,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=203 | code_lines=175 | risk_score=2
 - API surface: public=2 | top-level functions=3 | classes=3 | methods=11
 - Runtime signals: async_functions=14 | try=2 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/3 (0%) | methods=0/11 (0%)
@@ -3459,6 +4052,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=198 | code_lines=166 | risk_score=0
 - API surface: public=2 | top-level functions=3 | classes=3 | methods=17
 - Runtime signals: async_functions=17 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/3 (0%) | methods=0/17 (0%)
@@ -3473,6 +4068,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=167 | code_lines=137 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=3 | methods=19
 - Runtime signals: async_functions=16 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/3 (0%) | methods=0/19 (0%)
@@ -3487,6 +4084,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=514 | code_lines=434 | risk_score=0
 - API surface: public=11 | top-level functions=16 | classes=4 | methods=17
 - Runtime signals: async_functions=15 | try=1 | raise=2 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/16 (0%) | classes=0/4 (0%) | methods=0/17 (0%)
@@ -3501,6 +4100,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=31 | code_lines=23 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=1 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -3515,6 +4116,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=54 | code_lines=40 | risk_score=0
 - API surface: public=4 | top-level functions=4 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/4 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -3529,6 +4132,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=53 | code_lines=42 | risk_score=2
 - API surface: public=2 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=2 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -3543,6 +4148,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=92 | code_lines=62 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=6 | methods=12
 - Runtime signals: async_functions=11 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/6 (0%) | methods=0/12 (0%)
@@ -3557,6 +4164,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=157 | code_lines=124 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=6 | methods=11
 - Runtime signals: async_functions=10 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/6 (0%) | methods=0/11 (0%)
@@ -3571,6 +4180,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=100 | code_lines=74 | risk_score=0
 - API surface: public=2 | top-level functions=2 | classes=5 | methods=8
 - Runtime signals: async_functions=9 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/5 (0%) | methods=0/8 (0%)
@@ -3585,6 +4196,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=757 | code_lines=637 | risk_score=0
 - API surface: public=10 | top-level functions=13 | classes=11 | methods=33
 - Runtime signals: async_functions=40 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/13 (0%) | classes=0/11 (0%) | methods=0/33 (0%)
@@ -3599,6 +4212,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=302 | code_lines=256 | risk_score=0
 - API surface: public=3 | top-level functions=3 | classes=7 | methods=11
 - Runtime signals: async_functions=12 | try=0 | raise=2 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/7 (0%) | methods=0/11 (0%)
@@ -3613,6 +4228,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=97 | code_lines=70 | risk_score=0
 - API surface: public=10 | top-level functions=10 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/10 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -3627,6 +4244,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=805 | code_lines=690 | risk_score=0
 - API surface: public=10 | top-level functions=11 | classes=6 | methods=34
 - Runtime signals: async_functions=48 | try=0 | raise=4 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/11 (0%) | classes=0/6 (0%) | methods=0/34 (0%)
@@ -3641,6 +4260,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=21 | code_lines=15 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=1 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -3655,6 +4276,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=99 | code_lines=84 | risk_score=0
 - API surface: public=3 | top-level functions=3 | classes=0 | methods=0
 - Runtime signals: async_functions=3 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -3669,6 +4292,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=61 | code_lines=47 | risk_score=0
 - API surface: public=1 | top-level functions=2 | classes=3 | methods=4
 - Runtime signals: async_functions=5 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/3 (0%) | methods=0/4 (0%)
@@ -3683,6 +4308,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=183 | code_lines=156 | risk_score=5
 - API surface: public=1 | top-level functions=0 | classes=2 | methods=9
 - Runtime signals: async_functions=6 | try=5 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/2 (0%) | methods=0/9 (0%)
@@ -3697,6 +4324,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=60 | code_lines=50 | risk_score=0
 - API surface: public=5 | top-level functions=5 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/5 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -3711,6 +4340,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=19 | code_lines=12 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=1 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -3725,6 +4356,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=3 | code_lines=3 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -3739,6 +4372,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=51 | code_lines=41 | risk_score=6
 - API surface: public=2 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=1 | raise=0 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -3753,6 +4388,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=28 | code_lines=22 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=1/1 (100%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -3767,6 +4404,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=36 | code_lines=26 | risk_score=0
 - API surface: public=2 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=1 | raise=2 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -3781,6 +4420,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=32 | code_lines=24 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -3797,6 +4438,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=78 | code_lines=65 | risk_score=0
 - API surface: public=0 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -3813,6 +4456,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: asynchronous background processing
+- Source footprint: total_lines=2 | code_lines=1 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -3827,6 +4472,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service entrypoint and lifecycle wiring
+- Source footprint: total_lines=527 | code_lines=455 | risk_score=25
 - API surface: public=1 | top-level functions=0 | classes=1 | methods=20
 - Runtime signals: async_functions=13 | try=5 | raise=11 | broad_except=5 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/1 (0%) | methods=0/20 (0%)
@@ -3843,6 +4490,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=2 | code_lines=1 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -3857,6 +4506,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service entrypoint and lifecycle wiring
+- Source footprint: total_lines=354 | code_lines=304 | risk_score=52
 - API surface: public=1 | top-level functions=0 | classes=1 | methods=10
 - Runtime signals: async_functions=8 | try=10 | raise=3 | broad_except=9 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/1 (0%) | methods=0/10 (0%)
@@ -3873,6 +4524,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=0 | code_lines=0 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -3887,6 +4540,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=0 | code_lines=0 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -3901,6 +4556,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=271 | code_lines=206 | risk_score=6
 - API surface: public=2 | top-level functions=0 | classes=2 | methods=12
 - Runtime signals: async_functions=4 | try=1 | raise=0 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=2/2 (100%) | methods=12/12 (100%)
@@ -3915,6 +4572,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: domain/request-response schema definitions
+- Source footprint: total_lines=89 | code_lines=64 | risk_score=0
 - API surface: public=6 | top-level functions=0 | classes=6 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=6/6 (100%) | methods=0/0 (n/a)
@@ -3929,6 +4588,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=281 | code_lines=245 | risk_score=0
 - API surface: public=1 | top-level functions=0 | classes=1 | methods=9
 - Runtime signals: async_functions=8 | try=5 | raise=5 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=1/1 (100%) | methods=1/9 (11%)
@@ -3943,6 +4604,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=270 | code_lines=195 | risk_score=0
 - API surface: public=13 | top-level functions=13 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=1 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=13/13 (100%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -3959,6 +4622,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=167 | code_lines=115 | risk_score=12
 - API surface: public=2 | top-level functions=1 | classes=1 | methods=8
 - Runtime signals: async_functions=0 | try=3 | raise=1 | broad_except=2 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=1/1 (100%) | classes=1/1 (100%) | methods=7/8 (87%)
@@ -3975,6 +4640,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=5 | code_lines=4 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -3989,6 +4656,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service entrypoint and lifecycle wiring
+- Source footprint: total_lines=95 | code_lines=61 | risk_score=6
 - API surface: public=3 | top-level functions=3 | classes=0 | methods=0
 - Runtime signals: async_functions=3 | try=1 | raise=0 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=3/3 (100%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -4003,6 +4672,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=3 | code_lines=3 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -4017,6 +4688,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=427 | code_lines=369 | risk_score=45
 - API surface: public=11 | top-level functions=11 | classes=0 | methods=0
 - Runtime signals: async_functions=10 | try=9 | raise=16 | broad_except=9 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=9/11 (81%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -4031,6 +4704,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=3 | code_lines=3 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -4045,6 +4720,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=288 | code_lines=233 | risk_score=1
 - API surface: public=1 | top-level functions=2 | classes=1 | methods=6
 - Runtime signals: async_functions=2 | try=1 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/2 (0%) | classes=1/1 (100%) | methods=5/6 (83%)
@@ -4059,6 +4736,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=347 | code_lines=303 | risk_score=1
 - API surface: public=1 | top-level functions=9 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=1 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/9 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -4073,6 +4752,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=17 | code_lines=14 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=1/1 (100%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -4087,6 +4768,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=3060 | code_lines=2644 | risk_score=144
 - API surface: public=1 | top-level functions=0 | classes=2 | methods=66
 - Runtime signals: async_functions=0 | try=24 | raise=0 | broad_except=24 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=1/2 (50%) | methods=13/66 (19%)
@@ -4101,6 +4784,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=137 | code_lines=113 | risk_score=6
 - API surface: public=1 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=1 | raise=0 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=1/2 (50%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -4115,6 +4800,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=33 | code_lines=19 | risk_score=0
 - API surface: public=3 | top-level functions=3 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/3 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -4129,6 +4816,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=1819 | code_lines=1484 | risk_score=12
 - API surface: public=1 | top-level functions=0 | classes=1 | methods=29
 - Runtime signals: async_functions=0 | try=12 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=1/1 (100%) | methods=27/29 (93%)
@@ -4143,6 +4832,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=66 | code_lines=57 | risk_score=0
 - API surface: public=1 | top-level functions=0 | classes=1 | methods=3
 - Runtime signals: async_functions=2 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=1/1 (100%) | methods=2/3 (66%)
@@ -4157,6 +4848,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=3 | code_lines=3 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -4171,6 +4864,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=134 | code_lines=103 | risk_score=0
 - API surface: public=4 | top-level functions=4 | classes=2 | methods=7
 - Runtime signals: async_functions=6 | try=0 | raise=1 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/4 (0%) | classes=0/2 (0%) | methods=0/7 (0%)
@@ -4185,6 +4880,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=40 | code_lines=27 | risk_score=0
 - API surface: public=2 | top-level functions=2 | classes=1 | methods=3
 - Runtime signals: async_functions=4 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/1 (0%) | methods=0/3 (0%)
@@ -4199,6 +4896,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=65 | code_lines=56 | risk_score=0
 - API surface: public=2 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -4213,6 +4912,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=99 | code_lines=78 | risk_score=0
 - API surface: public=1 | top-level functions=0 | classes=1 | methods=5
 - Runtime signals: async_functions=0 | try=0 | raise=1 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/0 (n/a) | classes=0/1 (0%) | methods=0/5 (0%)
@@ -4227,6 +4928,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=212 | code_lines=184 | risk_score=0
 - API surface: public=1 | top-level functions=0 | classes=1 | methods=10
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/1 (0%) | methods=5/10 (50%)
@@ -4241,6 +4944,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=399 | code_lines=292 | risk_score=0
 - API surface: public=2 | top-level functions=1 | classes=1 | methods=27
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=1/1 (100%) | classes=1/1 (100%) | methods=27/27 (100%)
@@ -4255,6 +4960,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=53 | code_lines=39 | risk_score=0
 - API surface: public=3 | top-level functions=3 | classes=0 | methods=0
 - Runtime signals: async_functions=3 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -4269,6 +4976,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=244 | code_lines=191 | risk_score=0
 - API surface: public=8 | top-level functions=8 | classes=2 | methods=6
 - Runtime signals: async_functions=15 | try=0 | raise=3 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/8 (0%) | classes=0/2 (0%) | methods=0/6 (0%)
@@ -4285,6 +4994,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: asynchronous background processing
+- Source footprint: total_lines=1 | code_lines=1 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -4299,6 +5010,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service entrypoint and lifecycle wiring
+- Source footprint: total_lines=249 | code_lines=215 | risk_score=19
 - API surface: public=3 | top-level functions=2 | classes=1 | methods=11
 - Runtime signals: async_functions=5 | try=5 | raise=1 | broad_except=3 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/2 (0%) | classes=0/1 (0%) | methods=0/11 (0%)
@@ -4315,6 +5028,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: asynchronous background processing
+- Source footprint: total_lines=4 | code_lines=4 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -4329,6 +5044,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service entrypoint and lifecycle wiring
+- Source footprint: total_lines=2577 | code_lines=2283 | risk_score=175
 - API surface: public=2 | top-level functions=1 | classes=3 | methods=43
 - Runtime signals: async_functions=27 | try=42 | raise=69 | broad_except=35 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=1/1 (100%) | classes=1/3 (33%) | methods=18/43 (41%)
@@ -4345,6 +5062,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=7 | code_lines=6 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -4359,6 +5078,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=15 | code_lines=8 | risk_score=0
 - API surface: public=2 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -4373,6 +5094,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=397 | code_lines=302 | risk_score=24
 - API surface: public=5 | top-level functions=4 | classes=1 | methods=11
 - Runtime signals: async_functions=9 | try=4 | raise=0 | broad_except=4 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=4/4 (100%) | classes=1/1 (100%) | methods=10/11 (90%)
@@ -4387,6 +5110,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=407 | code_lines=334 | risk_score=30
 - API surface: public=5 | top-level functions=2 | classes=3 | methods=14
 - Runtime signals: async_functions=10 | try=6 | raise=8 | broad_except=6 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=2/2 (100%) | classes=3/3 (100%) | methods=11/14 (78%)
@@ -4401,6 +5126,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=1423 | code_lines=1222 | risk_score=72
 - API surface: public=2 | top-level functions=5 | classes=1 | methods=27
 - Runtime signals: async_functions=27 | try=12 | raise=0 | broad_except=12 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=4/5 (80%) | classes=1/1 (100%) | methods=25/27 (92%)
@@ -4415,6 +5142,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=108 | code_lines=96 | risk_score=0
 - API surface: public=2 | top-level functions=3 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -4429,6 +5158,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=128 | code_lines=102 | risk_score=0
 - API surface: public=5 | top-level functions=5 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=2/5 (40%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -4443,6 +5174,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=142 | code_lines=124 | risk_score=5
 - API surface: public=5 | top-level functions=6 | classes=0 | methods=0
 - Runtime signals: async_functions=3 | try=1 | raise=1 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=3/6 (50%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -4457,6 +5190,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=1542 | code_lines=1469 | risk_score=12
 - API surface: public=2 | top-level functions=2 | classes=2 | methods=9
 - Runtime signals: async_functions=8 | try=2 | raise=0 | broad_except=2 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=1/2 (50%) | classes=1/2 (50%) | methods=2/9 (22%)
@@ -4471,6 +5206,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=2 | code_lines=1 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -4485,6 +5222,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=639 | code_lines=531 | risk_score=54
 - API surface: public=1 | top-level functions=16 | classes=0 | methods=0
 - Runtime signals: async_functions=9 | try=14 | raise=0 | broad_except=8 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=10/16 (62%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -4499,6 +5238,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=140 | code_lines=110 | risk_score=0
 - API surface: public=1 | top-level functions=3 | classes=0 | methods=0
 - Runtime signals: async_functions=2 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -4513,6 +5254,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=674 | code_lines=578 | risk_score=36
 - API surface: public=1 | top-level functions=9 | classes=0 | methods=0
 - Runtime signals: async_functions=8 | try=6 | raise=0 | broad_except=6 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/9 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -4527,6 +5270,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=410 | code_lines=357 | risk_score=30
 - API surface: public=1 | top-level functions=5 | classes=0 | methods=0
 - Runtime signals: async_functions=4 | try=5 | raise=0 | broad_except=5 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/5 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -4541,6 +5286,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=653 | code_lines=600 | risk_score=18
 - API surface: public=1 | top-level functions=13 | classes=0 | methods=0
 - Runtime signals: async_functions=8 | try=3 | raise=0 | broad_except=3 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/13 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -4555,6 +5302,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=1230 | code_lines=1090 | risk_score=34
 - API surface: public=1 | top-level functions=46 | classes=0 | methods=0
 - Runtime signals: async_functions=45 | try=6 | raise=2 | broad_except=6 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/46 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -4569,6 +5318,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=22 | code_lines=14 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=1 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -4583,6 +5334,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=204 | code_lines=170 | risk_score=18
 - API surface: public=1 | top-level functions=3 | classes=0 | methods=0
 - Runtime signals: async_functions=2 | try=3 | raise=0 | broad_except=3 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -4599,6 +5352,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=0 | code_lines=0 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -4613,6 +5368,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service entrypoint and lifecycle wiring
+- Source footprint: total_lines=804 | code_lines=664 | risk_score=77
 - API surface: public=2 | top-level functions=1 | classes=2 | methods=19
 - Runtime signals: async_functions=10 | try=22 | raise=10 | broad_except=13 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=1/1 (100%) | classes=2/2 (100%) | methods=6/19 (31%)
@@ -4629,6 +5386,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=399 | code_lines=305 | risk_score=30
 - API surface: public=2 | top-level functions=1 | classes=1 | methods=10
 - Runtime signals: async_functions=9 | try=5 | raise=0 | broad_except=5 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=1/1 (100%) | classes=1/1 (100%) | methods=9/10 (90%)
@@ -4645,6 +5404,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: asynchronous background processing
+- Source footprint: total_lines=1 | code_lines=1 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -4659,6 +5420,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service entrypoint and lifecycle wiring
+- Source footprint: total_lines=4133 | code_lines=3811 | risk_score=120
 - API surface: public=3 | top-level functions=4 | classes=2 | methods=59
 - Runtime signals: async_functions=38 | try=32 | raise=36 | broad_except=24 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=3/4 (75%) | classes=1/2 (50%) | methods=3/59 (5%)
@@ -4673,6 +5436,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: asynchronous background processing
+- Source footprint: total_lines=55 | code_lines=50 | risk_score=0
 - API surface: public=1 | top-level functions=0 | classes=1 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=1/1 (100%) | methods=0/0 (n/a)
@@ -4687,6 +5452,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: asynchronous background processing
+- Source footprint: total_lines=500 | code_lines=438 | risk_score=10
 - API surface: public=3 | top-level functions=0 | classes=3 | methods=9
 - Runtime signals: async_functions=7 | try=2 | raise=4 | broad_except=2 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=3/3 (100%) | methods=1/9 (11%)
@@ -4703,6 +5470,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=2 | code_lines=0 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -4717,6 +5486,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=3 | code_lines=2 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -4731,6 +5502,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=275 | code_lines=205 | risk_score=5
 - API surface: public=6 | top-level functions=6 | classes=0 | methods=0
 - Runtime signals: async_functions=7 | try=2 | raise=2 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=6/6 (100%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -4745,6 +5518,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=222 | code_lines=169 | risk_score=5
 - API surface: public=6 | top-level functions=0 | classes=6 | methods=5
 - Runtime signals: async_functions=3 | try=3 | raise=4 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=6/6 (100%) | methods=5/5 (100%)
@@ -4759,6 +5534,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=170 | code_lines=132 | risk_score=5
 - API surface: public=2 | top-level functions=1 | classes=1 | methods=8
 - Runtime signals: async_functions=8 | try=2 | raise=7 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=1/1 (100%) | classes=1/1 (100%) | methods=7/8 (87%)
@@ -4773,6 +5550,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=295 | code_lines=219 | risk_score=5
 - API surface: public=6 | top-level functions=0 | classes=6 | methods=17
 - Runtime signals: async_functions=5 | try=1 | raise=3 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=6/6 (100%) | methods=15/17 (88%)
@@ -4787,6 +5566,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=271 | code_lines=208 | risk_score=51
 - API surface: public=5 | top-level functions=4 | classes=1 | methods=3
 - Runtime signals: async_functions=5 | try=9 | raise=3 | broad_except=9 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=4/4 (100%) | classes=1/1 (100%) | methods=2/3 (66%)
@@ -4801,6 +5582,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=5 | code_lines=4 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -4815,6 +5598,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=146 | code_lines=122 | risk_score=0
 - API surface: public=3 | top-level functions=0 | classes=3 | methods=6
 - Runtime signals: async_functions=0 | try=0 | raise=3 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=3/3 (100%) | methods=6/6 (100%)
@@ -4829,6 +5614,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=110 | code_lines=57 | risk_score=0
 - API surface: public=17 | top-level functions=0 | classes=17 | methods=1
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=17/17 (100%) | methods=0/1 (0%)
@@ -4843,6 +5630,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service entrypoint and lifecycle wiring
+- Source footprint: total_lines=619 | code_lines=457 | risk_score=73
 - API surface: public=5 | top-level functions=6 | classes=1 | methods=15
 - Runtime signals: async_functions=15 | try=13 | raise=5 | broad_except=13 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=5/6 (83%) | classes=1/1 (100%) | methods=14/15 (93%)
@@ -4857,6 +5646,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=5 | code_lines=4 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -4871,6 +5662,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=68 | code_lines=55 | risk_score=0
 - API surface: public=2 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=1 | try=0 | raise=2 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -4885,6 +5678,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=14 | code_lines=12 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -4899,6 +5694,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=89 | code_lines=74 | risk_score=6
 - API surface: public=2 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=1 | try=2 | raise=1 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -4913,6 +5710,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=1589 | code_lines=1441 | risk_score=15
 - API surface: public=18 | top-level functions=8 | classes=14 | methods=1
 - Runtime signals: async_functions=6 | try=15 | raise=50 | broad_except=3 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=2/8 (25%) | classes=2/14 (14%) | methods=0/1 (0%)
@@ -4927,6 +5726,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=189 | code_lines=163 | risk_score=37
 - API surface: public=1 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=2 | try=7 | raise=5 | broad_except=7 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=1/2 (50%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -4941,6 +5742,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=285 | code_lines=239 | risk_score=25
 - API surface: public=4 | top-level functions=4 | classes=0 | methods=0
 - Runtime signals: async_functions=4 | try=5 | raise=15 | broad_except=5 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=4/4 (100%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -4955,6 +5758,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=227 | code_lines=199 | risk_score=20
 - API surface: public=3 | top-level functions=3 | classes=0 | methods=0
 - Runtime signals: async_functions=3 | try=4 | raise=12 | broad_except=4 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=3/3 (100%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -4969,6 +5774,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=947 | code_lines=816 | risk_score=75
 - API surface: public=12 | top-level functions=14 | classes=5 | methods=0
 - Runtime signals: async_functions=11 | try=15 | raise=24 | broad_except=15 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=11/14 (78%) | classes=5/5 (100%) | methods=0/0 (n/a)
@@ -4983,6 +5790,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=1551 | code_lines=1385 | risk_score=60
 - API surface: public=6 | top-level functions=25 | classes=0 | methods=0
 - Runtime signals: async_functions=11 | try=12 | raise=44 | broad_except=12 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=6/25 (24%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -4997,6 +5806,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=1108 | code_lines=995 | risk_score=55
 - API surface: public=15 | top-level functions=26 | classes=4 | methods=0
 - Runtime signals: async_functions=14 | try=11 | raise=47 | broad_except=11 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/26 (0%) | classes=0/4 (0%) | methods=0/0 (n/a)
@@ -5011,6 +5822,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=409 | code_lines=333 | risk_score=30
 - API surface: public=10 | top-level functions=7 | classes=3 | methods=0
 - Runtime signals: async_functions=7 | try=6 | raise=18 | broad_except=6 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=7/7 (100%) | classes=3/3 (100%) | methods=0/0 (n/a)
@@ -5025,6 +5838,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=511 | code_lines=423 | risk_score=5
 - API surface: public=4 | top-level functions=14 | classes=3 | methods=3
 - Runtime signals: async_functions=1 | try=1 | raise=18 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=1/14 (7%) | classes=1/3 (33%) | methods=0/3 (0%)
@@ -5039,6 +5854,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=171 | code_lines=134 | risk_score=0
 - API surface: public=4 | top-level functions=4 | classes=0 | methods=0
 - Runtime signals: async_functions=4 | try=0 | raise=1 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=4/4 (100%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -5053,6 +5870,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=2 | code_lines=0 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -5067,6 +5886,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=1495 | code_lines=1385 | risk_score=35
 - API surface: public=8 | top-level functions=13 | classes=4 | methods=1
 - Runtime signals: async_functions=5 | try=15 | raise=66 | broad_except=7 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/13 (0%) | classes=0/4 (0%) | methods=0/1 (0%)
@@ -5081,6 +5902,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=12 | code_lines=8 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -5095,6 +5918,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=118 | code_lines=107 | risk_score=6
 - API surface: public=2 | top-level functions=1 | classes=1 | methods=3
 - Runtime signals: async_functions=3 | try=1 | raise=0 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/1 (0%) | methods=0/3 (0%)
@@ -5109,6 +5934,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=163 | code_lines=147 | risk_score=0
 - API surface: public=3 | top-level functions=0 | classes=3 | methods=4
 - Runtime signals: async_functions=3 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/0 (n/a) | classes=1/3 (33%) | methods=0/4 (0%)
@@ -5123,6 +5950,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=175 | code_lines=164 | risk_score=0
 - API surface: public=1 | top-level functions=0 | classes=1 | methods=2
 - Runtime signals: async_functions=1 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=1/1 (100%) | methods=0/2 (0%)
@@ -5137,6 +5966,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=153 | code_lines=137 | risk_score=0
 - API surface: public=1 | top-level functions=0 | classes=1 | methods=10
 - Runtime signals: async_functions=6 | try=0 | raise=3 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/1 (0%) | methods=0/10 (0%)
@@ -5151,6 +5982,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=240 | code_lines=226 | risk_score=0
 - API surface: public=1 | top-level functions=0 | classes=1 | methods=4
 - Runtime signals: async_functions=2 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=1/1 (100%) | methods=1/4 (25%)
@@ -5165,6 +5998,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=185 | code_lines=160 | risk_score=0
 - API surface: public=6 | top-level functions=8 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/8 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -5179,6 +6014,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=275 | code_lines=246 | risk_score=0
 - API surface: public=10 | top-level functions=10 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/10 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -5193,6 +6030,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=1053 | code_lines=962 | risk_score=1
 - API surface: public=6 | top-level functions=20 | classes=2 | methods=0
 - Runtime signals: async_functions=4 | try=5 | raise=4 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/20 (0%) | classes=2/2 (100%) | methods=0/0 (n/a)
@@ -5207,6 +6046,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=993 | code_lines=921 | risk_score=0
 - API surface: public=2 | top-level functions=7 | classes=1 | methods=24
 - Runtime signals: async_functions=19 | try=7 | raise=8 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/7 (0%) | classes=1/1 (100%) | methods=0/24 (0%)
@@ -5221,6 +6062,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=189 | code_lines=125 | risk_score=0
 - API surface: public=1 | top-level functions=0 | classes=1 | methods=6
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=1/1 (100%) | methods=5/6 (83%)
@@ -5235,6 +6078,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=413 | code_lines=344 | risk_score=25
 - API surface: public=2 | top-level functions=0 | classes=2 | methods=8
 - Runtime signals: async_functions=7 | try=5 | raise=8 | broad_except=5 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=2/2 (100%) | methods=8/8 (100%)
@@ -5249,6 +6094,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=354 | code_lines=254 | risk_score=0
 - API surface: public=2 | top-level functions=0 | classes=2 | methods=13
 - Runtime signals: async_functions=0 | try=1 | raise=4 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=2/2 (100%) | methods=12/13 (92%)
@@ -5263,6 +6110,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=1 | code_lines=0 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -5277,6 +6126,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=15 | code_lines=11 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -5291,6 +6142,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=633 | code_lines=471 | risk_score=1
 - API surface: public=4 | top-level functions=0 | classes=4 | methods=22
 - Runtime signals: async_functions=0 | try=1 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=4/4 (100%) | methods=22/22 (100%)
@@ -5305,6 +6158,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=18 | code_lines=15 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -5319,6 +6174,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=18 | code_lines=13 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -5333,6 +6190,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=597 | code_lines=439 | risk_score=1
 - API surface: public=6 | top-level functions=0 | classes=6 | methods=21
 - Runtime signals: async_functions=0 | try=1 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=6/6 (100%) | methods=20/21 (95%)
@@ -5347,6 +6206,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=18 | code_lines=14 | risk_score=0
 - API surface: public=1 | top-level functions=0 | classes=1 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=1/1 (100%) | methods=0/0 (n/a)
@@ -5361,6 +6222,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=1 | code_lines=0 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -5375,6 +6238,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=630 | code_lines=464 | risk_score=0
 - API surface: public=3 | top-level functions=0 | classes=3 | methods=20
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=3/3 (100%) | methods=19/20 (95%)
@@ -5391,6 +6256,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: asynchronous background processing
+- Source footprint: total_lines=0 | code_lines=0 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -5405,6 +6272,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service entrypoint and lifecycle wiring
+- Source footprint: total_lines=1365 | code_lines=1190 | risk_score=142
 - API surface: public=1 | top-level functions=0 | classes=3 | methods=28
 - Runtime signals: async_functions=15 | try=30 | raise=28 | broad_except=28 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=1/3 (33%) | methods=12/28 (42%)
@@ -5421,6 +6290,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=139 | code_lines=106 | risk_score=5
 - API surface: public=1 | top-level functions=7 | classes=0 | methods=0
 - Runtime signals: async_functions=3 | try=2 | raise=3 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/7 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -5437,6 +6308,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service entrypoint and lifecycle wiring
+- Source footprint: total_lines=34 | code_lines=26 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=1 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -5453,6 +6326,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: asynchronous background processing
+- Source footprint: total_lines=1 | code_lines=1 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -5467,6 +6342,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service entrypoint and lifecycle wiring
+- Source footprint: total_lines=5617 | code_lines=5250 | risk_score=235
 - API surface: public=2 | top-level functions=4 | classes=2 | methods=100
 - Runtime signals: async_functions=44 | try=62 | raise=81 | broad_except=47 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/4 (0%) | classes=0/2 (0%) | methods=5/100 (5%)
@@ -5481,6 +6358,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: asynchronous background processing
+- Source footprint: total_lines=94 | code_lines=76 | risk_score=1
 - API surface: public=0 | top-level functions=6 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=1 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/6 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -5495,6 +6374,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: asynchronous background processing
+- Source footprint: total_lines=1037 | code_lines=892 | risk_score=5
 - API surface: public=1 | top-level functions=30 | classes=1 | methods=0
 - Runtime signals: async_functions=0 | try=4 | raise=28 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=1/30 (3%) | classes=0/1 (0%) | methods=0/0 (n/a)
@@ -5509,6 +6390,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: asynchronous background processing
+- Source footprint: total_lines=272 | code_lines=234 | risk_score=11
 - API surface: public=0 | top-level functions=15 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=4 | raise=3 | broad_except=2 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/15 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -5525,6 +6408,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: asynchronous background processing
+- Source footprint: total_lines=0 | code_lines=0 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -5539,6 +6424,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service entrypoint and lifecycle wiring
+- Source footprint: total_lines=2075 | code_lines=1793 | risk_score=131
 - API surface: public=1 | top-level functions=0 | classes=1 | methods=43
 - Runtime signals: async_functions=26 | try=29 | raise=28 | broad_except=26 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=1/1 (100%) | methods=21/43 (48%)
@@ -5555,6 +6442,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: operational or migration automation
+- Source footprint: total_lines=130 | code_lines=101 | risk_score=16
 - API surface: public=1 | top-level functions=4 | classes=0 | methods=0
 - Runtime signals: async_functions=3 | try=3 | raise=2 | broad_except=3 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/4 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -5569,6 +6458,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: operational or migration automation
+- Source footprint: total_lines=70 | code_lines=59 | risk_score=8
 - API surface: public=2 | top-level functions=4 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=3 | raise=0 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/4 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -5583,6 +6474,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: operational or migration automation
+- Source footprint: total_lines=187 | code_lines=136 | risk_score=6
 - API surface: public=3 | top-level functions=3 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=1 | raise=0 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=3/3 (100%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -5597,6 +6490,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: operational or migration automation
+- Source footprint: total_lines=178 | code_lines=132 | risk_score=6
 - API surface: public=5 | top-level functions=5 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=1 | raise=0 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=5/5 (100%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -5611,6 +6506,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: operational or migration automation
+- Source footprint: total_lines=68 | code_lines=51 | risk_score=7
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=2 | raise=0 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -5625,6 +6522,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: operational or migration automation
+- Source footprint: total_lines=135 | code_lines=106 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=1 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=1/1 (100%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -5639,6 +6538,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: operational or migration automation
+- Source footprint: total_lines=75 | code_lines=54 | risk_score=0
 - API surface: public=2 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=2/2 (100%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -5653,6 +6554,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: operational or migration automation
+- Source footprint: total_lines=91 | code_lines=70 | risk_score=0
 - API surface: public=2 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=2/2 (100%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -5667,6 +6570,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: operational or migration automation
+- Source footprint: total_lines=115 | code_lines=103 | risk_score=0
 - API surface: public=1 | top-level functions=3 | classes=0 | methods=0
 - Runtime signals: async_functions=1 | try=1 | raise=1 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/3 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -5681,6 +6586,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: operational or migration automation
+- Source footprint: total_lines=49 | code_lines=37 | risk_score=0
 - API surface: public=1 | top-level functions=3 | classes=0 | methods=0
 - Runtime signals: async_functions=1 | try=1 | raise=1 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/3 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -5695,6 +6602,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: operational or migration automation
+- Source footprint: total_lines=66 | code_lines=48 | risk_score=0
 - API surface: public=3 | top-level functions=3 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=2/3 (66%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -5709,6 +6618,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: operational or migration automation
+- Source footprint: total_lines=90 | code_lines=67 | risk_score=5
 - API surface: public=0 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=3 | try=2 | raise=4 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -5723,6 +6634,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: operational or migration automation
+- Source footprint: total_lines=543 | code_lines=405 | risk_score=14
 - API surface: public=2 | top-level functions=1 | classes=1 | methods=10
 - Runtime signals: async_functions=0 | try=4 | raise=0 | broad_except=2 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=1/1 (100%) | classes=1/1 (100%) | methods=9/10 (90%)
@@ -5737,6 +6650,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: operational or migration automation
+- Source footprint: total_lines=62 | code_lines=44 | risk_score=6
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=1 | try=1 | raise=0 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=1/1 (100%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -5751,6 +6666,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: operational or migration automation
+- Source footprint: total_lines=204 | code_lines=152 | risk_score=0
 - API surface: public=4 | top-level functions=4 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=4/4 (100%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -5765,6 +6682,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: operational or migration automation
+- Source footprint: total_lines=233 | code_lines=176 | risk_score=13
 - API surface: public=3 | top-level functions=3 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=3 | raise=0 | broad_except=2 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=2/3 (66%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -5779,6 +6698,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: operational or migration automation
+- Source footprint: total_lines=56 | code_lines=43 | risk_score=0
 - API surface: public=1 | top-level functions=3 | classes=0 | methods=0
 - Runtime signals: async_functions=1 | try=1 | raise=1 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/3 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -5793,6 +6714,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: operational or migration automation
+- Source footprint: total_lines=313 | code_lines=256 | risk_score=41
 - API surface: public=2 | top-level functions=2 | classes=1 | methods=12
 - Runtime signals: async_functions=7 | try=7 | raise=1 | broad_except=7 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/2 (0%) | classes=0/1 (0%) | methods=0/12 (0%)
@@ -5807,6 +6730,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: operational or migration automation
+- Source footprint: total_lines=214 | code_lines=151 | risk_score=13
 - API surface: public=6 | top-level functions=5 | classes=1 | methods=3
 - Runtime signals: async_functions=0 | try=3 | raise=0 | broad_except=2 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=5/5 (100%) | classes=1/1 (100%) | methods=2/3 (66%)
@@ -5821,6 +6746,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: operational or migration automation
+- Source footprint: total_lines=222 | code_lines=191 | risk_score=6
 - API surface: public=1 | top-level functions=6 | classes=0 | methods=0
 - Runtime signals: async_functions=2 | try=2 | raise=1 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/6 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -5837,6 +6764,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=3 | code_lines=3 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -5851,6 +6780,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=186 | code_lines=134 | risk_score=5
 - API surface: public=1 | top-level functions=1 | classes=1 | methods=11
 - Runtime signals: async_functions=0 | try=1 | raise=1 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=1/1 (100%) | classes=1/1 (100%) | methods=11/11 (100%)
@@ -5865,6 +6796,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=370 | code_lines=257 | risk_score=1
 - API surface: public=1 | top-level functions=0 | classes=2 | methods=23
 - Runtime signals: async_functions=0 | try=1 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=2/2 (100%) | methods=17/23 (73%)
@@ -5879,6 +6812,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=315 | code_lines=239 | risk_score=5
 - API surface: public=4 | top-level functions=2 | classes=2 | methods=10
 - Runtime signals: async_functions=0 | try=1 | raise=1 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=2/2 (100%) | classes=2/2 (100%) | methods=10/10 (100%)
@@ -5893,6 +6828,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=139 | code_lines=100 | risk_score=0
 - API surface: public=3 | top-level functions=1 | classes=2 | methods=5
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=1/1 (100%) | classes=2/2 (100%) | methods=5/5 (100%)
@@ -5907,6 +6844,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=292 | code_lines=241 | risk_score=0
 - API surface: public=4 | top-level functions=0 | classes=4 | methods=4
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=4/4 (100%) | methods=4/4 (100%)
@@ -5921,6 +6860,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=199 | code_lines=141 | risk_score=0
 - API surface: public=5 | top-level functions=7 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=1 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=6/7 (85%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -5935,6 +6876,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=523 | code_lines=411 | risk_score=0
 - API surface: public=5 | top-level functions=4 | classes=2 | methods=47
 - Runtime signals: async_functions=0 | try=1 | raise=1 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=4/4 (100%) | classes=1/2 (50%) | methods=46/47 (97%)
@@ -5949,6 +6892,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=4405 | code_lines=3837 | risk_score=14
 - API surface: public=53 | top-level functions=18 | classes=46 | methods=207
 - Runtime signals: async_functions=0 | try=13 | raise=4 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=6/18 (33%) | classes=46/46 (100%) | methods=17/207 (8%)
@@ -5963,6 +6908,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=73 | code_lines=55 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -5977,6 +6924,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=428 | code_lines=320 | risk_score=15
 - API surface: public=9 | top-level functions=5 | classes=4 | methods=16
 - Runtime signals: async_functions=11 | try=4 | raise=8 | broad_except=3 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=5/5 (100%) | classes=4/4 (100%) | methods=16/16 (100%)
@@ -5991,6 +6940,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=276 | code_lines=210 | risk_score=11
 - API surface: public=14 | top-level functions=14 | classes=0 | methods=0
 - Runtime signals: async_functions=13 | try=2 | raise=1 | broad_except=2 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=12/14 (85%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -6005,6 +6956,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=97 | code_lines=66 | risk_score=0
 - API surface: public=4 | top-level functions=4 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=1 | raise=1 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=4/4 (100%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -6019,6 +6972,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=6 | code_lines=5 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -6033,6 +6988,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=2706 | code_lines=2606 | risk_score=3
 - API surface: public=15 | top-level functions=20 | classes=11 | methods=1
 - Runtime signals: async_functions=0 | try=3 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/20 (0%) | classes=0/11 (0%) | methods=0/1 (0%)
@@ -6047,6 +7004,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=198 | code_lines=179 | risk_score=0
 - API surface: public=1 | top-level functions=5 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/5 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -6061,6 +7020,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=505 | code_lines=450 | risk_score=14
 - API surface: public=1 | top-level functions=17 | classes=0 | methods=0
 - Runtime signals: async_functions=8 | try=4 | raise=0 | broad_except=2 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/17 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -6075,6 +7036,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=137 | code_lines=107 | risk_score=0
 - API surface: public=3 | top-level functions=1 | classes=2 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=1/1 (100%) | classes=0/2 (0%) | methods=0/0 (n/a)
@@ -6089,6 +7052,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=57 | code_lines=49 | risk_score=0
 - API surface: public=1 | top-level functions=0 | classes=1 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/1 (0%) | methods=0/0 (n/a)
@@ -6103,6 +7068,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=327 | code_lines=278 | risk_score=5
 - API surface: public=9 | top-level functions=9 | classes=5 | methods=0
 - Runtime signals: async_functions=1 | try=4 | raise=4 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/9 (0%) | classes=2/5 (40%) | methods=0/0 (n/a)
@@ -6117,6 +7084,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=20 | code_lines=16 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -6131,6 +7100,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=21 | code_lines=11 | risk_score=0
 - API surface: public=3 | top-level functions=3 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -6145,6 +7116,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=198 | code_lines=168 | risk_score=9
 - API surface: public=1 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=2 | try=4 | raise=0 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=1/2 (50%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -6159,6 +7132,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=200 | code_lines=165 | risk_score=6
 - API surface: public=2 | top-level functions=6 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=1 | raise=0 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=3/6 (50%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -6173,6 +7148,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=3 | code_lines=3 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -6187,6 +7164,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=195 | code_lines=152 | risk_score=0
 - API surface: public=4 | top-level functions=2 | classes=2 | methods=6
 - Runtime signals: async_functions=5 | try=0 | raise=2 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=2/2 (100%) | classes=2/2 (100%) | methods=6/6 (100%)
@@ -6201,6 +7180,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=2 | code_lines=1 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -6215,6 +7196,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=604 | code_lines=482 | risk_score=17
 - API surface: public=7 | top-level functions=4 | classes=4 | methods=12
 - Runtime signals: async_functions=8 | try=4 | raise=2 | broad_except=3 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=2/4 (50%) | classes=4/4 (100%) | methods=8/12 (66%)
@@ -6229,6 +7212,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: domain/request-response schema definitions
+- Source footprint: total_lines=44 | code_lines=37 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -6243,6 +7228,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: domain/request-response schema definitions
+- Source footprint: total_lines=113 | code_lines=89 | risk_score=0
 - API surface: public=7 | top-level functions=0 | classes=7 | methods=3
 - Runtime signals: async_functions=0 | try=0 | raise=5 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=2/7 (28%) | methods=0/3 (0%)
@@ -6257,6 +7244,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: domain/request-response schema definitions
+- Source footprint: total_lines=147 | code_lines=113 | risk_score=0
 - API surface: public=12 | top-level functions=0 | classes=12 | methods=2
 - Runtime signals: async_functions=0 | try=0 | raise=4 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=1/12 (8%) | methods=0/2 (0%)
@@ -6271,6 +7260,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: domain/request-response schema definitions
+- Source footprint: total_lines=44 | code_lines=28 | risk_score=0
 - API surface: public=1 | top-level functions=0 | classes=1 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/1 (0%) | methods=0/0 (n/a)
@@ -6285,6 +7276,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: domain/request-response schema definitions
+- Source footprint: total_lines=151 | code_lines=115 | risk_score=0
 - API surface: public=7 | top-level functions=0 | classes=7 | methods=6
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=7/7 (100%) | methods=6/6 (100%)
@@ -6299,6 +7292,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: domain/request-response schema definitions
+- Source footprint: total_lines=129 | code_lines=104 | risk_score=0
 - API surface: public=3 | top-level functions=0 | classes=3 | methods=6
 - Runtime signals: async_functions=0 | try=0 | raise=1 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=3/3 (100%) | methods=5/6 (83%)
@@ -6313,6 +7308,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: domain/request-response schema definitions
+- Source footprint: total_lines=184 | code_lines=139 | risk_score=0
 - API surface: public=11 | top-level functions=0 | classes=11 | methods=7
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=11/11 (100%) | methods=0/7 (0%)
@@ -6327,6 +7324,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: domain/request-response schema definitions
+- Source footprint: total_lines=328 | code_lines=280 | risk_score=6
 - API surface: public=4 | top-level functions=1 | classes=4 | methods=8
 - Runtime signals: async_functions=0 | try=1 | raise=0 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/1 (0%) | classes=4/4 (100%) | methods=7/8 (87%)
@@ -6341,6 +7340,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: domain/request-response schema definitions
+- Source footprint: total_lines=229 | code_lines=200 | risk_score=5
 - API surface: public=1 | top-level functions=0 | classes=1 | methods=6
 - Runtime signals: async_functions=0 | try=1 | raise=2 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=1/1 (100%) | methods=1/6 (16%)
@@ -6355,6 +7356,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: domain/request-response schema definitions
+- Source footprint: total_lines=195 | code_lines=145 | risk_score=0
 - API surface: public=10 | top-level functions=0 | classes=10 | methods=8
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=10/10 (100%) | methods=0/8 (0%)
@@ -6369,6 +7372,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: domain/request-response schema definitions
+- Source footprint: total_lines=140 | code_lines=111 | risk_score=0
 - API surface: public=6 | top-level functions=1 | classes=6 | methods=6
 - Runtime signals: async_functions=0 | try=0 | raise=6 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/1 (0%) | classes=5/6 (83%) | methods=5/6 (83%)
@@ -6383,6 +7388,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: domain/request-response schema definitions
+- Source footprint: total_lines=92 | code_lines=68 | risk_score=0
 - API surface: public=6 | top-level functions=0 | classes=6 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=6/6 (100%) | methods=0/0 (n/a)
@@ -6397,6 +7404,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: domain/request-response schema definitions
+- Source footprint: total_lines=16 | code_lines=8 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -6411,6 +7420,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: domain/request-response schema definitions
+- Source footprint: total_lines=51 | code_lines=36 | risk_score=0
 - API surface: public=3 | top-level functions=0 | classes=3 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/3 (0%) | methods=0/0 (n/a)
@@ -6425,6 +7436,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: domain/request-response schema definitions
+- Source footprint: total_lines=30 | code_lines=27 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -6439,6 +7452,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: domain/request-response schema definitions
+- Source footprint: total_lines=68 | code_lines=57 | risk_score=0
 - API surface: public=1 | top-level functions=0 | classes=1 | methods=1
 - Runtime signals: async_functions=0 | try=0 | raise=3 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/1 (0%) | methods=0/1 (0%)
@@ -6453,6 +7468,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: domain/request-response schema definitions
+- Source footprint: total_lines=541 | code_lines=430 | risk_score=0
 - API surface: public=10 | top-level functions=4 | classes=10 | methods=30
 - Runtime signals: async_functions=0 | try=0 | raise=22 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/4 (0%) | classes=10/10 (100%) | methods=17/30 (56%)
@@ -6467,6 +7484,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: domain/request-response schema definitions
+- Source footprint: total_lines=40 | code_lines=30 | risk_score=0
 - API surface: public=3 | top-level functions=0 | classes=3 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/3 (0%) | methods=0/0 (n/a)
@@ -6481,6 +7500,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: domain/request-response schema definitions
+- Source footprint: total_lines=120 | code_lines=86 | risk_score=0
 - API surface: public=9 | top-level functions=0 | classes=9 | methods=2
 - Runtime signals: async_functions=0 | try=0 | raise=1 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=9/9 (100%) | methods=0/2 (0%)
@@ -6495,6 +7516,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: domain/request-response schema definitions
+- Source footprint: total_lines=47 | code_lines=34 | risk_score=0
 - API surface: public=2 | top-level functions=0 | classes=2 | methods=2
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/0 (n/a) | classes=0/2 (0%) | methods=0/2 (0%)
@@ -6509,6 +7532,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: domain/request-response schema definitions
+- Source footprint: total_lines=45 | code_lines=37 | risk_score=0
 - API surface: public=2 | top-level functions=0 | classes=2 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/0 (n/a) | classes=0/2 (0%) | methods=0/0 (n/a)
@@ -6523,6 +7548,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: domain/request-response schema definitions
+- Source footprint: total_lines=84 | code_lines=72 | risk_score=0
 - API surface: public=1 | top-level functions=0 | classes=1 | methods=2
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/1 (0%) | methods=2/2 (100%)
@@ -6537,6 +7564,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: domain/request-response schema definitions
+- Source footprint: total_lines=174 | code_lines=153 | risk_score=11
 - API surface: public=5 | top-level functions=0 | classes=5 | methods=3
 - Runtime signals: async_functions=0 | try=2 | raise=1 | broad_except=2 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/5 (0%) | methods=0/3 (0%)
@@ -6551,6 +7580,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: domain/request-response schema definitions
+- Source footprint: total_lines=55 | code_lines=39 | risk_score=0
 - API surface: public=3 | top-level functions=0 | classes=3 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=1/3 (33%) | methods=0/0 (n/a)
@@ -6565,6 +7596,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: domain/request-response schema definitions
+- Source footprint: total_lines=10 | code_lines=6 | risk_score=0
 - API surface: public=1 | top-level functions=0 | classes=1 | methods=1
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/0 (n/a) | classes=0/1 (0%) | methods=0/1 (0%)
@@ -6579,6 +7612,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: domain/request-response schema definitions
+- Source footprint: total_lines=70 | code_lines=44 | risk_score=0
 - API surface: public=7 | top-level functions=0 | classes=7 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=7/7 (100%) | methods=0/0 (n/a)
@@ -6593,6 +7628,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: domain/request-response schema definitions
+- Source footprint: total_lines=93 | code_lines=74 | risk_score=0
 - API surface: public=1 | top-level functions=0 | classes=1 | methods=12
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=1/1 (100%) | methods=12/12 (100%)
@@ -6607,6 +7644,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: domain/request-response schema definitions
+- Source footprint: total_lines=66 | code_lines=46 | risk_score=0
 - API surface: public=3 | top-level functions=0 | classes=3 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=3/3 (100%) | methods=0/0 (n/a)
@@ -6621,6 +7660,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: domain/request-response schema definitions
+- Source footprint: total_lines=167 | code_lines=118 | risk_score=0
 - API surface: public=10 | top-level functions=0 | classes=10 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=10/10 (100%) | methods=0/0 (n/a)
@@ -6635,6 +7676,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: domain/request-response schema definitions
+- Source footprint: total_lines=56 | code_lines=34 | risk_score=0
 - API surface: public=2 | top-level functions=0 | classes=2 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=2/2 (100%) | methods=0/0 (n/a)
@@ -6649,6 +7692,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: domain/request-response schema definitions
+- Source footprint: total_lines=96 | code_lines=74 | risk_score=0
 - API surface: public=3 | top-level functions=0 | classes=3 | methods=1
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=3/3 (100%) | methods=0/1 (0%)
@@ -6663,6 +7708,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: domain/request-response schema definitions
+- Source footprint: total_lines=181 | code_lines=136 | risk_score=0
 - API surface: public=13 | top-level functions=1 | classes=13 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/1 (0%) | classes=13/13 (100%) | methods=0/0 (n/a)
@@ -6677,6 +7724,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=2 | code_lines=1 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -6691,6 +7740,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=589 | code_lines=467 | risk_score=18
 - API surface: public=6 | top-level functions=0 | classes=6 | methods=25
 - Runtime signals: async_functions=0 | try=3 | raise=0 | broad_except=3 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=6/6 (100%) | methods=24/25 (96%)
@@ -6705,6 +7756,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=403 | code_lines=338 | risk_score=12
 - API surface: public=9 | top-level functions=12 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=12 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=7/12 (58%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -6719,6 +7772,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=202 | code_lines=154 | risk_score=6
 - API surface: public=3 | top-level functions=2 | classes=1 | methods=1
 - Runtime signals: async_functions=0 | try=6 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=2/2 (100%) | classes=1/1 (100%) | methods=0/1 (0%)
@@ -6733,6 +7788,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=1046 | code_lines=884 | risk_score=140
 - API surface: public=8 | top-level functions=11 | classes=4 | methods=16
 - Runtime signals: async_functions=2 | try=26 | raise=1 | broad_except=23 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=4/11 (36%) | classes=2/4 (50%) | methods=11/16 (68%)
@@ -6747,6 +7804,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=198 | code_lines=156 | risk_score=25
 - API surface: public=9 | top-level functions=10 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=5 | raise=0 | broad_except=4 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=2/10 (20%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -6761,6 +7820,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=643 | code_lines=516 | risk_score=174
 - API surface: public=8 | top-level functions=8 | classes=3 | methods=17
 - Runtime signals: async_functions=2 | try=30 | raise=1 | broad_except=29 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=4/8 (50%) | classes=1/3 (33%) | methods=0/17 (0%)
@@ -6775,6 +7836,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=2 | code_lines=1 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -6789,6 +7852,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=568 | code_lines=466 | risk_score=45
 - API surface: public=10 | top-level functions=10 | classes=0 | methods=0
 - Runtime signals: async_functions=10 | try=12 | raise=14 | broad_except=9 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=10/10 (100%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -6803,6 +7868,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=638 | code_lines=538 | risk_score=28
 - API surface: public=12 | top-level functions=14 | classes=0 | methods=0
 - Runtime signals: async_functions=13 | try=5 | raise=2 | broad_except=5 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=13/14 (92%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -6817,6 +7884,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=19 | code_lines=17 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -6831,6 +7900,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=127 | code_lines=101 | risk_score=0
 - API surface: public=8 | top-level functions=8 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=2 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/8 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -6845,6 +7916,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=170 | code_lines=139 | risk_score=15
 - API surface: public=6 | top-level functions=8 | classes=1 | methods=7
 - Runtime signals: async_functions=0 | try=3 | raise=8 | broad_except=3 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=1/8 (12%) | classes=0/1 (0%) | methods=0/7 (0%)
@@ -6859,6 +7932,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=312 | code_lines=269 | risk_score=9
 - API surface: public=12 | top-level functions=12 | classes=0 | methods=0
 - Runtime signals: async_functions=9 | try=12 | raise=3 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/12 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -6873,6 +7948,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=897 | code_lines=653 | risk_score=0
 - API surface: public=9 | top-level functions=7 | classes=2 | methods=24
 - Runtime signals: async_functions=0 | try=3 | raise=72 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=7/7 (100%) | classes=2/2 (100%) | methods=23/24 (95%)
@@ -6887,6 +7964,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=57 | code_lines=46 | risk_score=0
 - API surface: public=2 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -6901,6 +7980,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=247 | code_lines=206 | risk_score=0
 - API surface: public=4 | top-level functions=8 | classes=2 | methods=0
 - Runtime signals: async_functions=2 | try=3 | raise=14 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=1/8 (12%) | classes=2/2 (100%) | methods=0/0 (n/a)
@@ -6915,6 +7996,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=7 | code_lines=5 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -6929,6 +8012,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=450 | code_lines=394 | risk_score=25
 - API surface: public=1 | top-level functions=0 | classes=1 | methods=22
 - Runtime signals: async_functions=0 | try=15 | raise=0 | broad_except=2 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=1/1 (100%) | methods=22/22 (100%)
@@ -6943,6 +8028,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=28 | code_lines=21 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -6957,6 +8044,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=8 | code_lines=6 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -6971,6 +8060,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=331 | code_lines=303 | risk_score=45
 - API surface: public=1 | top-level functions=4 | classes=0 | methods=0
 - Runtime signals: async_functions=2 | try=10 | raise=0 | broad_except=7 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=1/4 (25%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -6985,6 +8076,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=142 | code_lines=125 | risk_score=0
 - API surface: public=2 | top-level functions=5 | classes=0 | methods=0
 - Runtime signals: async_functions=1 | try=2 | raise=2 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/5 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -6999,6 +8092,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=1453 | code_lines=1288 | risk_score=60
 - API surface: public=8 | top-level functions=17 | classes=7 | methods=15
 - Runtime signals: async_functions=6 | try=15 | raise=32 | broad_except=12 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=6/17 (35%) | classes=2/7 (28%) | methods=0/15 (0%)
@@ -7013,6 +8108,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=172 | code_lines=140 | risk_score=0
 - API surface: public=3 | top-level functions=3 | classes=2 | methods=1
 - Runtime signals: async_functions=2 | try=0 | raise=1 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=1/3 (33%) | classes=0/2 (0%) | methods=0/1 (0%)
@@ -7027,6 +8124,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=8 | code_lines=6 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -7041,6 +8140,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=403 | code_lines=365 | risk_score=0
 - API surface: public=2 | top-level functions=1 | classes=1 | methods=9
 - Runtime signals: async_functions=6 | try=0 | raise=2 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/1 (0%) | classes=0/1 (0%) | methods=0/9 (0%)
@@ -7055,6 +8156,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=678 | code_lines=534 | risk_score=29
 - API surface: public=3 | top-level functions=1 | classes=2 | methods=26
 - Runtime signals: async_functions=22 | try=6 | raise=2 | broad_except=5 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=1/1 (100%) | classes=2/2 (100%) | methods=26/26 (100%)
@@ -7069,6 +8172,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=462 | code_lines=371 | risk_score=0
 - API surface: public=2 | top-level functions=0 | classes=2 | methods=13
 - Runtime signals: async_functions=12 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=2/2 (100%) | methods=12/13 (92%)
@@ -7083,6 +8188,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=408 | code_lines=302 | risk_score=10
 - API surface: public=4 | top-level functions=1 | classes=3 | methods=15
 - Runtime signals: async_functions=11 | try=2 | raise=2 | broad_except=2 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=1/1 (100%) | classes=3/3 (100%) | methods=13/15 (86%)
@@ -7097,6 +8204,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=637 | code_lines=517 | risk_score=11
 - API surface: public=1 | top-level functions=0 | classes=1 | methods=17
 - Runtime signals: async_functions=9 | try=2 | raise=1 | broad_except=2 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=1/1 (100%) | methods=15/17 (88%)
@@ -7111,6 +8220,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=500 | code_lines=393 | risk_score=31
 - API surface: public=10 | top-level functions=0 | classes=10 | methods=28
 - Runtime signals: async_functions=7 | try=6 | raise=0 | broad_except=5 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=10/10 (100%) | methods=14/28 (50%)
@@ -7125,6 +8236,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=254 | code_lines=211 | risk_score=29
 - API surface: public=4 | top-level functions=4 | classes=3 | methods=0
 - Runtime signals: async_functions=4 | try=5 | raise=1 | broad_except=5 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=4/4 (100%) | classes=1/3 (33%) | methods=0/0 (n/a)
@@ -7139,6 +8252,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=60 | code_lines=48 | risk_score=1
 - API surface: public=2 | top-level functions=1 | classes=1 | methods=0
 - Runtime signals: async_functions=1 | try=1 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/1 (0%) | methods=0/0 (n/a)
@@ -7153,6 +8268,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=553 | code_lines=501 | risk_score=0
 - API surface: public=5 | top-level functions=8 | classes=1 | methods=1
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=3/8 (37%) | classes=1/1 (100%) | methods=0/1 (0%)
@@ -7167,6 +8284,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=202 | code_lines=157 | risk_score=0
 - API surface: public=7 | top-level functions=7 | classes=3 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=4/7 (57%) | classes=0/3 (0%) | methods=0/0 (n/a)
@@ -7181,6 +8300,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=182 | code_lines=170 | risk_score=24
 - API surface: public=1 | top-level functions=0 | classes=1 | methods=6
 - Runtime signals: async_functions=5 | try=4 | raise=0 | broad_except=4 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=1/1 (100%) | methods=6/6 (100%)
@@ -7195,6 +8316,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=202 | code_lines=170 | risk_score=10
 - API surface: public=1 | top-level functions=6 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=2 | raise=6 | broad_except=2 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=6/6 (100%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -7209,6 +8332,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=426 | code_lines=330 | risk_score=44
 - API surface: public=2 | top-level functions=0 | classes=2 | methods=13
 - Runtime signals: async_functions=7 | try=9 | raise=0 | broad_except=7 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=2/2 (100%) | methods=12/13 (92%)
@@ -7223,6 +8348,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=468 | code_lines=372 | risk_score=0
 - API surface: public=5 | top-level functions=0 | classes=5 | methods=13
 - Runtime signals: async_functions=1 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=5/5 (100%) | methods=10/13 (76%)
@@ -7237,6 +8364,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=440 | code_lines=348 | risk_score=5
 - API surface: public=5 | top-level functions=0 | classes=5 | methods=18
 - Runtime signals: async_functions=0 | try=1 | raise=6 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=5/5 (100%) | methods=14/18 (77%)
@@ -7251,6 +8380,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=283 | code_lines=206 | risk_score=0
 - API surface: public=2 | top-level functions=0 | classes=2 | methods=12
 - Runtime signals: async_functions=8 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=2/2 (100%) | methods=12/12 (100%)
@@ -7265,6 +8396,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=44 | code_lines=36 | risk_score=12
 - API surface: public=2 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=2 | try=2 | raise=0 | broad_except=2 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=2/2 (100%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -7279,6 +8412,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=595 | code_lines=491 | risk_score=37
 - API surface: public=8 | top-level functions=14 | classes=1 | methods=1
 - Runtime signals: async_functions=7 | try=7 | raise=0 | broad_except=6 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=10/14 (71%) | classes=1/1 (100%) | methods=0/1 (0%)
@@ -7293,6 +8428,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=552 | code_lines=441 | risk_score=60
 - API surface: public=2 | top-level functions=0 | classes=2 | methods=11
 - Runtime signals: async_functions=0 | try=11 | raise=1 | broad_except=10 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=2/2 (100%) | methods=4/11 (36%)
@@ -7307,6 +8444,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=365 | code_lines=297 | risk_score=37
 - API surface: public=2 | top-level functions=0 | classes=2 | methods=5
 - Runtime signals: async_functions=0 | try=7 | raise=0 | broad_except=6 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=1/2 (50%) | methods=3/5 (60%)
@@ -7321,6 +8460,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=240 | code_lines=179 | risk_score=10
 - API surface: public=1 | top-level functions=0 | classes=1 | methods=5
 - Runtime signals: async_functions=4 | try=2 | raise=3 | broad_except=2 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=1/1 (100%) | methods=4/5 (80%)
@@ -7335,6 +8476,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=481 | code_lines=365 | risk_score=19
 - API surface: public=4 | top-level functions=1 | classes=3 | methods=14
 - Runtime signals: async_functions=10 | try=4 | raise=0 | broad_except=3 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=1/1 (100%) | classes=3/3 (100%) | methods=14/14 (100%)
@@ -7349,6 +8492,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=640 | code_lines=488 | risk_score=41
 - API surface: public=6 | top-level functions=3 | classes=3 | methods=25
 - Runtime signals: async_functions=20 | try=8 | raise=2 | broad_except=7 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=2/3 (66%) | classes=3/3 (100%) | methods=23/25 (92%)
@@ -7363,6 +8508,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=138 | code_lines=117 | risk_score=17
 - API surface: public=3 | top-level functions=1 | classes=2 | methods=2
 - Runtime signals: async_functions=4 | try=3 | raise=1 | broad_except=3 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/1 (0%) | classes=1/2 (50%) | methods=0/2 (0%)
@@ -7377,6 +8524,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=264 | code_lines=237 | risk_score=2
 - API surface: public=2 | top-level functions=2 | classes=2 | methods=2
 - Runtime signals: async_functions=1 | try=5 | raise=3 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/2 (0%) | classes=1/2 (50%) | methods=0/2 (0%)
@@ -7391,6 +8540,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=8 | code_lines=6 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -7405,6 +8556,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=318 | code_lines=283 | risk_score=0
 - API surface: public=2 | top-level functions=0 | classes=2 | methods=10
 - Runtime signals: async_functions=7 | try=0 | raise=22 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=2/2 (100%) | methods=4/10 (40%)
@@ -7419,6 +8572,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=342 | code_lines=319 | risk_score=10
 - API surface: public=4 | top-level functions=4 | classes=1 | methods=7
 - Runtime signals: async_functions=8 | try=3 | raise=4 | broad_except=2 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/4 (0%) | classes=0/1 (0%) | methods=0/7 (0%)
@@ -7433,6 +8588,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=35 | code_lines=29 | risk_score=7
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=1 | try=2 | raise=0 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -7447,6 +8604,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=459 | code_lines=341 | risk_score=35
 - API surface: public=4 | top-level functions=0 | classes=4 | methods=16
 - Runtime signals: async_functions=10 | try=7 | raise=2 | broad_except=6 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=4/4 (100%) | methods=16/16 (100%)
@@ -7461,6 +8620,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=371 | code_lines=291 | risk_score=0
 - API surface: public=2 | top-level functions=1 | classes=1 | methods=7
 - Runtime signals: async_functions=6 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=1/1 (100%) | classes=1/1 (100%) | methods=6/7 (85%)
@@ -7475,6 +8636,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=340 | code_lines=262 | risk_score=5
 - API surface: public=2 | top-level functions=0 | classes=2 | methods=10
 - Runtime signals: async_functions=6 | try=1 | raise=1 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=2/2 (100%) | methods=10/10 (100%)
@@ -7489,6 +8652,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=38 | code_lines=29 | risk_score=0
 - API surface: public=1 | top-level functions=0 | classes=1 | methods=4
 - Runtime signals: async_functions=3 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/1 (0%) | methods=0/4 (0%)
@@ -7503,6 +8668,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=267 | code_lines=222 | risk_score=6
 - API surface: public=2 | top-level functions=1 | classes=1 | methods=5
 - Runtime signals: async_functions=5 | try=1 | raise=0 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/1 (0%) | methods=1/5 (20%)
@@ -7517,6 +8684,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=222 | code_lines=200 | risk_score=15
 - API surface: public=2 | top-level functions=3 | classes=0 | methods=0
 - Runtime signals: async_functions=3 | try=5 | raise=10 | broad_except=3 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -7531,6 +8700,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=151 | code_lines=135 | risk_score=23
 - API surface: public=4 | top-level functions=4 | classes=0 | methods=0
 - Runtime signals: async_functions=3 | try=7 | raise=4 | broad_except=4 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=1/4 (25%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -7545,6 +8716,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=0 | code_lines=0 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -7559,6 +8732,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=153 | code_lines=115 | risk_score=0
 - API surface: public=3 | top-level functions=0 | classes=3 | methods=22
 - Runtime signals: async_functions=21 | try=2 | raise=7 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=3/3 (100%) | methods=1/22 (4%)
@@ -7573,6 +8748,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=390 | code_lines=341 | risk_score=15
 - API surface: public=10 | top-level functions=9 | classes=3 | methods=3
 - Runtime signals: async_functions=4 | try=5 | raise=0 | broad_except=2 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/9 (0%) | classes=0/3 (0%) | methods=0/3 (0%)
@@ -7587,6 +8764,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=1574 | code_lines=1391 | risk_score=123
 - API surface: public=10 | top-level functions=0 | classes=10 | methods=84
 - Runtime signals: async_functions=36 | try=29 | raise=16 | broad_except=22 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=5/10 (50%) | methods=9/84 (10%)
@@ -7601,6 +8780,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=83 | code_lines=71 | risk_score=0
 - API surface: public=2 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -7615,6 +8796,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=127 | code_lines=100 | risk_score=6
 - API surface: public=4 | top-level functions=1 | classes=3 | methods=10
 - Runtime signals: async_functions=10 | try=4 | raise=3 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/1 (0%) | classes=3/3 (100%) | methods=0/10 (0%)
@@ -7629,6 +8812,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=254 | code_lines=210 | risk_score=0
 - API surface: public=7 | top-level functions=7 | classes=1 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=1/7 (14%) | classes=0/1 (0%) | methods=0/0 (n/a)
@@ -7643,6 +8828,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=568 | code_lines=453 | risk_score=33
 - API surface: public=6 | top-level functions=2 | classes=4 | methods=22
 - Runtime signals: async_functions=0 | try=7 | raise=4 | broad_except=6 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=2/2 (100%) | classes=4/4 (100%) | methods=19/22 (86%)
@@ -7657,6 +8844,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=125 | code_lines=104 | risk_score=12
 - API surface: public=1 | top-level functions=0 | classes=1 | methods=5
 - Runtime signals: async_functions=5 | try=2 | raise=0 | broad_except=2 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/1 (0%) | methods=0/5 (0%)
@@ -7671,6 +8860,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=8 | code_lines=6 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -7685,6 +8876,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=523 | code_lines=450 | risk_score=0
 - API surface: public=7 | top-level functions=16 | classes=3 | methods=2
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/16 (0%) | classes=0/3 (0%) | methods=0/2 (0%)
@@ -7699,6 +8892,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=437 | code_lines=324 | risk_score=0
 - API surface: public=4 | top-level functions=0 | classes=4 | methods=14
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=4/4 (100%) | methods=13/14 (92%)
@@ -7713,6 +8908,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=386 | code_lines=300 | risk_score=6
 - API surface: public=4 | top-level functions=1 | classes=3 | methods=13
 - Runtime signals: async_functions=4 | try=2 | raise=1 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=1/1 (100%) | classes=3/3 (100%) | methods=9/13 (69%)
@@ -7727,6 +8924,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=278 | code_lines=223 | risk_score=0
 - API surface: public=8 | top-level functions=7 | classes=9 | methods=10
 - Runtime signals: async_functions=0 | try=1 | raise=4 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/7 (0%) | classes=0/9 (0%) | methods=0/10 (0%)
@@ -7741,6 +8940,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=39 | code_lines=32 | risk_score=0
 - API surface: public=1 | top-level functions=0 | classes=1 | methods=2
 - Runtime signals: async_functions=1 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/1 (0%) | methods=0/2 (0%)
@@ -7755,6 +8956,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=1312 | code_lines=1137 | risk_score=9
 - API surface: public=1 | top-level functions=24 | classes=0 | methods=0
 - Runtime signals: async_functions=1 | try=4 | raise=0 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=5/24 (20%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -7769,6 +8972,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=63 | code_lines=52 | risk_score=6
 - API surface: public=3 | top-level functions=3 | classes=0 | methods=0
 - Runtime signals: async_functions=1 | try=1 | raise=0 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -7783,6 +8988,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=146 | code_lines=123 | risk_score=0
 - API surface: public=6 | top-level functions=4 | classes=2 | methods=0
 - Runtime signals: async_functions=1 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/4 (0%) | classes=0/2 (0%) | methods=0/0 (n/a)
@@ -7797,6 +9004,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=591 | code_lines=541 | risk_score=6
 - API surface: public=2 | top-level functions=13 | classes=0 | methods=0
 - Runtime signals: async_functions=1 | try=1 | raise=0 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/13 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -7811,6 +9020,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=350 | code_lines=312 | risk_score=0
 - API surface: public=15 | top-level functions=15 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/15 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -7825,6 +9036,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=525 | code_lines=475 | risk_score=3
 - API surface: public=4 | top-level functions=4 | classes=2 | methods=0
 - Runtime signals: async_functions=0 | try=3 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/4 (0%) | classes=0/2 (0%) | methods=0/0 (n/a)
@@ -7839,6 +9052,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=32 | code_lines=28 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=3 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -7853,6 +9068,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=2463 | code_lines=2210 | risk_score=20
 - API surface: public=5 | top-level functions=52 | classes=5 | methods=16
 - Runtime signals: async_functions=9 | try=26 | raise=33 | broad_except=4 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=3/52 (5%) | classes=0/5 (0%) | methods=0/16 (0%)
@@ -7867,6 +9084,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=367 | code_lines=314 | risk_score=0
 - API surface: public=2 | top-level functions=10 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=2/10 (20%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -7881,6 +9100,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=96 | code_lines=82 | risk_score=6
 - API surface: public=5 | top-level functions=5 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=1 | raise=0 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=1/5 (20%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -7895,6 +9116,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=102 | code_lines=83 | risk_score=5
 - API surface: public=1 | top-level functions=0 | classes=1 | methods=3
 - Runtime signals: async_functions=1 | try=1 | raise=4 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/1 (0%) | methods=0/3 (0%)
@@ -7909,6 +9132,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=13 | code_lines=10 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -7923,6 +9148,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=188 | code_lines=155 | risk_score=0
 - API surface: public=6 | top-level functions=10 | classes=1 | methods=2
 - Runtime signals: async_functions=0 | try=1 | raise=5 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/10 (0%) | classes=0/1 (0%) | methods=0/2 (0%)
@@ -7937,6 +9164,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=83 | code_lines=71 | risk_score=11
 - API surface: public=2 | top-level functions=0 | classes=2 | methods=6
 - Runtime signals: async_functions=4 | try=3 | raise=2 | broad_except=2 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/0 (n/a) | classes=0/2 (0%) | methods=0/6 (0%)
@@ -7951,6 +9180,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=7 | code_lines=5 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -7965,6 +9196,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=36 | code_lines=31 | risk_score=0
 - API surface: public=2 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -7979,6 +9212,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=1858 | code_lines=1642 | risk_score=0
 - API surface: public=41 | top-level functions=49 | classes=2 | methods=0
 - Runtime signals: async_functions=0 | try=6 | raise=66 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=24/49 (48%) | classes=0/2 (0%) | methods=0/0 (n/a)
@@ -7993,6 +9228,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=1827 | code_lines=1679 | risk_score=5
 - API surface: public=3 | top-level functions=26 | classes=1 | methods=0
 - Runtime signals: async_functions=2 | try=5 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=6/26 (23%) | classes=0/1 (0%) | methods=0/0 (n/a)
@@ -8007,6 +9244,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=458 | code_lines=389 | risk_score=0
 - API surface: public=1 | top-level functions=14 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=3/14 (21%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -8021,6 +9260,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=437 | code_lines=379 | risk_score=12
 - API surface: public=2 | top-level functions=8 | classes=1 | methods=1
 - Runtime signals: async_functions=0 | try=2 | raise=0 | broad_except=2 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=1/8 (12%) | classes=0/1 (0%) | methods=0/1 (0%)
@@ -8035,6 +9276,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=178 | code_lines=150 | risk_score=7
 - API surface: public=1 | top-level functions=5 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=2 | raise=0 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=1/5 (20%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -8049,6 +9292,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=565 | code_lines=526 | risk_score=29
 - API surface: public=3 | top-level functions=8 | classes=3 | methods=6
 - Runtime signals: async_functions=7 | try=15 | raise=1 | broad_except=3 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/8 (0%) | classes=0/3 (0%) | methods=0/6 (0%)
@@ -8063,6 +9308,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=30 | code_lines=25 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -8077,6 +9324,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=142 | code_lines=123 | risk_score=1
 - API surface: public=9 | top-level functions=6 | classes=3 | methods=0
 - Runtime signals: async_functions=0 | try=1 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/6 (0%) | classes=0/3 (0%) | methods=0/0 (n/a)
@@ -8091,6 +9340,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=122 | code_lines=98 | risk_score=6
 - API surface: public=3 | top-level functions=4 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=1 | raise=0 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=2/4 (50%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -8105,6 +9356,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=235 | code_lines=202 | risk_score=0
 - API surface: public=10 | top-level functions=8 | classes=2 | methods=0
 - Runtime signals: async_functions=0 | try=2 | raise=2 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/8 (0%) | classes=0/2 (0%) | methods=0/0 (n/a)
@@ -8119,6 +9372,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=124 | code_lines=95 | risk_score=0
 - API surface: public=4 | top-level functions=8 | classes=1 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=2/8 (25%) | classes=0/1 (0%) | methods=0/0 (n/a)
@@ -8133,6 +9388,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=420 | code_lines=354 | risk_score=4
 - API surface: public=12 | top-level functions=11 | classes=2 | methods=0
 - Runtime signals: async_functions=0 | try=4 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=4/11 (36%) | classes=2/2 (100%) | methods=0/0 (n/a)
@@ -8147,6 +9404,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=280 | code_lines=224 | risk_score=5
 - API surface: public=9 | top-level functions=10 | classes=4 | methods=4
 - Runtime signals: async_functions=3 | try=3 | raise=25 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=1/10 (10%) | classes=0/4 (0%) | methods=0/4 (0%)
@@ -8161,6 +9420,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=172 | code_lines=140 | risk_score=15
 - API surface: public=2 | top-level functions=7 | classes=1 | methods=0
 - Runtime signals: async_functions=1 | try=3 | raise=4 | broad_except=3 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/7 (0%) | classes=0/1 (0%) | methods=0/0 (n/a)
@@ -8175,6 +9436,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=175 | code_lines=159 | risk_score=2
 - API surface: public=4 | top-level functions=4 | classes=1 | methods=0
 - Runtime signals: async_functions=0 | try=2 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/4 (0%) | classes=0/1 (0%) | methods=0/0 (n/a)
@@ -8189,6 +9452,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=57 | code_lines=46 | risk_score=6
 - API surface: public=4 | top-level functions=4 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=1 | raise=0 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/4 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -8203,6 +9468,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=8 | code_lines=6 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -8217,6 +9484,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=660 | code_lines=607 | risk_score=0
 - API surface: public=4 | top-level functions=4 | classes=4 | methods=16
 - Runtime signals: async_functions=13 | try=3 | raise=8 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/4 (0%) | classes=1/4 (25%) | methods=3/16 (18%)
@@ -8231,6 +9500,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=408 | code_lines=380 | risk_score=0
 - API surface: public=3 | top-level functions=0 | classes=3 | methods=15
 - Runtime signals: async_functions=12 | try=0 | raise=8 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/3 (0%) | methods=0/15 (0%)
@@ -8245,6 +9516,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=206 | code_lines=192 | risk_score=0
 - API surface: public=2 | top-level functions=0 | classes=2 | methods=5
 - Runtime signals: async_functions=4 | try=0 | raise=5 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/2 (0%) | methods=0/5 (0%)
@@ -8259,6 +9532,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=217 | code_lines=204 | risk_score=0
 - API surface: public=2 | top-level functions=0 | classes=2 | methods=5
 - Runtime signals: async_functions=4 | try=0 | raise=5 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/2 (0%) | methods=0/5 (0%)
@@ -8273,6 +9548,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=146 | code_lines=132 | risk_score=0
 - API surface: public=2 | top-level functions=0 | classes=2 | methods=5
 - Runtime signals: async_functions=4 | try=0 | raise=3 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/2 (0%) | methods=0/5 (0%)
@@ -8287,6 +9564,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=929 | code_lines=882 | risk_score=0
 - API surface: public=6 | top-level functions=0 | classes=6 | methods=22
 - Runtime signals: async_functions=17 | try=0 | raise=16 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/6 (0%) | methods=1/22 (4%)
@@ -8301,6 +9580,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=2315 | code_lines=2167 | risk_score=30
 - API surface: public=11 | top-level functions=4 | classes=10 | methods=37
 - Runtime signals: async_functions=29 | try=6 | raise=54 | broad_except=6 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/4 (0%) | classes=0/10 (0%) | methods=3/37 (8%)
@@ -8315,6 +9596,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=251 | code_lines=238 | risk_score=0
 - API surface: public=2 | top-level functions=0 | classes=2 | methods=5
 - Runtime signals: async_functions=4 | try=0 | raise=3 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/2 (0%) | methods=0/5 (0%)
@@ -8329,6 +9612,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=319 | code_lines=269 | risk_score=18
 - API surface: public=6 | top-level functions=5 | classes=2 | methods=3
 - Runtime signals: async_functions=4 | try=3 | raise=0 | broad_except=3 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=5/5 (100%) | classes=2/2 (100%) | methods=2/3 (66%)
@@ -8343,6 +9628,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=161 | code_lines=149 | risk_score=18
 - API surface: public=1 | top-level functions=0 | classes=1 | methods=4
 - Runtime signals: async_functions=3 | try=3 | raise=0 | broad_except=3 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=1/1 (100%) | methods=4/4 (100%)
@@ -8357,6 +9644,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=767 | code_lines=699 | risk_score=0
 - API surface: public=5 | top-level functions=1 | classes=5 | methods=15
 - Runtime signals: async_functions=13 | try=0 | raise=19 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/1 (0%) | classes=0/5 (0%) | methods=1/15 (6%)
@@ -8371,6 +9660,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=194 | code_lines=177 | risk_score=0
 - API surface: public=2 | top-level functions=0 | classes=2 | methods=5
 - Runtime signals: async_functions=3 | try=0 | raise=3 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/2 (0%) | methods=0/5 (0%)
@@ -8385,6 +9676,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=4392 | code_lines=4208 | risk_score=55
 - API surface: public=17 | top-level functions=1 | classes=17 | methods=84
 - Runtime signals: async_functions=72 | try=14 | raise=96 | broad_except=11 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=1/1 (100%) | classes=0/17 (0%) | methods=1/84 (1%)
@@ -8399,6 +9692,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=1859 | code_lines=1689 | risk_score=0
 - API surface: public=2 | top-level functions=1 | classes=1 | methods=35
 - Runtime signals: async_functions=20 | try=8 | raise=13 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/1 (0%) | classes=1/1 (100%) | methods=12/35 (34%)
@@ -8413,6 +9708,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=1507 | code_lines=1444 | risk_score=5
 - API surface: public=5 | top-level functions=0 | classes=5 | methods=30
 - Runtime signals: async_functions=24 | try=2 | raise=31 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=1/5 (20%) | methods=5/30 (16%)
@@ -8427,6 +9724,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=255 | code_lines=230 | risk_score=6
 - API surface: public=2 | top-level functions=1 | classes=2 | methods=9
 - Runtime signals: async_functions=7 | try=1 | raise=0 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/1 (0%) | classes=1/2 (50%) | methods=1/9 (11%)
@@ -8441,6 +9740,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=198 | code_lines=182 | risk_score=0
 - API surface: public=2 | top-level functions=0 | classes=2 | methods=6
 - Runtime signals: async_functions=4 | try=0 | raise=4 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/2 (0%) | methods=0/6 (0%)
@@ -8455,6 +9756,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=3253 | code_lines=3062 | risk_score=10
 - API surface: public=11 | top-level functions=14 | classes=11 | methods=57
 - Runtime signals: async_functions=54 | try=10 | raise=104 | broad_except=2 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/14 (0%) | classes=1/11 (9%) | methods=3/57 (5%)
@@ -8469,6 +9772,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=83 | code_lines=67 | risk_score=5
 - API surface: public=1 | top-level functions=0 | classes=1 | methods=8
 - Runtime signals: async_functions=7 | try=1 | raise=2 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/1 (0%) | methods=0/8 (0%)
@@ -8483,6 +9788,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=62 | code_lines=49 | risk_score=10
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=1 | try=2 | raise=2 | broad_except=2 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=1/1 (100%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -8497,6 +9804,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=621 | code_lines=554 | risk_score=0
 - API surface: public=5 | top-level functions=2 | classes=3 | methods=12
 - Runtime signals: async_functions=11 | try=0 | raise=15 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/2 (0%) | classes=1/3 (33%) | methods=3/12 (25%)
@@ -8511,6 +9820,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=37 | code_lines=29 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=1 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -8525,6 +9836,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=8 | code_lines=6 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -8539,6 +9852,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=20 | code_lines=14 | risk_score=0
 - API surface: public=1 | top-level functions=0 | classes=1 | methods=2
 - Runtime signals: async_functions=1 | try=1 | raise=1 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/0 (n/a) | classes=0/1 (0%) | methods=0/2 (0%)
@@ -8553,6 +9868,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=692 | code_lines=591 | risk_score=22
 - API surface: public=3 | top-level functions=2 | classes=1 | methods=21
 - Runtime signals: async_functions=20 | try=20 | raise=18 | broad_except=4 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=2/2 (100%) | classes=1/1 (100%) | methods=20/21 (95%)
@@ -8567,6 +9884,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=1253 | code_lines=1048 | risk_score=108
 - API surface: public=2 | top-level functions=1 | classes=1 | methods=31
 - Runtime signals: async_functions=21 | try=24 | raise=16 | broad_except=20 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=1/1 (100%) | classes=1/1 (100%) | methods=13/31 (41%)
@@ -8581,6 +9900,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=23 | code_lines=18 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=1 | try=1 | raise=1 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -8595,6 +9916,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=330 | code_lines=296 | risk_score=5
 - API surface: public=6 | top-level functions=2 | classes=6 | methods=9
 - Runtime signals: async_functions=6 | try=1 | raise=40 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=1/2 (50%) | classes=1/6 (16%) | methods=0/9 (0%)
@@ -8609,6 +9932,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=54 | code_lines=40 | risk_score=0
 - API surface: public=2 | top-level functions=1 | classes=1 | methods=2
 - Runtime signals: async_functions=2 | try=0 | raise=1 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/1 (0%) | classes=0/1 (0%) | methods=0/2 (0%)
@@ -8623,6 +9948,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=472 | code_lines=389 | risk_score=22
 - API surface: public=2 | top-level functions=1 | classes=1 | methods=24
 - Runtime signals: async_functions=21 | try=6 | raise=4 | broad_except=4 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=1/1 (100%) | classes=1/1 (100%) | methods=23/24 (95%)
@@ -8637,6 +9964,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=48 | code_lines=37 | risk_score=1
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=1 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=1/1 (100%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -8651,6 +9980,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=937 | code_lines=786 | risk_score=10
 - API surface: public=2 | top-level functions=1 | classes=1 | methods=22
 - Runtime signals: async_functions=18 | try=15 | raise=17 | broad_except=2 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=1/1 (100%) | classes=1/1 (100%) | methods=22/22 (100%)
@@ -8665,6 +9996,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=94 | code_lines=63 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -8679,6 +10012,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=5 | code_lines=4 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -8693,6 +10028,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=397 | code_lines=312 | risk_score=17
 - API surface: public=15 | top-level functions=12 | classes=3 | methods=12
 - Runtime signals: async_functions=5 | try=4 | raise=2 | broad_except=3 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=12/12 (100%) | classes=3/3 (100%) | methods=7/12 (58%)
@@ -8707,6 +10044,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=1 | code_lines=1 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -8721,6 +10060,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=124 | code_lines=102 | risk_score=0
 - API surface: public=5 | top-level functions=5 | classes=0 | methods=0
 - Runtime signals: async_functions=3 | try=0 | raise=2 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=1/5 (20%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -8735,6 +10076,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=1274 | code_lines=1156 | risk_score=9
 - API surface: public=4 | top-level functions=30 | classes=3 | methods=0
 - Runtime signals: async_functions=0 | try=10 | raise=1 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/30 (0%) | classes=0/3 (0%) | methods=0/0 (n/a)
@@ -8749,6 +10092,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=185 | code_lines=142 | risk_score=0
 - API surface: public=5 | top-level functions=7 | classes=1 | methods=1
 - Runtime signals: async_functions=0 | try=1 | raise=11 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/7 (0%) | classes=0/1 (0%) | methods=0/1 (0%)
@@ -8763,6 +10108,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=15 | code_lines=13 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -8777,6 +10124,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=169 | code_lines=145 | risk_score=0
 - API surface: public=1 | top-level functions=5 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=1/5 (20%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -8791,6 +10140,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=150 | code_lines=122 | risk_score=1
 - API surface: public=5 | top-level functions=8 | classes=2 | methods=0
 - Runtime signals: async_functions=0 | try=1 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/8 (0%) | classes=0/2 (0%) | methods=0/0 (n/a)
@@ -8805,6 +10156,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=283 | code_lines=249 | risk_score=12
 - API surface: public=2 | top-level functions=8 | classes=2 | methods=1
 - Runtime signals: async_functions=4 | try=2 | raise=0 | broad_except=2 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/8 (0%) | classes=0/2 (0%) | methods=0/1 (0%)
@@ -8819,6 +10172,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=328 | code_lines=268 | risk_score=5
 - API surface: public=4 | top-level functions=7 | classes=3 | methods=0
 - Runtime signals: async_functions=0 | try=2 | raise=45 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=2/7 (28%) | classes=0/3 (0%) | methods=0/0 (n/a)
@@ -8833,6 +10188,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=83 | code_lines=66 | risk_score=0
 - API surface: public=4 | top-level functions=3 | classes=2 | methods=3
 - Runtime signals: async_functions=0 | try=0 | raise=2 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/2 (0%) | methods=0/3 (0%)
@@ -8847,6 +10204,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=190 | code_lines=159 | risk_score=0
 - API surface: public=6 | top-level functions=8 | classes=1 | methods=0
 - Runtime signals: async_functions=1 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/8 (0%) | classes=0/1 (0%) | methods=0/0 (n/a)
@@ -8861,6 +10220,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=9 | code_lines=6 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=1 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -8875,6 +10236,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=1040 | code_lines=898 | risk_score=15
 - API surface: public=8 | top-level functions=44 | classes=2 | methods=0
 - Runtime signals: async_functions=0 | try=5 | raise=80 | broad_except=3 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=7/44 (15%) | classes=0/2 (0%) | methods=0/0 (n/a)
@@ -8889,6 +10252,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=29 | code_lines=21 | risk_score=0
 - API surface: public=3 | top-level functions=3 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -8903,6 +10268,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=141 | code_lines=89 | risk_score=0
 - API surface: public=5 | top-level functions=6 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=5/6 (83%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -8917,6 +10284,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=27 | code_lines=18 | risk_score=0
 - API surface: public=4 | top-level functions=4 | classes=0 | methods=0
 - Runtime signals: async_functions=4 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/4 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -8931,6 +10300,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=32 | code_lines=27 | risk_score=0
 - API surface: public=2 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -8945,6 +10316,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=14 | code_lines=9 | risk_score=0
 - API surface: public=2 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -8959,6 +10332,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=29 | code_lines=21 | risk_score=0
 - API surface: public=2 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -8973,6 +10348,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=46 | code_lines=34 | risk_score=0
 - API surface: public=3 | top-level functions=4 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=1/4 (25%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -8987,6 +10364,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=79 | code_lines=61 | risk_score=3
 - API surface: public=2 | top-level functions=3 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=3 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=1/3 (33%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -9001,6 +10380,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=11 | code_lines=8 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -9015,6 +10396,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=17 | code_lines=14 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -9029,6 +10412,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=23 | code_lines=13 | risk_score=0
 - API surface: public=3 | top-level functions=3 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=1 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/3 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -9043,6 +10428,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=92 | code_lines=81 | risk_score=6
 - API surface: public=3 | top-level functions=5 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=1 | raise=0 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/5 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -9057,6 +10444,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=31 | code_lines=24 | risk_score=6
 - API surface: public=3 | top-level functions=3 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=1 | raise=0 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -9071,6 +10460,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=46 | code_lines=42 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -9085,6 +10476,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=20 | code_lines=15 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=1 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -9099,6 +10492,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=91 | code_lines=74 | risk_score=15
 - API surface: public=2 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=3 | raise=9 | broad_except=3 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=2/2 (100%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -9113,6 +10508,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=395 | code_lines=272 | risk_score=24
 - API surface: public=9 | top-level functions=13 | classes=1 | methods=0
 - Runtime signals: async_functions=0 | try=4 | raise=0 | broad_except=4 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=13/13 (100%) | classes=1/1 (100%) | methods=0/0 (n/a)
@@ -9127,6 +10524,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=114 | code_lines=101 | risk_score=0
 - API surface: public=2 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=2/2 (100%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -9141,6 +10540,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=117 | code_lines=98 | risk_score=0
 - API surface: public=2 | top-level functions=4 | classes=1 | methods=0
 - Runtime signals: async_functions=0 | try=5 | raise=15 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/4 (0%) | classes=0/1 (0%) | methods=0/0 (n/a)
@@ -9155,6 +10556,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=245 | code_lines=226 | risk_score=8
 - API surface: public=8 | top-level functions=8 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=9 | raise=1 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/8 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -9169,6 +10572,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=252 | code_lines=172 | risk_score=6
 - API surface: public=2 | top-level functions=1 | classes=1 | methods=9
 - Runtime signals: async_functions=0 | try=1 | raise=0 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=1/1 (100%) | classes=1/1 (100%) | methods=9/9 (100%)
@@ -9183,6 +10588,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=128 | code_lines=115 | risk_score=0
 - API surface: public=3 | top-level functions=4 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/4 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -9197,6 +10604,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=1259 | code_lines=1021 | risk_score=46
 - API surface: public=1 | top-level functions=0 | classes=1 | methods=33
 - Runtime signals: async_functions=27 | try=11 | raise=10 | broad_except=9 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=1/1 (100%) | methods=33/33 (100%)
@@ -9211,6 +10620,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=366 | code_lines=266 | risk_score=12
 - API surface: public=11 | top-level functions=12 | classes=1 | methods=6
 - Runtime signals: async_functions=0 | try=2 | raise=0 | broad_except=2 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=12/12 (100%) | classes=1/1 (100%) | methods=6/6 (100%)
@@ -9225,6 +10636,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=466 | code_lines=367 | risk_score=0
 - API surface: public=12 | top-level functions=15 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=6/15 (40%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -9239,6 +10652,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=353 | code_lines=253 | risk_score=38
 - API surface: public=2 | top-level functions=1 | classes=1 | methods=10
 - Runtime signals: async_functions=0 | try=8 | raise=0 | broad_except=6 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=1/1 (100%) | classes=1/1 (100%) | methods=9/10 (90%)
@@ -9253,6 +10668,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=14 | code_lines=11 | risk_score=6
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=1 | raise=0 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -9267,6 +10684,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=16 | code_lines=12 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -9281,6 +10700,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=88 | code_lines=72 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=1/1 (100%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -9295,6 +10716,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=92 | code_lines=73 | risk_score=0
 - API surface: public=5 | top-level functions=5 | classes=0 | methods=0
 - Runtime signals: async_functions=1 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=3/5 (60%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -9309,6 +10732,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=36 | code_lines=31 | risk_score=0
 - API surface: public=2 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -9323,6 +10748,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=14 | code_lines=10 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=1/1 (100%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -9337,6 +10764,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=80 | code_lines=62 | risk_score=0
 - API surface: public=3 | top-level functions=2 | classes=1 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=1/2 (50%) | classes=0/1 (0%) | methods=0/0 (n/a)
@@ -9351,6 +10780,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=180 | code_lines=129 | risk_score=0
 - API surface: public=5 | top-level functions=5 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=1 | raise=1 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=5/5 (100%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -9365,6 +10796,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=38 | code_lines=30 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=1/1 (100%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -9379,6 +10812,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=42 | code_lines=34 | risk_score=0
 - API surface: public=3 | top-level functions=3 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=1 | raise=1 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=1/3 (33%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -9393,6 +10828,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=41 | code_lines=31 | risk_score=0
 - API surface: public=4 | top-level functions=4 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=2 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/4 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -9407,6 +10844,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=226 | code_lines=187 | risk_score=0
 - API surface: public=5 | top-level functions=5 | classes=3 | methods=0
 - Runtime signals: async_functions=0 | try=4 | raise=24 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=1/5 (20%) | classes=0/3 (0%) | methods=0/0 (n/a)
@@ -9421,6 +10860,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=141 | code_lines=124 | risk_score=0
 - API surface: public=3 | top-level functions=3 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=1/3 (33%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -9435,6 +10876,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=38 | code_lines=28 | risk_score=0
 - API surface: public=3 | top-level functions=3 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=1/3 (33%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -9449,6 +10892,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=26 | code_lines=19 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -9463,6 +10908,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=14 | code_lines=9 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=1/1 (100%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -9477,6 +10924,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=20 | code_lines=14 | risk_score=0
 - API surface: public=1 | top-level functions=0 | classes=1 | methods=3
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/0 (n/a) | classes=0/1 (0%) | methods=0/3 (0%)
@@ -9491,6 +10940,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=14 | code_lines=10 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -9505,6 +10956,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=71 | code_lines=55 | risk_score=1
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=1 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=1/1 (100%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -9519,6 +10972,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=7 | code_lines=4 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -9533,6 +10988,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=33 | code_lines=28 | risk_score=6
 - API surface: public=2 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=1 | raise=0 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -9547,6 +11004,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=17 | code_lines=13 | risk_score=6
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=1 | raise=0 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -9561,6 +11020,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: asynchronous background processing
+- Source footprint: total_lines=114 | code_lines=98 | risk_score=12
 - API surface: public=2 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=2 | try=4 | raise=2 | broad_except=2 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -9575,6 +11036,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=232 | code_lines=193 | risk_score=0
 - API surface: public=9 | top-level functions=10 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=7 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=4/10 (40%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -9589,6 +11052,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=38 | code_lines=31 | risk_score=0
 - API surface: public=3 | top-level functions=3 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -9603,6 +11068,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=71 | code_lines=56 | risk_score=0
 - API surface: public=2 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=2 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=2/2 (100%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -9617,6 +11084,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=77 | code_lines=63 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=2 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=1/1 (100%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -9631,6 +11100,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=73 | code_lines=55 | risk_score=0
 - API surface: public=9 | top-level functions=9 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/9 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -9645,6 +11116,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=141 | code_lines=123 | risk_score=0
 - API surface: public=3 | top-level functions=3 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=3/3 (100%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -9659,6 +11132,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=218 | code_lines=176 | risk_score=0
 - API surface: public=1 | top-level functions=0 | classes=1 | methods=11
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=1/1 (100%) | methods=11/11 (100%)
@@ -9673,6 +11148,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=136 | code_lines=105 | risk_score=2
 - API surface: public=1 | top-level functions=0 | classes=1 | methods=5
 - Runtime signals: async_functions=0 | try=2 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=1/1 (100%) | methods=5/5 (100%)
@@ -9687,6 +11164,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=134 | code_lines=103 | risk_score=0
 - API surface: public=3 | top-level functions=0 | classes=3 | methods=12
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=3/3 (100%) | methods=11/12 (91%)
@@ -9701,6 +11180,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=35 | code_lines=24 | risk_score=0
 - API surface: public=1 | top-level functions=0 | classes=1 | methods=3
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=1/1 (100%) | methods=0/3 (0%)
@@ -9715,6 +11196,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=402 | code_lines=344 | risk_score=8
 - API surface: public=2 | top-level functions=0 | classes=2 | methods=25
 - Runtime signals: async_functions=0 | try=3 | raise=0 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=2/2 (100%) | methods=25/25 (100%)
@@ -9729,6 +11212,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=334 | code_lines=261 | risk_score=7
 - API surface: public=1 | top-level functions=0 | classes=1 | methods=9
 - Runtime signals: async_functions=0 | try=2 | raise=0 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=1/1 (100%) | methods=9/9 (100%)
@@ -9743,6 +11228,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=139 | code_lines=108 | risk_score=3
 - API surface: public=1 | top-level functions=0 | classes=1 | methods=4
 - Runtime signals: async_functions=0 | try=3 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=1/1 (100%) | methods=4/4 (100%)
@@ -9757,6 +11244,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=87 | code_lines=61 | risk_score=1
 - API surface: public=1 | top-level functions=0 | classes=1 | methods=4
 - Runtime signals: async_functions=0 | try=1 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=1/1 (100%) | methods=4/4 (100%)
@@ -9771,6 +11260,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=63 | code_lines=47 | risk_score=0
 - API surface: public=1 | top-level functions=0 | classes=1 | methods=4
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=1/1 (100%) | methods=4/4 (100%)
@@ -9785,6 +11276,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=198 | code_lines=155 | risk_score=1
 - API surface: public=1 | top-level functions=0 | classes=1 | methods=5
 - Runtime signals: async_functions=0 | try=1 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=1/1 (100%) | methods=5/5 (100%)
@@ -9799,6 +11292,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=79 | code_lines=66 | risk_score=12
 - API surface: public=1 | top-level functions=0 | classes=1 | methods=3
 - Runtime signals: async_functions=0 | try=2 | raise=0 | broad_except=2 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=1/1 (100%) | methods=0/3 (0%)
@@ -9813,6 +11308,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=86 | code_lines=68 | risk_score=6
 - API surface: public=1 | top-level functions=1 | classes=1 | methods=3
 - Runtime signals: async_functions=0 | try=1 | raise=0 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/1 (0%) | classes=1/1 (100%) | methods=0/3 (0%)
@@ -9827,6 +11324,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=108 | code_lines=75 | risk_score=0
 - API surface: public=1 | top-level functions=0 | classes=1 | methods=3
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=1/1 (100%) | methods=3/3 (100%)
@@ -9841,6 +11340,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=154 | code_lines=113 | risk_score=1
 - API surface: public=1 | top-level functions=0 | classes=1 | methods=4
 - Runtime signals: async_functions=0 | try=1 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=1/1 (100%) | methods=4/4 (100%)
@@ -9855,6 +11356,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=136 | code_lines=98 | risk_score=4
 - API surface: public=1 | top-level functions=0 | classes=1 | methods=3
 - Runtime signals: async_functions=0 | try=4 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=1/1 (100%) | methods=3/3 (100%)
@@ -9869,6 +11372,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=35 | code_lines=24 | risk_score=0
 - API surface: public=1 | top-level functions=0 | classes=1 | methods=3
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=1/1 (100%) | methods=0/3 (0%)
@@ -9883,6 +11388,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=353 | code_lines=270 | risk_score=2
 - API surface: public=1 | top-level functions=0 | classes=1 | methods=6
 - Runtime signals: async_functions=0 | try=2 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=1/1 (100%) | methods=6/6 (100%)
@@ -9897,6 +11404,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=210 | code_lines=162 | risk_score=2
 - API surface: public=2 | top-level functions=0 | classes=2 | methods=5
 - Runtime signals: async_functions=0 | try=2 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=2/2 (100%) | methods=5/5 (100%)
@@ -9911,6 +11420,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=145 | code_lines=117 | risk_score=2
 - API surface: public=1 | top-level functions=0 | classes=1 | methods=4
 - Runtime signals: async_functions=0 | try=2 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=1/1 (100%) | methods=4/4 (100%)
@@ -9925,6 +11436,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=119 | code_lines=91 | risk_score=7
 - API surface: public=1 | top-level functions=0 | classes=1 | methods=4
 - Runtime signals: async_functions=0 | try=2 | raise=0 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=1/1 (100%) | methods=4/4 (100%)
@@ -9939,6 +11452,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=109 | code_lines=78 | risk_score=0
 - API surface: public=1 | top-level functions=0 | classes=1 | methods=3
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=1/1 (100%) | methods=3/3 (100%)
@@ -9953,6 +11468,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=51 | code_lines=38 | risk_score=0
 - API surface: public=1 | top-level functions=0 | classes=1 | methods=3
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=1/1 (100%) | methods=0/3 (0%)
@@ -9967,6 +11484,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=115 | code_lines=82 | risk_score=1
 - API surface: public=1 | top-level functions=0 | classes=1 | methods=3
 - Runtime signals: async_functions=0 | try=1 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=1/1 (100%) | methods=3/3 (100%)
@@ -9981,6 +11500,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=127 | code_lines=92 | risk_score=3
 - API surface: public=1 | top-level functions=0 | classes=1 | methods=3
 - Runtime signals: async_functions=0 | try=3 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=1/1 (100%) | methods=3/3 (100%)
@@ -9995,6 +11516,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=74 | code_lines=60 | risk_score=12
 - API surface: public=1 | top-level functions=0 | classes=1 | methods=3
 - Runtime signals: async_functions=0 | try=2 | raise=0 | broad_except=2 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=1/1 (100%) | methods=0/3 (0%)
@@ -10011,6 +11534,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=3 | code_lines=3 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -10025,6 +11550,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=911 | code_lines=715 | risk_score=15
 - API surface: public=8 | top-level functions=37 | classes=1 | methods=0
 - Runtime signals: async_functions=0 | try=7 | raise=27 | broad_except=3 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=1/37 (2%) | classes=0/1 (0%) | methods=0/0 (n/a)
@@ -10039,6 +11566,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=80 | code_lines=60 | risk_score=0
 - API surface: public=1 | top-level functions=4 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=2/4 (50%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -10053,6 +11582,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=0 | code_lines=0 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -10067,6 +11598,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=53 | code_lines=39 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=3 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -10081,6 +11614,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=979 | code_lines=880 | risk_score=5
 - API surface: public=3 | top-level functions=26 | classes=0 | methods=0
 - Runtime signals: async_functions=22 | try=6 | raise=14 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/26 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -10095,6 +11630,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=1794 | code_lines=1539 | risk_score=11
 - API surface: public=3 | top-level functions=34 | classes=0 | methods=0
 - Runtime signals: async_functions=27 | try=16 | raise=15 | broad_except=2 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=4/34 (11%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -10109,6 +11646,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=81 | code_lines=64 | risk_score=0
 - API surface: public=2 | top-level functions=4 | classes=0 | methods=0
 - Runtime signals: async_functions=1 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/4 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -10123,6 +11662,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=94 | code_lines=82 | risk_score=2
 - API surface: public=1 | top-level functions=3 | classes=0 | methods=0
 - Runtime signals: async_functions=1 | try=2 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/3 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -10137,6 +11678,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=1382 | code_lines=1080 | risk_score=74
 - API surface: public=14 | top-level functions=4 | classes=14 | methods=50
 - Runtime signals: async_functions=19 | try=25 | raise=1 | broad_except=10 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=3/4 (75%) | classes=14/14 (100%) | methods=41/50 (82%)
@@ -10151,6 +11694,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=904 | code_lines=763 | risk_score=15
 - API surface: public=5 | top-level functions=7 | classes=5 | methods=15
 - Runtime signals: async_functions=18 | try=7 | raise=14 | broad_except=3 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=3/7 (42%) | classes=5/5 (100%) | methods=15/15 (100%)
@@ -10165,6 +11710,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=297 | code_lines=244 | risk_score=5
 - API surface: public=7 | top-level functions=16 | classes=0 | methods=0
 - Runtime signals: async_functions=11 | try=3 | raise=7 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/16 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -10179,6 +11726,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=42 | code_lines=34 | risk_score=1
 - API surface: public=1 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=1 | try=1 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -10193,6 +11742,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=609 | code_lines=549 | risk_score=10
 - API surface: public=1 | top-level functions=9 | classes=0 | methods=0
 - Runtime signals: async_functions=7 | try=4 | raise=7 | broad_except=2 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/9 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -10207,6 +11758,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=443 | code_lines=364 | risk_score=11
 - API surface: public=7 | top-level functions=11 | classes=1 | methods=7
 - Runtime signals: async_functions=14 | try=7 | raise=1 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/11 (0%) | classes=0/1 (0%) | methods=0/7 (0%)
@@ -10221,6 +11774,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=377 | code_lines=321 | risk_score=15
 - API surface: public=1 | top-level functions=7 | classes=0 | methods=0
 - Runtime signals: async_functions=7 | try=4 | raise=6 | broad_except=3 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=1/7 (14%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -10235,6 +11790,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=2757 | code_lines=2338 | risk_score=60
 - API surface: public=4 | top-level functions=24 | classes=3 | methods=3
 - Runtime signals: async_functions=9 | try=17 | raise=49 | broad_except=12 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=6/24 (25%) | classes=0/3 (0%) | methods=0/3 (0%)
@@ -10249,6 +11806,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=2262 | code_lines=2062 | risk_score=10
 - API surface: public=14 | top-level functions=28 | classes=0 | methods=0
 - Runtime signals: async_functions=23 | try=13 | raise=14 | broad_except=2 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=15/28 (53%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -10263,6 +11822,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=588 | code_lines=539 | risk_score=10
 - API surface: public=1 | top-level functions=12 | classes=0 | methods=0
 - Runtime signals: async_functions=10 | try=11 | raise=12 | broad_except=2 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=1/12 (8%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -10277,6 +11838,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=409 | code_lines=371 | risk_score=0
 - API surface: public=2 | top-level functions=8 | classes=0 | methods=0
 - Runtime signals: async_functions=6 | try=5 | raise=5 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=2/8 (25%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -10291,6 +11854,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=697 | code_lines=646 | risk_score=0
 - API surface: public=1 | top-level functions=11 | classes=0 | methods=0
 - Runtime signals: async_functions=7 | try=7 | raise=10 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=1/11 (9%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -10305,6 +11870,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=267 | code_lines=240 | risk_score=0
 - API surface: public=1 | top-level functions=6 | classes=0 | methods=0
 - Runtime signals: async_functions=5 | try=3 | raise=5 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=1/6 (16%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -10319,6 +11886,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=185 | code_lines=139 | risk_score=9
 - API surface: public=4 | top-level functions=8 | classes=0 | methods=0
 - Runtime signals: async_functions=7 | try=5 | raise=1 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/8 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -10333,6 +11902,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=64 | code_lines=49 | risk_score=1
 - API surface: public=2 | top-level functions=3 | classes=0 | methods=0
 - Runtime signals: async_functions=2 | try=1 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/3 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -10347,6 +11918,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: asynchronous background processing
+- Source footprint: total_lines=91 | code_lines=70 | risk_score=1
 - API surface: public=3 | top-level functions=4 | classes=0 | methods=0
 - Runtime signals: async_functions=2 | try=1 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/4 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -10361,6 +11934,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=12 | code_lines=7 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -10375,6 +11950,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=129 | code_lines=98 | risk_score=0
 - API surface: public=4 | top-level functions=6 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/6 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -10389,6 +11966,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=83 | code_lines=56 | risk_score=0
 - API surface: public=4 | top-level functions=4 | classes=1 | methods=7
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/4 (0%) | classes=0/1 (0%) | methods=0/7 (0%)
@@ -10403,6 +11982,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=10 | code_lines=7 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -10417,6 +11998,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=115 | code_lines=81 | risk_score=0
 - API surface: public=7 | top-level functions=8 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/8 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -10431,6 +12014,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=2 | code_lines=1 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -10445,6 +12030,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=135 | code_lines=109 | risk_score=5
 - API surface: public=3 | top-level functions=4 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=2 | raise=3 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/4 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -10459,6 +12046,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=92 | code_lines=86 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=1 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -10473,6 +12062,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=122 | code_lines=94 | risk_score=6
 - API surface: public=1 | top-level functions=4 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=2 | raise=1 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/4 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -10487,6 +12078,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=51 | code_lines=39 | risk_score=0
 - API surface: public=1 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=1 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -10501,6 +12094,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=27 | code_lines=19 | risk_score=0
 - API surface: public=2 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -10515,6 +12110,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=135 | code_lines=119 | risk_score=0
 - API surface: public=2 | top-level functions=3 | classes=1 | methods=2
 - Runtime signals: async_functions=0 | try=1 | raise=2 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/1 (0%) | methods=0/2 (0%)
@@ -10529,6 +12126,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=89 | code_lines=77 | risk_score=0
 - API surface: public=2 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=2 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -10543,6 +12142,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=0 | code_lines=0 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -10557,6 +12158,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=640 | code_lines=475 | risk_score=0
 - API surface: public=6 | top-level functions=0 | classes=6 | methods=32
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=6/6 (100%) | methods=32/32 (100%)
@@ -10571,6 +12174,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=0 | code_lines=0 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -10585,6 +12190,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: asynchronous background processing
+- Source footprint: total_lines=176 | code_lines=146 | risk_score=0
 - API surface: public=3 | top-level functions=3 | classes=5 | methods=11
 - Runtime signals: async_functions=7 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/5 (0%) | methods=0/11 (0%)
@@ -10599,6 +12206,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: asynchronous background processing
+- Source footprint: total_lines=110 | code_lines=88 | risk_score=0
 - API surface: public=2 | top-level functions=2 | classes=2 | methods=6
 - Runtime signals: async_functions=2 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/2 (0%) | methods=0/6 (0%)
@@ -10613,6 +12222,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: asynchronous background processing
+- Source footprint: total_lines=336 | code_lines=272 | risk_score=0
 - API surface: public=10 | top-level functions=10 | classes=5 | methods=18
 - Runtime signals: async_functions=10 | try=0 | raise=1 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/10 (0%) | classes=0/5 (0%) | methods=0/18 (0%)
@@ -10627,6 +12238,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: asynchronous background processing
+- Source footprint: total_lines=201 | code_lines=152 | risk_score=0
 - API surface: public=3 | top-level functions=3 | classes=4 | methods=23
 - Runtime signals: async_functions=16 | try=0 | raise=4 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/4 (0%) | methods=0/23 (0%)
@@ -10641,6 +12254,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=86 | code_lines=59 | risk_score=0
 - API surface: public=4 | top-level functions=4 | classes=3 | methods=6
 - Runtime signals: async_functions=6 | try=0 | raise=1 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/4 (0%) | classes=0/3 (0%) | methods=0/6 (0%)
@@ -10655,6 +12270,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=73 | code_lines=61 | risk_score=0
 - API surface: public=5 | top-level functions=5 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/5 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -10669,6 +12286,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=331 | code_lines=237 | risk_score=0
 - API surface: public=5 | top-level functions=0 | classes=5 | methods=16
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=5/5 (100%) | methods=16/16 (100%)
@@ -10683,6 +12302,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: asynchronous background processing
+- Source footprint: total_lines=199 | code_lines=148 | risk_score=0
 - API surface: public=4 | top-level functions=4 | classes=3 | methods=20
 - Runtime signals: async_functions=11 | try=0 | raise=2 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/4 (0%) | classes=1/3 (33%) | methods=0/20 (0%)
@@ -10697,6 +12318,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=384 | code_lines=290 | risk_score=1
 - API surface: public=6 | top-level functions=0 | classes=6 | methods=31
 - Runtime signals: async_functions=0 | try=1 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=6/6 (100%) | methods=31/31 (100%)
@@ -10711,6 +12334,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=633 | code_lines=491 | risk_score=2
 - API surface: public=21 | top-level functions=20 | classes=1 | methods=1
 - Runtime signals: async_functions=0 | try=2 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=20/20 (100%) | classes=1/1 (100%) | methods=0/1 (0%)
@@ -10725,6 +12350,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=550 | code_lines=424 | risk_score=0
 - API surface: public=15 | top-level functions=9 | classes=6 | methods=15
 - Runtime signals: async_functions=20 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=9/9 (100%) | classes=0/6 (0%) | methods=0/15 (0%)
@@ -10739,6 +12366,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=63 | code_lines=53 | risk_score=0
 - API surface: public=2 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=2 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -10753,6 +12382,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=71 | code_lines=58 | risk_score=0
 - API surface: public=3 | top-level functions=3 | classes=0 | methods=0
 - Runtime signals: async_functions=3 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -10767,6 +12398,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=970 | code_lines=801 | risk_score=1
 - API surface: public=21 | top-level functions=22 | classes=0 | methods=0
 - Runtime signals: async_functions=33 | try=1 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/22 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -10781,6 +12414,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: domain/request-response schema definitions
+- Source footprint: total_lines=8 | code_lines=5 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -10795,6 +12430,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=135 | code_lines=106 | risk_score=0
 - API surface: public=5 | top-level functions=7 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=1 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=2/7 (28%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -10809,6 +12446,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=18 | code_lines=14 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -10823,6 +12462,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=44 | code_lines=32 | risk_score=0
 - API surface: public=2 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -10837,6 +12478,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=50 | code_lines=41 | risk_score=0
 - API surface: public=2 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -10851,6 +12494,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=109 | code_lines=82 | risk_score=0
 - API surface: public=6 | top-level functions=6 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/6 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -10865,6 +12510,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=109 | code_lines=81 | risk_score=1
 - API surface: public=3 | top-level functions=4 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=1 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/4 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -10879,6 +12526,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=195 | code_lines=161 | risk_score=0
 - API surface: public=3 | top-level functions=4 | classes=1 | methods=2
 - Runtime signals: async_functions=14 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/4 (0%) | classes=0/1 (0%) | methods=0/2 (0%)
@@ -10893,6 +12542,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=355 | code_lines=284 | risk_score=0
 - API surface: public=6 | top-level functions=8 | classes=1 | methods=1
 - Runtime signals: async_functions=36 | try=0 | raise=2 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/8 (0%) | classes=0/1 (0%) | methods=0/1 (0%)
@@ -10907,6 +12558,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=10 | code_lines=7 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -10921,6 +12574,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=57 | code_lines=44 | risk_score=0
 - API surface: public=4 | top-level functions=4 | classes=0 | methods=0
 - Runtime signals: async_functions=7 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/4 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -10935,6 +12590,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=8 | code_lines=5 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -10949,6 +12606,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=43 | code_lines=33 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=2 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -10963,6 +12622,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=137 | code_lines=102 | risk_score=0
 - API surface: public=9 | top-level functions=10 | classes=0 | methods=0
 - Runtime signals: async_functions=8 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=1/10 (10%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -10977,6 +12638,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=37 | code_lines=26 | risk_score=0
 - API surface: public=2 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=2 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -10991,6 +12654,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=398 | code_lines=329 | risk_score=0
 - API surface: public=20 | top-level functions=20 | classes=0 | methods=0
 - Runtime signals: async_functions=19 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/20 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -11005,6 +12670,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=35 | code_lines=28 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=2 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -11019,6 +12686,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=26 | code_lines=18 | risk_score=0
 - API surface: public=3 | top-level functions=3 | classes=0 | methods=0
 - Runtime signals: async_functions=3 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -11033,6 +12702,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=117 | code_lines=95 | risk_score=0
 - API surface: public=2 | top-level functions=2 | classes=1 | methods=3
 - Runtime signals: async_functions=8 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/1 (0%) | methods=0/3 (0%)
@@ -11047,6 +12718,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=67 | code_lines=54 | risk_score=0
 - API surface: public=4 | top-level functions=4 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/4 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -11061,6 +12734,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=49 | code_lines=41 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=1 | methods=1
 - Runtime signals: async_functions=2 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/1 (0%) | methods=0/1 (0%)
@@ -11075,6 +12750,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=23 | code_lines=18 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -11089,6 +12766,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=151 | code_lines=128 | risk_score=0
 - API surface: public=5 | top-level functions=6 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/6 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -11103,6 +12782,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=17 | code_lines=12 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -11117,6 +12798,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=41 | code_lines=30 | risk_score=0
 - API surface: public=3 | top-level functions=3 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -11131,6 +12814,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=129 | code_lines=106 | risk_score=0
 - API surface: public=1 | top-level functions=3 | classes=3 | methods=4
 - Runtime signals: async_functions=6 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/3 (0%) | methods=0/4 (0%)
@@ -11145,6 +12830,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=110 | code_lines=89 | risk_score=7
 - API surface: public=3 | top-level functions=5 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=2 | raise=0 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/5 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -11159,6 +12846,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=17 | code_lines=14 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -11173,6 +12862,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=10 | code_lines=7 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -11187,6 +12878,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=231 | code_lines=204 | risk_score=0
 - API surface: public=5 | top-level functions=5 | classes=2 | methods=4
 - Runtime signals: async_functions=5 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/5 (0%) | classes=0/2 (0%) | methods=0/4 (0%)
@@ -11201,6 +12894,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=19 | code_lines=15 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -11215,6 +12910,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=379 | code_lines=317 | risk_score=0
 - API surface: public=18 | top-level functions=18 | classes=1 | methods=4
 - Runtime signals: async_functions=5 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/18 (0%) | classes=0/1 (0%) | methods=0/4 (0%)
@@ -11229,6 +12926,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=92 | code_lines=76 | risk_score=0
 - API surface: public=4 | top-level functions=4 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/4 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -11243,6 +12942,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=67 | code_lines=53 | risk_score=0
 - API surface: public=3 | top-level functions=3 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -11257,6 +12958,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=35 | code_lines=23 | risk_score=0
 - API surface: public=2 | top-level functions=3 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -11271,6 +12974,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=398 | code_lines=315 | risk_score=0
 - API surface: public=3 | top-level functions=0 | classes=3 | methods=20
 - Runtime signals: async_functions=12 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=3/3 (100%) | methods=20/20 (100%)
@@ -11285,6 +12990,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=58 | code_lines=41 | risk_score=0
 - API surface: public=2 | top-level functions=2 | classes=2 | methods=5
 - Runtime signals: async_functions=7 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/2 (0%) | methods=0/5 (0%)
@@ -11299,6 +13006,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=3 | code_lines=3 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -11313,6 +13022,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=147 | code_lines=123 | risk_score=0
 - API surface: public=6 | top-level functions=6 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/6 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -11327,6 +13038,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=99 | code_lines=70 | risk_score=0
 - API surface: public=4 | top-level functions=4 | classes=1 | methods=3
 - Runtime signals: async_functions=11 | try=0 | raise=1 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/4 (0%) | classes=0/1 (0%) | methods=0/3 (0%)
@@ -11341,6 +13054,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=15 | code_lines=9 | risk_score=0
 - API surface: public=2 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -11355,6 +13070,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=44 | code_lines=31 | risk_score=0
 - API surface: public=6 | top-level functions=6 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/6 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -11369,6 +13086,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=57 | code_lines=39 | risk_score=0
 - API surface: public=6 | top-level functions=6 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/6 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -11383,6 +13102,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=3 | code_lines=3 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -11397,6 +13118,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=101 | code_lines=79 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=2 | methods=12
 - Runtime signals: async_functions=11 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/1 (0%) | classes=1/2 (50%) | methods=0/12 (0%)
@@ -11411,6 +13134,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=57 | code_lines=45 | risk_score=0
 - API surface: public=4 | top-level functions=4 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/4 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -11425,6 +13150,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=132 | code_lines=106 | risk_score=0
 - API surface: public=6 | top-level functions=6 | classes=0 | methods=0
 - Runtime signals: async_functions=12 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/6 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -11439,6 +13166,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=103 | code_lines=90 | risk_score=0
 - API surface: public=4 | top-level functions=5 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/5 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -11453,6 +13182,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=99 | code_lines=81 | risk_score=0
 - API surface: public=3 | top-level functions=5 | classes=1 | methods=2
 - Runtime signals: async_functions=4 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/5 (0%) | classes=0/1 (0%) | methods=0/2 (0%)
@@ -11467,6 +13198,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=128 | code_lines=98 | risk_score=0
 - API surface: public=4 | top-level functions=4 | classes=1 | methods=1
 - Runtime signals: async_functions=4 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/4 (0%) | classes=0/1 (0%) | methods=0/1 (0%)
@@ -11481,6 +13214,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=279 | code_lines=255 | risk_score=0
 - API surface: public=4 | top-level functions=4 | classes=1 | methods=3
 - Runtime signals: async_functions=6 | try=0 | raise=1 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/4 (0%) | classes=0/1 (0%) | methods=0/3 (0%)
@@ -11495,6 +13230,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=98 | code_lines=85 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=1 | methods=3
 - Runtime signals: async_functions=3 | try=0 | raise=1 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/1 (0%) | methods=0/3 (0%)
@@ -11509,6 +13246,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=66 | code_lines=57 | risk_score=0
 - API surface: public=2 | top-level functions=1 | classes=1 | methods=2
 - Runtime signals: async_functions=2 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/1 (0%) | methods=0/2 (0%)
@@ -11523,6 +13262,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=164 | code_lines=150 | risk_score=0
 - API surface: public=6 | top-level functions=6 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/6 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -11537,6 +13278,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=88 | code_lines=68 | risk_score=0
 - API surface: public=2 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=4 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -11551,6 +13294,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=342 | code_lines=298 | risk_score=0
 - API surface: public=4 | top-level functions=3 | classes=1 | methods=2
 - Runtime signals: async_functions=10 | try=0 | raise=3 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=1/3 (33%) | classes=0/1 (0%) | methods=0/2 (0%)
@@ -11565,6 +13310,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=104 | code_lines=85 | risk_score=0
 - API surface: public=2 | top-level functions=1 | classes=1 | methods=2
 - Runtime signals: async_functions=5 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/1 (0%) | methods=0/2 (0%)
@@ -11579,6 +13326,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=136 | code_lines=116 | risk_score=0
 - API surface: public=2 | top-level functions=1 | classes=1 | methods=2
 - Runtime signals: async_functions=6 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/1 (0%) | methods=0/2 (0%)
@@ -11593,6 +13342,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=81 | code_lines=69 | risk_score=0
 - API surface: public=3 | top-level functions=3 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -11607,6 +13358,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=137 | code_lines=113 | risk_score=0
 - API surface: public=2 | top-level functions=1 | classes=1 | methods=2
 - Runtime signals: async_functions=5 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/1 (0%) | methods=0/2 (0%)
@@ -11621,6 +13374,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=52 | code_lines=44 | risk_score=0
 - API surface: public=3 | top-level functions=3 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -11635,6 +13390,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=54 | code_lines=45 | risk_score=0
 - API surface: public=2 | top-level functions=3 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -11649,6 +13406,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=139 | code_lines=102 | risk_score=0
 - API surface: public=6 | top-level functions=6 | classes=2 | methods=8
 - Runtime signals: async_functions=14 | try=0 | raise=1 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=1/6 (16%) | classes=1/2 (50%) | methods=0/8 (0%)
@@ -11663,6 +13422,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=69 | code_lines=53 | risk_score=0
 - API surface: public=4 | top-level functions=2 | classes=2 | methods=4
 - Runtime signals: async_functions=4 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/2 (0%) | methods=0/4 (0%)
@@ -11677,6 +13438,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=63 | code_lines=50 | risk_score=1
 - API surface: public=2 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=2 | try=1 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -11691,6 +13454,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=48 | code_lines=41 | risk_score=0
 - API surface: public=2 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -11705,6 +13470,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=179 | code_lines=146 | risk_score=0
 - API surface: public=4 | top-level functions=4 | classes=3 | methods=3
 - Runtime signals: async_functions=10 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/4 (0%) | classes=0/3 (0%) | methods=0/3 (0%)
@@ -11719,6 +13486,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=240 | code_lines=204 | risk_score=0
 - API surface: public=17 | top-level functions=17 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/17 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -11733,6 +13502,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=165 | code_lines=132 | risk_score=2
 - API surface: public=2 | top-level functions=3 | classes=2 | methods=12
 - Runtime signals: async_functions=11 | try=2 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/2 (0%) | methods=0/12 (0%)
@@ -11747,6 +13518,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=205 | code_lines=164 | risk_score=0
 - API surface: public=3 | top-level functions=3 | classes=4 | methods=13
 - Runtime signals: async_functions=3 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/4 (0%) | methods=0/13 (0%)
@@ -11761,6 +13534,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=121 | code_lines=100 | risk_score=0
 - API surface: public=2 | top-level functions=2 | classes=3 | methods=6
 - Runtime signals: async_functions=4 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/3 (0%) | methods=0/6 (0%)
@@ -11775,6 +13550,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=160 | code_lines=126 | risk_score=7
 - API surface: public=2 | top-level functions=6 | classes=1 | methods=7
 - Runtime signals: async_functions=2 | try=3 | raise=1 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/6 (0%) | classes=0/1 (0%) | methods=0/7 (0%)
@@ -11789,6 +13566,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=129 | code_lines=92 | risk_score=0
 - API surface: public=3 | top-level functions=3 | classes=3 | methods=9
 - Runtime signals: async_functions=12 | try=0 | raise=2 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/3 (0%) | methods=0/9 (0%)
@@ -11803,6 +13582,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=246 | code_lines=206 | risk_score=0
 - API surface: public=2 | top-level functions=0 | classes=2 | methods=14
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/2 (0%) | methods=12/14 (85%)
@@ -11817,6 +13598,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=60 | code_lines=48 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=4 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -11831,6 +13614,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=432 | code_lines=277 | risk_score=0
 - API surface: public=15 | top-level functions=18 | classes=0 | methods=0
 - Runtime signals: async_functions=9 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=8/18 (44%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -11845,6 +13630,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=36 | code_lines=27 | risk_score=0
 - API surface: public=3 | top-level functions=3 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -11859,6 +13646,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=190 | code_lines=168 | risk_score=0
 - API surface: public=3 | top-level functions=3 | classes=5 | methods=5
 - Runtime signals: async_functions=8 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/5 (0%) | methods=0/5 (0%)
@@ -11873,6 +13662,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=59 | code_lines=41 | risk_score=0
 - API surface: public=4 | top-level functions=5 | classes=0 | methods=0
 - Runtime signals: async_functions=4 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=1/5 (20%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -11887,6 +13678,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=44 | code_lines=29 | risk_score=0
 - API surface: public=4 | top-level functions=2 | classes=2 | methods=4
 - Runtime signals: async_functions=6 | try=0 | raise=1 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/2 (0%) | methods=0/4 (0%)
@@ -11901,6 +13694,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=63 | code_lines=50 | risk_score=2
 - API surface: public=2 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=2 | try=2 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -11915,6 +13710,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=50 | code_lines=35 | risk_score=0
 - API surface: public=5 | top-level functions=5 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=3 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/5 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -11929,6 +13726,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=191 | code_lines=146 | risk_score=0
 - API surface: public=9 | top-level functions=10 | classes=0 | methods=0
 - Runtime signals: async_functions=9 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=10/10 (100%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -11943,6 +13742,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=173 | code_lines=144 | risk_score=0
 - API surface: public=5 | top-level functions=5 | classes=2 | methods=4
 - Runtime signals: async_functions=8 | try=0 | raise=1 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/5 (0%) | classes=0/2 (0%) | methods=0/4 (0%)
@@ -11957,6 +13758,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=39 | code_lines=29 | risk_score=0
 - API surface: public=3 | top-level functions=3 | classes=1 | methods=2
 - Runtime signals: async_functions=4 | try=1 | raise=2 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/1 (0%) | methods=0/2 (0%)
@@ -11971,6 +13774,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=99 | code_lines=73 | risk_score=0
 - API surface: public=7 | top-level functions=7 | classes=1 | methods=3
 - Runtime signals: async_functions=4 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/7 (0%) | classes=0/1 (0%) | methods=0/3 (0%)
@@ -11985,6 +13790,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=130 | code_lines=105 | risk_score=0
 - API surface: public=3 | top-level functions=3 | classes=3 | methods=7
 - Runtime signals: async_functions=6 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/3 (0%) | methods=0/7 (0%)
@@ -11999,6 +13806,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=296 | code_lines=238 | risk_score=0
 - API surface: public=7 | top-level functions=7 | classes=1 | methods=0
 - Runtime signals: async_functions=18 | try=0 | raise=5 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/7 (0%) | classes=0/1 (0%) | methods=0/0 (n/a)
@@ -12013,6 +13822,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=74 | code_lines=59 | risk_score=0
 - API surface: public=3 | top-level functions=3 | classes=2 | methods=3
 - Runtime signals: async_functions=4 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/2 (0%) | methods=0/3 (0%)
@@ -12027,6 +13838,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=60 | code_lines=44 | risk_score=0
 - API surface: public=3 | top-level functions=3 | classes=1 | methods=2
 - Runtime signals: async_functions=4 | try=0 | raise=1 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/1 (0%) | methods=0/2 (0%)
@@ -12041,6 +13854,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=71 | code_lines=54 | risk_score=0
 - API surface: public=3 | top-level functions=4 | classes=1 | methods=1
 - Runtime signals: async_functions=4 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/4 (0%) | classes=0/1 (0%) | methods=0/1 (0%)
@@ -12055,6 +13870,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=240 | code_lines=185 | risk_score=0
 - API surface: public=4 | top-level functions=0 | classes=4 | methods=18
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/4 (0%) | methods=18/18 (100%)
@@ -12069,6 +13886,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=185 | code_lines=156 | risk_score=0
 - API surface: public=4 | top-level functions=0 | classes=4 | methods=8
 - Runtime signals: async_functions=0 | try=0 | raise=1 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=1/4 (25%) | methods=8/8 (100%)
@@ -12083,6 +13902,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=52 | code_lines=39 | risk_score=0
 - API surface: public=3 | top-level functions=4 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/4 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -12097,6 +13918,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=43 | code_lines=30 | risk_score=0
 - API surface: public=4 | top-level functions=4 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=2 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/4 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -12111,6 +13934,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=125 | code_lines=98 | risk_score=0
 - API surface: public=4 | top-level functions=4 | classes=1 | methods=4
 - Runtime signals: async_functions=10 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/4 (0%) | classes=0/1 (0%) | methods=0/4 (0%)
@@ -12125,6 +13950,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=27 | code_lines=23 | risk_score=0
 - API surface: public=2 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -12139,6 +13966,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=98 | code_lines=80 | risk_score=0
 - API surface: public=3 | top-level functions=5 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/5 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -12153,6 +13982,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=82 | code_lines=60 | risk_score=0
 - API surface: public=4 | top-level functions=4 | classes=1 | methods=3
 - Runtime signals: async_functions=6 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/4 (0%) | classes=0/1 (0%) | methods=0/3 (0%)
@@ -12167,6 +13998,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=144 | code_lines=119 | risk_score=0
 - API surface: public=5 | top-level functions=5 | classes=0 | methods=0
 - Runtime signals: async_functions=6 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/5 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -12181,6 +14014,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=256 | code_lines=214 | risk_score=0
 - API surface: public=19 | top-level functions=19 | classes=1 | methods=2
 - Runtime signals: async_functions=2 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/19 (0%) | classes=0/1 (0%) | methods=0/2 (0%)
@@ -12195,6 +14030,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=117 | code_lines=102 | risk_score=0
 - API surface: public=5 | top-level functions=5 | classes=1 | methods=2
 - Runtime signals: async_functions=5 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/5 (0%) | classes=0/1 (0%) | methods=0/2 (0%)
@@ -12209,6 +14046,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=32 | code_lines=19 | risk_score=0
 - API surface: public=3 | top-level functions=3 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -12223,6 +14062,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=196 | code_lines=152 | risk_score=0
 - API surface: public=9 | top-level functions=9 | classes=0 | methods=0
 - Runtime signals: async_functions=21 | try=0 | raise=5 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/9 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -12237,6 +14078,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=237 | code_lines=195 | risk_score=0
 - API surface: public=20 | top-level functions=20 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/20 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -12251,6 +14094,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=466 | code_lines=437 | risk_score=0
 - API surface: public=11 | top-level functions=11 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/11 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -12265,6 +14110,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=52 | code_lines=42 | risk_score=0
 - API surface: public=2 | top-level functions=4 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=1 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/4 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -12279,6 +14126,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=410 | code_lines=386 | risk_score=0
 - API surface: public=10 | top-level functions=10 | classes=0 | methods=0
 - Runtime signals: async_functions=10 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=1/10 (10%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -12293,6 +14142,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=51 | code_lines=44 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -12307,6 +14158,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=60 | code_lines=44 | risk_score=0
 - API surface: public=2 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=6 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -12321,6 +14174,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=13 | code_lines=7 | risk_score=0
 - API surface: public=3 | top-level functions=3 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -12335,6 +14190,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=375 | code_lines=334 | risk_score=0
 - API surface: public=19 | top-level functions=20 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/20 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -12349,6 +14206,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=80 | code_lines=71 | risk_score=0
 - API surface: public=2 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -12363,6 +14222,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=143 | code_lines=115 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=4 | methods=8
 - Runtime signals: async_functions=7 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/4 (0%) | methods=0/8 (0%)
@@ -12377,6 +14238,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=134 | code_lines=113 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=3 | methods=4
 - Runtime signals: async_functions=4 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=1/1 (100%) | classes=0/3 (0%) | methods=0/4 (0%)
@@ -12391,6 +14254,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=101 | code_lines=83 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=3 | methods=4
 - Runtime signals: async_functions=4 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/3 (0%) | methods=0/4 (0%)
@@ -12405,6 +14270,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=753 | code_lines=682 | risk_score=0
 - API surface: public=11 | top-level functions=11 | classes=3 | methods=4
 - Runtime signals: async_functions=14 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/11 (0%) | classes=0/3 (0%) | methods=0/4 (0%)
@@ -12419,6 +14286,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=79 | code_lines=56 | risk_score=0
 - API surface: public=6 | top-level functions=6 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/6 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -12433,6 +14302,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=53 | code_lines=36 | risk_score=0
 - API surface: public=5 | top-level functions=5 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/5 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -12447,6 +14318,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=155 | code_lines=132 | risk_score=0
 - API surface: public=2 | top-level functions=2 | classes=3 | methods=4
 - Runtime signals: async_functions=5 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/3 (0%) | methods=0/4 (0%)
@@ -12461,6 +14334,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=111 | code_lines=92 | risk_score=0
 - API surface: public=7 | top-level functions=7 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/7 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -12475,6 +14350,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=159 | code_lines=133 | risk_score=0
 - API surface: public=4 | top-level functions=4 | classes=0 | methods=0
 - Runtime signals: async_functions=11 | try=0 | raise=2 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/4 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -12489,6 +14366,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=529 | code_lines=435 | risk_score=0
 - API surface: public=33 | top-level functions=33 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/33 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -12503,6 +14382,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=1040 | code_lines=967 | risk_score=0
 - API surface: public=22 | top-level functions=22 | classes=0 | methods=0
 - Runtime signals: async_functions=35 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/22 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -12517,6 +14398,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=93 | code_lines=76 | risk_score=0
 - API surface: public=4 | top-level functions=4 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/4 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -12531,6 +14414,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=49 | code_lines=42 | risk_score=0
 - API surface: public=2 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -12545,6 +14430,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=97 | code_lines=75 | risk_score=0
 - API surface: public=2 | top-level functions=2 | classes=4 | methods=6
 - Runtime signals: async_functions=7 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/4 (0%) | methods=0/6 (0%)
@@ -12559,6 +14446,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=112 | code_lines=92 | risk_score=0
 - API surface: public=1 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=7 | try=0 | raise=1 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=1/2 (50%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -12573,6 +14462,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=156 | code_lines=121 | risk_score=0
 - API surface: public=1 | top-level functions=2 | classes=2 | methods=5
 - Runtime signals: async_functions=11 | try=0 | raise=2 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=1/2 (50%) | classes=0/2 (0%) | methods=0/5 (0%)
@@ -12587,6 +14478,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=47 | code_lines=33 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=2 | methods=3
 - Runtime signals: async_functions=4 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/2 (0%) | methods=0/3 (0%)
@@ -12601,6 +14494,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=331 | code_lines=271 | risk_score=0
 - API surface: public=6 | top-level functions=6 | classes=3 | methods=7
 - Runtime signals: async_functions=11 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/6 (0%) | classes=0/3 (0%) | methods=0/7 (0%)
@@ -12615,6 +14510,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=72 | code_lines=57 | risk_score=0
 - API surface: public=4 | top-level functions=4 | classes=1 | methods=1
 - Runtime signals: async_functions=2 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/4 (0%) | classes=0/1 (0%) | methods=0/1 (0%)
@@ -12629,6 +14526,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=42 | code_lines=32 | risk_score=0
 - API surface: public=4 | top-level functions=4 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/4 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -12643,6 +14542,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=58 | code_lines=46 | risk_score=0
 - API surface: public=4 | top-level functions=5 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/5 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -12657,6 +14558,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=45 | code_lines=31 | risk_score=0
 - API surface: public=6 | top-level functions=6 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/6 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -12671,6 +14574,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=189 | code_lines=145 | risk_score=0
 - API surface: public=12 | top-level functions=12 | classes=2 | methods=4
 - Runtime signals: async_functions=7 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/12 (0%) | classes=0/2 (0%) | methods=0/4 (0%)
@@ -12685,6 +14590,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=151 | code_lines=120 | risk_score=1
 - API surface: public=1 | top-level functions=2 | classes=3 | methods=4
 - Runtime signals: async_functions=4 | try=1 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=1/2 (50%) | classes=0/3 (0%) | methods=0/4 (0%)
@@ -12699,6 +14606,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=125 | code_lines=109 | risk_score=0
 - API surface: public=2 | top-level functions=2 | classes=1 | methods=3
 - Runtime signals: async_functions=5 | try=0 | raise=3 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=2/2 (100%) | classes=0/1 (0%) | methods=0/3 (0%)
@@ -12713,6 +14622,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=35 | code_lines=26 | risk_score=0
 - API surface: public=4 | top-level functions=4 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/4 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -12727,6 +14638,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=134 | code_lines=106 | risk_score=0
 - API surface: public=3 | top-level functions=3 | classes=0 | methods=0
 - Runtime signals: async_functions=10 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -12741,6 +14654,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=65 | code_lines=43 | risk_score=0
 - API surface: public=2 | top-level functions=2 | classes=4 | methods=8
 - Runtime signals: async_functions=7 | try=0 | raise=1 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/4 (0%) | methods=0/8 (0%)
@@ -12755,6 +14670,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=123 | code_lines=107 | risk_score=0
 - API surface: public=5 | top-level functions=6 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/6 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -12769,6 +14686,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=202 | code_lines=159 | risk_score=0
 - API surface: public=7 | top-level functions=7 | classes=2 | methods=9
 - Runtime signals: async_functions=12 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=1/7 (14%) | classes=1/2 (50%) | methods=0/9 (0%)
@@ -12783,6 +14702,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=145 | code_lines=119 | risk_score=0
 - API surface: public=4 | top-level functions=0 | classes=4 | methods=15
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=4/4 (100%) | methods=0/15 (0%)
@@ -12797,6 +14718,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=194 | code_lines=155 | risk_score=0
 - API surface: public=6 | top-level functions=6 | classes=1 | methods=6
 - Runtime signals: async_functions=8 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/6 (0%) | classes=1/1 (100%) | methods=0/6 (0%)
@@ -12811,6 +14734,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=320 | code_lines=267 | risk_score=0
 - API surface: public=2 | top-level functions=0 | classes=2 | methods=15
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/2 (0%) | methods=14/15 (93%)
@@ -12825,6 +14750,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=67 | code_lines=50 | risk_score=0
 - API surface: public=3 | top-level functions=3 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -12839,6 +14766,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=100 | code_lines=73 | risk_score=0
 - API surface: public=3 | top-level functions=3 | classes=1 | methods=8
 - Runtime signals: async_functions=9 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/1 (0%) | methods=0/8 (0%)
@@ -12853,6 +14782,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=118 | code_lines=92 | risk_score=0
 - API surface: public=2 | top-level functions=2 | classes=3 | methods=12
 - Runtime signals: async_functions=2 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/3 (0%) | methods=0/12 (0%)
@@ -12867,6 +14798,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=124 | code_lines=93 | risk_score=0
 - API surface: public=4 | top-level functions=4 | classes=1 | methods=2
 - Runtime signals: async_functions=1 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/4 (0%) | classes=0/1 (0%) | methods=0/2 (0%)
@@ -12881,6 +14814,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=79 | code_lines=55 | risk_score=0
 - API surface: public=4 | top-level functions=4 | classes=2 | methods=2
 - Runtime signals: async_functions=6 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/4 (0%) | classes=0/2 (0%) | methods=0/2 (0%)
@@ -12895,6 +14830,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=86 | code_lines=74 | risk_score=1
 - API surface: public=2 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=1 | try=1 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -12909,6 +14846,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=66 | code_lines=50 | risk_score=0
 - API surface: public=2 | top-level functions=2 | classes=1 | methods=2
 - Runtime signals: async_functions=5 | try=0 | raise=1 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/1 (0%) | methods=0/2 (0%)
@@ -12923,6 +14862,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=3 | code_lines=3 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -12937,6 +14878,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=37 | code_lines=25 | risk_score=0
 - API surface: public=3 | top-level functions=3 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -12951,6 +14894,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=31 | code_lines=24 | risk_score=0
 - API surface: public=3 | top-level functions=3 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -12965,6 +14910,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=190 | code_lines=172 | risk_score=0
 - API surface: public=6 | top-level functions=6 | classes=1 | methods=2
 - Runtime signals: async_functions=7 | try=0 | raise=1 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/6 (0%) | classes=0/1 (0%) | methods=0/2 (0%)
@@ -12979,6 +14926,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=38 | code_lines=28 | risk_score=0
 - API surface: public=4 | top-level functions=4 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/4 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -12993,6 +14942,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=58 | code_lines=45 | risk_score=0
 - API surface: public=5 | top-level functions=5 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/5 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -13007,6 +14958,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=154 | code_lines=133 | risk_score=0
 - API surface: public=7 | top-level functions=7 | classes=0 | methods=0
 - Runtime signals: async_functions=8 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/7 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -13021,6 +14974,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=204 | code_lines=187 | risk_score=0
 - API surface: public=7 | top-level functions=7 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/7 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -13035,6 +14990,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=16 | code_lines=12 | risk_score=0
 - API surface: public=2 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -13049,6 +15006,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=20 | code_lines=12 | risk_score=0
 - API surface: public=3 | top-level functions=3 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -13063,6 +15022,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=24 | code_lines=17 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -13077,6 +15038,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=43 | code_lines=37 | risk_score=0
 - API surface: public=2 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -13091,6 +15054,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=36 | code_lines=26 | risk_score=0
 - API surface: public=2 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=1 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -13105,6 +15070,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=31 | code_lines=20 | risk_score=0
 - API surface: public=4 | top-level functions=4 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/4 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -13119,6 +15086,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=34 | code_lines=19 | risk_score=0
 - API surface: public=7 | top-level functions=7 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/7 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -13133,6 +15102,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=65 | code_lines=44 | risk_score=0
 - API surface: public=3 | top-level functions=3 | classes=0 | methods=0
 - Runtime signals: async_functions=3 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -13147,6 +15118,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=287 | code_lines=191 | risk_score=0
 - API surface: public=7 | top-level functions=3 | classes=4 | methods=29
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=1/3 (33%) | classes=0/4 (0%) | methods=0/29 (0%)
@@ -13161,6 +15134,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=59 | code_lines=41 | risk_score=0
 - API surface: public=2 | top-level functions=3 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -13175,6 +15150,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=15 | code_lines=9 | risk_score=0
 - API surface: public=3 | top-level functions=3 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -13189,6 +15166,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=21 | code_lines=14 | risk_score=0
 - API surface: public=2 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -13203,6 +15182,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=91 | code_lines=67 | risk_score=0
 - API surface: public=5 | top-level functions=5 | classes=3 | methods=4
 - Runtime signals: async_functions=9 | try=0 | raise=2 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/5 (0%) | classes=0/3 (0%) | methods=0/4 (0%)
@@ -13217,6 +15198,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=45 | code_lines=31 | risk_score=0
 - API surface: public=7 | top-level functions=7 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/7 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -13231,6 +15214,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=58 | code_lines=42 | risk_score=2
 - API surface: public=4 | top-level functions=4 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=2 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/4 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -13245,6 +15230,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=25 | code_lines=16 | risk_score=0
 - API surface: public=4 | top-level functions=4 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/4 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -13259,6 +15246,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=64 | code_lines=41 | risk_score=0
 - API surface: public=11 | top-level functions=11 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/11 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -13273,6 +15262,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=34 | code_lines=25 | risk_score=0
 - API surface: public=4 | top-level functions=4 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/4 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -13287,6 +15278,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=27 | code_lines=18 | risk_score=0
 - API surface: public=3 | top-level functions=3 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -13301,6 +15294,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=23 | code_lines=15 | risk_score=0
 - API surface: public=4 | top-level functions=4 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/4 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -13315,6 +15310,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=41 | code_lines=30 | risk_score=0
 - API surface: public=4 | top-level functions=4 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/4 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -13329,6 +15326,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=12 | code_lines=7 | risk_score=0
 - API surface: public=2 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -13343,6 +15342,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: asynchronous background processing
+- Source footprint: total_lines=57 | code_lines=39 | risk_score=0
 - API surface: public=3 | top-level functions=3 | classes=0 | methods=0
 - Runtime signals: async_functions=11 | try=0 | raise=4 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -13357,6 +15358,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=108 | code_lines=82 | risk_score=0
 - API surface: public=13 | top-level functions=13 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/13 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -13371,6 +15374,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=19 | code_lines=13 | risk_score=0
 - API surface: public=3 | top-level functions=3 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -13385,6 +15390,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=38 | code_lines=24 | risk_score=0
 - API surface: public=6 | top-level functions=6 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/6 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -13399,6 +15406,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=41 | code_lines=27 | risk_score=0
 - API surface: public=5 | top-level functions=5 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/5 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -13413,6 +15422,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=25 | code_lines=20 | risk_score=0
 - API surface: public=2 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -13427,6 +15438,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=104 | code_lines=74 | risk_score=0
 - API surface: public=15 | top-level functions=15 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/15 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -13441,6 +15454,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: asynchronous background processing
+- Source footprint: total_lines=3 | code_lines=3 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -13455,6 +15470,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: asynchronous background processing
+- Source footprint: total_lines=195 | code_lines=167 | risk_score=0
 - API surface: public=3 | top-level functions=5 | classes=2 | methods=7
 - Runtime signals: async_functions=8 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/5 (0%) | classes=0/2 (0%) | methods=0/7 (0%)
@@ -13469,6 +15486,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: asynchronous background processing
+- Source footprint: total_lines=79 | code_lines=63 | risk_score=0
 - API surface: public=3 | top-level functions=4 | classes=0 | methods=0
 - Runtime signals: async_functions=6 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/4 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -13483,6 +15502,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: asynchronous background processing
+- Source footprint: total_lines=166 | code_lines=136 | risk_score=0
 - API surface: public=5 | top-level functions=7 | classes=1 | methods=2
 - Runtime signals: async_functions=6 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/7 (0%) | classes=0/1 (0%) | methods=0/2 (0%)
@@ -13497,6 +15518,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: asynchronous background processing
+- Source footprint: total_lines=295 | code_lines=219 | risk_score=0
 - API surface: public=6 | top-level functions=6 | classes=9 | methods=33
 - Runtime signals: async_functions=21 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/6 (0%) | classes=0/9 (0%) | methods=0/33 (0%)
@@ -13511,6 +15534,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: asynchronous background processing
+- Source footprint: total_lines=234 | code_lines=179 | risk_score=0
 - API surface: public=4 | top-level functions=4 | classes=4 | methods=17
 - Runtime signals: async_functions=16 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/4 (0%) | classes=0/4 (0%) | methods=0/17 (0%)
@@ -13525,6 +15550,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: asynchronous background processing
+- Source footprint: total_lines=60 | code_lines=44 | risk_score=0
 - API surface: public=4 | top-level functions=4 | classes=0 | methods=0
 - Runtime signals: async_functions=2 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/4 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -13539,6 +15566,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: asynchronous background processing
+- Source footprint: total_lines=33 | code_lines=25 | risk_score=0
 - API surface: public=2 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=1 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -13553,6 +15582,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: asynchronous background processing
+- Source footprint: total_lines=30 | code_lines=22 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=2 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -13567,6 +15598,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: asynchronous background processing
+- Source footprint: total_lines=85 | code_lines=69 | risk_score=13
 - API surface: public=1 | top-level functions=3 | classes=0 | methods=0
 - Runtime signals: async_functions=1 | try=3 | raise=0 | broad_except=2 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -13581,6 +15614,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: asynchronous background processing
+- Source footprint: total_lines=209 | code_lines=164 | risk_score=0
 - API surface: public=12 | top-level functions=12 | classes=0 | methods=0
 - Runtime signals: async_functions=8 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/12 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -13595,6 +15630,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: asynchronous background processing
+- Source footprint: total_lines=104 | code_lines=81 | risk_score=0
 - API surface: public=5 | top-level functions=5 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=2/5 (40%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -13609,6 +15646,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: asynchronous background processing
+- Source footprint: total_lines=62 | code_lines=48 | risk_score=0
 - API surface: public=2 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -13623,6 +15662,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: asynchronous background processing
+- Source footprint: total_lines=63 | code_lines=52 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=1 | methods=3
 - Runtime signals: async_functions=2 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/1 (0%) | methods=0/3 (0%)
@@ -13637,6 +15678,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: asynchronous background processing
+- Source footprint: total_lines=505 | code_lines=439 | risk_score=0
 - API surface: public=10 | top-level functions=13 | classes=4 | methods=14
 - Runtime signals: async_functions=20 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/13 (0%) | classes=0/4 (0%) | methods=0/14 (0%)
@@ -13651,6 +15694,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: asynchronous background processing
+- Source footprint: total_lines=216 | code_lines=186 | risk_score=0
 - API surface: public=9 | top-level functions=10 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/10 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -13665,6 +15710,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: asynchronous background processing
+- Source footprint: total_lines=135 | code_lines=104 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=4 | methods=20
 - Runtime signals: async_functions=18 | try=0 | raise=4 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/4 (0%) | methods=0/20 (0%)
@@ -13679,6 +15726,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: asynchronous background processing
+- Source footprint: total_lines=250 | code_lines=212 | risk_score=0
 - API surface: public=6 | top-level functions=7 | classes=1 | methods=8
 - Runtime signals: async_functions=13 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=4/7 (57%) | classes=0/1 (0%) | methods=0/8 (0%)
@@ -13693,6 +15742,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: asynchronous background processing
+- Source footprint: total_lines=172 | code_lines=145 | risk_score=0
 - API surface: public=2 | top-level functions=3 | classes=3 | methods=8
 - Runtime signals: async_functions=7 | try=0 | raise=1 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/3 (0%) | methods=0/8 (0%)
@@ -13707,6 +15758,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: asynchronous background processing
+- Source footprint: total_lines=34 | code_lines=23 | risk_score=0
 - API surface: public=3 | top-level functions=3 | classes=0 | methods=0
 - Runtime signals: async_functions=3 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -13721,6 +15774,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: asynchronous background processing
+- Source footprint: total_lines=39 | code_lines=29 | risk_score=0
 - API surface: public=2 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=2 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -13735,6 +15790,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: asynchronous background processing
+- Source footprint: total_lines=238 | code_lines=207 | risk_score=0
 - API surface: public=3 | top-level functions=4 | classes=3 | methods=9
 - Runtime signals: async_functions=9 | try=0 | raise=2 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/4 (0%) | classes=0/3 (0%) | methods=0/9 (0%)
@@ -13749,6 +15806,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: asynchronous background processing
+- Source footprint: total_lines=191 | code_lines=158 | risk_score=2
 - API surface: public=12 | top-level functions=12 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=2 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/12 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -13763,6 +15822,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: asynchronous background processing
+- Source footprint: total_lines=150 | code_lines=122 | risk_score=0
 - API surface: public=2 | top-level functions=2 | classes=3 | methods=11
 - Runtime signals: async_functions=9 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/3 (0%) | methods=0/11 (0%)
@@ -13777,6 +15838,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: asynchronous background processing
+- Source footprint: total_lines=193 | code_lines=155 | risk_score=0
 - API surface: public=2 | top-level functions=3 | classes=3 | methods=11
 - Runtime signals: async_functions=9 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/3 (0%) | methods=0/11 (0%)
@@ -13791,6 +15854,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: asynchronous background processing
+- Source footprint: total_lines=221 | code_lines=176 | risk_score=7
 - API surface: public=6 | top-level functions=7 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=2 | raise=0 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/7 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -13805,6 +15870,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: asynchronous background processing
+- Source footprint: total_lines=835 | code_lines=743 | risk_score=7
 - API surface: public=24 | top-level functions=25 | classes=1 | methods=4
 - Runtime signals: async_functions=12 | try=2 | raise=0 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/25 (0%) | classes=0/1 (0%) | methods=0/4 (0%)
@@ -13819,6 +15886,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=48 | code_lines=42 | risk_score=2
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=2 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -13833,6 +15902,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=95 | code_lines=76 | risk_score=0
 - API surface: public=5 | top-level functions=6 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=1 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=1/6 (16%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -13849,6 +15920,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: asynchronous background processing
+- Source footprint: total_lines=2 | code_lines=1 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -13863,6 +15936,8 @@
 - Failure modes: not documented
 - Extension points: not documented
 - Dependencies (doc): not documented
+- Inferred role: service entrypoint and lifecycle wiring
+- Source footprint: total_lines=344 | code_lines=292 | risk_score=22
 - API surface: public=2 | top-level functions=4 | classes=1 | methods=8
 - Runtime signals: async_functions=8 | try=6 | raise=4 | broad_except=4 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/4 (0%) | classes=0/1 (0%) | methods=0/8 (0%)
