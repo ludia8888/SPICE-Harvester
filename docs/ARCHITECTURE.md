@@ -105,39 +105,39 @@ Source: `docker-compose.full.yml` (with extends resolved).
 
 ```mermaid
 graph TD
-  svc_action_outbox_worker[action-outbox-worker]
-  svc_action_worker[action-worker]
-  svc_agent[agent]
-  svc_alertmanager[alertmanager]
-  svc_bff[bff]
-  svc_connector_sync_worker[connector-sync-worker]
-  svc_connector_trigger_service[connector-trigger-service]
-  svc_db_migrations[db-migrations]
-  svc_elasticsearch[elasticsearch]
-  svc_funnel[funnel]
-  svc_grafana[grafana]
-  svc_ingest_reconciler_worker[ingest-reconciler-worker]
-  svc_instance_worker[instance-worker]
-  svc_jaeger[jaeger]
-  svc_kafka[kafka]
-  svc_kafka_ui[kafka-ui]
-  svc_lakefs[lakefs]
-  svc_lakefs_init[lakefs-init]
-  svc_message_relay[message-relay]
-  svc_minio[minio]
-  svc_minio_init[minio-init]
-  svc_objectify_worker[objectify-worker]
-  svc_oms[oms]
-  svc_ontology_worker[ontology-worker]
-  svc_otel_collector[otel-collector]
-  svc_pipeline_scheduler[pipeline-scheduler]
-  svc_pipeline_worker[pipeline-worker]
-  svc_postgres[postgres]
-  svc_projection_worker[projection-worker]
-  svc_prometheus[prometheus]
-  svc_redis[redis]
-  svc_writeback_materializer_worker[writeback-materializer-worker]
-  svc_zookeeper[zookeeper]
+  svc_action_outbox_worker["action-outbox-worker"]
+  svc_action_worker["action-worker"]
+  svc_agent["agent"]
+  svc_alertmanager["alertmanager"]
+  svc_bff["bff"]
+  svc_connector_sync_worker["connector-sync-worker"]
+  svc_connector_trigger_service["connector-trigger-service"]
+  svc_db_migrations["db-migrations"]
+  svc_elasticsearch["elasticsearch"]
+  svc_funnel["funnel"]
+  svc_grafana["grafana"]
+  svc_ingest_reconciler_worker["ingest-reconciler-worker"]
+  svc_instance_worker["instance-worker"]
+  svc_jaeger["jaeger"]
+  svc_kafka["kafka"]
+  svc_kafka_ui["kafka-ui"]
+  svc_lakefs["lakefs"]
+  svc_lakefs_init["lakefs-init"]
+  svc_message_relay["message-relay"]
+  svc_minio["minio"]
+  svc_minio_init["minio-init"]
+  svc_objectify_worker["objectify-worker"]
+  svc_oms["oms"]
+  svc_ontology_worker["ontology-worker"]
+  svc_otel_collector["otel-collector"]
+  svc_pipeline_scheduler["pipeline-scheduler"]
+  svc_pipeline_worker["pipeline-worker"]
+  svc_postgres["postgres"]
+  svc_projection_worker["projection-worker"]
+  svc_prometheus["prometheus"]
+  svc_redis["redis"]
+  svc_writeback_materializer_worker["writeback-materializer-worker"]
+  svc_zookeeper["zookeeper"]
   svc_action_outbox_worker --> svc_kafka
   svc_action_outbox_worker --> svc_postgres
   svc_action_outbox_worker --> svc_minio
@@ -238,30 +238,30 @@ graph TD
 
 ```mermaid
 flowchart LR
-  bff[BFF] --> oms[OMS]
-  oms --> es[Elasticsearch]
-  oms --> pg[Postgres]
+  bff["BFF"] --> oms["OMS"]
+  oms --> es["Elasticsearch"]
+  oms --> pg["Postgres"]
 ```
 
 ### Action Path (Submit -> Async Apply)
 
 ```mermaid
 flowchart LR
-  bff[BFF] --> kafka[Kafka]
-  kafka --> aw[action-worker]
-  aw --> lakefs[LakeFS]
-  aw --> pg[Postgres]
-  aw --> relay[message-relay]
+  bff["BFF"] --> kafka["Kafka"]
+  kafka --> aw["action-worker"]
+  aw --> lakefs["LakeFS"]
+  aw --> pg["Postgres"]
+  aw --> relay["message-relay"]
 ```
 
 ### Projection Path (Change -> Read Model)
 
 ```mermaid
 flowchart LR
-  oms[OMS] --> kafka[Kafka]
-  kafka --> pw[projection-worker]
-  pw --> es[Elasticsearch]
-  pw --> redis[Redis]
+  oms["OMS"] --> kafka["Kafka"]
+  kafka --> pw["projection-worker"]
+  pw --> es["Elasticsearch"]
+  pw --> redis["Redis"]
 ```
 
 ## Development Change Map

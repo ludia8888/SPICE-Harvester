@@ -180,6 +180,11 @@ def _render_mermaid_block(lines: List[str]) -> str:
     return "\n".join(["```mermaid", *lines, "```"]).rstrip() + "\n"
 
 
+def _mermaid_label(text: str) -> str:
+    escaped = str(text).replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
+
+
 def _compose_inventory(services: Sequence[ComposeService]) -> str:
     lines: List[str] = []
     lines.append(f"Source: `{COMPOSE_MAIN.name}` (with extends resolved).")
@@ -199,12 +204,12 @@ def _service_dependency_graph(services: Sequence[ComposeService]) -> str:
     graph_lines.append("graph TD")
     node_ids = {svc.name: f"svc_{svc.name.replace('-', '_')}" for svc in services}
     for svc in services:
-        graph_lines.append(f"  {node_ids[svc.name]}[{svc.name}]")
+        graph_lines.append(f"  {node_ids[svc.name]}[{_mermaid_label(svc.name)}]")
     for svc in services:
         for dep in svc.depends_on:
             if dep not in node_ids:
                 node_ids[dep] = f"svc_{dep.replace('-', '_')}"
-                graph_lines.append(f"  {node_ids[dep]}[{dep}]")
+                graph_lines.append(f"  {node_ids[dep]}[{_mermaid_label(dep)}]")
             graph_lines.append(f"  {node_ids[svc.name]} --> {node_ids[dep]}")
     return _render_mermaid_block(graph_lines)
 
@@ -276,9 +281,9 @@ def _critical_runtime_paths(services: Sequence[ComposeService]) -> str:
             _render_mermaid_block(
                 [
                     "flowchart LR",
-                    "  bff[BFF] --> oms[OMS]",
-                    "  oms --> es[Elasticsearch]",
-                    "  oms --> pg[Postgres]",
+                    f"  bff[{_mermaid_label('BFF')}] --> oms[{_mermaid_label('OMS')}]",
+                    f"  oms --> es[{_mermaid_label('Elasticsearch')}]",
+                    f"  oms --> pg[{_mermaid_label('Postgres')}]",
                 ]
             ).rstrip()
         )
@@ -291,11 +296,11 @@ def _critical_runtime_paths(services: Sequence[ComposeService]) -> str:
             _render_mermaid_block(
                 [
                     "flowchart LR",
-                    "  bff[BFF] --> kafka[Kafka]",
-                    "  kafka --> aw[action-worker]",
-                    "  aw --> lakefs[LakeFS]",
-                    "  aw --> pg[Postgres]",
-                    "  aw --> relay[message-relay]",
+                    f"  bff[{_mermaid_label('BFF')}] --> kafka[{_mermaid_label('Kafka')}]",
+                    f"  kafka --> aw[{_mermaid_label('action-worker')}]",
+                    f"  aw --> lakefs[{_mermaid_label('LakeFS')}]",
+                    f"  aw --> pg[{_mermaid_label('Postgres')}]",
+                    f"  aw --> relay[{_mermaid_label('message-relay')}]",
                 ]
             ).rstrip()
         )
@@ -308,10 +313,10 @@ def _critical_runtime_paths(services: Sequence[ComposeService]) -> str:
             _render_mermaid_block(
                 [
                     "flowchart LR",
-                    "  oms[OMS] --> kafka[Kafka]",
-                    "  kafka --> pw[projection-worker]",
-                    "  pw --> es[Elasticsearch]",
-                    "  pw --> redis[Redis]",
+                    f"  oms[{_mermaid_label('OMS')}] --> kafka[{_mermaid_label('Kafka')}]",
+                    f"  kafka --> pw[{_mermaid_label('projection-worker')}]",
+                    f"  pw --> es[{_mermaid_label('Elasticsearch')}]",
+                    f"  pw --> redis[{_mermaid_label('Redis')}]",
                 ]
             ).rstrip()
         )
