@@ -125,7 +125,7 @@ def _compute_tool_run_id(*, run_id: str, step_id: Optional[str], step_index: int
     try:
         return str(uuid5(UUID(str(run_id)), base))
     except Exception:
-        logging.getLogger(__name__).warning("Broad exception fallback at agent/services/agent_runtime.py:128", exc_info=True)
+        logging.getLogger(__name__).warning("Exception fallback at agent/services/agent_runtime.py:128", exc_info=True)
         return str(uuid4())
 
 
@@ -870,7 +870,7 @@ class AgentRuntime:
         try:
             return len(_safe_json(obj).encode("utf-8"))
         except Exception:
-            logging.getLogger(__name__).warning("Broad exception fallback at agent/services/agent_runtime.py:872", exc_info=True)
+            logging.getLogger(__name__).warning("Exception fallback at agent/services/agent_runtime.py:872", exc_info=True)
             return 0
 
     def _forward_headers(self, headers: Dict[str, str], actor: str) -> Dict[str, str]:
@@ -1405,7 +1405,7 @@ class AgentRuntime:
                 }
             )
         except Exception as exc:
-            logging.getLogger(__name__).warning("Broad exception fallback at agent/services/agent_runtime.py:1406", exc_info=True)
+            logging.getLogger(__name__).warning("Exception fallback at agent/services/agent_runtime.py:1406", exc_info=True)
             error = f"template resolution failed: {exc}"
             await self.record_event(
                 event_type="AGENT_TOOL_RESULT",
@@ -1787,7 +1787,7 @@ class AgentRuntime:
                     if pipeline_run_status in {"FAILED", "CANCELLED", "TIMEOUT"}:
                         error = f"pipeline job {pipeline_job_id} {pipeline_run_status}"
         except Exception as exc:
-            logging.getLogger(__name__).warning("Broad exception fallback at agent/services/agent_runtime.py:1787", exc_info=True)
+            logging.getLogger(__name__).warning("Exception fallback at agent/services/agent_runtime.py:1787", exc_info=True)
             error = str(exc)
             if not error:
                 error = exc.__class__.__name__

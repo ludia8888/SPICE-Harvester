@@ -27,7 +27,7 @@ try:  # optional
 
     HAS_ASYNCPG = True
 except Exception:  # pragma: no cover - optional dependency
-    logging.getLogger(__name__).warning("Broad exception fallback at shared/errors/error_response.py:28", exc_info=True)
+    logging.getLogger(__name__).warning("Exception fallback at shared/errors/error_response.py:28", exc_info=True)
     asyncpg = None
     HAS_ASYNCPG = False
 

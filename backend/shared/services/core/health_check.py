@@ -104,7 +104,7 @@ class HealthCheckInterface(ABC):
                 error="timeout"
             )
         except Exception as e:
-            logging.getLogger(__name__).warning("Broad exception fallback at shared/services/core/health_check.py:106", exc_info=True)
+            logging.getLogger(__name__).warning("Exception fallback at shared/services/core/health_check.py:106", exc_info=True)
             return HealthCheckResult(
                 status=HealthStatus.UNHEALTHY,
                 service_name=self.service_name,
@@ -159,7 +159,7 @@ class DatabaseHealthCheck(HealthCheckInterface):
             )
             
         except Exception as e:
-            logging.getLogger(__name__).warning("Broad exception fallback at shared/services/core/health_check.py:160", exc_info=True)
+            logging.getLogger(__name__).warning("Exception fallback at shared/services/core/health_check.py:160", exc_info=True)
             response_time = (time.time() - start_time) * 1000
             return HealthCheckResult(
                 status=HealthStatus.UNHEALTHY,
@@ -228,7 +228,7 @@ class RedisHealthCheck(HealthCheckInterface):
             )
             
         except Exception as e:
-            logging.getLogger(__name__).warning("Broad exception fallback at shared/services/core/health_check.py:224", exc_info=True)
+            logging.getLogger(__name__).warning("Exception fallback at shared/services/core/health_check.py:224", exc_info=True)
             response_time = (time.time() - start_time) * 1000
             return HealthCheckResult(
                 status=HealthStatus.UNHEALTHY,
@@ -297,7 +297,7 @@ class ElasticsearchHealthCheck(HealthCheckInterface):
             )
             
         except Exception as e:
-            logging.getLogger(__name__).warning("Broad exception fallback at shared/services/core/health_check.py:292", exc_info=True)
+            logging.getLogger(__name__).warning("Exception fallback at shared/services/core/health_check.py:292", exc_info=True)
             response_time = (time.time() - start_time) * 1000
             return HealthCheckResult(
                 status=HealthStatus.UNHEALTHY,
@@ -363,7 +363,7 @@ class StorageHealthCheck(HealthCheckInterface):
                 )
                 
         except Exception as e:
-            logging.getLogger(__name__).warning("Broad exception fallback at shared/services/core/health_check.py:357", exc_info=True)
+            logging.getLogger(__name__).warning("Exception fallback at shared/services/core/health_check.py:357", exc_info=True)
             response_time = (time.time() - start_time) * 1000
             return HealthCheckResult(
                 status=HealthStatus.UNHEALTHY,

@@ -733,7 +733,7 @@ class StorageService:
                 command_data = await self.load_json(bucket, file_key)
 
                 # Normalize shape:
-                # - Legacy shape: {command_type, payload, ...}
+                # - Compatibility shape: {command_type, payload, ...}
                 # - Current instance-worker snapshot shape: {command: {...}, payload: <full/merged>, ...}
                 command_record = command_data
                 if isinstance(command_data, dict) and isinstance(command_data.get("command"), dict):

@@ -560,7 +560,7 @@ class DatasetRegistry(PostgresSchemaRegistry):
                 """
             )
 
-            # Migrate legacy integer versioning to lakeFS commit ids.
+            # Migrate older integer versioning to lakeFS commit ids.
             await conn.execute(
                 f"""
                 ALTER TABLE {self._schema}.dataset_versions
@@ -569,7 +569,7 @@ class DatasetRegistry(PostgresSchemaRegistry):
             )
             # Best-effort backfill:
             # - If artifact_key is an s3:// URI, the second path segment is the ref (commit/branch).
-            # - Otherwise, synthesize a stable legacy identifier so existing rows remain addressable.
+            # - Otherwise, synthesize a stable compatibility identifier so existing rows remain addressable.
             await conn.execute(
                 f"""
                 UPDATE {self._schema}.dataset_versions
@@ -2353,7 +2353,7 @@ class DatasetRegistry(PostgresSchemaRegistry):
             try:
                 return int(str(result).split()[-1])
             except Exception:
-                logging.getLogger(__name__).warning("Broad exception fallback at shared/services/registries/dataset_registry.py:2356", exc_info=True)
+                logging.getLogger(__name__).warning("Exception fallback at shared/services/registries/dataset_registry.py:2356", exc_info=True)
                 return 0
 
     async def remap_instance_edits(
@@ -2390,7 +2390,7 @@ class DatasetRegistry(PostgresSchemaRegistry):
                     try:
                         updated += int(str(result).split()[-1])
                     except Exception:
-                        logging.getLogger(__name__).warning("Broad exception fallback at shared/services/registries/dataset_registry.py:2392", exc_info=True)
+                        logging.getLogger(__name__).warning("Exception fallback at shared/services/registries/dataset_registry.py:2392", exc_info=True)
                         continue
         return updated
 
@@ -2528,7 +2528,7 @@ class DatasetRegistry(PostgresSchemaRegistry):
                     try:
                         updated += int(str(result).split()[-1])
                     except Exception:
-                        logging.getLogger(__name__).warning("Broad exception fallback at shared/services/registries/dataset_registry.py:2529", exc_info=True)
+                        logging.getLogger(__name__).warning("Exception fallback at shared/services/registries/dataset_registry.py:2529", exc_info=True)
                         continue
         return updated
 
@@ -2586,7 +2586,7 @@ class DatasetRegistry(PostgresSchemaRegistry):
         try:
             return int(str(result).split()[-1])
         except Exception:
-            logging.getLogger(__name__).warning("Broad exception fallback at shared/services/registries/dataset_registry.py:2586", exc_info=True)
+            logging.getLogger(__name__).warning("Exception fallback at shared/services/registries/dataset_registry.py:2586", exc_info=True)
             return 0
 
     async def create_relationship_spec(
@@ -3025,7 +3025,7 @@ class DatasetRegistry(PostgresSchemaRegistry):
             try:
                 return int(str(result).split()[-1])
             except Exception:
-                logging.getLogger(__name__).warning("Broad exception fallback at shared/services/registries/dataset_registry.py:3024", exc_info=True)
+                logging.getLogger(__name__).warning("Exception fallback at shared/services/registries/dataset_registry.py:3024", exc_info=True)
                 return 0
 
     async def create_schema_migration_plan(
@@ -4118,7 +4118,7 @@ class DatasetRegistry(PostgresSchemaRegistry):
             try:
                 oldest_age_seconds = int((now - oldest_created).total_seconds())
             except Exception:
-                logging.getLogger(__name__).warning("Broad exception fallback at shared/services/registries/dataset_registry.py:4116", exc_info=True)
+                logging.getLogger(__name__).warning("Exception fallback at shared/services/registries/dataset_registry.py:4116", exc_info=True)
                 oldest_age_seconds = None
 
         return {

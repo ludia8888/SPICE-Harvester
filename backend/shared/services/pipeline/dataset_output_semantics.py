@@ -242,7 +242,7 @@ def normalize_dataset_output_metadata(
     normalized_write_mode = _normalize_write_mode(write_mode_raw)
     if write_mode_key and write_mode_key not in {"write_mode", "writeMode"}:
         warnings.append(
-            f"legacy write-mode key '{write_mode_key}' normalized to 'write_mode={normalized_write_mode}'"
+            f"compatibility write-mode key '{write_mode_key}' normalized to 'write_mode={normalized_write_mode}'"
         )
 
     primary_key_raw = _first_raw(
@@ -261,7 +261,7 @@ def normalize_dataset_output_metadata(
     )
     if post_filtering_key and post_filtering_key not in {"post_filtering_column", "postFilteringColumn"}:
         warnings.append(
-            "legacy post-filtering key "
+            "compatibility post-filtering key "
             f"'{post_filtering_key}' normalized to 'post_filtering_column={post_filtering_value}'"
         )
 
@@ -274,7 +274,7 @@ def normalize_dataset_output_metadata(
     output_format = _text(output_format_value).lower() or "parquet"
     if output_format_key and output_format_key not in {"output_format", "outputFormat"}:
         warnings.append(
-            f"legacy output format key '{output_format_key}' normalized to 'output_format={output_format}'"
+            f"compatibility output format key '{output_format_key}' normalized to 'output_format={output_format}'"
         )
 
     partition_value = _first_raw(

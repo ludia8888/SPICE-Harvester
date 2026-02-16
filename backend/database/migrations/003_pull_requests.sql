@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS pull_requests (
     -- MVCC optimistic locking
     version INT DEFAULT 1 NOT NULL,
     
-    -- Cache for legacy diff results
+    -- Cache for compatibility diff results
     diff_cache JSONB,
     conflicts JSONB,
     

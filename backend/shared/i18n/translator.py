@@ -22,7 +22,7 @@ def m(*, en: str, ko: str, lang: Optional[str] = None, **params: Any) -> str:
     try:
         return template.format(**params)
     except Exception:
-        logging.getLogger(__name__).warning("Broad exception fallback at shared/i18n/translator.py:23", exc_info=True)
+        logging.getLogger(__name__).warning("Exception fallback at shared/i18n/translator.py:23", exc_info=True)
         return template
 
 

@@ -57,7 +57,7 @@ class ComplexTypeSerializer:
                 # Default serialization
                 return str(value), {"type": data_type}
         except Exception as e:
-            logging.getLogger(__name__).warning("Broad exception fallback at shared/serializers/complex_type_serializer.py:60", exc_info=True)
+            logging.getLogger(__name__).warning("Exception fallback at shared/serializers/complex_type_serializer.py:60", exc_info=True)
             return str(value), {"type": data_type, "error": str(e)}
 
     @staticmethod

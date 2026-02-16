@@ -29,7 +29,7 @@ class SystemAnalyzer:
             "components_analyzed": [
                 "Event Sourcing (Kafka + processed_events registry)",
                 "MVCC (PostgreSQL)",
-                "TerminusDB Integration",
+                "Foundry Object Storage v2 Integration",
                 "MCP Integration",
                 "Worker Services"
             ],

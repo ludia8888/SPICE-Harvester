@@ -30,14 +30,15 @@ def _s3_client():
 def _cleanup_bucket(client, bucket: str) -> None:
     try:
         response = client.list_objects_v2(Bucket=bucket)
-    except Exception:
+    except Exception as exc:
+        print(f"[cleanup-warning] list_objects_v2 failed for bucket={bucket}: {exc}")
         return
     for obj in response.get("Contents", []):
         client.delete_object(Bucket=bucket, Key=obj["Key"])
     try:
         client.delete_bucket(Bucket=bucket)
-    except Exception:
-        pass
+    except Exception as exc:
+        print(f"[cleanup-warning] delete_bucket failed for bucket={bucket}: {exc}")
 
 
 @pytest.mark.asyncio

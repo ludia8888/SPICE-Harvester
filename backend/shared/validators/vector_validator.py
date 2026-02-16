@@ -27,7 +27,7 @@ class VectorValidator(BaseValidator):
             try:
                 normalized = json.loads(value)
             except Exception:
-                logging.getLogger(__name__).warning("Broad exception fallback at shared/validators/vector_validator.py:28", exc_info=True)
+                logging.getLogger(__name__).warning("Exception fallback at shared/validators/vector_validator.py:28", exc_info=True)
                 return ValidationResult(is_valid=False, message="Invalid JSON vector format")
 
         if not isinstance(normalized, list):
@@ -42,7 +42,7 @@ class VectorValidator(BaseValidator):
             try:
                 expected = int(dimensions)
             except Exception:
-                logging.getLogger(__name__).warning("Broad exception fallback at shared/validators/vector_validator.py:42", exc_info=True)
+                logging.getLogger(__name__).warning("Exception fallback at shared/validators/vector_validator.py:42", exc_info=True)
                 return ValidationResult(is_valid=False, message="Invalid vector dimensions constraint")
             if len(normalized) != expected:
                 return ValidationResult(

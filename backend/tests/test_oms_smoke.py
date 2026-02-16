@@ -322,7 +322,7 @@ async def test_oms_end_to_end_smoke():
             await _wait_for_ontology_present(session, db_name=db_name, ontology_id=class_id, branch=write_branch)
 
             # Enterprise contract:
-            # Some legacy schema documents may discard custom per-property metadata, so OMS overlays
+            # Some older schema documents may discard custom per-property metadata, so OMS overlays
             # key_spec from a separate registry to preserve primaryKey/titleKey on reads.
             async with session.get(
                 f"{OMS_URL}/api/v1/database/{db_name}/ontology/{class_id}",
@@ -374,4 +374,4 @@ async def test_oms_end_to_end_smoke():
                     await _wait_for_db_exists(session, db_name=db_name, expected=False, timeout_seconds=60)
             except Exception:
                 # Avoid masking test failures; cleanup can be retried manually.
-                pass
+                print(f"[cleanup-warning] failed to delete test database {db_name}", flush=True)

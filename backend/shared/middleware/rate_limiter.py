@@ -449,7 +449,7 @@ def rate_limit(
                         if client_ip and rate_limit_config.is_whitelisted(client_ip):
                             bypass_rate_limit = True
                     except Exception:
-                        logging.getLogger(__name__).warning("Broad exception fallback at shared/middleware/rate_limiter.py:450", exc_info=True)
+                        logging.getLogger(__name__).warning("Exception fallback at shared/middleware/rate_limiter.py:450", exc_info=True)
                         bypass_rate_limit = False
             
             # If no Request found, skip rate limiting (for non-HTTP contexts)

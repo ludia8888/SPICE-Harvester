@@ -164,7 +164,7 @@ def get_production_type_inference_service() -> TypeInferenceInterface:
 
 def get_mock_type_inference_service() -> TypeInferenceInterface:
     """
-    Legacy helper kept for backward compatibility.
+    Compatibility helper kept for backward compatibility.
 
     This project no longer ships a mock implementation for type inference.
     The returned service is the real production implementation.

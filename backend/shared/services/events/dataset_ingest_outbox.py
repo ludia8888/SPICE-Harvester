@@ -253,7 +253,7 @@ class DatasetIngestOutboxPublisher:
             try:
                 await self._publish_item(item)
             except Exception as exc:
-                logging.getLogger(__name__).warning("Broad exception fallback at shared/services/events/dataset_ingest_outbox.py:236", exc_info=True)
+                logging.getLogger(__name__).warning("Exception fallback at shared/services/events/dataset_ingest_outbox.py:236", exc_info=True)
                 await self._handle_failure(item, error=str(exc))
         return len(batch)
 

@@ -1,6 +1,6 @@
 # Backend Method Index
 
-> Generated: 2026-02-16T12:25:31+09:00
+> Generated: 2026-02-16T12:30:43+09:00
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 
 ## action_outbox_worker
@@ -4602,7 +4602,7 @@
   - `_parse_dt(value)` (line 22): no docstring
   - `async _run_queue(limit, db_name, branch)` (line 32): no docstring
   - `async _run_replay(from_dt, to_dt, limit)` (line 68): no docstring
-  - `async main()` (line 103): no docstring
+  - `async main()` (line 106): no docstring
 
 ### `backend/scripts/dependency_parsing.py`
 - **Functions**
@@ -5354,7 +5354,7 @@
 ### `backend/shared/interfaces/type_inference.py`
 - **Functions**
   - `get_production_type_inference_service()` (line 153): 🔥 Get REAL production type inference service!
-  - `get_mock_type_inference_service()` (line 165): Legacy helper kept for backward compatibility.
+  - `get_mock_type_inference_service()` (line 165): Compatibility helper kept for backward compatibility.
 - **Classes**
   - `TypeInferenceInterface` (line 13): Abstract interface for type inference services.
     - `async infer_column_type(self, column_data, column_name, include_complex_types, context_columns, metadata)` (line 22): Analyze a single column and infer its type.
@@ -6187,9 +6187,9 @@
     - `async get_command_details(self, command_id)` (line 282): Get complete command details including status and result.
     - `async list_user_commands(self, user_id, status_filter, limit)` (line 315): List commands for a specific user.
     - `async cleanup_old_commands(self, days)` (line 362): Clean up commands older than specified days.
-    - `async set_command_status(self, command_id, status, metadata)` (line 378): Legacy compatibility method for setting command status.
-    - `async get_command_status(self, command_id)` (line 421): Legacy compatibility method for getting command status.
-    - `async get_command_result(self, command_id)` (line 448): Legacy compatibility method for getting command result.
+    - `async set_command_status(self, command_id, status, metadata)` (line 378): Compatibility method for setting command status.
+    - `async get_command_status(self, command_id)` (line 421): Compatibility method for getting command status.
+    - `async get_command_result(self, command_id)` (line 448): Compatibility method for getting command result.
 
 ### `backend/shared/services/core/consistency_token.py`
 - **Functions**
@@ -6336,7 +6336,7 @@
   - `_normalize_ref(ref)` (line 19): Normalize a relationship reference to TargetClass/instance_id format.
   - `_expects_many(cardinality)` (line 38): Determine if a relationship cardinality expects multiple values.
   - `_extract_from_relationship_list(rel_list, payload, relationships, known_fields)` (line 52): Extract relationships from a list of relationship definitions (OntologyResponse or OMS dict).
-  - `_extract_from_graph_schema(schema, payload, relationships, known_fields)` (line 96): Extract relationships from legacy graph-schema style definitions (`@class`).
+  - `_extract_from_graph_schema(schema, payload, relationships, known_fields)` (line 96): Extract relationships from compatibility graph-schema style definitions (`@class`).
   - `_pattern_fallback(payload, relationships)` (line 130): Fallback: detect relationships by field name patterns.
   - `extract_relationships(payload, ontology_data, rel_map, allow_pattern_fallback)` (line 153): Extract relationship fields from an instance payload.
 
@@ -8890,7 +8890,7 @@
 - **Classes**
   - `ValidationResult` (line 11): Result of validation operation
     - `error(self)` (line 20): Get error message if validation failed
-    - `to_tuple(self)` (line 24): Convert to legacy tuple format for backward compatibility
+    - `to_tuple(self)` (line 24): Convert to compatibility tuple format for backward compatibility
   - `BaseValidator` (line 29): Abstract base class for validators
     - `validate(self, value, constraints)` (line 33): Validate a value against constraints
     - `normalize(self, value)` (line 49): Normalize a value to standard format
@@ -9140,12 +9140,12 @@
   - `_create_customer_and_product(db_name, customer_id, product_id, wait_command)` (line 462): no docstring
   - `_assert_converged(db_name, customer_id, product_id, customer_command_id, product_command_id, retry_expected)` (line 498): no docstring
   - `scenario_kafka_down_then_recover()` (line 556): no docstring
-  - `scenario_redis_down_then_recover()` (line 588): no docstring
-  - `scenario_es_down_then_recover()` (line 610): no docstring
-  - `scenario_instance_worker_crash_after_claim()` (line 642): no docstring
-  - `scenario_out_of_order_delivery()` (line 680): no docstring
-  - `scenario_soak_random_failures(duration_s, seed)` (line 764): Soak test with real infra + random partial failures (no mocks).
-  - `main()` (line 849): no docstring
+  - `scenario_redis_down_then_recover()` (line 589): no docstring
+  - `scenario_es_down_then_recover()` (line 611): no docstring
+  - `scenario_instance_worker_crash_after_claim()` (line 643): no docstring
+  - `scenario_out_of_order_delivery()` (line 681): no docstring
+  - `scenario_soak_random_failures(duration_s, seed)` (line 765): Soak test with real infra + random partial failures (no mocks).
+  - `main()` (line 850): no docstring
 - **Classes**
   - `Endpoints` (line 72): no docstring
 
@@ -9233,15 +9233,6 @@
   - `test_auth_disabled_requires_explicit_allow()` (line 51): no docstring
   - `async test_oms_write_requires_auth()` (line 65): no docstring
 
-### `backend/tests/test_branch_virtualization_e2e.py`
-- **Functions**
-  - `async _get_write_side_last_sequence(aggregate_type, aggregate_id)` (line 62): Best-effort: fetch current write-side sequence for OCC cleanup (returns None if Postgres unavailable).
-  - `async _wait_for_db_exists(session, db_name, expected, timeout_seconds, poll_interval_seconds)` (line 117): no docstring
-  - `async _wait_for_command_completed(session, command_id, timeout_seconds, poll_interval_seconds)` (line 137): no docstring
-  - `async _wait_for_ontology_present(session, db_name, ontology_id, timeout_seconds, poll_interval_seconds)` (line 162): no docstring
-  - `async _wait_for_graph_node(session, db_name, branch, class_id, primary_key_value, expected_name, require_overlay_index, timeout_seconds, poll_interval_seconds)` (line 183): Poll BFF graph query until a single node is returned and ES enrichment is ready.
-  - `async test_branch_virtualization_overlay_copy_on_write()` (line 261): no docstring
-
 ### `backend/tests/test_command_status_ttl_e2e.py`
 - **Functions**
   - `_set_env(**updates)` (line 22): no docstring
@@ -9268,57 +9259,57 @@
     - `test_kafka_consumer_groups_listable(self)` (line 354): Verify consumer groups can be listed (connectivity + broker feature check).
     - `test_expected_consumer_groups_present(self)` (line 364): Verify critical worker consumer groups exist (proxy for "workers are actually running").
     - `test_read_committed_filters_aborted_transactions(self)` (line 416): End-to-end verification: read_committed consumers must NOT see aborted transactional messages.
-  - `TestBFFHealth` (line 509): Verify BFF is running and healthy.
-    - `async test_bff_health_endpoint(self)` (line 514): BFF health endpoint should return success.
-    - `async test_bff_databases_connected(self)` (line 525): BFF should have database connections.
-  - `TestMSAServiceHealth` (line 539): Verify all first-class services are reachable (full stack).
-    - `async test_oms_health_endpoint(self)` (line 544): no docstring
-    - `async test_funnel_health_endpoint(self)` (line 551): no docstring
-    - `async test_agent_health_endpoint(self)` (line 558): no docstring
-    - `async test_ingest_reconciler_health_endpoint(self)` (line 565): no docstring
-  - `TestDatabaseConnectivity` (line 576): Verify database connectivity.
-    - `async test_postgres_connection(self)` (line 581): PostgreSQL should be connectable.
-    - `async test_redis_connection(self)` (line 598): Redis should be connectable and require authentication (prod safety).
-  - `TestInfraConnectivity` (line 653): Verify non-DB infra dependencies (S3/MinIO, lakeFS, Elasticsearch).
-    - `async test_minio_health(self)` (line 658): no docstring
-    - `async test_lakefs_health(self)` (line 665): no docstring
-    - `async test_elasticsearch_health(self)` (line 674): no docstring
-  - `TestSystemWiring` (line 683): Verify producer/consumer wiring between key MSAs (no mocks).
-    - `async test_message_relay_publishes_event_store_appends(self)` (line 693): Message relay must publish newly appended Event Store events to Kafka.
-    - `async test_connector_trigger_publishes_outbox(self)` (line 767): Connector trigger service must publish pending outbox items to Kafka.
-    - `async test_pipeline_scheduler_enqueues_scheduled_pipeline(self)` (line 821): Pipeline scheduler must enqueue due scheduled pipelines to Kafka.
-    - `async test_action_outbox_emits_action_applied_event(self)` (line 902): Action outbox worker must emit ActionApplied into the event store, and the relay must publish it to Kafka.
-  - `TestOutboxPatternVerification` (line 1025): Verify outbox pattern implementation.
-    - `test_objectify_outbox_uses_aggregate_key(self)` (line 1028): Objectify outbox should scope ordering by run_id when present.
-    - `test_objectify_outbox_tracks_delivery(self)` (line 1043): Objectify outbox should track individual delivery status.
-    - `test_message_relay_prefers_ordering_key(self)` (line 1056): Message relay should prefer ordering_key for Kafka partitioning when present.
-  - `TestProcessedEventRegistryIdempotency` (line 1071): Verify ProcessedEventRegistry provides idempotency.
-    - `async test_claim_idempotency(self)` (line 1076): ProcessedEventRegistry.claim should be idempotent.
-    - `async test_sequence_ordering(self)` (line 1110): ProcessedEventRegistry should enforce sequence ordering.
-  - `TestPipelineJobQueue` (line 1164): Verify PipelineJobQueue implementation.
-    - `test_pipeline_job_has_dedupe_key(self)` (line 1167): PipelineJob should auto-generate dedupe_key.
-    - `test_pipeline_job_queue_uses_pipeline_id_key(self)` (line 1181): PipelineJobQueue should use pipeline_id as partition key.
-  - `TestEndToEndFlowSimulation` (line 1195): Simulate E2E flows without actually processing jobs.
-    - `async test_objectify_job_creation_flow(self)` (line 1199): Test creating an objectify job payload.
-    - `async test_pipeline_job_creation_flow(self)` (line 1227): Test creating a pipeline job payload.
-  - `TestWorkerModuleImports` (line 1262): Verify workers can be imported without errors.
-    - `test_objectify_worker_import(self)` (line 1265): Objectify worker should be importable.
-    - `test_pipeline_worker_import(self)` (line 1270): Pipeline worker should be importable.
-    - `test_action_worker_import(self)` (line 1275): Action worker should be importable.
-    - `test_connector_sync_worker_import(self)` (line 1280): Connector sync worker should be importable.
-    - `test_ontology_worker_import(self)` (line 1285): Ontology worker should be importable.
-    - `test_instance_worker_import(self)` (line 1290): Instance worker should be importable.
-    - `test_projection_worker_import(self)` (line 1295): Projection worker should be importable.
-    - `test_action_outbox_worker_import(self)` (line 1300): Action outbox worker should be importable.
-    - `test_ingest_reconciler_worker_import(self)` (line 1305): Ingest reconciler worker should be importable.
-    - `test_writeback_materializer_worker_import(self)` (line 1310): Writeback materializer worker should be importable.
-    - `test_connector_trigger_service_import(self)` (line 1315): Connector trigger service should be importable.
-    - `test_pipeline_scheduler_import(self)` (line 1320): Pipeline scheduler should be importable.
-    - `test_message_relay_import(self)` (line 1325): Message relay should be importable.
-  - `TestConsistencySummary` (line 1336): Summary tests for all consistency features.
-    - `test_all_critical_settings_enforced(self)` (line 1339): All critical Kafka settings should be enforced.
-    - `test_idempotency_patterns_present(self)` (line 1351): Idempotency patterns should be present.
-    - `test_occ_support_present(self)` (line 1369): OCC support should be present in PipelineRegistry.
+  - `TestBFFHealth` (line 510): Verify BFF is running and healthy.
+    - `async test_bff_health_endpoint(self)` (line 515): BFF health endpoint should return success.
+    - `async test_bff_databases_connected(self)` (line 526): BFF should have database connections.
+  - `TestMSAServiceHealth` (line 540): Verify all first-class services are reachable (full stack).
+    - `async test_oms_health_endpoint(self)` (line 545): no docstring
+    - `async test_funnel_health_endpoint(self)` (line 552): no docstring
+    - `async test_agent_health_endpoint(self)` (line 559): no docstring
+    - `async test_ingest_reconciler_health_endpoint(self)` (line 566): no docstring
+  - `TestDatabaseConnectivity` (line 577): Verify database connectivity.
+    - `async test_postgres_connection(self)` (line 582): PostgreSQL should be connectable.
+    - `async test_redis_connection(self)` (line 599): Redis should be connectable and require authentication (prod safety).
+  - `TestInfraConnectivity` (line 654): Verify non-DB infra dependencies (S3/MinIO, lakeFS, Elasticsearch).
+    - `async test_minio_health(self)` (line 659): no docstring
+    - `async test_lakefs_health(self)` (line 666): no docstring
+    - `async test_elasticsearch_health(self)` (line 675): no docstring
+  - `TestSystemWiring` (line 684): Verify producer/consumer wiring between key MSAs (no mocks).
+    - `async test_message_relay_publishes_event_store_appends(self)` (line 694): Message relay must publish newly appended Event Store events to Kafka.
+    - `async test_connector_trigger_publishes_outbox(self)` (line 768): Connector trigger service must publish pending outbox items to Kafka.
+    - `async test_pipeline_scheduler_enqueues_scheduled_pipeline(self)` (line 822): Pipeline scheduler must enqueue due scheduled pipelines to Kafka.
+    - `async test_action_outbox_emits_action_applied_event(self)` (line 903): Action outbox worker must emit ActionApplied into the event store, and the relay must publish it to Kafka.
+  - `TestOutboxPatternVerification` (line 1026): Verify outbox pattern implementation.
+    - `test_objectify_outbox_uses_aggregate_key(self)` (line 1029): Objectify outbox should scope ordering by run_id when present.
+    - `test_objectify_outbox_tracks_delivery(self)` (line 1044): Objectify outbox should track individual delivery status.
+    - `test_message_relay_prefers_ordering_key(self)` (line 1057): Message relay should prefer ordering_key for Kafka partitioning when present.
+  - `TestProcessedEventRegistryIdempotency` (line 1072): Verify ProcessedEventRegistry provides idempotency.
+    - `async test_claim_idempotency(self)` (line 1077): ProcessedEventRegistry.claim should be idempotent.
+    - `async test_sequence_ordering(self)` (line 1111): ProcessedEventRegistry should enforce sequence ordering.
+  - `TestPipelineJobQueue` (line 1165): Verify PipelineJobQueue implementation.
+    - `test_pipeline_job_has_dedupe_key(self)` (line 1168): PipelineJob should auto-generate dedupe_key.
+    - `test_pipeline_job_queue_uses_pipeline_id_key(self)` (line 1182): PipelineJobQueue should use pipeline_id as partition key.
+  - `TestEndToEndFlowSimulation` (line 1196): Simulate E2E flows without actually processing jobs.
+    - `async test_objectify_job_creation_flow(self)` (line 1200): Test creating an objectify job payload.
+    - `async test_pipeline_job_creation_flow(self)` (line 1228): Test creating a pipeline job payload.
+  - `TestWorkerModuleImports` (line 1263): Verify workers can be imported without errors.
+    - `test_objectify_worker_import(self)` (line 1266): Objectify worker should be importable.
+    - `test_pipeline_worker_import(self)` (line 1271): Pipeline worker should be importable.
+    - `test_action_worker_import(self)` (line 1276): Action worker should be importable.
+    - `test_connector_sync_worker_import(self)` (line 1281): Connector sync worker should be importable.
+    - `test_ontology_worker_import(self)` (line 1286): Ontology worker should be importable.
+    - `test_instance_worker_import(self)` (line 1291): Instance worker should be importable.
+    - `test_projection_worker_import(self)` (line 1296): Projection worker should be importable.
+    - `test_action_outbox_worker_import(self)` (line 1301): Action outbox worker should be importable.
+    - `test_ingest_reconciler_worker_import(self)` (line 1306): Ingest reconciler worker should be importable.
+    - `test_writeback_materializer_worker_import(self)` (line 1311): Writeback materializer worker should be importable.
+    - `test_connector_trigger_service_import(self)` (line 1316): Connector trigger service should be importable.
+    - `test_pipeline_scheduler_import(self)` (line 1321): Pipeline scheduler should be importable.
+    - `test_message_relay_import(self)` (line 1326): Message relay should be importable.
+  - `TestConsistencySummary` (line 1337): Summary tests for all consistency features.
+    - `test_all_critical_settings_enforced(self)` (line 1340): All critical Kafka settings should be enforced.
+    - `test_idempotency_patterns_present(self)` (line 1352): Idempotency patterns should be present.
+    - `test_occ_support_present(self)` (line 1370): OCC support should be present in PipelineRegistry.
 
 ### `backend/tests/test_core_functionality.py`
 - **Functions**
@@ -9425,34 +9416,34 @@
   - `_build_smoke_user_jwt()` (line 56): Build a deterministic HS256 user JWT for integration smoke tests.
   - `_load_repo_dotenv()` (line 88): Best-effort loader for the repo root `.env` used by docker-compose port overrides.
   - `_get_postgres_url_candidates()` (line 117): no docstring
-  - `async _get_write_side_last_sequence(aggregate_type, aggregate_id)` (line 144): Fetch current write-side aggregate sequence (OCC expected_seq) from Postgres.
-  - `async _get_ontology_head_commit(session, db_name, branch)` (line 195): no docstring
-  - `async _record_deployed_commit(db_name, target_branch, ontology_commit_id)` (line 219): no docstring
-  - `async _wait_for_command_completed(session, command_id, timeout_seconds, poll_interval_seconds)` (line 252): no docstring
-  - `async _wait_for_ontology_schema_ready(session, schema_url, branch, class_id, timeout_seconds, poll_interval_seconds)` (line 282): Wait until ontology schema is readable on the target branch.
-  - `async _wait_for_action_type_ready(session, db_name, action_type_id, branch, timeout_seconds, poll_interval_seconds)` (line 322): Wait until action-type resource becomes readable on the target branch.
-  - `_xlsx_bytes(header, rows)` (line 358): no docstring
-  - `_csv_bytes(header, rows)` (line 376): no docstring
-  - `_is_wip(op)` (line 396): no docstring
-  - `_is_ops_only(op)` (line 406): no docstring
-  - `_safe_pipeline_ref(value)` (line 454): no docstring
-  - `async _request(session, plan)` (line 485): no docstring
-  - `_format_path(template, ctx, overrides)` (line 519): no docstring
-  - `_normalize_db_path(path)` (line 570): no docstring
-  - `_pick_spec_path(paths, *candidates)` (line 578): no docstring
-  - `_ontology_payload(class_id, label_en, label_ko)` (line 586): no docstring
-  - `_mapping_file_bytes(ctx)` (line 612): no docstring
-  - `_target_schema_json(ctx)` (line 634): no docstring
-  - `_mappings_json(ctx)` (line 643): no docstring
-  - `async _build_plan(op, ctx)` (line 651): Return a runnable RequestPlan for every non-WIP/non-ops operation.
-  - `async test_openapi_stable_contract_smoke()` (line 1840): no docstring
+  - `async _get_write_side_last_sequence(aggregate_type, aggregate_id)` (line 147): Fetch current write-side aggregate sequence (OCC expected_seq) from Postgres.
+  - `async _get_ontology_head_commit(session, db_name, branch)` (line 198): no docstring
+  - `async _record_deployed_commit(db_name, target_branch, ontology_commit_id)` (line 222): no docstring
+  - `async _wait_for_command_completed(session, command_id, timeout_seconds, poll_interval_seconds)` (line 255): no docstring
+  - `async _wait_for_ontology_schema_ready(session, schema_url, branch, class_id, timeout_seconds, poll_interval_seconds)` (line 285): Wait until ontology schema is readable on the target branch.
+  - `async _wait_for_action_type_ready(session, db_name, action_type_id, branch, timeout_seconds, poll_interval_seconds)` (line 325): Wait until action-type resource becomes readable on the target branch.
+  - `_xlsx_bytes(header, rows)` (line 361): no docstring
+  - `_csv_bytes(header, rows)` (line 379): no docstring
+  - `_is_wip(op)` (line 399): no docstring
+  - `_is_ops_only(op)` (line 409): no docstring
+  - `_safe_pipeline_ref(value)` (line 457): no docstring
+  - `async _request(session, plan)` (line 488): no docstring
+  - `_format_path(template, ctx, overrides)` (line 522): no docstring
+  - `_normalize_db_path(path)` (line 573): no docstring
+  - `_pick_spec_path(paths, *candidates)` (line 581): no docstring
+  - `_ontology_payload(class_id, label_en, label_ko)` (line 589): no docstring
+  - `_mapping_file_bytes(ctx)` (line 615): no docstring
+  - `_target_schema_json(ctx)` (line 637): no docstring
+  - `_mappings_json(ctx)` (line 646): no docstring
+  - `async _build_plan(op, ctx)` (line 654): Return a runnable RequestPlan for every non-WIP/non-ops operation.
+  - `async test_openapi_stable_contract_smoke()` (line 1843): no docstring
 - **Classes**
-  - `Operation` (line 389): no docstring
-  - `SmokeContext` (line 415): no docstring
-    - `instance_aggregate_id(self)` (line 443): no docstring
-    - `pipeline_name(self)` (line 447): no docstring
-    - `dataset_name(self)` (line 451): no docstring
-  - `RequestPlan` (line 471): no docstring
+  - `Operation` (line 392): no docstring
+  - `SmokeContext` (line 418): no docstring
+    - `instance_aggregate_id(self)` (line 446): no docstring
+    - `pipeline_name(self)` (line 450): no docstring
+    - `dataset_name(self)` (line 454): no docstring
+  - `RequestPlan` (line 474): no docstring
 
 ### `backend/tests/test_pipeline_execution_semantics_e2e.py`
 - **Functions**
@@ -9476,14 +9467,14 @@
   - `async test_incremental_empty_diff_noop()` (line 816): Checklist CL-020:
   - `async test_incremental_removed_files_noop()` (line 957): Checklist CL-021:
   - `async test_run_branch_conflict_fallback_and_cleanup()` (line 1150): Retry safety: pre-existing run branch should not block deploy; fallback branch must be used and cleaned up.
-  - `async test_partition_column_special_chars_roundtrip()` (line 1277): Checklist CL-021:
-  - `async test_pk_semantics_append_log_allows_duplicate_ids()` (line 1387): P0-3: append_log should not enforce unique PK.
-  - `async test_pk_semantics_append_state_blocks_duplicate_ids()` (line 1515): P0-3: append_state must enforce unique PK and fail on duplicates.
-  - `async test_pk_semantics_remove_requires_delete_column()` (line 1644): P0-3: remove semantics must enforce deleteColumn.
-  - `async test_schema_contract_breach_blocks_deploy()` (line 1741): Schema contract should fail when required columns or types mismatch.
-  - `async test_executor_vs_worker_validation_consistency()` (line 1832): Compare in-memory executor vs spark worker validation errors for PK expectations.
-  - `async test_incremental_small_files_compaction_metrics()` (line 1977): Perf check: measure small file growth across repeated incremental runs.
-  - `async test_composite_pk_unique_perf()` (line 2154): Perf check: composite PK unique validation should complete without OOM/shuffle failures.
+  - `async test_partition_column_special_chars_roundtrip()` (line 1280): Checklist CL-021:
+  - `async test_pk_semantics_append_log_allows_duplicate_ids()` (line 1390): P0-3: append_log should not enforce unique PK.
+  - `async test_pk_semantics_append_state_blocks_duplicate_ids()` (line 1518): P0-3: append_state must enforce unique PK and fail on duplicates.
+  - `async test_pk_semantics_remove_requires_delete_column()` (line 1647): P0-3: remove semantics must enforce deleteColumn.
+  - `async test_schema_contract_breach_blocks_deploy()` (line 1744): Schema contract should fail when required columns or types mismatch.
+  - `async test_executor_vs_worker_validation_consistency()` (line 1835): Compare in-memory executor vs spark worker validation errors for PK expectations.
+  - `async test_incremental_small_files_compaction_metrics()` (line 1980): Perf check: measure small file growth across repeated incremental runs.
+  - `async test_composite_pk_unique_perf()` (line 2157): Perf check: composite PK unique validation should complete without OOM/shuffle failures.
 
 ### `backend/tests/test_pipeline_objectify_es_e2e.py`
 - **Functions**
@@ -12135,7 +12126,7 @@
 - **Functions**
   - `_s3_client()` (line 19): no docstring
   - `_cleanup_bucket(client, bucket)` (line 30): no docstring
-  - `async test_event_publisher_processes_index(monkeypatch)` (line 44): no docstring
+  - `async test_event_publisher_processes_index(monkeypatch)` (line 45): no docstring
 
 ### `backend/tests/unit/workers/test_objectify_delta_lakefs.py`
 - **Functions**

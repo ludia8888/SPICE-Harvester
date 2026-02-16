@@ -248,7 +248,7 @@ class CoverageReporter:
                         try:
                             test_data["duration"] = float(part.rstrip('s'))
                         except ValueError:
-                            pass
+                            continue
         
         return test_data
     

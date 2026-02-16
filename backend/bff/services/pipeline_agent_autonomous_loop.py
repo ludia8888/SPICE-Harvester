@@ -69,7 +69,7 @@ class AutonomousPipelineAgentDecision(BaseModel):
     # NOTE: Do not hard-cap the list length here. If the model emits too many tool calls, the
     # runner will deterministically execute only the first N (see max_tool_calls_per_step).
     tool_calls: List[AutonomousPipelineAgentToolCall] = Field(default_factory=list)
-    # Legacy single-call shape (kept for backward compatibility with older mocks/models).
+    # Compatibility single-call shape (kept for backward compatibility with older mocks/models).
     tool: Optional[str] = Field(default=None, max_length=200)
     args: Dict[str, Any] = Field(default_factory=dict)
     questions: List[PipelineClarificationQuestion] = Field(default_factory=list)
@@ -1422,7 +1422,7 @@ def _get_item_type(item_json: str) -> str:
         obj = json.loads(item_json)
         return str(obj.get("type") or "unknown") if isinstance(obj, dict) else "unknown"
     except Exception:
-        logging.getLogger(__name__).warning("Broad exception fallback at bff/services/pipeline_agent_autonomous_loop.py:1408", exc_info=True)
+        logging.getLogger(__name__).warning("Exception fallback at bff/services/pipeline_agent_autonomous_loop.py:1408", exc_info=True)
         return "unknown"
 
 
@@ -1431,7 +1431,7 @@ def _reshrink_tool_output(item_json: str, max_chars: int) -> str:
     try:
         obj = json.loads(item_json)
     except Exception:
-        logging.getLogger(__name__).warning("Broad exception fallback at bff/services/pipeline_agent_autonomous_loop.py:1416", exc_info=True)
+        logging.getLogger(__name__).warning("Exception fallback at bff/services/pipeline_agent_autonomous_loop.py:1416", exc_info=True)
         return item_json[:max_chars]
     if not isinstance(obj, dict):
         return item_json[:max_chars]
@@ -1789,7 +1789,7 @@ async def _call_mcp_tool(
             try:
                 parsed = json.loads(text)
             except Exception as parse_exc:
-                logging.getLogger(__name__).warning("Broad exception fallback at bff/services/pipeline_agent_autonomous_loop.py:1773", exc_info=True)
+                logging.getLogger(__name__).warning("Exception fallback at bff/services/pipeline_agent_autonomous_loop.py:1773", exc_info=True)
                 parse_errors.append(f"JSON parse error: {parse_exc}")
                 continue
             if isinstance(parsed, dict):
@@ -2411,10 +2411,10 @@ async def _run_agent_core(
         try:
             from mcp_servers.mcp_client import get_mcp_manager  # type: ignore[import-not-found]
         except Exception:
-            logging.getLogger(__name__).warning("Broad exception fallback at bff/services/pipeline_agent_autonomous_loop.py:2393", exc_info=True)
+            logging.getLogger(__name__).warning("Exception fallback at bff/services/pipeline_agent_autonomous_loop.py:2393", exc_info=True)
             from backend.mcp_servers.mcp_client import get_mcp_manager  # type: ignore[import-not-found]
     except Exception as exc:
-        logging.getLogger(__name__).warning("Broad exception fallback at bff/services/pipeline_agent_autonomous_loop.py:2395", exc_info=True)
+        logging.getLogger(__name__).warning("Exception fallback at bff/services/pipeline_agent_autonomous_loop.py:2395", exc_info=True)
         yield StreamEvent(
             event_type="error" if streaming else "complete",
             data={
@@ -2710,7 +2710,7 @@ async def _run_agent_core(
                 try:
                     plan_model = PipelinePlan.model_validate(state.plan_obj)
                 except Exception as exc:
-                    logging.getLogger(__name__).warning("Broad exception fallback at bff/services/pipeline_agent_autonomous_loop.py:2690", exc_info=True)
+                    logging.getLogger(__name__).warning("Exception fallback at bff/services/pipeline_agent_autonomous_loop.py:2690", exc_info=True)
                     state.last_observation = {"status": "invalid", "errors": [str(exc)]}
                     continue
 
@@ -2908,7 +2908,7 @@ async def _run_agent_core(
                     dict(call.args or {}), last=batch_last, last_by_alias=batch_last_by_alias,
                 )
             except Exception as exc:
-                logging.getLogger(__name__).warning("Broad exception fallback at bff/services/pipeline_agent_autonomous_loop.py:2886", exc_info=True)
+                logging.getLogger(__name__).warning("Exception fallback at bff/services/pipeline_agent_autonomous_loop.py:2886", exc_info=True)
                 state.last_observation = {"error": f"failed to resolve batch tool refs for {tool_name}: {exc}"}
                 stop_reason = "bad_batch_ref"
                 break
@@ -3152,7 +3152,7 @@ async def _run_agent_core(
         try:
             plan_model = PipelinePlan.model_validate(state.plan_obj)
         except Exception as exc:
-            logging.getLogger(__name__).warning("Broad exception fallback at bff/services/pipeline_agent_autonomous_loop.py:3129", exc_info=True)
+            logging.getLogger(__name__).warning("Exception fallback at bff/services/pipeline_agent_autonomous_loop.py:3129", exc_info=True)
             yield StreamEvent(
                 event_type="complete",
                 data={

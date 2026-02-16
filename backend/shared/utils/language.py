@@ -104,7 +104,7 @@ def _parse_accept_language_header(value: str) -> List[str]:
                 try:
                     q = float(params[2:])
                 except Exception:
-                    logging.getLogger(__name__).warning("Broad exception fallback at shared/utils/language.py:105", exc_info=True)
+                    logging.getLogger(__name__).warning("Exception fallback at shared/utils/language.py:105", exc_info=True)
                     q = 1.0
         weighted.append((q, normalize_language(lang)))
 
@@ -241,7 +241,7 @@ def coerce_localized_text(value: Any, *, default_lang: Optional[str] = None) -> 
     try:
         text = str(value).strip()
     except Exception:
-        logging.getLogger(__name__).warning("Broad exception fallback at shared/utils/language.py:241", exc_info=True)
+        logging.getLogger(__name__).warning("Exception fallback at shared/utils/language.py:241", exc_info=True)
         return {}
     if not text:
         return {}

@@ -27,7 +27,7 @@ def _resolve_table_index(
                 if str(getattr(t, "id", None) or t.get("id")) == str(op.table_id):
                     return i
             except Exception:
-                logging.getLogger(__name__).warning("Broad exception fallback at funnel/services/structure_patch.py:28", exc_info=True)
+                logging.getLogger(__name__).warning("Exception fallback at funnel/services/structure_patch.py:28", exc_info=True)
                 continue
     return None
 

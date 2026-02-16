@@ -957,7 +957,7 @@ async def refute_pipeline_plan_claims(
             run_result = await executor.run(definition=definition_for_run, db_name=db_name)
         except Exception as exc:
             # Fail open: preview execution errors are not counterexamples.
-            logging.getLogger(__name__).warning("Broad exception fallback at shared/services/pipeline/pipeline_claim_refuter.py:958", exc_info=True)
+            logging.getLogger(__name__).warning("Exception fallback at shared/services/pipeline/pipeline_claim_refuter.py:958", exc_info=True)
             return mask_pii(
                 {
                     "status": "success",

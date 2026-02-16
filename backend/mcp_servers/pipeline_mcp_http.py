@@ -27,7 +27,7 @@ async def http_json(
     try:
         payload = resp.json()
     except Exception:
-        logging.getLogger(__name__).warning("Broad exception fallback at mcp_servers/pipeline_mcp_http.py:28", exc_info=True)
+        logging.getLogger(__name__).warning("Exception fallback at mcp_servers/pipeline_mcp_http.py:28", exc_info=True)
         payload = {"raw": (resp.text or "").strip()}
     if resp.status_code >= 400:
         detail = payload.get("detail") if isinstance(payload, dict) else None

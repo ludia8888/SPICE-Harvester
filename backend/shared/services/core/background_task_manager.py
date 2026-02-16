@@ -155,7 +155,7 @@ class BackgroundTaskManager:
                     task_id = str(uuid4())
             except Exception:
                 # If task lookup fails, fall back to generated id to avoid overwriting.
-                logging.getLogger(__name__).warning("Broad exception fallback at shared/services/core/background_task_manager.py:157", exc_info=True)
+                logging.getLogger(__name__).warning("Exception fallback at shared/services/core/background_task_manager.py:157", exc_info=True)
                 task_id = str(uuid4())
 
         # Convenience: inject the effective task_id into the task function unless caller already set it.

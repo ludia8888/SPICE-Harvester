@@ -665,7 +665,7 @@ async def promote_alias_to_index(
         try:
             alias_exists = await elasticsearch_service.client.indices.exists_alias(name=base_index)
         except Exception:
-            logging.getLogger(__name__).warning("Broad exception fallback at shared/services/storage/elasticsearch_service.py:690", exc_info=True)
+            logging.getLogger(__name__).warning("Exception fallback at shared/services/storage/elasticsearch_service.py:690", exc_info=True)
             alias_exists = False
 
         if alias_exists:
@@ -688,5 +688,5 @@ async def promote_alias_to_index(
         await elasticsearch_service.create_alias(index=new_index, alias=base_index)
         return True, None
     except Exception as exc:
-        logging.getLogger(__name__).warning("Broad exception fallback at shared/services/storage/elasticsearch_service.py:712", exc_info=True)
+        logging.getLogger(__name__).warning("Exception fallback at shared/services/storage/elasticsearch_service.py:712", exc_info=True)
         return False, str(exc)

@@ -135,7 +135,7 @@ class SheetImportService:
                 try:
                     return json.loads(value), None
                 except Exception:
-                    logging.getLogger(__name__).warning("Broad exception fallback at shared/services/core/sheet_import_service.py:136", exc_info=True)
+                    logging.getLogger(__name__).warning("Exception fallback at shared/services/core/sheet_import_service.py:136", exc_info=True)
                     return None, f"Cannot parse JSON from '{value}'"
             return None, f"Cannot coerce JSON from '{value}'"
 
@@ -180,7 +180,7 @@ class SheetImportService:
                 dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
                 return dt.isoformat(sep=" "), None
             except Exception:
-                logging.getLogger(__name__).warning("Broad exception fallback at shared/services/core/sheet_import_service.py:180", exc_info=True)
+                logging.getLogger(__name__).warning("Exception fallback at shared/services/core/sheet_import_service.py:180", exc_info=True)
                 return None, f"Cannot parse {t} from '{value}'"
 
         # Numeric types
@@ -195,7 +195,7 @@ class SheetImportService:
                 try:
                     dec = Decimal(str(value))
                 except Exception:
-                    logging.getLogger(__name__).warning("Broad exception fallback at shared/services/core/sheet_import_service.py:194", exc_info=True)
+                    logging.getLogger(__name__).warning("Exception fallback at shared/services/core/sheet_import_service.py:194", exc_info=True)
                     return None, f"Cannot parse number from '{value}'"
             else:
                 raw = cls._strip_numeric_affixes(str(value))
@@ -213,7 +213,7 @@ class SheetImportService:
                 try:
                     return int(dec), None
                 except Exception:
-                    logging.getLogger(__name__).warning("Broad exception fallback at shared/services/core/sheet_import_service.py:211", exc_info=True)
+                    logging.getLogger(__name__).warning("Exception fallback at shared/services/core/sheet_import_service.py:211", exc_info=True)
                     return None, f"Integer out of range: '{value}'"
 
             # decimal/float/double -> JSON number (float) or int if integral
@@ -221,11 +221,11 @@ class SheetImportService:
                 try:
                     return int(dec), None
                 except Exception:
-                    logging.getLogger(__name__).warning("Broad exception fallback at shared/services/core/sheet_import_service.py:218", exc_info=True)
+                    logging.getLogger(__name__).warning("Exception fallback at shared/services/core/sheet_import_service.py:218", exc_info=True)
             try:
                 return float(dec), None
             except Exception:
-                logging.getLogger(__name__).warning("Broad exception fallback at shared/services/core/sheet_import_service.py:222", exc_info=True)
+                logging.getLogger(__name__).warning("Exception fallback at shared/services/core/sheet_import_service.py:222", exc_info=True)
                 return None, f"Decimal out of range: '{value}'"
 
         # Relationship / unsupported types

@@ -52,7 +52,7 @@ def start_service(name, path, command, port, *, protocol: str, verify_ssl: bool,
                 return process
         except (requests.ConnectionError, requests.Timeout):
             # 서비스가 아직 시작 중일 수 있음 - 정상적인 상황
-            pass
+            response = None
         except Exception as e:
             # 다른 예외는 로그를 남김
             print(f"⚠️ {name} health check error: {type(e).__name__}: {e}")
@@ -80,7 +80,7 @@ def stop_services(processes):
                 print(f"✅ Stopped {name}")
             except ProcessLookupError:
                 # 프로세스가 이미 종료됨 - 정상
-                pass
+                print(f"ℹ️ {name} already stopped")
             except Exception as e:
                 print(f"⚠️ Error stopping {name}: {type(e).__name__}: {e}")
 

@@ -129,7 +129,10 @@ def _get_postgres_url_candidates() -> list[str]:
         try:
             ports.append(int(port_override))
         except ValueError:
-            pass
+            print(
+                f"[config-warning] invalid POSTGRES_PORT_HOST={port_override!r}; "
+                "falling back to default local ports"
+            )
 
     # Common defaults across compose variants.
     for p in (5433, 5432, 15433):
@@ -417,7 +420,7 @@ class SmokeContext:
     branch_name: str
     class_id: str
     advanced_class_id: str
-    legacy_class_id: str
+    wrapper_class_id: str
     instance_id: str
     command_ids: Dict[str, str]
     udf_id: str
@@ -1147,17 +1150,17 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
         return RequestPlan(op.method, op.path, url, (200,))
     if key == ("POST", "/api/v1/databases/{db_name}/classes"):
         url = f"{BFF_URL}{_format_path(op.path, ctx)}"
-        legacy_pk = f"{ctx.legacy_class_id.lower()}_id"
+        wrapper_pk = f"{ctx.wrapper_class_id.lower()}_id"
         body = {
-            "@id": ctx.legacy_class_id,
-            "label": ctx.legacy_class_id,
-            "description": "legacy wrapper class (openapi smoke)",
+            "@id": ctx.wrapper_class_id,
+            "label": ctx.wrapper_class_id,
+            "description": "wrapper class (openapi smoke)",
             # Linter requires a stable primary key property.
             "properties": [
                 {
-                    "name": legacy_pk,
+                    "name": wrapper_pk,
                     "type": "xsd:string",
-                    "label": f"{ctx.legacy_class_id} ID",
+                    "label": f"{ctx.wrapper_class_id} ID",
                     "required": True,
                     "primaryKey": True,
                     "titleKey": True,
@@ -1922,7 +1925,7 @@ async def test_openapi_stable_contract_smoke():
         branch_name="feature/openapi-smoke",
         class_id="Product",
         advanced_class_id="Order",
-        legacy_class_id="LegacySmokeClass",
+        wrapper_class_id="SmokeWrapperClass",
         instance_id=f"prod_{unique}",
         command_ids={},
         udf_id="udf_smoke",
@@ -1957,7 +1960,7 @@ async def test_openapi_stable_contract_smoke():
                 ctx.command_ids["create_database"] = str(command_id)
                 await _wait_for_command_completed(session, command_id=str(command_id))
 
-            # Create branch (for merge simulate, etc) when legacy branch API is exposed.
+            # Create branch (for merge simulate, etc) when branch API is exposed.
             if db_branches_available:
                 plan = await _build_plan(
                     Operation("POST", db_branches_path, ("Database Management",), "Create Branch"),
@@ -2466,7 +2469,7 @@ async def test_openapi_stable_contract_smoke():
                     # type on a fresh branch from the current main head and merge+deploy it.
                     if not db_branches_available:
                         raise AssertionError(
-                            "Action-type protected-branch fallback requires legacy branch API, "
+                            "Action-type protected-branch fallback requires branch API, "
                             "but '/databases/{db_name}/branches' is not exposed in this profile."
                         )
                     action_branch = f"{ctx.branch_name}-action-type"

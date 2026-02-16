@@ -72,7 +72,7 @@ try:
 
     HAS_OPENTELEMETRY = True
 except Exception:  # pragma: no cover - depends on environment
-    logging.getLogger(__name__).warning("Broad exception fallback at shared/observability/tracing.py:73", exc_info=True)
+    logging.getLogger(__name__).warning("Exception fallback at shared/observability/tracing.py:73", exc_info=True)
     baggage = None
     context = None
     otel_trace = None
@@ -99,7 +99,7 @@ try:  # optional: baggage propagation for richer cross-service context
     from opentelemetry.baggage.propagation import W3CBaggagePropagator
     from opentelemetry.propagators.composite import CompositePropagator
 except Exception:  # pragma: no cover - depends on environment
-    logging.getLogger(__name__).warning("Broad exception fallback at shared/observability/tracing.py:99", exc_info=True)
+    logging.getLogger(__name__).warning("Exception fallback at shared/observability/tracing.py:99", exc_info=True)
     W3CBaggagePropagator = None
     CompositePropagator = None
 
@@ -107,67 +107,67 @@ except Exception:  # pragma: no cover - depends on environment
 try:  # optional
     from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
 except Exception:  # pragma: no cover - depends on environment
-    logging.getLogger(__name__).warning("Broad exception fallback at shared/observability/tracing.py:106", exc_info=True)
+    logging.getLogger(__name__).warning("Exception fallback at shared/observability/tracing.py:106", exc_info=True)
     OTLPSpanExporter = None
 
 try:  # optional
     from opentelemetry.exporter.jaeger.thrift import JaegerExporter
 except Exception:  # pragma: no cover - depends on environment
-    logging.getLogger(__name__).warning("Broad exception fallback at shared/observability/tracing.py:111", exc_info=True)
+    logging.getLogger(__name__).warning("Exception fallback at shared/observability/tracing.py:111", exc_info=True)
     JaegerExporter = None
 
 try:  # optional
     from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 except Exception:  # pragma: no cover - depends on environment
-    logging.getLogger(__name__).warning("Broad exception fallback at shared/observability/tracing.py:116", exc_info=True)
+    logging.getLogger(__name__).warning("Exception fallback at shared/observability/tracing.py:116", exc_info=True)
     FastAPIInstrumentor = None
 
 try:  # optional
     from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 except Exception:  # pragma: no cover - depends on environment
-    logging.getLogger(__name__).warning("Broad exception fallback at shared/observability/tracing.py:121", exc_info=True)
+    logging.getLogger(__name__).warning("Exception fallback at shared/observability/tracing.py:121", exc_info=True)
     HTTPXClientInstrumentor = None
 
 try:  # optional
     from opentelemetry.instrumentation.asyncpg import AsyncPGInstrumentor
 except Exception:  # pragma: no cover - depends on environment
-    logging.getLogger(__name__).warning("Broad exception fallback at shared/observability/tracing.py:126", exc_info=True)
+    logging.getLogger(__name__).warning("Exception fallback at shared/observability/tracing.py:126", exc_info=True)
     AsyncPGInstrumentor = None
 
 try:  # optional
     from opentelemetry.instrumentation.redis import RedisInstrumentor
 except Exception:  # pragma: no cover - depends on environment
-    logging.getLogger(__name__).warning("Broad exception fallback at shared/observability/tracing.py:131", exc_info=True)
+    logging.getLogger(__name__).warning("Exception fallback at shared/observability/tracing.py:131", exc_info=True)
     RedisInstrumentor = None
 
 try:  # optional
     from opentelemetry.instrumentation.asyncio import AsyncioInstrumentor
 except Exception:  # pragma: no cover - depends on environment
-    logging.getLogger(__name__).warning("Broad exception fallback at shared/observability/tracing.py:136", exc_info=True)
+    logging.getLogger(__name__).warning("Exception fallback at shared/observability/tracing.py:136", exc_info=True)
     AsyncioInstrumentor = None
 
 try:  # optional
     from opentelemetry.instrumentation.aiohttp_client import AioHttpClientInstrumentor
 except Exception:  # pragma: no cover - depends on environment
-    logging.getLogger(__name__).warning("Broad exception fallback at shared/observability/tracing.py:141", exc_info=True)
+    logging.getLogger(__name__).warning("Exception fallback at shared/observability/tracing.py:141", exc_info=True)
     AioHttpClientInstrumentor = None
 
 try:  # optional
     from opentelemetry.instrumentation.botocore import BotocoreInstrumentor
 except Exception:  # pragma: no cover - depends on environment
-    logging.getLogger(__name__).warning("Broad exception fallback at shared/observability/tracing.py:146", exc_info=True)
+    logging.getLogger(__name__).warning("Exception fallback at shared/observability/tracing.py:146", exc_info=True)
     BotocoreInstrumentor = None
 
 try:  # optional
     from opentelemetry.instrumentation.requests import RequestsInstrumentor
 except Exception:  # pragma: no cover - depends on environment
-    logging.getLogger(__name__).warning("Broad exception fallback at shared/observability/tracing.py:151", exc_info=True)
+    logging.getLogger(__name__).warning("Exception fallback at shared/observability/tracing.py:151", exc_info=True)
     RequestsInstrumentor = None
 
 try:  # optional
     from opentelemetry.instrumentation.kafka import KafkaInstrumentor
 except Exception:  # pragma: no cover - depends on environment
-    logging.getLogger(__name__).warning("Broad exception fallback at shared/observability/tracing.py:156", exc_info=True)
+    logging.getLogger(__name__).warning("Exception fallback at shared/observability/tracing.py:156", exc_info=True)
     KafkaInstrumentor = None
 
 
@@ -326,7 +326,7 @@ class TracingService:
                         [TraceContextTextMapPropagator(), W3CBaggagePropagator()]
                     )
                 except Exception:
-                    logging.getLogger(__name__).warning("Broad exception fallback at shared/observability/tracing.py:297", exc_info=True)
+                    logging.getLogger(__name__).warning("Exception fallback at shared/observability/tracing.py:297", exc_info=True)
                     propagator = TraceContextTextMapPropagator()
 
             set_global_textmap(propagator)
@@ -551,7 +551,7 @@ class TracingService:
         try:
             inject(headers)
         except Exception:
-            logging.getLogger(__name__).warning("Broad exception fallback at shared/observability/tracing.py:491", exc_info=True)
+            logging.getLogger(__name__).warning("Exception fallback at shared/observability/tracing.py:491", exc_info=True)
             return headers
         return headers
 
@@ -561,7 +561,7 @@ class TracingService:
         try:
             return extract(headers)
         except Exception:
-            logging.getLogger(__name__).warning("Broad exception fallback at shared/observability/tracing.py:500", exc_info=True)
+            logging.getLogger(__name__).warning("Exception fallback at shared/observability/tracing.py:500", exc_info=True)
             return None
 
 

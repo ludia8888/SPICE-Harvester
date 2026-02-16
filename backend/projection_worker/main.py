@@ -122,7 +122,7 @@ class ProjectionWorker(StrictHeartbeatEventEnvelopeKafkaWorker[None]):
         # 재시도 설정
         max_retries = int(worker_cfg.max_retries)
         self.max_retries_config = max_retries
-        # Legacy semantics: max_retries counted retries (not attempts). Our runtime uses registry attempt_count starting at 1.
+        # Compatibility semantics: max_retries counted retries (not attempts). Our runtime uses registry attempt_count starting at 1.
         self.max_retries = max(1, max_retries + 1)
         self.backoff_base = 2
         self.backoff_max = 30

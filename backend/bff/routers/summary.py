@@ -42,7 +42,7 @@ async def get_summary(
     is_protected_branch = bool(branch_name and branch_name in protected_branches)
     ontology_backend = "postgres"
 
-    # Legacy branch-info API is removed in Foundry-style profile.
+    # Deprecated branch-info API is removed in Foundry-style profile.
     branch_info: Optional[Dict[str, Any]] = None
 
     redis_ok = await redis_service.ping()
@@ -56,7 +56,7 @@ async def get_summary(
         if es_ok:
             es_health = await es_service.get_cluster_health()
     except Exception as e:
-        logging.getLogger(__name__).warning("Broad exception fallback at bff/routers/summary.py:77", exc_info=True)
+        logging.getLogger(__name__).warning("Exception fallback at bff/routers/summary.py:77", exc_info=True)
         es_error = str(e)
     finally:
         await es_service.disconnect()

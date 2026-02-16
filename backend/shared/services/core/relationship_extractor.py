@@ -5,7 +5,7 @@ Shared library used by:
 - objectify_worker: extract relationships during ES indexing
 - instance_worker: extract relationships for CRUD operations (Phase 2)
 
-Accepts ontology data directly without legacy graph adapter dependencies.
+Accepts ontology data directly without compatibility graph adapter dependencies.
 """
 
 from __future__ import annotations
@@ -42,7 +42,7 @@ def _expects_many(cardinality: Optional[Any]) -> Optional[bool]:
     try:
         card = str(cardinality).strip()
     except Exception:
-        logging.getLogger(__name__).warning("Broad exception fallback at shared/services/core/relationship_extractor.py:44", exc_info=True)
+        logging.getLogger(__name__).warning("Exception fallback at shared/services/core/relationship_extractor.py:44", exc_info=True)
         return None
     if not card:
         return None
@@ -99,7 +99,7 @@ def _extract_from_graph_schema(
     relationships: Dict[str, Union[str, List[str]]],
     known_fields: Set[str],
 ) -> None:
-    """Extract relationships from legacy graph-schema style definitions (`@class`)."""
+    """Extract relationships from compatibility graph-schema style definitions (`@class`)."""
     for key, value_def in schema.items():
         if isinstance(value_def, dict) and "@class" in value_def:
             known_fields.add(str(key))
@@ -163,7 +163,7 @@ def extract_relationships(
     Args:
         payload: The instance data dictionary.
         ontology_data: Ontology schema data (OntologyResponse pydantic model, OMS dict,
-                       or legacy graph schema dict). Optional if rel_map is provided.
+                       or compatibility graph schema dict). Optional if rel_map is provided.
         rel_map: Pre-parsed relationship map from _extract_ontology_fields().
                  Keys are predicate names, values are relationship definition dicts.
                  When provided, ontology_data is ignored.

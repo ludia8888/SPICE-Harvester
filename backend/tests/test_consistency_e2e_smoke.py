@@ -245,7 +245,7 @@ class TestKafkaProducerConfiguration:
             source = f.read()
         tree = ast.parse(source, filename=spec.origin)
 
-        legacy_config: dict[str, object] = {}
+        direct_config: dict[str, object] = {}
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
                 continue
@@ -253,13 +253,13 @@ class TestKafkaProducerConfiguration:
                 continue
             if not node.args or not isinstance(node.args[0], ast.Dict):
                 continue
-            legacy_config = _extract_constant_dict(node.args[0])
+            direct_config = _extract_constant_dict(node.args[0])
             break
 
-        if legacy_config:
-            assert legacy_config.get("acks") == "all"
-            assert legacy_config.get("enable.idempotence") is True
-            assert legacy_config.get("max.in.flight.requests.per.connection") == 5
+        if direct_config:
+            assert direct_config.get("acks") == "all"
+            assert direct_config.get("enable.idempotence") is True
+            assert direct_config.get("max.in.flight.requests.per.connection") == 5
             return
 
         factory_kwargs: dict[str, object] = {}
@@ -291,7 +291,7 @@ class TestKafkaProducerConfiguration:
             source = f.read()
         tree = ast.parse(source, filename=spec.origin)
 
-        legacy_config: dict[str, object] = {}
+        direct_config: dict[str, object] = {}
         for node in ast.walk(tree):
             if not isinstance(node, ast.Assign):
                 continue
@@ -299,13 +299,13 @@ class TestKafkaProducerConfiguration:
                 continue
             if node.targets[0].id != "kafka_config":
                 continue
-            legacy_config = _extract_constant_dict(node.value)
+            direct_config = _extract_constant_dict(node.value)
             break
 
-        if legacy_config:
-            assert legacy_config.get("acks") == "all"
-            assert legacy_config.get("enable.idempotence") is True
-            assert legacy_config.get("max.in.flight.requests.per.connection") == 5
+        if direct_config:
+            assert direct_config.get("acks") == "all"
+            assert direct_config.get("enable.idempotence") is True
+            assert direct_config.get("max.in.flight.requests.per.connection") == 5
             return
 
         factory_kwargs: dict[str, object] = {}
@@ -432,11 +432,12 @@ class TestKafkaConnectivity:
                 # Topic may already exist; treat as success.
                 try:
                     fut.result()
-                except Exception:
-                    pass
-        except Exception:
+                except Exception as exc:
+                    if "topic already exists" not in str(exc).lower():
+                        raise
+        except Exception as exc:
             # If topic auto-create is enabled, we can proceed even if explicit create fails.
-            pass
+            print(f"[kafka-warning] explicit topic create skipped for {topic}: {exc}")
 
         aborted_value = f"aborted-{uuid.uuid4().hex}".encode("utf-8")
         committed_value = f"committed-{uuid.uuid4().hex}".encode("utf-8")
@@ -466,8 +467,8 @@ class TestKafkaConnectivity:
         finally:
             try:
                 producer.flush(5.0)
-            except Exception:
-                pass
+            except Exception as exc:
+                print(f"[cleanup-warning] producer flush failed for topic={topic}: {exc}")
 
         consumer = SafeKafkaConsumer(
             group_id=f"smoke-tx-consumer-{uuid.uuid4().hex[:8]}",
@@ -645,7 +646,7 @@ class TestDatabaseConnectivity:
                 f"(noauth_url={noauth_url!r})"
             )
         except AuthenticationError:
-            pass
+            print("Redis unauthenticated ping rejected as expected", flush=True)
         finally:
             await noauth.aclose()
 
@@ -713,8 +714,8 @@ class TestSystemWiring:
                 for _t, fut in futures.items():
                     with contextlib.suppress(Exception):
                         fut.result()
-            except Exception:
-                pass
+            except Exception as exc:
+                print(f"[kafka-warning] relay topic create skipped for {topic}: {exc}")
 
             await event_store.connect()
             envelope = EventEnvelope(

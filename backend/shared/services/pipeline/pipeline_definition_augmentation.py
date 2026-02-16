@@ -546,7 +546,7 @@ async def augment_definition_with_casts(
                 selection=selection,
             )
         except Exception:
-            logging.getLogger(__name__).warning("Broad exception fallback at shared/services/pipeline/pipeline_definition_augmentation.py:547", exc_info=True)
+            logging.getLogger(__name__).warning("Exception fallback at shared/services/pipeline/pipeline_definition_augmentation.py:547", exc_info=True)
             continue
         dataset = resolution.dataset
         version = resolution.version

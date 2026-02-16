@@ -22,7 +22,7 @@ class ValidationResult:
         return self.message if not self.is_valid else None
 
     def to_tuple(self) -> Tuple[bool, str, Any]:
-        """Convert to legacy tuple format for backward compatibility"""
+        """Convert to compatibility tuple format for backward compatibility"""
         return (self.is_valid, self.message, self.normalized_value)
 
 

@@ -2,7 +2,7 @@
 🔥 SPICE HARVESTER CORE FUNCTIONALITY TESTS
 Production-ready test suite - NO MOCKS, REAL INTEGRATIONS ONLY
 
-This consolidated test file replaces multiple legacy test files
+This consolidated test file replaces multiple older test files
 and provides comprehensive coverage of core functionality.
 """
 

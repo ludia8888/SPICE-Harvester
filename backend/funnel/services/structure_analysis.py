@@ -111,14 +111,14 @@ class FunnelStructureAnalyzer:
         try:
             ttl_seconds = int(ttl_seconds)
         except Exception:
-            logging.getLogger(__name__).warning("Broad exception fallback at funnel/services/structure_analysis.py:112", exc_info=True)
+            logging.getLogger(__name__).warning("Exception fallback at funnel/services/structure_analysis.py:112", exc_info=True)
             ttl_seconds = 3600
         ttl_seconds = max(1, ttl_seconds)
 
         try:
             max_entries = int(max_entries)
         except Exception:
-            logging.getLogger(__name__).warning("Broad exception fallback at funnel/services/structure_analysis.py:118", exc_info=True)
+            logging.getLogger(__name__).warning("Exception fallback at funnel/services/structure_analysis.py:118", exc_info=True)
             max_entries = 128
         max_entries = max(1, max_entries)
 
@@ -135,7 +135,7 @@ class FunnelStructureAnalyzer:
         try:
             return json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
         except Exception:
-            logging.getLogger(__name__).warning("Broad exception fallback at funnel/services/structure_analysis.py:134", exc_info=True)
+            logging.getLogger(__name__).warning("Exception fallback at funnel/services/structure_analysis.py:134", exc_info=True)
             return str(value)
 
     @classmethod
@@ -164,7 +164,7 @@ class FunnelStructureAnalyzer:
                 try:
                     h.update(int(v).to_bytes(4, "little", signed=False))
                 except Exception:
-                    logging.getLogger(__name__).warning("Broad exception fallback at funnel/services/structure_analysis.py:162", exc_info=True)
+                    logging.getLogger(__name__).warning("Exception fallback at funnel/services/structure_analysis.py:162", exc_info=True)
                     h.update(str(v).encode("utf-8", errors="ignore"))
                 h.update(b"\x1f")
             h.update(b"\x1e")
@@ -239,12 +239,12 @@ class FunnelStructureAnalyzer:
         try:
             sig_rows = int(opts.get("signature_rows", 20))
         except Exception:
-            logging.getLogger(__name__).warning("Broad exception fallback at funnel/services/structure_analysis.py:236", exc_info=True)
+            logging.getLogger(__name__).warning("Exception fallback at funnel/services/structure_analysis.py:236", exc_info=True)
             sig_rows = 20
         try:
             sig_cols = int(opts.get("signature_cols", 200))
         except Exception:
-            logging.getLogger(__name__).warning("Broad exception fallback at funnel/services/structure_analysis.py:240", exc_info=True)
+            logging.getLogger(__name__).warning("Exception fallback at funnel/services/structure_analysis.py:240", exc_info=True)
             sig_cols = 200
         sig_rows = max(1, min(sig_rows, rows))
         sig_cols = max(1, min(sig_cols, max(1, cols)))
@@ -253,7 +253,7 @@ class FunnelStructureAnalyzer:
         try:
             merge_rows = int(opts.get("signature_merge_rows", max(40, sig_rows * 2)))
         except Exception:
-            logging.getLogger(__name__).warning("Broad exception fallback at funnel/services/structure_analysis.py:248", exc_info=True)
+            logging.getLogger(__name__).warning("Exception fallback at funnel/services/structure_analysis.py:248", exc_info=True)
             merge_rows = max(40, sig_rows * 2)
         merge_rows = max(sig_rows, merge_rows)
 
@@ -298,7 +298,7 @@ class FunnelStructureAnalyzer:
                         packed = (fill_rgb << 8) | mask
                         h.update(packed.to_bytes(4, "little", signed=False))
                     except Exception:
-                        logging.getLogger(__name__).warning("Broad exception fallback at funnel/services/structure_analysis.py:292", exc_info=True)
+                        logging.getLogger(__name__).warning("Exception fallback at funnel/services/structure_analysis.py:292", exc_info=True)
                         h.update(b"\0\0\0\0")
                 h.update(b"\x1e")
 
@@ -421,7 +421,7 @@ class FunnelStructureAnalyzer:
                     try:
                         style_hint = style_hints[r][c]
                     except Exception:
-                        logging.getLogger(__name__).warning("Broad exception fallback at funnel/services/structure_analysis.py:414", exc_info=True)
+                        logging.getLogger(__name__).warning("Exception fallback at funnel/services/structure_analysis.py:414", exc_info=True)
                         style_hint = None
 
                 score = cls._cell_score(text, inferred_type=inferred_type, row=r, non_empty_in_row=None)
@@ -470,7 +470,7 @@ class FunnelStructureAnalyzer:
         try:
             target_cells = int(opts.get("coarse_target_cells", 120_000))
         except Exception:
-            logging.getLogger(__name__).warning("Broad exception fallback at funnel/services/structure_analysis.py:462", exc_info=True)
+            logging.getLogger(__name__).warning("Exception fallback at funnel/services/structure_analysis.py:462", exc_info=True)
             target_cells = 120_000
         row_stride, col_stride = cls._compute_coarse_strides(rows, cols, target_cells=target_cells)
 
@@ -519,7 +519,7 @@ class FunnelStructureAnalyzer:
         try:
             kv_rows = int(opts.get("coarse_kv_scan_rows", 80))
         except Exception:
-            logging.getLogger(__name__).warning("Broad exception fallback at funnel/services/structure_analysis.py:510", exc_info=True)
+            logging.getLogger(__name__).warning("Exception fallback at funnel/services/structure_analysis.py:510", exc_info=True)
             kv_rows = 80
         regions = list(islands)
         if kv_rows > 0 and rows > 0 and cols > 0:
@@ -626,14 +626,14 @@ class FunnelStructureAnalyzer:
                 if cached is not None:
                     return SheetStructureAnalysisResponse(**cached)
             except Exception:
-                logging.getLogger(__name__).warning("Broad exception fallback at funnel/services/structure_analysis.py:616", exc_info=True)
+                logging.getLogger(__name__).warning("Exception fallback at funnel/services/structure_analysis.py:616", exc_info=True)
                 cache_key = None
 
         # Optional coarse-to-fine mode for very large sheets
         try:
             coarse_threshold = int(opts.get("coarse_cells_threshold", 200_000))
         except Exception:
-            logging.getLogger(__name__).warning("Broad exception fallback at funnel/services/structure_analysis.py:622", exc_info=True)
+            logging.getLogger(__name__).warning("Exception fallback at funnel/services/structure_analysis.py:622", exc_info=True)
             coarse_threshold = 200_000
         coarse_enabled = bool(opts.get("coarse_to_fine", True))
         if coarse_enabled and (rows_base * cols_base) > coarse_threshold:
@@ -653,12 +653,12 @@ class FunnelStructureAnalyzer:
                 try:
                     ttl_seconds = int(opts.get("cache_ttl_seconds", 3600))
                 except Exception:
-                    logging.getLogger(__name__).warning("Broad exception fallback at funnel/services/structure_analysis.py:641", exc_info=True)
+                    logging.getLogger(__name__).warning("Exception fallback at funnel/services/structure_analysis.py:641", exc_info=True)
                     ttl_seconds = 3600
                 try:
                     max_entries = int(opts.get("cache_max_entries", 128))
                 except Exception:
-                    logging.getLogger(__name__).warning("Broad exception fallback at funnel/services/structure_analysis.py:645", exc_info=True)
+                    logging.getLogger(__name__).warning("Exception fallback at funnel/services/structure_analysis.py:645", exc_info=True)
                     max_entries = 128
                 cls._cache_set(
                     cache_key,
@@ -743,12 +743,12 @@ class FunnelStructureAnalyzer:
             try:
                 ttl_seconds = int(opts.get("cache_ttl_seconds", 3600))
             except Exception:
-                logging.getLogger(__name__).warning("Broad exception fallback at funnel/services/structure_analysis.py:729", exc_info=True)
+                logging.getLogger(__name__).warning("Exception fallback at funnel/services/structure_analysis.py:729", exc_info=True)
                 ttl_seconds = 3600
             try:
                 max_entries = int(opts.get("cache_max_entries", 128))
             except Exception:
-                logging.getLogger(__name__).warning("Broad exception fallback at funnel/services/structure_analysis.py:733", exc_info=True)
+                logging.getLogger(__name__).warning("Exception fallback at funnel/services/structure_analysis.py:733", exc_info=True)
                 max_entries = 128
             cls._cache_set(
                 cache_key,
@@ -866,7 +866,7 @@ class FunnelStructureAnalyzer:
                 try:
                     row_limit = int(row_limit)
                 except Exception:
-                    logging.getLogger(__name__).warning("Broad exception fallback at funnel/services/structure_analysis.py:850", exc_info=True)
+                    logging.getLogger(__name__).warning("Exception fallback at funnel/services/structure_analysis.py:850", exc_info=True)
                     row_limit = 20
                 sample_rows = rows_out if row_limit < 0 else rows_out[: min(row_limit, len(rows_out))]
 
@@ -904,7 +904,7 @@ class FunnelStructureAnalyzer:
             try:
                 row_limit = int(row_limit)
             except Exception:
-                logging.getLogger(__name__).warning("Broad exception fallback at funnel/services/structure_analysis.py:887", exc_info=True)
+                logging.getLogger(__name__).warning("Exception fallback at funnel/services/structure_analysis.py:887", exc_info=True)
                 row_limit = 20
             sample_rows = rows_out if row_limit < 0 else rows_out[: min(row_limit, len(rows_out))]
 
@@ -1434,7 +1434,7 @@ class FunnelStructureAnalyzer:
                 try:
                     row_limit = int(row_limit)
                 except Exception:
-                    logging.getLogger(__name__).warning("Broad exception fallback at funnel/services/structure_analysis.py:1416", exc_info=True)
+                    logging.getLogger(__name__).warning("Exception fallback at funnel/services/structure_analysis.py:1416", exc_info=True)
                     row_limit = 20
                 sample_rows = rows if row_limit < 0 else rows[: min(row_limit, len(rows))]
             table = DetectedTable(
@@ -1475,7 +1475,7 @@ class FunnelStructureAnalyzer:
             try:
                 row_limit = int(row_limit)
             except Exception:
-                logging.getLogger(__name__).warning("Broad exception fallback at funnel/services/structure_analysis.py:1456", exc_info=True)
+                logging.getLogger(__name__).warning("Exception fallback at funnel/services/structure_analysis.py:1456", exc_info=True)
                 row_limit = 20
             sample_rows = rows if row_limit < 0 else rows[: min(row_limit, len(rows))]
         table = DetectedTable(
@@ -1534,7 +1534,7 @@ class FunnelStructureAnalyzer:
         try:
             max_skip = int(opts.get("max_preamble_skip", 2))
         except Exception:
-            logging.getLogger(__name__).warning("Broad exception fallback at funnel/services/structure_analysis.py:1514", exc_info=True)
+            logging.getLogger(__name__).warning("Exception fallback at funnel/services/structure_analysis.py:1514", exc_info=True)
             max_skip = 2
         max_skip = max(0, min(max_skip, height - 3))
         if max_skip <= 0:
@@ -2735,7 +2735,7 @@ class FunnelStructureAnalyzer:
         try:
             limit = max(0, int(limit))
         except Exception:
-            logging.getLogger(__name__).warning("Broad exception fallback at funnel/services/structure_analysis.py:2715", exc_info=True)
+            logging.getLogger(__name__).warning("Exception fallback at funnel/services/structure_analysis.py:2715", exc_info=True)
             limit = 8
         if limit <= 0:
             return []
@@ -2856,7 +2856,7 @@ class FunnelStructureAnalyzer:
                     try:
                         style_hint = style_hints[r][c]
                     except Exception:
-                        logging.getLogger(__name__).warning("Broad exception fallback at funnel/services/structure_analysis.py:2835", exc_info=True)
+                        logging.getLogger(__name__).warning("Exception fallback at funnel/services/structure_analysis.py:2835", exc_info=True)
                         style_hint = None
                 score = cls._cell_score(
                     text,

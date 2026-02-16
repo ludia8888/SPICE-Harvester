@@ -36,7 +36,7 @@ def _coerce_questions(raw: Any) -> List[PipelineClarificationQuestion]:
         try:
             questions.append(PipelineClarificationQuestion.model_validate(item))
         except Exception:
-            logging.getLogger(__name__).warning("Broad exception fallback at bff/services/pipeline_plan_autonomous_compiler.py:36", exc_info=True)
+            logging.getLogger(__name__).warning("Exception fallback at bff/services/pipeline_plan_autonomous_compiler.py:36", exc_info=True)
             continue
     return questions
 
@@ -53,7 +53,7 @@ def _coerce_llm_meta(raw: Any) -> Optional[LLMCallMeta]:
             return None
         return LLMCallMeta(provider=provider, model=model, cache_hit=cache_hit, latency_ms=latency_ms)
     except Exception:
-        logging.getLogger(__name__).warning("Broad exception fallback at bff/services/pipeline_plan_autonomous_compiler.py:52", exc_info=True)
+        logging.getLogger(__name__).warning("Exception fallback at bff/services/pipeline_plan_autonomous_compiler.py:52", exc_info=True)
         return None
 
 
@@ -169,7 +169,7 @@ async def compile_pipeline_plan_mcp_autonomous(
         try:
             plan = PipelinePlan.model_validate(payload_plan)
         except Exception:
-            logging.getLogger(__name__).warning("Broad exception fallback at bff/services/pipeline_plan_autonomous_compiler.py:165", exc_info=True)
+            logging.getLogger(__name__).warning("Exception fallback at bff/services/pipeline_plan_autonomous_compiler.py:165", exc_info=True)
             plan = None
 
     questions = _coerce_questions(payload.get("questions"))

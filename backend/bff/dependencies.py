@@ -417,7 +417,7 @@ async def check_bff_dependencies_health(
                 else:
                     health_status[service_name] = "not_registered"
             except Exception as e:
-                logging.getLogger(__name__).warning("Broad exception fallback at bff/dependencies.py:607", exc_info=True)
+                logging.getLogger(__name__).warning("Exception fallback at bff/dependencies.py:607", exc_info=True)
                 health_status[service_name] = f"error: {str(e)}"
         
         return {
@@ -427,7 +427,7 @@ async def check_bff_dependencies_health(
         }
         
     except Exception as e:
-        logging.getLogger(__name__).warning("Broad exception fallback at bff/dependencies.py:616", exc_info=True)
+        logging.getLogger(__name__).warning("Exception fallback at bff/dependencies.py:616", exc_info=True)
         return build_error_envelope(
             service_name=SERVICE_NAME,
             message="BFF dependency health check failed",

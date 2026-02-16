@@ -254,7 +254,7 @@ def _apply_compute(schema: SchemaInfo, metadata: Any) -> SchemaInfo:
     """
     Compute transforms can be represented in a few deterministic forms:
 
-    - legacy: {"expression": "new_col = ..."}
+    - compatibility: {"expression": "new_col = ..."}
     - preferred single column: {"targetColumn": "new_col", "formula": "..."}
     - preferred multi column: {"assignments": [{"column": "c1", "expression": "..."}, ...]}
 
@@ -291,7 +291,7 @@ def _apply_compute(schema: SchemaInfo, metadata: Any) -> SchemaInfo:
                 type_map[target] = None
             return SchemaInfo(columns=columns, type_map=type_map, dynamic_columns=schema.dynamic_columns)
 
-        # Legacy "expression" string.
+        # Compatibility "expression" string.
         metadata = metadata.get("expression") or ""
 
     expression = str(metadata or "").strip()

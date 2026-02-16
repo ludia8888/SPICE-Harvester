@@ -46,8 +46,8 @@ async def _wait_for_command(
                             exists = (exists_payload.get("data") or {}).get("exists")
                             if exists is True:
                                 return
-                    except httpx.HTTPError:
-                        pass
+                    except httpx.HTTPError as exc:
+                        print(f"[wait-warning] database existence check failed for {db_name}: {exc}")
                 raise AssertionError(f"Command {command_id} failed: {payload}")
         if db_name:
             try:
@@ -57,8 +57,8 @@ async def _wait_for_command(
                     exists = (exists_payload.get("data") or {}).get("exists")
                     if exists is True:
                         return
-            except httpx.HTTPError:
-                pass
+            except httpx.HTTPError as exc:
+                print(f"[wait-warning] database existence probe failed for {db_name}: {exc}")
         await asyncio.sleep(0.5)
     raise AssertionError(f"Timed out waiting for command {command_id}")
 

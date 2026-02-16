@@ -29,7 +29,7 @@ try:  # best-effort: enable OTLP export when SDK is available
 
     _HAS_OTEL_METRICS_SDK = True
 except Exception:  # pragma: no cover - env dependent
-    logging.getLogger(__name__).warning("Broad exception fallback at shared/observability/metrics.py:30", exc_info=True)
+    logging.getLogger(__name__).warning("Exception fallback at shared/observability/metrics.py:30", exc_info=True)
     OTLPMetricExporter = None
     MeterProvider = None
     PeriodicExportingMetricReader = None
@@ -124,7 +124,7 @@ def initialize_metrics_provider(*, service_name: str) -> None:
                     OpenTelemetryMetricsConfig.EXPORT_INTERVAL_SECONDS,
                 )
             except Exception as e:
-                logging.getLogger(__name__).warning("Broad exception fallback at shared/observability/metrics.py:119", exc_info=True)
+                logging.getLogger(__name__).warning("Exception fallback at shared/observability/metrics.py:119", exc_info=True)
                 _log_no_op_once(f"Failed to configure OTLP metric exporter: {e}")
 
     if not readers:
@@ -139,7 +139,7 @@ def initialize_metrics_provider(*, service_name: str) -> None:
         _metrics_provider_no_op_reason = None
         logger.info("OpenTelemetry metrics initialized: service=%s", service_name)
     except Exception as e:
-        logging.getLogger(__name__).warning("Broad exception fallback at shared/observability/metrics.py:132", exc_info=True)
+        logging.getLogger(__name__).warning("Exception fallback at shared/observability/metrics.py:132", exc_info=True)
         _log_no_op_once(f"Failed to set meter provider: {e}")
         _metrics_provider_initialized = True
 

@@ -66,7 +66,7 @@ async def _check_service_instance(instance: Any) -> Dict[str, Any]:
                 "latency_ms": int((time.monotonic() - start) * 1000),
             }
     except Exception as e:
-        logging.getLogger(__name__).warning("Broad exception fallback at shared/routers/monitoring.py:69", exc_info=True)
+        logging.getLogger(__name__).warning("Exception fallback at shared/routers/monitoring.py:69", exc_info=True)
         return {
             "status": "unhealthy",
             "checked_via": None,
@@ -211,7 +211,7 @@ async def liveness_probe(
         return JSONResponse(content=response_data, status_code=status_code)
         
     except Exception as e:
-        logging.getLogger(__name__).warning("Broad exception fallback at shared/routers/monitoring.py:213", exc_info=True)
+        logging.getLogger(__name__).warning("Exception fallback at shared/routers/monitoring.py:213", exc_info=True)
         return JSONResponse(
             content={"alive": False, "error": str(e)},
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE
@@ -424,7 +424,7 @@ async def get_background_task_metrics(
         }
         
     except Exception as e:
-        logging.getLogger(__name__).warning("Broad exception fallback at shared/routers/monitoring.py:431", exc_info=True)
+        logging.getLogger(__name__).warning("Exception fallback at shared/routers/monitoring.py:431", exc_info=True)
         payload = build_error_envelope(
             service_name=_resolve_service_name(request),
             message="Failed to load background task metrics",
@@ -501,7 +501,7 @@ async def get_active_background_tasks(
         }
         
     except Exception as e:
-        logging.getLogger(__name__).warning("Broad exception fallback at shared/routers/monitoring.py:507", exc_info=True)
+        logging.getLogger(__name__).warning("Exception fallback at shared/routers/monitoring.py:507", exc_info=True)
         payload = build_error_envelope(
             service_name=_resolve_service_name(request),
             message="Failed to list active background tasks",
@@ -620,7 +620,7 @@ async def get_background_task_health(
         return JSONResponse(content=response_data, status_code=status_code)
         
     except Exception as e:
-        logging.getLogger(__name__).warning("Broad exception fallback at shared/routers/monitoring.py:625", exc_info=True)
+        logging.getLogger(__name__).warning("Exception fallback at shared/routers/monitoring.py:625", exc_info=True)
         payload = build_error_envelope(
             service_name=_resolve_service_name(request),
             message="Failed to evaluate background task health",

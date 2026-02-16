@@ -90,8 +90,11 @@ async def _run_replay(*, from_dt: datetime, to_dt: Optional[datetime], limit: Op
                     s3_key=None,
                     error=str(e),
                 )
-            except Exception:
-                pass
+            except Exception as enqueue_error:
+                print(
+                    "Replay backfill enqueue failed "
+                    f"(event_id={env.event_id}, record_error={e}, enqueue_error={enqueue_error})"
+                )
 
         processed += 1
         if limit is not None and processed >= limit:

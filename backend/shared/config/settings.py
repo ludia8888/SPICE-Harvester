@@ -1146,8 +1146,8 @@ class PipelineSettings(BaseSettings):
         # Backward compatible: historically BFF used PIPELINE_LOCK_ACQUIRE_TIMEOUT_SECONDS.
         if os.getenv("PIPELINE_PUBLISH_LOCK_ACQUIRE_TIMEOUT_SECONDS") not in (None, ""):
             return v
-        legacy = (os.getenv("PIPELINE_LOCK_ACQUIRE_TIMEOUT_SECONDS") or "").strip()
-        return legacy or v
+        compat_fallback = (os.getenv("PIPELINE_LOCK_ACQUIRE_TIMEOUT_SECONDS") or "").strip()
+        return compat_fallback or v
 
     @field_validator("jobs_max_retries", mode="before")
     @classmethod
@@ -2664,14 +2664,14 @@ class InstanceWorkerSettings(BaseSettings):
     @field_validator("allow_pk_generation", mode="before")
     @classmethod
     def fallback_allow_pk_generation(cls, v):  # noqa: ANN001
-        legacy = _parse_boolish(os.getenv("INSTANCE_ALLOW_PK_GENERATION"))
-        return legacy if legacy is not None else v
+        compat_fallback = _parse_boolish(os.getenv("INSTANCE_ALLOW_PK_GENERATION"))
+        return compat_fallback if compat_fallback is not None else v
 
     @field_validator("relationship_strict", mode="before")
     @classmethod
     def fallback_relationship_strict(cls, v):  # noqa: ANN001
-        legacy = _parse_boolish(os.getenv("INSTANCE_RELATIONSHIP_STRICT"))
-        return legacy if legacy is not None else v
+        compat_fallback = _parse_boolish(os.getenv("INSTANCE_RELATIONSHIP_STRICT"))
+        return compat_fallback if compat_fallback is not None else v
 
     @field_validator("max_retry_attempts", mode="before")
     @classmethod
@@ -3703,11 +3703,11 @@ class EventPublisherSettings(BaseSettings):
     )
     poll_interval: int = Field(
         default=3,
-        description="Poll interval seconds (EVENT_PUBLISHER_POLL_INTERVAL; legacy MESSAGE_RELAY_POLL_INTERVAL)",
+        description="Poll interval seconds (EVENT_PUBLISHER_POLL_INTERVAL; compatibility MESSAGE_RELAY_POLL_INTERVAL)",
     )
     batch_size: int = Field(
         default=200,
-        description="Batch size (EVENT_PUBLISHER_BATCH_SIZE; legacy MESSAGE_RELAY_BATCH_SIZE)",
+        description="Batch size (EVENT_PUBLISHER_BATCH_SIZE; compatibility MESSAGE_RELAY_BATCH_SIZE)",
     )
     kafka_flush_batch_size: Optional[int] = Field(
         default=None,
@@ -3751,16 +3751,16 @@ class EventPublisherSettings(BaseSettings):
     def fallback_poll_interval(cls, v):  # noqa: ANN001
         if (os.getenv("EVENT_PUBLISHER_POLL_INTERVAL") or "").strip():
             return v
-        legacy = (os.getenv("MESSAGE_RELAY_POLL_INTERVAL") or "").strip()
-        return legacy or v
+        compat_fallback = (os.getenv("MESSAGE_RELAY_POLL_INTERVAL") or "").strip()
+        return compat_fallback or v
 
     @field_validator("batch_size", mode="before")
     @classmethod
     def fallback_batch_size(cls, v):  # noqa: ANN001
         if (os.getenv("EVENT_PUBLISHER_BATCH_SIZE") or "").strip():
             return v
-        legacy = (os.getenv("MESSAGE_RELAY_BATCH_SIZE") or "").strip()
-        return legacy or v
+        compat_fallback = (os.getenv("MESSAGE_RELAY_BATCH_SIZE") or "").strip()
+        return compat_fallback or v
 
     @field_validator("kafka_topic_bootstrap_timeout_seconds", mode="before")
     @classmethod
@@ -4248,7 +4248,7 @@ def build_client_ssl_config(settings: Optional[ApplicationSettings] = None) -> D
     """
     SSL config for HTTP clients (httpx/requests/etc).
 
-    Mirrors legacy behavior:
+    Mirrors compatibility behavior:
     - In production: always verify.
     - In non-prod: follow `services.verify_ssl`.
     - If verifying and CA path exists, use it.

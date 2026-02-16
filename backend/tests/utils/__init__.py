@@ -1,6 +1,9 @@
 """Test utilities for SPICE HARVESTER."""
 
+import logging
+
 __all__ = []
+logger = logging.getLogger(__name__)
 
 try:
     from .test_isolation import (
@@ -18,8 +21,8 @@ try:
         "with_isolation",
         "isolated_test_context",
     ]
-except Exception:
-    pass
+except ImportError as exc:
+    logger.debug("Optional test_isolation utilities unavailable: %s", exc)
 
 try:
     from .wait_conditions import (
@@ -41,5 +44,5 @@ try:
         "wait_for_service_health",
         "wait_for_database_operation",
     ]
-except Exception:
-    pass
+except ImportError as exc:
+    logger.debug("Optional wait_conditions utilities unavailable: %s", exc)

@@ -414,8 +414,8 @@ def validate_pipeline_definition(
                     ("lat2Column", "lat2_column"),
                     ("lon2Column", "lon2_column"),
                 )
-                for canonical, legacy in required:
-                    if not str(geospatial.get(canonical) or geospatial.get(legacy) or "").strip():
+                for canonical, alias_key in required:
+                    if not str(geospatial.get(canonical) or geospatial.get(alias_key) or "").strip():
                         errors.append(f"geospatial missing {canonical} on node {node_id}")
 
         if operation == "patternMining":

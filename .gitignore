@@ -48,6 +48,9 @@ coverage.xml
 .hypothesis/
 .pytest_cache/
 cover/
+backend/reports/*
+!backend/reports/README.md
+backend/bandit_report.json
 
 # Translations
 *.mo

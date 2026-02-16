@@ -74,7 +74,7 @@ class OntologyDeployOutboxPublisher:
                 await event_store.append_event(event)
                 await self.registry.mark_outbox_published(outbox_id=item.outbox_id)
             except Exception as exc:
-                logging.getLogger(__name__).warning("Broad exception fallback at oms/services/ontology_deploy_outbox.py:76", exc_info=True)
+                logging.getLogger(__name__).warning("Exception fallback at oms/services/ontology_deploy_outbox.py:76", exc_info=True)
                 attempts = int(item.publish_attempts) + 1
                 await self.registry.mark_outbox_failed(
                     outbox_id=item.outbox_id,

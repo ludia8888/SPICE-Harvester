@@ -245,7 +245,7 @@ class ConsistencyTokenService:
             
         except Exception:
             # Document not found yet
-            logging.getLogger(__name__).warning("Broad exception fallback at shared/services/core/consistency_token.py:245", exc_info=True)
+            logging.getLogger(__name__).warning("Exception fallback at shared/services/core/consistency_token.py:245", exc_info=True)
             pass
         
         return False
@@ -275,7 +275,7 @@ class ConsistencyTokenService:
             return False, None
             
         except Exception as e:
-            logging.getLogger(__name__).warning("Broad exception fallback at shared/services/core/consistency_token.py:275", exc_info=True)
+            logging.getLogger(__name__).warning("Exception fallback at shared/services/core/consistency_token.py:275", exc_info=True)
             print(f"Token validation error: {e}")
             return False, None
     

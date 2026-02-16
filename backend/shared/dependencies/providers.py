@@ -270,7 +270,7 @@ async def health_check_core_services(container: ServiceContainer) -> dict:
             else:
                 results[service_name] = None  # Not created yet
         except Exception as e:
-            logging.getLogger(__name__).warning("Broad exception fallback at shared/dependencies/providers.py:271", exc_info=True)
+            logging.getLogger(__name__).warning("Exception fallback at shared/dependencies/providers.py:271", exc_info=True)
             results[service_name] = f"Error: {str(e)}"
     
     return results

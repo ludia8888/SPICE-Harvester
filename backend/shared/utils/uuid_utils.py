@@ -12,6 +12,6 @@ def safe_uuid(value: Any) -> Optional[str]:
     try:
         return str(UUID(raw))
     except Exception:
-        logging.getLogger(__name__).warning("Broad exception fallback at shared/utils/uuid_utils.py:13", exc_info=True)
+        logging.getLogger(__name__).warning("Exception fallback at shared/utils/uuid_utils.py:13", exc_info=True)
         return None
 

@@ -33,7 +33,7 @@ def normalize_diff_changes(raw: Any) -> List[Dict[str, Any]]:
         try:
             parsed = json.loads(text)
         except Exception:
-            logging.getLogger(__name__).warning("Broad exception fallback at shared/utils/diff_utils.py:34", exc_info=True)
+            logging.getLogger(__name__).warning("Exception fallback at shared/utils/diff_utils.py:34", exc_info=True)
             return []
         return normalize_diff_changes(parsed)
     return []

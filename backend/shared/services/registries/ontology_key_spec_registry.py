@@ -1,7 +1,7 @@
 """
 Ontology KeySpec Registry (Postgres SSoT).
 
-Some legacy schema documents may discard custom per-property metadata such as
+Some older schema documents may discard custom per-property metadata such as
 primaryKey/titleKey flags. To make ontology primary keys authoritative and
 round-trip safe, we persist the ordered key spec in Postgres and overlay it
 back into ontology reads.
@@ -237,7 +237,7 @@ class OntologyKeySpecRegistry:
                 try:
                     parsed = json.loads(raw)
                 except Exception:
-                    logging.getLogger(__name__).warning("Broad exception fallback at shared/services/registries/ontology_key_spec_registry.py:239", exc_info=True)
+                    logging.getLogger(__name__).warning("Exception fallback at shared/services/registries/ontology_key_spec_registry.py:239", exc_info=True)
                     return []
                 if isinstance(parsed, list):
                     return [str(v) for v in parsed if str(v)]

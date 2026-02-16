@@ -99,7 +99,7 @@ async def start_pipelining_google_sheet(
 
             columns, rows = normalize_sheet_data(values)
         except Exception:
-            logging.getLogger(__name__).warning("Broad exception fallback at bff/services/data_connector_pipelining_service.py:101", exc_info=True)
+            logging.getLogger(__name__).warning("Exception fallback at bff/services/data_connector_pipelining_service.py:101", exc_info=True)
             columns = []
             rows = []
 

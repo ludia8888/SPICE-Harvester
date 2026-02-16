@@ -19,7 +19,7 @@ def _stable_definition_hash(definition_json: Dict[str, Any]) -> str:
     try:
         payload = json.dumps(definition_json or {}, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str)
     except Exception:
-        logging.getLogger(__name__).warning("Broad exception fallback at bff/routers/pipeline_ops_definition.py:21", exc_info=True)
+        logging.getLogger(__name__).warning("Exception fallback at bff/routers/pipeline_ops_definition.py:21", exc_info=True)
         payload = json.dumps(str(definition_json))
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 

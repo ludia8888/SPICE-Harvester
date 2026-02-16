@@ -242,7 +242,7 @@ class ComplexTypeValidator:
                     return True, f"Default validation passed for type: {data_type}", value
 
         except Exception as e:
-            logging.getLogger(__name__).warning("Broad exception fallback at shared/validators/complex_type_validator.py:244", exc_info=True)
+            logging.getLogger(__name__).warning("Exception fallback at shared/validators/complex_type_validator.py:244", exc_info=True)
             return False, f"Validation error: {str(e)}", value
 
     @classmethod

@@ -33,7 +33,7 @@ def _build_ingest_request_fingerprint(payload: Dict[str, Any]) -> str:
     try:
         serialized = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
     except Exception:
-        logging.getLogger(__name__).warning("Broad exception fallback at bff/routers/pipeline_datasets_ops_ingest.py:35", exc_info=True)
+        logging.getLogger(__name__).warning("Exception fallback at bff/routers/pipeline_datasets_ops_ingest.py:35", exc_info=True)
         serialized = json.dumps(str(payload))
     return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 

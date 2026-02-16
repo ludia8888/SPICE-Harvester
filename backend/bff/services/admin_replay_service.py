@@ -144,7 +144,7 @@ async def get_replay_trace(
             )
             audit = {"count": len(audit_items), "items": [item.model_dump(mode="json") for item in audit_items]}
         except Exception as exc:
-            logging.getLogger(__name__).warning("Broad exception fallback at bff/services/admin_replay_service.py:146", exc_info=True)
+            logging.getLogger(__name__).warning("Exception fallback at bff/services/admin_replay_service.py:146", exc_info=True)
             audit_error = str(exc)
 
     lineage: Optional[Dict[str, Any]] = None
@@ -161,7 +161,7 @@ async def get_replay_trace(
             )
             lineage = graph.model_dump(mode="json")
         except Exception as exc:
-            logging.getLogger(__name__).warning("Broad exception fallback at bff/services/admin_replay_service.py:162", exc_info=True)
+            logging.getLogger(__name__).warning("Exception fallback at bff/services/admin_replay_service.py:162", exc_info=True)
             lineage_error = str(exc)
 
     return {
@@ -412,5 +412,5 @@ def _parse_iso_datetime(raw: str) -> Optional[datetime]:
             dt = dt.replace(tzinfo=timezone.utc)
         return dt.astimezone(timezone.utc)
     except Exception:
-        logging.getLogger(__name__).warning("Broad exception fallback at bff/services/admin_replay_service.py:412", exc_info=True)
+        logging.getLogger(__name__).warning("Exception fallback at bff/services/admin_replay_service.py:412", exc_info=True)
         return None

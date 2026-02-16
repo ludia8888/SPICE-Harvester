@@ -57,7 +57,7 @@ async def search_document_bundle(
     try:
         limit = int(payload.get("limit") or 10)
     except Exception:
-        logging.getLogger(__name__).warning("Broad exception fallback at bff/routers/document_bundles.py:60", exc_info=True)
+        logging.getLogger(__name__).warning("Exception fallback at bff/routers/document_bundles.py:60", exc_info=True)
         limit = 10
     limit = max(1, min(50, limit))
 
@@ -92,7 +92,7 @@ async def search_document_bundle(
         try:
             score = float(score) if score is not None else None
         except Exception:
-            logging.getLogger(__name__).warning("Broad exception fallback at bff/routers/document_bundles.py:94", exc_info=True)
+            logging.getLogger(__name__).warning("Exception fallback at bff/routers/document_bundles.py:94", exc_info=True)
             score = None
 
         snippet = obj.get("snippet")

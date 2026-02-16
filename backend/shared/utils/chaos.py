@@ -61,7 +61,7 @@ def maybe_crash(point: str, *, logger: Optional[object] = None) -> None:
             marker.write_text("crashed\n", encoding="utf-8")
         except OSError:
             # Marker best-effort; still crash if requested.
-            logging.getLogger(__name__).warning("Broad exception fallback at shared/utils/chaos.py:61", exc_info=True)
+            logging.getLogger(__name__).warning("Exception fallback at shared/utils/chaos.py:61", exc_info=True)
 
     msg = f"CHAOS: crashing at {point}"
     try:
@@ -70,7 +70,7 @@ def maybe_crash(point: str, *, logger: Optional[object] = None) -> None:
         else:
             print(msg, flush=True)
     except (AttributeError, OSError):
-        logging.getLogger(__name__).warning("Broad exception fallback at shared/utils/chaos.py:71", exc_info=True)
+        logging.getLogger(__name__).warning("Exception fallback at shared/utils/chaos.py:71", exc_info=True)
         try:
             print(msg, flush=True)
         except OSError:

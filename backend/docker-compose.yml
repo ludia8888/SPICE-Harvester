@@ -389,7 +389,7 @@ services:
       - AGENT_PLAN_ALLOWLIST_BOOTSTRAP_ENABLED=${AGENT_PLAN_ALLOWLIST_BOOTSTRAP_ENABLED:-true}
       - AGENT_PLAN_ALLOWLIST_BOOTSTRAP_ONLY_IF_EMPTY=${AGENT_PLAN_ALLOWLIST_BOOTSTRAP_ONLY_IF_EMPTY:-true}
       - AGENT_PLAN_ALLOWLIST_BUNDLE_PATH=${AGENT_PLAN_ALLOWLIST_BUNDLE_PATH:-}
-      # LLM gateway (planner). Default: OpenAI-compatible (set LLM_API_KEY; OPENAI_API_KEY is a legacy alias).
+      # LLM gateway (planner). Default: OpenAI-compatible (set LLM_API_KEY; OPENAI_API_KEY is a compatibility alias).
       # To disable LLM features: set LLM_PROVIDER=disabled.
       - LLM_PROVIDER=${LLM_PROVIDER:-openai_compat}
       - LLM_MODEL=${LLM_MODEL:-${OPENAI_MODEL:-gpt-5}}
@@ -500,7 +500,7 @@ services:
   #
   # NOTE: Pipeline Agent runs are primarily handled in the BFF now
   # (/api/v1/agent/pipeline-runs + /stream), but we keep this service for
-  # compatibility (health checks, legacy flows, and production gate expectations).
+  # compatibility (health checks, prior-flow support, and production gate expectations).
   agent:
     build:
       context: .

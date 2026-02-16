@@ -703,7 +703,7 @@ class PipelineRegistry(PostgresSchemaRegistry):
                 """
             )
 
-            # lakeFS refactor: remove legacy branch-base + integer deployed version columns.
+            # lakeFS refactor: remove older branch-base + integer deployed version columns.
             await conn.execute(
                 f"""
                 ALTER TABLE {self._schema}.pipelines
@@ -1963,7 +1963,7 @@ class PipelineRegistry(PostgresSchemaRegistry):
             try:
                 committed = await lakefs_storage.load_json(bucket=repository, key=f"{commit_id}/{definition_key}")
             except Exception:
-                logging.getLogger(__name__).warning("Broad exception fallback at shared/services/registries/pipeline_registry.py:1965", exc_info=True)
+                logging.getLogger(__name__).warning("Exception fallback at shared/services/registries/pipeline_registry.py:1965", exc_info=True)
                 return False
             return committed == definition_dict
 

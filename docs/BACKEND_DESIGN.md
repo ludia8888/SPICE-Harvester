@@ -1,14 +1,14 @@
 # Backend Design Reference
 
-> Generated: 2026-02-16T12:25:31+09:00
+> Generated: 2026-02-16T12:30:43+09:00
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 > Source: AST + docstring extraction (module/class/function) via `scripts/generate_backend_methods.py`.
 
 ## Coverage Summary
 
-- Modules scanned: **983**
-- Modules with module docstring: **561/983**
-- Modules with broad `except Exception`: **284**
+- Modules scanned: **982**
+- Modules with module docstring: **560/982**
+- Modules with broad `except Exception`: **282**
 - Modules with bare `except:`: **0**
 - Modules with `return` inside `finally`: **0**
 
@@ -5633,7 +5633,7 @@
 - Public API names: fix_datetime_in_file; main
 
 ### `backend/scripts/migrations/migrate_lineage_es_aliases_to_canonical.py`
-- Module summary: One-time migration: normalize legacy ES lineage aliases to canonical names.
+- Module summary: One-time migration: normalize compatibility ES lineage aliases to canonical names.
 - Responsibilities: not documented
 - Invariants: not documented
 - Failure modes: not documented
@@ -5647,7 +5647,7 @@
 - Public API names: main
 
 ### `backend/scripts/migrations/migrate_lineage_s3_edge_alias_to_canonical.py`
-- Module summary: One-time migration: normalize legacy S3 lineage edge alias to canonical name.
+- Module summary: One-time migration: normalize compatibility S3 lineage edge alias to canonical name.
 - Responsibilities: not documented
 - Invariants: not documented
 - Failure modes: not documented
@@ -10088,20 +10088,6 @@
 - External imports (7): __future__; aiohttp; os; pytest; subprocess; sys; typing
 - Public API names: test_auth_disabled_requires_explicit_allow; test_oms_write_requires_auth
 
-### `backend/tests/test_branch_virtualization_e2e.py`
-- Module summary: E2E test for legacy branch-based data virtualization (copy-on-write semantics).
-- Responsibilities: not documented
-- Invariants: not documented
-- Failure modes: not documented
-- Extension points: not documented
-- Dependencies (doc): not documented
-- API surface: public=1 | top-level functions=6 | classes=0 | methods=0
-- Runtime signals: async_functions=6 | try=4 | raise=6 | broad_except=3 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=2/6 (33%) | classes=0/0 (n/a) | methods=0/0 (n/a)
-- Internal imports (2): shared.config.search_config; tests.utils.auth
-- External imports (8): __future__; aiohttp; asyncio; os; pytest; time; typing; uuid
-- Public API names: test_branch_virtualization_overlay_copy_on_write
-
 ### `backend/tests/test_command_status_ttl_e2e.py`
 - Module summary: Command status TTL E2E tests (no mocks).
 - Responsibilities: not documented
@@ -10124,7 +10110,7 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - API surface: public=14 | top-level functions=4 | classes=14 | methods=50
-- Runtime signals: async_functions=19 | try=25 | raise=0 | broad_except=10 | bare_except=0 | finally_return=0
+- Runtime signals: async_functions=19 | try=25 | raise=1 | broad_except=10 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=3/4 (75%) | classes=14/14 (100%) | methods=41/50 (82%)
 - Internal imports (1): shared.config.settings
 - External imports (12): __future__; aiohttp; ast; asyncio; confluent_kafka; contextlib; os; pytest (+4 more)
@@ -11853,7 +11839,7 @@
 - Public API names: test_execute_graph_query_provenance_uses_graph_key; test_execute_multi_hop_query_uses_foundry_naming; test_execute_simple_graph_query_uses_foundry_naming
 
 ### `backend/tests/unit/services/test_graph_service_health.py`
-- Module summary: Tests for graph_service_health (ES-only, no TerminusDB).
+- Module summary: Tests for graph_service_health (ES-only mode).
 - Responsibilities: not documented
 - Invariants: not documented
 - Failure modes: not documented
@@ -13778,10 +13764,10 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
-- Runtime signals: async_functions=0 | try=2 | raise=0 | broad_except=2 | bare_except=0 | finally_return=0
+- Runtime signals: async_functions=0 | try=2 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
 - Internal imports (0): not documented
-- External imports (0): not documented
+- External imports (1): logging
 - Public API names: not documented
 
 ### `backend/tests/utils/auth.py`

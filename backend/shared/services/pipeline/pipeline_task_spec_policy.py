@@ -57,7 +57,7 @@ def normalize_task_spec(raw: Optional[Dict[str, Any]], *, dataset_count: int) ->
     try:
         spec = PipelineTaskSpec.model_validate(raw)
     except Exception:
-        logging.getLogger(__name__).warning("Broad exception fallback at shared/services/pipeline/pipeline_task_spec_policy.py:58", exc_info=True)
+        logging.getLogger(__name__).warning("Exception fallback at shared/services/pipeline/pipeline_task_spec_policy.py:58", exc_info=True)
         return None
     return clamp_task_spec(spec=spec, dataset_count=int(dataset_count or 0))
 

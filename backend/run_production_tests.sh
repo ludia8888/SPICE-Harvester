@@ -86,7 +86,7 @@ INGEST_RECONCILER_PORT_HOST="${INGEST_RECONCILER_PORT_HOST:-8012}"
 RESOURCE_STORAGE_BACKEND_RAW="${ONTOLOGY_RESOURCE_STORAGE_BACKEND:-postgres}"
 RESOURCE_STORAGE_BACKEND="$(printf '%s' "${RESOURCE_STORAGE_BACKEND_RAW}" | tr '[:upper:]' '[:lower:]' | xargs)"
 if [[ "$RESOURCE_STORAGE_BACKEND" != "postgres" && -n "$RESOURCE_STORAGE_BACKEND" ]]; then
-  echo "⚠️  Ignoring legacy ONTOLOGY_RESOURCE_STORAGE_BACKEND=${RESOURCE_STORAGE_BACKEND}; runtime is fixed to postgres"
+  echo "⚠️  Ignoring compatibility ONTOLOGY_RESOURCE_STORAGE_BACKEND=${RESOURCE_STORAGE_BACKEND}; runtime is fixed to postgres"
 fi
 RESOURCE_STORAGE_BACKEND="postgres"
 
@@ -583,8 +583,8 @@ echo "ℹ️  ONTOLOGY_RESOURCE_STORAGE_BACKEND=${RESOURCE_STORAGE_BACKEND}"
 "$PYTHON_BIN" -m pytest tests/test_idempotency_chaos.py -q
 
 if [[ "$MODE" == "full" ]]; then
-  # 2) Legacy branch/version compatibility suite has been removed in Foundry/Postgres runtime.
-  echo "ℹ️  Legacy branch/version compatibility suite removed"
+  # 2) Branch/version compatibility suite has been removed in Foundry/Postgres runtime.
+  echo "ℹ️  Branch/version compatibility suite removed"
 
   # 3) OMS live smoke via HTTP (destructive; opt-out via --no-oms-smoke)
   if [[ "$RUN_OMS_SMOKE" == "true" ]]; then
@@ -600,7 +600,6 @@ if [[ "$MODE" == "full" ]]; then
   "$PYTHON_BIN" -m pytest tests/test_openapi_contract_smoke.py -q
   "$PYTHON_BIN" -m pytest tests/test_auth_hardening_e2e.py -q
   "$PYTHON_BIN" -m pytest tests/test_websocket_auth_e2e.py -q
-  echo "ℹ️  Skipping tests/test_branch_virtualization_e2e.py (legacy branch virtualization runtime removed)"
   "$PYTHON_BIN" -m pytest tests/test_command_status_ttl_e2e.py -q
   "$PYTHON_BIN" -m pytest tests/test_worker_lease_safety_e2e.py -q
   "$PYTHON_BIN" -m pytest tests/test_event_store_tls_guard.py -q

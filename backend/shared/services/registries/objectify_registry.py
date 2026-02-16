@@ -803,7 +803,7 @@ class ObjectifyRegistry(PostgresSchemaRegistry):
             try:
                 oldest_age_seconds = int((now - oldest_created).total_seconds())
             except Exception:
-                logging.getLogger(__name__).warning("Broad exception fallback at shared/services/registries/objectify_registry.py:804", exc_info=True)
+                logging.getLogger(__name__).warning("Exception fallback at shared/services/registries/objectify_registry.py:804", exc_info=True)
                 oldest_age_seconds = None
 
         return {

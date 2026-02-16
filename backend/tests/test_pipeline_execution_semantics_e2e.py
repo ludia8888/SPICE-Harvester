@@ -1268,8 +1268,11 @@ async def test_run_branch_conflict_fallback_and_cleanup() -> None:
             if precreated:
                 try:
                     await lakefs_client.delete_branch(repository=artifact_repo, name=expected_branch)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    print(
+                        "[cleanup-warning] failed to delete precreated lakeFS branch "
+                        f"{artifact_repo}/{expected_branch}: {exc}"
+                    )
 
 
 @pytest.mark.integration

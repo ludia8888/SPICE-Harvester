@@ -95,7 +95,7 @@ async def upload_excel_dataset(
             try:
                 file.file.seek(0)
             except (AttributeError, OSError, ValueError):
-                logging.getLogger(__name__).warning("Failed to rewind legacy XLS stream", exc_info=True)
+                logging.getLogger(__name__).warning("Failed to rewind compatibility XLS stream", exc_info=True)
             converted = await asyncio.to_thread(_convert_xls_to_xlsx_bytes, raw_bytes)
             stem = filename.rsplit(".", 1)[0].strip() or "upload"
             filename = f"{stem}.xlsx"

@@ -742,7 +742,7 @@ class PipelineMCPServer:
                             "output_kind": {
                                 "type": "string",
                                 "enum": ["dataset", "geotemporal", "media", "virtual", "ontology"],
-                                "description": "Canonical output kind. Legacy aliases unknown/object/link are still accepted for compatibility.",
+                                "description": "Canonical output kind. Compatibility aliases unknown/object/link are still accepted.",
                             },
                             "node_id": {"type": "string"},
                             "write_mode": {

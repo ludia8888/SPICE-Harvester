@@ -94,7 +94,7 @@ def _load_pricing_table(raw: Optional[str]) -> dict[str, dict[str, float]]:
     try:
         parsed = json.loads(raw_value)
     except Exception:
-        logging.getLogger(__name__).warning("Broad exception fallback at shared/services/agent/llm_gateway.py:98", exc_info=True)
+        logging.getLogger(__name__).warning("Exception fallback at shared/services/agent/llm_gateway.py:98", exc_info=True)
         _PRICING_CACHE = (raw_value, {})
         return _PRICING_CACHE[1]
     table: dict[str, dict[str, float]] = {}
@@ -135,7 +135,7 @@ def _parse_provider_policies(raw: Optional[str]) -> dict[str, dict[str, Any]]:
     try:
         parsed = json.loads(text)
     except Exception:
-        logging.getLogger(__name__).warning("Broad exception fallback at shared/services/agent/llm_gateway.py:138", exc_info=True)
+        logging.getLogger(__name__).warning("Exception fallback at shared/services/agent/llm_gateway.py:138", exc_info=True)
         return {}
     if not isinstance(parsed, dict):
         return {}
@@ -291,7 +291,7 @@ def _tool_parameters_from_model(model: Type[BaseModel]) -> Dict[str, Any]:
     try:
         schema = model.model_json_schema()
     except Exception:
-        logging.getLogger(__name__).warning("Broad exception fallback at shared/services/agent/llm_gateway.py:293", exc_info=True)
+        logging.getLogger(__name__).warning("Exception fallback at shared/services/agent/llm_gateway.py:293", exc_info=True)
         schema = {}
     if not isinstance(schema, dict):
         schema = {}
@@ -697,9 +697,9 @@ class LLMGateway:
                 if isinstance(func, dict):
                     arguments = func.get("arguments")
         if arguments is None and isinstance(message, dict):
-            legacy_call = message.get("function_call")
-            if isinstance(legacy_call, dict):
-                arguments = legacy_call.get("arguments")
+            compat_call = message.get("function_call")
+            if isinstance(compat_call, dict):
+                arguments = compat_call.get("arguments")
 
         _log_llm_event(
             "openai.response",
@@ -1191,7 +1191,7 @@ class LLMGateway:
                         try:
                             parsed = json.loads(raw)
                         except Exception:
-                            logging.getLogger(__name__).warning("Broad exception fallback at shared/services/agent/llm_gateway.py:1190", exc_info=True)
+                            logging.getLogger(__name__).warning("Exception fallback at shared/services/agent/llm_gateway.py:1190", exc_info=True)
                             parsed = None
 
                         if isinstance(parsed, list):

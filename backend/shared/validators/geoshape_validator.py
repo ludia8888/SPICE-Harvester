@@ -40,7 +40,7 @@ class GeoShapeValidator(BaseValidator):
             try:
                 geometry = json.loads(raw)
             except Exception:
-                logging.getLogger(__name__).warning("Broad exception fallback at shared/validators/geoshape_validator.py:41", exc_info=True)
+                logging.getLogger(__name__).warning("Exception fallback at shared/validators/geoshape_validator.py:41", exc_info=True)
                 return ValidationResult(is_valid=False, message="Invalid GeoJSON string")
         elif isinstance(value, dict):
             geometry = value

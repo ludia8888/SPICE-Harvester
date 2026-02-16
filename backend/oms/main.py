@@ -554,14 +554,14 @@ async def container_health_check():
             _oms_container.get_jsonld_converter()
             oms_services_status["jsonld_converter"] = "healthy"
         except Exception as e:
-            logging.getLogger(__name__).warning("Broad exception fallback at oms/main.py:640", exc_info=True)
+            logging.getLogger(__name__).warning("Exception fallback at oms/main.py:640", exc_info=True)
             oms_services_status["jsonld_converter"] = f"unhealthy: {str(e)}"
         
         try:
             _oms_container.get_label_mapper()
             oms_services_status["label_mapper"] = "healthy"
         except Exception as e:
-            logging.getLogger(__name__).warning("Broad exception fallback at oms/main.py:646", exc_info=True)
+            logging.getLogger(__name__).warning("Exception fallback at oms/main.py:646", exc_info=True)
             oms_services_status["label_mapper"] = f"unhealthy: {str(e)}"
         
         # Check optional services
@@ -621,7 +621,7 @@ app.include_router(instance_async.router, prefix="/api/v1", tags=["async-instanc
 app.include_router(instance.router, prefix="/api/v1", tags=["instance"])
 app.include_router(action_async.router, prefix="/api/v1", tags=["async-actions"])
 app.include_router(command_status.router, prefix="/api/v1", tags=["command-status"])
-logger.info("Legacy /branch and /version routers are permanently disabled (Foundry-style profile)")
+logger.info("Deprecated /branch and /version routers are permanently disabled (Foundry-style profile)")
 
 # Pull Request endpoints depend on Postgres MVCC; keep them opt-in only.
 if get_settings().features.enable_pull_requests:

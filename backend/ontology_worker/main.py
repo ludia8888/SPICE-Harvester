@@ -261,7 +261,7 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
             self.command_status_service = None
 
         # Event Sourcing is now mandatory for write-side correctness.
-        # Legacy "direct Kafka publish" paths are removed because they break SSoT.
+        # Deprecated "direct Kafka publish" paths are removed because they break SSoT.
         if not self.enable_event_sourcing:
             raise RuntimeError(
                 "ENABLE_EVENT_SOURCING=false is no longer supported. "

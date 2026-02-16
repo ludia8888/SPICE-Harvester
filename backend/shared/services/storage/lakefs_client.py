@@ -88,7 +88,7 @@ def _normalize_metadata(metadata: Dict[str, Any]) -> Dict[str, str]:
         try:
             normalized[key] = json.dumps(raw_value, ensure_ascii=False, sort_keys=True)
         except Exception:
-            logging.getLogger(__name__).warning("Broad exception fallback at shared/services/storage/lakefs_client.py:89", exc_info=True)
+            logging.getLogger(__name__).warning("Exception fallback at shared/services/storage/lakefs_client.py:89", exc_info=True)
             normalized[key] = str(raw_value)
     return normalized
 

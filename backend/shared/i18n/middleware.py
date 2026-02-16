@@ -74,7 +74,7 @@ def install_i18n_middleware(app: FastAPI, *, max_body_bytes: int = 1_000_000) ->
         try:
             payload = json.loads(body.decode("utf-8"))
         except Exception:
-            logging.getLogger(__name__).warning("Broad exception fallback at shared/i18n/middleware.py:75", exc_info=True)
+            logging.getLogger(__name__).warning("Exception fallback at shared/i18n/middleware.py:75", exc_info=True)
             return Response(
                 content=body,
                 status_code=response.status_code,

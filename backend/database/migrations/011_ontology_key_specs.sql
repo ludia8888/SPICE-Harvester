@@ -1,6 +1,6 @@
 -- Ontology key_spec registry (Postgres SSoT)
 --
--- Legacy schema documents may discard per-property metadata (primaryKey/titleKey),
+-- Older schema documents may discard per-property metadata (primaryKey/titleKey),
 -- so we persist the ordered key spec for each ontology class and overlay it on reads.
 
 CREATE TABLE IF NOT EXISTS ontology_key_specs (

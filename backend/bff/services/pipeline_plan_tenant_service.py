@@ -54,7 +54,7 @@ async def resolve_tenant_policy(request: Request) -> tuple[Optional[str], Option
         policy_registry = await get_agent_policy_registry()
         policy = await policy_registry.get_tenant_policy(tenant_id=tenant_id)
     except Exception:
-        logging.getLogger(__name__).warning("Broad exception fallback at bff/services/pipeline_plan_tenant_service.py:55", exc_info=True)
+        logging.getLogger(__name__).warning("Exception fallback at bff/services/pipeline_plan_tenant_service.py:55", exc_info=True)
         return None, None, None
 
     if not policy:

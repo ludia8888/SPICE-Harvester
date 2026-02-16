@@ -85,7 +85,7 @@ async def resolve_ontology_version(
     """
     Resolve ontology semantic contract stamp in Foundry-style branch-ref form.
 
-    Legacy branch/version lookups are intentionally removed. The canonical
+    Deprecated branch/version lookups are intentionally removed. The canonical
     contract is `ref=branch:<name>`, with commit omitted when unavailable.
     """
     _ = (source, db_name, logger)

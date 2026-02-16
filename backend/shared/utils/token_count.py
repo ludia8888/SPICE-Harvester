@@ -25,7 +25,7 @@ def approx_token_count_json(payload: Any, *, empty_collections_as_zero: bool = F
     try:
         text = json.dumps(payload, ensure_ascii=False, separators=(",", ":"), default=str)
     except Exception:
-        logging.getLogger(__name__).warning("Broad exception fallback at shared/utils/token_count.py:26", exc_info=True)
+        logging.getLogger(__name__).warning("Exception fallback at shared/utils/token_count.py:26", exc_info=True)
         text = str(payload)
     text = text.strip()
     if not text:

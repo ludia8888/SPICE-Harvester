@@ -78,7 +78,7 @@ def _max_watermark_from_snapshots(
                 if float(candidate) > float(max_value):
                     max_value = candidate
             except Exception:
-                logging.getLogger(__name__).warning("Broad exception fallback at pipeline_worker/worker_helpers.py:80", exc_info=True)
+                logging.getLogger(__name__).warning("Exception fallback at pipeline_worker/worker_helpers.py:80", exc_info=True)
                 if str(candidate) > str(max_value):
                     max_value = candidate
     return max_value
@@ -90,7 +90,7 @@ def _watermark_values_match(left: Any, right: Any) -> bool:
     try:
         return float(left) == float(right)
     except Exception:
-        logging.getLogger(__name__).warning("Broad exception fallback at pipeline_worker/worker_helpers.py:91", exc_info=True)
+        logging.getLogger(__name__).warning("Exception fallback at pipeline_worker/worker_helpers.py:91", exc_info=True)
         return str(left) == str(right)
 
 

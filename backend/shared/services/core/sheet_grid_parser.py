@@ -184,7 +184,7 @@ class SheetGridParser:
                 )
                 merges.append(mr)
         except Exception:
-            logging.getLogger(__name__).warning("Broad exception fallback at shared/services/core/sheet_grid_parser.py:185", exc_info=True)
+            logging.getLogger(__name__).warning("Exception fallback at shared/services/core/sheet_grid_parser.py:185", exc_info=True)
             warnings.append("Failed to read merged cell ranges from workbook")
 
         # Read cells (keep A1 anchor; downstream structure analyzer expects leading blanks too)
@@ -206,7 +206,7 @@ class SheetGridParser:
             try:
                 max_cells = int(getattr(opts, "excel_style_hints_max_cells", 250_000))
             except Exception:
-                logging.getLogger(__name__).warning("Broad exception fallback at shared/services/core/sheet_grid_parser.py:206", exc_info=True)
+                logging.getLogger(__name__).warning("Exception fallback at shared/services/core/sheet_grid_parser.py:206", exc_info=True)
                 max_cells = 250_000
             if max_row * max_col > max_cells:
                 include_styles = False
@@ -235,7 +235,7 @@ class SheetGridParser:
                 if isinstance(value, str) and value:
                     return int(value[-6:], 16)
             except Exception:
-                logging.getLogger(__name__).warning("Broad exception fallback at shared/services/core/sheet_grid_parser.py:234", exc_info=True)
+                logging.getLogger(__name__).warning("Exception fallback at shared/services/core/sheet_grid_parser.py:234", exc_info=True)
                 return 0
             return 0
 
@@ -257,7 +257,7 @@ class SheetGridParser:
                     fg = getattr(fill, "fgColor", None) or getattr(fill, "start_color", None)
                     fill_rgb = _rgb24_from_openpyxl_color(fg)
             except Exception:
-                logging.getLogger(__name__).warning("Broad exception fallback at shared/services/core/sheet_grid_parser.py:255", exc_info=True)
+                logging.getLogger(__name__).warning("Exception fallback at shared/services/core/sheet_grid_parser.py:255", exc_info=True)
                 fill_rgb = 0
             # Treat white/empty as no fill
             if fill_rgb not in (0, 0xFFFFFF):
@@ -313,7 +313,7 @@ class SheetGridParser:
                 try:
                     style_hints = [row[: trim_meta["cols"]] for row in style_hints[: trim_meta["rows"]]]
                 except Exception:
-                    logging.getLogger(__name__).warning("Broad exception fallback at shared/services/core/sheet_grid_parser.py:310", exc_info=True)
+                    logging.getLogger(__name__).warning("Exception fallback at shared/services/core/sheet_grid_parser.py:310", exc_info=True)
                     style_hints = None
 
         rows = len(grid)
@@ -471,7 +471,7 @@ class SheetGridParser:
             try:
                 return f"{float(value) * 100:.0f}%"
             except Exception:
-                logging.getLogger(__name__).warning("Broad exception fallback at shared/services/core/sheet_grid_parser.py:467", exc_info=True)
+                logging.getLogger(__name__).warning("Exception fallback at shared/services/core/sheet_grid_parser.py:467", exc_info=True)
                 return f"{value}%"
 
         currency_prefix, currency_suffix = cls._detect_currency_affixes(s)
@@ -481,7 +481,7 @@ class SheetGridParser:
         try:
             num = float(value)
         except Exception:
-            logging.getLogger(__name__).warning("Broad exception fallback at shared/services/core/sheet_grid_parser.py:476", exc_info=True)
+            logging.getLogger(__name__).warning("Exception fallback at shared/services/core/sheet_grid_parser.py:476", exc_info=True)
             return str(value)
 
         # Basic numeric formatting (best-effort)

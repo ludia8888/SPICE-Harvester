@@ -566,9 +566,10 @@ def scenario_kafka_down_then_recover() -> None:
     time.sleep(3)
     try:
         _wait_command_completed(ids["product_command_id"], timeout_s=5)
+    except Exception as exc:
+        print(f"Command remained incomplete while Kafka was down (expected): {exc}", flush=True)
+    else:
         raise AssertionError("command unexpectedly completed while Kafka was stopped")
-    except Exception:
-        pass
 
     print("Starting Kafka...", flush=True)
     _docker_compose(["up", "-d", "kafka"])
@@ -623,9 +624,9 @@ def scenario_es_down_then_recover() -> None:
         statuses = [str(n.get("data_status")) for n in nodes if isinstance(n, dict)]
         if statuses and all(s == "FULL" for s in statuses):
             raise AssertionError("expected non-FULL while ES is stopped")
-    except Exception:
+    except Exception as exc:
         # acceptable if BFF errors while ES is down
-        pass
+        print(f"Graph query failed while ES was down (expected): {exc}", flush=True)
 
     print("Starting Elasticsearch...", flush=True)
     _docker_compose(["up", "-d", "elasticsearch"])

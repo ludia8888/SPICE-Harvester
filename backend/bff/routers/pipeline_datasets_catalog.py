@@ -87,7 +87,7 @@ async def get_dataset_raw_file(
             try:
                 size_bytes = int(size_bytes)
             except Exception:
-                logging.getLogger(__name__).warning("Broad exception fallback at bff/routers/pipeline_datasets_catalog.py:90", exc_info=True)
+                logging.getLogger(__name__).warning("Exception fallback at bff/routers/pipeline_datasets_catalog.py:90", exc_info=True)
                 size_bytes = None
 
         if not target_uri:

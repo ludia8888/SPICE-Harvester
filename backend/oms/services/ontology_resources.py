@@ -117,7 +117,7 @@ def _json_like_to_dict(value: Any, *, default: Optional[Dict[str, Any]] = None) 
             parsed = json.loads(raw)
         except Exception:
             logging.getLogger(__name__).warning(
-                "Broad exception fallback at oms/services/ontology_resources.py:117",
+                "Exception fallback at oms/services/ontology_resources.py:117",
                 exc_info=True,
             )
             return default
@@ -148,7 +148,7 @@ def _to_datetime(value: Any) -> datetime:
         return datetime.fromisoformat(raw.replace("Z", "+00:00"))
     except Exception:
         logging.getLogger(__name__).warning(
-            "Broad exception fallback at oms/services/ontology_resources.py:148",
+            "Exception fallback at oms/services/ontology_resources.py:148",
             exc_info=True,
         )
         return datetime.fromtimestamp(0, tz=timezone.utc)

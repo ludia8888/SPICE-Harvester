@@ -1,5 +1,5 @@
 """
-One-time migration: normalize legacy ES lineage aliases to canonical names.
+One-time migration: normalize compatibility ES lineage aliases to canonical names.
 
 Usage:
   python backend/scripts/migrations/migrate_lineage_es_aliases_to_canonical.py --schema spice_lineage
@@ -15,7 +15,7 @@ import asyncpg
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Normalize legacy ES lineage aliases in Postgres")
+    parser = argparse.ArgumentParser(description="Normalize compatibility ES lineage aliases in Postgres")
     parser.add_argument("--dsn", default=None, help="Postgres DSN; defaults to POSTGRES_URL env")
     parser.add_argument("--schema", default="spice_lineage", help="Target schema (default: spice_lineage)")
     return parser
@@ -47,7 +47,7 @@ async def _run(*, dsn: str, schema: str) -> None:
                 run_id,
                 code_sha,
                 schema_version,
-                metadata || jsonb_build_object('legacy_node_id', node_id)
+                metadata || jsonb_build_object('compat_node_id', node_id)
             FROM {schema}.lineage_nodes
             WHERE node_id LIKE 'artifact:elasticsearch:%'
             ON CONFLICT (node_id) DO UPDATE

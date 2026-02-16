@@ -925,7 +925,7 @@ async def deploy_pipeline(
                             try:
                                 expected_version_int = int(expected_version)
                             except Exception:
-                                logging.getLogger(__name__).warning("Broad exception fallback at bff/services/pipeline_execution_service.py:844", exc_info=True)
+                                logging.getLogger(__name__).warning("Exception fallback at bff/services/pipeline_execution_service.py:844", exc_info=True)
                                 expected_version_int = None
                             if expected_version_int is not None and expected_version_int != current.version:
                                 mismatches.append(
@@ -1070,12 +1070,12 @@ async def deploy_pipeline(
                 try:
                     row_count_int = int(row_count_raw) if row_count_raw is not None else None
                 except Exception:
-                    logging.getLogger(__name__).warning("Broad exception fallback at bff/services/pipeline_execution_service.py:1022", exc_info=True)
+                    logging.getLogger(__name__).warning("Exception fallback at bff/services/pipeline_execution_service.py:1022", exc_info=True)
                     row_count_int = None
                 try:
                     delta_row_count_int = int(delta_row_count_raw) if delta_row_count_raw is not None else None
                 except Exception:
-                    logging.getLogger(__name__).warning("Broad exception fallback at bff/services/pipeline_execution_service.py:1026", exc_info=True)
+                    logging.getLogger(__name__).warning("Exception fallback at bff/services/pipeline_execution_service.py:1026", exc_info=True)
                     delta_row_count_int = None
                 try:
                     output_kind = normalize_output_kind(

@@ -1815,5 +1815,5 @@ class PatternBasedTypeDetector:
         )
 
 
-# Legacy alias for backward compatibility
+# Compatibility alias for backward compatibility
 FunnelTypeInferenceService = PatternBasedTypeDetector

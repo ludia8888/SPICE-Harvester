@@ -1,4 +1,4 @@
-"""Tests for graph_service_health (ES-only, no TerminusDB)."""
+"""Tests for graph_service_health (ES-only mode)."""
 from __future__ import annotations
 
 from typing import Any, Dict

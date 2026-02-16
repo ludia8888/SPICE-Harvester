@@ -147,7 +147,7 @@ class MockServiceContainer:
                         is_healthy = service.health_check()
                     health_status[service_name] = "healthy" if is_healthy else "unhealthy"
                 except Exception as e:
-                    logging.getLogger(__name__).warning("Broad exception fallback at shared/testing/config_fixtures.py:147", exc_info=True)
+                    logging.getLogger(__name__).warning("Exception fallback at shared/testing/config_fixtures.py:147", exc_info=True)
                     health_status[service_name] = f"error: {str(e)}"
             else:
                 health_status[service_name] = "mock_healthy"

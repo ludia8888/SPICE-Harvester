@@ -115,7 +115,7 @@ class ObjectifyOutboxPublisher:
             #
             # Enterprise evolution (Foundry-style):
             # - If a run_id is present, scope ordering to that run to preserve throughput.
-            # - Otherwise fall back to db+branch ordering for legacy callers.
+            # - Otherwise fall back to db+branch ordering for compatibility callers.
             aggregate_id = None
             if isinstance(item.payload, dict):
                 db_name = str(item.payload.get("db_name") or "").strip()

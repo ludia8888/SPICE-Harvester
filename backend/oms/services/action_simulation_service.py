@@ -86,7 +86,7 @@ def _enterprise_payload_for_error(*, error_key: str) -> Optional[Dict[str, Any]]
             external_code=None,
         ).to_dict()
     except Exception:
-        logging.getLogger(__name__).warning("Broad exception fallback at oms/services/action_simulation_service.py:80", exc_info=True)
+        logging.getLogger(__name__).warning("Exception fallback at oms/services/action_simulation_service.py:80", exc_info=True)
         return None
 
 
@@ -1385,7 +1385,7 @@ async def simulate_effects_for_patchset(
             )
             baseline = merged.document
         except Exception:
-            logging.getLogger(__name__).warning("Broad exception fallback at oms/services/action_simulation_service.py:1222", exc_info=True)
+            logging.getLogger(__name__).warning("Exception fallback at oms/services/action_simulation_service.py:1222", exc_info=True)
             baseline = {
                 "instance_id": instance_id,
                 "class_id": class_id,

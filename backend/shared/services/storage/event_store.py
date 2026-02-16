@@ -46,7 +46,7 @@ try:
     from shared.services.registries.lineage_store import LineageStore
     from shared.services.core.audit_log_store import AuditLogStore
 except Exception:  # pragma: no cover
-    logging.getLogger(__name__).warning("Broad exception fallback at shared/services/storage/event_store.py:41", exc_info=True)
+    logging.getLogger(__name__).warning("Exception fallback at shared/services/storage/event_store.py:41", exc_info=True)
     LineageStore = None  # type: ignore
     AuditLogStore = None  # type: ignore
 
@@ -372,7 +372,7 @@ class EventStore:
         Ensure `event.sequence_number` is set using an atomic write-side allocator.
 
         Default mode is Postgres (`EVENT_STORE_SEQUENCE_ALLOCATOR_MODE=postgres`).
-        Emergency/legacy modes:
+        Emergency/compatibility modes:
         - `legacy`/`s3`: best-effort `get_aggregate_version()+1` (non-atomic, not recommended)
         - `off`: require caller to provide `sequence_number`
         """
@@ -457,7 +457,7 @@ class EventStore:
                     or 0
                 )
             except Exception:
-                logging.getLogger(__name__).warning("Broad exception fallback at shared/services/storage/event_store.py:393", exc_info=True)
+                logging.getLogger(__name__).warning("Exception fallback at shared/services/storage/event_store.py:393", exc_info=True)
                 return int(seed or 0)
 
         expected_seq = None
@@ -523,7 +523,7 @@ class EventStore:
         if isinstance(event.metadata, dict):
             enrich_metadata_with_current_trace(event.metadata)
 
-        # Build S3 key path (legacy layout). NOTE: append idempotency MUST NOT rely
+        # Build S3 key path (compatibility layout). NOTE: append idempotency MUST NOT rely
         # on occurred_at, because retries/replays may re-materialize the same
         # event_id with a different timestamp. We therefore also maintain a
         # stable by-event-id index (indexes/by-event-id/{event_id}.json).
@@ -610,7 +610,7 @@ class EventStore:
                 try:
                     await s3.head_object(Bucket=self.bucket_name, Key=key)
                     existing_event = await self._read_event_object(s3, key)
-                    self._enforce_idempotency_contract(existing_event, event, source="legacy-key")
+                    self._enforce_idempotency_contract(existing_event, event, source="compat-key")
 
                     # If the existing event is missing kafka_topic (older writers),
                     # allow index routing to be fixed by the incoming envelope.
@@ -996,7 +996,7 @@ class EventStore:
                 if any_index:
                     return
 
-                # Slow fallback (no indexes): scan by year prefix like legacy code.
+                # Slow fallback (no indexes): scan by year prefix like compatibility code.
                 prefix = f"events/{start.year:04d}/"
                 async for page in paginator.paginate(Bucket=self.bucket_name, Prefix=prefix):
                     for obj in page.get("Contents", []):
@@ -1053,7 +1053,7 @@ class EventStore:
         except Exception as e:
             logger.warning(f"Failed to read aggregate index for {aggregate_type}/{aggregate_id}: {e}")
 
-        # Fallback: legacy streams without indexes (slow and unbounded). In production paths we generally
+        # Fallback: compatibility streams without indexes (slow and unbounded). In production paths we generally
         # want to avoid a full bucket scan because it can block unrelated requests under load.
         if not allow_full_scan:
             return 0

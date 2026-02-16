@@ -376,7 +376,7 @@ class ConnectorSyncWorker(StrictHeartbeatEventEnvelopeKafkaWorker[Optional[str]]
         try:
             max_rows = int(max_rows) if max_rows is not None else None
         except Exception:
-            logging.getLogger(__name__).warning("Broad exception fallback at connector_sync_worker/main.py:365", exc_info=True)
+            logging.getLogger(__name__).warning("Exception fallback at connector_sync_worker/main.py:365", exc_info=True)
             max_rows = None
         if max_rows is not None and max_rows > 0:
             rows = rows[: int(max_rows)]

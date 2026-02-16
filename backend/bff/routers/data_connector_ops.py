@@ -61,7 +61,7 @@ async def _resolve_google_connection(
         try:
             expires_at_float = float(expires_at)
         except Exception:
-            logging.getLogger(__name__).warning("Broad exception fallback at bff/routers/data_connector_ops.py:63", exc_info=True)
+            logging.getLogger(__name__).warning("Exception fallback at bff/routers/data_connector_ops.py:63", exc_info=True)
             expires_at_float = None
         if expires_at_float and oauth_client.is_token_expired(expires_at_float):
             token = None

@@ -374,7 +374,7 @@ class CommandStatusService:
         logger.info(f"Cleanup requested for commands older than {days} days")
         return 0
     
-    # Compatibility methods for legacy interface
+    # Compatibility methods for older interface
     async def set_command_status(
         self,
         command_id: str,
@@ -382,7 +382,7 @@ class CommandStatusService:
         metadata: Optional[Dict[str, Any]] = None
     ) -> None:
         """
-        Legacy compatibility method for setting command status.
+        Compatibility method for setting command status.
         
         Args:
             command_id: Command ID
@@ -420,7 +420,7 @@ class CommandStatusService:
     
     async def get_command_status(self, command_id: str) -> Optional[Dict[str, Any]]:
         """
-        Legacy compatibility method for getting command status.
+        Compatibility method for getting command status.
         
         Args:
             command_id: Command ID
@@ -447,7 +447,7 @@ class CommandStatusService:
     
     async def get_command_result(self, command_id: str) -> Optional[Dict[str, Any]]:
         """
-        Legacy compatibility method for getting command result.
+        Compatibility method for getting command result.
         
         Args:
             command_id: Command ID

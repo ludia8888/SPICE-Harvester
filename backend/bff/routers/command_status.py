@@ -50,7 +50,7 @@ async def get_command_status(command_id: str, oms: OMSClient = OMSClientDep) -> 
             try:
                 detail = resp.json().get("detail")
             except Exception:
-                logging.getLogger(__name__).warning("Broad exception fallback at bff/routers/command_status.py:53", exc_info=True)
+                logging.getLogger(__name__).warning("Exception fallback at bff/routers/command_status.py:53", exc_info=True)
                 detail = resp.text
             raise classified_http_exception(resp.status_code, str(detail), code=ErrorCode.UPSTREAM_ERROR) from e
         raise classified_http_exception(

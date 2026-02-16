@@ -19,7 +19,7 @@ def dt_iso(value: Any) -> Optional[str]:
     try:
         return value.isoformat()
     except Exception:
-        logging.getLogger(__name__).warning("Broad exception fallback at bff/utils/action_log_serialization.py:20", exc_info=True)
+        logging.getLogger(__name__).warning("Exception fallback at bff/utils/action_log_serialization.py:20", exc_info=True)
         return str(value)
 
 

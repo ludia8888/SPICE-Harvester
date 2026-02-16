@@ -2,7 +2,7 @@
 Event Publisher Service
 S3/MinIO Event Store(SSoT)에 저장된 이벤트를 Kafka로 발행하는 서비스.
 
-Legacy DB 기반 delivery-buffer를 제거하고, Event Store 자체를 "발행 원천"으로 사용합니다.
+기존 DB 기반 delivery-buffer를 제거하고, Event Store 자체를 "발행 원천"으로 사용합니다.
 
 Flow:
 1) Producers append EventEnvelope JSON to S3/MinIO (events/...)

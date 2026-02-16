@@ -119,7 +119,7 @@ class Config(AppConfig):
                 "minio": bool(cls.get_minio_url())
             }
         except Exception as e:
-            logging.getLogger(__name__).warning("Broad exception fallback at shared/config/__init__.py:126", exc_info=True)
+            logging.getLogger(__name__).warning("Exception fallback at shared/config/__init__.py:126", exc_info=True)
             results["service_urls"] = {"error": str(e)}
         
         return results
