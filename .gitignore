@@ -74,6 +74,11 @@ docs/_build/
 docs/reference/python/
 docs/reference/autoapi/
 
+# Docusaurus portal
+docs-portal/node_modules/
+docs-portal/.docusaurus/
+docs-portal/build/
+
 # PyBuilder
 .pybuilder/
 target/

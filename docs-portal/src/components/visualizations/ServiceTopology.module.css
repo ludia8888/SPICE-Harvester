@@ -1,0 +1,118 @@
+.container {
+  position: relative;
+  background: var(--portal-surface-elevated);
+  border: 1px solid var(--portal-border-subtle);
+  border-radius: var(--portal-radius-lg);
+  overflow: hidden;
+}
+
+/* Legend ----------------------------------------------------------- */
+.legend {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  z-index: 10;
+  padding: 8px 12px;
+  background: var(--portal-surface);
+  border: 1px solid var(--portal-border-subtle);
+  border-radius: var(--portal-radius-md);
+  box-shadow: var(--portal-shadow-sm);
+}
+
+.legendItem {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.legendDot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.legendLabel {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--ifm-font-color-base);
+  opacity: 0.8;
+}
+
+/* Controls -------------------------------------------------------- */
+.controls {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  z-index: 10;
+}
+
+.controlBtn {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--portal-surface);
+  border: 1px solid var(--portal-border-subtle);
+  border-radius: var(--portal-radius-sm);
+  color: var(--ifm-font-color-base);
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  box-shadow: var(--portal-shadow-sm);
+}
+
+.controlBtn:hover {
+  background: var(--portal-surface-overlay);
+  box-shadow: var(--portal-shadow-md);
+}
+
+/* Tooltip --------------------------------------------------------- */
+.tooltip {
+  position: fixed;
+  z-index: 100;
+  padding: 10px 14px;
+  background: var(--portal-surface-elevated);
+  border: 1px solid var(--portal-border);
+  border-radius: var(--portal-radius-md);
+  box-shadow: var(--portal-shadow-lg);
+  pointer-events: none;
+  max-width: 240px;
+}
+
+.tooltipTitle {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ifm-font-color-base);
+  margin-bottom: 2px;
+}
+
+.tooltipPort {
+  font-size: 11px;
+  font-weight: 600;
+  font-family: var(--ifm-font-family-monospace);
+  color: var(--ifm-color-primary);
+  margin-bottom: 4px;
+}
+
+.tooltipDesc {
+  font-size: 11px;
+  color: var(--ifm-font-color-secondary);
+  line-height: 1.4;
+  margin-bottom: 4px;
+}
+
+.tooltipCategory {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}

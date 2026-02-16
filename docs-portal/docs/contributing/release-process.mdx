@@ -1,0 +1,245 @@
+---
+title: Release Process
+sidebar_position: 3
+---
+
+# Release Process
+
+This page documents how SPICE Harvester releases are versioned, built, tested, and deployed.
+
+## Versioning
+
+SPICE Harvester follows **Semantic Versioning (SemVer)**:
+
+```
+MAJOR.MINOR.PATCH
+```
+
+| Component | Increment When |
+|-----------|---------------|
+| **MAJOR** | Breaking API changes, incompatible schema migrations, v1/v2 API removals |
+| **MINOR** | New features, new API endpoints, backward-compatible additions |
+| **PATCH** | Bug fixes, security patches, documentation updates |
+
+Pre-release versions use suffixes: `1.2.0-alpha.1`, `1.2.0-beta.1`, `1.2.0-rc.1`.
+
+## Release Workflow
+
+### 1. Prepare the Release Branch
+
+```bash
+# Create a release branch from main
+git checkout main
+git pull origin main
+git checkout -b release/1.2.0
+```
+
+### 2. Version Bump
+
+Update version numbers across the codebase:
+
+```bash
+# Use the bump script to update all version references
+python scripts/bump_version.py 1.2.0
+```
+
+This updates:
+- `pyproject.toml` -- Python package version
+- `package.json` -- Node.js package version
+- `src/spice/__version__.py` -- Runtime version constant
+- `docker-compose.yml` -- Image tags
+- `docs/` -- Version references in documentation
+
+### 3. Update Changelog
+
+Add a new section to `CHANGELOG.md` following the Keep a Changelog format:
+
+```markdown
+## [1.2.0] - 2024-01-15
+
+### Added
+- Search operator `startsWith` for keyword fields (#1234)
+- Pipeline transform `pivot` for row-to-column conversion (#1250)
+
+### Changed
+- Increased default `pageSize` from 50 to 100 (#1260)
+
+### Fixed
+- Race condition in concurrent action validation (#1245)
+- Elasticsearch index mapping for geopoint fields (#1248)
+
+### Deprecated
+- v1 API endpoints (scheduled for removal in 2.0.0)
+```
+
+### 4. Run the Full Test Suite
+
+```bash
+# Unit tests
+pytest -m "not integration"
+
+# Integration tests
+pytest -m integration
+
+# TypeScript tests
+npm test
+
+# Type checking
+mypy src/
+
+# Lint
+ruff check .
+npx eslint .
+
+# Build Docker images
+docker compose build
+```
+
+### 5. Create a Pull Request
+
+Open a PR from `release/1.2.0` to `main`. The PR should include:
+
+- Version bump commits
+- Changelog updates
+- Any last-minute fixes
+
+The CI pipeline runs:
+- All tests (unit, integration, end-to-end)
+- Linting and type checking
+- Docker image build verification
+- Documentation build
+
+### 6. Merge and Tag
+
+After the PR is approved and CI passes:
+
+```bash
+# Merge the release branch
+git checkout main
+git merge release/1.2.0
+
+# Create a signed tag
+git tag -s v1.2.0 -m "Release v1.2.0"
+
+# Push
+git push origin main
+git push origin v1.2.0
+```
+
+### 7. Build and Publish
+
+The CI/CD pipeline triggers automatically on tag push:
+
+1. **Build Docker images** -- All service images are built with the version tag.
+2. **Push to registry** -- Images are pushed to the container registry.
+3. **Publish Python package** -- The SDK is published to PyPI (if applicable).
+4. **Publish npm package** -- The TypeScript SDK is published to npm (if applicable).
+5. **Create GitHub Release** -- A release is created with the changelog as the body.
+
+### 8. Deploy
+
+Deployment depends on the target environment:
+
+#### Staging
+
+```bash
+# Pull latest images
+docker compose pull
+
+# Apply migrations
+docker compose exec oms python -m alembic upgrade head
+
+# Restart services with new images
+docker compose up -d
+```
+
+#### Production
+
+Production deployments use a rolling update strategy:
+
+1. Deploy data store migrations first (if any).
+2. Deploy workers (they are stateless and can be replaced safely).
+3. Deploy API servers one at a time behind the load balancer.
+4. Verify health checks pass for each service before proceeding to the next.
+5. Monitor dashboards for error rate spikes during the rollout.
+
+## Deployment Pipeline
+
+```
+Tag Push ──▶ CI/CD Pipeline
+              ├── Build Docker images
+              ├── Run full test suite
+              ├── Push images to registry
+              ├── Deploy to staging
+              ├── Run smoke tests
+              └── (Manual gate) Deploy to production
+```
+
+## Hotfix Process
+
+For urgent fixes that cannot wait for the next planned release:
+
+```bash
+# Create hotfix branch from latest release tag
+git checkout -b hotfix/1.2.1 v1.2.0
+
+# Apply the fix
+# ... make changes ...
+
+# Bump patch version
+python scripts/bump_version.py 1.2.1
+
+# Update changelog
+# ... add hotfix entry ...
+
+# Create PR, merge, tag, and deploy
+git tag -s v1.2.1 -m "Hotfix v1.2.1"
+git push origin v1.2.1
+```
+
+## Rollback
+
+If a release causes issues in production:
+
+### Quick Rollback
+
+```bash
+# Roll back to previous version
+docker compose pull   # with previous version tag
+docker compose up -d
+```
+
+### Database Rollback
+
+If the release included database migrations:
+
+```bash
+# Downgrade to previous migration
+docker compose exec oms python -m alembic downgrade -1
+```
+
+:::caution
+Database rollbacks may result in data loss if the migration added columns or tables that received data after the migration ran. Always test rollbacks in staging first.
+:::
+
+## Release Checklist
+
+- [ ] Version bumped in all files
+- [ ] Changelog updated
+- [ ] All tests passing (unit, integration, e2e)
+- [ ] No lint or type check warnings
+- [ ] Docker images build successfully
+- [ ] Documentation updated for any API changes
+- [ ] Breaking changes documented and communicated
+- [ ] Release PR approved by at least two reviewers
+- [ ] Tag created and pushed
+- [ ] CI/CD pipeline completed successfully
+- [ ] Staging deployment verified
+- [ ] Production deployment verified
+- [ ] Post-release monitoring (30 minutes minimum)
+
+## Next Steps
+
+- **[Development Setup](./dev-setup)** -- Set up your local environment
+- **[Code Standards](./code-standards)** -- Follow the coding conventions
+- **[Monitoring](/docs/operations/monitoring)** -- Post-deployment monitoring

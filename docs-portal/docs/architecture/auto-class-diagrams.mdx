@@ -1,0 +1,221 @@
+---
+title: "Backend Class Architecture"
+sidebar_label: "Class Diagrams"
+sidebar_position: 4
+---
+
+# Backend Class Architecture
+
+:::info Auto-Generated
+This diagram is auto-generated from `docs/architecture/` Mermaid sources.
+Do not edit manually. Run `python scripts/generate_portal_mermaid.py`.
+:::
+
+Class diagram of the core backend architecture including domain models, service layer, type system, and middleware.
+
+```mermaid
+classDiagram
+    %% SPICE HARVESTER Comprehensive Backend Architecture
+    %% Last Updated: 2025-07-20
+    
+    %% Core Application Layer
+    class FastAPIApplication {
+        +FastAPI app
+        +List~Router~ routers
+        +List~Middleware~ middleware
+        +Config config
+        +startup() Task
+        +shutdown() Task
+        +include_routers() None
+        +add_middleware() None
+    }
+    
+    %% Domain Models
+    class Production {
+        +String id
+        +String name
+        +DateTime created_at
+        +DateTime updated_at
+        +Dict metadata
+        +List~Relationship~ relationships
+        +validate() bool
+        +to_dict() Dict
+        +from_dict() Production
+    }
+    
+    class Ontology {
+        +String id
+        +String name
+        +String version
+        +Dict schema
+        +List~Class~ classes
+        +List~Property~ properties
+        +validate_schema() bool
+        +get_class() Class
+        +add_property() None
+    }
+    
+    class Relationship {
+        +String id
+        +String source_id
+        +String target_id
+        +String relationship_type
+        +Dict properties
+        +DateTime created_at
+        +validate_circular() bool
+        +get_path() List
+    }
+    
+    %% Service Layer
+    class OntologyManagementService {
+        +OntologyRegistryService registry_service
+        +SearchService search_service
+        +RelationshipManager relationship_manager
+        +create_ontology() Ontology
+        +update_ontology() Ontology
+        +delete_ontology() bool
+        +get_ontology() Ontology
+        +list_ontologies() List~Ontology~
+        +validate_relationships() bool
+    }
+    
+    class BackendForFrontend {
+        +OMSClient oms_client
+        +FunnelClient funnel_client
+        +LabelMapper label_mapper
+        +ResponseFormatter formatter
+        +aggregate_data() Dict
+        +format_response() Response
+        +handle_error() ErrorResponse
+        +map_labels() Dict
+        +suggest_schema() SchemaResponse
+    }
+    
+    class OntologyRegistryService {
+        +String postgres_url
+        +HTTPXClient http_client
+        +ConnectionPool pool
+        +create_resource() bool
+        +update_resource() bool
+        +delete_resource() bool
+        +get_resource() Document
+        +list_resources() List
+    }
+    
+    class FunnelService {
+        +TypeInferenceEngine engine
+        +DataProcessor processor
+        +SchemaGenerator generator
+        +analyze_dataset() DatasetAnalysis
+        +infer_types() List~TypeInference~
+        +suggest_schema() SchemaResponse
+        +preview_google_sheets() PreviewResponse
+    }
+    
+    class TypeInferenceEngine {
+        +Dict type_patterns
+        +List inference_rules
+        +infer_column_type() InferredType
+        +calculate_confidence() float
+        +detect_complex_types() List~ComplexType~
+        +validate_inference() bool
+    }
+    
+    class DataProcessor {
+        +GoogleSheetsAdapter sheets_adapter
+        +CSVAdapter csv_adapter
+        +fetch_sample_data() DataFrame
+        +clean_data() DataFrame
+        +analyze_patterns() PatternAnalysis
+        +extract_metadata() Metadata
+    }
+    
+    %% Complex Type System
+    class ComplexTypeValidator {
+        +Dict type_registry
+        +List validation_rules
+        +validate() bool
+        +validate_nested() bool
+        +register_type() None
+        +get_validator() Validator
+        +validate_email() bool
+        +validate_phone() bool
+        +validate_url() bool
+        +validate_money() bool
+        +validate_coordinate() bool
+    }
+    
+    class ComplexTypeSerializer {
+        +Dict serializers
+        +serialize() str
+        +deserialize() Any
+        +register_serializer() None
+        +handle_circular_refs() Dict
+    }
+    
+    %% Utils and Helpers
+    class RelationshipManager {
+        +CircularReferenceDetector detector
+        +RelationshipPathTracker tracker
+        +create_relationship() Relationship
+        +validate_relationship() bool
+        +find_paths() List~Path~
+        +detect_cycles() bool
+    }
+    
+    class MultilingualText {
+        +Dict~str, str~ translations
+        +String default_language
+        +get_text() str
+        +set_text() None
+        +get_languages() List~str~
+        +validate() bool
+    }
+    
+    %% Middleware
+    class RBACMiddleware {
+        +PermissionChecker checker
+        +UserContext context
+        +check_permission() bool
+        +get_user_roles() List~Role~
+        +enforce_policy() None
+    }
+    
+    class ValidationMiddleware {
+        +RequestValidator validator
+        +validate_request() bool
+        +validate_response() bool
+        +sanitize_input() Dict
+    }
+    
+    class CORSMiddleware {
+        +List allowed_origins
+        +List allowed_methods
+        +bool allow_credentials
+        +configure_auto() None
+        +add_origin() None
+    }
+    
+    %% Relationships
+    FastAPIApplication --> OntologyManagementService : uses
+    FastAPIApplication --> BackendForFrontend : uses (Port 8002)
+    FastAPIApplication --> FunnelService : uses (Port 8003)
+    FastAPIApplication --> OntologyManagementService : uses (Port 8000)
+    OntologyManagementService --> OntologyRegistryService : uses
+    OntologyManagementService --> RelationshipManager : uses
+    BackendForFrontend --> ComplexTypeSerializer : uses
+    BackendForFrontend --> ComplexTypeValidator : uses
+    BackendForFrontend --> FunnelService : calls
+    FunnelService --> TypeInferenceEngine : uses
+    FunnelService --> DataProcessor : uses
+    FunnelService --> ComplexTypeValidator : uses
+    TypeInferenceEngine --> ComplexTypeValidator : uses
+    DataProcessor --> TypeInferenceEngine : feeds data
+    Production --> Relationship : has many
+    Ontology --> Production : defines
+    RelationshipManager --> Relationship : manages
+    FastAPIApplication --> RBACMiddleware : applies
+    FastAPIApplication --> ValidationMiddleware : applies
+    FastAPIApplication --> CORSMiddleware : applies
+    MultilingualText --> ComplexTypeValidator : validated by
+```

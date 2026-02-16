@@ -1,0 +1,183 @@
+---
+title: Pipeline Tools Reference
+sidebar_position: 3
+---
+
+# Pipeline Tools Reference
+
+This page documents the pipeline builder's transform types, MCP tools, and agent-allowed tools for automating data workflows.
+
+## Pipeline Transform Types
+
+The pipeline builder supports 22+ transform types organized into four categories. Each transform receives a data frame as input and produces a data frame as output.
+
+### Structural Transforms
+
+These transforms reshape the data without altering individual values.
+
+| Transform | Description | Key Parameters |
+|-----------|-------------|----------------|
+| `map` | Apply a mapping function to each row | `expression`: mapping expression |
+| `filter` | Remove rows that do not match a predicate | `predicate`: filter expression |
+| `flatten` | Expand nested arrays into individual rows | `field`: array field to flatten |
+| `groupBy` | Group rows by one or more keys | `keys`: grouping fields, `aggregations`: aggregate expressions |
+| `sort` | Order rows by one or more fields | `fields`: sort fields, `order`: `asc` or `desc` |
+| `distinct` | Remove duplicate rows | `fields`: fields to check for uniqueness |
+| `limit` | Take the first N rows | `count`: maximum number of rows |
+| `skip` | Skip the first N rows | `count`: number of rows to skip |
+| `union` | Combine rows from multiple sources | `sources`: array of source references |
+| `pivot` | Pivot rows into columns | `rowKey`, `columnKey`, `valueField` |
+
+### Enrichment Transforms
+
+These transforms add or modify data using external sources.
+
+| Transform | Description | Key Parameters |
+|-----------|-------------|----------------|
+| `lookup` | Enrich rows by looking up values from an object type | `objectType`, `lookupKey`, `returnFields` |
+| `join` | Join two data frames on matching keys | `right`: second data source, `joinKey`, `joinType` |
+| `geocode` | Convert addresses to geographic coordinates | `addressField`, `provider` |
+| `resolve` | Resolve entity references to canonical records | `entityField`, `strategy` |
+| `compute` | Add computed columns using expressions | `columns`: map of column name to expression |
+
+### Validation Transforms
+
+These transforms ensure data quality.
+
+| Transform | Description | Key Parameters |
+|-----------|-------------|----------------|
+| `validate` | Check rows against schema or custom rules | `rules`: validation rule set |
+| `deduplicate` | Remove or merge duplicate records | `matchFields`, `strategy` (`keep_first`, `keep_last`, `merge`) |
+| `normalize` | Standardize field values | `field`, `normalization`: (`trim`, `lowercase`, `titlecase`, `strip_html`) |
+| `typecast` | Convert field data types | `conversions`: map of field to target type |
+
+### Output Transforms
+
+These transforms write results to the ontology.
+
+| Transform | Description | Key Parameters |
+|-----------|-------------|----------------|
+| `upsertObjects` | Create or update object instances | `objectType`, `primaryKeyField`, `propertyMapping` |
+| `createLinks` | Create link instances between objects | `linkType`, `sourceKeyField`, `targetKeyField` |
+| `publishEvent` | Publish custom events to Kafka | `topic`, `eventType`, `payloadMapping` |
+
+## Pipeline Definition Format
+
+Pipelines are defined as JSON or YAML:
+
+```json
+{
+  "name": "employee-import",
+  "description": "Import employee records from CSV",
+  "source": {
+    "type": "file",
+    "format": "csv",
+    "path": "s3://imports/employees.csv",
+    "options": {
+      "header": true,
+      "delimiter": ","
+    }
+  },
+  "transforms": [
+    {
+      "type": "typecast",
+      "config": {
+        "conversions": {
+          "salary": "double",
+          "startDate": "date",
+          "isActive": "boolean"
+        }
+      }
+    },
+    {
+      "type": "normalize",
+      "config": {
+        "field": "fullName",
+        "normalization": "titlecase"
+      }
+    },
+    {
+      "type": "validate",
+      "config": {
+        "rules": [
+          { "field": "employeeId", "rule": "required" },
+          { "field": "employeeId", "rule": "pattern", "pattern": "^EMP-\\d{3,}$" },
+          { "field": "salary", "rule": "range", "min": 0, "max": 1000000 }
+        ]
+      }
+    },
+    {
+      "type": "deduplicate",
+      "config": {
+        "matchFields": ["employeeId"],
+        "strategy": "keep_last"
+      }
+    },
+    {
+      "type": "upsertObjects",
+      "config": {
+        "objectType": "Employee",
+        "primaryKeyField": "employeeId",
+        "propertyMapping": {
+          "employeeId": "employeeId",
+          "fullName": "fullName",
+          "department": "department",
+          "startDate": "startDate",
+          "salary": "salary",
+          "isActive": "isActive"
+        }
+      }
+    }
+  ]
+}
+```
+
+## MCP Tools
+
+The Model Context Protocol (MCP) tools provide an interface for AI agents to interact with the pipeline system.
+
+| Tool | Description | Parameters |
+|------|-------------|------------|
+| `pipeline.create` | Create a new pipeline definition | `name`, `source`, `transforms` |
+| `pipeline.run` | Execute a pipeline | `pipelineId`, `dryRun` (optional) |
+| `pipeline.status` | Check pipeline execution status | `executionId` |
+| `pipeline.list` | List all pipeline definitions | `pageSize`, `pageToken` |
+| `pipeline.get` | Get a pipeline definition | `pipelineId` |
+| `pipeline.delete` | Delete a pipeline definition | `pipelineId` |
+| `pipeline.validate` | Validate a pipeline definition without executing | `pipeline` (definition object) |
+| `pipeline.preview` | Execute a pipeline on a sample of data | `pipelineId`, `sampleSize` |
+| `ontology.listObjectTypes` | List object types for mapping | `ontologyApiName` |
+| `ontology.getObjectType` | Get object type schema | `ontologyApiName`, `objectTypeApiName` |
+| `search.query` | Search objects for enrichment lookups | `ontologyApiName`, `objectType`, `where` |
+
+## Agent Allowed Tools
+
+When running pipelines in agent mode (via AI-assisted pipeline building), the following tools are available to the agent:
+
+| Tool Category | Tools | Description |
+|--------------|-------|-------------|
+| **Read** | `ontology.list`, `ontology.get`, `objectType.list`, `objectType.get` | Read ontology metadata |
+| **Search** | `search.query`, `search.aggregate` | Query existing data |
+| **Preview** | `pipeline.preview`, `pipeline.validate` | Test pipeline definitions |
+| **Execute** | `pipeline.run` (with approval) | Run pipelines (requires user confirmation) |
+| **Monitor** | `pipeline.status`, `pipeline.logs` | Monitor running pipelines |
+
+:::note
+The agent cannot directly modify ontology schemas, delete objects, or perform administrative actions. These require explicit user interaction through the Admin service.
+:::
+
+## Source Types
+
+| Source Type | Description | Config Options |
+|-------------|-------------|----------------|
+| `file` | Read from a file (CSV, JSON, Parquet) | `path`, `format`, `options` |
+| `api` | Read from an external REST API | `url`, `method`, `headers`, `pagination` |
+| `database` | Read from an external database | `connectionString`, `query` |
+| `kafka` | Read from a Kafka topic | `topic`, `consumerGroup`, `offsetReset` |
+| `objectType` | Read from existing SPICE Harvester objects | `ontologyApiName`, `objectTypeApiName`, `where` |
+
+## Next Steps
+
+- **[Pipeline Builder Guide](/docs/guides/data-engineer/pipeline-builder)** -- Step-by-step guide to building pipelines
+- **[Configuration Reference](./config)** -- Pipeline-related configuration
+- **[API Overview](/docs/api/overview)** -- API conventions for pipeline management

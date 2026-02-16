@@ -1,0 +1,103 @@
+.wrapper {
+  position: relative;
+  background: var(--portal-surface-elevated);
+  border: 1px solid var(--portal-border-subtle);
+  border-radius: var(--portal-radius-lg);
+  overflow: hidden;
+  margin: 1.5rem 0;
+  transition: all 0.3s ease;
+}
+
+.wrapper.fullscreen {
+  position: fixed;
+  top: 5vh;
+  left: 5vw;
+  width: 90vw;
+  height: 90vh;
+  z-index: 1000;
+  border-radius: var(--portal-radius-xl);
+  box-shadow: var(--portal-shadow-xl);
+}
+
+/* Header ---------------------------------------------------------- */
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--portal-border-subtle);
+  background: var(--portal-surface-overlay);
+}
+
+.title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ifm-font-color-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.actions {
+  display: flex;
+  gap: 4px;
+}
+
+.actionBtn {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: var(--portal-radius-sm);
+  background: transparent;
+  color: var(--ifm-font-color-secondary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.actionBtn:hover {
+  background: var(--portal-surface-elevated);
+  color: var(--ifm-font-color-base);
+}
+
+/* Content --------------------------------------------------------- */
+.content {
+  padding: 1.5rem;
+  overflow: auto;
+  display: flex;
+  justify-content: center;
+}
+
+.fullscreen .content {
+  height: calc(100% - 45px);
+  padding: 2rem;
+  align-items: center;
+}
+
+.content > * {
+  max-width: 100%;
+}
+
+/* Override Docusaurus mermaid container styles inside our wrapper */
+.content :global(.docusaurus-mermaid-container) {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  margin: 0;
+  box-shadow: none;
+}
+
+/* Backdrop -------------------------------------------------------- */
+.backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(17, 20, 24, 0.75);
+  backdrop-filter: blur(4px);
+  z-index: 999;
+  cursor: pointer;
+}

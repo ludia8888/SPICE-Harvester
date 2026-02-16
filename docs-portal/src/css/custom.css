@@ -1,0 +1,297 @@
+/**
+ * SPICE Harvester — Enterprise Documentation Portal
+ * Design tokens aligned with Blueprint.js (@blueprintjs/core ^6.7.0)
+ */
+
+/* ------------------------------------------------------------------ */
+/* Light theme                                                         */
+/* ------------------------------------------------------------------ */
+:root {
+  /* Primary — Blueprint intent-primary */
+  --ifm-color-primary: #215DB0;
+  --ifm-color-primary-dark: #1C509A;
+  --ifm-color-primary-darker: #1A4B91;
+  --ifm-color-primary-darkest: #153D77;
+  --ifm-color-primary-light: #2D72D2;
+  --ifm-color-primary-lighter: #4C90F0;
+  --ifm-color-primary-lightest: #8ABBFF;
+
+  /* Typography */
+  --ifm-font-family-base: -apple-system, BlinkMacSystemFont, "Segoe UI",
+    "Roboto", "Oxygen", "Ubuntu", "Cantarell", sans-serif;
+  --ifm-font-family-monospace: "SF Mono", "Fira Code", "Fira Mono",
+    "Roboto Mono", monospace;
+  --ifm-code-font-size: 85%;
+  --ifm-heading-font-weight: 600;
+
+  /* Layout */
+  --ifm-container-width-xl: 1440px;
+  --ifm-spacing-horizontal: 1.5rem;
+  --doc-sidebar-width: 280px;
+
+  /* Code highlighting */
+  --docusaurus-highlighted-code-line-bg: rgba(33, 93, 176, 0.08);
+
+  /* Portal design tokens */
+  --portal-accent: #7C3AED;
+  --portal-success: #0D9373;
+  --portal-warning: #C87619;
+  --portal-danger: #CD4246;
+  --portal-info: #2D72D2;
+
+  --portal-surface: #ffffff;
+  --portal-surface-elevated: #ffffff;
+  --portal-surface-overlay: #f6f7f9;
+  --portal-border: #dce0e5;
+  --portal-border-subtle: #edeff2;
+
+  --portal-radius-sm: 6px;
+  --portal-radius-md: 8px;
+  --portal-radius-lg: 12px;
+  --portal-radius-xl: 16px;
+
+  --portal-shadow-sm: 0 1px 2px rgba(17, 20, 24, 0.06);
+  --portal-shadow-md: 0 2px 8px rgba(17, 20, 24, 0.08),
+    0 1px 2px rgba(17, 20, 24, 0.04);
+  --portal-shadow-lg: 0 4px 16px rgba(17, 20, 24, 0.1),
+    0 2px 4px rgba(17, 20, 24, 0.06);
+  --portal-shadow-xl: 0 8px 32px rgba(17, 20, 24, 0.12),
+    0 4px 8px rgba(17, 20, 24, 0.08);
+
+  /* Gradients */
+  --portal-gradient-hero: linear-gradient(
+    135deg,
+    #1c2127 0%,
+    #215db0 50%,
+    #2d72d2 100%
+  );
+  --portal-gradient-card: linear-gradient(180deg, #f6f7f9 0%, #ffffff 100%);
+  --portal-gradient-accent: linear-gradient(135deg, #7c3aed 0%, #2d72d2 100%);
+}
+
+/* ------------------------------------------------------------------ */
+/* Dark theme — Blueprint dark palette                                 */
+/* ------------------------------------------------------------------ */
+[data-theme="dark"] {
+  --ifm-color-primary: #4C90F0;
+  --ifm-color-primary-dark: #2D72D2;
+  --ifm-color-primary-darker: #215DB0;
+  --ifm-color-primary-darkest: #184A90;
+  --ifm-color-primary-light: #8ABBFF;
+  --ifm-color-primary-lighter: #A6CDFF;
+  --ifm-color-primary-lightest: #C9DFFF;
+
+  --ifm-background-color: #111418;
+  --ifm-background-surface-color: #1c2127;
+
+  --docusaurus-highlighted-code-line-bg: rgba(76, 144, 240, 0.15);
+
+  --portal-surface: #1c2127;
+  --portal-surface-elevated: #252a31;
+  --portal-surface-overlay: #2f343c;
+  --portal-border: #404854;
+  --portal-border-subtle: #343a42;
+
+  --portal-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --portal-shadow-md: 0 2px 8px rgba(0, 0, 0, 0.35),
+    0 1px 2px rgba(0, 0, 0, 0.2);
+  --portal-shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.4),
+    0 2px 4px rgba(0, 0, 0, 0.25);
+  --portal-shadow-xl: 0 8px 32px rgba(0, 0, 0, 0.45),
+    0 4px 8px rgba(0, 0, 0, 0.3);
+
+  --portal-gradient-hero: linear-gradient(
+    135deg,
+    #111418 0%,
+    #1c2127 40%,
+    #215db0 100%
+  );
+  --portal-gradient-card: linear-gradient(180deg, #252a31 0%, #1c2127 100%);
+}
+
+/* ------------------------------------------------------------------ */
+/* Global overrides                                                    */
+/* ------------------------------------------------------------------ */
+
+/* Smoother scrolling */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Enhanced navbar */
+.navbar {
+  backdrop-filter: saturate(180%) blur(16px);
+  background: rgba(255, 255, 255, 0.85);
+  border-bottom: 1px solid var(--portal-border-subtle);
+  box-shadow: none;
+}
+
+[data-theme="dark"] .navbar {
+  background: rgba(28, 33, 39, 0.9);
+  border-bottom: 1px solid var(--portal-border-subtle);
+}
+
+.navbar__title {
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+/* Sidebar refinements */
+.menu__link {
+  border-radius: var(--portal-radius-sm);
+  font-size: 0.875rem;
+  transition: all 0.15s ease;
+}
+
+.menu__link:hover {
+  background: var(--portal-surface-overlay);
+}
+
+.menu__link--active {
+  font-weight: 600;
+}
+
+/* Doc page enhancements */
+.markdown h1 {
+  font-size: 2.25rem;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  line-height: 1.2;
+}
+
+.markdown h2 {
+  font-size: 1.5rem;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  margin-top: 2.5rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--portal-border-subtle);
+}
+
+.markdown h3 {
+  font-size: 1.25rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin-top: 2rem;
+}
+
+/* Code blocks */
+.prism-code {
+  border-radius: var(--portal-radius-md) !important;
+  border: 1px solid var(--portal-border-subtle);
+}
+
+/* Admonitions — more refined */
+.admonition {
+  border-radius: var(--portal-radius-md);
+  border-left-width: 4px;
+  box-shadow: var(--portal-shadow-sm);
+}
+
+/* Tables */
+table {
+  border-collapse: separate;
+  border-spacing: 0;
+  border-radius: var(--portal-radius-md);
+  overflow: hidden;
+  box-shadow: var(--portal-shadow-sm);
+}
+
+table th {
+  background: var(--portal-surface-overlay);
+  font-weight: 600;
+  font-size: 0.8125rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+table td {
+  font-size: 0.875rem;
+}
+
+/* TOC — right sidebar */
+.table-of-contents__link {
+  font-size: 0.8125rem;
+  transition: color 0.15s ease;
+}
+
+.table-of-contents__link--active {
+  font-weight: 600;
+}
+
+/* Footer */
+.footer {
+  background: #111418;
+}
+
+.footer__title {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  opacity: 0.7;
+}
+
+.footer__link-item {
+  font-size: 0.875rem;
+  transition: opacity 0.15s ease;
+}
+
+.footer__link-item:hover {
+  opacity: 0.8;
+}
+
+/* ------------------------------------------------------------------ */
+/* Mermaid diagram enhancements                                        */
+/* ------------------------------------------------------------------ */
+.docusaurus-mermaid-container {
+  background: var(--portal-surface-elevated);
+  border: 1px solid var(--portal-border-subtle);
+  border-radius: var(--portal-radius-lg);
+  padding: 1.5rem;
+  margin: 1.5rem 0;
+  overflow-x: auto;
+}
+
+/* ------------------------------------------------------------------ */
+/* Search                                                              */
+/* ------------------------------------------------------------------ */
+.navbar__search-input {
+  border-radius: var(--portal-radius-md);
+  background: var(--portal-surface-overlay);
+  border: 1px solid var(--portal-border-subtle);
+  transition: all 0.2s ease;
+}
+
+.navbar__search-input:focus {
+  border-color: var(--ifm-color-primary);
+  box-shadow: 0 0 0 3px rgba(45, 114, 210, 0.15);
+}
+
+/* ------------------------------------------------------------------ */
+/* Animations                                                          */
+/* ------------------------------------------------------------------ */
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slideInLeft {
+  from {
+    opacity: 0;
+    transform: translateX(-12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.theme-doc-markdown {
+  animation: fadeInUp 0.3s ease-out;
+}

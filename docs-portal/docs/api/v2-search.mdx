@@ -1,0 +1,356 @@
+---
+title: "v2: Search"
+sidebar_position: 4
+---
+
+# Foundry v2 Search API
+
+The Search API allows you to query objects using the `SearchJsonQueryV2` format, which supports 13 operators for building expressive filters. Search is powered by Elasticsearch and returns results in the standard Foundry v2 object format.
+
+## Search Objects
+
+```
+POST /api/v2/ontologies/{ontologyApiName}/objects/{objectTypeApiName}/search
+```
+
+### Path Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `ontologyApiName` | string | Yes | The API name of the ontology |
+| `objectTypeApiName` | string | Yes | The API name of the object type to search |
+
+### Request Body
+
+```json
+{
+  "where": { ... },
+  "orderBy": [
+    { "field": "startDate", "direction": "desc" }
+  ],
+  "select": ["fullName", "department", "startDate"],
+  "pageSize": 25,
+  "pageToken": null
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `where` | SearchJsonQueryV2 | Yes | Filter expression using search operators |
+| `orderBy` | array | No | Sort order. Each element has `field` and `direction` (`asc` or `desc`) |
+| `select` | string[] | No | Properties to include in results |
+| `pageSize` | integer | No | Results per page (default: 100, max: 1000) |
+| `pageToken` | string | No | Opaque token for the next page |
+
+---
+
+## SearchJsonQueryV2 Operators
+
+The `where` clause uses a recursive JSON structure. Each operator is identified by a `type` field.
+
+### Comparison Operators
+
+#### `eq` -- Equals
+
+Match objects where a field equals a specific value.
+
+```json
+{
+  "type": "eq",
+  "field": "department",
+  "value": "Engineering"
+}
+```
+
+#### `gt` -- Greater Than
+
+```json
+{
+  "type": "gt",
+  "field": "salary",
+  "value": 100000
+}
+```
+
+#### `gte` -- Greater Than or Equal
+
+```json
+{
+  "type": "gte",
+  "field": "startDate",
+  "value": "2023-01-01"
+}
+```
+
+#### `lt` -- Less Than
+
+```json
+{
+  "type": "lt",
+  "field": "salary",
+  "value": 200000
+}
+```
+
+#### `lte` -- Less Than or Equal
+
+```json
+{
+  "type": "lte",
+  "field": "startDate",
+  "value": "2024-12-31"
+}
+```
+
+#### `isNull` -- Null Check
+
+Match objects where a field is null (or not null).
+
+```json
+{
+  "type": "isNull",
+  "field": "department",
+  "value": true
+}
+```
+
+Set `value` to `false` to match objects where the field is not null.
+
+---
+
+### Text Search Operators
+
+#### `containsAnyTerm` -- Any Term Match
+
+Match objects where a text field contains any of the specified terms. Terms are analyzed (lowercased, stemmed) before matching.
+
+```json
+{
+  "type": "containsAnyTerm",
+  "field": "fullName",
+  "value": "jane john"
+}
+```
+
+This matches objects where `fullName` contains "jane" OR "john".
+
+#### `containsAllTerms` -- All Terms Match
+
+Match objects where a text field contains all of the specified terms, in any order.
+
+```json
+{
+  "type": "containsAllTerms",
+  "field": "description",
+  "value": "data pipeline"
+}
+```
+
+This matches objects where `description` contains both "data" AND "pipeline" (in any order).
+
+#### `containsAllTermsInOrder` -- Phrase Match
+
+Match objects where a text field contains all terms in the exact order specified.
+
+```json
+{
+  "type": "containsAllTermsInOrder",
+  "field": "description",
+  "value": "data transformation pipeline"
+}
+```
+
+#### `containsAllTermsInOrderPrefixLastTerm` -- Prefix Phrase Match
+
+Like `containsAllTermsInOrder`, but the last term is treated as a prefix. Useful for autocomplete/typeahead functionality.
+
+```json
+{
+  "type": "containsAllTermsInOrderPrefixLastTerm",
+  "field": "fullName",
+  "value": "jane d"
+}
+```
+
+This matches "Jane Doe", "Jane Davis", etc.
+
+#### `startsWith` -- Prefix Match
+
+Match objects where a field value starts with a specific prefix. Works on keyword (non-analyzed) fields.
+
+```json
+{
+  "type": "startsWith",
+  "field": "employeeId",
+  "value": "EMP-04"
+}
+```
+
+---
+
+### Logical Operators
+
+#### `and` -- Logical AND
+
+Combine multiple conditions. All must match.
+
+```json
+{
+  "type": "and",
+  "value": [
+    { "type": "eq", "field": "department", "value": "Engineering" },
+    { "type": "gte", "field": "salary", "value": 120000 },
+    { "type": "eq", "field": "isActive", "value": true }
+  ]
+}
+```
+
+#### `or` -- Logical OR
+
+Combine multiple conditions. At least one must match.
+
+```json
+{
+  "type": "or",
+  "value": [
+    { "type": "eq", "field": "department", "value": "Engineering" },
+    { "type": "eq", "field": "department", "value": "Product" }
+  ]
+}
+```
+
+#### `not` -- Logical NOT
+
+Negate a condition.
+
+```json
+{
+  "type": "not",
+  "value": {
+    "type": "eq",
+    "field": "department",
+    "value": "HR"
+  }
+}
+```
+
+---
+
+## Complete Request/Response Example
+
+### Request
+
+Find active engineers hired after 2023 with salary above 100k, sorted by start date descending:
+
+```bash
+curl -X POST \
+  "http://localhost:8002/api/v2/ontologies/acme/objects/Employee/search" \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "where": {
+      "type": "and",
+      "value": [
+        {
+          "type": "eq",
+          "field": "department",
+          "value": "Engineering"
+        },
+        {
+          "type": "gte",
+          "field": "startDate",
+          "value": "2023-01-01"
+        },
+        {
+          "type": "gt",
+          "field": "salary",
+          "value": 100000
+        },
+        {
+          "type": "eq",
+          "field": "isActive",
+          "value": true
+        }
+      ]
+    },
+    "orderBy": [
+      { "field": "startDate", "direction": "desc" }
+    ],
+    "select": ["fullName", "department", "startDate", "salary"],
+    "pageSize": 10
+  }'
+```
+
+### Response
+
+```json
+{
+  "data": [
+    {
+      "__rid": "ri.ontology.main.object.emp-100",
+      "__primaryKey": "EMP-100",
+      "__apiName": "Employee",
+      "properties": {
+        "fullName": "Alex Rivera",
+        "department": "Engineering",
+        "startDate": "2024-01-10",
+        "salary": 155000.00
+      }
+    },
+    {
+      "__rid": "ri.ontology.main.object.emp-042",
+      "__primaryKey": "EMP-042",
+      "__apiName": "Employee",
+      "properties": {
+        "fullName": "Jane Doe",
+        "department": "Engineering",
+        "startDate": "2023-06-15",
+        "salary": 145000.00
+      }
+    }
+  ],
+  "nextPageToken": null,
+  "totalCount": 2
+}
+```
+
+---
+
+## Operator Reference Table
+
+| Operator | Type | Fields | Description |
+|----------|------|--------|-------------|
+| `eq` | Comparison | All types | Exact equality match |
+| `gt` | Comparison | Numeric, Date, Timestamp | Greater than |
+| `gte` | Comparison | Numeric, Date, Timestamp | Greater than or equal |
+| `lt` | Comparison | Numeric, Date, Timestamp | Less than |
+| `lte` | Comparison | Numeric, Date, Timestamp | Less than or equal |
+| `isNull` | Comparison | All types | Null/not-null check |
+| `containsAnyTerm` | Text | String (analyzed) | Any term matches |
+| `containsAllTerms` | Text | String (analyzed) | All terms match (any order) |
+| `containsAllTermsInOrder` | Text | String (analyzed) | Phrase match |
+| `containsAllTermsInOrderPrefixLastTerm` | Text | String (analyzed) | Prefix phrase match |
+| `startsWith` | Text | String (keyword) | Prefix match on keyword field |
+| `and` | Logical | N/A | All conditions must match |
+| `or` | Logical | N/A | At least one condition must match |
+| `not` | Logical | N/A | Negate a condition |
+
+:::note
+The `not` operator wraps a single query, while `and` and `or` wrap an array of queries. Logical operators can be nested to arbitrary depth.
+:::
+
+## Error Responses
+
+| Status | Error Code | Description |
+|--------|-----------|-------------|
+| `400` | `InvalidQuery` | The search query is malformed or uses an unsupported operator |
+| `400` | `InvalidField` | The specified field does not exist on the object type |
+| `400` | `InvalidValue` | The value type does not match the field type |
+| `404` | `ObjectTypeNotFound` | The object type does not exist |
+| `404` | `OntologyNotFound` | The ontology does not exist |
+
+## Next Steps
+
+- **[v2 Actions API](./v2-actions)** -- Mutate objects
+- **[v2 Objects API](./v2-objects)** -- Load objects by primary key
+- **[API Overview](./overview)** -- General API conventions

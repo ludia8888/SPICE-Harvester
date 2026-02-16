@@ -1,0 +1,296 @@
+---
+title: Troubleshooting
+sidebar_position: 2
+---
+
+# Troubleshooting
+
+This page covers common issues encountered when operating SPICE Harvester, along with diagnostic steps and resolutions.
+
+## Quick Diagnostics
+
+### Check Overall Health
+
+```bash
+# All service health checks
+docker compose exec oms python -m spice.cli health --all
+
+# Individual service health
+curl http://localhost:8000/health   # OMS
+curl http://localhost:8002/health   # BFF
+curl http://localhost:8003/health   # Funnel
+curl http://localhost:8004/health   # Admin
+
+# Docker service status
+docker compose ps
+```
+
+### Check Logs
+
+```bash
+# All service logs (last 100 lines)
+docker compose logs --tail=100
+
+# Specific service logs
+docker compose logs --tail=100 oms
+docker compose logs --tail=100 bff
+
+# Follow logs in real time
+docker compose logs -f oms
+
+# Filter for errors only
+docker compose logs oms 2>&1 | grep "ERROR"
+```
+
+### Check Resource Usage
+
+```bash
+# Container resource usage
+docker stats --no-stream
+
+# Disk usage by volume
+docker system df -v
+```
+
+## Common Issues
+
+### Services Fail to Start
+
+**Symptom**: One or more services exit immediately after starting.
+
+**Diagnosis**:
+```bash
+docker compose ps        # Check which services are not running
+docker compose logs <service>  # Check error logs
+```
+
+**Common causes**:
+1. **Port conflict** -- Another process is using the required port. Change the port in `.env`.
+2. **Missing environment variable** -- A required variable is not set. Check logs for `KeyError` or `ConfigurationError`.
+3. **Dependency not ready** -- A data store started but is not yet accepting connections. Restart the dependent service.
+4. **Insufficient memory** -- Container was OOM-killed. Increase Docker memory limits.
+
+**Resolution**:
+```bash
+# Restart a specific service
+docker compose restart <service>
+
+# Restart with fresh containers
+docker compose up -d --force-recreate <service>
+```
+
+### API Returns 401 Unauthorized
+
+**Symptom**: All API requests return `401 Unauthorized`.
+
+**Diagnosis**:
+1. Verify the token is present in the `Authorization` header as `Bearer <token>`.
+2. Check if the token has expired (default: 1 hour).
+3. Verify the Auth service is running: `curl http://localhost:8002/health`.
+
+**Resolution**:
+```bash
+# Obtain a new token
+curl -X POST http://localhost:8002/api/v2/auth/token \
+  -H "Content-Type: application/json" \
+  -d '{"username": "admin", "password": "admin"}'
+```
+
+### Search Returns Stale Results
+
+**Symptom**: Recently created or updated objects do not appear in search results.
+
+**Diagnosis**:
+1. Check Elasticsearch index health: `curl http://localhost:9200/_cluster/health`.
+2. Check Kafka consumer lag in Grafana or directly:
+   ```bash
+   docker compose exec kafka kafka-consumer-groups.sh \
+     --bootstrap-server localhost:9092 \
+     --group spice-index-syncer \
+     --describe
+   ```
+3. Check the Index Syncer worker logs:
+   ```bash
+   docker compose logs index-syncer
+   ```
+
+**Resolution**:
+- If consumer lag is high, the Index Syncer is behind. It will catch up automatically.
+- For immediate consistency, use the `X-Consistency: strong` header to read from PostgreSQL.
+- To force a full reindex:
+  ```bash
+  docker compose exec oms python -m spice.cli reindex --all
+  ```
+
+### Database Connection Errors
+
+**Symptom**: Services log `ConnectionRefusedError` or `OperationalError` for PostgreSQL.
+
+**Diagnosis**:
+```bash
+# Check PostgreSQL is running
+docker compose ps postgres
+
+# Check PostgreSQL is accepting connections
+docker compose exec postgres pg_isready
+
+# Check connection pool status
+docker compose logs oms | grep "pool"
+```
+
+**Resolution**:
+1. If PostgreSQL is not running, restart it: `docker compose restart postgres`.
+2. If the connection pool is exhausted, increase `POSTGRES_MAX_CONNECTIONS` in `.env`.
+3. Check for long-running queries:
+   ```bash
+   docker compose exec postgres psql -U spice -d spice_harvester -c \
+     "SELECT pid, now() - pg_stat_activity.query_start AS duration, query
+      FROM pg_stat_activity
+      WHERE (now() - pg_stat_activity.query_start) > interval '5 minutes';"
+   ```
+
+### Kafka Consumer Lag Growing
+
+**Symptom**: Consumer lag metrics in Grafana show increasing lag for one or more consumer groups.
+
+**Diagnosis**:
+```bash
+# Check all consumer groups
+docker compose exec kafka kafka-consumer-groups.sh \
+  --bootstrap-server localhost:9092 \
+  --list
+
+# Check lag for a specific group
+docker compose exec kafka kafka-consumer-groups.sh \
+  --bootstrap-server localhost:9092 \
+  --group spice-event-processor \
+  --describe
+```
+
+**Common causes**:
+1. Worker crashed and is not consuming events.
+2. Event processing is slower than the publish rate.
+3. A single event is causing repeated failures (poison pill).
+
+**Resolution**:
+1. Check if the worker is running: `docker compose ps event-processor`.
+2. Restart the worker: `docker compose restart event-processor`.
+3. Scale up workers: `docker compose up -d --scale event-processor=3`.
+4. Check the dead letter queue for poison pill events.
+
+### Elasticsearch Cluster Yellow/Red
+
+**Symptom**: Elasticsearch cluster health is yellow or red.
+
+**Diagnosis**:
+```bash
+# Check cluster health
+curl http://localhost:9200/_cluster/health?pretty
+
+# Check unassigned shards
+curl http://localhost:9200/_cat/shards?v&h=index,shard,prirep,state,unassigned.reason | grep UNASSIGNED
+```
+
+**Resolution**:
+- **Yellow**: Replica shards are not assigned. In single-node development, this is expected. For production, add more Elasticsearch nodes.
+- **Red**: Primary shards are missing. Check disk space and Elasticsearch logs:
+  ```bash
+  docker compose logs elasticsearch
+  ```
+
+### Pipeline Execution Fails
+
+**Symptom**: A pipeline run results in a `FAILED` status.
+
+**Diagnosis**:
+```bash
+# Check pipeline status
+curl http://localhost:8002/api/v2/pipelines/<pipelineId>/executions/<executionId> \
+  -H "Authorization: Bearer <token>"
+
+# Check Pipeline Runner logs
+docker compose logs pipeline-runner
+```
+
+**Common causes**:
+1. Source file not found or inaccessible.
+2. Data validation failure (invalid types, missing required fields).
+3. Target object type does not exist in the ontology.
+4. Transform timeout exceeded.
+
+**Resolution**: Check the error details in the execution response and pipeline runner logs. Fix the source data or pipeline configuration and re-run.
+
+### Out of Disk Space
+
+**Symptom**: Services crash with disk-related errors.
+
+**Diagnosis**:
+```bash
+# Check Docker disk usage
+docker system df
+
+# Check volume sizes
+docker system df -v
+```
+
+**Resolution**:
+```bash
+# Remove unused Docker resources
+docker system prune
+
+# Remove unused volumes (CAUTION: deletes data)
+docker volume prune
+
+# Compact Elasticsearch indices
+curl -X POST http://localhost:9200/_forcemerge?max_num_segments=1
+```
+
+## Health Check Endpoints
+
+| Service | Endpoint | Expected Response |
+|---------|----------|-------------------|
+| OMS | `GET /health` | `{"status": "healthy", "checks": {...}}` |
+| BFF | `GET /health` | `{"status": "healthy", "checks": {...}}` |
+| Funnel | `GET /health` | `{"status": "healthy", "checks": {...}}` |
+| Admin | `GET /health` | `{"status": "healthy", "checks": {...}}` |
+| Elasticsearch | `GET /_cluster/health` | `{"status": "green", ...}` |
+| Redis | `redis-cli ping` | `PONG` |
+
+## Service Restart Procedures
+
+### Restart a Single Service
+
+```bash
+docker compose restart <service-name>
+```
+
+### Restart All API Servers
+
+```bash
+docker compose restart oms bff funnel admin
+```
+
+### Restart All Workers
+
+```bash
+docker compose restart event-processor projection-builder pipeline-runner \
+  lineage-worker schema-validator action-executor notification-worker \
+  retry-handler dead-letter-processor metric-aggregator cache-warmer \
+  index-syncer snapshot-worker
+```
+
+### Full Platform Restart
+
+```bash
+docker compose down && docker compose up -d
+```
+
+:::caution
+A full restart causes temporary downtime. For production, use rolling restarts by restarting services one at a time.
+:::
+
+## Next Steps
+
+- **[Monitoring](./monitoring)** -- Set up dashboards and alerts
+- **[Projection Consistency](./projection-consistency)** -- Fix stale projections
+- **[Error Codes](/docs/api/error-codes)** -- Understand error responses

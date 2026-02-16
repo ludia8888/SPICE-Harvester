@@ -1,0 +1,240 @@
+---
+title: Monitoring
+sidebar_position: 1
+---
+
+# Monitoring
+
+SPICE Harvester ships with a full observability stack. This page covers Grafana dashboards, Prometheus metrics, Jaeger traces, log aggregation, and alerting.
+
+## Observability Stack
+
+| Service | Port | Purpose |
+|---------|------|---------|
+| **Grafana** | 13000 | Dashboards, visualization, alerting UI |
+| **Prometheus** | 19090 | Metrics collection, storage, and alerting rules |
+| **Jaeger** | 16686 | Distributed tracing UI |
+| **OTEL Collector** | 4317 (gRPC) / 4318 (HTTP) | Telemetry aggregation (traces, metrics, logs) |
+| **AlertManager** | 9093 | Alert routing and notification |
+| **Loki** | 3100 | Log aggregation and querying |
+
+## Accessing Dashboards
+
+After starting the platform with the observability profile, access Grafana at:
+
+```
+http://localhost:13000
+```
+
+Default credentials: `admin` / `admin` (change on first login for production).
+
+## Pre-Built Dashboards
+
+SPICE Harvester includes several pre-configured Grafana dashboards:
+
+### Platform Overview
+
+The main dashboard provides a top-level view of platform health:
+
+- **Service Status** -- Health of all 33+ services with green/red indicators
+- **Request Rate** -- Requests per second across all API servers
+- **Error Rate** -- Error percentage by service and status code
+- **Latency** -- P50, P95, and P99 latency for API endpoints
+- **Active Connections** -- Database, Redis, and Kafka connection counts
+
+### API Performance
+
+Detailed API performance metrics:
+
+- **Endpoint Latency** -- Per-endpoint latency histograms
+- **Request Volume** -- Traffic distribution across endpoints
+- **Error Breakdown** -- Error codes and rates by endpoint
+- **Payload Size** -- Request and response size distributions
+- **Rate Limiting** -- Rate limit hits by user and endpoint
+
+### Data Pipeline
+
+Pipeline execution monitoring:
+
+- **Active Pipelines** -- Currently running pipeline executions
+- **Pipeline Duration** -- Execution time distribution by pipeline
+- **Transform Throughput** -- Records processed per second per transform
+- **Pipeline Failures** -- Failed pipelines with error details
+- **Source/Sink Metrics** -- Data read and write rates
+
+### Event Processing
+
+Event system health:
+
+- **Event Rate** -- Events published per second by topic
+- **Consumer Lag** -- Kafka consumer group lag by topic and partition
+- **Processing Latency** -- Time from event creation to read model update
+- **Dead Letter Queue** -- Events in the DLQ with reasons
+- **Snapshot Status** -- Recent snapshot creation activity
+
+### Data Store Health
+
+Infrastructure-level metrics:
+
+- **PostgreSQL** -- Connection pool utilization, query duration, transaction rate, WAL size
+- **Elasticsearch** -- Cluster health, index sizes, query latency, indexing rate
+- **Redis** -- Memory usage, hit rate, connection count, eviction rate
+- **Kafka** -- Broker health, topic partition counts, under-replicated partitions
+- **MinIO** -- Storage usage, request rate, error rate
+
+## Key Prometheus Metrics
+
+### API Metrics
+
+```
+# Request rate by endpoint
+spice_http_requests_total{service, method, path, status}
+
+# Request duration histogram
+spice_http_request_duration_seconds{service, method, path}
+
+# Active connections
+spice_http_connections_active{service}
+```
+
+### Event Metrics
+
+```
+# Events published per second
+spice_events_published_total{topic, event_type}
+
+# Consumer lag
+spice_kafka_consumer_lag{consumer_group, topic, partition}
+
+# Event processing duration
+spice_event_processing_duration_seconds{worker, event_type}
+
+# Dead letter queue size
+spice_dlq_messages_total{topic, reason}
+```
+
+### Data Store Metrics
+
+```
+# PostgreSQL connection pool
+spice_postgres_pool_size{state}  # state: active, idle, waiting
+
+# Elasticsearch cluster health
+spice_elasticsearch_cluster_status  # 0=green, 1=yellow, 2=red
+
+# Redis memory usage
+spice_redis_memory_used_bytes
+
+# Kafka broker count
+spice_kafka_brokers_active
+```
+
+## Distributed Tracing
+
+Access Jaeger at:
+
+```
+http://localhost:16686
+```
+
+### Tracing a Request
+
+1. Open Jaeger UI and select the service (e.g., `bff`, `oms`).
+2. Search for traces by time range, duration, or tags.
+3. Click on a trace to see the full span tree.
+4. Each span shows the service, operation, duration, and tags.
+
+### Key Tags
+
+| Tag | Description |
+|-----|-------------|
+| `http.method` | HTTP method (GET, POST) |
+| `http.url` | Request URL |
+| `http.status_code` | Response status code |
+| `ontology` | Ontology API name |
+| `object_type` | Object type API name |
+| `action.type` | Action type (createObject, editObject, etc.) |
+| `user.id` | Authenticated user ID |
+
+### Correlating Traces with Logs
+
+Every request generates a trace ID that is included in log entries. Use the `X-Request-Id` header or the trace ID from Jaeger to search logs in Grafana/Loki:
+
+```
+{service="oms"} |= "trace_id=abc123def456"
+```
+
+## Log Aggregation
+
+Logs are collected by the OTEL Collector and forwarded to Loki. Query logs through Grafana's Explore view:
+
+### Log Query Examples
+
+```logql
+# All OMS errors in the last hour
+{service="oms"} |= "ERROR"
+
+# Action validation failures
+{service="oms"} |= "ValidationFailed"
+
+# Slow queries (> 1 second)
+{service="oms"} | json | duration > 1s
+
+# Specific user activity
+{service="bff"} |= "user_id=user-admin-001"
+```
+
+### Log Levels
+
+| Level | Description | When to Investigate |
+|-------|-------------|-------------------|
+| `DEBUG` | Detailed diagnostic information | Only when actively debugging |
+| `INFO` | Normal operational events | Routine review |
+| `WARNING` | Unusual but non-critical conditions | Review during daily checks |
+| `ERROR` | Failures that prevent request completion | Investigate promptly |
+| `CRITICAL` | System-level failures | Investigate immediately |
+
+## Alerting
+
+AlertManager routes alerts from Prometheus to notification channels.
+
+### Pre-Configured Alerts
+
+| Alert | Condition | Severity |
+|-------|-----------|----------|
+| `ServiceDown` | Health check failing for > 1 minute | Critical |
+| `HighErrorRate` | Error rate > 5% for 5 minutes | Warning |
+| `HighLatency` | P99 latency > 5s for 5 minutes | Warning |
+| `ConsumerLagHigh` | Kafka consumer lag > 10,000 for 10 minutes | Warning |
+| `DiskSpaceLow` | Disk usage > 85% | Warning |
+| `DiskSpaceCritical` | Disk usage > 95% | Critical |
+| `PostgresConnectionPoolExhausted` | No idle connections for 1 minute | Critical |
+| `ElasticsearchClusterRed` | Cluster status is red | Critical |
+| `DeadLetterQueueGrowing` | DLQ size increasing for 30 minutes | Warning |
+
+### Notification Channels
+
+Configure notification channels in `alertmanager.yml`:
+
+```yaml
+receivers:
+  - name: slack-critical
+    slack_configs:
+      - api_url: https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK
+        channel: '#spice-alerts-critical'
+
+  - name: email-warning
+    email_configs:
+      - to: platform-team@your-org.com
+        from: alerts@spice-harvester.local
+
+  - name: pagerduty-critical
+    pagerduty_configs:
+      - service_key: YOUR_PAGERDUTY_SERVICE_KEY
+```
+
+## Next Steps
+
+- **[Troubleshooting](./troubleshooting)** -- Common issues and resolutions
+- **[Projection Consistency](./projection-consistency)** -- Monitoring projection lag
+- **[Service Topology](/docs/architecture/service-topology)** -- Understanding the service inventory

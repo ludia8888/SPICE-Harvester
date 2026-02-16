@@ -1,0 +1,36 @@
+---
+title: REST API Integration
+sidebar_position: 1
+---
+
+# REST API Integration
+
+:::info Coming Soon
+This guide is under development. Check back for the full walkthrough.
+:::
+
+## What This Guide Covers
+
+This guide will walk integration developers through building applications that consume the SPICE Harvester REST API, including:
+
+- **Getting Started** -- Obtaining API credentials, making your first authenticated request
+- **Object CRUD** -- Creating, reading, updating, and deleting objects through the v2 API
+- **Search Integration** -- Building search queries with `SearchJsonQueryV2` operators
+- **Pagination Handling** -- Implementing cursor-based pagination with `pageToken`
+- **Error Handling** -- Parsing structured errors, implementing retry logic with exponential backoff
+- **Batch Operations** -- Using bulk endpoints for high-throughput data access
+- **Webhook Integration** -- Receiving real-time notifications when objects change
+- **Rate Limit Management** -- Respecting rate limits and implementing backpressure
+- **API Versioning** -- Handling v1/v2 compatibility and future API evolution
+- **Performance Tips** -- Using `select` for partial responses, caching strategies, connection pooling
+
+## Prerequisites
+
+- [Quick Start](/docs/getting-started/quick-start) -- Platform must be running
+- [API Overview](/docs/api/overview) -- Authentication and conventions
+
+## Related Resources
+
+- [Auth Flow Guide](./auth-flow) -- Detailed authentication patterns
+- [SDK Guide](./sdk-guide) -- Using the official Python and TypeScript SDKs
+- [Error Codes](/docs/api/error-codes) -- Complete error reference

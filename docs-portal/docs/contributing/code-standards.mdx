@@ -1,0 +1,261 @@
+---
+title: Code Standards
+sidebar_position: 2
+---
+
+# Code Standards
+
+This page documents the coding standards and conventions for contributing to SPICE Harvester. Consistent code style makes the codebase easier to read, review, and maintain.
+
+## Python Style Guide
+
+### Formatting
+
+SPICE Harvester uses **Ruff** for both linting and formatting. Ruff enforces a style consistent with Black, isort, and a curated set of linting rules.
+
+```bash
+# Format code
+ruff format .
+
+# Lint code
+ruff check .
+
+# Lint and auto-fix
+ruff check --fix .
+```
+
+### Key Rules
+
+- **Line length**: 100 characters maximum.
+- **Imports**: Sorted by standard library, third-party, local. One import per line.
+- **Strings**: Double quotes for user-facing strings, single quotes acceptable for internal identifiers.
+- **Type hints**: Required for all function signatures (parameters and return types).
+- **Docstrings**: Google-style docstrings for all public classes and functions.
+
+### Type Hints
+
+All functions must include type annotations:
+
+```python
+# Good
+def get_object(
+    ontology_api_name: str,
+    object_type_api_name: str,
+    primary_key: str,
+) -> ObjectInstance:
+    ...
+
+# Bad - missing type hints
+def get_object(ontology_api_name, object_type_api_name, primary_key):
+    ...
+```
+
+Run type checking with:
+
+```bash
+mypy src/
+```
+
+### Naming Conventions
+
+| Element | Convention | Example |
+|---------|-----------|---------|
+| Modules | `snake_case` | `object_type.py` |
+| Classes | `PascalCase` | `ObjectTypeService` |
+| Functions | `snake_case` | `get_object_by_pk` |
+| Constants | `UPPER_SNAKE_CASE` | `MAX_PAGE_SIZE` |
+| Private members | `_leading_underscore` | `_validate_schema` |
+| Type variables | `PascalCase` | `T`, `ObjectT` |
+
+### Docstring Format
+
+```python
+def search_objects(
+    ontology_api_name: str,
+    object_type_api_name: str,
+    query: SearchJsonQueryV2,
+    page_size: int = 100,
+) -> PaginatedResponse[ObjectInstance]:
+    """Search for objects matching a query.
+
+    Translates the SearchJsonQueryV2 query into an Elasticsearch
+    DSL query and returns paginated results.
+
+    Args:
+        ontology_api_name: API name of the target ontology.
+        object_type_api_name: API name of the object type to search.
+        query: Search query using the SearchJsonQueryV2 format.
+        page_size: Number of results per page. Defaults to 100.
+
+    Returns:
+        Paginated response containing matching object instances.
+
+    Raises:
+        ObjectTypeNotFoundError: If the object type does not exist.
+        InvalidQueryError: If the query is malformed.
+    """
+```
+
+## TypeScript Conventions
+
+### Formatting
+
+TypeScript code is formatted with **Prettier** and linted with **ESLint**.
+
+```bash
+# Format
+npx prettier --write .
+
+# Lint
+npx eslint .
+
+# Lint and fix
+npx eslint --fix .
+```
+
+### Key Rules
+
+- **Line length**: 100 characters maximum.
+- **Semicolons**: Always use semicolons.
+- **Quotes**: Single quotes for strings.
+- **Types**: Prefer `interface` over `type` for object shapes. Use `type` for unions and utility types.
+- **Null handling**: Use strict null checks. Avoid `any`.
+
+### Naming Conventions
+
+| Element | Convention | Example |
+|---------|-----------|---------|
+| Files | `kebab-case` | `object-type-service.ts` |
+| Classes | `PascalCase` | `ObjectTypeService` |
+| Interfaces | `PascalCase` | `ObjectTypeResponse` |
+| Functions | `camelCase` | `getObjectByPk` |
+| Constants | `UPPER_SNAKE_CASE` | `MAX_PAGE_SIZE` |
+| Enums | `PascalCase` members | `ActionType.CreateObject` |
+
+## Commit Message Format
+
+Commit messages follow the **Conventional Commits** specification:
+
+```
+<type>(<scope>): <description>
+
+[optional body]
+
+[optional footer(s)]
+```
+
+### Types
+
+| Type | Description | Example |
+|------|-------------|---------|
+| `feat` | New feature | `feat(search): add containsAllTermsInOrder operator` |
+| `fix` | Bug fix | `fix(oms): resolve race condition in action validation` |
+| `refactor` | Code restructuring without behavior change | `refactor(bff): extract auth middleware` |
+| `docs` | Documentation changes | `docs(api): add v2 search examples` |
+| `test` | Adding or updating tests | `test(pipeline): add transform unit tests` |
+| `chore` | Build, CI, dependency updates | `chore(deps): bump elasticsearch-py to 8.12` |
+| `perf` | Performance improvements | `perf(search): optimize ES query compilation` |
+| `ci` | CI/CD changes | `ci: add integration test pipeline` |
+
+### Scopes
+
+Common scopes: `oms`, `bff`, `funnel`, `admin`, `search`, `actions`, `pipeline`, `lineage`, `events`, `auth`, `config`, `docs`, `ci`, `deps`.
+
+### Rules
+
+- **Subject line**: Imperative mood, lowercase, no trailing period, max 72 characters.
+- **Body**: Explain *what* and *why*, not *how*. Wrap at 72 characters.
+- **Breaking changes**: Add `BREAKING CHANGE:` footer or `!` after the type.
+
+### Examples
+
+```
+feat(search): add startsWith operator for keyword fields
+
+Implements the startsWith operator for SearchJsonQueryV2. This
+operator works on keyword (non-analyzed) fields and is useful for
+prefix matching on identifiers like employeeId.
+
+Closes #1234
+```
+
+```
+fix(oms)!: change primary key type from integer to string
+
+BREAKING CHANGE: Primary keys are now strings instead of integers.
+Update all client code that assumes integer primary keys.
+```
+
+## Testing Standards
+
+### Test Organization
+
+```
+tests/
+├── unit/               # Fast, no external dependencies
+│   ├── test_ontology.py
+│   ├── test_actions.py
+│   └── test_search.py
+├── integration/         # Require running data stores
+│   ├── test_api_objects.py
+│   ├── test_api_search.py
+│   └── test_event_processing.py
+└── conftest.py          # Shared fixtures
+```
+
+### Test Naming
+
+```python
+# Good - describes the scenario and expected outcome
+def test_search_with_eq_operator_returns_matching_objects():
+    ...
+
+def test_create_object_with_duplicate_pk_raises_conflict():
+    ...
+
+# Bad - vague names
+def test_search():
+    ...
+
+def test_error():
+    ...
+```
+
+### Test Structure
+
+Follow the Arrange-Act-Assert pattern:
+
+```python
+def test_edit_object_updates_properties():
+    # Arrange
+    instance = create_test_employee(department="Engineering")
+
+    # Act
+    result = oms.apply_action(EditObject(
+        primary_key=instance.primary_key,
+        properties={"department": "Product"}
+    ))
+
+    # Assert
+    assert result.status == ActionStatus.COMPLETED
+    updated = oms.get_object(instance.primary_key)
+    assert updated.properties["department"] == "Product"
+```
+
+## Code Review Checklist
+
+When submitting or reviewing a pull request, verify:
+
+- [ ] All tests pass (`pytest` and `npm test`)
+- [ ] No type errors (`mypy src/`)
+- [ ] No lint warnings (`ruff check .` and `npx eslint .`)
+- [ ] Commit messages follow Conventional Commits format
+- [ ] New public APIs have docstrings and type hints
+- [ ] New features have corresponding tests
+- [ ] No secrets or credentials in the code
+- [ ] Breaking changes are documented
+
+## Next Steps
+
+- **[Development Setup](./dev-setup)** -- Configure your development environment
+- **[Release Process](./release-process)** -- How to cut a release

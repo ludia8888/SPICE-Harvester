@@ -1,0 +1,319 @@
+---
+title: v1 API Reference (Auto-Generated)
+sidebar_label: v1 Complete Reference
+sidebar_position: 11
+---
+
+# Legacy v1 API Reference
+
+:::warning Deprecated
+The v1 API is deprecated. Migrate to the [Foundry v2 API](./auto-v2-reference) for all new integrations.
+:::
+
+:::info Auto-Generated
+This page is auto-generated from the live BFF OpenAPI schema.
+Do not edit manually. Run `python scripts/generate_portal_api_reference.py`.
+:::
+
+**Total v1 endpoints: 246**
+
+### Object Types & Schema (89 endpoints)
+
+| Method | Path | Summary | Auth |
+|--------|------|---------|------|
+| `GET` | `/api/v1/databases` | List Databases | No |
+| `POST` | `/api/v1/databases` | Create Database | No |
+| `GET` | `/api/v1/databases/{db_name}` | Get Database | No |
+| `DELETE` | `/api/v1/databases/{db_name}` | Delete Database | No |
+| `GET` | `/api/v1/databases/{db_name}/actions/logs` | List Action Logs | No |
+| `GET` | `/api/v1/databases/{db_name}/actions/logs/{action_log_id}` | Get Action Log | No |
+| `POST` | `/api/v1/databases/{db_name}/actions/logs/{action_log_id}/undo` | Undo Action | No |
+| `GET` | `/api/v1/databases/{db_name}/actions/simulations` | List Action Simulations | No |
+| `GET` | `/api/v1/databases/{db_name}/actions/simulations/{simulation_id}` | Get Action Simulation | No |
+| `GET` | `/api/v1/databases/{db_name}/actions/simulations/{simulation_id}/versions` | List Action Simulation Versions | No |
+| `GET` | `/api/v1/databases/{db_name}/actions/simulations/{simulation_id}/versions/{version}` | Get Action Simulation Version | No |
+| `POST` | `/api/v1/databases/{db_name}/actions/{action_type_id}/simulate` | Simulate Action | No |
+| `POST` | `/api/v1/databases/{db_name}/actions/{action_type_id}/submit` | Submit Action | No |
+| `POST` | `/api/v1/databases/{db_name}/actions/{action_type_id}/submit-batch` | Submit Action Batch | No |
+| `GET` | `/api/v1/databases/{db_name}/class/{class_id}/instance/{instance_id}` | Get Instance | No |
+| `GET` | `/api/v1/databases/{db_name}/class/{class_id}/instances` | Get Class Instances | No |
+| `GET` | `/api/v1/databases/{db_name}/class/{class_id}/sample-values` | Get Class Sample Values | No |
+| `GET` | `/api/v1/databases/{db_name}/classes` | List Classes | No |
+| `POST` | `/api/v1/databases/{db_name}/classes` | Create Class | No |
+| `GET` | `/api/v1/databases/{db_name}/classes/{class_id}` | Get Class | No |
+| `GET` | `/api/v1/databases/{db_name}/expected-seq` | Get Database Expected Seq | No |
+| `POST` | `/api/v1/databases/{db_name}/import-from-excel/commit` | Commit Import From Excel | No |
+| `POST` | `/api/v1/databases/{db_name}/import-from-excel/dry-run` | Dry Run Import From Excel | No |
+| `POST` | `/api/v1/databases/{db_name}/import-from-google-sheets/commit` | Commit Import From Google Sheets | No |
+| `POST` | `/api/v1/databases/{db_name}/import-from-google-sheets/dry-run` | Dry Run Import From Google Sheets | No |
+| `POST` | `/api/v1/databases/{db_name}/instances/{class_label}/bulk-create` | Bulk Create Instances Async | No |
+| `POST` | `/api/v1/databases/{db_name}/instances/{class_label}/create` | Create Instance Async | No |
+| `DELETE` | `/api/v1/databases/{db_name}/instances/{class_label}/{instance_id}/delete` | Delete Instance Async | No |
+| `PUT` | `/api/v1/databases/{db_name}/instances/{class_label}/{instance_id}/update` | Update Instance Async | No |
+| `GET` | `/api/v1/databases/{db_name}/mappings/` | Get Mappings Summary | No |
+| `DELETE` | `/api/v1/databases/{db_name}/mappings/` | Clear Mappings | No |
+| `POST` | `/api/v1/databases/{db_name}/mappings/export` | Export Mappings | No |
+| `POST` | `/api/v1/databases/{db_name}/mappings/import` | Import Mappings | No |
+| `POST` | `/api/v1/databases/{db_name}/mappings/validate` | Validate Mappings | No |
+| `POST` | `/api/v1/databases/{db_name}/ontology` | Create Ontology | No |
+| `GET` | `/api/v1/databases/{db_name}/ontology/action-types` | List Route | No |
+| `POST` | `/api/v1/databases/{db_name}/ontology/action-types` | Create Route | No |
+| `GET` | `/api/v1/databases/{db_name}/ontology/action-types/{resource_id}` | Get Route | No |
+| `PUT` | `/api/v1/databases/{db_name}/ontology/action-types/{resource_id}` | Update Route | No |
+| `DELETE` | `/api/v1/databases/{db_name}/ontology/action-types/{resource_id}` | Delete Route | No |
+| `POST` | `/api/v1/databases/{db_name}/ontology/deploy` | Deploy Ontology | No |
+| `GET` | `/api/v1/databases/{db_name}/ontology/functions` | List Route | No |
+| `POST` | `/api/v1/databases/{db_name}/ontology/functions` | Create Route | No |
+| `GET` | `/api/v1/databases/{db_name}/ontology/functions/{resource_id}` | Get Route | No |
+| `PUT` | `/api/v1/databases/{db_name}/ontology/functions/{resource_id}` | Update Route | No |
+| `DELETE` | `/api/v1/databases/{db_name}/ontology/functions/{resource_id}` | Delete Route | No |
+| `GET` | `/api/v1/databases/{db_name}/ontology/groups` | List Route | No |
+| `POST` | `/api/v1/databases/{db_name}/ontology/groups` | Create Route | No |
+| `GET` | `/api/v1/databases/{db_name}/ontology/groups/{resource_id}` | Get Route | No |
+| `PUT` | `/api/v1/databases/{db_name}/ontology/groups/{resource_id}` | Update Route | No |
+| `DELETE` | `/api/v1/databases/{db_name}/ontology/groups/{resource_id}` | Delete Route | No |
+| `GET` | `/api/v1/databases/{db_name}/ontology/health` | Ontology Health | No |
+| `GET` | `/api/v1/databases/{db_name}/ontology/interfaces` | List Route | No |
+| `POST` | `/api/v1/databases/{db_name}/ontology/interfaces` | Create Route | No |
+| `GET` | `/api/v1/databases/{db_name}/ontology/interfaces/{resource_id}` | Get Route | No |
+| `PUT` | `/api/v1/databases/{db_name}/ontology/interfaces/{resource_id}` | Update Route | No |
+| `DELETE` | `/api/v1/databases/{db_name}/ontology/interfaces/{resource_id}` | Delete Route | No |
+| `GET` | `/api/v1/databases/{db_name}/ontology/link-types` | List Link Types | No |
+| `POST` | `/api/v1/databases/{db_name}/ontology/link-types` | Create Link Type | No |
+| `GET` | `/api/v1/databases/{db_name}/ontology/link-types/{link_type_id}` | Get Link Type | No |
+| `PUT` | `/api/v1/databases/{db_name}/ontology/link-types/{link_type_id}` | Update Link Type | No |
+| `GET` | `/api/v1/databases/{db_name}/ontology/link-types/{link_type_id}/edits` | List Link Edits | No |
+| `POST` | `/api/v1/databases/{db_name}/ontology/link-types/{link_type_id}/edits` | Create Link Edit | No |
+| `POST` | `/api/v1/databases/{db_name}/ontology/link-types/{link_type_id}/reindex` | Reindex Link Type | No |
+| `POST` | `/api/v1/databases/{db_name}/ontology/object-types` | Create Object Type Contract | No |
+| `PUT` | `/api/v1/databases/{db_name}/ontology/object-types/{class_id}` | Update Object Type Contract | No |
+| `GET` | `/api/v1/databases/{db_name}/ontology/proposals` | List Ontology Proposals | No |
+| `POST` | `/api/v1/databases/{db_name}/ontology/proposals` | Create Ontology Proposal | No |
+| `POST` | `/api/v1/databases/{db_name}/ontology/proposals/{proposal_id}/approve` | Approve Ontology Proposal | No |
+| `GET` | `/api/v1/databases/{db_name}/ontology/shared-properties` | List Route | No |
+| `POST` | `/api/v1/databases/{db_name}/ontology/shared-properties` | Create Route | No |
+| `GET` | `/api/v1/databases/{db_name}/ontology/shared-properties/{resource_id}` | Get Route | No |
+| `PUT` | `/api/v1/databases/{db_name}/ontology/shared-properties/{resource_id}` | Update Route | No |
+| `DELETE` | `/api/v1/databases/{db_name}/ontology/shared-properties/{resource_id}` | Delete Route | No |
+| `POST` | `/api/v1/databases/{db_name}/ontology/validate` | Validate Ontology Create Bff | No |
+| `GET` | `/api/v1/databases/{db_name}/ontology/value-types` | List Route | No |
+| `POST` | `/api/v1/databases/{db_name}/ontology/value-types` | Create Route | No |
+| `GET` | `/api/v1/databases/{db_name}/ontology/value-types/{resource_id}` | Get Route | No |
+| `PUT` | `/api/v1/databases/{db_name}/ontology/value-types/{resource_id}` | Update Route | No |
+| `DELETE` | `/api/v1/databases/{db_name}/ontology/value-types/{resource_id}` | Delete Route | No |
+| `POST` | `/api/v1/databases/{db_name}/ontology/{class_id}/mapping-metadata` | Save Mapping Metadata | No |
+| `GET` | `/api/v1/databases/{db_name}/ontology/{class_id}/schema` | Get Ontology Schema | No |
+| `GET` | `/api/v1/databases/{db_name}/query/builder` | Query Builder Info | No |
+| `POST` | `/api/v1/databases/{db_name}/suggest-mappings` | Suggest Mappings | No |
+| `POST` | `/api/v1/databases/{db_name}/suggest-mappings-from-excel` | Suggest Mappings From Excel | No |
+| `POST` | `/api/v1/databases/{db_name}/suggest-mappings-from-google-sheets` | Suggest Mappings From Google Sheets | No |
+| `POST` | `/api/v1/databases/{db_name}/suggest-schema-from-data` | Suggest Schema From Data | No |
+| `POST` | `/api/v1/databases/{db_name}/suggest-schema-from-excel` | Suggest Schema From Excel | No |
+| `POST` | `/api/v1/databases/{db_name}/suggest-schema-from-google-sheets` | Suggest Schema From Google Sheets | No |
+
+### Pipeline (5 endpoints)
+
+| Method | Path | Summary | Auth |
+|--------|------|---------|------|
+| `POST` | `/api/v1/pipeline-plans/compile` | Compile Plan | No |
+| `GET` | `/api/v1/pipeline-plans/{plan_id}` | Get Plan | No |
+| `POST` | `/api/v1/pipeline-plans/{plan_id}/evaluate-joins` | Evaluate Joins | No |
+| `POST` | `/api/v1/pipeline-plans/{plan_id}/inspect-preview` | Inspect Plan Preview | No |
+| `POST` | `/api/v1/pipeline-plans/{plan_id}/preview` | Preview Plan | No |
+
+### Objectify (7 endpoints)
+
+| Method | Path | Summary | Auth |
+|--------|------|---------|------|
+| `POST` | `/api/v1/objectify/databases/{db_name}/datasets/{dataset_id}/detect-relationships` | Detect FK relationships in a dataset | No |
+| `POST` | `/api/v1/objectify/databases/{db_name}/run-dag` | Run Objectify Dag | No |
+| `POST` | `/api/v1/objectify/datasets/{dataset_id}/run` | Run Objectify | No |
+| `GET` | `/api/v1/objectify/mapping-specs` | List Mapping Specs | No |
+| `POST` | `/api/v1/objectify/mapping-specs` | Create Mapping Spec | No |
+| `POST` | `/api/v1/objectify/mapping-specs/{mapping_spec_id}/trigger-incremental` | Trigger incremental objectify | No |
+| `GET` | `/api/v1/objectify/mapping-specs/{mapping_spec_id}/watermark` | Get objectify watermark | No |
+
+### Lineage & Graph (10 endpoints)
+
+| Method | Path | Summary | Auth |
+|--------|------|---------|------|
+| `GET` | `/api/v1/lineage/column-lineage` | Get Lineage Column Lineage | No |
+| `GET` | `/api/v1/lineage/diff` | Get Lineage Diff | No |
+| `GET` | `/api/v1/lineage/graph` | Get Lineage Graph | No |
+| `GET` | `/api/v1/lineage/impact` | Get Lineage Impact | No |
+| `GET` | `/api/v1/lineage/metrics` | Get Lineage Metrics | No |
+| `GET` | `/api/v1/lineage/out-of-date` | Get Lineage Out Of Date | No |
+| `GET` | `/api/v1/lineage/path` | Get Lineage Path | No |
+| `GET` | `/api/v1/lineage/run-impact` | Get Lineage Run Impact | No |
+| `GET` | `/api/v1/lineage/runs` | Get Lineage Runs | No |
+| `GET` | `/api/v1/lineage/timeline` | Get Lineage Timeline | No |
+
+### AI & Agents (16 endpoints)
+
+| Method | Path | Summary | Auth |
+|--------|------|---------|------|
+| `POST` | `/api/v1/agent/pipeline-runs` | Create Pipeline Run | No |
+| `POST` | `/api/v1/agent/pipeline-runs/stream` | Stream Pipeline Run | No |
+| `POST` | `/api/v1/ai/intent` | Ai Intent | No |
+| `POST` | `/api/v1/ai/query/{db_name}` | Ai Query | No |
+| `POST` | `/api/v1/ai/translate/query-plan/{db_name}` | Translate Query Plan | No |
+| `POST` | `/api/v1/context-tools/datasets/describe` | Describe Datasets | No |
+| `POST` | `/api/v1/context-tools/ontology/snapshot` | Snapshot Ontology | No |
+| `POST` | `/api/v1/context7/analyze/ontology` | Analyze Ontology | No |
+| `GET` | `/api/v1/context7/context/{entity_id}` | Get Entity Context | No |
+| `GET` | `/api/v1/context7/health` | Check Context7 Health | No |
+| `POST` | `/api/v1/context7/knowledge` | Add Knowledge | No |
+| `POST` | `/api/v1/context7/link` | Create Entity Link | No |
+| `POST` | `/api/v1/context7/search` | Search Context7 | No |
+| `GET` | `/api/v1/context7/suggestions/{db_name}/{class_id}` | Get Ontology Suggestions | No |
+| `POST` | `/api/v1/ontology-agent/runs` | Run ontology agent | No |
+| `GET` | `/api/v1/summary` | Get Summary | No |
+
+### Governance & Audit (9 endpoints)
+
+| Method | Path | Summary | Auth |
+|--------|------|---------|------|
+| `GET` | `/api/v1/audit/chain-head` | Get Chain Head | No |
+| `GET` | `/api/v1/audit/logs` | List Audit Logs | No |
+| `PUT` | `/api/v1/schema-changes/drifts/{drift_id}/acknowledge` | Acknowledge Drift | No |
+| `GET` | `/api/v1/schema-changes/history` | List Schema Changes | No |
+| `GET` | `/api/v1/schema-changes/mappings/{mapping_spec_id}/compatibility` | Check Mapping Compatibility | No |
+| `GET` | `/api/v1/schema-changes/stats` | Get Schema Change Stats | No |
+| `GET` | `/api/v1/schema-changes/subscriptions` | List Subscriptions | No |
+| `POST` | `/api/v1/schema-changes/subscriptions` | Create Subscription | No |
+| `DELETE` | `/api/v1/schema-changes/subscriptions/{subscription_id}` | Delete Subscription | No |
+
+### Admin (13 endpoints)
+
+| Method | Path | Summary | Auth |
+|--------|------|---------|------|
+| `POST` | `/api/v1/admin/ci/ci-results` | Ingest Ci Result | No |
+| `POST` | `/api/v1/admin/cleanup-old-replays` | Cleanup Old Replay Results | No |
+| `POST` | `/api/v1/admin/databases/{db_name}/rebuild-index` | Rebuild Instance Index Endpoint | No |
+| `GET` | `/api/v1/admin/databases/{db_name}/rebuild-index/{task_id}/status` | Get Rebuild Status | No |
+| `GET` | `/api/v1/admin/lakefs/credentials` | List Lakefs Credentials | No |
+| `POST` | `/api/v1/admin/lakefs/credentials` | Upsert Lakefs Credentials | No |
+| `POST` | `/api/v1/admin/recompute-projection` | Recompute Projection | No |
+| `GET` | `/api/v1/admin/recompute-projection/{task_id}/result` | Get Recompute Projection Result | No |
+| `POST` | `/api/v1/admin/reindex-instances` | Reindex all instances for a database (dataset-primary rebuild) | No |
+| `POST` | `/api/v1/admin/replay-instance-state` | Replay Instance State | No |
+| `GET` | `/api/v1/admin/replay-instance-state/{task_id}/result` | Get Replay Result | No |
+| `GET` | `/api/v1/admin/replay-instance-state/{task_id}/trace` | Get Replay Trace | No |
+| `GET` | `/api/v1/admin/system-health` | Get System Health | No |
+
+### Health & Monitoring (20 endpoints)
+
+| Method | Path | Summary | Auth |
+|--------|------|---------|------|
+| `GET` | `/api/v1/config/config/changes` | Configuration Changes | No |
+| `POST` | `/api/v1/config/config/check-changes` | Check for Changes | No |
+| `GET` | `/api/v1/config/config/current` | Current Configuration | No |
+| `GET` | `/api/v1/config/config/drift-analysis` | Environment Drift Analysis | No |
+| `GET` | `/api/v1/config/config/health-impact` | Configuration Health Impact | No |
+| `GET` | `/api/v1/config/config/monitoring-status` | Configuration Monitoring Status | No |
+| `GET` | `/api/v1/config/config/report` | Configuration Report | No |
+| `GET` | `/api/v1/config/config/security-audit` | Security Audit | No |
+| `GET` | `/api/v1/config/config/validation` | Configuration Validation | No |
+| `GET` | `/api/v1/health` | Health Check | No |
+| `GET` | `/api/v1/monitoring/background-tasks/active` | Active Background Tasks | No |
+| `GET` | `/api/v1/monitoring/background-tasks/health` | Background Task System Health | No |
+| `GET` | `/api/v1/monitoring/background-tasks/metrics` | Background Task Metrics | No |
+| `GET` | `/api/v1/monitoring/config` | Configuration Overview | No |
+| `GET` | `/api/v1/monitoring/health` | Basic Health Check | No |
+| `GET` | `/api/v1/monitoring/health/detailed` | Detailed Health Check | No |
+| `GET` | `/api/v1/monitoring/health/liveness` | Kubernetes Liveness Probe | No |
+| `GET` | `/api/v1/monitoring/health/readiness` | Kubernetes Readiness Probe | No |
+| `GET` | `/api/v1/monitoring/metrics` | Service Metrics | No |
+| `GET` | `/api/v1/monitoring/status` | Service Status Overview | No |
+
+### Tasks (5 endpoints)
+
+| Method | Path | Summary | Auth |
+|--------|------|---------|------|
+| `GET` | `/api/v1/tasks/` | List Tasks | No |
+| `GET` | `/api/v1/tasks/metrics/summary` | Get Task Metrics | No |
+| `GET` | `/api/v1/tasks/{task_id}` | Get Task Status | No |
+| `DELETE` | `/api/v1/tasks/{task_id}` | Cancel Task | No |
+| `GET` | `/api/v1/tasks/{task_id}/result` | Get Task Result | No |
+
+### Operations (1 endpoints)
+
+| Method | Path | Summary | Auth |
+|--------|------|---------|------|
+| `GET` | `/api/v1/ops/status` | Ops Status | No |
+
+### Other (71 endpoints)
+
+| Method | Path | Summary | Auth |
+|--------|------|---------|------|
+| `GET` | `/api/v1/` | Root | No |
+| `GET` | `/api/v1/access-policies` | List Access Policies | No |
+| `POST` | `/api/v1/access-policies` | Upsert Access Policy | No |
+| `GET` | `/api/v1/backing-datasource-versions/{version_id}` | Get Backing Datasource Version | No |
+| `GET` | `/api/v1/backing-datasources` | List Backing Datasources | No |
+| `POST` | `/api/v1/backing-datasources` | Create Backing Datasource | No |
+| `GET` | `/api/v1/backing-datasources/{backing_id}` | Get Backing Datasource | No |
+| `GET` | `/api/v1/backing-datasources/{backing_id}/versions` | List Backing Datasource Versions | No |
+| `POST` | `/api/v1/backing-datasources/{backing_id}/versions` | Create Backing Datasource Version | No |
+| `GET` | `/api/v1/commands/{command_id}/status` | Get Command Status | No |
+| `GET` | `/api/v1/data-connectors/google-sheets/connections` | List Google Sheets connections | No |
+| `DELETE` | `/api/v1/data-connectors/google-sheets/connections/{connection_id}` | Remove Google Sheets connection | No |
+| `GET` | `/api/v1/data-connectors/google-sheets/drive/spreadsheets` | List Google Sheets spreadsheets | No |
+| `POST` | `/api/v1/data-connectors/google-sheets/grid` | Extract Google Sheets grid + merges | No |
+| `GET` | `/api/v1/data-connectors/google-sheets/oauth/callback` | Google Sheets OAuth callback | No |
+| `POST` | `/api/v1/data-connectors/google-sheets/oauth/start` | Start Google Sheets OAuth flow | No |
+| `POST` | `/api/v1/data-connectors/google-sheets/preview` | Preview Google Sheet data (for Funnel) | No |
+| `POST` | `/api/v1/data-connectors/google-sheets/register` | Register Google Sheet for data monitoring | No |
+| `GET` | `/api/v1/data-connectors/google-sheets/registered` | List registered Google Sheets | No |
+| `GET` | `/api/v1/data-connectors/google-sheets/spreadsheets/{sheet_id}/worksheets` | List worksheets for a spreadsheet | No |
+| `DELETE` | `/api/v1/data-connectors/google-sheets/{sheet_id}` | Unregister Google Sheet | No |
+| `GET` | `/api/v1/data-connectors/google-sheets/{sheet_id}/preview` | Preview registered Google Sheet data | No |
+| `POST` | `/api/v1/data-connectors/google-sheets/{sheet_id}/start-pipelining` | Start pipelining from a registered Google Sheet | No |
+| `POST` | `/api/v1/document-bundles/{bundle_id}/search` | Search Document Bundle | No |
+| `GET` | `/api/v1/gate-policies` | List Gate Policies | No |
+| `POST` | `/api/v1/gate-policies` | Upsert Gate Policy | No |
+| `GET` | `/api/v1/gate-results` | List Gate Results | No |
+| `GET` | `/api/v1/graph-query/health` | Graph Service Health | No |
+| `POST` | `/api/v1/graph-query/{db_name}` | Execute Graph Query | No |
+| `POST` | `/api/v1/graph-query/{db_name}/multi-hop` | Execute Multi Hop Query | No |
+| `GET` | `/api/v1/graph-query/{db_name}/paths` | Find Relationship Paths | No |
+| `POST` | `/api/v1/graph-query/{db_name}/simple` | Execute Simple Graph Query | No |
+| `GET` | `/api/v1/key-specs` | List Key Specs | No |
+| `POST` | `/api/v1/key-specs` | Create Key Spec | No |
+| `GET` | `/api/v1/key-specs/{key_spec_id}` | Get Key Spec | No |
+| `GET` | `/api/v1/pipelines` | List Pipelines | No |
+| `POST` | `/api/v1/pipelines` | Create Pipeline | No |
+| `GET` | `/api/v1/pipelines/branches` | List Pipeline Branches | No |
+| `POST` | `/api/v1/pipelines/branches/{branch}/archive` | Archive Pipeline Branch | No |
+| `POST` | `/api/v1/pipelines/branches/{branch}/restore` | Restore Pipeline Branch | No |
+| `GET` | `/api/v1/pipelines/datasets` | List Datasets | No |
+| `POST` | `/api/v1/pipelines/datasets` | Create Dataset | No |
+| `POST` | `/api/v1/pipelines/datasets/csv-upload` | Upload Csv Dataset | No |
+| `POST` | `/api/v1/pipelines/datasets/excel-upload` | Upload Excel Dataset | No |
+| `GET` | `/api/v1/pipelines/datasets/ingest-requests/{ingest_request_id}` | Get Dataset Ingest Request | No |
+| `POST` | `/api/v1/pipelines/datasets/ingest-requests/{ingest_request_id}/schema/approve` | Approve Dataset Schema | No |
+| `POST` | `/api/v1/pipelines/datasets/media-upload` | Upload Media Dataset | No |
+| `GET` | `/api/v1/pipelines/datasets/{dataset_id}/raw-file` | Get Dataset Raw File | No |
+| `POST` | `/api/v1/pipelines/datasets/{dataset_id}/versions` | Create Dataset Version | No |
+| `POST` | `/api/v1/pipelines/datasets/{dataset_id}/versions/{version_id}/funnel-analysis` | Reanalyze Dataset Version | No |
+| `GET` | `/api/v1/pipelines/proposals` | List Pipeline Proposals | No |
+| `POST` | `/api/v1/pipelines/simulate-definition` | Simulate Pipeline Definition | No |
+| `GET` | `/api/v1/pipelines/udfs` | List Udfs | No |
+| `POST` | `/api/v1/pipelines/udfs` | Create Udf | No |
+| `GET` | `/api/v1/pipelines/udfs/{udf_id}` | Get Udf | No |
+| `POST` | `/api/v1/pipelines/udfs/{udf_id}/versions` | Create Udf Version | No |
+| `GET` | `/api/v1/pipelines/udfs/{udf_id}/versions/{version}` | Get Udf Version | No |
+| `GET` | `/api/v1/pipelines/{pipeline_id}` | Get Pipeline | No |
+| `PUT` | `/api/v1/pipelines/{pipeline_id}` | Update Pipeline | No |
+| `GET` | `/api/v1/pipelines/{pipeline_id}/artifacts` | List Pipeline Artifacts | No |
+| `GET` | `/api/v1/pipelines/{pipeline_id}/artifacts/{artifact_id}` | Get Pipeline Artifact | No |
+| `POST` | `/api/v1/pipelines/{pipeline_id}/branches` | Create Pipeline Branch | No |
+| `POST` | `/api/v1/pipelines/{pipeline_id}/build` | Build Pipeline | No |
+| `POST` | `/api/v1/pipelines/{pipeline_id}/deploy` | Deploy Pipeline | No |
+| `POST` | `/api/v1/pipelines/{pipeline_id}/preview` | Preview Pipeline | No |
+| `POST` | `/api/v1/pipelines/{pipeline_id}/proposals` | Submit Pipeline Proposal | No |
+| `POST` | `/api/v1/pipelines/{pipeline_id}/proposals/approve` | Approve Pipeline Proposal | No |
+| `POST` | `/api/v1/pipelines/{pipeline_id}/proposals/reject` | Reject Pipeline Proposal | No |
+| `GET` | `/api/v1/pipelines/{pipeline_id}/readiness` | Get Pipeline Readiness | No |
+| `GET` | `/api/v1/pipelines/{pipeline_id}/runs` | List Pipeline Runs | No |
+| `GET` | `/api/v1/schema-migration-plans` | List Schema Migration Plans | No |

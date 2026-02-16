@@ -1,0 +1,263 @@
+---
+title: Projection Consistency
+sidebar_position: 3
+---
+
+# Projection Consistency Runbook
+
+Projections are denormalized, precomputed views derived from the event stream. Because they are built asynchronously, they can become stale if workers fall behind or encounter errors. This runbook covers detecting, diagnosing, and resolving projection consistency issues.
+
+## Understanding Projection Lag
+
+Projection lag is the delay between an event being published and the corresponding projection being updated. Some lag is normal and expected; excessive lag indicates a problem.
+
+### Acceptable Lag
+
+| Environment | Acceptable Lag | Alert Threshold |
+|-------------|---------------|-----------------|
+| Development | < 5 seconds | 30 seconds |
+| Staging | < 2 seconds | 10 seconds |
+| Production | < 500 ms | 5 seconds |
+
+## Detecting Stale Projections
+
+### 1. Grafana Dashboard
+
+The **Event Processing** dashboard includes a panel showing projection builder consumer lag. Check:
+
+- **Consumer Lag** -- Number of unprocessed events per partition
+- **Processing Latency** -- Time from event creation to projection update
+- **Error Rate** -- Projection build failures per minute
+
+### 2. CLI Check
+
+```bash
+# Check projection status
+docker compose exec oms python -m spice.cli projections status
+
+# Output example:
+# Projection           | Status  | Lag (events) | Last Updated
+# ─────────────────────┼─────────┼──────────────┼───────────────────
+# object-counts         | OK      | 3            | 2024-01-15 09:30:00
+# department-summary    | WARNING | 1,247        | 2024-01-15 09:15:00
+# activity-timeline     | ERROR   | 15,892       | 2024-01-15 08:00:00
+```
+
+### 3. Direct Kafka Consumer Lag Check
+
+```bash
+docker compose exec kafka kafka-consumer-groups.sh \
+  --bootstrap-server localhost:9092 \
+  --group spice-projection-builder \
+  --describe
+```
+
+Look for partitions with large lag values or no active consumer.
+
+### 4. API Consistency Check
+
+Compare the event store sequence number with the projection's last processed sequence:
+
+```bash
+curl http://localhost:8002/api/v2/admin/projections/consistency \
+  -H "Authorization: Bearer <token>"
+```
+
+Response:
+
+```json
+{
+  "projections": [
+    {
+      "name": "object-counts",
+      "lastProcessedSequence": 45230,
+      "currentEventSequence": 45233,
+      "lag": 3,
+      "status": "OK"
+    },
+    {
+      "name": "department-summary",
+      "lastProcessedSequence": 44000,
+      "currentEventSequence": 45233,
+      "lag": 1233,
+      "status": "WARNING"
+    }
+  ]
+}
+```
+
+## Diagnosing Root Causes
+
+### Worker Not Running
+
+```bash
+docker compose ps projection-builder
+```
+
+If the worker is not running, check why it stopped:
+
+```bash
+docker compose logs --tail=200 projection-builder
+```
+
+### Worker Stuck on a Failing Event
+
+Check for repeated error messages processing the same event:
+
+```bash
+docker compose logs projection-builder | grep "ERROR" | tail -20
+```
+
+If a specific event is causing repeated failures, it may be a poison pill. The event will eventually be moved to the dead letter queue after retry exhaustion.
+
+### Kafka Partition Rebalancing
+
+If you recently scaled workers up or down, Kafka may be in the middle of a consumer group rebalance. Wait 1-2 minutes and check again.
+
+### Resource Exhaustion
+
+Check if the worker is running out of memory or CPU:
+
+```bash
+docker stats projection-builder
+```
+
+## Reindex Procedures
+
+### Rebuild a Single Projection
+
+```bash
+docker compose exec oms python -m spice.cli projections rebuild --name object-counts
+```
+
+This replays all events from the event store and rebuilds the projection from scratch. The projection is unavailable during the rebuild.
+
+### Rebuild All Projections
+
+```bash
+docker compose exec oms python -m spice.cli projections rebuild --all
+```
+
+:::caution
+Rebuilding all projections is a heavy operation. It replays the entire event history and can take significant time depending on event volume. Plan for increased resource usage.
+:::
+
+### Rebuild from Snapshot
+
+If snapshots are available, rebuilding from a snapshot is faster:
+
+```bash
+docker compose exec oms python -m spice.cli projections rebuild \
+  --name object-counts \
+  --from-snapshot
+```
+
+### Partial Rebuild
+
+Rebuild events from a specific point in time:
+
+```bash
+docker compose exec oms python -m spice.cli projections rebuild \
+  --name object-counts \
+  --since 2024-01-15T00:00:00Z
+```
+
+## Elasticsearch Reindexing
+
+If the Elasticsearch search index is inconsistent with PostgreSQL:
+
+### Check Index Consistency
+
+```bash
+# Compare counts
+docker compose exec oms python -m spice.cli reindex --check
+
+# Output:
+# ObjectType    | PostgreSQL | Elasticsearch | Diff
+# ──────────────┼────────────┼───────────────┼──────
+# Employee      | 1,542      | 1,540         | -2
+# Project       | 387        | 387           | 0
+```
+
+### Full Reindex
+
+```bash
+# Reindex all object types
+docker compose exec oms python -m spice.cli reindex --all
+
+# Reindex a specific object type
+docker compose exec oms python -m spice.cli reindex --object-type Employee
+```
+
+### Zero-Downtime Reindex
+
+For production, use the blue-green reindex strategy:
+
+```bash
+docker compose exec oms python -m spice.cli reindex --all --strategy blue-green
+```
+
+This creates new indices, populates them, and atomically swaps aliases when complete. Search remains available throughout the process.
+
+## Consistency Verification
+
+After a rebuild, verify consistency:
+
+```bash
+# Verify projection consistency
+docker compose exec oms python -m spice.cli projections verify --all
+
+# Verify search index consistency
+docker compose exec oms python -m spice.cli reindex --check
+
+# Run a full consistency audit
+docker compose exec oms python -m spice.cli audit --full
+```
+
+## Prevention
+
+### Monitor Consumer Lag
+
+Set up Prometheus alerts for consumer lag:
+
+```yaml
+# prometheus/alerts.yml
+- alert: ProjectionLagHigh
+  expr: spice_kafka_consumer_lag{consumer_group="spice-projection-builder"} > 1000
+  for: 5m
+  labels:
+    severity: warning
+  annotations:
+    summary: "Projection builder consumer lag is high"
+    description: "Consumer lag for {{ $labels.topic }} partition {{ $labels.partition }} is {{ $value }}"
+```
+
+### Regular Consistency Checks
+
+Schedule periodic consistency checks:
+
+```bash
+# Add to crontab or CI/CD pipeline
+0 */6 * * * docker compose exec oms python -m spice.cli projections verify --all
+```
+
+### Worker Health Monitoring
+
+Ensure all workers have health checks configured in Docker Compose with automatic restart:
+
+```yaml
+services:
+  projection-builder:
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-m", "spice.cli", "health", "--service", "projection-builder"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+```
+
+## Next Steps
+
+- **[Monitoring](./monitoring)** -- Grafana dashboards and alerting
+- **[Troubleshooting](./troubleshooting)** -- General troubleshooting guide
+- **[Event Sourcing](/docs/architecture/event-sourcing)** -- Understanding the event flow

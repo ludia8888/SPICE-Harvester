@@ -1,0 +1,235 @@
+---
+title: Core Concepts
+sidebar_position: 3
+---
+
+# Core Concepts
+
+SPICE Harvester is built around a strongly-typed ontology model inspired by Palantir Foundry. This page introduces the foundational concepts you need to understand before working with the platform.
+
+## Ontology
+
+The **Ontology** is the top-level container that defines the data model for your organization. It describes what types of objects exist, how they relate to each other, and what properties they carry.
+
+An ontology in SPICE Harvester consists of:
+- **Object Types** -- blueprints for entities (e.g., Employee, Project, Asset)
+- **Link Types** -- relationships between object types (e.g., Employee *manages* Project)
+- **Properties** -- typed attributes on object types (e.g., `fullName: string`, `startDate: date`)
+
+You can have multiple ontologies, each identified by a unique `apiName`. Most deployments use a single primary ontology.
+
+```
+Ontology: "acme-corp"
+├── ObjectType: Employee
+│   ├── Property: employeeId (string, primary key)
+│   ├── Property: fullName (string)
+│   ├── Property: department (string)
+│   └── Property: startDate (date)
+├── ObjectType: Project
+│   ├── Property: projectId (string, primary key)
+│   ├── Property: name (string)
+│   └── Property: status (string)
+└── LinkType: manages (Employee → Project)
+```
+
+## Object Types
+
+An **Object Type** is a schema definition, similar to a table in a relational database or a class in object-oriented programming. Each object type declares:
+
+- **apiName** -- unique identifier used in API calls (e.g., `Employee`)
+- **displayName** -- human-readable label (e.g., "Employee")
+- **primaryKey** -- the property that uniquely identifies instances
+- **properties** -- a map of named, typed attributes
+
+Object types are registered in the ontology and define the structure that all instances of that type must follow.
+
+### Supported Data Types
+
+| Type | Description | Example |
+|------|-------------|---------|
+| `string` | UTF-8 text | `"Jane Doe"` |
+| `integer` | 64-bit signed integer | `42` |
+| `long` | 64-bit signed integer (alias) | `9876543210` |
+| `double` | 64-bit floating point | `3.14159` |
+| `boolean` | True or false | `true` |
+| `date` | ISO 8601 date | `"2024-01-15"` |
+| `timestamp` | ISO 8601 datetime | `"2024-01-15T09:30:00Z"` |
+| `geopoint` | Latitude/longitude pair | `{"lat": 37.7749, "lon": -122.4194}` |
+| `geoshape` | GeoJSON geometry | `{"type": "Polygon", ...}` |
+| `array` | Ordered list of a base type | `["tag1", "tag2"]` |
+
+## Link Types
+
+A **Link Type** defines a directed relationship between two object types. Links are first-class citizens in the ontology and enable graph-style traversal across your data.
+
+Each link type specifies:
+- **apiName** -- unique identifier (e.g., `manages`)
+- **sourceObjectType** -- the "from" side of the relationship
+- **targetObjectType** -- the "to" side of the relationship
+- **cardinality** -- `ONE_TO_ONE`, `ONE_TO_MANY`, `MANY_TO_ONE`, or `MANY_TO_MANY`
+
+Links are stored as edges in the data model and are queryable through the API. You can traverse links to navigate between related objects.
+
+## Properties
+
+A **Property** is a named, typed attribute on an object type. Properties define what data each instance carries.
+
+Properties have:
+- **apiName** -- identifier used in API requests and responses
+- **displayName** -- human-readable label
+- **dataType** -- one of the supported data types above
+- **required** -- whether the property must be present on every instance
+- **indexed** -- whether the property is searchable in Elasticsearch
+
+The primary key property is always required and indexed.
+
+## Instances
+
+An **Instance** is a concrete record of a particular object type. If an object type is the blueprint, an instance is the actual building. Each instance has:
+
+- **\_\_rid** -- resource identifier, globally unique across the platform
+- **\_\_primaryKey** -- the value of the primary key property
+- **\_\_apiName** -- the object type this instance belongs to
+- **properties** -- the actual data values
+
+Example instance of the `Employee` object type:
+
+```json
+{
+  "__rid": "ri.ontology.main.object.employee-00042",
+  "__primaryKey": "EMP-042",
+  "__apiName": "Employee",
+  "properties": {
+    "employeeId": "EMP-042",
+    "fullName": "Jane Doe",
+    "department": "Engineering",
+    "startDate": "2023-06-15"
+  }
+}
+```
+
+Instances are stored in PostgreSQL (source of truth) and indexed in Elasticsearch (for search and analytics).
+
+## Actions
+
+**Actions** are the write side of the platform. Instead of direct CRUD mutations, SPICE Harvester uses an action system that provides:
+
+- **Validation** -- actions are validated against rules before execution
+- **Audit trail** -- every action is logged as an event in the event store
+- **Undo support** -- actions can be reversed through compensating actions
+- **Conflict resolution** -- concurrent modifications are detected and resolved
+- **Templates** -- reusable action definitions with dynamic expressions
+
+### Action Types
+
+| Action Type | Description |
+|-------------|-------------|
+| `createObject` | Create a new instance of an object type |
+| `editObject` | Modify properties of an existing instance |
+| `deleteObject` | Remove an instance |
+| `createLink` | Establish a relationship between two instances |
+| `deleteLink` | Remove a relationship |
+| `bulkAction` | Execute multiple actions atomically |
+
+### Action Templates
+
+Action templates use a dynamic expression language with operators like `$ref`, `$now`, `$if`, `$switch`, and `$call` to define reusable action logic. Templates are evaluated at execution time and can reference the current user, timestamp, and existing object properties.
+
+## Pipelines
+
+A **Pipeline** is a declarative data transformation workflow. Pipelines define how data flows from sources (files, APIs, databases) through a series of transforms into the ontology.
+
+Pipelines support 22+ transform types including:
+
+- **Structural**: `map`, `filter`, `flatten`, `groupBy`, `sort`, `distinct`
+- **Enrichment**: `lookup`, `join`, `geocode`, `resolve`
+- **Validation**: `validate`, `deduplicate`, `normalize`
+- **Output**: `upsertObjects`, `createLinks`, `publishEvent`
+
+Pipelines are defined as JSON or YAML configurations and executed by the Pipeline Runner workers.
+
+## Projections
+
+A **Projection** is a precomputed, denormalized view of data optimized for specific query patterns. Projections are built by the Projection Builder workers from the event stream.
+
+Examples of projections:
+- An aggregated count of objects by type and department
+- A flattened view joining objects across link types
+- A time-series rollup of action activity
+
+Projections are eventually consistent with the source of truth. The platform provides tools to monitor projection lag and trigger rebuilds.
+
+## Lineage
+
+**Lineage** tracks how data flows through the system. SPICE Harvester captures 15 edge types of lineage relationships:
+
+| Edge Type | Description |
+|-----------|-------------|
+| `DERIVED_FROM` | Object was derived from another object |
+| `IMPORTED_BY` | Data was imported by a pipeline |
+| `TRANSFORMED_BY` | Data was processed by a transform |
+| `LINKED_TO` | Object is linked to another object |
+| `CREATED_BY` | Object was created by an action |
+| `MODIFIED_BY` | Object was modified by an action |
+| `DELETED_BY` | Object was deleted by an action |
+| `VALIDATED_BY` | Data was validated by a rule |
+| `ENRICHED_BY` | Data was enriched by a lookup |
+| `MERGED_FROM` | Object was merged from multiple sources |
+| `SPLIT_INTO` | Object was split into multiple objects |
+| `AGGREGATED_FROM` | Projection was aggregated from source objects |
+| `PUBLISHED_TO` | Data was published to an external system |
+| `CONSUMED_FROM` | Data was consumed from an external system |
+| `SNAPSHOT_OF` | A point-in-time snapshot of an object |
+
+Lineage data is stored in the event store and can be queried through the API to trace data provenance.
+
+## Event Sourcing
+
+SPICE Harvester uses **Event Sourcing** as its persistence pattern. Every state change is captured as an immutable event:
+
+1. An action is submitted through the API
+2. The action is validated and converted to one or more events
+3. Events are published to **Kafka** for real-time processing
+4. Events are persisted to the **S3/MinIO Event Store** for durability
+5. Workers consume events to update **read models** (PostgreSQL, Elasticsearch, projections)
+
+This design provides a complete audit trail, enables time-travel queries, and supports rebuilding any read model from the event history.
+
+## How Concepts Relate
+
+```
+┌─────────────────────────────────────────────────────┐
+│                     Ontology                        │
+│  ┌──────────────┐    ┌──────────────┐               │
+│  │  ObjectType   │───▶│   LinkType   │               │
+│  │  (blueprint)  │    │ (relationship)│              │
+│  └──────┬───────┘    └──────────────┘               │
+│         │                                           │
+│  ┌──────▼───────┐                                   │
+│  │  Properties   │                                   │
+│  │  (attributes) │                                   │
+│  └──────────────┘                                   │
+└─────────────────────────────────────────────────────┘
+         │ defines structure for
+         ▼
+┌─────────────────┐     ┌─────────────┐
+│    Instances     │────▶│   Actions   │
+│  (actual data)   │◀────│  (mutations) │
+└────────┬────────┘     └──────┬──────┘
+         │                     │ emit
+         │              ┌──────▼──────┐
+         │              │   Events    │
+         │              └──────┬──────┘
+         │                     │ consumed by
+         │              ┌──────▼──────┐
+         └─────────────▶│ Projections │
+                        │  Pipelines  │
+                        │  Lineage    │
+                        └─────────────┘
+```
+
+## Next Steps
+
+- **[Architecture Overview](/docs/architecture/overview)** -- See how these concepts map to services
+- **[API Reference](/docs/api/overview)** -- Start interacting with the platform
+- **[Data Engineer Guide](/docs/guides/data-engineer/schema-config)** -- Define your own ontology

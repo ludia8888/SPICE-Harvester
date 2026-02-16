@@ -16,3 +16,11 @@ repos:
         pass_filenames: false
         always_run: true
         description: "Fail commit on Sphinx warnings/errors"
+
+      - id: portal-autogen-check
+        name: Portal Auto-Generated Check
+        entry: .venv-docs/bin/python scripts/generate_portal_content.py --check
+        language: system
+        pass_filenames: false
+        always_run: true
+        description: "Fail commit if portal auto-generated content is stale"

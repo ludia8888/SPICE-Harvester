@@ -1,0 +1,368 @@
+---
+title: "v2: Actions"
+sidebar_position: 5
+---
+
+# Foundry v2 Actions API
+
+Actions are the write interface for SPICE Harvester. All mutations -- creating objects, editing properties, deleting records, and managing links -- are performed through the Actions API. Actions provide validation, audit logging, undo support, and conflict resolution.
+
+## Apply an Action
+
+Execute one or more actions against the ontology.
+
+```
+POST /api/v2/ontologies/{ontologyApiName}/actions/apply
+```
+
+### Path Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `ontologyApiName` | string | Yes | The API name of the ontology |
+
+### Request Body
+
+```json
+{
+  "actions": [
+    {
+      "type": "createObject",
+      "objectTypeApiName": "Employee",
+      "properties": {
+        "employeeId": "EMP-200",
+        "fullName": "Morgan Chen",
+        "department": "Engineering",
+        "startDate": "2024-02-01",
+        "isActive": true
+      }
+    }
+  ]
+}
+```
+
+### Action Types
+
+#### `createObject`
+
+Create a new object instance.
+
+```json
+{
+  "type": "createObject",
+  "objectTypeApiName": "Employee",
+  "properties": {
+    "employeeId": "EMP-200",
+    "fullName": "Morgan Chen",
+    "department": "Engineering",
+    "startDate": "2024-02-01"
+  }
+}
+```
+
+#### `editObject`
+
+Modify properties of an existing object. Only the specified properties are updated; others remain unchanged.
+
+```json
+{
+  "type": "editObject",
+  "objectTypeApiName": "Employee",
+  "primaryKey": "EMP-042",
+  "properties": {
+    "department": "Product",
+    "salary": 160000.00
+  }
+}
+```
+
+#### `deleteObject`
+
+Remove an object instance.
+
+```json
+{
+  "type": "deleteObject",
+  "objectTypeApiName": "Employee",
+  "primaryKey": "EMP-042"
+}
+```
+
+#### `createLink`
+
+Create a relationship between two objects.
+
+```json
+{
+  "type": "createLink",
+  "linkTypeApiName": "manages",
+  "sourceObjectPrimaryKey": "EMP-001",
+  "sourceObjectType": "Employee",
+  "targetObjectPrimaryKey": "PRJ-042",
+  "targetObjectType": "Project"
+}
+```
+
+#### `deleteLink`
+
+Remove a relationship between two objects.
+
+```json
+{
+  "type": "deleteLink",
+  "linkTypeApiName": "manages",
+  "sourceObjectPrimaryKey": "EMP-001",
+  "sourceObjectType": "Employee",
+  "targetObjectPrimaryKey": "PRJ-042",
+  "targetObjectType": "Project"
+}
+```
+
+### Bulk Actions
+
+Submit multiple actions in a single request. They are executed atomically -- all succeed or all fail.
+
+```bash
+curl -X POST \
+  "http://localhost:8002/api/v2/ontologies/acme/actions/apply" \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "actions": [
+      {
+        "type": "createObject",
+        "objectTypeApiName": "Project",
+        "properties": {
+          "projectId": "PRJ-100",
+          "name": "Atlas Initiative",
+          "status": "active",
+          "budget": 500000
+        }
+      },
+      {
+        "type": "createLink",
+        "linkTypeApiName": "manages",
+        "sourceObjectPrimaryKey": "EMP-042",
+        "sourceObjectType": "Employee",
+        "targetObjectPrimaryKey": "PRJ-100",
+        "targetObjectType": "Project"
+      }
+    ]
+  }'
+```
+
+### Response
+
+```json
+{
+  "actionResults": [
+    {
+      "actionId": "act-2024-01-15-a1b2c3",
+      "type": "createObject",
+      "status": "COMPLETED",
+      "objectRid": "ri.ontology.main.object.prj-100"
+    },
+    {
+      "actionId": "act-2024-01-15-d4e5f6",
+      "type": "createLink",
+      "status": "COMPLETED"
+    }
+  ]
+}
+```
+
+---
+
+## List Action Types
+
+Retrieve all action type templates defined in the ontology.
+
+```
+GET /api/v2/ontologies/{ontologyApiName}/actionTypes
+```
+
+### Response Example
+
+```json
+{
+  "data": [
+    {
+      "apiName": "createEmployee",
+      "displayName": "Create Employee",
+      "description": "Create a new employee record with auto-generated ID",
+      "type": "createObject",
+      "objectTypeApiName": "Employee",
+      "parameters": {
+        "fullName": { "type": "string", "required": true },
+        "department": { "type": "string", "required": true },
+        "startDate": { "type": "date", "required": false }
+      },
+      "rid": "ri.ontology.main.action-type.create-employee"
+    }
+  ],
+  "nextPageToken": null
+}
+```
+
+---
+
+## Validate an Action
+
+Check whether an action would succeed without actually executing it.
+
+```
+POST /api/v2/ontologies/{ontologyApiName}/actions/validate
+```
+
+### Request Body
+
+Same format as `apply`, but no mutation is performed.
+
+### Response Example (Valid)
+
+```json
+{
+  "valid": true,
+  "warnings": []
+}
+```
+
+### Response Example (Invalid)
+
+```json
+{
+  "valid": false,
+  "errors": [
+    {
+      "field": "department",
+      "errorCode": "INVALID_VALUE",
+      "message": "Value 'Eng' is not in the allowed values list",
+      "allowedValues": ["Engineering", "Product", "Marketing", "HR", "Finance"]
+    },
+    {
+      "field": "employeeId",
+      "errorCode": "DUPLICATE_PRIMARY_KEY",
+      "message": "An object with primary key 'EMP-042' already exists"
+    }
+  ]
+}
+```
+
+---
+
+## Action Template System
+
+Action templates define reusable, parameterized actions using a dynamic expression language. Templates are evaluated at execution time.
+
+### Template Operators
+
+| Operator | Description | Example |
+|----------|-------------|---------|
+| `$ref` | Reference a parameter, property, or context value | `{"$ref": "parameters.fullName"}` |
+| `$now` | Current timestamp | `{"$now": "ISO8601"}` |
+| `$if` | Conditional expression | `{"$if": {"cond": ..., "then": ..., "else": ...}}` |
+| `$switch` | Multi-branch conditional | `{"$switch": {"on": ..., "cases": {...}, "default": ...}}` |
+| `$call` | Invoke a registered function | `{"$call": {"fn": "generateId", "args": [...]}}` |
+
+### Template Example
+
+```json
+{
+  "apiName": "onboardEmployee",
+  "displayName": "Onboard Employee",
+  "type": "createObject",
+  "objectTypeApiName": "Employee",
+  "template": {
+    "employeeId": {
+      "$call": {
+        "fn": "generateId",
+        "args": ["EMP"]
+      }
+    },
+    "fullName": { "$ref": "parameters.fullName" },
+    "department": { "$ref": "parameters.department" },
+    "startDate": {
+      "$if": {
+        "cond": { "$ref": "parameters.startDate" },
+        "then": { "$ref": "parameters.startDate" },
+        "else": { "$now": "date" }
+      }
+    },
+    "isActive": true,
+    "accessLevel": {
+      "$switch": {
+        "on": { "$ref": "parameters.department" },
+        "cases": {
+          "Engineering": "full",
+          "Product": "full",
+          "Marketing": "standard",
+          "HR": "restricted"
+        },
+        "default": "standard"
+      }
+    }
+  }
+}
+```
+
+---
+
+## Undo an Action
+
+Reverse a previously applied action by creating a compensating action.
+
+```
+POST /api/v2/ontologies/{ontologyApiName}/actions/{actionId}/undo
+```
+
+### Response
+
+```json
+{
+  "undoActionId": "act-2024-01-15-undo-a1b2c3",
+  "status": "COMPLETED",
+  "originalActionId": "act-2024-01-15-a1b2c3"
+}
+```
+
+:::caution
+Not all actions are undoable. The `deleteObject` action is only undoable if the event store still contains the object's creation and update events. Check the `undoable` field in the action result.
+:::
+
+---
+
+## Conflict Resolution
+
+When concurrent modifications target the same object, the platform detects conflicts using optimistic locking. Each object carries a `version` number that is incremented on every update.
+
+If a conflict is detected, the API returns:
+
+```json
+{
+  "errorCode": "CONFLICT",
+  "errorName": "ConcurrentModification",
+  "errorInstanceId": "err-2024-01-15-conflict-001",
+  "parameters": {
+    "objectRid": "ri.ontology.main.object.emp-042",
+    "expectedVersion": 5,
+    "actualVersion": 6
+  }
+}
+```
+
+To resolve, re-read the object to get the latest version and resubmit the action.
+
+## Error Responses
+
+| Status | Error Code | Description |
+|--------|-----------|-------------|
+| `400` | `InvalidAction` | The action payload is malformed |
+| `404` | `ObjectNotFound` | The target object does not exist (for edit/delete) |
+| `409` | `ConcurrentModification` | Another action modified the object concurrently |
+| `422` | `ValidationFailed` | The action failed business rule validation |
+
+## Next Steps
+
+- **[v2 Objects API](./v2-objects)** -- Read objects
+- **[v2 Search API](./v2-search)** -- Search across objects
+- **[Error Codes](./error-codes)** -- Full error code reference

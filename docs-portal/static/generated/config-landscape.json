@@ -1,0 +1,5612 @@
+{
+  "classes": [
+    {
+      "name": "DatabaseSettings",
+      "docstring": "Database configuration settings",
+      "field_count": 19,
+      "fields": [
+        {
+          "name": "query_max_scan_docs",
+          "type": "int",
+          "default": "5000",
+          "description": "Max scan docs for unsafe queries (QUERY_MAX_SCAN_DOCS)",
+          "env_vars": [
+            "QUERY_MAX_SCAN_DOCS"
+          ],
+          "required": false
+        },
+        {
+          "name": "postgres_host",
+          "type": "str",
+          "default": "<env-dependent>",
+          "description": "PostgreSQL host",
+          "env_vars": [
+            "POSTGRES_HOST"
+          ],
+          "required": false
+        },
+        {
+          "name": "postgres_port",
+          "type": "int",
+          "default": "<env-dependent>",
+          "description": "PostgreSQL port",
+          "env_vars": [
+            "POSTGRES_PORT",
+            "POSTGRES_PORT_HOST"
+          ],
+          "required": false
+        },
+        {
+          "name": "postgres_user",
+          "type": "str",
+          "default": "spiceadmin",
+          "description": "PostgreSQL username",
+          "env_vars": [
+            "POSTGRES_USER"
+          ],
+          "required": false
+        },
+        {
+          "name": "postgres_password",
+          "type": "str",
+          "default": "spicepass123",
+          "description": "PostgreSQL password",
+          "env_vars": [
+            "POSTGRES_PASSWORD"
+          ],
+          "required": false
+        },
+        {
+          "name": "postgres_db",
+          "type": "str",
+          "default": "spicedb",
+          "description": "PostgreSQL database name",
+          "env_vars": [
+            "POSTGRES_DB"
+          ],
+          "required": false
+        },
+        {
+          "name": "redis_host",
+          "type": "str",
+          "default": "<env-dependent>",
+          "description": "Redis host",
+          "env_vars": [
+            "REDIS_HOST"
+          ],
+          "required": false
+        },
+        {
+          "name": "redis_port",
+          "type": "int",
+          "default": "6379",
+          "description": "Redis port",
+          "env_vars": [
+            "REDIS_PORT",
+            "REDIS_PORT_HOST"
+          ],
+          "required": false
+        },
+        {
+          "name": "redis_password",
+          "type": "Optional[str]",
+          "default": "spicepass123",
+          "description": "Redis password",
+          "env_vars": [
+            "REDIS_PASSWORD"
+          ],
+          "required": false
+        },
+        {
+          "name": "elasticsearch_host",
+          "type": "str",
+          "default": "<env-dependent>",
+          "description": "Elasticsearch host",
+          "env_vars": [
+            "ELASTICSEARCH_HOST"
+          ],
+          "required": false
+        },
+        {
+          "name": "elasticsearch_port",
+          "type": "int",
+          "default": "9200",
+          "description": "Elasticsearch port",
+          "env_vars": [
+            "ELASTICSEARCH_PORT",
+            "ELASTICSEARCH_PORT_HOST"
+          ],
+          "required": false
+        },
+        {
+          "name": "elasticsearch_request_timeout",
+          "type": "int",
+          "default": "60",
+          "description": "Elasticsearch request timeout in seconds",
+          "env_vars": [
+            "ELASTICSEARCH_REQUEST_TIMEOUT"
+          ],
+          "required": false
+        },
+        {
+          "name": "elasticsearch_username",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "Elasticsearch username",
+          "env_vars": [
+            "ELASTICSEARCH_USERNAME"
+          ],
+          "required": true
+        },
+        {
+          "name": "elasticsearch_password",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "Elasticsearch password",
+          "env_vars": [
+            "ELASTICSEARCH_PASSWORD"
+          ],
+          "required": true
+        },
+        {
+          "name": "elasticsearch_default_shards",
+          "type": "int",
+          "default": "1",
+          "description": "Default number of shards for new indices (ELASTICSEARCH_DEFAULT_SHARDS)",
+          "env_vars": [
+            "ELASTICSEARCH_DEFAULT_SHARDS"
+          ],
+          "required": false
+        },
+        {
+          "name": "elasticsearch_default_replicas",
+          "type": "Optional[int]",
+          "default": null,
+          "description": "Default number of replicas for new indices (ELASTICSEARCH_DEFAULT_REPLICAS)",
+          "env_vars": [
+            "ELASTICSEARCH_DEFAULT_REPLICAS"
+          ],
+          "required": true
+        },
+        {
+          "name": "kafka_host",
+          "type": "str",
+          "default": "<env-dependent>",
+          "description": "Kafka host",
+          "env_vars": [
+            "KAFKA_HOST"
+          ],
+          "required": false
+        },
+        {
+          "name": "kafka_port",
+          "type": "int",
+          "default": "<env-dependent>",
+          "description": "Kafka port",
+          "env_vars": [
+            "KAFKA_PORT",
+            "KAFKA_PORT_HOST"
+          ],
+          "required": false
+        },
+        {
+          "name": "kafka_bootstrap_servers",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "Kafka bootstrap servers (overrides host:port)",
+          "env_vars": [
+            "KAFKA_BOOTSTRAP_SERVERS"
+          ],
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "ServiceSettings",
+      "docstring": "Service configuration settings",
+      "field_count": 22,
+      "fields": [
+        {
+          "name": "oms_host",
+          "type": "str",
+          "default": "<env-dependent>",
+          "description": "OMS service host",
+          "env_vars": [
+            "OMS_HOST"
+          ],
+          "required": false
+        },
+        {
+          "name": "oms_port",
+          "type": "int",
+          "default": "8000",
+          "description": "OMS service port",
+          "env_vars": [
+            "OMS_PORT"
+          ],
+          "required": false
+        },
+        {
+          "name": "oms_base_url_override",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "OMS base URL override (OMS_BASE_URL)",
+          "env_vars": [
+            "OMS_BASE_URL_OVERRIDE"
+          ],
+          "required": true
+        },
+        {
+          "name": "bff_host",
+          "type": "str",
+          "default": "<env-dependent>",
+          "description": "BFF service host",
+          "env_vars": [
+            "BFF_HOST"
+          ],
+          "required": false
+        },
+        {
+          "name": "bff_port",
+          "type": "int",
+          "default": "8002",
+          "description": "BFF service port",
+          "env_vars": [
+            "BFF_PORT"
+          ],
+          "required": false
+        },
+        {
+          "name": "bff_base_url_override",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "BFF base URL override (BFF_BASE_URL)",
+          "env_vars": [
+            "BFF_BASE_URL_OVERRIDE"
+          ],
+          "required": true
+        },
+        {
+          "name": "funnel_host",
+          "type": "str",
+          "default": "<env-dependent>",
+          "description": "Funnel service host",
+          "env_vars": [
+            "FUNNEL_HOST"
+          ],
+          "required": false
+        },
+        {
+          "name": "funnel_port",
+          "type": "int",
+          "default": "8003",
+          "description": "Funnel service port",
+          "env_vars": [
+            "FUNNEL_PORT"
+          ],
+          "required": false
+        },
+        {
+          "name": "funnel_base_url_override",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "Funnel base URL override (FUNNEL_BASE_URL)",
+          "env_vars": [
+            "FUNNEL_BASE_URL_OVERRIDE"
+          ],
+          "required": true
+        },
+        {
+          "name": "agent_host",
+          "type": "str",
+          "default": "<env-dependent>",
+          "description": "Agent service host",
+          "env_vars": [
+            "AGENT_HOST"
+          ],
+          "required": false
+        },
+        {
+          "name": "agent_port",
+          "type": "int",
+          "default": "8004",
+          "description": "Agent service port",
+          "env_vars": [
+            "AGENT_PORT"
+          ],
+          "required": false
+        },
+        {
+          "name": "agent_base_url_override",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "Agent base URL override (AGENT_BASE_URL)",
+          "env_vars": [
+            "AGENT_BASE_URL_OVERRIDE"
+          ],
+          "required": true
+        },
+        {
+          "name": "use_https",
+          "type": "bool",
+          "default": "False",
+          "description": "Use HTTPS for service communication",
+          "env_vars": [
+            "USE_HTTPS"
+          ],
+          "required": false
+        },
+        {
+          "name": "ssl_cert_path",
+          "type": "str",
+          "default": "./ssl/common/server.crt",
+          "description": "SSL certificate path",
+          "env_vars": [
+            "SSL_CERT_PATH"
+          ],
+          "required": false
+        },
+        {
+          "name": "ssl_key_path",
+          "type": "str",
+          "default": "./ssl/common/server.key",
+          "description": "SSL private key path",
+          "env_vars": [
+            "SSL_KEY_PATH"
+          ],
+          "required": false
+        },
+        {
+          "name": "ssl_ca_path",
+          "type": "str",
+          "default": "./ssl/ca.crt",
+          "description": "SSL CA certificate path",
+          "env_vars": [
+            "SSL_CA_PATH"
+          ],
+          "required": false
+        },
+        {
+          "name": "verify_ssl",
+          "type": "bool",
+          "default": "False",
+          "description": "Verify SSL certificates",
+          "env_vars": [
+            "VERIFY_SSL"
+          ],
+          "required": false
+        },
+        {
+          "name": "cors_enabled",
+          "type": "bool",
+          "default": "True",
+          "description": "Enable CORS",
+          "env_vars": [
+            "CORS_ENABLED"
+          ],
+          "required": false
+        },
+        {
+          "name": "cors_origins",
+          "type": "str",
+          "default": "",
+          "description": "CORS allowed origins (JSON array string; CORS_ORIGINS). When unset, defaults apply.",
+          "env_vars": [
+            "CORS_ORIGINS"
+          ],
+          "required": false
+        },
+        {
+          "name": "enable_debug_endpoints",
+          "type": "bool",
+          "default": "False",
+          "description": "Enable opt-in debug endpoints (ENABLE_DEBUG_ENDPOINTS)",
+          "env_vars": [
+            "ENABLE_DEBUG_ENDPOINTS"
+          ],
+          "required": false
+        },
+        {
+          "name": "funnel_excel_timeout_seconds",
+          "type": "float",
+          "default": "120.0",
+          "description": "Funnel excel timeout seconds (FUNNEL_EXCEL_TIMEOUT_SECONDS; fallback FUNNEL_CLIENT_TIMEOUT_SECONDS)",
+          "env_vars": [
+            "FUNNEL_EXCEL_TIMEOUT_SECONDS"
+          ],
+          "required": false
+        },
+        {
+          "name": "funnel_infer_timeout_seconds",
+          "type": "float",
+          "default": "8.0",
+          "description": "Funnel dataset analysis timeout seconds (FUNNEL_INFER_TIMEOUT_SECONDS; fallback FUNNEL_CLIENT_TIMEOUT_SECONDS)",
+          "env_vars": [
+            "FUNNEL_INFER_TIMEOUT_SECONDS"
+          ],
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "LLMSettings",
+      "docstring": "LLM gateway settings (shared across services).",
+      "field_count": 26,
+      "fields": [
+        {
+          "name": "provider",
+          "type": "str",
+          "default": "disabled",
+          "description": "LLM provider (LLM_PROVIDER)",
+          "env_vars": [
+            "PROVIDER"
+          ],
+          "required": false
+        },
+        {
+          "name": "base_url",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "OpenAI-compatible base URL (LLM_BASE_URL)",
+          "env_vars": [
+            "BASE_URL"
+          ],
+          "required": true
+        },
+        {
+          "name": "api_key",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "OpenAI-compatible API key (LLM_API_KEY)",
+          "env_vars": [
+            "API_KEY"
+          ],
+          "required": true
+        },
+        {
+          "name": "model",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "Default model id (LLM_MODEL)",
+          "env_vars": [
+            "MODEL"
+          ],
+          "required": true
+        },
+        {
+          "name": "anthropic_base_url",
+          "type": "str",
+          "default": "https://api.anthropic.com",
+          "description": "Anthropic base URL (LLM_ANTHROPIC_BASE_URL)",
+          "env_vars": [
+            "ANTHROPIC_BASE_URL"
+          ],
+          "required": false
+        },
+        {
+          "name": "anthropic_api_key",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "Anthropic API key (LLM_ANTHROPIC_API_KEY; fallback ANTHROPIC_API_KEY/LLM_API_KEY)",
+          "env_vars": [
+            "ANTHROPIC_API_KEY"
+          ],
+          "required": true
+        },
+        {
+          "name": "anthropic_version",
+          "type": "str",
+          "default": "2023-06-01",
+          "description": "Anthropic API version header (LLM_ANTHROPIC_VERSION)",
+          "env_vars": [
+            "ANTHROPIC_VERSION"
+          ],
+          "required": false
+        },
+        {
+          "name": "google_base_url",
+          "type": "str",
+          "default": "https://generativelanguage.googleapis.com",
+          "description": "Google Generative Language base URL (LLM_GOOGLE_BASE_URL)",
+          "env_vars": [
+            "GOOGLE_BASE_URL"
+          ],
+          "required": false
+        },
+        {
+          "name": "google_api_key",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "Google API key (LLM_GOOGLE_API_KEY; fallback GOOGLE_API_KEY/LLM_API_KEY)",
+          "env_vars": [
+            "GOOGLE_API_KEY"
+          ],
+          "required": true
+        },
+        {
+          "name": "timeout_seconds",
+          "type": "float",
+          "default": "60.0",
+          "description": "LLM timeout seconds (LLM_TIMEOUT_SECONDS)",
+          "env_vars": [
+            "TIMEOUT_SECONDS"
+          ],
+          "required": false
+        },
+        {
+          "name": "temperature",
+          "type": "float",
+          "default": "0.0",
+          "description": "LLM temperature (LLM_TEMPERATURE)",
+          "env_vars": [
+            "TEMPERATURE"
+          ],
+          "required": false
+        },
+        {
+          "name": "max_tokens",
+          "type": "int",
+          "default": "800",
+          "description": "LLM max tokens (LLM_MAX_TOKENS)",
+          "env_vars": [
+            "MAX_TOKENS"
+          ],
+          "required": false
+        },
+        {
+          "name": "enable_json_mode",
+          "type": "bool",
+          "default": "True",
+          "description": "Enable JSON mode (LLM_ENABLE_JSON_MODE)",
+          "env_vars": [
+            "ENABLE_JSON_MODE"
+          ],
+          "required": false
+        },
+        {
+          "name": "native_tool_calling",
+          "type": "bool",
+          "default": "False",
+          "description": "Enable native tool calling (LLM_NATIVE_TOOL_CALLING)",
+          "env_vars": [
+            "NATIVE_TOOL_CALLING"
+          ],
+          "required": false
+        },
+        {
+          "name": "provider_policies_json",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "Provider send policies JSON (LLM_PROVIDER_POLICIES_JSON)",
+          "env_vars": [
+            "PROVIDER_POLICIES_JSON"
+          ],
+          "required": true
+        },
+        {
+          "name": "cache_enabled",
+          "type": "bool",
+          "default": "True",
+          "description": "Enable Redis cache (LLM_CACHE_ENABLED)",
+          "env_vars": [
+            "CACHE_ENABLED"
+          ],
+          "required": false
+        },
+        {
+          "name": "cache_ttl_seconds",
+          "type": "int",
+          "default": "3600",
+          "description": "Cache TTL seconds (LLM_CACHE_TTL_SECONDS)",
+          "env_vars": [
+            "CACHE_TTL_SECONDS"
+          ],
+          "required": false
+        },
+        {
+          "name": "max_prompt_chars",
+          "type": "int",
+          "default": "0",
+          "description": "Prompt size cap chars; 0=auto-detect from model context window (LLM_MAX_PROMPT_CHARS)",
+          "env_vars": [
+            "MAX_PROMPT_CHARS"
+          ],
+          "required": false
+        },
+        {
+          "name": "retry_max_attempts",
+          "type": "int",
+          "default": "2",
+          "description": "Max retry attempts (LLM_RETRY_MAX_ATTEMPTS)",
+          "env_vars": [
+            "RETRY_MAX_ATTEMPTS"
+          ],
+          "required": false
+        },
+        {
+          "name": "retry_base_delay_seconds",
+          "type": "float",
+          "default": "0.5",
+          "description": "Retry base delay seconds (LLM_RETRY_BASE_DELAY_SECONDS)",
+          "env_vars": [
+            "RETRY_BASE_DELAY_SECONDS"
+          ],
+          "required": false
+        },
+        {
+          "name": "retry_max_delay_seconds",
+          "type": "float",
+          "default": "4.0",
+          "description": "Retry max delay seconds (LLM_RETRY_MAX_DELAY_SECONDS)",
+          "env_vars": [
+            "RETRY_MAX_DELAY_SECONDS"
+          ],
+          "required": false
+        },
+        {
+          "name": "circuit_failure_threshold",
+          "type": "int",
+          "default": "5",
+          "description": "Circuit breaker threshold (LLM_CIRCUIT_FAILURE_THRESHOLD)",
+          "env_vars": [
+            "CIRCUIT_FAILURE_THRESHOLD"
+          ],
+          "required": false
+        },
+        {
+          "name": "circuit_open_seconds",
+          "type": "float",
+          "default": "30.0",
+          "description": "Circuit breaker open seconds (LLM_CIRCUIT_OPEN_SECONDS)",
+          "env_vars": [
+            "CIRCUIT_OPEN_SECONDS"
+          ],
+          "required": false
+        },
+        {
+          "name": "pricing_json",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "Pricing table JSON (LLM_PRICING_JSON)",
+          "env_vars": [
+            "PRICING_JSON"
+          ],
+          "required": true
+        },
+        {
+          "name": "mock_json",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "Mock provider JSON payload (LLM_MOCK_JSON)",
+          "env_vars": [
+            "MOCK_JSON"
+          ],
+          "required": true
+        },
+        {
+          "name": "mock_dir",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "Directory containing mock JSON files like agent_plan_compile_v1.json (LLM_MOCK_DIR)",
+          "env_vars": [
+            "MOCK_DIR"
+          ],
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "ObservabilitySettings",
+      "docstring": "Logging/observability settings (shared across services/workers).",
+      "field_count": 24,
+      "fields": [
+        {
+          "name": "log_level",
+          "type": "str",
+          "default": "INFO",
+          "description": "Python logging level (LOG_LEVEL)",
+          "env_vars": [
+            "LOG_LEVEL"
+          ],
+          "required": false
+        },
+        {
+          "name": "service_name",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "Service name override (SERVICE_NAME)",
+          "env_vars": [
+            "SERVICE_NAME"
+          ],
+          "required": true
+        },
+        {
+          "name": "hostname",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "Hostname override (HOSTNAME)",
+          "env_vars": [
+            "HOSTNAME"
+          ],
+          "required": true
+        },
+        {
+          "name": "enable_lineage",
+          "type": "bool",
+          "default": "True",
+          "description": "Enable lineage store integration (ENABLE_LINEAGE)",
+          "env_vars": [
+            "ENABLE_LINEAGE"
+          ],
+          "required": false
+        },
+        {
+          "name": "lineage_fail_closed",
+          "type": "bool",
+          "default": "True",
+          "description": "Fail closed when lineage is unavailable/recording fails (LINEAGE_FAIL_CLOSED)",
+          "env_vars": [
+            "LINEAGE_FAIL_CLOSED"
+          ],
+          "required": false
+        },
+        {
+          "name": "lineage_fail_open_override",
+          "type": "bool",
+          "default": "False",
+          "description": "Emergency override to disable lineage fail-closed behavior (LINEAGE_FAIL_OPEN_OVERRIDE)",
+          "env_vars": [
+            "LINEAGE_FAIL_OPEN_OVERRIDE"
+          ],
+          "required": false
+        },
+        {
+          "name": "enable_audit_logs",
+          "type": "bool",
+          "default": "True",
+          "description": "Enable audit log store integration (ENABLE_AUDIT_LOGS)",
+          "env_vars": [
+            "ENABLE_AUDIT_LOGS"
+          ],
+          "required": false
+        },
+        {
+          "name": "run_id",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "Execution/run id (RUN_ID; fallback PIPELINE_RUN_ID/EXECUTION_ID)",
+          "env_vars": [
+            "RUN_ID"
+          ],
+          "required": true
+        },
+        {
+          "name": "code_sha",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "Code SHA for audit/tracing (CODE_SHA; fallback GIT_SHA/COMMIT_SHA)",
+          "env_vars": [
+            "CODE_SHA"
+          ],
+          "required": true
+        },
+        {
+          "name": "source_version",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "Build/source version identifier (SOURCE_VERSION)",
+          "env_vars": [
+            "SOURCE_VERSION"
+          ],
+          "required": true
+        },
+        {
+          "name": "enterprise_catalog_ref",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "Enterprise error catalog ref (ENTERPRISE_CATALOG_REF)",
+          "env_vars": [
+            "ENTERPRISE_CATALOG_REF"
+          ],
+          "required": true
+        },
+        {
+          "name": "otel_service_name",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "OpenTelemetry service name (OTEL_SERVICE_NAME)",
+          "env_vars": [
+            "OTEL_SERVICE_NAME"
+          ],
+          "required": true
+        },
+        {
+          "name": "otel_service_version",
+          "type": "str",
+          "default": "1.0.0",
+          "description": "OpenTelemetry service version (OTEL_SERVICE_VERSION)",
+          "env_vars": [
+            "OTEL_SERVICE_VERSION"
+          ],
+          "required": false
+        },
+        {
+          "name": "otel_environment",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "OpenTelemetry environment override (OTEL_ENVIRONMENT)",
+          "env_vars": [
+            "OTEL_ENVIRONMENT"
+          ],
+          "required": true
+        },
+        {
+          "name": "otel_exporter_otlp_endpoint",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "OTLP exporter endpoint (OTEL_EXPORTER_OTLP_ENDPOINT)",
+          "env_vars": [
+            "OTEL_EXPORTER_OTLP_ENDPOINT"
+          ],
+          "required": true
+        },
+        {
+          "name": "jaeger_endpoint",
+          "type": "str",
+          "default": "localhost:14250",
+          "description": "Jaeger exporter endpoint (JAEGER_ENDPOINT)",
+          "env_vars": [
+            "JAEGER_ENDPOINT"
+          ],
+          "required": false
+        },
+        {
+          "name": "otel_trace_sample_rate",
+          "type": "float",
+          "default": "1.0",
+          "description": "Trace sample rate 0.0-1.0 (OTEL_TRACE_SAMPLE_RATE)",
+          "env_vars": [
+            "OTEL_TRACE_SAMPLE_RATE"
+          ],
+          "required": false
+        },
+        {
+          "name": "otel_export_console",
+          "type": "bool",
+          "default": "False",
+          "description": "Export spans to console (OTEL_EXPORT_CONSOLE)",
+          "env_vars": [
+            "OTEL_EXPORT_CONSOLE"
+          ],
+          "required": false
+        },
+        {
+          "name": "otel_export_otlp",
+          "type": "Optional[bool]",
+          "default": null,
+          "description": "Export spans via OTLP (OTEL_EXPORT_OTLP). If unset, enabled when OTEL_EXPORTER_OTLP_ENDPOINT is set.",
+          "env_vars": [
+            "OTEL_EXPORT_OTLP"
+          ],
+          "required": true
+        },
+        {
+          "name": "otel_export_jaeger",
+          "type": "bool",
+          "default": "False",
+          "description": "Export spans via Jaeger (OTEL_EXPORT_JAEGER)",
+          "env_vars": [
+            "OTEL_EXPORT_JAEGER"
+          ],
+          "required": false
+        },
+        {
+          "name": "otel_enable_tracing",
+          "type": "bool",
+          "default": "True",
+          "description": "Enable tracing (OTEL_ENABLE_TRACING)",
+          "env_vars": [
+            "OTEL_ENABLE_TRACING"
+          ],
+          "required": false
+        },
+        {
+          "name": "otel_instrument_asyncio",
+          "type": "bool",
+          "default": "False",
+          "description": "Enable asyncio instrumentation (OTEL_INSTRUMENT_ASYNCIO)",
+          "env_vars": [
+            "OTEL_INSTRUMENT_ASYNCIO"
+          ],
+          "required": false
+        },
+        {
+          "name": "otel_enable_metrics",
+          "type": "bool",
+          "default": "False",
+          "description": "Enable metrics (OTEL_ENABLE_METRICS)",
+          "env_vars": [
+            "OTEL_ENABLE_METRICS"
+          ],
+          "required": false
+        },
+        {
+          "name": "otel_metric_export_interval_seconds",
+          "type": "float",
+          "default": "10.0",
+          "description": "Metrics export interval seconds (OTEL_METRIC_EXPORT_INTERVAL_SECONDS)",
+          "env_vars": [
+            "OTEL_METRIC_EXPORT_INTERVAL_SECONDS"
+          ],
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "GraphQuerySettings",
+      "docstring": "Graph query guardrails (graph federation).",
+      "field_count": 4,
+      "fields": [
+        {
+          "name": "max_hops",
+          "type": "int",
+          "default": "10",
+          "description": "Max hops allowed (GRAPH_QUERY_MAX_HOPS)",
+          "env_vars": [
+            "MAX_HOPS"
+          ],
+          "required": false
+        },
+        {
+          "name": "max_limit",
+          "type": "int",
+          "default": "1000",
+          "description": "Max limit allowed (GRAPH_QUERY_MAX_LIMIT)",
+          "env_vars": [
+            "MAX_LIMIT"
+          ],
+          "required": false
+        },
+        {
+          "name": "max_paths",
+          "type": "int",
+          "default": "2000",
+          "description": "Max paths cap (GRAPH_QUERY_MAX_PATHS)",
+          "env_vars": [
+            "MAX_PATHS"
+          ],
+          "required": false
+        },
+        {
+          "name": "enforce_semantics",
+          "type": "bool",
+          "default": "True",
+          "description": "Enforce semantics (GRAPH_QUERY_ENFORCE_SEMANTICS)",
+          "env_vars": [
+            "ENFORCE_SEMANTICS"
+          ],
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "FeatureFlagsSettings",
+      "docstring": "Feature flags / opt-in endpoints.",
+      "field_count": 6,
+      "fields": [
+        {
+          "name": "enable_pull_requests",
+          "type": "bool",
+          "default": "False",
+          "description": "Enable pull request endpoints (ENABLE_PULL_REQUESTS)",
+          "env_vars": [
+            "ENABLE_PULL_REQUESTS"
+          ],
+          "required": false
+        },
+        {
+          "name": "enable_pipeline_control_plane_events",
+          "type": "bool",
+          "default": "True",
+          "description": "Enable pipeline control-plane events (ENABLE_PIPELINE_CONTROL_PLANE_EVENTS)",
+          "env_vars": [
+            "ENABLE_PIPELINE_CONTROL_PLANE_EVENTS"
+          ],
+          "required": false
+        },
+        {
+          "name": "enable_sync_database_create_fallback",
+          "type": "bool",
+          "default": "True",
+          "description": "Enable synchronous database-create fallback (ENABLE_SYNC_DATABASE_CREATE_FALLBACK)",
+          "env_vars": [
+            "ENABLE_SYNC_DATABASE_CREATE_FALLBACK"
+          ],
+          "required": false
+        },
+        {
+          "name": "enable_oms_rollback",
+          "type": "bool",
+          "default": "False",
+          "description": "Enable OMS rollback endpoints (ENABLE_OMS_ROLLBACK)",
+          "env_vars": [
+            "ENABLE_OMS_ROLLBACK"
+          ],
+          "required": false
+        },
+        {
+          "name": "enable_foundry_v2_strict_compat",
+          "type": "bool",
+          "default": "False",
+          "description": "Enable strict Foundry v2 wire compatibility mode (ENABLE_FOUNDRY_V2_STRICT_COMPAT)",
+          "env_vars": [
+            "ENABLE_FOUNDRY_V2_STRICT_COMPAT"
+          ],
+          "required": false
+        },
+        {
+          "name": "foundry_v2_strict_compat_db_allowlist",
+          "type": "str",
+          "default": "",
+          "description": "Comma-separated db allowlist for strict Foundry v2 compatibility (FOUNDRY_V2_STRICT_COMPAT_DB_ALLOWLIST)",
+          "env_vars": [
+            "FOUNDRY_V2_STRICT_COMPAT_DB_ALLOWLIST"
+          ],
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "PipelineSettings",
+      "docstring": "Pipeline Builder + pipeline worker settings.",
+      "field_count": 37,
+      "fields": [
+        {
+          "name": "require_proposals",
+          "type": "bool",
+          "default": "False",
+          "description": "Require proposals on protected branches (PIPELINE_REQUIRE_PROPOSALS)",
+          "env_vars": [
+            "REQUIRE_PROPOSALS"
+          ],
+          "required": false
+        },
+        {
+          "name": "protected_branches",
+          "type": "str",
+          "default": "main",
+          "description": "Comma-separated protected branches (PIPELINE_PROTECTED_BRANCHES)",
+          "env_vars": [
+            "PROTECTED_BRANCHES"
+          ],
+          "required": false
+        },
+        {
+          "name": "fallback_branches",
+          "type": "str",
+          "default": "main",
+          "description": "Comma-separated fallback branches for dataset resolution (PIPELINE_FALLBACK_BRANCHES)",
+          "env_vars": [
+            "FALLBACK_BRANCHES"
+          ],
+          "required": false
+        },
+        {
+          "name": "locks_enabled",
+          "type": "bool",
+          "default": "True",
+          "description": "Enable pipeline locks (PIPELINE_LOCKS_ENABLED)",
+          "env_vars": [
+            "LOCKS_ENABLED"
+          ],
+          "required": false
+        },
+        {
+          "name": "locks_required",
+          "type": "bool",
+          "default": "True",
+          "description": "Require lock acquisition (PIPELINE_LOCKS_REQUIRED)",
+          "env_vars": [
+            "LOCKS_REQUIRED"
+          ],
+          "required": false
+        },
+        {
+          "name": "lock_ttl_seconds",
+          "type": "int",
+          "default": "3600",
+          "description": "Lock TTL seconds (PIPELINE_LOCK_TTL_SECONDS)",
+          "env_vars": [
+            "LOCK_TTL_SECONDS"
+          ],
+          "required": false
+        },
+        {
+          "name": "lock_renew_seconds",
+          "type": "int",
+          "default": "300",
+          "description": "Lock renew interval seconds (PIPELINE_LOCK_RENEW_SECONDS)",
+          "env_vars": [
+            "LOCK_RENEW_SECONDS"
+          ],
+          "required": false
+        },
+        {
+          "name": "lock_retry_seconds",
+          "type": "int",
+          "default": "5",
+          "description": "Lock acquire retry sleep seconds (PIPELINE_LOCK_RETRY_SECONDS)",
+          "env_vars": [
+            "LOCK_RETRY_SECONDS"
+          ],
+          "required": false
+        },
+        {
+          "name": "lock_acquire_timeout_seconds",
+          "type": "int",
+          "default": "3600",
+          "description": "Worker lock acquire timeout seconds (PIPELINE_LOCK_ACQUIRE_TIMEOUT_SECONDS)",
+          "env_vars": [
+            "LOCK_ACQUIRE_TIMEOUT_SECONDS"
+          ],
+          "required": false
+        },
+        {
+          "name": "publish_lock_acquire_timeout_seconds",
+          "type": "int",
+          "default": "30",
+          "description": "BFF publish lock acquire timeout seconds (PIPELINE_PUBLISH_LOCK_ACQUIRE_TIMEOUT_SECONDS; fallback PIPELINE_LOCK_ACQUIRE_TIMEOUT_SECONDS)",
+          "env_vars": [
+            "PUBLISH_LOCK_ACQUIRE_TIMEOUT_SECONDS"
+          ],
+          "required": false
+        },
+        {
+          "name": "lakefs_diff_enabled",
+          "type": "bool",
+          "default": "True",
+          "description": "Enable lakeFS diff during pipeline execution (PIPELINE_LAKEFS_DIFF_ENABLED)",
+          "env_vars": [
+            "LAKEFS_DIFF_ENABLED"
+          ],
+          "required": false
+        },
+        {
+          "name": "spark_ansi_enabled",
+          "type": "bool",
+          "default": "True",
+          "description": "Enable Spark ANSI mode (PIPELINE_SPARK_ANSI_ENABLED)",
+          "env_vars": [
+            "SPARK_ANSI_ENABLED"
+          ],
+          "required": false
+        },
+        {
+          "name": "spark_adaptive_enabled",
+          "type": "bool",
+          "default": "True",
+          "description": "Enable Spark Adaptive Query Execution (PIPELINE_SPARK_ADAPTIVE_ENABLED)",
+          "env_vars": [
+            "SPARK_ADAPTIVE_ENABLED"
+          ],
+          "required": false
+        },
+        {
+          "name": "spark_shuffle_partitions",
+          "type": "int",
+          "default": "16",
+          "description": "Default Spark shuffle partitions (PIPELINE_SPARK_SHUFFLE_PARTITIONS)",
+          "env_vars": [
+            "SPARK_SHUFFLE_PARTITIONS"
+          ],
+          "required": false
+        },
+        {
+          "name": "spark_console_progress",
+          "type": "bool",
+          "default": "False",
+          "description": "Show Spark console progress bars (PIPELINE_SPARK_CONSOLE_PROGRESS)",
+          "env_vars": [
+            "SPARK_CONSOLE_PROGRESS"
+          ],
+          "required": false
+        },
+        {
+          "name": "spark_executor_threads",
+          "type": "int",
+          "default": "1",
+          "description": "Spark executor thread pool size (PIPELINE_SPARK_EXECUTOR_THREADS)",
+          "env_vars": [
+            "SPARK_EXECUTOR_THREADS"
+          ],
+          "required": false
+        },
+        {
+          "name": "spark_streaming_enabled",
+          "type": "bool",
+          "default": "True",
+          "description": "Enable Spark Structured Streaming input mode (PIPELINE_SPARK_STREAMING_ENABLED)",
+          "env_vars": [
+            "SPARK_STREAMING_ENABLED"
+          ],
+          "required": false
+        },
+        {
+          "name": "spark_streaming_default_trigger",
+          "type": "str",
+          "default": "available_now",
+          "description": "Default trigger for streaming external inputs: available_now|once (PIPELINE_SPARK_STREAMING_DEFAULT_TRIGGER)",
+          "env_vars": [
+            "SPARK_STREAMING_DEFAULT_TRIGGER"
+          ],
+          "required": false
+        },
+        {
+          "name": "spark_streaming_await_timeout_seconds",
+          "type": "int",
+          "default": "120",
+          "description": "Streaming query await timeout seconds for external inputs (PIPELINE_SPARK_STREAMING_AWAIT_TIMEOUT_SECONDS)",
+          "env_vars": [
+            "SPARK_STREAMING_AWAIT_TIMEOUT_SECONDS"
+          ],
+          "required": false
+        },
+        {
+          "name": "kafka_schema_registry_timeout_seconds",
+          "type": "int",
+          "default": "10",
+          "description": "HTTP timeout seconds for kafka AVRO schema-registry resolution (PIPELINE_KAFKA_SCHEMA_REGISTRY_TIMEOUT_SECONDS)",
+          "env_vars": [
+            "KAFKA_SCHEMA_REGISTRY_TIMEOUT_SECONDS"
+          ],
+          "required": false
+        },
+        {
+          "name": "cast_mode",
+          "type": "str",
+          "default": "SAFE_NULL",
+          "description": "Casting policy: SAFE_NULL or STRICT (PIPELINE_CAST_MODE)",
+          "env_vars": [
+            "CAST_MODE"
+          ],
+          "required": false
+        },
+        {
+          "name": "udf_require_reference",
+          "type": "bool",
+          "default": "True",
+          "description": "Require UDF metadata to use udfId(+udfVersion) without inline udfCode (PIPELINE_UDF_REQUIRE_REFERENCE)",
+          "env_vars": [
+            "UDF_REQUIRE_REFERENCE"
+          ],
+          "required": false
+        },
+        {
+          "name": "udf_require_version_pinning",
+          "type": "bool",
+          "default": "True",
+          "description": "Require udfVersion pinning for UDF transforms during validation/preflight (PIPELINE_UDF_REQUIRE_VERSION_PINNING)",
+          "env_vars": [
+            "UDF_REQUIRE_VERSION_PINNING"
+          ],
+          "required": false
+        },
+        {
+          "name": "udf_preflight_require_existence",
+          "type": "bool",
+          "default": "True",
+          "description": "Require preflight to verify UDF reference existence/version in registry (PIPELINE_UDF_PREFLIGHT_REQUIRE_EXISTENCE)",
+          "env_vars": [
+            "UDF_PREFLIGHT_REQUIRE_EXISTENCE"
+          ],
+          "required": false
+        },
+        {
+          "name": "udf_spark_parity_enabled",
+          "type": "bool",
+          "default": "True",
+          "description": "Enable Spark execution parity for UDF transforms (PIPELINE_UDF_SPARK_PARITY_ENABLED)",
+          "env_vars": [
+            "UDF_SPARK_PARITY_ENABLED"
+          ],
+          "required": false
+        },
+        {
+          "name": "preflight_fail_closed",
+          "type": "bool",
+          "default": "True",
+          "description": "Fail closed when pipeline preflight throws internal errors (PIPELINE_PREFLIGHT_FAIL_CLOSED)",
+          "env_vars": [
+            "PREFLIGHT_FAIL_CLOSED"
+          ],
+          "required": false
+        },
+        {
+          "name": "artifact_path",
+          "type": "str",
+          "default": "data/pipeline_artifacts",
+          "description": "Local pipeline artifact path root (PIPELINE_ARTIFACT_PATH)",
+          "env_vars": [
+            "ARTIFACT_PATH"
+          ],
+          "required": false
+        },
+        {
+          "name": "jobs_group",
+          "type": "str",
+          "default": "pipeline-worker-group",
+          "description": "Kafka consumer group id (PIPELINE_JOBS_GROUP)",
+          "env_vars": [
+            "JOBS_GROUP"
+          ],
+          "required": false
+        },
+        {
+          "name": "job_queue_flush_timeout_seconds",
+          "type": "float",
+          "default": "5.0",
+          "description": "Kafka producer flush timeout seconds (PIPELINE_JOB_QUEUE_FLUSH_TIMEOUT_SECONDS)",
+          "env_vars": [
+            "JOB_QUEUE_FLUSH_TIMEOUT_SECONDS"
+          ],
+          "required": false
+        },
+        {
+          "name": "worker_handler",
+          "type": "str",
+          "default": "pipeline_worker",
+          "description": "Worker handler label (PIPELINE_WORKER_HANDLER)",
+          "env_vars": [
+            "WORKER_HANDLER"
+          ],
+          "required": false
+        },
+        {
+          "name": "worker_name",
+          "type": "str",
+          "default": "pipeline_worker",
+          "description": "Worker service name label (PIPELINE_WORKER_NAME)",
+          "env_vars": [
+            "WORKER_NAME"
+          ],
+          "required": false
+        },
+        {
+          "name": "jobs_max_retries",
+          "type": "int",
+          "default": "5",
+          "description": "Pipeline job max retries (PIPELINE_JOBS_MAX_RETRIES)",
+          "env_vars": [
+            "JOBS_MAX_RETRIES"
+          ],
+          "required": false
+        },
+        {
+          "name": "jobs_backoff_base_seconds",
+          "type": "int",
+          "default": "2",
+          "description": "Pipeline job retry backoff base seconds (PIPELINE_JOBS_BACKOFF_BASE_SECONDS)",
+          "env_vars": [
+            "JOBS_BACKOFF_BASE_SECONDS"
+          ],
+          "required": false
+        },
+        {
+          "name": "jobs_backoff_max_seconds",
+          "type": "int",
+          "default": "60",
+          "description": "Pipeline job retry backoff max seconds (PIPELINE_JOBS_BACKOFF_MAX_SECONDS)",
+          "env_vars": [
+            "JOBS_BACKOFF_MAX_SECONDS"
+          ],
+          "required": false
+        },
+        {
+          "name": "jobs_max_poll_interval_ms",
+          "type": "int",
+          "default": "3600000",
+          "description": "Kafka max.poll.interval.ms for pipeline worker jobs (PIPELINE_JOBS_MAX_POLL_INTERVAL_MS)",
+          "env_vars": [
+            "JOBS_MAX_POLL_INTERVAL_MS"
+          ],
+          "required": false
+        },
+        {
+          "name": "processed_event_lease_timeout_seconds",
+          "type": "int",
+          "default": "120",
+          "description": "Processed-event lease timeout seconds for pipeline worker idempotency (PIPELINE_PROCESSED_EVENT_LEASE_TIMEOUT_SECONDS)",
+          "env_vars": [
+            "PROCESSED_EVENT_LEASE_TIMEOUT_SECONDS"
+          ],
+          "required": false
+        },
+        {
+          "name": "scheduler_poll_seconds",
+          "type": "int",
+          "default": "30",
+          "description": "Pipeline scheduler poll interval seconds (PIPELINE_SCHEDULER_POLL_SECONDS)",
+          "env_vars": [
+            "SCHEDULER_POLL_SECONDS"
+          ],
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "OntologySettings",
+      "docstring": "Ontology API + linter governance settings.",
+      "field_count": 12,
+      "fields": [
+        {
+          "name": "protected_branches",
+          "type": "str",
+          "default": "main,master,production,prod",
+          "description": "Protected branches (ONTOLOGY_PROTECTED_BRANCHES)",
+          "env_vars": [
+            "PROTECTED_BRANCHES"
+          ],
+          "required": false
+        },
+        {
+          "name": "require_proposals",
+          "type": "bool",
+          "default": "True",
+          "description": "Require proposals on protected branches (ONTOLOGY_REQUIRE_PROPOSALS)",
+          "env_vars": [
+            "REQUIRE_PROPOSALS"
+          ],
+          "required": false
+        },
+        {
+          "name": "validate_relationships",
+          "type": "bool",
+          "default": "True",
+          "description": "Validate relationship structure (ONTOLOGY_VALIDATE_RELATIONSHIPS)",
+          "env_vars": [
+            "VALIDATE_RELATIONSHIPS"
+          ],
+          "required": false
+        },
+        {
+          "name": "resource_strict",
+          "type": "bool",
+          "default": "True",
+          "description": "Strict resource checks (ONTOLOGY_RESOURCE_STRICT)",
+          "env_vars": [
+            "RESOURCE_STRICT"
+          ],
+          "required": false
+        },
+        {
+          "name": "require_health_gate",
+          "type": "bool",
+          "default": "True",
+          "description": "Require health gate for destructive ops (ONTOLOGY_REQUIRE_HEALTH_GATE)",
+          "env_vars": [
+            "REQUIRE_HEALTH_GATE"
+          ],
+          "required": false
+        },
+        {
+          "name": "resource_storage_backend",
+          "type": "str",
+          "default": "postgres",
+          "description": "Ontology resource storage backend (ONTOLOGY_RESOURCE_STORAGE_BACKEND: postgres)",
+          "env_vars": [
+            "RESOURCE_STORAGE_BACKEND"
+          ],
+          "required": false
+        },
+        {
+          "name": "require_primary_key",
+          "type": "bool",
+          "default": "True",
+          "description": "Require primary key (ONTOLOGY_REQUIRE_PRIMARY_KEY)",
+          "env_vars": [
+            "REQUIRE_PRIMARY_KEY"
+          ],
+          "required": false
+        },
+        {
+          "name": "allow_implicit_primary_key",
+          "type": "Optional[bool]",
+          "default": null,
+          "description": "Allow implicit primary key (ONTOLOGY_ALLOW_IMPLICIT_PRIMARY_KEY). When unset, defaults to false in production and on protected branches requiring proposals.",
+          "env_vars": [
+            "ALLOW_IMPLICIT_PRIMARY_KEY"
+          ],
+          "required": true
+        },
+        {
+          "name": "require_title_key",
+          "type": "bool",
+          "default": "True",
+          "description": "Require title key (ONTOLOGY_REQUIRE_TITLE_KEY)",
+          "env_vars": [
+            "REQUIRE_TITLE_KEY"
+          ],
+          "required": false
+        },
+        {
+          "name": "allow_implicit_title_key",
+          "type": "Optional[bool]",
+          "default": null,
+          "description": "Allow implicit title key (ONTOLOGY_ALLOW_IMPLICIT_TITLE_KEY). When unset, defaults to false in production and on protected branches requiring proposals.",
+          "env_vars": [
+            "ALLOW_IMPLICIT_TITLE_KEY"
+          ],
+          "required": true
+        },
+        {
+          "name": "block_event_like_class_names",
+          "type": "bool",
+          "default": "False",
+          "description": "Block event-like class names (ONTOLOGY_BLOCK_EVENT_LIKE_CLASS)",
+          "env_vars": [
+            "BLOCK_EVENT_LIKE_CLASS_NAMES"
+          ],
+          "required": false
+        },
+        {
+          "name": "enforce_snake_case_fields",
+          "type": "bool",
+          "default": "False",
+          "description": "Enforce snake_case field names (ONTOLOGY_ENFORCE_SNAKE_CASE_FIELDS)",
+          "env_vars": [
+            "ENFORCE_SNAKE_CASE_FIELDS"
+          ],
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "AgentRuntimeSettings",
+      "docstring": "Agent runtime settings (agent service tool runner).",
+      "field_count": 26,
+      "fields": [
+        {
+          "name": "bff_base_url",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "Override BFF base URL for tool calls (AGENT_BFF_BASE_URL)",
+          "env_vars": [
+            "BFF_BASE_URL"
+          ],
+          "required": true
+        },
+        {
+          "name": "bff_token",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "Bearer token for BFF tool calls (AGENT_BFF_TOKEN; fallback BFF_AGENT_TOKEN)",
+          "env_vars": [
+            "BFF_TOKEN"
+          ],
+          "required": true
+        },
+        {
+          "name": "service_name",
+          "type": "str",
+          "default": "agent",
+          "description": "Service name for audit/events (AGENT_SERVICE_NAME)",
+          "env_vars": [
+            "SERVICE_NAME"
+          ],
+          "required": false
+        },
+        {
+          "name": "run_max_steps",
+          "type": "int",
+          "default": "50",
+          "description": "Max steps per agent run (AGENT_RUN_MAX_STEPS)",
+          "env_vars": [
+            "RUN_MAX_STEPS"
+          ],
+          "required": false
+        },
+        {
+          "name": "require_event_store",
+          "type": "bool",
+          "default": "True",
+          "description": "Require event store availability (AGENT_REQUIRE_EVENT_STORE)",
+          "env_vars": [
+            "REQUIRE_EVENT_STORE"
+          ],
+          "required": false
+        },
+        {
+          "name": "tool_timeout_seconds",
+          "type": "float",
+          "default": "180.0",
+          "description": "HTTP timeout for tool calls (AGENT_TOOL_TIMEOUT_SECONDS)",
+          "env_vars": [
+            "TOOL_TIMEOUT_SECONDS"
+          ],
+          "required": false
+        },
+        {
+          "name": "tool_max_payload_bytes",
+          "type": "int",
+          "default": "200000",
+          "description": "Max tool payload bytes (AGENT_TOOL_MAX_PAYLOAD_BYTES)",
+          "env_vars": [
+            "TOOL_MAX_PAYLOAD_BYTES"
+          ],
+          "required": false
+        },
+        {
+          "name": "audit_max_preview_chars",
+          "type": "int",
+          "default": "2000",
+          "description": "Max chars stored in audit previews (AGENT_AUDIT_MAX_PREVIEW_CHARS)",
+          "env_vars": [
+            "AUDIT_MAX_PREVIEW_CHARS"
+          ],
+          "required": false
+        },
+        {
+          "name": "context_upload_max_bytes",
+          "type": "int",
+          "default": null,
+          "description": "Max bytes for agent session context uploads (AGENT_CONTEXT_UPLOAD_MAX_BYTES)",
+          "env_vars": [
+            "CONTEXT_UPLOAD_MAX_BYTES"
+          ],
+          "required": true
+        },
+        {
+          "name": "context_upload_max_text_chars",
+          "type": "int",
+          "default": "20000",
+          "description": "Max chars extracted from uploaded context files (AGENT_CONTEXT_UPLOAD_MAX_TEXT_CHARS)",
+          "env_vars": [
+            "CONTEXT_UPLOAD_MAX_TEXT_CHARS"
+          ],
+          "required": false
+        },
+        {
+          "name": "context_upload_clamav_host",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "ClamAV daemon host for context upload scanning (AGENT_CONTEXT_UPLOAD_CLAMAV_HOST)",
+          "env_vars": [
+            "CONTEXT_UPLOAD_CLAMAV_HOST"
+          ],
+          "required": true
+        },
+        {
+          "name": "context_upload_clamav_port",
+          "type": "int",
+          "default": "3310",
+          "description": "ClamAV daemon port for context upload scanning (AGENT_CONTEXT_UPLOAD_CLAMAV_PORT)",
+          "env_vars": [
+            "CONTEXT_UPLOAD_CLAMAV_PORT"
+          ],
+          "required": false
+        },
+        {
+          "name": "context_upload_clamav_timeout_seconds",
+          "type": "float",
+          "default": "2.0",
+          "description": "ClamAV scan timeout seconds (AGENT_CONTEXT_UPLOAD_CLAMAV_TIMEOUT_SECONDS)",
+          "env_vars": [
+            "CONTEXT_UPLOAD_CLAMAV_TIMEOUT_SECONDS"
+          ],
+          "required": false
+        },
+        {
+          "name": "context_upload_clamav_required",
+          "type": "bool",
+          "default": "False",
+          "description": "Reject uploads when ClamAV unavailable (AGENT_CONTEXT_UPLOAD_CLAMAV_REQUIRED)",
+          "env_vars": [
+            "CONTEXT_UPLOAD_CLAMAV_REQUIRED"
+          ],
+          "required": false
+        },
+        {
+          "name": "command_timeout_seconds",
+          "type": "float",
+          "default": "600.0",
+          "description": "Wait timeout for async commands/pipeline jobs (AGENT_COMMAND_TIMEOUT_SECONDS; fallback PIPELINE_RUN_TIMEOUT_SECONDS/PIPELINE_RUN_TIMEOUT)",
+          "env_vars": [
+            "COMMAND_TIMEOUT_SECONDS"
+          ],
+          "required": false
+        },
+        {
+          "name": "command_poll_interval_seconds",
+          "type": "float",
+          "default": "2.0",
+          "description": "Poll interval seconds for command status (AGENT_COMMAND_POLL_INTERVAL_SECONDS)",
+          "env_vars": [
+            "COMMAND_POLL_INTERVAL_SECONDS"
+          ],
+          "required": false
+        },
+        {
+          "name": "command_ws_idle_seconds",
+          "type": "float",
+          "default": "5.0",
+          "description": "WebSocket idle poll seconds (AGENT_COMMAND_WS_IDLE_SECONDS)",
+          "env_vars": [
+            "COMMAND_WS_IDLE_SECONDS"
+          ],
+          "required": false
+        },
+        {
+          "name": "command_ws_enabled",
+          "type": "bool",
+          "default": "True",
+          "description": "Enable command WebSocket progress (AGENT_COMMAND_WS_ENABLED)",
+          "env_vars": [
+            "COMMAND_WS_ENABLED"
+          ],
+          "required": false
+        },
+        {
+          "name": "pipeline_wait_enabled",
+          "type": "bool",
+          "default": "True",
+          "description": "Wait for pipeline build/deploy job completion (AGENT_PIPELINE_WAIT_ENABLED)",
+          "env_vars": [
+            "PIPELINE_WAIT_ENABLED"
+          ],
+          "required": false
+        },
+        {
+          "name": "block_writes_on_overlay_degraded",
+          "type": "bool",
+          "default": "True",
+          "description": "Block writes when overlay is degraded (AGENT_BLOCK_WRITES_ON_OVERLAY_DEGRADED)",
+          "env_vars": [
+            "BLOCK_WRITES_ON_OVERLAY_DEGRADED"
+          ],
+          "required": false
+        },
+        {
+          "name": "allow_degraded_writes",
+          "type": "bool",
+          "default": "False",
+          "description": "Allow writes even if overlay degraded (AGENT_ALLOW_DEGRADED_WRITES)",
+          "env_vars": [
+            "ALLOW_DEGRADED_WRITES"
+          ],
+          "required": false
+        },
+        {
+          "name": "auto_retry_enabled",
+          "type": "bool",
+          "default": "True",
+          "description": "Enable auto retries for tool calls (AGENT_AUTO_RETRY_ENABLED)",
+          "env_vars": [
+            "AUTO_RETRY_ENABLED"
+          ],
+          "required": false
+        },
+        {
+          "name": "auto_retry_max_attempts",
+          "type": "int",
+          "default": "3",
+          "description": "Auto retry max attempts (AGENT_AUTO_RETRY_MAX_ATTEMPTS)",
+          "env_vars": [
+            "AUTO_RETRY_MAX_ATTEMPTS"
+          ],
+          "required": false
+        },
+        {
+          "name": "auto_retry_base_delay_seconds",
+          "type": "float",
+          "default": "0.5",
+          "description": "Auto retry base delay seconds (AGENT_AUTO_RETRY_BASE_DELAY_SECONDS)",
+          "env_vars": [
+            "AUTO_RETRY_BASE_DELAY_SECONDS"
+          ],
+          "required": false
+        },
+        {
+          "name": "auto_retry_max_delay_seconds",
+          "type": "float",
+          "default": "8.0",
+          "description": "Auto retry max delay seconds (AGENT_AUTO_RETRY_MAX_DELAY_SECONDS)",
+          "env_vars": [
+            "AUTO_RETRY_MAX_DELAY_SECONDS"
+          ],
+          "required": false
+        },
+        {
+          "name": "auto_retry_allow_writes",
+          "type": "bool",
+          "default": "False",
+          "description": "Allow auto retries on write methods (AGENT_AUTO_RETRY_ALLOW_WRITES)",
+          "env_vars": [
+            "AUTO_RETRY_ALLOW_WRITES"
+          ],
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "AgentPlanSettings",
+      "docstring": "LLM-native control plane settings (planner + allowlist bootstrap).",
+      "field_count": 3,
+      "fields": [
+        {
+          "name": "allowlist_bundle_path",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "Path to agent tool allowlist bundle JSON (AGENT_PLAN_ALLOWLIST_BUNDLE_PATH)",
+          "env_vars": [
+            "ALLOWLIST_BUNDLE_PATH"
+          ],
+          "required": true
+        },
+        {
+          "name": "allowlist_bootstrap_enabled",
+          "type": "bool",
+          "default": "False",
+          "description": "Bootstrap allowlist bundle into Postgres on startup (AGENT_PLAN_ALLOWLIST_BOOTSTRAP_ENABLED)",
+          "env_vars": [
+            "ALLOWLIST_BOOTSTRAP_ENABLED"
+          ],
+          "required": false
+        },
+        {
+          "name": "allowlist_bootstrap_only_if_empty",
+          "type": "bool",
+          "default": "True",
+          "description": "Only bootstrap if DB table is empty (AGENT_PLAN_ALLOWLIST_BOOTSTRAP_ONLY_IF_EMPTY)",
+          "env_vars": [
+            "ALLOWLIST_BOOTSTRAP_ONLY_IF_EMPTY"
+          ],
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "PipelinePlanSettings",
+      "docstring": "Pipeline plan planner settings (LLM-backed pipeline definition proposals).",
+      "field_count": 1,
+      "fields": [
+        {
+          "name": "llm_enabled",
+          "type": "bool",
+          "default": "False",
+          "description": "Enable pipeline planner LLM (PIPELINE_PLAN_LLM_ENABLED)",
+          "env_vars": [
+            "LLM_ENABLED"
+          ],
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "ClientSettings",
+      "docstring": "Internal service-to-service client settings (BFF/OMS/etc).",
+      "field_count": 5,
+      "fields": [
+        {
+          "name": "oms_client_timeout_seconds",
+          "type": "float",
+          "default": "60.0",
+          "description": "OMS client timeout seconds (OMS_CLIENT_TIMEOUT_SECONDS)",
+          "env_vars": [
+            "OMS_CLIENT_TIMEOUT_SECONDS"
+          ],
+          "required": false
+        },
+        {
+          "name": "oms_client_token",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "OMS client admin token (OMS_CLIENT_TOKEN; fallback OMS_ADMIN_TOKEN/ADMIN_API_KEY/ADMIN_TOKEN)",
+          "env_vars": [
+            "OMS_CLIENT_TOKEN"
+          ],
+          "required": true
+        },
+        {
+          "name": "oms_client_debug_payload",
+          "type": "bool",
+          "default": "False",
+          "description": "Log OMS request payloads (OMS_CLIENT_DEBUG_PAYLOAD)",
+          "env_vars": [
+            "OMS_CLIENT_DEBUG_PAYLOAD"
+          ],
+          "required": false
+        },
+        {
+          "name": "agent_proxy_timeout_seconds",
+          "type": "float",
+          "default": "30.0",
+          "description": "BFF -> Agent proxy timeout seconds (AGENT_PROXY_TIMEOUT_SECONDS)",
+          "env_vars": [
+            "AGENT_PROXY_TIMEOUT_SECONDS"
+          ],
+          "required": false
+        },
+        {
+          "name": "bff_admin_token",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "BFF admin token for internal calls (BFF_ADMIN_TOKEN; fallback BFF_WRITE_TOKEN/ADMIN_API_KEY/ADMIN_TOKEN)",
+          "env_vars": [
+            "BFF_ADMIN_TOKEN"
+          ],
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "MCPSettings",
+      "docstring": "MCP integration settings (BFF/agent).",
+      "field_count": 1,
+      "fields": [
+        {
+          "name": "config_path",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "Path to MCP config JSON (MCP_CONFIG_PATH)",
+          "env_vars": [
+            "CONFIG_PATH"
+          ],
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "AuthSettings",
+      "docstring": "Service auth configuration (BFF/OMS).",
+      "field_count": 27,
+      "fields": [
+        {
+          "name": "bff_admin_token",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "BFF admin token(s), comma-separated for rotation (BFF_ADMIN_TOKEN)",
+          "env_vars": [
+            "BFF_ADMIN_TOKEN"
+          ],
+          "required": true
+        },
+        {
+          "name": "bff_write_token",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "BFF write token(s), comma-separated for rotation (BFF_WRITE_TOKEN)",
+          "env_vars": [
+            "BFF_WRITE_TOKEN"
+          ],
+          "required": true
+        },
+        {
+          "name": "bff_agent_token",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "BFF internal agent token(s), comma-separated for rotation (BFF_AGENT_TOKEN)",
+          "env_vars": [
+            "BFF_AGENT_TOKEN"
+          ],
+          "required": true
+        },
+        {
+          "name": "oms_admin_token",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "OMS admin token(s), comma-separated for rotation (OMS_ADMIN_TOKEN)",
+          "env_vars": [
+            "OMS_ADMIN_TOKEN"
+          ],
+          "required": true
+        },
+        {
+          "name": "oms_write_token",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "OMS write token(s), comma-separated for rotation (OMS_WRITE_TOKEN)",
+          "env_vars": [
+            "OMS_WRITE_TOKEN"
+          ],
+          "required": true
+        },
+        {
+          "name": "admin_api_key",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "Unified admin API key(s), comma-separated for rotation (ADMIN_API_KEY)",
+          "env_vars": [
+            "ADMIN_API_KEY"
+          ],
+          "required": true
+        },
+        {
+          "name": "admin_token",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "Unified admin token(s), comma-separated for rotation (ADMIN_TOKEN)",
+          "env_vars": [
+            "ADMIN_TOKEN"
+          ],
+          "required": true
+        },
+        {
+          "name": "user_jwt_enabled",
+          "type": "bool",
+          "default": "False",
+          "description": "Enable end-user JWT auth (USER_JWT_ENABLED)",
+          "env_vars": [
+            "USER_JWT_ENABLED"
+          ],
+          "required": false
+        },
+        {
+          "name": "user_jwt_issuer",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "Expected JWT issuer (USER_JWT_ISSUER)",
+          "env_vars": [
+            "USER_JWT_ISSUER"
+          ],
+          "required": true
+        },
+        {
+          "name": "user_jwt_audience",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "Expected JWT audience (USER_JWT_AUDIENCE)",
+          "env_vars": [
+            "USER_JWT_AUDIENCE"
+          ],
+          "required": true
+        },
+        {
+          "name": "user_jwt_jwks_url",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "JWKS URL for JWT verification (USER_JWT_JWKS_URL)",
+          "env_vars": [
+            "USER_JWT_JWKS_URL"
+          ],
+          "required": true
+        },
+        {
+          "name": "user_jwt_public_key",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "PEM public key for JWT verification (USER_JWT_PUBLIC_KEY)",
+          "env_vars": [
+            "USER_JWT_PUBLIC_KEY"
+          ],
+          "required": true
+        },
+        {
+          "name": "user_jwt_hs256_secret",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "HS256 shared secret(s), comma-separated for rotation (USER_JWT_HS256_SECRET)",
+          "env_vars": [
+            "USER_JWT_HS256_SECRET"
+          ],
+          "required": true
+        },
+        {
+          "name": "user_jwt_algorithms",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "Comma-separated accepted JWT algorithms (USER_JWT_ALGORITHMS)",
+          "env_vars": [
+            "USER_JWT_ALGORITHMS"
+          ],
+          "required": true
+        },
+        {
+          "name": "bff_require_auth",
+          "type": "Optional[bool]",
+          "default": null,
+          "description": "Require auth for BFF (BFF_REQUIRE_AUTH)",
+          "env_vars": [
+            "BFF_REQUIRE_AUTH"
+          ],
+          "required": true
+        },
+        {
+          "name": "oms_require_auth",
+          "type": "Optional[bool]",
+          "default": null,
+          "description": "Require auth for OMS (OMS_REQUIRE_AUTH)",
+          "env_vars": [
+            "OMS_REQUIRE_AUTH"
+          ],
+          "required": true
+        },
+        {
+          "name": "bff_require_db_scope",
+          "type": "bool",
+          "default": "False",
+          "description": "Require db scope headers for BFF writes (BFF_REQUIRE_DB_SCOPE)",
+          "env_vars": [
+            "BFF_REQUIRE_DB_SCOPE"
+          ],
+          "required": false
+        },
+        {
+          "name": "bff_require_db_access",
+          "type": "Optional[bool]",
+          "default": null,
+          "description": "Require database access roles for BFF writes (BFF_REQUIRE_DB_ACCESS)",
+          "env_vars": [
+            "BFF_REQUIRE_DB_ACCESS"
+          ],
+          "required": true
+        },
+        {
+          "name": "allow_insecure_bff_auth_disable",
+          "type": "bool",
+          "default": "False",
+          "description": "Allow disabling BFF auth (ALLOW_INSECURE_BFF_AUTH_DISABLE)",
+          "env_vars": [
+            "ALLOW_INSECURE_BFF_AUTH_DISABLE"
+          ],
+          "required": false
+        },
+        {
+          "name": "allow_insecure_oms_auth_disable",
+          "type": "bool",
+          "default": "False",
+          "description": "Allow disabling OMS auth (ALLOW_INSECURE_OMS_AUTH_DISABLE)",
+          "env_vars": [
+            "ALLOW_INSECURE_OMS_AUTH_DISABLE"
+          ],
+          "required": false
+        },
+        {
+          "name": "allow_insecure_auth_disable",
+          "type": "bool",
+          "default": "False",
+          "description": "Allow disabling auth globally (ALLOW_INSECURE_AUTH_DISABLE)",
+          "env_vars": [
+            "ALLOW_INSECURE_AUTH_DISABLE"
+          ],
+          "required": false
+        },
+        {
+          "name": "dev_master_auth_enabled",
+          "type": "bool",
+          "default": "False",
+          "description": "Development-only: allow bypassing auth failures by attaching a master principal (DEV_MASTER_AUTH_ENABLED)",
+          "env_vars": [
+            "DEV_MASTER_AUTH_ENABLED"
+          ],
+          "required": false
+        },
+        {
+          "name": "dev_master_user_id",
+          "type": "str",
+          "default": "dev-admin",
+          "description": "Development-only: master principal user id (DEV_MASTER_USER_ID)",
+          "env_vars": [
+            "DEV_MASTER_USER_ID"
+          ],
+          "required": false
+        },
+        {
+          "name": "dev_master_user_type",
+          "type": "str",
+          "default": "user",
+          "description": "Development-only: master principal type (DEV_MASTER_USER_TYPE)",
+          "env_vars": [
+            "DEV_MASTER_USER_TYPE"
+          ],
+          "required": false
+        },
+        {
+          "name": "dev_master_roles",
+          "type": "Optional[str]",
+          "default": "admin,platform_admin",
+          "description": "Development-only: comma-separated roles for the master principal (DEV_MASTER_ROLES)",
+          "env_vars": [
+            "DEV_MASTER_ROLES"
+          ],
+          "required": false
+        },
+        {
+          "name": "bff_auth_exempt_paths",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "Comma-separated exempt paths for BFF (BFF_AUTH_EXEMPT_PATHS)",
+          "env_vars": [
+            "BFF_AUTH_EXEMPT_PATHS"
+          ],
+          "required": true
+        },
+        {
+          "name": "oms_auth_exempt_paths",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "Comma-separated exempt paths for OMS (OMS_AUTH_EXEMPT_PATHS)",
+          "env_vars": [
+            "OMS_AUTH_EXEMPT_PATHS"
+          ],
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "RateLimitSettings",
+      "docstring": "Rate limiter runtime configuration.",
+      "field_count": 2,
+      "fields": [
+        {
+          "name": "fail_open",
+          "type": "bool",
+          "default": "False",
+          "description": "Fail-open when Redis is unavailable (RATE_LIMIT_FAIL_OPEN)",
+          "env_vars": [
+            "FAIL_OPEN"
+          ],
+          "required": false
+        },
+        {
+          "name": "local_max_entries",
+          "type": "int",
+          "default": "10000",
+          "description": "Local fallback cache max entries (RATE_LIMIT_LOCAL_MAX_ENTRIES)",
+          "env_vars": [
+            "LOCAL_MAX_ENTRIES"
+          ],
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "MessagingSettings",
+      "docstring": "Kafka topic/group configuration settings",
+      "field_count": 25,
+      "fields": [
+        {
+          "name": "instance_events_topic",
+          "type": "str",
+          "default": "instance_events",
+          "description": "Kafka topic for instance domain events (INSTANCE_EVENTS_TOPIC)",
+          "env_vars": [
+            "INSTANCE_EVENTS_TOPIC"
+          ],
+          "required": false
+        },
+        {
+          "name": "ontology_events_topic",
+          "type": "str",
+          "default": "ontology_events",
+          "description": "Kafka topic for ontology domain events (ONTOLOGY_EVENTS_TOPIC)",
+          "env_vars": [
+            "ONTOLOGY_EVENTS_TOPIC"
+          ],
+          "required": false
+        },
+        {
+          "name": "action_events_topic",
+          "type": "str",
+          "default": "action_events",
+          "description": "Kafka topic for action events (ACTION_EVENTS_TOPIC)",
+          "env_vars": [
+            "ACTION_EVENTS_TOPIC"
+          ],
+          "required": false
+        },
+        {
+          "name": "projection_dlq_topic",
+          "type": "str",
+          "default": "projection_failures_dlq",
+          "description": "Kafka DLQ topic for projection failures (PROJECTION_DLQ_TOPIC)",
+          "env_vars": [
+            "PROJECTION_DLQ_TOPIC"
+          ],
+          "required": false
+        },
+        {
+          "name": "connector_updates_topic",
+          "type": "str",
+          "default": "connector-updates",
+          "description": "Kafka topic for connector updates (CONNECTOR_UPDATES_TOPIC)",
+          "env_vars": [
+            "CONNECTOR_UPDATES_TOPIC"
+          ],
+          "required": false
+        },
+        {
+          "name": "connector_updates_dlq_topic",
+          "type": "str",
+          "default": "connector-updates-dlq",
+          "description": "Kafka DLQ topic for connector updates (CONNECTOR_UPDATES_DLQ_TOPIC)",
+          "env_vars": [
+            "CONNECTOR_UPDATES_DLQ_TOPIC"
+          ],
+          "required": false
+        },
+        {
+          "name": "pipeline_jobs_topic",
+          "type": "str",
+          "default": "pipeline-jobs",
+          "description": "Kafka topic for pipeline jobs (PIPELINE_JOBS_TOPIC)",
+          "env_vars": [
+            "PIPELINE_JOBS_TOPIC"
+          ],
+          "required": false
+        },
+        {
+          "name": "pipeline_jobs_dlq_topic",
+          "type": "str",
+          "default": "pipeline-jobs-dlq",
+          "description": "Kafka DLQ topic for pipeline jobs (PIPELINE_JOBS_DLQ_TOPIC)",
+          "env_vars": [
+            "PIPELINE_JOBS_DLQ_TOPIC"
+          ],
+          "required": false
+        },
+        {
+          "name": "pipeline_events_topic",
+          "type": "str",
+          "default": "pipeline-events",
+          "description": "Kafka topic for pipeline control-plane events (PIPELINE_EVENTS_TOPIC)",
+          "env_vars": [
+            "PIPELINE_EVENTS_TOPIC"
+          ],
+          "required": false
+        },
+        {
+          "name": "dataset_ingest_outbox_dlq_topic",
+          "type": "str",
+          "default": "dataset-ingest-outbox-dlq",
+          "description": "Kafka DLQ topic for dataset ingest outbox (DATASET_INGEST_OUTBOX_DLQ_TOPIC)",
+          "env_vars": [
+            "DATASET_INGEST_OUTBOX_DLQ_TOPIC"
+          ],
+          "required": false
+        },
+        {
+          "name": "objectify_jobs_topic",
+          "type": "str",
+          "default": "objectify-jobs",
+          "description": "Kafka topic for objectify jobs (OBJECTIFY_JOBS_TOPIC)",
+          "env_vars": [
+            "OBJECTIFY_JOBS_TOPIC"
+          ],
+          "required": false
+        },
+        {
+          "name": "objectify_jobs_dlq_topic",
+          "type": "str",
+          "default": "objectify-jobs-dlq",
+          "description": "Kafka DLQ topic for objectify jobs (OBJECTIFY_JOBS_DLQ_TOPIC)",
+          "env_vars": [
+            "OBJECTIFY_JOBS_DLQ_TOPIC"
+          ],
+          "required": false
+        },
+        {
+          "name": "instance_commands_topic",
+          "type": "str",
+          "default": "instance_commands",
+          "description": "Kafka topic for instance commands (INSTANCE_COMMANDS_TOPIC)",
+          "env_vars": [
+            "INSTANCE_COMMANDS_TOPIC"
+          ],
+          "required": false
+        },
+        {
+          "name": "ontology_commands_topic",
+          "type": "str",
+          "default": "ontology_commands",
+          "description": "Kafka topic for ontology commands (ONTOLOGY_COMMANDS_TOPIC)",
+          "env_vars": [
+            "ONTOLOGY_COMMANDS_TOPIC"
+          ],
+          "required": false
+        },
+        {
+          "name": "database_commands_topic",
+          "type": "str",
+          "default": "database_commands",
+          "description": "Kafka topic for database commands (DATABASE_COMMANDS_TOPIC)",
+          "env_vars": [
+            "DATABASE_COMMANDS_TOPIC"
+          ],
+          "required": false
+        },
+        {
+          "name": "action_commands_topic",
+          "type": "str",
+          "default": "action_commands",
+          "description": "Kafka topic for action commands (ACTION_COMMANDS_TOPIC)",
+          "env_vars": [
+            "ACTION_COMMANDS_TOPIC"
+          ],
+          "required": false
+        },
+        {
+          "name": "instance_commands_dlq_topic",
+          "type": "str",
+          "default": "instance-commands-dlq",
+          "description": "Kafka DLQ topic for instance commands (INSTANCE_COMMANDS_DLQ_TOPIC)",
+          "env_vars": [
+            "INSTANCE_COMMANDS_DLQ_TOPIC"
+          ],
+          "required": false
+        },
+        {
+          "name": "ontology_commands_dlq_topic",
+          "type": "str",
+          "default": "ontology-commands-dlq",
+          "description": "Kafka DLQ topic for ontology commands (ONTOLOGY_COMMANDS_DLQ_TOPIC)",
+          "env_vars": [
+            "ONTOLOGY_COMMANDS_DLQ_TOPIC"
+          ],
+          "required": false
+        },
+        {
+          "name": "action_commands_dlq_topic",
+          "type": "str",
+          "default": "action-commands-dlq",
+          "description": "Kafka DLQ topic for action commands (ACTION_COMMANDS_DLQ_TOPIC)",
+          "env_vars": [
+            "ACTION_COMMANDS_DLQ_TOPIC"
+          ],
+          "required": false
+        },
+        {
+          "name": "projection_worker_group",
+          "type": "str",
+          "default": "projection-worker-group",
+          "description": "Kafka consumer group for projection worker (PROJECTION_WORKER_GROUP)",
+          "env_vars": [
+            "PROJECTION_WORKER_GROUP"
+          ],
+          "required": false
+        },
+        {
+          "name": "message_relay_group",
+          "type": "str",
+          "default": "message-relay-group",
+          "description": "Kafka consumer group for message relay (MESSAGE_RELAY_GROUP)",
+          "env_vars": [
+            "MESSAGE_RELAY_GROUP"
+          ],
+          "required": false
+        },
+        {
+          "name": "instance_worker_group",
+          "type": "str",
+          "default": "instance-worker-group",
+          "description": "Kafka consumer group for instance worker (INSTANCE_WORKER_GROUP)",
+          "env_vars": [
+            "INSTANCE_WORKER_GROUP"
+          ],
+          "required": false
+        },
+        {
+          "name": "ontology_worker_group",
+          "type": "str",
+          "default": "ontology-worker-group",
+          "description": "Kafka consumer group for ontology worker (ONTOLOGY_WORKER_GROUP)",
+          "env_vars": [
+            "ONTOLOGY_WORKER_GROUP"
+          ],
+          "required": false
+        },
+        {
+          "name": "action_worker_group",
+          "type": "str",
+          "default": "action-worker-group",
+          "description": "Kafka consumer group for action worker (ACTION_WORKER_GROUP)",
+          "env_vars": [
+            "ACTION_WORKER_GROUP"
+          ],
+          "required": false
+        },
+        {
+          "name": "objectify_jobs_group",
+          "type": "str",
+          "default": "objectify-worker-group",
+          "description": "Kafka consumer group for objectify jobs (OBJECTIFY_JOBS_GROUP)",
+          "env_vars": [
+            "OBJECTIFY_JOBS_GROUP"
+          ],
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "StorageSettings",
+      "docstring": "Storage configuration settings",
+      "field_count": 21,
+      "fields": [
+        {
+          "name": "minio_endpoint_url",
+          "type": "str",
+          "default": "<env-dependent>",
+          "description": "MinIO/S3 endpoint URL",
+          "env_vars": [
+            "MINIO_ENDPOINT_URL",
+            "MINIO_PORT_HOST"
+          ],
+          "required": false
+        },
+        {
+          "name": "minio_access_key",
+          "type": "str",
+          "default": "minioadmin",
+          "description": "MinIO/S3 access key",
+          "env_vars": [
+            "MINIO_ACCESS_KEY"
+          ],
+          "required": false
+        },
+        {
+          "name": "minio_secret_key",
+          "type": "str",
+          "default": "minioadmin123",
+          "description": "MinIO/S3 secret key",
+          "env_vars": [
+            "MINIO_SECRET_KEY"
+          ],
+          "required": false
+        },
+        {
+          "name": "minio_ssl_verify",
+          "type": "Optional[bool]",
+          "default": null,
+          "description": "Verify SSL certificates for MinIO/S3 when using https (MINIO_SSL_VERIFY). When unset, botocore defaults apply.",
+          "env_vars": [
+            "MINIO_SSL_VERIFY"
+          ],
+          "required": true
+        },
+        {
+          "name": "minio_ssl_ca_bundle",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "CA bundle path for MinIO/S3 TLS verification (MINIO_SSL_CA_BUNDLE).",
+          "env_vars": [
+            "MINIO_SSL_CA_BUNDLE"
+          ],
+          "required": true
+        },
+        {
+          "name": "lakefs_api_url",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "lakeFS API base URL (e.g. http://localhost:48080)",
+          "env_vars": [
+            "LAKEFS_API_URL"
+          ],
+          "required": true
+        },
+        {
+          "name": "lakefs_s3_endpoint_url",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "lakeFS S3 gateway endpoint URL (e.g. http://localhost:8000)",
+          "env_vars": [
+            "LAKEFS_S3_ENDPOINT_URL"
+          ],
+          "required": true
+        },
+        {
+          "name": "lakefs_api_port",
+          "type": "int",
+          "default": "<env-dependent>",
+          "description": "lakeFS API port (used when LAKEFS_API_URL is unset)",
+          "env_vars": [
+            "LAKEFS_API_PORT",
+            "LAKEFS_PORT_HOST"
+          ],
+          "required": false
+        },
+        {
+          "name": "lakefs_access_key_id",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "lakeFS access key id",
+          "env_vars": [
+            "LAKEFS_ACCESS_KEY_ID"
+          ],
+          "required": true
+        },
+        {
+          "name": "lakefs_secret_access_key",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "lakeFS secret access key",
+          "env_vars": [
+            "LAKEFS_SECRET_ACCESS_KEY"
+          ],
+          "required": true
+        },
+        {
+          "name": "lakefs_s3_ssl_verify",
+          "type": "Optional[bool]",
+          "default": null,
+          "description": "Verify SSL certificates for lakeFS S3 gateway when using https (LAKEFS_S3_SSL_VERIFY).",
+          "env_vars": [
+            "LAKEFS_S3_SSL_VERIFY"
+          ],
+          "required": true
+        },
+        {
+          "name": "lakefs_s3_ssl_ca_bundle",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "CA bundle path for lakeFS S3 gateway TLS verification (LAKEFS_S3_SSL_CA_BUNDLE).",
+          "env_vars": [
+            "LAKEFS_S3_SSL_CA_BUNDLE"
+          ],
+          "required": true
+        },
+        {
+          "name": "lakefs_client_timeout_seconds",
+          "type": "float",
+          "default": "120.0",
+          "description": "lakeFS REST client timeout seconds (LAKEFS_CLIENT_TIMEOUT_SECONDS; fallback LAKEFS_TIMEOUT_SECONDS)",
+          "env_vars": [
+            "LAKEFS_CLIENT_TIMEOUT_SECONDS"
+          ],
+          "required": false
+        },
+        {
+          "name": "lakefs_credentials_source",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "Where to load lakeFS credentials from (LAKEFS_CREDENTIALS_SOURCE: env|db)",
+          "env_vars": [
+            "LAKEFS_CREDENTIALS_SOURCE"
+          ],
+          "required": true
+        },
+        {
+          "name": "lakefs_service_principal",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "Service principal identifier for lakeFS credentials (LAKEFS_SERVICE_PRINCIPAL)",
+          "env_vars": [
+            "LAKEFS_SERVICE_PRINCIPAL"
+          ],
+          "required": true
+        },
+        {
+          "name": "lakefs_credentials_encryption_key",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "Fernet key for encrypting lakeFS secrets in Postgres (LAKEFS_CREDENTIALS_ENCRYPTION_KEY)",
+          "env_vars": [
+            "LAKEFS_CREDENTIALS_ENCRYPTION_KEY"
+          ],
+          "required": true
+        },
+        {
+          "name": "lakefs_raw_repository",
+          "type": "str",
+          "default": "raw-datasets",
+          "description": "lakeFS repository for raw datasets (LAKEFS_RAW_REPOSITORY)",
+          "env_vars": [
+            "LAKEFS_RAW_REPOSITORY"
+          ],
+          "required": false
+        },
+        {
+          "name": "lakefs_artifacts_repository",
+          "type": "str",
+          "default": "pipeline-artifacts",
+          "description": "lakeFS repository for pipeline artifacts (LAKEFS_ARTIFACTS_REPOSITORY)",
+          "env_vars": [
+            "LAKEFS_ARTIFACTS_REPOSITORY"
+          ],
+          "required": false
+        },
+        {
+          "name": "event_store_bucket",
+          "type": "str",
+          "default": "spice-event-store",
+          "description": "S3 bucket for immutable event store (EVENT_STORE_BUCKET)",
+          "env_vars": [
+            "EVENT_STORE_BUCKET"
+          ],
+          "required": false
+        },
+        {
+          "name": "instance_bucket",
+          "type": "str",
+          "default": "instance-events",
+          "description": "S3 bucket for instance events",
+          "env_vars": [
+            "INSTANCE_BUCKET"
+          ],
+          "required": false
+        },
+        {
+          "name": "label_mappings_db_path",
+          "type": "str",
+          "default": "data/label_mappings.db",
+          "description": "SQLite path for label mappings (LABEL_MAPPINGS_DB_PATH)",
+          "env_vars": [
+            "LABEL_MAPPINGS_DB_PATH"
+          ],
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "CacheSettings",
+      "docstring": "Cache and TTL configuration settings",
+      "field_count": 6,
+      "fields": [
+        {
+          "name": "class_label_cache_ttl",
+          "type": "int",
+          "default": "3600",
+          "description": "Class label cache TTL in seconds",
+          "env_vars": [
+            "CLASS_LABEL_CACHE_TTL"
+          ],
+          "required": false
+        },
+        {
+          "name": "command_status_cache_ttl",
+          "type": "int",
+          "default": "86400",
+          "description": "Command status cache TTL in seconds",
+          "env_vars": [
+            "COMMAND_STATUS_CACHE_TTL"
+          ],
+          "required": false
+        },
+        {
+          "name": "command_status_ttl_seconds",
+          "type": "int",
+          "default": "0",
+          "description": "TTL seconds for command status entries (COMMAND_STATUS_TTL_SECONDS; 0=never expire)",
+          "env_vars": [
+            "COMMAND_STATUS_TTL_SECONDS"
+          ],
+          "required": false
+        },
+        {
+          "name": "user_session_cache_ttl",
+          "type": "int",
+          "default": "7200",
+          "description": "User session cache TTL in seconds",
+          "env_vars": [
+            "USER_SESSION_CACHE_TTL"
+          ],
+          "required": false
+        },
+        {
+          "name": "websocket_connection_ttl",
+          "type": "int",
+          "default": "3600",
+          "description": "WebSocket connection TTL in seconds",
+          "env_vars": [
+            "WEBSOCKET_CONNECTION_TTL"
+          ],
+          "required": false
+        },
+        {
+          "name": "mapping_cache_ttl",
+          "type": "int",
+          "default": "1800",
+          "description": "Mapping cache TTL in seconds",
+          "env_vars": [
+            "MAPPING_CACHE_TTL"
+          ],
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "SecuritySettings",
+      "docstring": "Security configuration settings",
+      "field_count": 12,
+      "fields": [
+        {
+          "name": "secret_key",
+          "type": "str",
+          "default": "your-secret-key-change-this-in-production",
+          "description": "JWT secret key",
+          "env_vars": [
+            "SECRET_KEY"
+          ],
+          "required": false
+        },
+        {
+          "name": "algorithm",
+          "type": "str",
+          "default": "HS256",
+          "description": "JWT algorithm",
+          "env_vars": [
+            "ALGORITHM"
+          ],
+          "required": false
+        },
+        {
+          "name": "access_token_expire_minutes",
+          "type": "int",
+          "default": "30",
+          "description": "JWT access token expiry in minutes",
+          "env_vars": [
+            "ACCESS_TOKEN_EXPIRE_MINUTES"
+          ],
+          "required": false
+        },
+        {
+          "name": "data_encryption_keys",
+          "type": "str",
+          "default": "",
+          "description": "Comma-separated base64/hex keys for encrypting stored data at rest (DATA_ENCRYPTION_KEYS)",
+          "env_vars": [
+            "DATA_ENCRYPTION_KEYS"
+          ],
+          "required": false
+        },
+        {
+          "name": "input_sanitizer_max_dict_keys",
+          "type": "int",
+          "default": "100",
+          "description": "Max dict keys to sanitize (INPUT_SANITIZER_MAX_DICT_KEYS)",
+          "env_vars": [
+            "INPUT_SANITIZER_MAX_DICT_KEYS"
+          ],
+          "required": false
+        },
+        {
+          "name": "input_sanitizer_max_list_items",
+          "type": "int",
+          "default": "1000",
+          "description": "Max list items to sanitize (INPUT_SANITIZER_MAX_LIST_ITEMS)",
+          "env_vars": [
+            "INPUT_SANITIZER_MAX_LIST_ITEMS"
+          ],
+          "required": false
+        },
+        {
+          "name": "max_search_query_length",
+          "type": "int",
+          "default": "100",
+          "description": "Maximum search query length (MAX_SEARCH_QUERY_LENGTH)",
+          "env_vars": [
+            "MAX_SEARCH_QUERY_LENGTH"
+          ],
+          "required": false
+        },
+        {
+          "name": "max_db_name_length",
+          "type": "int",
+          "default": "50",
+          "description": "Maximum database name length (MAX_DB_NAME_LENGTH)",
+          "env_vars": [
+            "MAX_DB_NAME_LENGTH"
+          ],
+          "required": false
+        },
+        {
+          "name": "max_class_id_length",
+          "type": "int",
+          "default": "100",
+          "description": "Maximum class id length (MAX_CLASS_ID_LENGTH)",
+          "env_vars": [
+            "MAX_CLASS_ID_LENGTH"
+          ],
+          "required": false
+        },
+        {
+          "name": "max_instance_id_length",
+          "type": "int",
+          "default": "255",
+          "description": "Maximum instance id length (MAX_INSTANCE_ID_LENGTH)",
+          "env_vars": [
+            "MAX_INSTANCE_ID_LENGTH"
+          ],
+          "required": false
+        },
+        {
+          "name": "max_client_id_length",
+          "type": "int",
+          "default": "50",
+          "description": "Maximum websocket client id length (MAX_CLIENT_ID_LENGTH)",
+          "env_vars": [
+            "MAX_CLIENT_ID_LENGTH"
+          ],
+          "required": false
+        },
+        {
+          "name": "max_user_id_length",
+          "type": "int",
+          "default": "50",
+          "description": "Maximum user id length (MAX_USER_ID_LENGTH)",
+          "env_vars": [
+            "MAX_USER_ID_LENGTH"
+          ],
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "PerformanceSettings",
+      "docstring": "Performance and optimization settings",
+      "field_count": 33,
+      "fields": [
+        {
+          "name": "database_pool_size",
+          "type": "int",
+          "default": "20",
+          "description": "Database connection pool size",
+          "env_vars": [
+            "DATABASE_POOL_SIZE"
+          ],
+          "required": false
+        },
+        {
+          "name": "database_max_overflow",
+          "type": "int",
+          "default": "30",
+          "description": "Database max overflow connections",
+          "env_vars": [
+            "DATABASE_MAX_OVERFLOW"
+          ],
+          "required": false
+        },
+        {
+          "name": "enable_rate_limiting",
+          "type": "bool",
+          "default": "True",
+          "description": "Enable API rate limiting",
+          "env_vars": [
+            "ENABLE_RATE_LIMITING"
+          ],
+          "required": false
+        },
+        {
+          "name": "requests_per_minute",
+          "type": "int",
+          "default": "60",
+          "description": "Requests per minute limit",
+          "env_vars": [
+            "REQUESTS_PER_MINUTE"
+          ],
+          "required": false
+        },
+        {
+          "name": "max_concurrent_commands",
+          "type": "int",
+          "default": "100",
+          "description": "Max concurrent commands (MAX_CONCURRENT_COMMANDS)",
+          "env_vars": [
+            "MAX_CONCURRENT_COMMANDS"
+          ],
+          "required": false
+        },
+        {
+          "name": "max_websocket_connections",
+          "type": "int",
+          "default": "1000",
+          "description": "Max websocket connections (MAX_WEBSOCKET_CONNECTIONS)",
+          "env_vars": [
+            "MAX_WEBSOCKET_CONNECTIONS"
+          ],
+          "required": false
+        },
+        {
+          "name": "max_ontology_size",
+          "type": "int",
+          "default": "10485760",
+          "description": "Max ontology payload size in bytes (MAX_ONTOLOGY_SIZE)",
+          "env_vars": [
+            "MAX_ONTOLOGY_SIZE"
+          ],
+          "required": false
+        },
+        {
+          "name": "max_instance_size",
+          "type": "int",
+          "default": "1048576",
+          "description": "Max instance payload size in bytes (MAX_INSTANCE_SIZE)",
+          "env_vars": [
+            "MAX_INSTANCE_SIZE"
+          ],
+          "required": false
+        },
+        {
+          "name": "action_log_pg_pool_min",
+          "type": "int",
+          "default": "1",
+          "description": "ACTION_LOG_PG_POOL_MIN",
+          "env_vars": [
+            "ACTION_LOG_PG_POOL_MIN"
+          ],
+          "required": false
+        },
+        {
+          "name": "action_log_pg_pool_max",
+          "type": "int",
+          "default": "5",
+          "description": "ACTION_LOG_PG_POOL_MAX",
+          "env_vars": [
+            "ACTION_LOG_PG_POOL_MAX"
+          ],
+          "required": false
+        },
+        {
+          "name": "action_log_pg_command_timeout_seconds",
+          "type": "int",
+          "default": "30",
+          "description": "ACTION_LOG_PG_COMMAND_TIMEOUT",
+          "env_vars": [
+            "ACTION_LOG_PG_COMMAND_TIMEOUT_SECONDS",
+            "ACTION_LOG_PG_COMMAND_TIMEOUT"
+          ],
+          "required": false
+        },
+        {
+          "name": "connector_registry_pg_pool_min",
+          "type": "int",
+          "default": "1",
+          "description": "CONNECTOR_REGISTRY_PG_POOL_MIN",
+          "env_vars": [
+            "CONNECTOR_REGISTRY_PG_POOL_MIN"
+          ],
+          "required": false
+        },
+        {
+          "name": "connector_registry_pg_pool_max",
+          "type": "int",
+          "default": "5",
+          "description": "CONNECTOR_REGISTRY_PG_POOL_MAX",
+          "env_vars": [
+            "CONNECTOR_REGISTRY_PG_POOL_MAX"
+          ],
+          "required": false
+        },
+        {
+          "name": "connector_registry_pg_command_timeout_seconds",
+          "type": "int",
+          "default": "30",
+          "description": "CONNECTOR_REGISTRY_PG_COMMAND_TIMEOUT",
+          "env_vars": [
+            "CONNECTOR_REGISTRY_PG_COMMAND_TIMEOUT_SECONDS",
+            "CONNECTOR_REGISTRY_PG_COMMAND_TIMEOUT"
+          ],
+          "required": false
+        },
+        {
+          "name": "dataset_registry_pg_pool_min",
+          "type": "int",
+          "default": "1",
+          "description": "DATASET_REGISTRY_PG_POOL_MIN",
+          "env_vars": [
+            "DATASET_REGISTRY_PG_POOL_MIN"
+          ],
+          "required": false
+        },
+        {
+          "name": "dataset_registry_pg_pool_max",
+          "type": "int",
+          "default": "5",
+          "description": "DATASET_REGISTRY_PG_POOL_MAX",
+          "env_vars": [
+            "DATASET_REGISTRY_PG_POOL_MAX"
+          ],
+          "required": false
+        },
+        {
+          "name": "dataset_registry_pg_command_timeout_seconds",
+          "type": "int",
+          "default": "30",
+          "description": "DATASET_REGISTRY_PG_COMMAND_TIMEOUT",
+          "env_vars": [
+            "DATASET_REGISTRY_PG_COMMAND_TIMEOUT_SECONDS",
+            "DATASET_REGISTRY_PG_COMMAND_TIMEOUT"
+          ],
+          "required": false
+        },
+        {
+          "name": "pipeline_registry_pg_pool_min",
+          "type": "int",
+          "default": "1",
+          "description": "PIPELINE_REGISTRY_PG_POOL_MIN",
+          "env_vars": [
+            "PIPELINE_REGISTRY_PG_POOL_MIN"
+          ],
+          "required": false
+        },
+        {
+          "name": "pipeline_registry_pg_pool_max",
+          "type": "int",
+          "default": "5",
+          "description": "PIPELINE_REGISTRY_PG_POOL_MAX",
+          "env_vars": [
+            "PIPELINE_REGISTRY_PG_POOL_MAX"
+          ],
+          "required": false
+        },
+        {
+          "name": "pipeline_registry_pg_command_timeout_seconds",
+          "type": "int",
+          "default": "30",
+          "description": "PIPELINE_REGISTRY_PG_COMMAND_TIMEOUT",
+          "env_vars": [
+            "PIPELINE_REGISTRY_PG_COMMAND_TIMEOUT_SECONDS",
+            "PIPELINE_REGISTRY_PG_COMMAND_TIMEOUT"
+          ],
+          "required": false
+        },
+        {
+          "name": "objectify_pg_pool_min",
+          "type": "int",
+          "default": "1",
+          "description": "OBJECTIFY_PG_POOL_MIN",
+          "env_vars": [
+            "OBJECTIFY_PG_POOL_MIN"
+          ],
+          "required": false
+        },
+        {
+          "name": "objectify_pg_pool_max",
+          "type": "int",
+          "default": "5",
+          "description": "OBJECTIFY_PG_POOL_MAX",
+          "env_vars": [
+            "OBJECTIFY_PG_POOL_MAX"
+          ],
+          "required": false
+        },
+        {
+          "name": "objectify_pg_command_timeout_seconds",
+          "type": "int",
+          "default": "30",
+          "description": "OBJECTIFY_PG_COMMAND_TIMEOUT",
+          "env_vars": [
+            "OBJECTIFY_PG_COMMAND_TIMEOUT_SECONDS",
+            "OBJECTIFY_PG_COMMAND_TIMEOUT"
+          ],
+          "required": false
+        },
+        {
+          "name": "audit_pg_pool_min",
+          "type": "int",
+          "default": "1",
+          "description": "AUDIT_PG_POOL_MIN",
+          "env_vars": [
+            "AUDIT_PG_POOL_MIN"
+          ],
+          "required": false
+        },
+        {
+          "name": "audit_pg_pool_max",
+          "type": "int",
+          "default": "5",
+          "description": "AUDIT_PG_POOL_MAX",
+          "env_vars": [
+            "AUDIT_PG_POOL_MAX"
+          ],
+          "required": false
+        },
+        {
+          "name": "audit_pg_command_timeout_seconds",
+          "type": "int",
+          "default": "30",
+          "description": "AUDIT_PG_COMMAND_TIMEOUT",
+          "env_vars": [
+            "AUDIT_PG_COMMAND_TIMEOUT_SECONDS",
+            "AUDIT_PG_COMMAND_TIMEOUT"
+          ],
+          "required": false
+        },
+        {
+          "name": "lineage_pg_pool_min",
+          "type": "int",
+          "default": "1",
+          "description": "LINEAGE_PG_POOL_MIN",
+          "env_vars": [
+            "LINEAGE_PG_POOL_MIN"
+          ],
+          "required": false
+        },
+        {
+          "name": "lineage_pg_pool_max",
+          "type": "int",
+          "default": "5",
+          "description": "LINEAGE_PG_POOL_MAX",
+          "env_vars": [
+            "LINEAGE_PG_POOL_MAX"
+          ],
+          "required": false
+        },
+        {
+          "name": "lineage_pg_command_timeout_seconds",
+          "type": "int",
+          "default": "30",
+          "description": "LINEAGE_PG_COMMAND_TIMEOUT",
+          "env_vars": [
+            "LINEAGE_PG_COMMAND_TIMEOUT_SECONDS",
+            "LINEAGE_PG_COMMAND_TIMEOUT"
+          ],
+          "required": false
+        },
+        {
+          "name": "lineage_latest_edges_max_ids",
+          "type": "int",
+          "default": "5000",
+          "description": "LINEAGE_LATEST_EDGES_MAX_IDS",
+          "env_vars": [
+            "LINEAGE_LATEST_EDGES_MAX_IDS"
+          ],
+          "required": false
+        },
+        {
+          "name": "agg_seq_pg_pool_min",
+          "type": "int",
+          "default": "1",
+          "description": "AGG_SEQ_PG_POOL_MIN",
+          "env_vars": [
+            "AGG_SEQ_PG_POOL_MIN"
+          ],
+          "required": false
+        },
+        {
+          "name": "agg_seq_pg_pool_max",
+          "type": "int",
+          "default": "5",
+          "description": "AGG_SEQ_PG_POOL_MAX",
+          "env_vars": [
+            "AGG_SEQ_PG_POOL_MAX"
+          ],
+          "required": false
+        },
+        {
+          "name": "agg_seq_pg_command_timeout_seconds",
+          "type": "int",
+          "default": "30",
+          "description": "AGG_SEQ_PG_COMMAND_TIMEOUT",
+          "env_vars": [
+            "AGG_SEQ_PG_COMMAND_TIMEOUT_SECONDS",
+            "AGG_SEQ_PG_COMMAND_TIMEOUT"
+          ],
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "EventSourcingSettings",
+      "docstring": "Event sourcing / CQRS tuning settings",
+      "field_count": 20,
+      "fields": [
+        {
+          "name": "event_store_retention_days",
+          "type": "int",
+          "default": "365",
+          "description": "Event store retention in days (EVENT_STORE_RETENTION_DAYS)",
+          "env_vars": [
+            "EVENT_STORE_RETENTION_DAYS"
+          ],
+          "required": false
+        },
+        {
+          "name": "projection_batch_size",
+          "type": "int",
+          "default": "1000",
+          "description": "Projection worker batch size (PROJECTION_BATCH_SIZE)",
+          "env_vars": [
+            "PROJECTION_BATCH_SIZE"
+          ],
+          "required": false
+        },
+        {
+          "name": "projection_scroll_timeout",
+          "type": "str",
+          "default": "5m",
+          "description": "Elasticsearch scroll timeout for projections (PROJECTION_SCROLL_TIMEOUT)",
+          "env_vars": [
+            "PROJECTION_SCROLL_TIMEOUT"
+          ],
+          "required": false
+        },
+        {
+          "name": "command_timeout_seconds",
+          "type": "int",
+          "default": "300",
+          "description": "Command processing timeout in seconds (COMMAND_TIMEOUT_SECONDS)",
+          "env_vars": [
+            "COMMAND_TIMEOUT_SECONDS"
+          ],
+          "required": false
+        },
+        {
+          "name": "command_retry_count",
+          "type": "int",
+          "default": "3",
+          "description": "Command retry count (COMMAND_RETRY_COUNT)",
+          "env_vars": [
+            "COMMAND_RETRY_COUNT"
+          ],
+          "required": false
+        },
+        {
+          "name": "enable_event_sourcing",
+          "type": "bool",
+          "default": "True",
+          "description": "Enable event sourcing (ENABLE_EVENT_SOURCING)",
+          "env_vars": [
+            "ENABLE_EVENT_SOURCING"
+          ],
+          "required": false
+        },
+        {
+          "name": "enable_processed_event_registry",
+          "type": "bool",
+          "default": "True",
+          "description": "Enable durable processed-event registry (ENABLE_PROCESSED_EVENT_REGISTRY)",
+          "env_vars": [
+            "ENABLE_PROCESSED_EVENT_REGISTRY"
+          ],
+          "required": false
+        },
+        {
+          "name": "processed_event_lease_timeout_seconds",
+          "type": "int",
+          "default": "900",
+          "description": "Processed-event lease timeout seconds (PROCESSED_EVENT_LEASE_TIMEOUT_SECONDS)",
+          "env_vars": [
+            "PROCESSED_EVENT_LEASE_TIMEOUT_SECONDS"
+          ],
+          "required": false
+        },
+        {
+          "name": "processed_event_heartbeat_interval_seconds",
+          "type": "int",
+          "default": "30",
+          "description": "Processed-event heartbeat interval seconds (PROCESSED_EVENT_HEARTBEAT_INTERVAL_SECONDS)",
+          "env_vars": [
+            "PROCESSED_EVENT_HEARTBEAT_INTERVAL_SECONDS"
+          ],
+          "required": false
+        },
+        {
+          "name": "processed_event_pg_pool_min",
+          "type": "int",
+          "default": "1",
+          "description": "Processed-event Postgres pool min size (PROCESSED_EVENT_PG_POOL_MIN)",
+          "env_vars": [
+            "PROCESSED_EVENT_PG_POOL_MIN"
+          ],
+          "required": false
+        },
+        {
+          "name": "processed_event_pg_pool_max",
+          "type": "int",
+          "default": "5",
+          "description": "Processed-event Postgres pool max size (PROCESSED_EVENT_PG_POOL_MAX)",
+          "env_vars": [
+            "PROCESSED_EVENT_PG_POOL_MAX"
+          ],
+          "required": false
+        },
+        {
+          "name": "processed_event_pg_command_timeout",
+          "type": "int",
+          "default": "30",
+          "description": "Processed-event Postgres command timeout seconds (PROCESSED_EVENT_PG_COMMAND_TIMEOUT)",
+          "env_vars": [
+            "PROCESSED_EVENT_PG_COMMAND_TIMEOUT"
+          ],
+          "required": false
+        },
+        {
+          "name": "processed_event_owner",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "Override processed-event registry owner id (PROCESSED_EVENT_OWNER)",
+          "env_vars": [
+            "PROCESSED_EVENT_OWNER"
+          ],
+          "required": true
+        },
+        {
+          "name": "event_store_sequence_allocator_mode",
+          "type": "str",
+          "default": "postgres",
+          "description": "Sequence allocator mode (EVENT_STORE_SEQUENCE_ALLOCATOR_MODE)",
+          "env_vars": [
+            "EVENT_STORE_SEQUENCE_ALLOCATOR_MODE"
+          ],
+          "required": false
+        },
+        {
+          "name": "event_store_sequence_schema",
+          "type": "str",
+          "default": "spice_event_registry",
+          "description": "Sequence schema name (EVENT_STORE_SEQUENCE_SCHEMA)",
+          "env_vars": [
+            "EVENT_STORE_SEQUENCE_SCHEMA"
+          ],
+          "required": false
+        },
+        {
+          "name": "event_store_sequence_handler_prefix",
+          "type": "str",
+          "default": "write_side",
+          "description": "Sequence handler prefix (EVENT_STORE_SEQUENCE_HANDLER_PREFIX)",
+          "env_vars": [
+            "EVENT_STORE_SEQUENCE_HANDLER_PREFIX"
+          ],
+          "required": false
+        },
+        {
+          "name": "event_store_idempotency_mismatch_mode",
+          "type": "str",
+          "default": "error",
+          "description": "Idempotency mismatch handling (EVENT_STORE_IDEMPOTENCY_MISMATCH_MODE)",
+          "env_vars": [
+            "EVENT_STORE_IDEMPOTENCY_MISMATCH_MODE"
+          ],
+          "required": false
+        },
+        {
+          "name": "event_store_require_tls",
+          "type": "bool",
+          "default": "False",
+          "description": "Require TLS for event store endpoint (EVENT_STORE_REQUIRE_TLS)",
+          "env_vars": [
+            "EVENT_STORE_REQUIRE_TLS"
+          ],
+          "required": false
+        },
+        {
+          "name": "event_store_ssl_verify",
+          "type": "bool",
+          "default": "True",
+          "description": "Verify TLS certs for event store (EVENT_STORE_SSL_VERIFY)",
+          "env_vars": [
+            "EVENT_STORE_SSL_VERIFY"
+          ],
+          "required": false
+        },
+        {
+          "name": "event_store_s3_addressing_style",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "Force S3 addressing style (EVENT_STORE_S3_ADDRESSING_STYLE)",
+          "env_vars": [
+            "EVENT_STORE_S3_ADDRESSING_STYLE"
+          ],
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "BranchVirtualizationSettings",
+      "docstring": "Branch virtualization defaults (OCC seeding).",
+      "field_count": 1,
+      "fields": [
+        {
+          "name": "base_branch",
+          "type": "str",
+          "default": "main",
+          "description": "Base branch to seed OCC when branch has no local events (BRANCH_VIRTUALIZATION_BASE_BRANCH)",
+          "env_vars": [
+            "BASE_BRANCH"
+          ],
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "InstanceWorkerSettings",
+      "docstring": "Instance worker runtime settings.",
+      "field_count": 6,
+      "fields": [
+        {
+          "name": "dlq_flush_timeout_seconds",
+          "type": "float",
+          "default": "10.0",
+          "description": "DLQ flush timeout seconds (INSTANCE_WORKER_DLQ_FLUSH_TIMEOUT_SECONDS)",
+          "env_vars": [
+            "DLQ_FLUSH_TIMEOUT_SECONDS"
+          ],
+          "required": false
+        },
+        {
+          "name": "max_retry_attempts",
+          "type": "int",
+          "default": "5",
+          "description": "Max retry attempts for command processing (INSTANCE_WORKER_MAX_RETRY_ATTEMPTS)",
+          "env_vars": [
+            "MAX_RETRY_ATTEMPTS"
+          ],
+          "required": false
+        },
+        {
+          "name": "allow_pk_generation",
+          "type": "bool",
+          "default": "False",
+          "description": "Allow generating missing PKs (INSTANCE_ALLOW_PK_GENERATION)",
+          "env_vars": [
+            "ALLOW_PK_GENERATION"
+          ],
+          "required": false
+        },
+        {
+          "name": "relationship_strict",
+          "type": "bool",
+          "default": "True",
+          "description": "Strict relationship schema enforcement (INSTANCE_RELATIONSHIP_STRICT)",
+          "env_vars": [
+            "RELATIONSHIP_STRICT"
+          ],
+          "required": false
+        },
+        {
+          "name": "untyped_ref_max_retry_attempts",
+          "type": "int",
+          "default": "30",
+          "description": "Max retry attempts for untyped ref witness errors (INSTANCE_WORKER_UNTYPED_REF_MAX_RETRY_ATTEMPTS)",
+          "env_vars": [
+            "UNTYPED_REF_MAX_RETRY_ATTEMPTS"
+          ],
+          "required": false
+        },
+        {
+          "name": "untyped_ref_backoff_max_seconds",
+          "type": "float",
+          "default": "15.0",
+          "description": "Max backoff seconds for untyped ref witness errors (INSTANCE_WORKER_UNTYPED_REF_BACKOFF_MAX_SECONDS)",
+          "env_vars": [
+            "UNTYPED_REF_BACKOFF_MAX_SECONDS"
+          ],
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "OntologyWorkerSettings",
+      "docstring": "Ontology worker runtime settings.",
+      "field_count": 3,
+      "fields": [
+        {
+          "name": "dlq_flush_timeout_seconds",
+          "type": "float",
+          "default": "10.0",
+          "description": "DLQ flush timeout seconds (ONTOLOGY_WORKER_DLQ_FLUSH_TIMEOUT_SECONDS)",
+          "env_vars": [
+            "DLQ_FLUSH_TIMEOUT_SECONDS"
+          ],
+          "required": false
+        },
+        {
+          "name": "db_ready_poll_seconds",
+          "type": "float",
+          "default": "0.5",
+          "description": "DB readiness poll seconds (ONTOLOGY_WORKER_DB_READY_POLL_SECONDS)",
+          "env_vars": [
+            "DB_READY_POLL_SECONDS"
+          ],
+          "required": false
+        },
+        {
+          "name": "max_retry_attempts",
+          "type": "int",
+          "default": "5",
+          "description": "Max retry attempts (ONTOLOGY_WORKER_MAX_RETRY_ATTEMPTS)",
+          "env_vars": [
+            "MAX_RETRY_ATTEMPTS"
+          ],
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "ProjectionWorkerSettings",
+      "docstring": "Projection worker runtime settings.",
+      "field_count": 2,
+      "fields": [
+        {
+          "name": "dlq_flush_timeout_seconds",
+          "type": "float",
+          "default": "10.0",
+          "description": "DLQ flush timeout seconds (PROJECTION_WORKER_DLQ_FLUSH_TIMEOUT_SECONDS)",
+          "env_vars": [
+            "DLQ_FLUSH_TIMEOUT_SECONDS"
+          ],
+          "required": false
+        },
+        {
+          "name": "max_retries",
+          "type": "int",
+          "default": "5",
+          "description": "Max retries for projection worker (PROJECTION_WORKER_MAX_RETRIES)",
+          "env_vars": [
+            "MAX_RETRIES"
+          ],
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "ActionWorkerSettings",
+      "docstring": "Action worker runtime settings.",
+      "field_count": 3,
+      "fields": [
+        {
+          "name": "dlq_flush_timeout_seconds",
+          "type": "float",
+          "default": "10.0",
+          "description": "DLQ flush timeout seconds (ACTION_WORKER_DLQ_FLUSH_TIMEOUT_SECONDS)",
+          "env_vars": [
+            "DLQ_FLUSH_TIMEOUT_SECONDS"
+          ],
+          "required": false
+        },
+        {
+          "name": "dlq_retries",
+          "type": "int",
+          "default": "10",
+          "description": "DLQ producer retries (ACTION_WORKER_DLQ_RETRIES)",
+          "env_vars": [
+            "DLQ_RETRIES"
+          ],
+          "required": false
+        },
+        {
+          "name": "max_retry_attempts",
+          "type": "int",
+          "default": "5",
+          "description": "Max retry attempts (ACTION_WORKER_MAX_RETRY_ATTEMPTS)",
+          "env_vars": [
+            "MAX_RETRY_ATTEMPTS"
+          ],
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "ActionOutboxSettings",
+      "docstring": "Action outbox worker settings.",
+      "field_count": 2,
+      "fields": [
+        {
+          "name": "poll_seconds",
+          "type": "float",
+          "default": "2.0",
+          "description": "Poll interval seconds (ACTION_OUTBOX_POLL_SECONDS)",
+          "env_vars": [
+            "POLL_SECONDS"
+          ],
+          "required": false
+        },
+        {
+          "name": "batch_size",
+          "type": "int",
+          "default": "100",
+          "description": "Batch size for each scan (ACTION_OUTBOX_BATCH_SIZE)",
+          "env_vars": [
+            "BATCH_SIZE"
+          ],
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "OntologyDeployOutboxSettings",
+      "docstring": "Ontology deployment outbox worker settings (OMS embedded worker).",
+      "field_count": 11,
+      "fields": [
+        {
+          "name": "enabled",
+          "type": "bool",
+          "default": "True",
+          "description": "Enable ontology deploy outbox worker (ENABLE_ONTOLOGY_DEPLOY_OUTBOX_WORKER)",
+          "env_vars": [
+            "ENABLED",
+            "ENABLE_ONTOLOGY_DEPLOY_OUTBOX_WORKER"
+          ],
+          "required": false
+        },
+        {
+          "name": "use_deployments_v2",
+          "type": "bool",
+          "default": "True",
+          "description": "Use deployments registry v2 (ONTOLOGY_DEPLOYMENTS_V2)",
+          "env_vars": [
+            "USE_DEPLOYMENTS_V2",
+            "ONTOLOGY_DEPLOYMENTS_V2"
+          ],
+          "required": false
+        },
+        {
+          "name": "poll_seconds",
+          "type": "int",
+          "default": "5",
+          "description": "Poll interval seconds (ONTOLOGY_DEPLOY_OUTBOX_POLL_SECONDS)",
+          "env_vars": [
+            "POLL_SECONDS",
+            "ONTOLOGY_DEPLOY_OUTBOX_POLL_SECONDS"
+          ],
+          "required": false
+        },
+        {
+          "name": "batch_size",
+          "type": "int",
+          "default": "50",
+          "description": "Batch size (ONTOLOGY_DEPLOY_OUTBOX_BATCH)",
+          "env_vars": [
+            "BATCH_SIZE",
+            "ONTOLOGY_DEPLOY_OUTBOX_BATCH"
+          ],
+          "required": false
+        },
+        {
+          "name": "claim_timeout_seconds",
+          "type": "int",
+          "default": "300",
+          "description": "Claim timeout seconds (ONTOLOGY_DEPLOY_OUTBOX_CLAIM_TIMEOUT_SECONDS)",
+          "env_vars": [
+            "CLAIM_TIMEOUT_SECONDS",
+            "ONTOLOGY_DEPLOY_OUTBOX_CLAIM_TIMEOUT_SECONDS"
+          ],
+          "required": false
+        },
+        {
+          "name": "backoff_base_seconds",
+          "type": "int",
+          "default": "2",
+          "description": "Backoff base seconds (ONTOLOGY_DEPLOY_OUTBOX_BACKOFF_BASE_SECONDS)",
+          "env_vars": [
+            "BACKOFF_BASE_SECONDS",
+            "ONTOLOGY_DEPLOY_OUTBOX_BACKOFF_BASE_SECONDS"
+          ],
+          "required": false
+        },
+        {
+          "name": "backoff_max_seconds",
+          "type": "int",
+          "default": "60",
+          "description": "Backoff max seconds (ONTOLOGY_DEPLOY_OUTBOX_BACKOFF_MAX_SECONDS)",
+          "env_vars": [
+            "BACKOFF_MAX_SECONDS",
+            "ONTOLOGY_DEPLOY_OUTBOX_BACKOFF_MAX_SECONDS"
+          ],
+          "required": false
+        },
+        {
+          "name": "retention_days",
+          "type": "int",
+          "default": "7",
+          "description": "Retention days (ONTOLOGY_DEPLOY_OUTBOX_RETENTION_DAYS)",
+          "env_vars": [
+            "RETENTION_DAYS",
+            "ONTOLOGY_DEPLOY_OUTBOX_RETENTION_DAYS"
+          ],
+          "required": false
+        },
+        {
+          "name": "purge_interval_seconds",
+          "type": "int",
+          "default": "3600",
+          "description": "Purge interval seconds (ONTOLOGY_DEPLOY_OUTBOX_PURGE_INTERVAL_SECONDS)",
+          "env_vars": [
+            "PURGE_INTERVAL_SECONDS",
+            "ONTOLOGY_DEPLOY_OUTBOX_PURGE_INTERVAL_SECONDS"
+          ],
+          "required": false
+        },
+        {
+          "name": "purge_limit",
+          "type": "int",
+          "default": "10000",
+          "description": "Purge batch limit (ONTOLOGY_DEPLOY_OUTBOX_PURGE_LIMIT)",
+          "env_vars": [
+            "PURGE_LIMIT",
+            "ONTOLOGY_DEPLOY_OUTBOX_PURGE_LIMIT"
+          ],
+          "required": false
+        },
+        {
+          "name": "worker_id",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "Worker id override (ONTOLOGY_DEPLOY_OUTBOX_WORKER_ID)",
+          "env_vars": [
+            "WORKER_ID",
+            "ONTOLOGY_DEPLOY_OUTBOX_WORKER_ID"
+          ],
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "ConnectorSyncSettings",
+      "docstring": "Connector sync worker settings.",
+      "field_count": 5,
+      "fields": [
+        {
+          "name": "group",
+          "type": "str",
+          "default": "connector-sync-worker-group",
+          "description": "Kafka consumer group id (CONNECTOR_SYNC_GROUP)",
+          "env_vars": [
+            "GROUP"
+          ],
+          "required": false
+        },
+        {
+          "name": "handler",
+          "type": "str",
+          "default": "connector_sync_worker",
+          "description": "Handler label (CONNECTOR_SYNC_HANDLER)",
+          "env_vars": [
+            "HANDLER"
+          ],
+          "required": false
+        },
+        {
+          "name": "max_retries",
+          "type": "int",
+          "default": "5",
+          "description": "Max retries (CONNECTOR_SYNC_MAX_RETRIES)",
+          "env_vars": [
+            "MAX_RETRIES"
+          ],
+          "required": false
+        },
+        {
+          "name": "backoff_base_seconds",
+          "type": "int",
+          "default": "2",
+          "description": "Backoff base seconds (CONNECTOR_SYNC_BACKOFF_BASE_SECONDS)",
+          "env_vars": [
+            "BACKOFF_BASE_SECONDS"
+          ],
+          "required": false
+        },
+        {
+          "name": "backoff_max_seconds",
+          "type": "int",
+          "default": "60",
+          "description": "Backoff max seconds (CONNECTOR_SYNC_BACKOFF_MAX_SECONDS)",
+          "env_vars": [
+            "BACKOFF_MAX_SECONDS"
+          ],
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "ConnectorTriggerSettings",
+      "docstring": "Connector trigger service settings.",
+      "field_count": 4,
+      "fields": [
+        {
+          "name": "source_type",
+          "type": "str",
+          "default": "google_sheets",
+          "description": "Connector trigger source type (CONNECTOR_TRIGGER_SOURCE_TYPE)",
+          "env_vars": [
+            "SOURCE_TYPE"
+          ],
+          "required": false
+        },
+        {
+          "name": "tick_seconds",
+          "type": "int",
+          "default": "5",
+          "description": "Tick interval seconds (CONNECTOR_TRIGGER_TICK_SECONDS)",
+          "env_vars": [
+            "TICK_SECONDS"
+          ],
+          "required": false
+        },
+        {
+          "name": "poll_concurrency",
+          "type": "int",
+          "default": "5",
+          "description": "Poll concurrency (CONNECTOR_TRIGGER_POLL_CONCURRENCY)",
+          "env_vars": [
+            "POLL_CONCURRENCY"
+          ],
+          "required": false
+        },
+        {
+          "name": "outbox_batch",
+          "type": "int",
+          "default": "50",
+          "description": "Outbox batch size (CONNECTOR_TRIGGER_OUTBOX_BATCH)",
+          "env_vars": [
+            "OUTBOX_BATCH"
+          ],
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "ObjectifySettings",
+      "docstring": "Objectify worker settings.",
+      "field_count": 14,
+      "fields": [
+        {
+          "name": "worker_handler",
+          "type": "str",
+          "default": "objectify_worker",
+          "description": "Worker handler label (OBJECTIFY_WORKER_HANDLER)",
+          "env_vars": [
+            "WORKER_HANDLER"
+          ],
+          "required": false
+        },
+        {
+          "name": "batch_size",
+          "type": "int",
+          "default": "500",
+          "description": "Default batch size (OBJECTIFY_BATCH_SIZE)",
+          "env_vars": [
+            "BATCH_SIZE"
+          ],
+          "required": false
+        },
+        {
+          "name": "row_batch_size",
+          "type": "int",
+          "default": "1000",
+          "description": "Row batch size (OBJECTIFY_ROW_BATCH_SIZE)",
+          "env_vars": [
+            "ROW_BATCH_SIZE"
+          ],
+          "required": false
+        },
+        {
+          "name": "bulk_update_batch_size",
+          "type": "Optional[int]",
+          "default": null,
+          "description": "Bulk update batch size (OBJECTIFY_BULK_UPDATE_BATCH_SIZE; default OBJECTIFY_BATCH_SIZE)",
+          "env_vars": [
+            "BULK_UPDATE_BATCH_SIZE"
+          ],
+          "required": true
+        },
+        {
+          "name": "list_page_size",
+          "type": "int",
+          "default": "1000",
+          "description": "Pagination page size (OBJECTIFY_LIST_PAGE_SIZE)",
+          "env_vars": [
+            "LIST_PAGE_SIZE"
+          ],
+          "required": false
+        },
+        {
+          "name": "max_rows",
+          "type": "int",
+          "default": "0",
+          "description": "Max rows limit (0=unlimited) (OBJECTIFY_MAX_ROWS)",
+          "env_vars": [
+            "MAX_ROWS"
+          ],
+          "required": false
+        },
+        {
+          "name": "lineage_max_links",
+          "type": "int",
+          "default": "1000",
+          "description": "Max lineage links emitted (OBJECTIFY_LINEAGE_MAX_LINKS)",
+          "env_vars": [
+            "LINEAGE_MAX_LINKS"
+          ],
+          "required": false
+        },
+        {
+          "name": "max_retries",
+          "type": "int",
+          "default": "5",
+          "description": "Max retries (OBJECTIFY_MAX_RETRIES)",
+          "env_vars": [
+            "MAX_RETRIES"
+          ],
+          "required": false
+        },
+        {
+          "name": "backoff_base_seconds",
+          "type": "int",
+          "default": "2",
+          "description": "Backoff base seconds (OBJECTIFY_BACKOFF_BASE_SECONDS)",
+          "env_vars": [
+            "BACKOFF_BASE_SECONDS"
+          ],
+          "required": false
+        },
+        {
+          "name": "backoff_max_seconds",
+          "type": "int",
+          "default": "60",
+          "description": "Backoff max seconds (OBJECTIFY_BACKOFF_MAX_SECONDS)",
+          "env_vars": [
+            "BACKOFF_MAX_SECONDS"
+          ],
+          "required": false
+        },
+        {
+          "name": "ontology_pk_validation_mode",
+          "type": "str",
+          "default": "warn",
+          "description": "When ontology schema declares primaryKey, validate object_type pk_spec matches (fields + order). Modes: off|warn|fail (OBJECTIFY_ONTOLOGY_PK_VALIDATION_MODE).",
+          "env_vars": [
+            "ONTOLOGY_PK_VALIDATION_MODE"
+          ],
+          "required": false
+        },
+        {
+          "name": "dataset_primary_index_chunk_size",
+          "type": "int",
+          "default": "500",
+          "description": "Chunk size for dataset-primary ES bulk indexing (OBJECTIFY_DATASET_PRIMARY_INDEX_CHUNK_SIZE).",
+          "env_vars": [
+            "DATASET_PRIMARY_INDEX_CHUNK_SIZE"
+          ],
+          "required": false
+        },
+        {
+          "name": "dataset_primary_refresh",
+          "type": "bool",
+          "default": "False",
+          "description": "Refresh ES index after dataset-primary writes (OBJECTIFY_DATASET_PRIMARY_REFRESH).",
+          "env_vars": [
+            "DATASET_PRIMARY_REFRESH"
+          ],
+          "required": false
+        },
+        {
+          "name": "dataset_primary_prune_stale_on_full",
+          "type": "bool",
+          "default": "True",
+          "description": "When execution_mode=full, delete stale class instances not present in current dataset snapshot (OBJECTIFY_DATASET_PRIMARY_PRUNE_STALE_ON_FULL).",
+          "env_vars": [
+            "DATASET_PRIMARY_PRUNE_STALE_ON_FULL"
+          ],
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "IngestReconcilerSettings",
+      "docstring": "Dataset ingest reconciler worker settings.",
+      "field_count": 11,
+      "fields": [
+        {
+          "name": "enabled",
+          "type": "bool",
+          "default": "True",
+          "description": "Enable ingest reconciler (ENABLE_DATASET_INGEST_RECONCILER)",
+          "env_vars": [
+            "ENABLED",
+            "ENABLE_DATASET_INGEST_RECONCILER"
+          ],
+          "required": false
+        },
+        {
+          "name": "poll_seconds",
+          "type": "int",
+          "default": "60",
+          "description": "Poll interval seconds (DATASET_INGEST_RECONCILER_POLL_SECONDS)",
+          "env_vars": [
+            "POLL_SECONDS",
+            "DATASET_INGEST_RECONCILER_POLL_SECONDS"
+          ],
+          "required": false
+        },
+        {
+          "name": "stale_seconds",
+          "type": "int",
+          "default": "3600",
+          "description": "Stale cutoff seconds (DATASET_INGEST_RECONCILER_STALE_SECONDS)",
+          "env_vars": [
+            "STALE_SECONDS",
+            "DATASET_INGEST_RECONCILER_STALE_SECONDS"
+          ],
+          "required": false
+        },
+        {
+          "name": "limit",
+          "type": "int",
+          "default": "200",
+          "description": "Max ingest rows per run (DATASET_INGEST_RECONCILER_LIMIT)",
+          "env_vars": [
+            "LIMIT",
+            "DATASET_INGEST_RECONCILER_LIMIT"
+          ],
+          "required": false
+        },
+        {
+          "name": "lock_key",
+          "type": "int",
+          "default": "910214",
+          "description": "Postgres advisory lock key (DATASET_INGEST_RECONCILER_LOCK_KEY)",
+          "env_vars": [
+            "LOCK_KEY",
+            "DATASET_INGEST_RECONCILER_LOCK_KEY"
+          ],
+          "required": false
+        },
+        {
+          "name": "alert_published_threshold",
+          "type": "int",
+          "default": "1",
+          "description": "Alert threshold for published count (INGEST_RECONCILER_ALERT_PUBLISHED_THRESHOLD)",
+          "env_vars": [
+            "ALERT_PUBLISHED_THRESHOLD"
+          ],
+          "required": false
+        },
+        {
+          "name": "alert_aborted_threshold",
+          "type": "int",
+          "default": "1",
+          "description": "Alert threshold for aborted count (INGEST_RECONCILER_ALERT_ABORTED_THRESHOLD)",
+          "env_vars": [
+            "ALERT_ABORTED_THRESHOLD"
+          ],
+          "required": false
+        },
+        {
+          "name": "alert_on_error",
+          "type": "bool",
+          "default": "True",
+          "description": "Alert on exceptions (INGEST_RECONCILER_ALERT_ON_ERROR)",
+          "env_vars": [
+            "ALERT_ON_ERROR"
+          ],
+          "required": false
+        },
+        {
+          "name": "alert_cooldown_seconds",
+          "type": "int",
+          "default": "300",
+          "description": "Alert cooldown seconds (INGEST_RECONCILER_ALERT_COOLDOWN_SECONDS)",
+          "env_vars": [
+            "ALERT_COOLDOWN_SECONDS"
+          ],
+          "required": false
+        },
+        {
+          "name": "alert_webhook_url",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "Webhook URL (INGEST_RECONCILER_ALERT_WEBHOOK_URL; fallback ALERT_WEBHOOK_URL)",
+          "env_vars": [
+            "ALERT_WEBHOOK_URL"
+          ],
+          "required": true
+        },
+        {
+          "name": "port",
+          "type": "int",
+          "default": "8012",
+          "description": "Worker port (INGEST_RECONCILER_PORT)",
+          "env_vars": [
+            "PORT",
+            "INGEST_RECONCILER_PORT"
+          ],
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "DatasetIngestOutboxSettings",
+      "docstring": "Dataset ingest outbox worker settings (BFF embedded worker).",
+      "field_count": 16,
+      "fields": [
+        {
+          "name": "enabled",
+          "type": "bool",
+          "default": "True",
+          "description": "Enable dataset ingest outbox worker (ENABLE_DATASET_INGEST_OUTBOX_WORKER)",
+          "env_vars": [
+            "ENABLED",
+            "ENABLE_DATASET_INGEST_OUTBOX_WORKER"
+          ],
+          "required": false
+        },
+        {
+          "name": "poll_seconds",
+          "type": "int",
+          "default": "5",
+          "description": "Poll interval seconds (DATASET_INGEST_OUTBOX_POLL_SECONDS)",
+          "env_vars": [
+            "POLL_SECONDS",
+            "DATASET_INGEST_OUTBOX_POLL_SECONDS"
+          ],
+          "required": false
+        },
+        {
+          "name": "flush_timeout_seconds",
+          "type": "float",
+          "default": "10.0",
+          "description": "Kafka flush timeout seconds (DATASET_INGEST_OUTBOX_FLUSH_TIMEOUT_SECONDS)",
+          "env_vars": [
+            "FLUSH_TIMEOUT_SECONDS",
+            "DATASET_INGEST_OUTBOX_FLUSH_TIMEOUT_SECONDS"
+          ],
+          "required": false
+        },
+        {
+          "name": "backoff_base_seconds",
+          "type": "int",
+          "default": "2",
+          "description": "Retry backoff base seconds (DATASET_INGEST_OUTBOX_BACKOFF_BASE_SECONDS)",
+          "env_vars": [
+            "BACKOFF_BASE_SECONDS",
+            "DATASET_INGEST_OUTBOX_BACKOFF_BASE_SECONDS"
+          ],
+          "required": false
+        },
+        {
+          "name": "backoff_max_seconds",
+          "type": "int",
+          "default": "60",
+          "description": "Retry backoff max seconds (DATASET_INGEST_OUTBOX_BACKOFF_MAX_SECONDS)",
+          "env_vars": [
+            "BACKOFF_MAX_SECONDS",
+            "DATASET_INGEST_OUTBOX_BACKOFF_MAX_SECONDS"
+          ],
+          "required": false
+        },
+        {
+          "name": "max_retries",
+          "type": "int",
+          "default": "5",
+          "description": "Max retries before DLQ (DATASET_INGEST_OUTBOX_MAX_RETRIES)",
+          "env_vars": [
+            "MAX_RETRIES",
+            "DATASET_INGEST_OUTBOX_MAX_RETRIES"
+          ],
+          "required": false
+        },
+        {
+          "name": "claim_timeout_seconds",
+          "type": "int",
+          "default": "300",
+          "description": "Claim timeout seconds (DATASET_INGEST_OUTBOX_CLAIM_TIMEOUT_SECONDS)",
+          "env_vars": [
+            "CLAIM_TIMEOUT_SECONDS",
+            "DATASET_INGEST_OUTBOX_CLAIM_TIMEOUT_SECONDS"
+          ],
+          "required": false
+        },
+        {
+          "name": "worker_id",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "Worker id override (DATASET_INGEST_OUTBOX_WORKER_ID)",
+          "env_vars": [
+            "WORKER_ID",
+            "DATASET_INGEST_OUTBOX_WORKER_ID"
+          ],
+          "required": true
+        },
+        {
+          "name": "purge_interval_seconds",
+          "type": "int",
+          "default": "3600",
+          "description": "Purge interval seconds (DATASET_INGEST_OUTBOX_PURGE_INTERVAL_SECONDS)",
+          "env_vars": [
+            "PURGE_INTERVAL_SECONDS",
+            "DATASET_INGEST_OUTBOX_PURGE_INTERVAL_SECONDS"
+          ],
+          "required": false
+        },
+        {
+          "name": "retention_days",
+          "type": "int",
+          "default": "7",
+          "description": "Retention days (DATASET_INGEST_OUTBOX_RETENTION_DAYS)",
+          "env_vars": [
+            "RETENTION_DAYS",
+            "DATASET_INGEST_OUTBOX_RETENTION_DAYS"
+          ],
+          "required": false
+        },
+        {
+          "name": "purge_limit",
+          "type": "int",
+          "default": "10000",
+          "description": "Purge batch limit (DATASET_INGEST_OUTBOX_PURGE_LIMIT)",
+          "env_vars": [
+            "PURGE_LIMIT",
+            "DATASET_INGEST_OUTBOX_PURGE_LIMIT"
+          ],
+          "required": false
+        },
+        {
+          "name": "enable_dlq",
+          "type": "bool",
+          "default": "True",
+          "description": "Enable DLQ publishing (ENABLE_DATASET_INGEST_OUTBOX_DLQ)",
+          "env_vars": [
+            "ENABLE_DLQ",
+            "ENABLE_DATASET_INGEST_OUTBOX_DLQ"
+          ],
+          "required": false
+        },
+        {
+          "name": "dlq_max_in_flight",
+          "type": "int",
+          "default": "5",
+          "description": "DLQ producer max in-flight requests (DATASET_INGEST_OUTBOX_MAX_IN_FLIGHT)",
+          "env_vars": [
+            "DLQ_MAX_IN_FLIGHT",
+            "DATASET_INGEST_OUTBOX_MAX_IN_FLIGHT"
+          ],
+          "required": false
+        },
+        {
+          "name": "dlq_delivery_timeout_ms",
+          "type": "int",
+          "default": "120000",
+          "description": "DLQ producer delivery.timeout.ms (DATASET_INGEST_OUTBOX_DELIVERY_TIMEOUT_MS)",
+          "env_vars": [
+            "DLQ_DELIVERY_TIMEOUT_MS",
+            "DATASET_INGEST_OUTBOX_DELIVERY_TIMEOUT_MS"
+          ],
+          "required": false
+        },
+        {
+          "name": "dlq_request_timeout_ms",
+          "type": "int",
+          "default": "30000",
+          "description": "DLQ producer request.timeout.ms (DATASET_INGEST_OUTBOX_REQUEST_TIMEOUT_MS)",
+          "env_vars": [
+            "DLQ_REQUEST_TIMEOUT_MS",
+            "DATASET_INGEST_OUTBOX_REQUEST_TIMEOUT_MS"
+          ],
+          "required": false
+        },
+        {
+          "name": "dlq_retries",
+          "type": "int",
+          "default": "5",
+          "description": "DLQ producer retries (DATASET_INGEST_OUTBOX_RETRIES)",
+          "env_vars": [
+            "DLQ_RETRIES",
+            "DATASET_INGEST_OUTBOX_RETRIES"
+          ],
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "ObjectifyOutboxWorkerSettings",
+      "docstring": "Objectify outbox worker settings (BFF embedded worker).",
+      "field_count": 15,
+      "fields": [
+        {
+          "name": "enabled",
+          "type": "bool",
+          "default": "True",
+          "description": "Enable objectify outbox worker (ENABLE_OBJECTIFY_OUTBOX_WORKER)",
+          "env_vars": [
+            "ENABLED",
+            "ENABLE_OBJECTIFY_OUTBOX_WORKER"
+          ],
+          "required": false
+        },
+        {
+          "name": "poll_seconds",
+          "type": "int",
+          "default": "5",
+          "description": "Poll interval seconds (OBJECTIFY_OUTBOX_POLL_SECONDS)",
+          "env_vars": [
+            "POLL_SECONDS",
+            "OBJECTIFY_OUTBOX_POLL_SECONDS"
+          ],
+          "required": false
+        },
+        {
+          "name": "batch_size",
+          "type": "int",
+          "default": "50",
+          "description": "Batch size per scan (OBJECTIFY_OUTBOX_BATCH)",
+          "env_vars": [
+            "BATCH_SIZE",
+            "OBJECTIFY_OUTBOX_BATCH"
+          ],
+          "required": false
+        },
+        {
+          "name": "flush_timeout_seconds",
+          "type": "float",
+          "default": "10.0",
+          "description": "Kafka flush timeout seconds (OBJECTIFY_OUTBOX_FLUSH_TIMEOUT_SECONDS)",
+          "env_vars": [
+            "FLUSH_TIMEOUT_SECONDS",
+            "OBJECTIFY_OUTBOX_FLUSH_TIMEOUT_SECONDS"
+          ],
+          "required": false
+        },
+        {
+          "name": "backoff_base_seconds",
+          "type": "int",
+          "default": "2",
+          "description": "Retry backoff base seconds (OBJECTIFY_OUTBOX_BACKOFF_BASE_SECONDS)",
+          "env_vars": [
+            "BACKOFF_BASE_SECONDS",
+            "OBJECTIFY_OUTBOX_BACKOFF_BASE_SECONDS"
+          ],
+          "required": false
+        },
+        {
+          "name": "backoff_max_seconds",
+          "type": "int",
+          "default": "60",
+          "description": "Retry backoff max seconds (OBJECTIFY_OUTBOX_BACKOFF_MAX_SECONDS)",
+          "env_vars": [
+            "BACKOFF_MAX_SECONDS",
+            "OBJECTIFY_OUTBOX_BACKOFF_MAX_SECONDS"
+          ],
+          "required": false
+        },
+        {
+          "name": "claim_timeout_seconds",
+          "type": "int",
+          "default": "300",
+          "description": "Claim timeout seconds (OBJECTIFY_OUTBOX_CLAIM_TIMEOUT_SECONDS)",
+          "env_vars": [
+            "CLAIM_TIMEOUT_SECONDS",
+            "OBJECTIFY_OUTBOX_CLAIM_TIMEOUT_SECONDS"
+          ],
+          "required": false
+        },
+        {
+          "name": "worker_id",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "Worker id override (OBJECTIFY_OUTBOX_WORKER_ID)",
+          "env_vars": [
+            "WORKER_ID",
+            "OBJECTIFY_OUTBOX_WORKER_ID"
+          ],
+          "required": true
+        },
+        {
+          "name": "purge_interval_seconds",
+          "type": "int",
+          "default": "3600",
+          "description": "Purge interval seconds (OBJECTIFY_OUTBOX_PURGE_INTERVAL_SECONDS)",
+          "env_vars": [
+            "PURGE_INTERVAL_SECONDS",
+            "OBJECTIFY_OUTBOX_PURGE_INTERVAL_SECONDS"
+          ],
+          "required": false
+        },
+        {
+          "name": "retention_days",
+          "type": "int",
+          "default": "7",
+          "description": "Retention days (OBJECTIFY_OUTBOX_RETENTION_DAYS)",
+          "env_vars": [
+            "RETENTION_DAYS",
+            "OBJECTIFY_OUTBOX_RETENTION_DAYS"
+          ],
+          "required": false
+        },
+        {
+          "name": "purge_limit",
+          "type": "int",
+          "default": "10000",
+          "description": "Purge batch limit (OBJECTIFY_OUTBOX_PURGE_LIMIT)",
+          "env_vars": [
+            "PURGE_LIMIT",
+            "OBJECTIFY_OUTBOX_PURGE_LIMIT"
+          ],
+          "required": false
+        },
+        {
+          "name": "producer_max_in_flight",
+          "type": "int",
+          "default": "5",
+          "description": "Kafka producer max in-flight requests (OBJECTIFY_OUTBOX_MAX_IN_FLIGHT)",
+          "env_vars": [
+            "PRODUCER_MAX_IN_FLIGHT",
+            "OBJECTIFY_OUTBOX_MAX_IN_FLIGHT"
+          ],
+          "required": false
+        },
+        {
+          "name": "producer_delivery_timeout_ms",
+          "type": "int",
+          "default": "120000",
+          "description": "Kafka producer delivery.timeout.ms (OBJECTIFY_OUTBOX_DELIVERY_TIMEOUT_MS)",
+          "env_vars": [
+            "PRODUCER_DELIVERY_TIMEOUT_MS",
+            "OBJECTIFY_OUTBOX_DELIVERY_TIMEOUT_MS"
+          ],
+          "required": false
+        },
+        {
+          "name": "producer_request_timeout_ms",
+          "type": "int",
+          "default": "30000",
+          "description": "Kafka producer request.timeout.ms (OBJECTIFY_OUTBOX_REQUEST_TIMEOUT_MS)",
+          "env_vars": [
+            "PRODUCER_REQUEST_TIMEOUT_MS",
+            "OBJECTIFY_OUTBOX_REQUEST_TIMEOUT_MS"
+          ],
+          "required": false
+        },
+        {
+          "name": "producer_retries",
+          "type": "int",
+          "default": "5",
+          "description": "Kafka producer retries (OBJECTIFY_OUTBOX_RETRIES)",
+          "env_vars": [
+            "PRODUCER_RETRIES",
+            "OBJECTIFY_OUTBOX_RETRIES"
+          ],
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "ObjectifyReconcilerSettings",
+      "docstring": "Objectify reconciler worker settings (BFF embedded worker).",
+      "field_count": 5,
+      "fields": [
+        {
+          "name": "enabled",
+          "type": "bool",
+          "default": "True",
+          "description": "Enable objectify reconciler (ENABLE_OBJECTIFY_RECONCILER)",
+          "env_vars": [
+            "ENABLED",
+            "ENABLE_OBJECTIFY_RECONCILER"
+          ],
+          "required": false
+        },
+        {
+          "name": "poll_seconds",
+          "type": "int",
+          "default": "60",
+          "description": "Poll interval seconds (OBJECTIFY_RECONCILER_POLL_SECONDS)",
+          "env_vars": [
+            "POLL_SECONDS",
+            "OBJECTIFY_RECONCILER_POLL_SECONDS"
+          ],
+          "required": false
+        },
+        {
+          "name": "stale_after_seconds",
+          "type": "int",
+          "default": "600",
+          "description": "Stale cutoff seconds (OBJECTIFY_RECONCILER_STALE_SECONDS)",
+          "env_vars": [
+            "STALE_AFTER_SECONDS",
+            "OBJECTIFY_RECONCILER_STALE_SECONDS"
+          ],
+          "required": false
+        },
+        {
+          "name": "enqueued_stale_seconds",
+          "type": "int",
+          "default": "900",
+          "description": "Stale cutoff seconds for QUEUED runs (OBJECTIFY_RECONCILER_ENQUEUED_STALE_SECONDS; 0=disabled)",
+          "env_vars": [
+            "ENQUEUED_STALE_SECONDS",
+            "OBJECTIFY_RECONCILER_ENQUEUED_STALE_SECONDS"
+          ],
+          "required": false
+        },
+        {
+          "name": "lock_key",
+          "type": "int",
+          "default": "910215",
+          "description": "Postgres advisory lock key (OBJECTIFY_RECONCILER_LOCK_KEY)",
+          "env_vars": [
+            "LOCK_KEY",
+            "OBJECTIFY_RECONCILER_LOCK_KEY"
+          ],
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "WritebackMaterializerSettings",
+      "docstring": "Writeback materializer worker settings.",
+      "field_count": 4,
+      "fields": [
+        {
+          "name": "base_branch",
+          "type": "str",
+          "default": "main",
+          "description": "Base branch (WRITEBACK_MATERIALIZER_BASE_BRANCH)",
+          "env_vars": [
+            "BASE_BRANCH"
+          ],
+          "required": false
+        },
+        {
+          "name": "interval_seconds",
+          "type": "float",
+          "default": null,
+          "description": "Run interval seconds (WRITEBACK_MATERIALIZER_INTERVAL_SECONDS)",
+          "env_vars": [
+            "INTERVAL_SECONDS"
+          ],
+          "required": true
+        },
+        {
+          "name": "run_once",
+          "type": "bool",
+          "default": "False",
+          "description": "Run once and exit (WRITEBACK_MATERIALIZER_RUN_ONCE)",
+          "env_vars": [
+            "RUN_ONCE"
+          ],
+          "required": false
+        },
+        {
+          "name": "db_names",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "Comma-separated db names to materialize (WRITEBACK_MATERIALIZER_DB_NAMES)",
+          "env_vars": [
+            "DB_NAMES"
+          ],
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "EventPublisherSettings",
+      "docstring": "Event publisher (message relay) settings.",
+      "field_count": 12,
+      "fields": [
+        {
+          "name": "checkpoint_key",
+          "type": "str",
+          "default": "checkpoints/event_publisher.json",
+          "description": "Checkpoint S3 key (EVENT_PUBLISHER_CHECKPOINT_KEY)",
+          "env_vars": [
+            "CHECKPOINT_KEY"
+          ],
+          "required": false
+        },
+        {
+          "name": "poll_interval",
+          "type": "int",
+          "default": "3",
+          "description": "Poll interval seconds (EVENT_PUBLISHER_POLL_INTERVAL; compatibility MESSAGE_RELAY_POLL_INTERVAL)",
+          "env_vars": [
+            "POLL_INTERVAL"
+          ],
+          "required": false
+        },
+        {
+          "name": "batch_size",
+          "type": "int",
+          "default": "200",
+          "description": "Batch size (EVENT_PUBLISHER_BATCH_SIZE; compatibility MESSAGE_RELAY_BATCH_SIZE)",
+          "env_vars": [
+            "BATCH_SIZE"
+          ],
+          "required": false
+        },
+        {
+          "name": "kafka_flush_batch_size",
+          "type": "Optional[int]",
+          "default": null,
+          "description": "Kafka flush batch size (EVENT_PUBLISHER_KAFKA_FLUSH_BATCH_SIZE; default batch_size)",
+          "env_vars": [
+            "KAFKA_FLUSH_BATCH_SIZE"
+          ],
+          "required": true
+        },
+        {
+          "name": "kafka_flush_timeout_seconds",
+          "type": "float",
+          "default": "10.0",
+          "description": "Kafka flush timeout seconds (EVENT_PUBLISHER_KAFKA_FLUSH_TIMEOUT_SECONDS)",
+          "env_vars": [
+            "KAFKA_FLUSH_TIMEOUT_SECONDS"
+          ],
+          "required": false
+        },
+        {
+          "name": "metrics_log_interval_seconds",
+          "type": "int",
+          "default": "30",
+          "description": "Metrics log interval seconds (EVENT_PUBLISHER_METRICS_LOG_INTERVAL_SECONDS)",
+          "env_vars": [
+            "METRICS_LOG_INTERVAL_SECONDS"
+          ],
+          "required": false
+        },
+        {
+          "name": "lookback_seconds",
+          "type": "int",
+          "default": "600",
+          "description": "Lookback seconds (EVENT_PUBLISHER_LOOKBACK_SECONDS)",
+          "env_vars": [
+            "LOOKBACK_SECONDS"
+          ],
+          "required": false
+        },
+        {
+          "name": "lookback_max_keys",
+          "type": "int",
+          "default": "2000",
+          "description": "Lookback max keys (EVENT_PUBLISHER_LOOKBACK_MAX_KEYS)",
+          "env_vars": [
+            "LOOKBACK_MAX_KEYS"
+          ],
+          "required": false
+        },
+        {
+          "name": "dedup_max_events",
+          "type": "int",
+          "default": "10000",
+          "description": "Dedup max events (EVENT_PUBLISHER_DEDUP_MAX_EVENTS)",
+          "env_vars": [
+            "DEDUP_MAX_EVENTS"
+          ],
+          "required": false
+        },
+        {
+          "name": "dedup_checkpoint_max_events",
+          "type": "int",
+          "default": "2000",
+          "description": "Dedup checkpoint max events (EVENT_PUBLISHER_DEDUP_CHECKPOINT_MAX_EVENTS)",
+          "env_vars": [
+            "DEDUP_CHECKPOINT_MAX_EVENTS"
+          ],
+          "required": false
+        },
+        {
+          "name": "start_timestamp",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "Optional start timestamp ISO8601 (EVENT_PUBLISHER_START_TIMESTAMP)",
+          "env_vars": [
+            "START_TIMESTAMP"
+          ],
+          "required": true
+        },
+        {
+          "name": "kafka_topic_bootstrap_timeout_seconds",
+          "type": "int",
+          "default": "120",
+          "description": "Kafka topic bootstrap timeout seconds (KAFKA_TOPIC_BOOTSTRAP_TIMEOUT_SECONDS)",
+          "env_vars": [
+            "KAFKA_TOPIC_BOOTSTRAP_TIMEOUT_SECONDS"
+          ],
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "AgentRetentionWorkerSettings",
+      "docstring": "Agent session retention worker settings (SEC-005).",
+      "field_count": 5,
+      "fields": [
+        {
+          "name": "enabled",
+          "type": "bool",
+          "default": "False",
+          "description": "Enable agent retention worker (AGENT_RETENTION_ENABLED)",
+          "env_vars": [
+            "ENABLED"
+          ],
+          "required": false
+        },
+        {
+          "name": "poll_seconds",
+          "type": "int",
+          "default": "3600",
+          "description": "Retention worker poll seconds (AGENT_RETENTION_POLL_SECONDS)",
+          "env_vars": [
+            "POLL_SECONDS"
+          ],
+          "required": false
+        },
+        {
+          "name": "retention_days",
+          "type": "int",
+          "default": "30",
+          "description": "Retention days for agent session data (AGENT_RETENTION_DAYS)",
+          "env_vars": [
+            "RETENTION_DAYS"
+          ],
+          "required": false
+        },
+        {
+          "name": "action",
+          "type": "str",
+          "default": "redact",
+          "description": "Retention action redact|delete (AGENT_RETENTION_ACTION)",
+          "env_vars": [
+            "ACTION"
+          ],
+          "required": false
+        },
+        {
+          "name": "policy_json",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "Retention policy JSON per object type (AGENT_RETENTION_POLICY_JSON)",
+          "env_vars": [
+            "POLICY_JSON"
+          ],
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "SchemaChangeMonitorSettings",
+      "docstring": "Schema change monitor settings for proactive drift detection.",
+      "field_count": 3,
+      "fields": [
+        {
+          "name": "enabled",
+          "type": "bool",
+          "default": "False",
+          "description": "Enable schema change monitor (SCHEMA_MONITOR_ENABLED)",
+          "env_vars": [
+            "ENABLED"
+          ],
+          "required": false
+        },
+        {
+          "name": "check_interval_seconds",
+          "type": "int",
+          "default": "300",
+          "description": "Schema check interval in seconds (SCHEMA_MONITOR_CHECK_INTERVAL_SECONDS)",
+          "env_vars": [
+            "CHECK_INTERVAL_SECONDS"
+          ],
+          "required": false
+        },
+        {
+          "name": "cooldown_seconds",
+          "type": "int",
+          "default": "3600",
+          "description": "Notification cooldown in seconds (SCHEMA_MONITOR_COOLDOWN_SECONDS)",
+          "env_vars": [
+            "COOLDOWN_SECONDS"
+          ],
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "ChaosSettings",
+      "docstring": "Chaos/fault injection settings (test-only).",
+      "field_count": 4,
+      "fields": [
+        {
+          "name": "enabled",
+          "type": "bool",
+          "default": "False",
+          "description": "Enable chaos injection (ENABLE_CHAOS_INJECTION)",
+          "env_vars": [
+            "ENABLED",
+            "ENABLE_CHAOS_INJECTION"
+          ],
+          "required": false
+        },
+        {
+          "name": "crash_point",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "Crash point selector (CHAOS_CRASH_POINT)",
+          "env_vars": [
+            "CRASH_POINT"
+          ],
+          "required": true
+        },
+        {
+          "name": "crash_once",
+          "type": "bool",
+          "default": "True",
+          "description": "Crash only once per container (CHAOS_CRASH_ONCE)",
+          "env_vars": [
+            "CRASH_ONCE"
+          ],
+          "required": false
+        },
+        {
+          "name": "crash_exit_code",
+          "type": "int",
+          "default": "42",
+          "description": "Process exit code when crashing (CHAOS_CRASH_EXIT_CODE)",
+          "env_vars": [
+            "CRASH_EXIT_CODE"
+          ],
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "WorkersSettings",
+      "docstring": "Workers/services runtime settings.",
+      "field_count": 17,
+      "fields": [
+        {
+          "name": "instance",
+          "type": "InstanceWorkerSettings",
+          "default": "InstanceWorkerSettings",
+          "description": "",
+          "env_vars": [
+            "INSTANCE"
+          ],
+          "required": false
+        },
+        {
+          "name": "ontology",
+          "type": "OntologyWorkerSettings",
+          "default": "OntologyWorkerSettings",
+          "description": "",
+          "env_vars": [
+            "ONTOLOGY"
+          ],
+          "required": false
+        },
+        {
+          "name": "ontology_deploy_outbox",
+          "type": "OntologyDeployOutboxSettings",
+          "default": "OntologyDeployOutboxSettings",
+          "description": "",
+          "env_vars": [
+            "ONTOLOGY_DEPLOY_OUTBOX"
+          ],
+          "required": false
+        },
+        {
+          "name": "projection",
+          "type": "ProjectionWorkerSettings",
+          "default": "ProjectionWorkerSettings",
+          "description": "",
+          "env_vars": [
+            "PROJECTION"
+          ],
+          "required": false
+        },
+        {
+          "name": "action",
+          "type": "ActionWorkerSettings",
+          "default": "ActionWorkerSettings",
+          "description": "",
+          "env_vars": [
+            "ACTION"
+          ],
+          "required": false
+        },
+        {
+          "name": "action_outbox",
+          "type": "ActionOutboxSettings",
+          "default": "ActionOutboxSettings",
+          "description": "",
+          "env_vars": [
+            "ACTION_OUTBOX"
+          ],
+          "required": false
+        },
+        {
+          "name": "connector_sync",
+          "type": "ConnectorSyncSettings",
+          "default": "ConnectorSyncSettings",
+          "description": "",
+          "env_vars": [
+            "CONNECTOR_SYNC"
+          ],
+          "required": false
+        },
+        {
+          "name": "connector_trigger",
+          "type": "ConnectorTriggerSettings",
+          "default": "ConnectorTriggerSettings",
+          "description": "",
+          "env_vars": [
+            "CONNECTOR_TRIGGER"
+          ],
+          "required": false
+        },
+        {
+          "name": "objectify",
+          "type": "ObjectifySettings",
+          "default": "ObjectifySettings",
+          "description": "",
+          "env_vars": [
+            "OBJECTIFY"
+          ],
+          "required": false
+        },
+        {
+          "name": "dataset_ingest_outbox",
+          "type": "DatasetIngestOutboxSettings",
+          "default": "DatasetIngestOutboxSettings",
+          "description": "",
+          "env_vars": [
+            "DATASET_INGEST_OUTBOX"
+          ],
+          "required": false
+        },
+        {
+          "name": "ingest_reconciler",
+          "type": "IngestReconcilerSettings",
+          "default": "IngestReconcilerSettings",
+          "description": "",
+          "env_vars": [
+            "INGEST_RECONCILER"
+          ],
+          "required": false
+        },
+        {
+          "name": "objectify_outbox",
+          "type": "ObjectifyOutboxWorkerSettings",
+          "default": "ObjectifyOutboxWorkerSettings",
+          "description": "",
+          "env_vars": [
+            "OBJECTIFY_OUTBOX"
+          ],
+          "required": false
+        },
+        {
+          "name": "objectify_reconciler",
+          "type": "ObjectifyReconcilerSettings",
+          "default": "ObjectifyReconcilerSettings",
+          "description": "",
+          "env_vars": [
+            "OBJECTIFY_RECONCILER"
+          ],
+          "required": false
+        },
+        {
+          "name": "writeback_materializer",
+          "type": "WritebackMaterializerSettings",
+          "default": "WritebackMaterializerSettings",
+          "description": "",
+          "env_vars": [
+            "WRITEBACK_MATERIALIZER"
+          ],
+          "required": false
+        },
+        {
+          "name": "event_publisher",
+          "type": "EventPublisherSettings",
+          "default": "EventPublisherSettings",
+          "description": "",
+          "env_vars": [
+            "EVENT_PUBLISHER"
+          ],
+          "required": false
+        },
+        {
+          "name": "agent_retention",
+          "type": "AgentRetentionWorkerSettings",
+          "default": "AgentRetentionWorkerSettings",
+          "description": "",
+          "env_vars": [
+            "AGENT_RETENTION"
+          ],
+          "required": false
+        },
+        {
+          "name": "schema_change_monitor",
+          "type": "SchemaChangeMonitorSettings",
+          "default": "SchemaChangeMonitorSettings",
+          "description": "",
+          "env_vars": [
+            "SCHEMA_CHANGE_MONITOR"
+          ],
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "WritebackSettings",
+      "docstring": "Ontology writeback + read overlay settings",
+      "field_count": 10,
+      "fields": [
+        {
+          "name": "ontology_writeback_repo",
+          "type": "str",
+          "default": "ontology-writeback",
+          "description": "lakeFS repository for writeback (ONTOLOGY_WRITEBACK_REPO)",
+          "env_vars": [
+            "ONTOLOGY_WRITEBACK_REPO"
+          ],
+          "required": false
+        },
+        {
+          "name": "ontology_writeback_branch_prefix",
+          "type": "str",
+          "default": "writeback",
+          "description": "Branch prefix for writeback branches (ONTOLOGY_WRITEBACK_BRANCH_PREFIX)",
+          "env_vars": [
+            "ONTOLOGY_WRITEBACK_BRANCH_PREFIX"
+          ],
+          "required": false
+        },
+        {
+          "name": "ontology_writeback_dataset_id",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "Optional dataset id for writeback scope (ONTOLOGY_WRITEBACK_DATASET_ID)",
+          "env_vars": [
+            "ONTOLOGY_WRITEBACK_DATASET_ID"
+          ],
+          "required": true
+        },
+        {
+          "name": "writeback_enforce",
+          "type": "bool",
+          "default": "False",
+          "description": "Enforce writeback policy checks (WRITEBACK_ENFORCE)",
+          "env_vars": [
+            "WRITEBACK_ENFORCE"
+          ],
+          "required": false
+        },
+        {
+          "name": "writeback_enforce_governance",
+          "type": "bool",
+          "default": "False",
+          "description": "Enforce governance checks for writeback (WRITEBACK_ENFORCE_GOVERNANCE)",
+          "env_vars": [
+            "WRITEBACK_ENFORCE_GOVERNANCE"
+          ],
+          "required": false
+        },
+        {
+          "name": "writeback_enforce_action_data_access",
+          "type": "bool",
+          "default": "True",
+          "description": "Enforce action target data_access policy checks on submit/simulate/worker (WRITEBACK_ENFORCE_ACTION_DATA_ACCESS)",
+          "env_vars": [
+            "WRITEBACK_ENFORCE_ACTION_DATA_ACCESS"
+          ],
+          "required": false
+        },
+        {
+          "name": "writeback_read_overlay",
+          "type": "bool",
+          "default": "False",
+          "description": "Enable overlay reads from lakeFS branches (WRITEBACK_READ_OVERLAY)",
+          "env_vars": [
+            "WRITEBACK_READ_OVERLAY"
+          ],
+          "required": false
+        },
+        {
+          "name": "writeback_enabled_object_types",
+          "type": "str",
+          "default": "",
+          "description": "Comma-separated allowed object types for writeback/overlay (WRITEBACK_ENABLED_OBJECT_TYPES)",
+          "env_vars": [
+            "WRITEBACK_ENABLED_OBJECT_TYPES"
+          ],
+          "required": false
+        },
+        {
+          "name": "writeback_dataset_acl_scope",
+          "type": "str",
+          "default": "dataset_acl",
+          "description": "ACL scope name for writeback dataset access (WRITEBACK_DATASET_ACL_SCOPE)",
+          "env_vars": [
+            "WRITEBACK_DATASET_ACL_SCOPE"
+          ],
+          "required": false
+        },
+        {
+          "name": "writeback_submission_snapshot_max_targets",
+          "type": "int",
+          "default": "200",
+          "description": "Max targets to snapshot during writeback submission (WRITEBACK_SUBMISSION_SNAPSHOT_MAX_TARGETS)",
+          "env_vars": [
+            "WRITEBACK_SUBMISSION_SNAPSHOT_MAX_TARGETS"
+          ],
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "TestSettings",
+      "docstring": "Test environment configuration",
+      "field_count": 3,
+      "fields": [
+        {
+          "name": "test_database_url",
+          "type": "str",
+          "default": "sqlite:///./test.db",
+          "description": "Test database URL",
+          "env_vars": [
+            "TEST_DATABASE_URL"
+          ],
+          "required": false
+        },
+        {
+          "name": "test_timeout",
+          "type": "int",
+          "default": "30",
+          "description": "Test timeout in seconds",
+          "env_vars": [
+            "TEST_TIMEOUT"
+          ],
+          "required": false
+        },
+        {
+          "name": "oms_query_wait_seconds",
+          "type": "float",
+          "default": "60.0",
+          "description": "OMS query wait seconds (OMS_QUERY_WAIT_SECONDS)",
+          "env_vars": [
+            "OMS_QUERY_WAIT_SECONDS"
+          ],
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "GoogleSheetsSettings",
+      "docstring": "Google Sheets integration settings",
+      "field_count": 5,
+      "fields": [
+        {
+          "name": "google_sheets_api_key",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "Google Sheets API key",
+          "env_vars": [
+            "GOOGLE_SHEETS_API_KEY"
+          ],
+          "required": true
+        },
+        {
+          "name": "google_sheets_credentials_path",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "Google Sheets service account credentials path",
+          "env_vars": [
+            "GOOGLE_SHEETS_CREDENTIALS_PATH"
+          ],
+          "required": true
+        },
+        {
+          "name": "oauth_client_id",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "Google OAuth client id (GOOGLE_CLIENT_ID)",
+          "env_vars": [
+            "OAUTH_CLIENT_ID",
+            "GOOGLE_CLIENT_ID"
+          ],
+          "required": true
+        },
+        {
+          "name": "oauth_client_secret",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "Google OAuth client secret (GOOGLE_CLIENT_SECRET)",
+          "env_vars": [
+            "OAUTH_CLIENT_SECRET",
+            "GOOGLE_CLIENT_SECRET"
+          ],
+          "required": true
+        },
+        {
+          "name": "oauth_redirect_uri",
+          "type": "str",
+          "default": "http://localhost:8002/api/v1/data-connectors/google-sheets/oauth/callback",
+          "description": "Google OAuth redirect URI (GOOGLE_REDIRECT_URI)",
+          "env_vars": [
+            "OAUTH_REDIRECT_URI",
+            "GOOGLE_REDIRECT_URI"
+          ],
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "ApplicationSettings",
+      "docstring": "Main application settings - aggregates all other settings",
+      "field_count": 29,
+      "fields": [
+        {
+          "name": "environment",
+          "type": "Environment",
+          "default": null,
+          "description": "Application environment",
+          "env_vars": [
+            "ENVIRONMENT",
+            "SPICE_ENV"
+          ],
+          "required": true
+        },
+        {
+          "name": "debug",
+          "type": "bool",
+          "default": "True",
+          "description": "Enable debug mode",
+          "env_vars": [
+            "DEBUG"
+          ],
+          "required": false
+        },
+        {
+          "name": "database",
+          "type": "DatabaseSettings",
+          "default": "DatabaseSettings",
+          "description": "",
+          "env_vars": [
+            "DATABASE"
+          ],
+          "required": false
+        },
+        {
+          "name": "services",
+          "type": "ServiceSettings",
+          "default": "ServiceSettings",
+          "description": "",
+          "env_vars": [
+            "SERVICES"
+          ],
+          "required": false
+        },
+        {
+          "name": "llm",
+          "type": "LLMSettings",
+          "default": "LLMSettings",
+          "description": "",
+          "env_vars": [
+            "LLM"
+          ],
+          "required": false
+        },
+        {
+          "name": "observability",
+          "type": "ObservabilitySettings",
+          "default": "ObservabilitySettings",
+          "description": "",
+          "env_vars": [
+            "OBSERVABILITY"
+          ],
+          "required": false
+        },
+        {
+          "name": "graph_query",
+          "type": "GraphQuerySettings",
+          "default": "GraphQuerySettings",
+          "description": "",
+          "env_vars": [
+            "GRAPH_QUERY"
+          ],
+          "required": false
+        },
+        {
+          "name": "features",
+          "type": "FeatureFlagsSettings",
+          "default": "FeatureFlagsSettings",
+          "description": "",
+          "env_vars": [
+            "FEATURES"
+          ],
+          "required": false
+        },
+        {
+          "name": "pipeline",
+          "type": "PipelineSettings",
+          "default": "PipelineSettings",
+          "description": "",
+          "env_vars": [
+            "PIPELINE"
+          ],
+          "required": false
+        },
+        {
+          "name": "pipeline_plan",
+          "type": "PipelinePlanSettings",
+          "default": "PipelinePlanSettings",
+          "description": "",
+          "env_vars": [
+            "PIPELINE_PLAN"
+          ],
+          "required": false
+        },
+        {
+          "name": "ontology",
+          "type": "OntologySettings",
+          "default": "OntologySettings",
+          "description": "",
+          "env_vars": [
+            "ONTOLOGY"
+          ],
+          "required": false
+        },
+        {
+          "name": "agent",
+          "type": "AgentRuntimeSettings",
+          "default": "AgentRuntimeSettings",
+          "description": "",
+          "env_vars": [
+            "AGENT"
+          ],
+          "required": false
+        },
+        {
+          "name": "agent_plan",
+          "type": "AgentPlanSettings",
+          "default": "AgentPlanSettings",
+          "description": "",
+          "env_vars": [
+            "AGENT_PLAN"
+          ],
+          "required": false
+        },
+        {
+          "name": "clients",
+          "type": "ClientSettings",
+          "default": "ClientSettings",
+          "description": "",
+          "env_vars": [
+            "CLIENTS"
+          ],
+          "required": false
+        },
+        {
+          "name": "mcp",
+          "type": "MCPSettings",
+          "default": "MCPSettings",
+          "description": "",
+          "env_vars": [
+            "MCP"
+          ],
+          "required": false
+        },
+        {
+          "name": "auth",
+          "type": "AuthSettings",
+          "default": "AuthSettings",
+          "description": "",
+          "env_vars": [
+            "AUTH"
+          ],
+          "required": false
+        },
+        {
+          "name": "rate_limit",
+          "type": "RateLimitSettings",
+          "default": "RateLimitSettings",
+          "description": "",
+          "env_vars": [
+            "RATE_LIMIT"
+          ],
+          "required": false
+        },
+        {
+          "name": "messaging",
+          "type": "MessagingSettings",
+          "default": "MessagingSettings",
+          "description": "",
+          "env_vars": [
+            "MESSAGING"
+          ],
+          "required": false
+        },
+        {
+          "name": "event_sourcing",
+          "type": "EventSourcingSettings",
+          "default": "EventSourcingSettings",
+          "description": "",
+          "env_vars": [
+            "EVENT_SOURCING"
+          ],
+          "required": false
+        },
+        {
+          "name": "branch_virtualization",
+          "type": "BranchVirtualizationSettings",
+          "default": "BranchVirtualizationSettings",
+          "description": "",
+          "env_vars": [
+            "BRANCH_VIRTUALIZATION"
+          ],
+          "required": false
+        },
+        {
+          "name": "storage",
+          "type": "StorageSettings",
+          "default": "StorageSettings",
+          "description": "",
+          "env_vars": [
+            "STORAGE"
+          ],
+          "required": false
+        },
+        {
+          "name": "workers",
+          "type": "WorkersSettings",
+          "default": "WorkersSettings",
+          "description": "",
+          "env_vars": [
+            "WORKERS"
+          ],
+          "required": false
+        },
+        {
+          "name": "chaos",
+          "type": "ChaosSettings",
+          "default": "ChaosSettings",
+          "description": "",
+          "env_vars": [
+            "CHAOS"
+          ],
+          "required": false
+        },
+        {
+          "name": "cache",
+          "type": "CacheSettings",
+          "default": "CacheSettings",
+          "description": "",
+          "env_vars": [
+            "CACHE"
+          ],
+          "required": false
+        },
+        {
+          "name": "writeback",
+          "type": "WritebackSettings",
+          "default": "WritebackSettings",
+          "description": "",
+          "env_vars": [
+            "WRITEBACK"
+          ],
+          "required": false
+        },
+        {
+          "name": "security",
+          "type": "SecuritySettings",
+          "default": "SecuritySettings",
+          "description": "",
+          "env_vars": [
+            "SECURITY"
+          ],
+          "required": false
+        },
+        {
+          "name": "performance",
+          "type": "PerformanceSettings",
+          "default": "PerformanceSettings",
+          "description": "",
+          "env_vars": [
+            "PERFORMANCE"
+          ],
+          "required": false
+        },
+        {
+          "name": "test",
+          "type": "TestSettings",
+          "default": "TestSettings",
+          "description": "",
+          "env_vars": [
+            "TEST"
+          ],
+          "required": false
+        },
+        {
+          "name": "google_sheets",
+          "type": "GoogleSheetsSettings",
+          "default": "GoogleSheetsSettings",
+          "description": "",
+          "env_vars": [
+            "GOOGLE_SHEETS"
+          ],
+          "required": false
+        }
+      ]
+    }
+  ],
+  "total_fields": 522
+}
