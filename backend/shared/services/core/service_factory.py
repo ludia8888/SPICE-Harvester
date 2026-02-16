@@ -247,9 +247,8 @@ def _add_logging_middleware(app: FastAPI) -> None:
         try:
             response.headers.setdefault("X-Request-Id", request_id)
             response.headers.setdefault("X-Correlation-Id", correlation_id)
-        except Exception:
-            logging.getLogger(__name__).warning("Broad exception fallback at shared/services/core/service_factory.py:249", exc_info=True)
-            pass
+        except (AttributeError, TypeError) as header_exc:
+            logger.warning("Failed to set request tracing headers on response: %s", header_exc, exc_info=True)
 
         logger.info(
             "Request: %s %s - Response: %s - Time: %.4fs",

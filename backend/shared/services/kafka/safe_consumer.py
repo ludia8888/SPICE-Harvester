@@ -335,9 +335,12 @@ class SafeKafkaConsumer:
             try:
                 if self._consumer.assignment():
                     return True
-            except Exception:
-                logging.getLogger(__name__).warning("Broad exception fallback at shared/services/kafka/safe_consumer.py:337", exc_info=True)
-                pass
+            except Exception as exc:
+                logger.warning(
+                    "Failed to read consumer assignment while waiting for partition assignment: %s",
+                    exc,
+                    exc_info=True,
+                )
             time.sleep(0.1)
         return False
 

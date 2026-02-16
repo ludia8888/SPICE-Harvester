@@ -91,8 +91,10 @@ class EventEnvelope(BaseModel):
             if ctx_req and "request_id" not in base_metadata:
                 base_metadata["request_id"] = ctx_req
         except Exception:
-            logging.getLogger(__name__).warning("Broad exception fallback at shared/models/event_envelope.py:92", exc_info=True)
-            pass
+            logging.getLogger(__name__).warning(
+                "Failed to enrich event envelope metadata from request context",
+                exc_info=True,
+            )
         if kafka_topic:
             base_metadata["kafka_topic"] = kafka_topic
         if metadata:

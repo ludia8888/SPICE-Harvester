@@ -645,11 +645,10 @@ class FunnelStructureAnalyzer:
                 max_tables=max_tables,
                 opts=opts,
             )
-            try:
+            if isinstance(result.metadata, dict):
                 result.metadata["sheet_signature"] = sheet_signature
-            except Exception:
-                logging.getLogger(__name__).warning("Broad exception fallback at funnel/services/structure_analysis.py:636", exc_info=True)
-                pass
+            else:
+                logger.warning("Structure analysis result metadata has unexpected type: %r", type(result.metadata))
             if cache_key and cache_enabled:
                 try:
                     ttl_seconds = int(opts.get("cache_ttl_seconds", 3600))

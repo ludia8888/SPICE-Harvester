@@ -222,7 +222,6 @@ class SheetImportService:
                     return int(dec), None
                 except Exception:
                     logging.getLogger(__name__).warning("Broad exception fallback at shared/services/core/sheet_import_service.py:218", exc_info=True)
-                    pass
             try:
                 return float(dec), None
             except Exception:

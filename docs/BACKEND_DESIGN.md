@@ -1,6 +1,6 @@
 # Backend Design Reference
 
-> Generated: 2026-02-16T11:26:44+09:00
+> Generated: 2026-02-16T12:25:31+09:00
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 > Source: AST + docstring extraction (module/class/function) via `scripts/generate_backend_methods.py`.
 
@@ -8,7 +8,7 @@
 
 - Modules scanned: **983**
 - Modules with module docstring: **561/983**
-- Modules with broad `except Exception`: **286**
+- Modules with broad `except Exception`: **284**
 - Modules with bare `except:`: **0**
 - Modules with `return` inside `finally`: **0**
 
@@ -4060,7 +4060,7 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - API surface: public=1 | top-level functions=0 | classes=2 | methods=66
-- Runtime signals: async_functions=0 | try=25 | raise=0 | broad_except=25 | bare_except=0 | finally_return=0
+- Runtime signals: async_functions=0 | try=24 | raise=0 | broad_except=24 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=1/2 (50%) | methods=13/66 (19%)
 - Internal imports (4): funnel.services.type_inference; shared.models.common; shared.models.structure_analysis; shared.utils.blank_utils
 - External imports (11): __future__; dataclasses; functools; hashlib; json; logging; math; re (+3 more)
@@ -6202,7 +6202,7 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - API surface: public=7 | top-level functions=4 | classes=4 | methods=12
-- Runtime signals: async_functions=8 | try=4 | raise=2 | broad_except=4 | bare_except=0 | finally_return=0
+- Runtime signals: async_functions=8 | try=4 | raise=2 | broad_except=3 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=2/4 (50%) | classes=4/4 (100%) | methods=8/12 (66%)
 - Internal imports (5): shared.config.rate_limit_config; shared.config.settings; shared.errors.error_types; shared.security.auth_utils; shared.utils.app_logger
 - External imports (8): fastapi; functools; hashlib; hmac; logging; redis; time; typing
@@ -6986,7 +6986,7 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - API surface: public=8 | top-level functions=17 | classes=7 | methods=15
-- Runtime signals: async_functions=6 | try=15 | raise=32 | broad_except=13 | bare_except=0 | finally_return=0
+- Runtime signals: async_functions=6 | try=15 | raise=32 | broad_except=12 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=6/17 (35%) | classes=2/7 (28%) | methods=0/15 (0%)
 - Internal imports (4): shared.config.settings; shared.services.core.audit_log_store; shared.services.storage.redis_service; shared.utils.llm_safety
 - External imports (10): __future__; asyncio; dataclasses; httpx; json; logging; pydantic; re (+2 more)
@@ -7098,7 +7098,7 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - API surface: public=10 | top-level functions=0 | classes=10 | methods=28
-- Runtime signals: async_functions=7 | try=6 | raise=0 | broad_except=6 | bare_except=0 | finally_return=0
+- Runtime signals: async_functions=7 | try=6 | raise=0 | broad_except=5 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=10/10 (100%) | methods=14/28 (50%)
 - Internal imports (0): not documented
 - External imports (8): abc; asyncio; dataclasses; datetime; enum; logging; time; typing
@@ -7126,7 +7126,7 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - API surface: public=2 | top-level functions=1 | classes=1 | methods=0
-- Runtime signals: async_functions=1 | try=1 | raise=0 | broad_except=1 | bare_except=0 | finally_return=0
+- Runtime signals: async_functions=1 | try=1 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/1 (0%) | methods=0/0 (n/a)
 - Internal imports (2): shared.utils.resource_rid; shared.utils.writeback_conflicts
 - External imports (3): __future__; logging; typing
@@ -7252,7 +7252,7 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - API surface: public=8 | top-level functions=14 | classes=1 | methods=1
-- Runtime signals: async_functions=7 | try=7 | raise=0 | broad_except=7 | bare_except=0 | finally_return=0
+- Runtime signals: async_functions=7 | try=7 | raise=0 | broad_except=6 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=10/14 (71%) | classes=1/1 (100%) | methods=0/1 (0%)
 - Internal imports (6): shared.config.settings; shared.errors.error_response; shared.i18n.middleware; shared.middleware.rate_limiter; shared.models.requests; shared.observability.request_context
 - External imports (8): contextlib; datetime; fastapi; logging; starlette; time; typing; uvicorn
@@ -8022,7 +8022,7 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - API surface: public=3 | top-level functions=8 | classes=3 | methods=6
-- Runtime signals: async_functions=7 | try=15 | raise=1 | broad_except=7 | bare_except=0 | finally_return=0
+- Runtime signals: async_functions=7 | try=15 | raise=1 | broad_except=3 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/8 (0%) | classes=0/3 (0%) | methods=0/6 (0%)
 - Internal imports (8): shared.errors.error_envelope; shared.errors.error_types; shared.models.pipeline_job; shared.services.pipeline.pipeline_control_plane_events; shared.services.pipeline.pipeline_dependency_utils; shared.services.pipeline.pipeline_job_queue; shared.services.registries.pipeline_registry; shared.utils.time_utils
 - External imports (7): __future__; asyncio; contextlib; dataclasses; datetime; logging; typing
@@ -8358,7 +8358,7 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - API surface: public=17 | top-level functions=1 | classes=17 | methods=84
-- Runtime signals: async_functions=72 | try=14 | raise=96 | broad_except=12 | bare_except=0 | finally_return=0
+- Runtime signals: async_functions=72 | try=14 | raise=96 | broad_except=11 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=1/1 (100%) | classes=0/17 (0%) | methods=1/84 (1%)
 - Internal imports (7): shared.config.settings; shared.observability.context_propagation; shared.services.registries.postgres_schema_registry; shared.utils.json_utils; shared.utils.s3_uri; shared.utils.schema_hash; shared.utils.time_utils
 - External imports (7): __future__; asyncpg; dataclasses; datetime; logging; typing; uuid
@@ -8960,7 +8960,7 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - API surface: public=2 | top-level functions=3 | classes=0 | methods=0
-- Runtime signals: async_functions=0 | try=2 | raise=0 | broad_except=2 | bare_except=0 | finally_return=0
+- Runtime signals: async_functions=0 | try=3 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=1/3 (33%) | classes=0/0 (n/a) | methods=0/0 (n/a)
 - Internal imports (1): shared.config.settings
 - External imports (6): __future__; logging; os; pathlib; re; typing
@@ -9170,7 +9170,7 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - API surface: public=1 | top-level functions=0 | classes=1 | methods=33
-- Runtime signals: async_functions=27 | try=11 | raise=10 | broad_except=11 | bare_except=0 | finally_return=0
+- Runtime signals: async_functions=27 | try=11 | raise=10 | broad_except=9 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=1/1 (100%) | methods=33/33 (100%)
 - Internal imports (2): shared.config.settings; shared.utils.language
 - External imports (8): aiosqlite; asyncio; contextlib; datetime; logging; os; pathlib; typing

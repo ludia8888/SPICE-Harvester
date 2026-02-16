@@ -167,9 +167,13 @@ async def rebuild_instance_index(
         # Cleanup: delete partially built new index
         try:
             await elasticsearch_service.delete_index(new_index)
-        except Exception:
-            logging.getLogger(__name__).warning("Broad exception fallback at shared/services/core/instance_index_rebuild_service.py:170", exc_info=True)
-            pass
+        except Exception as cleanup_exc:
+            logger.warning(
+                "Failed to cleanup partially built index %s after rebuild failure: %s",
+                new_index,
+                cleanup_exc,
+                exc_info=True,
+            )
         return RebuildIndexResult(
             task_id=task_id,
             status="FAILED",

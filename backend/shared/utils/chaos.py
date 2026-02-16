@@ -59,10 +59,9 @@ def maybe_crash(point: str, *, logger: Optional[object] = None) -> None:
             if marker.exists():
                 return
             marker.write_text("crashed\n", encoding="utf-8")
-        except Exception:
+        except OSError:
             # Marker best-effort; still crash if requested.
             logging.getLogger(__name__).warning("Broad exception fallback at shared/utils/chaos.py:61", exc_info=True)
-            pass
 
     msg = f"CHAOS: crashing at {point}"
     try:
@@ -70,8 +69,11 @@ def maybe_crash(point: str, *, logger: Optional[object] = None) -> None:
             logger.error(msg)
         else:
             print(msg, flush=True)
-    except Exception:
+    except (AttributeError, OSError):
         logging.getLogger(__name__).warning("Broad exception fallback at shared/utils/chaos.py:71", exc_info=True)
-        pass
+        try:
+            print(msg, flush=True)
+        except OSError:
+            logging.getLogger(__name__).warning("Fallback print failed for chaos crash marker", exc_info=True)
 
     os._exit(int(chaos.crash_exit_code))

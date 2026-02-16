@@ -211,9 +211,12 @@ class RedisHealthCheck(HealthCheckInterface):
                     info = await self.redis_service.info()
                     details["memory_usage"] = info.get("used_memory_human", "unknown")
                     details["connected_clients"] = info.get("connected_clients", "unknown")
-                except Exception:
-                    logging.getLogger(__name__).warning("Broad exception fallback at shared/services/core/health_check.py:212", exc_info=True)
-                    pass  # Info not available, continue without it
+                except (AttributeError, TypeError, ValueError, RuntimeError) as info_exc:
+                    logger.warning(
+                        "Failed to retrieve Redis info during health check: %s",
+                        info_exc,
+                        exc_info=True,
+                    )
             
             return HealthCheckResult(
                 status=HealthStatus.HEALTHY,

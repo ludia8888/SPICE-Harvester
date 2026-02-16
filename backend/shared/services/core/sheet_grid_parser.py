@@ -245,9 +245,8 @@ class SheetGridParser:
             try:
                 if bool(getattr(getattr(cell, "font", None), "bold", False)):
                     mask |= STYLE_BOLD
-            except Exception:
-                logging.getLogger(__name__).warning("Broad exception fallback at shared/services/core/sheet_grid_parser.py:244", exc_info=True)
-                pass
+            except Exception as font_exc:
+                logger.warning("Failed to extract font style hint: %s", font_exc, exc_info=True)
 
             # Fill
             fill_rgb = 0
@@ -282,9 +281,8 @@ class SheetGridParser:
                         mask |= STYLE_BORDER_LEFT
                     if right:
                         mask |= STYLE_BORDER_RIGHT
-            except Exception:
-                logging.getLogger(__name__).warning("Broad exception fallback at shared/services/core/sheet_grid_parser.py:279", exc_info=True)
-                pass
+            except Exception as border_exc:
+                logger.warning("Failed to extract border style hint: %s", border_exc, exc_info=True)
 
             return mask | (fill_rgb << 8)
 

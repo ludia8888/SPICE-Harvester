@@ -262,9 +262,8 @@ def _extract_json_object(text: str) -> Dict[str, Any]:
         obj = json.loads(text)
         if isinstance(obj, dict):
             return obj
-    except Exception:
-        logging.getLogger(__name__).warning("Broad exception fallback at shared/services/agent/llm_gateway.py:265", exc_info=True)
-        pass
+    except (json.JSONDecodeError, TypeError, ValueError) as parse_exc:
+        logger.warning("Failed to parse direct JSON output from LLM: %s", parse_exc, exc_info=True)
 
     # Fallback: find outermost braces
     start = text.find("{")

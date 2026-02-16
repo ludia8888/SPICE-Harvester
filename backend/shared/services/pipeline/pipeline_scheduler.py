@@ -75,18 +75,24 @@ class PipelineScheduler:
                     if self.metrics and hasattr(self.metrics, "record_business_metric"):
                         try:
                             self.metrics.record_business_metric("pipeline_scheduler_ticks", 1)
-                        except Exception:
-                            logging.getLogger(__name__).warning("Broad exception fallback at shared/services/pipeline/pipeline_scheduler.py:78", exc_info=True)
-                            pass
+                        except (AttributeError, TypeError, ValueError, RuntimeError) as metrics_exc:
+                            logger.warning(
+                                "Failed to record scheduler tick metric: %s",
+                                metrics_exc,
+                                exc_info=True,
+                            )
                     await self._tick()
             except Exception as exc:
                 logger.error("PipelineScheduler tick failed: %s", exc)
                 if self.metrics and hasattr(self.metrics, "record_business_metric"):
                     try:
                         self.metrics.record_business_metric("pipeline_scheduler_tick_errors", 1)
-                    except Exception:
-                        logging.getLogger(__name__).warning("Broad exception fallback at shared/services/pipeline/pipeline_scheduler.py:86", exc_info=True)
-                        pass
+                    except (AttributeError, TypeError, ValueError, RuntimeError) as metrics_exc:
+                        logger.warning(
+                            "Failed to record scheduler tick error metric: %s",
+                            metrics_exc,
+                            exc_info=True,
+                        )
             await asyncio.sleep(self.poll_seconds)
 
     async def stop(self) -> None:
@@ -97,9 +103,12 @@ class PipelineScheduler:
         if self.tracing and hasattr(self.tracing, "set_span_attribute"):
             try:
                 self.tracing.set_span_attribute("pipeline.scheduled_count", len(pipelines))
-            except Exception:
-                logging.getLogger(__name__).warning("Broad exception fallback at shared/services/pipeline/pipeline_scheduler.py:98", exc_info=True)
-                pass
+            except (AttributeError, TypeError, ValueError, RuntimeError) as tracing_exc:
+                logger.warning(
+                    "Failed to set tracing attribute for scheduled_count: %s",
+                    tracing_exc,
+                    exc_info=True,
+                )
         now = _utcnow()
         for pipeline in pipelines:
             pipeline_id = str(pipeline.get("pipeline_id") or "").strip()
@@ -278,9 +287,13 @@ class PipelineScheduler:
                             1,
                             attributes={"trigger": trigger_reason},
                         )
-                    except Exception:
-                        logging.getLogger(__name__).warning("Broad exception fallback at shared/services/pipeline/pipeline_scheduler.py:278", exc_info=True)
-                        pass
+                    except (AttributeError, TypeError, ValueError, RuntimeError) as metrics_exc:
+                        logger.warning(
+                            "Failed to record scheduler enqueue metric for pipeline %s: %s",
+                            pipeline_id,
+                            metrics_exc,
+                            exc_info=True,
+                        )
                 await emit_pipeline_control_plane_event(
                     event_type="PIPELINE_SCHEDULE_TRIGGERED",
                     pipeline_id=pipeline_id,

@@ -4350,9 +4350,8 @@ class DatasetRegistry(PostgresSchemaRegistry):
             if isinstance(repaired, str) and repaired.startswith("UPDATE"):
                 try:
                     results["committed_tx"] = int(repaired.split()[-1])
-                except Exception:
-                    logging.getLogger(__name__).warning("Broad exception fallback at shared/services/registries/dataset_registry.py:4349", exc_info=True)
-                    pass
+                except (IndexError, ValueError) as parse_exc:
+                    logger.warning("Failed to parse committed transaction update count from '%s': %s", repaired, parse_exc)
 
             # 3) Abort stale OPEN transactions.
             async with self._pool.acquire() as conn:

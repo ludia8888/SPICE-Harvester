@@ -486,9 +486,13 @@ def rate_limit(
                         rejected=not allowed,
                         strategy=strategy,
                     )
-                except Exception:
-                    logging.getLogger(__name__).warning("Broad exception fallback at shared/middleware/rate_limiter.py:487", exc_info=True)
-                    pass
+                except (AttributeError, TypeError, ValueError, RuntimeError) as metrics_exc:
+                    logger.warning(
+                        "Failed to record rate limit metric for %s: %s",
+                        request.url.path,
+                        metrics_exc,
+                        exc_info=True,
+                    )
             
             # Add rate limit headers
             headers = {

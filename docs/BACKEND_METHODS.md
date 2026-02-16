@@ -1,6 +1,6 @@
 # Backend Method Index
 
-> Generated: 2026-02-16T11:26:44+09:00
+> Generated: 2026-02-16T12:25:31+09:00
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 
 ## action_outbox_worker
@@ -3001,57 +3001,57 @@
     - `_score_cells_in_bbox(cls, grid, bbox, include_complex_types, style_hints)` (line 382): Score only cells inside a bbox (used by coarse-to-fine mode).
     - `_analyze_coarse_to_fine(cls, grid, style_hints, include_complex_types, merged_cells, max_tables, opts)` (line 457): no docstring
     - `analyze(cls, grid, include_complex_types, merged_cells, cell_style_hints, max_tables, options)` (line 576): no docstring
-    - `analyze_bbox(cls, grid, bbox, include_complex_types, merged_cells, cell_style_hints, options, table_id, override_mode, override_header_rows, override_header_cols)` (line 763): Analyze a single bbox (used for patch re-evaluation / UI corrections).
-    - `_detect_data_islands(cls, grid, cell_map, row_stats, max_tables, opts, style_hints)` (line 938): no docstring
-    - `_bbox_quality_score(cls, grid, bbox, cell_map)` (line 1054): no docstring
-    - `_split_bbox_by_row_separators(cls, grid, bbox, cell_map, opts, style_hints)` (line 1076): Split a bbox into multiple bboxes when internal separator rows exist.
-    - `_split_bbox_by_row_profile(cls, grid, bbox, opts)` (line 1204): Split hybrid blocks where top rows are narrow (key-value) and bottom rows are wide (table).
-    - `_expand_bbox_to_dense_region(cls, grid, bbox, cell_map, expand_threshold, max_header_scan)` (line 1254): Expand a bbox derived from "core" cells to cover adjacent string/header cells that
-    - `_analyze_island(cls, grid, cell_map, bbox, include_complex_types, table_id, opts, merged_cells)` (line 1340): no docstring
-    - `_detect_preamble_skip(cls, grid, bbox, cell_map, opts)` (line 1516): Detect leading "title/description" rows inside a detected bbox.
-    - `_rank_header_row_candidates(cls, sub, bbox, cell_map, max_k, include_complex_types, merged_cells, opts)` (line 1619): no docstring
-    - `_rank_header_col_candidates(cls, sub, bbox, cell_map, max_k, include_complex_types, merged_cells, opts)` (line 1809): no docstring
-    - `_score_property_mode(cls, sub, bbox, cell_map)` (line 1972): no docstring
-    - `_best_header_row_candidate(cls, sub, bbox, cell_map, max_k, include_complex_types)` (line 2045): no docstring
-    - `_best_header_col_candidate(cls, sub, bbox, cell_map, max_k, include_complex_types)` (line 2071): no docstring
-    - `_header_row_score(cls, sub, bbox, cell_map, header_rows)` (line 2097): no docstring
-    - `_header_col_score(cls, sub, bbox, cell_map, header_cols)` (line 2130): no docstring
-    - `_axis_type_consistency(cls, sequences, include_complex_types)` (line 2165): no docstring
-    - `_string_sequence_consistency(cls, values)` (line 2190): Estimate how "table-like" a string-only sequence is.
-    - `_flatten_merged_cells(cls, grid, merged_cells, include_complex_types, fill_boxes)` (line 2241): no docstring
-    - `_should_fill_merge(cls, value, mr, include_complex_types)` (line 2267): no docstring
-    - `_bboxes_intersect(a, b)` (line 2288): no docstring
-    - `_extract_key_values(cls, grid, cell_map, exclude_boxes, include_complex_types, opts)` (line 2301): no docstring
-    - `_looks_like_kv_label(cls, text)` (line 2423): no docstring
-    - `_looks_like_explicit_kv_label(cls, text)` (line 2437): Strict label detector used to avoid pairing label-to-label in KV extraction.
-    - `_looks_like_data_value_text(cls, text)` (line 2448): Heuristic: some strings are much more likely to be data values than headers/labels.
-    - `_find_nearest_label(cls, cell_map, row, col, radius)` (line 2465): no docstring
-    - `_extract_property_table_kv(cls, sub, bbox, cell_map)` (line 2502): no docstring
-    - `_pivot_transposed(cls, sub, header_cols)` (line 2541): no docstring
-    - `_build_table_column_provenance(cls, headers, bbox, header_rows)` (line 2577): no docstring
-    - `_build_transposed_column_provenance(cls, headers, bbox, header_cols, field_row_offsets)` (line 2602): no docstring
-    - `_extract_table(cls, sub, header_rows)` (line 2631): no docstring
-    - `_build_header_tree(cls, header_grid)` (line 2667): Build a hierarchical header tree from a multi-row header grid.
-    - `_collect_cell_evidence(cls, cell_map, bbox, limit)` (line 2722): Collect a small sample of "evidence" cells for explainability.
-    - `_infer_schema(cls, headers, rows, include_complex_types)` (line 2770): no docstring
-    - `_dedupe_headers(cls, headers)` (line 2789): no docstring
-    - `_normalize_grid(cls, grid)` (line 2805): no docstring
-    - `_normalize_style_hints(cls, style_hints, rows, cols)` (line 2810): no docstring
-    - `_score_cells(cls, grid, include_complex_types, style_hints)` (line 2829): no docstring
-    - `_infer_single_value_type(cls, text, include_complex_types)` (line 2900): no docstring
-    - `_cell_score(cls, text, inferred_type, row, non_empty_in_row)` (line 2907): no docstring
-    - `_is_label_like_text(cls, text)` (line 2937): no docstring
-    - `_is_header_like_text(cls, text)` (line 2951): no docstring
-    - `_connected_components(points)` (line 2962): no docstring
-    - `_bbox_for_points(points)` (line 2984): no docstring
-    - `_tighten_bbox(grid, bbox)` (line 2990): no docstring
-    - `_bbox_area(bbox)` (line 3012): no docstring
-    - `_count_non_empty_in_bbox(cls, grid, bbox)` (line 3016): no docstring
-    - `_slice_bbox(grid, bbox)` (line 3026): no docstring
-    - `_extract_columns_from_sub(rows)` (line 3030): no docstring
-    - `_extract_rows_from_sub(rows, start_col)` (line 3041): no docstring
-    - `_ensure_row_len(grid, row, length)` (line 3048): no docstring
-    - `_get_cell(grid, row, col)` (line 3055): no docstring
+    - `analyze_bbox(cls, grid, bbox, include_complex_types, merged_cells, cell_style_hints, options, table_id, override_mode, override_header_rows, override_header_cols)` (line 762): Analyze a single bbox (used for patch re-evaluation / UI corrections).
+    - `_detect_data_islands(cls, grid, cell_map, row_stats, max_tables, opts, style_hints)` (line 937): no docstring
+    - `_bbox_quality_score(cls, grid, bbox, cell_map)` (line 1053): no docstring
+    - `_split_bbox_by_row_separators(cls, grid, bbox, cell_map, opts, style_hints)` (line 1075): Split a bbox into multiple bboxes when internal separator rows exist.
+    - `_split_bbox_by_row_profile(cls, grid, bbox, opts)` (line 1203): Split hybrid blocks where top rows are narrow (key-value) and bottom rows are wide (table).
+    - `_expand_bbox_to_dense_region(cls, grid, bbox, cell_map, expand_threshold, max_header_scan)` (line 1253): Expand a bbox derived from "core" cells to cover adjacent string/header cells that
+    - `_analyze_island(cls, grid, cell_map, bbox, include_complex_types, table_id, opts, merged_cells)` (line 1339): no docstring
+    - `_detect_preamble_skip(cls, grid, bbox, cell_map, opts)` (line 1515): Detect leading "title/description" rows inside a detected bbox.
+    - `_rank_header_row_candidates(cls, sub, bbox, cell_map, max_k, include_complex_types, merged_cells, opts)` (line 1618): no docstring
+    - `_rank_header_col_candidates(cls, sub, bbox, cell_map, max_k, include_complex_types, merged_cells, opts)` (line 1808): no docstring
+    - `_score_property_mode(cls, sub, bbox, cell_map)` (line 1971): no docstring
+    - `_best_header_row_candidate(cls, sub, bbox, cell_map, max_k, include_complex_types)` (line 2044): no docstring
+    - `_best_header_col_candidate(cls, sub, bbox, cell_map, max_k, include_complex_types)` (line 2070): no docstring
+    - `_header_row_score(cls, sub, bbox, cell_map, header_rows)` (line 2096): no docstring
+    - `_header_col_score(cls, sub, bbox, cell_map, header_cols)` (line 2129): no docstring
+    - `_axis_type_consistency(cls, sequences, include_complex_types)` (line 2164): no docstring
+    - `_string_sequence_consistency(cls, values)` (line 2189): Estimate how "table-like" a string-only sequence is.
+    - `_flatten_merged_cells(cls, grid, merged_cells, include_complex_types, fill_boxes)` (line 2240): no docstring
+    - `_should_fill_merge(cls, value, mr, include_complex_types)` (line 2266): no docstring
+    - `_bboxes_intersect(a, b)` (line 2287): no docstring
+    - `_extract_key_values(cls, grid, cell_map, exclude_boxes, include_complex_types, opts)` (line 2300): no docstring
+    - `_looks_like_kv_label(cls, text)` (line 2422): no docstring
+    - `_looks_like_explicit_kv_label(cls, text)` (line 2436): Strict label detector used to avoid pairing label-to-label in KV extraction.
+    - `_looks_like_data_value_text(cls, text)` (line 2447): Heuristic: some strings are much more likely to be data values than headers/labels.
+    - `_find_nearest_label(cls, cell_map, row, col, radius)` (line 2464): no docstring
+    - `_extract_property_table_kv(cls, sub, bbox, cell_map)` (line 2501): no docstring
+    - `_pivot_transposed(cls, sub, header_cols)` (line 2540): no docstring
+    - `_build_table_column_provenance(cls, headers, bbox, header_rows)` (line 2576): no docstring
+    - `_build_transposed_column_provenance(cls, headers, bbox, header_cols, field_row_offsets)` (line 2601): no docstring
+    - `_extract_table(cls, sub, header_rows)` (line 2630): no docstring
+    - `_build_header_tree(cls, header_grid)` (line 2666): Build a hierarchical header tree from a multi-row header grid.
+    - `_collect_cell_evidence(cls, cell_map, bbox, limit)` (line 2721): Collect a small sample of "evidence" cells for explainability.
+    - `_infer_schema(cls, headers, rows, include_complex_types)` (line 2769): no docstring
+    - `_dedupe_headers(cls, headers)` (line 2788): no docstring
+    - `_normalize_grid(cls, grid)` (line 2804): no docstring
+    - `_normalize_style_hints(cls, style_hints, rows, cols)` (line 2809): no docstring
+    - `_score_cells(cls, grid, include_complex_types, style_hints)` (line 2828): no docstring
+    - `_infer_single_value_type(cls, text, include_complex_types)` (line 2899): no docstring
+    - `_cell_score(cls, text, inferred_type, row, non_empty_in_row)` (line 2906): no docstring
+    - `_is_label_like_text(cls, text)` (line 2936): no docstring
+    - `_is_header_like_text(cls, text)` (line 2950): no docstring
+    - `_connected_components(points)` (line 2961): no docstring
+    - `_bbox_for_points(points)` (line 2983): no docstring
+    - `_tighten_bbox(grid, bbox)` (line 2989): no docstring
+    - `_bbox_area(bbox)` (line 3011): no docstring
+    - `_count_non_empty_in_bbox(cls, grid, bbox)` (line 3015): no docstring
+    - `_slice_bbox(grid, bbox)` (line 3025): no docstring
+    - `_extract_columns_from_sub(rows)` (line 3029): no docstring
+    - `_extract_rows_from_sub(rows, start_col)` (line 3040): no docstring
+    - `_ensure_row_len(grid, row, length)` (line 3047): no docstring
+    - `_get_cell(grid, row, col)` (line 3054): no docstring
 
 ### `backend/funnel/services/structure_patch.py`
 - **Functions**
@@ -3685,8 +3685,8 @@
     - `async _write_instance_commands_to_s3(self, job, instances, indexed_instance_ids, branch, now_iso, batch_sequence)` (line 223): Write BULK_CREATE_INSTANCES command files to instance-events S3 for action writeback.
     - `async finalize_job(self, job, execution_mode, indexed_instance_ids)` (line 294): no docstring
     - `async _ensure_instances_index(self, db_name, branch)` (line 337): no docstring
-    - `async _find_stale_instance_ids(self, index_name, class_id, active_instance_ids)` (line 363): no docstring
-    - `_build_document(job, instance, instance_id, branch, ontology_version, now_iso, event_sequence, relationships, target_field_types)` (line 420): no docstring
+    - `async _find_stale_instance_ids(self, index_name, class_id, active_instance_ids)` (line 367): no docstring
+    - `_build_document(job, instance, instance_id, branch, ontology_version, now_iso, event_sequence, relationships, target_field_types)` (line 424): no docstring
 
 ## oms
 
@@ -5371,8 +5371,8 @@
 - **Functions**
   - `_is_valid_admin_bypass_token(headers)` (line 24): no docstring
   - `rate_limit(requests, window, strategy, cost)` (line 394): Rate limiting decorator for FastAPI endpoints
-  - `install_rate_limit_headers_middleware(app)` (line 555): no docstring
-  - `async get_rate_limiter()` (line 594): Get or create global rate limiter instance
+  - `install_rate_limit_headers_middleware(app)` (line 559): no docstring
+  - `async get_rate_limiter()` (line 598): Get or create global rate limiter instance
 - **Classes**
   - `TokenBucket` (line 35): Token Bucket algorithm implementation for rate limiting
     - `__init__(self, redis_client, capacity, refill_rate, key_prefix, fail_open)` (line 45): Initialize Token Bucket
@@ -5389,7 +5389,7 @@
     - `get_local_bucket(self, bucket_type, capacity, refill_rate)` (line 297): no docstring
     - `get_client_id(self, request, strategy)` (line 307): Get client identifier based on strategy
     - `async check_rate_limit(self, request, capacity, refill_rate, strategy, tokens)` (line 342): Check if request should be rate limited
-  - `RateLimitPresets` (line 568): Common rate limit configurations
+  - `RateLimitPresets` (line 572): Common rate limit configurations
 
 ### `backend/shared/models/__init__.py`
 
@@ -5498,10 +5498,10 @@
   - `EventEnvelope` (line 23): Canonical event envelope.
     - `_normalize_datetime(value)` (line 51): no docstring
     - `from_command(cls, command, actor, event_type, kafka_topic, metadata)` (line 57): no docstring
-    - `from_base_event(cls, event, kafka_topic, metadata)` (line 113): no docstring
-    - `from_connector_update(cls, source_type, source_id, cursor, previous_cursor, sequence_number, occurred_at, event_type, actor, kafka_topic, data, metadata)` (line 149): Build a canonical connector update envelope.
-    - `as_kafka_key(self)` (line 222): no docstring
-    - `as_json(self)` (line 226): no docstring
+    - `from_base_event(cls, event, kafka_topic, metadata)` (line 115): no docstring
+    - `from_connector_update(cls, source_type, source_id, cursor, previous_cursor, sequence_number, occurred_at, event_type, actor, kafka_topic, data, metadata)` (line 151): Build a canonical connector update envelope.
+    - `as_kafka_key(self)` (line 224): no docstring
+    - `as_json(self)` (line 228): no docstring
 
 ### `backend/shared/models/events.py`
 - **Classes**
@@ -6080,15 +6080,15 @@
   - `_filter_provider_extra_body(provider, extra_body)` (line 178): no docstring
   - `_build_provider_send_overrides(provider, provider_policy, audit_partition_key, audit_actor)` (line 189): Build provider send overrides (SEC-002).
   - `_extract_json_object(text)` (line 241): Best-effort JSON object extraction.
-  - `_tool_parameters_from_model(model)` (line 284): Build an OpenAI tool/function `parameters` schema from a Pydantic model.
-  - `_openai_max_tokens_params(model, max_tokens)` (line 313): OpenAI compatibility: newer models (ex: gpt-5) require max_completion_tokens.
-  - `_openai_temperature_params(model, temperature)` (line 323): OpenAI compatibility: gpt-5 only supports the default temperature (1).
-  - `_openai_reasoning_params(model)` (line 333): OpenAI responses API: gpt-5 needs low reasoning effort to emit output tokens.
-  - `_use_openai_responses_api(model)` (line 343): no docstring
-  - `_extract_openai_responses_text(data)` (line 348): no docstring
-  - `_mask_payload(value, max_chars)` (line 377): no docstring
-  - `_log_llm_event(event, payload, max_chars)` (line 387): no docstring
-  - `create_llm_gateway(settings)` (line 1453): no docstring
+  - `_tool_parameters_from_model(model)` (line 283): Build an OpenAI tool/function `parameters` schema from a Pydantic model.
+  - `_openai_max_tokens_params(model, max_tokens)` (line 312): OpenAI compatibility: newer models (ex: gpt-5) require max_completion_tokens.
+  - `_openai_temperature_params(model, temperature)` (line 322): OpenAI compatibility: gpt-5 only supports the default temperature (1).
+  - `_openai_reasoning_params(model)` (line 332): OpenAI responses API: gpt-5 needs low reasoning effort to emit output tokens.
+  - `_use_openai_responses_api(model)` (line 342): no docstring
+  - `_extract_openai_responses_text(data)` (line 347): no docstring
+  - `_mask_payload(value, max_chars)` (line 376): no docstring
+  - `_log_llm_event(event, payload, max_chars)` (line 386): no docstring
+  - `create_llm_gateway(settings)` (line 1452): no docstring
 - **Classes**
   - `LLMUnavailableError` (line 45): no docstring
   - `LLMRequestError` (line 49): no docstring
@@ -6097,21 +6097,21 @@
   - `LLMHTTPStatusError` (line 61): no docstring
     - `__init__(self, status_code, body_preview)` (line 62): no docstring
   - `LLMCallMeta` (line 69): no docstring
-  - `LLMGateway` (line 395): A thin, safe wrapper around an LLM provider.
-    - `__init__(self, settings)` (line 404): no docstring
-    - `is_enabled(self)` (line 449): no docstring
-    - `_circuit_key(self, provider, model)` (line 462): no docstring
-    - `_is_circuit_open(self, circuit_key)` (line 465): no docstring
-    - `_record_circuit_success(self, circuit_key)` (line 470): no docstring
-    - `_record_circuit_failure(self, circuit_key)` (line 474): no docstring
-    - `_retry_delay_s(self, prompt_hash, attempt)` (line 482): no docstring
-    - `_should_retry(self, exc)` (line 492): no docstring
-    - `async _call_openai_compat_json(self, task, system_prompt, user_prompt, model, temperature, max_tokens, prompt_hash, extra_headers, extra_body)` (line 499): no docstring
-    - `async _call_openai_compat_tool_call(self, task, system_prompt, user_prompt, model, temperature, max_tokens, prompt_hash, tool_name, tool_parameters, extra_headers, extra_body)` (line 603): no docstring
-    - `async _call_openai_compat_responses_json(self, task, system_prompt, user_prompt, model, max_tokens, prompt_hash, tool_parameters, schema_name, extra_headers, extra_body)` (line 729): no docstring
-    - `async _call_anthropic_json(self, task, system_prompt, user_prompt, model, temperature, max_tokens, prompt_hash, extra_headers, extra_body)` (line 906): no docstring
-    - `async _call_google_json(self, task, system_prompt, user_prompt, model, temperature, max_tokens, prompt_hash, extra_headers, extra_body)` (line 961): no docstring
-    - `async complete_json(self, task, system_prompt, user_prompt, response_model, model, allowed_models, use_native_tool_calling, redis_service, audit_store, audit_partition_key, audit_actor, audit_resource_id, audit_metadata, temperature, max_tokens)` (line 1020): no docstring
+  - `LLMGateway` (line 394): A thin, safe wrapper around an LLM provider.
+    - `__init__(self, settings)` (line 403): no docstring
+    - `is_enabled(self)` (line 448): no docstring
+    - `_circuit_key(self, provider, model)` (line 461): no docstring
+    - `_is_circuit_open(self, circuit_key)` (line 464): no docstring
+    - `_record_circuit_success(self, circuit_key)` (line 469): no docstring
+    - `_record_circuit_failure(self, circuit_key)` (line 473): no docstring
+    - `_retry_delay_s(self, prompt_hash, attempt)` (line 481): no docstring
+    - `_should_retry(self, exc)` (line 491): no docstring
+    - `async _call_openai_compat_json(self, task, system_prompt, user_prompt, model, temperature, max_tokens, prompt_hash, extra_headers, extra_body)` (line 498): no docstring
+    - `async _call_openai_compat_tool_call(self, task, system_prompt, user_prompt, model, temperature, max_tokens, prompt_hash, tool_name, tool_parameters, extra_headers, extra_body)` (line 602): no docstring
+    - `async _call_openai_compat_responses_json(self, task, system_prompt, user_prompt, model, max_tokens, prompt_hash, tool_parameters, schema_name, extra_headers, extra_body)` (line 728): no docstring
+    - `async _call_anthropic_json(self, task, system_prompt, user_prompt, model, temperature, max_tokens, prompt_hash, extra_headers, extra_body)` (line 905): no docstring
+    - `async _call_google_json(self, task, system_prompt, user_prompt, model, temperature, max_tokens, prompt_hash, extra_headers, extra_body)` (line 960): no docstring
+    - `async complete_json(self, task, system_prompt, user_prompt, response_model, model, allowed_models, use_native_tool_calling, redis_service, audit_store, audit_partition_key, audit_actor, audit_resource_id, audit_metadata, temperature, max_tokens)` (line 1019): no docstring
 
 ### `backend/shared/services/agent/llm_quota.py`
 - **Functions**
@@ -6257,31 +6257,31 @@
     - `service_name(self)` (line 182): no docstring
     - `service_type(self)` (line 186): no docstring
     - `async health_check(self)` (line 189): Check Redis connectivity and performance
-  - `ElasticsearchHealthCheck` (line 240): Health check for Elasticsearch connections
-    - `__init__(self, elasticsearch_service, service_name)` (line 243): no docstring
-    - `service_name(self)` (line 248): no docstring
-    - `service_type(self)` (line 252): no docstring
-    - `async health_check(self)` (line 255): Check Elasticsearch connectivity and cluster health
-  - `StorageHealthCheck` (line 309): Health check for storage services (S3, etc.)
-    - `__init__(self, storage_service, service_name)` (line 312): no docstring
-    - `service_name(self)` (line 317): no docstring
-    - `service_type(self)` (line 321): no docstring
-    - `async health_check(self)` (line 324): Check storage service connectivity
-  - `AggregatedHealthStatus` (line 376): Aggregated health status for the entire system
-    - `to_dict(self)` (line 383): Convert to dictionary for serialization
-  - `HealthCheckAggregator` (line 393): Aggregates health checks from multiple services
-    - `__init__(self)` (line 396): no docstring
-    - `register_health_checker(self, health_checker)` (line 399): Register a health checker
-    - `async check_all_services(self, timeout_seconds)` (line 403): Check all registered services and aggregate results
-    - `_determine_overall_status(self, results)` (line 446): Determine overall system health based on individual service results
-    - `_generate_summary(self, results)` (line 468): Generate summary statistics
+  - `ElasticsearchHealthCheck` (line 243): Health check for Elasticsearch connections
+    - `__init__(self, elasticsearch_service, service_name)` (line 246): no docstring
+    - `service_name(self)` (line 251): no docstring
+    - `service_type(self)` (line 255): no docstring
+    - `async health_check(self)` (line 258): Check Elasticsearch connectivity and cluster health
+  - `StorageHealthCheck` (line 312): Health check for storage services (S3, etc.)
+    - `__init__(self, storage_service, service_name)` (line 315): no docstring
+    - `service_name(self)` (line 320): no docstring
+    - `service_type(self)` (line 324): no docstring
+    - `async health_check(self)` (line 327): Check storage service connectivity
+  - `AggregatedHealthStatus` (line 379): Aggregated health status for the entire system
+    - `to_dict(self)` (line 386): Convert to dictionary for serialization
+  - `HealthCheckAggregator` (line 396): Aggregates health checks from multiple services
+    - `__init__(self)` (line 399): no docstring
+    - `register_health_checker(self, health_checker)` (line 402): Register a health checker
+    - `async check_all_services(self, timeout_seconds)` (line 406): Check all registered services and aggregate results
+    - `_determine_overall_status(self, results)` (line 449): Determine overall system health based on individual service results
+    - `_generate_summary(self, results)` (line 471): Generate summary statistics
 
 ### `backend/shared/services/core/instance_index_rebuild_service.py`
 - **Functions**
   - `async rebuild_instance_index(request, elasticsearch_service, task_id)` (line 61): Rebuild the instances index via ES reindex + Blue-Green alias swap.
-  - `async _resolve_alias_targets(es, alias_name)` (line 189): Return concrete index names behind *alias_name*, or empty list.
-  - `async _reindex_from_source(es, source_index, dest_index)` (line 205): Run ES ``_reindex`` API and return the number of documents reindexed.
-  - `async _get_class_counts(es, index_name)` (line 227): Return ``{class_id: count}`` from a terms aggregation.
+  - `async _resolve_alias_targets(es, alias_name)` (line 193): Return concrete index names behind *alias_name*, or empty list.
+  - `async _reindex_from_source(es, source_index, dest_index)` (line 209): Run ES ``_reindex`` API and return the number of documents reindexed.
+  - `async _get_class_counts(es, index_name)` (line 231): Return ``{class_id: count}`` from a terms aggregation.
 - **Classes**
   - `RebuildIndexRequest` (line 33): Parameters for an index rebuild operation.
   - `RebuildClassResult` (line 42): no docstring
@@ -6289,9 +6289,9 @@
 
 ### `backend/shared/services/core/object_type_meta_resolver.py`
 - **Functions**
-  - `build_object_type_meta_resolver(resources, db_name, branch)` (line 15): no docstring
+  - `build_object_type_meta_resolver(resources, db_name, branch)` (line 17): no docstring
 - **Classes**
-  - `ObjectTypeMeta` (line 10): no docstring
+  - `ObjectTypeMeta` (line 12): no docstring
 
 ### `backend/shared/services/core/ontology_linter.py`
 - **Functions**
@@ -6428,16 +6428,16 @@
   - `_install_openapi_language_contract(app)` (line 155): Add `?lang=en|ko` and `Accept-Language` to OpenAPI so clients discover i18n support.
   - `_configure_cors(app)` (line 205): Configure CORS middleware based on environment variables
   - `_add_logging_middleware(app)` (line 220): Add request logging middleware
-  - `_add_health_check(app, service_info)` (line 264): Add standardized health check endpoints
-  - `_add_debug_endpoints(app)` (line 288): Add debug endpoints for development environment
-  - `_install_observability(app, service_info)` (line 297): Install tracing + metrics in a way that is:
-  - `create_uvicorn_config(service_info, reload)` (line 421): Create standardized uvicorn configuration.
-  - `_get_logging_config(service_name)` (line 454): Get standardized logging configuration for uvicorn
-  - `run_service(app, service_info, app_module_path, reload)` (line 499): Run the service with standardized uvicorn configuration.
-  - `get_bff_service_info()` (line 518): no docstring
-  - `get_oms_service_info()` (line 550): no docstring
-  - `get_funnel_service_info()` (line 568): no docstring
-  - `get_agent_service_info()` (line 584): no docstring
+  - `_add_health_check(app, service_info)` (line 263): Add standardized health check endpoints
+  - `_add_debug_endpoints(app)` (line 287): Add debug endpoints for development environment
+  - `_install_observability(app, service_info)` (line 296): Install tracing + metrics in a way that is:
+  - `create_uvicorn_config(service_info, reload)` (line 420): Create standardized uvicorn configuration.
+  - `_get_logging_config(service_name)` (line 453): Get standardized logging configuration for uvicorn
+  - `run_service(app, service_info, app_module_path, reload)` (line 498): Run the service with standardized uvicorn configuration.
+  - `get_bff_service_info()` (line 517): no docstring
+  - `get_oms_service_info()` (line 549): no docstring
+  - `get_funnel_service_info()` (line 567): no docstring
+  - `get_agent_service_info()` (line 583): no docstring
 - **Classes**
   - `ServiceInfo` (line 39): Service configuration container
     - `__init__(self, name, title, description, version, port, host, tags)` (line 42): no docstring
@@ -6449,14 +6449,14 @@
     - `from_google_sheets_values(cls, values, merged_cells, sheet_name, options, metadata)` (line 53): Build SheetGrid from Google Sheets "values" matrix (A1-anchored).
     - `merged_cells_from_google_metadata(cls, sheets_metadata, worksheet_name, sheet_id)` (line 92): Extract merged ranges from Google Sheets "spreadsheets.get" metadata JSON.
     - `from_excel_bytes(cls, xlsx_bytes, sheet_name, options, metadata)` (line 134): Parse an .xlsx file into SheetGrid.
-    - `_normalize_grid(cls, grid, max_rows, max_cols)` (line 340): no docstring
-    - `_json_safe_cell(value)` (line 360): no docstring
-    - `_trim_trailing_empty(cls, grid, min_rows, min_cols)` (line 375): no docstring
-    - `_clip_merge_ranges(cls, merges, rows, cols)` (line 409): no docstring
-    - `_excel_cell_to_display_value(cls, cell, fallback_to_formula)` (line 431): Best-effort conversion of an openpyxl cell into a display-like value.
-    - `_format_excel_number(cls, value, fmt)` (line 468): no docstring
-    - `_detect_currency_affixes(cls, fmt)` (line 506): no docstring
-    - `_infer_decimal_places_from_format(fmt)` (line 532): no docstring
+    - `_normalize_grid(cls, grid, max_rows, max_cols)` (line 338): no docstring
+    - `_json_safe_cell(value)` (line 358): no docstring
+    - `_trim_trailing_empty(cls, grid, min_rows, min_cols)` (line 373): no docstring
+    - `_clip_merge_ranges(cls, merges, rows, cols)` (line 407): no docstring
+    - `_excel_cell_to_display_value(cls, cell, fallback_to_formula)` (line 429): Best-effort conversion of an openpyxl cell into a display-like value.
+    - `_format_excel_number(cls, value, fmt)` (line 466): no docstring
+    - `_detect_currency_affixes(cls, fmt)` (line 504): no docstring
+    - `_infer_decimal_places_from_format(fmt)` (line 530): no docstring
 
 ### `backend/shared/services/core/sheet_import_service.py`
 - **Classes**
@@ -6466,7 +6466,7 @@
     - `_is_blank(value)` (line 52): no docstring
     - `_strip_numeric_affixes(raw)` (line 56): Remove common affixes around numeric strings (currency symbols/units/codes, percent).
     - `coerce_value(cls, value, target_type)` (line 114): Coerce a cell value into a JSON-serializable value compatible with target_type.
-    - `build_instances(cls, columns, rows, mappings, target_field_types, max_rows)` (line 240): Apply mappings and type coercion to build target instances.
+    - `build_instances(cls, columns, rows, mappings, target_field_types, max_rows)` (line 239): Apply mappings and type coercion to build target instances.
 
 ### `backend/shared/services/core/sync_wrapper_service.py`
 - **Classes**
@@ -6856,8 +6856,8 @@
 
 ### `backend/shared/services/kafka/safe_consumer.py`
 - **Functions**
-  - `create_safe_consumer(group_id, topics, service_name, **kwargs)` (line 517): Factory function to create a SafeKafkaConsumer.
-  - `validate_consumer_config(config)` (line 546): Validate that a consumer config meets safety requirements.
+  - `create_safe_consumer(group_id, topics, service_name, **kwargs)` (line 520): Factory function to create a SafeKafkaConsumer.
+  - `validate_consumer_config(config)` (line 549): Validate that a consumer config meets safety requirements.
 - **Classes**
   - `ConsumerState` (line 30): Consumer lifecycle states.
   - `PartitionState` (line 40): Track state for each assigned partition.
@@ -6871,20 +6871,20 @@
     - `is_rebalancing(self)` (line 281): Check if consumer is currently rebalancing.
     - `poll(self, timeout)` (line 286): Poll for a message with rebalance awareness.
     - `wait_for_assignment(self, timeout_seconds)` (line 318): Block until partitions are assigned (or timeout).
-    - `mark_processed(self, msg)` (line 344): Mark a message as successfully processed.
-    - `commit(self, message, offsets, asynchronous, msg)` (line 362): Commit offsets.
-    - `commit_sync(self, msg)` (line 432): Synchronously commit a specific message offset.
-    - `seek(self, partition)` (line 436): Seek to a specific offset for a partition.
-    - `close(self, timeout)` (line 455): Gracefully close the consumer.
-    - `__enter__(self)` (line 477): no docstring
-    - `__exit__(self, _exc_type, _exc_val, _exc_tb)` (line 480): no docstring
-    - `list_topics(self, topic, timeout)` (line 484): List available topics.
-    - `get_watermark_offsets(self, partition, timeout)` (line 488): Return (low, high) offsets for a partition.
-    - `committed(self, partitions, timeout)` (line 492): Return committed offsets for partitions in this consumer group.
-    - `assignment(self)` (line 496): Get current partition assignment.
-    - `position(self, partitions)` (line 500): Get current position for partitions.
-    - `pause(self, partitions)` (line 504): Pause fetching from the provided partitions (backpressure).
-    - `resume(self, partitions)` (line 510): Resume fetching from the provided partitions (backpressure).
+    - `mark_processed(self, msg)` (line 347): Mark a message as successfully processed.
+    - `commit(self, message, offsets, asynchronous, msg)` (line 365): Commit offsets.
+    - `commit_sync(self, msg)` (line 435): Synchronously commit a specific message offset.
+    - `seek(self, partition)` (line 439): Seek to a specific offset for a partition.
+    - `close(self, timeout)` (line 458): Gracefully close the consumer.
+    - `__enter__(self)` (line 480): no docstring
+    - `__exit__(self, _exc_type, _exc_val, _exc_tb)` (line 483): no docstring
+    - `list_topics(self, topic, timeout)` (line 487): List available topics.
+    - `get_watermark_offsets(self, partition, timeout)` (line 491): Return (low, high) offsets for a partition.
+    - `committed(self, partitions, timeout)` (line 495): Return committed offsets for partitions in this consumer group.
+    - `assignment(self)` (line 499): Get current partition assignment.
+    - `position(self, partitions)` (line 503): Get current position for partitions.
+    - `pause(self, partitions)` (line 507): Pause fetching from the provided partitions (backpressure).
+    - `resume(self, partitions)` (line 513): Resume fetching from the provided partitions (backpressure).
 
 ### `backend/shared/services/kafka/worker_consumer_runtime.py`
 - **Classes**
@@ -7364,24 +7364,24 @@
 
 ### `backend/shared/services/pipeline/pipeline_scheduler.py`
 - **Functions**
-  - `_should_run_schedule(now, last_run, interval, cron)` (line 391): no docstring
-  - `_cron_matches(now, expression)` (line 408): no docstring
-  - `_cron_field_matches(field, value)` (line 423): no docstring
-  - `_normalize_dependencies(raw)` (line 457): no docstring
-  - `async _dependencies_satisfied(registry, dependencies)` (line 461): no docstring
-  - `async _evaluate_dependencies(registry, dependencies)` (line 469): no docstring
-  - `_is_valid_cron_expression(expression)` (line 504): no docstring
-  - `_is_valid_cron_field(field)` (line 511): no docstring
+  - `_should_run_schedule(now, last_run, interval, cron)` (line 404): no docstring
+  - `_cron_matches(now, expression)` (line 421): no docstring
+  - `_cron_field_matches(field, value)` (line 436): no docstring
+  - `_normalize_dependencies(raw)` (line 470): no docstring
+  - `async _dependencies_satisfied(registry, dependencies)` (line 474): no docstring
+  - `async _evaluate_dependencies(registry, dependencies)` (line 482): no docstring
+  - `_is_valid_cron_expression(expression)` (line 517): no docstring
+  - `_is_valid_cron_field(field)` (line 524): no docstring
 - **Classes**
   - `ScheduledPipeline` (line 28): no docstring
   - `DependencyEvaluation` (line 37): no docstring
   - `PipelineScheduler` (line 43): no docstring
     - `__init__(self, registry, queue, poll_seconds, tracing, metrics)` (line 44): no docstring
     - `async run(self)` (line 60): no docstring
-    - `async stop(self)` (line 92): no docstring
-    - `async _tick(self)` (line 95): no docstring
-    - `async _record_scheduler_config_error(self, pipeline_id, now, error_key, detail, extra)` (line 300): no docstring
-    - `async _record_scheduler_ignored(self, pipeline_id, now, reason, detail, extra)` (line 344): no docstring
+    - `async stop(self)` (line 98): no docstring
+    - `async _tick(self)` (line 101): no docstring
+    - `async _record_scheduler_config_error(self, pipeline_id, now, error_key, detail, extra)` (line 313): no docstring
+    - `async _record_scheduler_ignored(self, pipeline_id, now, reason, detail, extra)` (line 357): no docstring
 
 ### `backend/shared/services/pipeline/pipeline_schema_casts.py`
 - **Functions**
@@ -8211,7 +8211,7 @@
 
 ### `backend/shared/services/storage/storage_service.py`
 - **Functions**
-  - `create_storage_service(settings)` (line 901): 스토리지 서비스 팩토리 함수 (Anti-pattern 13 해결)
+  - `create_storage_service(settings)` (line 906): 스토리지 서비스 팩토리 함수 (Anti-pattern 13 해결)
 - **Classes**
   - `StorageService` (line 33): S3/MinIO 스토리지 서비스 - Event Sourcing 지원
     - `__init__(self, endpoint_url, access_key, secret_key, region, use_ssl, ssl_verify)` (line 57): 스토리지 서비스 초기화
@@ -8223,19 +8223,19 @@
     - `async load_json(self, bucket, key)` (line 290): S3에서 JSON 데이터 로드
     - `async load_bytes(self, bucket, key)` (line 312): S3에서 Raw bytes 로드
     - `async load_bytes_lines(self, bucket, key, max_lines, max_bytes)` (line 332): Load up to `max_lines` newline-delimited lines from the start of an object.
-    - `async verify_checksum(self, bucket, key, expected_checksum)` (line 386): 저장된 파일의 체크섬 검증
-    - `async delete_object(self, bucket, key)` (line 412): S3 객체 삭제
-    - `async delete_prefix(self, bucket, prefix)` (line 430): Delete all objects under a prefix.
-    - `async list_objects(self, bucket, prefix, max_keys)` (line 473): 버킷의 객체 목록 조회
-    - `async list_objects_paginated(self, bucket, prefix, max_keys, continuation_token)` (line 502): Paginated object listing (returns next continuation token if more).
-    - `async iter_objects(self, bucket, prefix, max_keys)` (line 524): Async iterator over all objects under prefix (pagination-aware).
-    - `async get_object_metadata(self, bucket, key)` (line 548): 객체 메타데이터 조회
-    - `generate_instance_path(self, db_name, class_id, instance_id, command_id)` (line 576): 인스턴스 이벤트 저장 경로 생성
-    - `async get_all_commands_for_instance(self, bucket, db_name, class_id, instance_id)` (line 598): 특정 인스턴스의 모든 Command 파일 목록 조회
-    - `async list_command_files(self, bucket, prefix)` (line 662): List command JSON objects under a prefix (pagination-aware, sorted by LastModified).
-    - `async replay_instance_state(self, bucket, command_files)` (line 703): Command 파일들을 순차적으로 읽어 인스턴스의 최종 상태 재구성
-    - `is_instance_deleted(self, instance_state)` (line 863): 인스턴스가 삭제된 상태인지 확인
-    - `get_deletion_info(self, instance_state)` (line 877): 삭제된 인스턴스의 삭제 정보 반환
+    - `async verify_checksum(self, bucket, key, expected_checksum)` (line 391): 저장된 파일의 체크섬 검증
+    - `async delete_object(self, bucket, key)` (line 417): S3 객체 삭제
+    - `async delete_prefix(self, bucket, prefix)` (line 435): Delete all objects under a prefix.
+    - `async list_objects(self, bucket, prefix, max_keys)` (line 478): 버킷의 객체 목록 조회
+    - `async list_objects_paginated(self, bucket, prefix, max_keys, continuation_token)` (line 507): Paginated object listing (returns next continuation token if more).
+    - `async iter_objects(self, bucket, prefix, max_keys)` (line 529): Async iterator over all objects under prefix (pagination-aware).
+    - `async get_object_metadata(self, bucket, key)` (line 553): 객체 메타데이터 조회
+    - `generate_instance_path(self, db_name, class_id, instance_id, command_id)` (line 581): 인스턴스 이벤트 저장 경로 생성
+    - `async get_all_commands_for_instance(self, bucket, db_name, class_id, instance_id)` (line 603): 특정 인스턴스의 모든 Command 파일 목록 조회
+    - `async list_command_files(self, bucket, prefix)` (line 667): List command JSON objects under a prefix (pagination-aware, sorted by LastModified).
+    - `async replay_instance_state(self, bucket, command_files)` (line 708): Command 파일들을 순차적으로 읽어 인스턴스의 최종 상태 재구성
+    - `is_instance_deleted(self, instance_state)` (line 868): 인스턴스가 삭제된 상태인지 확인
+    - `get_deletion_info(self, instance_state)` (line 882): 삭제된 인스턴스의 삭제 정보 반환
 
 ### `backend/shared/setup.py`
 
@@ -8243,18 +8243,18 @@
 
 ### `backend/shared/testing/config_fixtures.py`
 - **Functions**
-  - `create_mock_storage_service()` (line 179): Create mock storage service for testing
-  - `create_mock_redis_service()` (line 189): Create mock Redis service for testing
-  - `create_mock_elasticsearch_service()` (line 201): Create mock Elasticsearch service for testing
-  - `create_mock_label_mapper()` (line 212): Create mock label mapper for testing
-  - `create_mock_jsonld_converter()` (line 220): Create mock JSON-LD converter for testing
-  - `test_settings()` (line 229): Pytest fixture for test application settings
-  - `test_settings_with_overrides()` (line 235): Pytest fixture factory for test settings with custom overrides
-  - `async mock_container(test_settings)` (line 243): Pytest fixture for mock service container
-  - `mock_command_status_service()` (line 261): Pytest fixture for mock command status service
-  - `async isolated_test_environment(**config_overrides)` (line 300): Async context manager for completely isolated test environment
-  - `setup_test_database_config(**overrides)` (line 328): Create test settings with database configuration
-  - `setup_test_service_config(**overrides)` (line 342): Create test settings with service configuration
+  - `create_mock_storage_service()` (line 185): Create mock storage service for testing
+  - `create_mock_redis_service()` (line 195): Create mock Redis service for testing
+  - `create_mock_elasticsearch_service()` (line 207): Create mock Elasticsearch service for testing
+  - `create_mock_label_mapper()` (line 218): Create mock label mapper for testing
+  - `create_mock_jsonld_converter()` (line 226): Create mock JSON-LD converter for testing
+  - `test_settings()` (line 235): Pytest fixture for test application settings
+  - `test_settings_with_overrides()` (line 241): Pytest fixture factory for test settings with custom overrides
+  - `async mock_container(test_settings)` (line 249): Pytest fixture for mock service container
+  - `mock_command_status_service()` (line 267): Pytest fixture for mock command status service
+  - `async isolated_test_environment(**config_overrides)` (line 306): Async context manager for completely isolated test environment
+  - `setup_test_database_config(**overrides)` (line 334): Create test settings with database configuration
+  - `setup_test_service_config(**overrides)` (line 348): Create test settings with service configuration
 - **Classes**
   - `TestApplicationSettings` (line 34): Test-specific application settings that provide safe defaults for testing
     - `__init__(self, **overrides)` (line 42): no docstring
@@ -8267,10 +8267,10 @@
     - `get_sync(self, service_type)` (line 124): Get service instance (sync)
     - `async health_check_all(self)` (line 137): Mock health check for all services
     - `async shutdown(self)` (line 156): Shutdown all services
-  - `ConfigOverride` (line 270): Context manager for temporary configuration overrides
-    - `__init__(self, **overrides)` (line 278): no docstring
-    - `__enter__(self)` (line 282): no docstring
-    - `__exit__(self, _exc_type, _exc_val, _exc_tb)` (line 290): no docstring
+  - `ConfigOverride` (line 276): Context manager for temporary configuration overrides
+    - `__init__(self, **overrides)` (line 284): no docstring
+    - `__enter__(self)` (line 288): no docstring
+    - `__exit__(self, _exc_type, _exc_val, _exc_tb)` (line 296): no docstring
 
 ### `backend/shared/tools/__init__.py`
 
@@ -8616,22 +8616,22 @@
     - `_convert_relationships_to_display(self, relationships, relationship_labels)` (line 538): Convert relationships to display format with labels.
     - `_convert_data_item_to_display(self, data, class_labels, property_labels, relationship_labels)` (line 546): Convert a single data item to display format.
     - `async convert_to_display_batch(self, db_name, data_list, lang)` (line 576): Convert multiple data items to label-based format in batch (solves N+1 query problem)
-    - `async register_property(self, db_name, class_id, property_id, label)` (line 645): 속성 레이블 매핑 등록
-    - `async register_relationship(self, db_name, predicate, label)` (line 681): 관계 레이블 매핑 등록
-    - `async get_class_id(self, db_name, label, lang)` (line 713): 레이블로 클래스 ID 조회
-    - `async get_class_label(self, db_name, class_id, lang)` (line 743): 클래스 ID로 레이블 조회
-    - `async get_property_id(self, db_name, class_id, label, lang)` (line 773): 레이블로 속성 ID 조회
-    - `async get_predicate(self, db_name, label, lang)` (line 806): 레이블로 관계 술어 조회
-    - `async convert_query_to_internal(self, db_name, query, lang)` (line 836): 레이블 기반 쿼리를 내부 ID 기반으로 변환
-    - `async convert_to_display(self, db_name, data, lang)` (line 928): 내부 ID 기반 데이터를 레이블 기반으로 변환
-    - `async get_property_label(self, db_name, class_id, property_id, lang)` (line 949): 속성 ID로 레이블 조회 (공개 메서드)
-    - `async _get_property_label(self, db_name, class_id, property_id, lang)` (line 966): 속성 ID로 레이블 조회 (내부 메서드)
-    - `async _get_relationship_label(self, db_name, predicate, lang)` (line 988): 관계 술어로 레이블 조회
-    - `_extract_labels(self, label)` (line 1010): 레이블에서 언어별 텍스트 추출
-    - `async update_mappings(self, db_name, ontology_data)` (line 1046): 온톨로지 데이터로부터 모든 매핑 업데이트
-    - `async remove_class(self, db_name, class_id)` (line 1075): 클래스 관련 모든 매핑 제거
-    - `async export_mappings(self, db_name)` (line 1106): 특정 데이터베이스의 모든 매핑 내보내기
-    - `async import_mappings(self, data)` (line 1176): 매핑 데이터 가져오기
+    - `async register_property(self, db_name, class_id, property_id, label)` (line 644): 속성 레이블 매핑 등록
+    - `async register_relationship(self, db_name, predicate, label)` (line 680): 관계 레이블 매핑 등록
+    - `async get_class_id(self, db_name, label, lang)` (line 712): 레이블로 클래스 ID 조회
+    - `async get_class_label(self, db_name, class_id, lang)` (line 742): 클래스 ID로 레이블 조회
+    - `async get_property_id(self, db_name, class_id, label, lang)` (line 772): 레이블로 속성 ID 조회
+    - `async get_predicate(self, db_name, label, lang)` (line 805): 레이블로 관계 술어 조회
+    - `async convert_query_to_internal(self, db_name, query, lang)` (line 835): 레이블 기반 쿼리를 내부 ID 기반으로 변환
+    - `async convert_to_display(self, db_name, data, lang)` (line 927): 내부 ID 기반 데이터를 레이블 기반으로 변환
+    - `async get_property_label(self, db_name, class_id, property_id, lang)` (line 948): 속성 ID로 레이블 조회 (공개 메서드)
+    - `async _get_property_label(self, db_name, class_id, property_id, lang)` (line 965): 속성 ID로 레이블 조회 (내부 메서드)
+    - `async _get_relationship_label(self, db_name, predicate, lang)` (line 987): 관계 술어로 레이블 조회
+    - `_extract_labels(self, label)` (line 1009): 레이블에서 언어별 텍스트 추출
+    - `async update_mappings(self, db_name, ontology_data)` (line 1045): 온톨로지 데이터로부터 모든 매핑 업데이트
+    - `async remove_class(self, db_name, class_id)` (line 1074): 클래스 관련 모든 매핑 제거
+    - `async export_mappings(self, db_name)` (line 1105): 특정 데이터베이스의 모든 매핑 내보내기
+    - `async import_mappings(self, data)` (line 1175): 매핑 데이터 가져오기
 
 ### `backend/shared/utils/language.py`
 - **Functions**

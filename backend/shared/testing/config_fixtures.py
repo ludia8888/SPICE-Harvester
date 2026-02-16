@@ -162,18 +162,24 @@ class MockServiceContainer:
                         await service.close()
                     else:
                         service.close()
-                except Exception:
-                    logging.getLogger(__name__).warning("Broad exception fallback at shared/testing/config_fixtures.py:162", exc_info=True)
-                    pass  # Ignore errors during test cleanup
+                except Exception as close_exc:
+                    logging.getLogger(__name__).warning(
+                        "Ignoring service.close() cleanup error during tests: %s",
+                        close_exc,
+                        exc_info=True,
+                    )
             elif hasattr(service, 'disconnect'):
                 try:
                     if asyncio.iscoroutinefunction(service.disconnect):
                         await service.disconnect()
                     else:
                         service.disconnect()
-                except Exception:
-                    logging.getLogger(__name__).warning("Broad exception fallback at shared/testing/config_fixtures.py:170", exc_info=True)
-                    pass  # Ignore errors during test cleanup
+                except Exception as disconnect_exc:
+                    logging.getLogger(__name__).warning(
+                        "Ignoring service.disconnect() cleanup error during tests: %s",
+                        disconnect_exc,
+                        exc_info=True,
+                    )
 
 
 def create_mock_storage_service() -> Mock:

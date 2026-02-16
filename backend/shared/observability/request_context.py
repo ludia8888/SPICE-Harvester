@@ -186,9 +186,12 @@ def request_context(
         if otel_token is not None and _HAS_OTEL and otel_context is not None:
             try:
                 otel_context.detach(otel_token)
-            except Exception:
-                logging.getLogger(__name__).warning("Broad exception fallback at shared/observability/request_context.py:185", exc_info=True)
-                pass
+            except Exception as exc:
+                logging.getLogger(__name__).warning(
+                    "Failed to detach OpenTelemetry context token: %s",
+                    exc,
+                    exc_info=True,
+                )
         _REQUEST_ID.reset(token_request)
         _CORRELATION_ID.reset(token_corr)
         _DB_NAME.reset(token_db)

@@ -6,6 +6,8 @@ from shared.utils.resource_rid import parse_metadata_rev
 from shared.utils.writeback_conflicts import parse_conflict_policy
 import logging
 
+logger = logging.getLogger(__name__)
+
 
 class ObjectTypeMeta(TypedDict):
     conflict_policy: Optional[str]
@@ -42,9 +44,15 @@ def build_object_type_meta_resolver(
                 meta["conflict_policy"] = parse_conflict_policy(obj_spec.get("conflict_policy"))
             obj_metadata = object_resource.get("metadata") if isinstance(object_resource, dict) else None
             meta["rev"] = parse_metadata_rev(obj_metadata)
-        except Exception:
-            logging.getLogger(__name__).warning("Broad exception fallback at shared/services/core/object_type_meta_resolver.py:44", exc_info=True)
-            pass
+        except (RuntimeError, ValueError, TypeError, KeyError) as meta_exc:
+            logger.warning(
+                "Failed to resolve object type metadata for %s/%s@%s: %s",
+                db_name,
+                key,
+                branch,
+                meta_exc,
+                exc_info=True,
+            )
 
         cache[key] = meta
         return meta

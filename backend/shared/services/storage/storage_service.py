@@ -370,9 +370,14 @@ class StorageService:
             finally:
                 try:
                     body.close()
-                except Exception:
-                    logging.getLogger(__name__).warning("Broad exception fallback at shared/services/storage/storage_service.py:370", exc_info=True)
-                    pass
+                except Exception as close_exc:
+                    logger.warning(
+                        "Failed to close storage stream for %s/%s: %s",
+                        bucket,
+                        key,
+                        close_exc,
+                        exc_info=True,
+                    )
             return bytes(out)
 
         try:
@@ -930,4 +935,3 @@ def create_storage_service(settings: 'ApplicationSettings') -> Optional[StorageS
         use_ssl=settings.storage.use_ssl,
         ssl_verify=verify,
     )
-

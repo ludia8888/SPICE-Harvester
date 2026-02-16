@@ -341,9 +341,13 @@ class DatasetPrimaryIndexWritePath:
             try:
                 if await self._es.index_exists(index_name):
                     return index_name
-            except Exception:
-                logging.getLogger(__name__).warning("Broad exception fallback at objectify_worker/write_paths.py:336", exc_info=True)
-                pass
+            except Exception as exc:
+                logger.warning(
+                    "Failed to verify cached instances index existence (%s): %s",
+                    index_name,
+                    exc,
+                    exc_info=True,
+                )
             self._created_indices.discard(index_name)
 
         if not await self._es.index_exists(index_name):
