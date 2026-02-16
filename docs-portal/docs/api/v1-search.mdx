@@ -1,0 +1,106 @@
+---
+title: "v1: Search (Legacy)"
+sidebar_position: 8
+---
+
+# Legacy v1 Search API
+
+:::warning Deprecated
+The v1 API is deprecated and will be removed in a future release. All new integrations should use the [v2 Search API](./v2-search). See the [Foundry Migration Guide](/docs/guides/platform-admin/foundry-migration) for migration instructions.
+:::
+
+## Overview
+
+The v1 Search API uses a custom filter syntax with flat query parameters. It has been superseded by the v2 `SearchJsonQueryV2` format which offers more expressive query capabilities.
+
+## Endpoints
+
+### Search Objects
+
+```
+GET /api/v1/ontology/{ontologyId}/object-types/{objectTypeId}/objects/search
+```
+
+### Full-Text Search
+
+```
+GET /api/v1/ontology/{ontologyId}/search?q={query}
+```
+
+## v1 Query Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `q` | string | Full-text search query |
+| `filter` | string | Filter expression (e.g., `department:Engineering`) |
+| `sortBy` | string | Field to sort by |
+| `sortOrder` | string | `asc` or `desc` |
+| `offset` | integer | Pagination offset |
+| `limit` | integer | Results per page (max: 1000) |
+| `fields` | string | Comma-separated list of fields to return |
+
+### v1 Filter Syntax
+
+The v1 filter syntax uses a custom string format:
+
+```
+# Equals
+filter=department:Engineering
+
+# Multiple filters (AND)
+filter=department:Engineering,isActive:true
+
+# Range (numeric)
+filter=salary>100000
+
+# Range (date)
+filter=startDate>=2023-01-01
+
+# Text contains
+filter=fullName~jane
+```
+
+## Key Differences from v2
+
+| Aspect | v1 | v2 |
+|--------|----|----|
+| Query format | Flat query parameters | JSON body with `SearchJsonQueryV2` |
+| Filter syntax | Custom string format | Structured JSON operators |
+| Operators | 5 (`=`, `>`, `<`, `>=`, `~`) | 13 operators |
+| Logical operators | Only AND (comma-separated) | `and`, `or`, `not` with nesting |
+| Text search | Simple `~` contains | 4 text operators including phrase and prefix matching |
+| Pagination | `offset` + `limit` | Opaque `pageToken` |
+
+## v1 Response Example
+
+```json
+{
+  "results": [
+    {
+      "id": 42,
+      "type": "Employee",
+      "data": {
+        "employeeId": "EMP-042",
+        "fullName": "Jane Doe",
+        "department": "Engineering"
+      },
+      "score": 1.5
+    }
+  ],
+  "total": 1,
+  "offset": 0,
+  "limit": 100
+}
+```
+
+## Migration Path
+
+1. Replace GET query parameters with POST request body using `SearchJsonQueryV2`.
+2. Convert string filters to JSON operator objects:
+   - `department:Engineering` becomes `{"type": "eq", "field": "department", "value": "Engineering"}`
+   - `salary>100000` becomes `{"type": "gt", "field": "salary", "value": 100000}`
+   - `fullName~jane` becomes `{"type": "containsAnyTerm", "field": "fullName", "value": "jane"}`
+3. Combine multiple filters using the `and` operator instead of comma-separated values.
+4. Switch from `offset`/`limit` to `pageToken` pagination.
+
+See the [v2 Search API](./v2-search) for complete documentation and the [Foundry Migration Guide](/docs/guides/platform-admin/foundry-migration) for migration instructions.

@@ -1,0 +1,33 @@
+---
+title: Import Templates
+sidebar_position: 3
+---
+
+# Import Templates
+
+:::info Coming Soon
+This guide is under development. Check back for the full walkthrough.
+:::
+
+## What This Guide Covers
+
+This guide will walk data engineers through using import templates to streamline bulk data ingestion, including:
+
+- **Template Concepts** -- What import templates are and when to use them
+- **Built-in Templates** -- Pre-configured templates for common data formats (CSV, Excel, JSON, NDJSON)
+- **Custom Templates** -- Creating reusable import templates with field mapping, validation, and transformation
+- **Column Mapping** -- Mapping source columns to ontology properties, including type conversions
+- **Data Validation** -- Configuring validation rules within templates (required fields, patterns, ranges)
+- **Conflict Handling** -- Strategies for handling duplicate primary keys (skip, overwrite, merge)
+- **Batch Processing** -- Managing large file imports with chunking and progress tracking
+- **Template Sharing** -- Exporting and importing templates across environments
+
+## Prerequisites
+
+- [Schema Configuration](./schema-config) -- Object types must be defined
+- [Pipeline Builder](./pipeline-builder) -- Understanding of transforms
+
+## Related Resources
+
+- [Funnel Service](/docs/architecture/service-topology) -- The ingestion service that processes imports
+- [v2 Actions API](/docs/api/v2-actions) -- How imported records are written

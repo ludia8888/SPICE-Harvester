@@ -1,0 +1,207 @@
+---
+title: Quick Start
+sidebar_position: 1
+---
+
+# Quick Start
+
+Get SPICE Harvester running locally in under 10 minutes. This guide walks you through prerequisites, starting the platform, and making your first API call.
+
+## Prerequisites
+
+Before you begin, ensure the following tools are installed on your development machine:
+
+| Tool | Minimum Version | Verify Command |
+|------|----------------|----------------|
+| Docker | 24.0+ | `docker --version` |
+| Docker Compose | 2.20+ | `docker compose version` |
+| Node.js | 20.0+ | `node --version` |
+| Python | 3.11+ | `python3 --version` |
+| Git | 2.40+ | `git --version` |
+
+**System requirements:**
+- 16 GB RAM minimum (32 GB recommended for full observability stack)
+- 20 GB free disk space
+- macOS 13+, Ubuntu 22.04+, or Windows 11 with WSL2
+
+## Step 1: Clone the Repository
+
+```bash
+git clone https://github.com/your-org/spice-harvester.git
+cd spice-harvester
+```
+
+## Step 2: Configure Environment
+
+Copy the example environment file and adjust settings as needed:
+
+```bash
+cp .env.example .env
+```
+
+The default configuration works out of the box for local development. Key defaults include:
+
+```bash
+# Core service ports
+OMS_PORT=8000           # Ontology Management Service
+BFF_PORT=8002           # Backend-for-Frontend gateway
+FUNNEL_PORT=8003        # Funnel ingestion service
+
+# Data stores
+POSTGRES_PORT=5432
+ELASTICSEARCH_PORT=9200
+REDIS_PORT=6379
+KAFKA_PORT=9092
+MINIO_PORT=9000
+```
+
+## Step 3: Start the Platform
+
+Launch all 33+ services using Docker Compose:
+
+```bash
+docker compose up -d
+```
+
+This starts the full stack including:
+- **4 API servers** (OMS, BFF, Funnel, Admin)
+- **13 workers** (event processors, projection builders, pipeline runners)
+- **8 data stores** (PostgreSQL, Elasticsearch, Redis, Kafka, MinIO, and more)
+- **6 observability services** (Grafana, Prometheus, Jaeger, OTEL Collector, AlertManager, Loki)
+
+:::tip
+For a lighter footprint during development, start only the core services:
+```bash
+docker compose --profile core up -d
+```
+:::
+
+## Step 4: Verify Services
+
+Check that all services are healthy:
+
+```bash
+docker compose ps
+```
+
+You can also hit the health endpoints directly:
+
+```bash
+# OMS health check
+curl http://localhost:8000/health
+
+# BFF health check
+curl http://localhost:8002/health
+
+# Funnel health check
+curl http://localhost:8003/health
+```
+
+Each should return:
+
+```json
+{
+  "status": "healthy",
+  "version": "1.0.0",
+  "uptime": "...",
+  "checks": {
+    "database": "ok",
+    "elasticsearch": "ok",
+    "redis": "ok",
+    "kafka": "ok"
+  }
+}
+```
+
+## Step 5: Run Database Migrations
+
+Apply the initial schema and seed data:
+
+```bash
+docker compose exec oms python -m alembic upgrade head
+docker compose exec oms python -m spice.cli seed --demo
+```
+
+The seed command creates a demo ontology with sample object types, link types, and instances so you can explore the platform immediately.
+
+## Step 6: Make Your First API Call
+
+### Authenticate
+
+Obtain a Bearer token:
+
+```bash
+curl -X POST http://localhost:8002/api/v2/auth/token \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "admin",
+    "password": "admin"
+  }'
+```
+
+Response:
+
+```json
+{
+  "access_token": "eyJhbGciOiJIUzI1NiIs...",
+  "token_type": "Bearer",
+  "expires_in": 3600
+}
+```
+
+### List Object Types
+
+Use the token to list available object types in the demo ontology:
+
+```bash
+curl http://localhost:8002/api/v2/ontologies/demo/objectTypes \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..."
+```
+
+Response:
+
+```json
+{
+  "data": [
+    {
+      "apiName": "Employee",
+      "displayName": "Employee",
+      "pluralDisplayName": "Employees",
+      "primaryKey": "employeeId",
+      "properties": {
+        "employeeId": { "dataType": { "type": "string" } },
+        "fullName": { "dataType": { "type": "string" } },
+        "department": { "dataType": { "type": "string" } },
+        "startDate": { "dataType": { "type": "date" } }
+      },
+      "rid": "ri.ontology.main.object-type.employee-001"
+    }
+  ],
+  "nextPageToken": null
+}
+```
+
+### Search for Objects
+
+Search for employees in the Engineering department:
+
+```bash
+curl -X POST http://localhost:8002/api/v2/ontologies/demo/objects/Employee/search \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "where": {
+      "type": "eq",
+      "field": "department",
+      "value": "Engineering"
+    },
+    "pageSize": 10
+  }'
+```
+
+## Next Steps
+
+- **[Installation Guide](./installation)** -- Detailed setup with production configuration options
+- **[Core Concepts](./concepts)** -- Understand the ontology model and platform architecture
+- **[API Reference](/docs/api/overview)** -- Full API documentation with all 275 endpoints
+- **[Architecture Overview](/docs/architecture/overview)** -- How the system is designed

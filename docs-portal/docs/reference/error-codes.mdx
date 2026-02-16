@@ -1,0 +1,44 @@
+---
+title: Error Codes
+sidebar_position: 1
+---
+
+# Error Codes
+
+SPICE Harvester defines 290+ structured error codes organized by subsystem, domain, and class.
+
+For the complete error code reference -- including error format, code structure, severity levels, retry policies, and a full listing of common error codes -- see the **[API Error Codes Reference](/docs/api/error-codes)**.
+
+## Quick Reference
+
+### Error Format
+
+```json
+{
+  "errorCode": "NOT_FOUND",
+  "errorName": "ObjectNotFound",
+  "errorInstanceId": "err-2024-01-15-a1b2c3d4",
+  "parameters": { ... }
+}
+```
+
+### Error Code Pattern
+
+```
+SHV-{SUBSYSTEM}-{DOMAIN}-{CLASS}-{NUMBER}
+```
+
+Example: `SHV-ONT-OBJ-NFD-001` (Ontology > Object > Not Found > #001)
+
+### Retryable vs Non-Retryable
+
+| Retryable | Non-Retryable |
+|-----------|---------------|
+| `CON` (Conflict) -- re-read and retry | `VAL` (Validation) -- fix the input |
+| `INT` (Internal) -- exponential backoff | `NFD` (Not Found) -- check resource ID |
+| `TMO` (Timeout) -- retry with backoff | `PRM` (Permission) -- check access |
+| `LIM` (Rate Limit) -- respect `Retry-After` | `DUP` (Duplicate) -- resource exists |
+| `UNV` (Unavailable) -- wait and retry | |
+| `DEP` (Dependency) -- downstream issue | |
+
+For full details, see **[API Error Codes Reference](/docs/api/error-codes)**.

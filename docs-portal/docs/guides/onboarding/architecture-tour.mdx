@@ -1,0 +1,35 @@
+---
+title: Architecture Tour
+sidebar_position: 2
+---
+
+# Architecture Tour
+
+:::info Coming Soon
+This guide is under development. Check back for the full walkthrough.
+:::
+
+## What This Guide Covers
+
+This guide provides a visual, guided tour through the SPICE Harvester architecture for new team members, including:
+
+- **The Big Picture** -- A narrated walkthrough of the system architecture diagram, explaining each layer and its purpose
+- **Request Journey** -- Following a single API request from client to response, seeing every service it touches
+- **Write Path Walkthrough** -- Tracing an action from submission through validation, event creation, Kafka distribution, and read model updates
+- **Search Path Walkthrough** -- Following a search query from the BFF through OMS to Elasticsearch and back
+- **Event Lifecycle** -- Observing an event from creation through the outbox, Kafka, event store, and worker processing
+- **Service Discovery** -- Mapping out which services talk to which, and why
+- **Data Flow Visualization** -- Interactive diagrams showing data movement through the platform
+- **Hands-On Exploration** -- Using health endpoints, Grafana dashboards, and Jaeger traces to observe the running system
+
+## Prerequisites
+
+- [Quick Start](/docs/getting-started/quick-start) -- Platform should be running locally
+- [Core Concepts](/docs/getting-started/concepts) -- Basic terminology
+
+## Related Resources
+
+- [Architecture Overview](/docs/architecture/overview) -- Detailed architecture documentation
+- [Data Flow](/docs/architecture/data-flow) -- Request lifecycle diagrams
+- [Service Topology](/docs/architecture/service-topology) -- Complete service inventory
+- [Event Sourcing](/docs/architecture/event-sourcing) -- Event-driven architecture details

@@ -1,0 +1,184 @@
+---
+title: Development Setup
+sidebar_position: 1
+---
+
+# Development Setup
+
+This guide covers setting up a local development environment for contributing to SPICE Harvester.
+
+## Prerequisites
+
+Ensure the following tools are installed:
+
+| Tool | Version | Purpose |
+|------|---------|---------|
+| Python | 3.11+ | Backend services, CLI, tests |
+| Node.js | 20+ LTS | BFF, frontend tooling, documentation site |
+| Docker | 24.0+ | Running data stores and services |
+| Docker Compose | 2.20+ | Service orchestration |
+| Git | 2.40+ | Version control |
+| Make | 4.0+ | Build automation (optional but recommended) |
+
+## Clone and Setup
+
+```bash
+# Clone the repository
+git clone https://github.com/your-org/spice-harvester.git
+cd spice-harvester
+
+# Create Python virtual environment
+python3 -m venv .venv
+source .venv/bin/activate   # macOS/Linux
+# .venv\Scripts\activate    # Windows
+
+# Install Python dependencies
+pip install -e ".[dev]"
+
+# Install Node.js dependencies
+npm install
+
+# Copy environment configuration
+cp .env.example .env
+```
+
+## Start Data Stores
+
+For development, start only the data stores (not the application services, which you will run directly):
+
+```bash
+docker compose --profile datastores up -d
+```
+
+This starts PostgreSQL, Elasticsearch, Redis, Kafka, ZooKeeper, and MinIO.
+
+## Run Database Migrations
+
+```bash
+python -m alembic upgrade head
+python -m spice.cli seed --demo
+```
+
+## Run Services Locally
+
+Run services directly (outside Docker) for a faster development loop:
+
+```bash
+# Terminal 1: OMS
+python -m uvicorn spice.oms.app:app --reload --port 8000
+
+# Terminal 2: BFF
+python -m uvicorn spice.bff.app:app --reload --port 8002
+
+# Terminal 3: Funnel
+python -m uvicorn spice.funnel.app:app --reload --port 8003
+```
+
+The `--reload` flag enables auto-restart on code changes.
+
+## Pre-Commit Hooks
+
+Install pre-commit hooks to enforce code quality before every commit:
+
+```bash
+pip install pre-commit
+pre-commit install
+```
+
+The hooks run:
+- **Ruff** -- Python linting and formatting
+- **mypy** -- Python type checking
+- **ESLint** -- TypeScript/JavaScript linting
+- **Prettier** -- TypeScript/JavaScript formatting
+- **Unit tests** -- Fast test suite
+
+To run hooks manually:
+
+```bash
+pre-commit run --all-files
+```
+
+## Running Tests
+
+```bash
+# All Python tests
+pytest
+
+# Specific test module
+pytest tests/test_ontology.py
+
+# With coverage
+pytest --cov=spice --cov-report=html
+
+# Only fast unit tests (no external dependencies)
+pytest -m "not integration"
+
+# Integration tests (require running data stores)
+pytest -m integration
+
+# TypeScript tests
+npm test
+```
+
+## IDE Configuration
+
+### VS Code
+
+Recommended extensions:
+- Python (ms-python.python)
+- Pylance (ms-python.vscode-pylance)
+- Ruff (charliermarsh.ruff)
+- ESLint (dbaeumer.vscode-eslint)
+- Prettier (esbenp.prettier-vscode)
+- Docker (ms-azuretools.vscode-docker)
+
+Recommended settings (`.vscode/settings.json`):
+
+```json
+{
+  "python.defaultInterpreterPath": ".venv/bin/python",
+  "python.analysis.typeCheckingMode": "basic",
+  "[python]": {
+    "editor.defaultFormatter": "charliermarsh.ruff",
+    "editor.formatOnSave": true,
+    "editor.codeActionsOnSave": {
+      "source.fixAll.ruff": "explicit",
+      "source.organizeImports.ruff": "explicit"
+    }
+  },
+  "[typescript]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode",
+    "editor.formatOnSave": true
+  }
+}
+```
+
+### PyCharm / IntelliJ
+
+1. Set the project interpreter to `.venv/bin/python`.
+2. Enable Ruff integration via the Ruff plugin.
+3. Configure the test runner to use pytest.
+4. Mark `src/` as a sources root and `tests/` as a tests root.
+
+## Makefile Targets
+
+If available, use Make for common tasks:
+
+```bash
+make install        # Install all dependencies
+make test           # Run all tests
+make test-unit      # Run unit tests only
+make test-integration  # Run integration tests
+make lint           # Run linters
+make format         # Auto-format code
+make typecheck      # Run type checking
+make docs           # Build documentation
+make docker-build   # Build Docker images
+make clean          # Remove build artifacts
+```
+
+## Next Steps
+
+- **[Code Standards](./code-standards)** -- Style guides and conventions
+- **[Release Process](./release-process)** -- How to cut a release
+- **[Architecture Overview](/docs/architecture/overview)** -- Understand the system design

@@ -1,0 +1,332 @@
+---
+title: Class Diagrams
+sidebar_position: 4
+---
+
+# Class Diagrams
+
+This page presents the key domain model classes in SPICE Harvester. These diagrams reflect the core entities and their relationships as implemented in the ontology management layer.
+
+## Ontology Domain Model
+
+The following class diagram shows the primary entities that make up the ontology schema and instance layers.
+
+```mermaid
+classDiagram
+    class Ontology {
+        +String rid
+        +String apiName
+        +String displayName
+        +String description
+        +DateTime createdAt
+        +DateTime updatedAt
+        +listObjectTypes() ObjectType[]
+        +listLinkTypes() LinkType[]
+        +getObjectType(apiName) ObjectType
+    }
+
+    class ObjectType {
+        +String rid
+        +String apiName
+        +String displayName
+        +String pluralDisplayName
+        +String primaryKey
+        +String ontologyApiName
+        +Map~String, Property~ properties
+        +DateTime createdAt
+        +getProperty(apiName) Property
+        +validate(instance) ValidationResult
+    }
+
+    class Property {
+        +String apiName
+        +String displayName
+        +DataType dataType
+        +Boolean required
+        +Boolean indexed
+        +Object defaultValue
+        +String description
+    }
+
+    class DataType {
+        +String type
+        +DataType itemType
+        +Boolean nullable
+    }
+
+    class LinkType {
+        +String rid
+        +String apiName
+        +String displayName
+        +String sourceObjectType
+        +String targetObjectType
+        +Cardinality cardinality
+        +String ontologyApiName
+    }
+
+    class Instance {
+        +String rid
+        +String primaryKey
+        +String objectTypeApiName
+        +String ontologyApiName
+        +Map~String, Any~ properties
+        +DateTime createdAt
+        +DateTime updatedAt
+        +Long version
+        +getProperty(name) Any
+        +toFoundryV2Format() Object
+    }
+
+    Ontology "1" --> "*" ObjectType : contains
+    Ontology "1" --> "*" LinkType : contains
+    ObjectType "1" --> "*" Property : defines
+    Property "1" --> "1" DataType : has type
+    LinkType "1" --> "1" ObjectType : source
+    LinkType "1" --> "1" ObjectType : target
+    ObjectType "1" --> "*" Instance : instantiates
+```
+
+## Action System Model
+
+Actions represent all write operations in the platform. They are validated, executed, and recorded as events.
+
+```mermaid
+classDiagram
+    class Action {
+        +String actionId
+        +ActionType type
+        +String ontologyApiName
+        +String objectTypeApiName
+        +Map~String, Any~ parameters
+        +String userId
+        +DateTime submittedAt
+        +ActionStatus status
+        +validate() ValidationResult
+        +execute() ActionResult
+        +undo() Action
+    }
+
+    class ActionType {
+        <<enumeration>>
+        CREATE_OBJECT
+        EDIT_OBJECT
+        DELETE_OBJECT
+        CREATE_LINK
+        DELETE_LINK
+        BULK_ACTION
+    }
+
+    class ActionTemplate {
+        +String templateId
+        +String apiName
+        +String displayName
+        +ActionType type
+        +Map~String, ParameterDef~ parameters
+        +Expression[] rules
+        +Expression[] sideEffects
+        +evaluate(context) Action
+    }
+
+    class ActionResult {
+        +String actionId
+        +Boolean success
+        +String objectRid
+        +Map~String, Any~ modifiedProperties
+        +Event[] emittedEvents
+        +String errorCode
+        +String errorMessage
+    }
+
+    class ValidationResult {
+        +Boolean valid
+        +ValidationError[] errors
+        +ValidationWarning[] warnings
+    }
+
+    class ActionStatus {
+        <<enumeration>>
+        PENDING
+        VALIDATING
+        EXECUTING
+        COMPLETED
+        FAILED
+        UNDONE
+    }
+
+    Action --> ActionType : has type
+    Action --> ActionResult : produces
+    Action --> ActionStatus : has status
+    Action --> ValidationResult : validated by
+    ActionTemplate --> Action : generates
+    ActionTemplate --> ActionType : defines type
+```
+
+## Event Model
+
+Events are the immutable records of all state changes in the platform.
+
+```mermaid
+classDiagram
+    class Event {
+        +String eventId
+        +String eventType
+        +String aggregateId
+        +String aggregateType
+        +Long sequenceNumber
+        +DateTime timestamp
+        +String userId
+        +Map~String, Any~ payload
+        +Map~String, String~ metadata
+        +String correlationId
+        +String causationId
+    }
+
+    class EventStore {
+        +append(event) void
+        +getEvents(aggregateId) Event[]
+        +getEventsSince(timestamp) Event[]
+        +getSnapshot(aggregateId) Snapshot
+        +createSnapshot(aggregateId) Snapshot
+    }
+
+    class Snapshot {
+        +String aggregateId
+        +Long sequenceNumber
+        +DateTime timestamp
+        +Map~String, Any~ state
+    }
+
+    class EventConsumer {
+        +String consumerGroup
+        +String[] subscribedTopics
+        +consume(event) void
+        +commit(offset) void
+        +getPosition() Long
+    }
+
+    EventStore "1" --> "*" Event : stores
+    EventStore "1" --> "*" Snapshot : manages
+    EventConsumer --> Event : consumes
+```
+
+## Pipeline Model
+
+Pipelines define data transformation workflows.
+
+```mermaid
+classDiagram
+    class Pipeline {
+        +String pipelineId
+        +String name
+        +String description
+        +PipelineStatus status
+        +Source source
+        +Transform[] transforms
+        +Sink sink
+        +DateTime createdAt
+        +DateTime lastRunAt
+        +execute() PipelineResult
+    }
+
+    class Source {
+        +String sourceType
+        +Map~String, Any~ config
+        +read() DataFrame
+    }
+
+    class Transform {
+        +String transformType
+        +Map~String, Any~ config
+        +Integer order
+        +apply(data) DataFrame
+    }
+
+    class Sink {
+        +String sinkType
+        +String objectTypeApiName
+        +Map~String, Any~ config
+        +write(data) WriteResult
+    }
+
+    class PipelineStatus {
+        <<enumeration>>
+        DRAFT
+        SUBMITTED
+        RUNNING
+        COMPLETED
+        FAILED
+        CANCELLED
+    }
+
+    Pipeline --> Source : reads from
+    Pipeline "1" --> "*" Transform : applies
+    Pipeline --> Sink : writes to
+    Pipeline --> PipelineStatus : has status
+```
+
+## Lineage Model
+
+Lineage tracks data provenance through the system.
+
+```mermaid
+classDiagram
+    class LineageNode {
+        +String nodeId
+        +String nodeType
+        +String rid
+        +Map~String, Any~ attributes
+        +DateTime createdAt
+    }
+
+    class LineageEdge {
+        +String edgeId
+        +LineageEdgeType edgeType
+        +String sourceNodeId
+        +String targetNodeId
+        +DateTime timestamp
+        +String pipelineId
+        +String actionId
+        +Map~String, Any~ metadata
+    }
+
+    class LineageEdgeType {
+        <<enumeration>>
+        DERIVED_FROM
+        IMPORTED_BY
+        TRANSFORMED_BY
+        LINKED_TO
+        CREATED_BY
+        MODIFIED_BY
+        DELETED_BY
+        VALIDATED_BY
+        ENRICHED_BY
+        MERGED_FROM
+        SPLIT_INTO
+        AGGREGATED_FROM
+        PUBLISHED_TO
+        CONSUMED_FROM
+        SNAPSHOT_OF
+    }
+
+    LineageEdge --> LineageEdgeType : has type
+    LineageEdge --> LineageNode : source
+    LineageEdge --> LineageNode : target
+```
+
+## Relationship Summary
+
+The domain model follows these key relationships:
+
+- An **Ontology** contains multiple **ObjectTypes** and **LinkTypes**.
+- Each **ObjectType** defines multiple **Properties**, each with a **DataType**.
+- **Instances** are concrete records conforming to an ObjectType schema.
+- **Actions** mutate instances and produce **Events**.
+- **Events** are stored in the **EventStore** and consumed by **EventConsumers** (workers).
+- **Pipelines** read from **Sources**, apply **Transforms**, and write to **Sinks** (which submit actions).
+- **Lineage** records provenance relationships between **LineageNodes** via typed **LineageEdges**.
+
+## Next Steps
+
+- **[Event Sourcing](./event-sourcing)** -- How events flow through the system
+- **[Core Concepts](/docs/getting-started/concepts)** -- Plain-language explanation of these entities
+- **[API Reference](/docs/api/overview)** -- How these models appear in the API

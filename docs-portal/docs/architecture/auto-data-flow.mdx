@@ -1,0 +1,86 @@
+---
+title: "Data Flow Architecture"
+sidebar_label: "Data Flow"
+sidebar_position: 2
+---
+
+# Data Flow Architecture
+
+:::info Auto-Generated
+This diagram is auto-generated from `docs/architecture/` Mermaid sources.
+Do not edit manually. Run `python scripts/generate_portal_mermaid.py`.
+:::
+
+End-to-end data flow through SPICE Harvester, from client requests through the API Gateway, Service Layer, and Data Layer.
+
+```mermaid
+graph TB
+    %% Data Flow Architecture
+    %% Last Updated: 2026-02-15
+    
+    subgraph "Client Layer"
+        Web[Web Application]
+        Mobile[Mobile App]
+        API[External API]
+    end
+    
+    subgraph "API Gateway Layer"
+        BFF["Backend for Frontend<br/>(Port 8002)"]
+        Auth[Authentication]
+        RateLimit[Rate Limiter]
+        CORS[CORS Handler]
+    end
+    
+    subgraph "Service Layer"
+        OMS["Ontology Management<br/>(Port 8000)"]
+        Query[Query Service]
+        Validator[Validation Service]
+        Funnel["Type Inference Service<br/>(Port 8003)"]
+    end
+    
+    subgraph "Data Layer"
+        Registry["Ontology Registry<br/>(Postgres)"]
+        EventStore["Durable Event Store<br/>(S3/MinIO)"]
+        Cache[Redis Cache]
+        Search["Object Read Model<br/>(Elasticsearch)"]
+        LabelDB[Label Mapping DB]
+    end
+    
+    subgraph "External Sources"
+        GoogleSheets[Google Sheets]
+        CSV[CSV Files]
+        ExtAPI[External APIs]
+    end
+    
+    %% Connections
+    Web --> BFF
+    Mobile --> BFF
+    API --> BFF
+    
+    BFF --> Auth
+    BFF --> RateLimit
+    BFF --> CORS
+    
+    Auth --> OMS
+    Auth --> Query
+    Auth --> Funnel
+    
+    OMS --> Validator
+    Query --> Validator
+    Funnel --> Validator
+    
+    OMS --> Registry
+    OMS --> EventStore
+    OMS --> Search
+    Query --> Search
+    Query --> Cache
+    BFF --> LabelDB
+    
+    Funnel --> GoogleSheets
+    Funnel --> CSV
+    Funnel --> ExtAPI
+    
+    %% Type Inference Flow
+    BFF -.-> Funnel
+    Funnel --> BFF
+```

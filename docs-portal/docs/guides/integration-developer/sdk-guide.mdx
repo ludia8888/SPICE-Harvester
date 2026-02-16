@@ -1,0 +1,69 @@
+---
+title: SDK Guide
+sidebar_position: 3
+---
+
+# SDK Guide
+
+:::info Coming Soon
+This guide is under development. Check back for the full walkthrough.
+:::
+
+## What This Guide Covers
+
+This guide will walk integration developers through using the official SPICE Harvester client SDKs, including:
+
+- **SDK Installation** -- Installing the Python and TypeScript SDKs
+- **Client Configuration** -- Setting up the client with base URL, authentication, and options
+- **Object Operations** -- Creating, reading, updating, and deleting objects with type-safe methods
+- **Search** -- Building search queries using SDK builder patterns
+- **Actions** -- Submitting actions with validation and error handling
+- **Pagination** -- Iterating through paginated results with async iterators
+- **Error Handling** -- Catching and handling typed SDK exceptions
+- **Logging and Debugging** -- Enabling request/response logging for troubleshooting
+- **Advanced Usage** -- Custom HTTP clients, request interceptors, and middleware
+- **SDK vs REST** -- When to use the SDK versus direct REST calls
+
+### Python SDK
+
+```python
+# Installation
+pip install spice-harvester-sdk
+
+# Basic usage
+from spice_harvester import SpiceClient
+
+client = SpiceClient(
+    base_url="http://localhost:8002",
+    token="your-access-token"
+)
+
+employees = client.objects.list("acme", "Employee", page_size=25)
+```
+
+### TypeScript SDK
+
+```typescript
+// Installation
+npm install @spice-harvester/sdk
+
+// Basic usage
+import { SpiceClient } from '@spice-harvester/sdk';
+
+const client = new SpiceClient({
+  baseUrl: 'http://localhost:8002',
+  token: 'your-access-token',
+});
+
+const employees = await client.objects.list('acme', 'Employee', { pageSize: 25 });
+```
+
+## Prerequisites
+
+- [API Overview](/docs/api/overview) -- API conventions the SDKs build upon
+- [REST API Guide](./rest-api) -- Understanding the underlying REST API
+
+## Related Resources
+
+- [Auth Flow Guide](./auth-flow) -- Token management in SDK clients
+- [v2 Search API](/docs/api/v2-search) -- Search operator reference

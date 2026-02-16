@@ -1,0 +1,988 @@
+---
+title: Configuration Reference (Auto-Generated)
+sidebar_label: Configuration
+sidebar_position: 2
+---
+
+# Configuration Reference
+
+:::info Auto-Generated
+This page is auto-generated from `backend/shared/config/settings.py`.
+Do not edit manually. Run `python scripts/generate_portal_config_reference.py`.
+:::
+
+SPICE Harvester uses **45 configuration classes** with **520 settings** total.
+All settings use Pydantic BaseSettings with environment variable binding.
+
+## Configuration Classes
+
+- [DatabaseSettings](#databasesettings) — Database configuration settings
+- [ServiceSettings](#servicesettings) — Service configuration settings
+- [LLMSettings](#llmsettings) — LLM gateway settings (shared across services).
+- [ObservabilitySettings](#observabilitysettings) — Logging/observability settings (shared across services/workers).
+- [GraphQuerySettings](#graphquerysettings) — Graph query guardrails (graph federation).
+- [FeatureFlagsSettings](#featureflagssettings) — Feature flags / opt-in endpoints.
+- [PipelineSettings](#pipelinesettings) — Pipeline Builder + pipeline worker settings.
+- [OntologySettings](#ontologysettings) — Ontology API + linter governance settings.
+- [AgentRuntimeSettings](#agentruntimesettings) — Agent runtime settings (agent service tool runner).
+- [AgentPlanSettings](#agentplansettings) — LLM-native control plane settings (planner + allowlist bootstrap).
+- [PipelinePlanSettings](#pipelineplansettings) — Pipeline plan planner settings (LLM-backed pipeline definition proposals).
+- [ClientSettings](#clientsettings) — Internal service-to-service client settings (BFF/OMS/etc).
+- [MCPSettings](#mcpsettings) — MCP integration settings (BFF/agent).
+- [AuthSettings](#authsettings) — Service auth configuration (BFF/OMS).
+- [RateLimitSettings](#ratelimitsettings) — Rate limiter runtime configuration.
+- [MessagingSettings](#messagingsettings) — Kafka topic/group configuration settings
+- [StorageSettings](#storagesettings) — Storage configuration settings
+- [CacheSettings](#cachesettings) — Cache and TTL configuration settings
+- [SecuritySettings](#securitysettings) — Security configuration settings
+- [PerformanceSettings](#performancesettings) — Performance and optimization settings
+- [EventSourcingSettings](#eventsourcingsettings) — Event sourcing / CQRS tuning settings
+- [BranchVirtualizationSettings](#branchvirtualizationsettings) — Branch virtualization defaults (OCC seeding).
+- [InstanceWorkerSettings](#instanceworkersettings) — Instance worker runtime settings.
+- [OntologyWorkerSettings](#ontologyworkersettings) — Ontology worker runtime settings.
+- [ProjectionWorkerSettings](#projectionworkersettings) — Projection worker runtime settings.
+- [ActionWorkerSettings](#actionworkersettings) — Action worker runtime settings.
+- [ActionOutboxSettings](#actionoutboxsettings) — Action outbox worker settings.
+- [OntologyDeployOutboxSettings](#ontologydeployoutboxsettings) — Ontology deployment outbox worker settings (OMS embedded worker).
+- [ConnectorSyncSettings](#connectorsyncsettings) — Connector sync worker settings.
+- [ConnectorTriggerSettings](#connectortriggersettings) — Connector trigger service settings.
+- [ObjectifySettings](#objectifysettings) — Objectify worker settings.
+- [IngestReconcilerSettings](#ingestreconcilersettings) — Dataset ingest reconciler worker settings.
+- [DatasetIngestOutboxSettings](#datasetingestoutboxsettings) — Dataset ingest outbox worker settings (BFF embedded worker).
+- [ObjectifyOutboxWorkerSettings](#objectifyoutboxworkersettings) — Objectify outbox worker settings (BFF embedded worker).
+- [ObjectifyReconcilerSettings](#objectifyreconcilersettings) — Objectify reconciler worker settings (BFF embedded worker).
+- [WritebackMaterializerSettings](#writebackmaterializersettings) — Writeback materializer worker settings.
+- [EventPublisherSettings](#eventpublishersettings) — Event publisher (message relay) settings.
+- [AgentRetentionWorkerSettings](#agentretentionworkersettings) — Agent session retention worker settings (SEC-005).
+- [SchemaChangeMonitorSettings](#schemachangemonitorsettings) — Schema change monitor settings for proactive drift detection.
+- [ChaosSettings](#chaossettings) — Chaos/fault injection settings (test-only).
+- [WorkersSettings](#workerssettings) — Workers/services runtime settings.
+- [WritebackSettings](#writebacksettings) — Ontology writeback + read overlay settings
+- [TestSettings](#testsettings) — Test environment configuration
+- [GoogleSheetsSettings](#googlesheetssettings) — Google Sheets integration settings
+- [ApplicationSettings](#applicationsettings) — Main application settings - aggregates all other settings
+
+## DatabaseSettings
+
+> Database configuration settings
+
+**19 settings**
+
+| Setting | Type | Default | Env Variable | Description |
+|---------|------|---------|-------------|-------------|
+| `query_max_scan_docs` | `int` | `5000` | `QUERY_MAX_SCAN_DOCS` | Max scan docs for unsafe queries (QUERY_MAX_SCAN_DOCS) |
+| `postgres_host` | `str` | `<env-dependent>` | `POSTGRES_HOST` | PostgreSQL host |
+| `postgres_port` | `int` | `<env-dependent>` | `POSTGRES_PORT`, `POSTGRES_PORT_HOST` | PostgreSQL port |
+| `postgres_user` | `str` | `spiceadmin` | `POSTGRES_USER` | PostgreSQL username |
+| `postgres_password` | `str` | `spicepass123` | `POSTGRES_PASSWORD` | PostgreSQL password |
+| `postgres_db` | `str` | `spicedb` | `POSTGRES_DB` | PostgreSQL database name |
+| `redis_host` | `str` | `<env-dependent>` | `REDIS_HOST` | Redis host |
+| `redis_port` | `int` | `6379` | `REDIS_PORT`, `REDIS_PORT_HOST` | Redis port |
+| `redis_password` | `Optional[str]` | `spicepass123` | `REDIS_PASSWORD` | Redis password |
+| `elasticsearch_host` | `str` | `<env-dependent>` | `ELASTICSEARCH_HOST` | Elasticsearch host |
+| `elasticsearch_port` | `int` | `9200` | `ELASTICSEARCH_PORT`, `ELASTICSEARCH_PORT_HOST` | Elasticsearch port |
+| `elasticsearch_request_timeout` | `int` | `60` | `ELASTICSEARCH_REQUEST_TIMEOUT` | Elasticsearch request timeout in seconds |
+| `elasticsearch_username` | `Optional[str]` | **required** | `ELASTICSEARCH_USERNAME` | Elasticsearch username |
+| `elasticsearch_password` | `Optional[str]` | **required** | `ELASTICSEARCH_PASSWORD` | Elasticsearch password |
+| `elasticsearch_default_shards` | `int` | `1` | `ELASTICSEARCH_DEFAULT_SHARDS` | Default number of shards for new indices (ELASTICSEARCH_DEFAULT_SHARDS) |
+| `elasticsearch_default_replicas` | `Optional[int]` | **required** | `ELASTICSEARCH_DEFAULT_REPLICAS` | Default number of replicas for new indices (ELASTICSEARCH_DEFAULT_REPLICAS) |
+| `kafka_host` | `str` | `<env-dependent>` | `KAFKA_HOST` | Kafka host |
+| `kafka_port` | `int` | `<env-dependent>` | `KAFKA_PORT`, `KAFKA_PORT_HOST` | Kafka port |
+| `kafka_bootstrap_servers` | `Optional[str]` | **required** | `KAFKA_BOOTSTRAP_SERVERS` | Kafka bootstrap servers (overrides host:port) |
+
+## ServiceSettings
+
+> Service configuration settings
+
+**22 settings**
+
+| Setting | Type | Default | Env Variable | Description |
+|---------|------|---------|-------------|-------------|
+| `oms_host` | `str` | `<env-dependent>` | `OMS_HOST` | OMS service host |
+| `oms_port` | `int` | `8000` | `OMS_PORT` | OMS service port |
+| `oms_base_url_override` | `Optional[str]` | **required** | `OMS_BASE_URL_OVERRIDE` | OMS base URL override (OMS_BASE_URL) |
+| `bff_host` | `str` | `<env-dependent>` | `BFF_HOST` | BFF service host |
+| `bff_port` | `int` | `8002` | `BFF_PORT` | BFF service port |
+| `bff_base_url_override` | `Optional[str]` | **required** | `BFF_BASE_URL_OVERRIDE` | BFF base URL override (BFF_BASE_URL) |
+| `funnel_host` | `str` | `<env-dependent>` | `FUNNEL_HOST` | Funnel service host |
+| `funnel_port` | `int` | `8003` | `FUNNEL_PORT` | Funnel service port |
+| `funnel_base_url_override` | `Optional[str]` | **required** | `FUNNEL_BASE_URL_OVERRIDE` | Funnel base URL override (FUNNEL_BASE_URL) |
+| `agent_host` | `str` | `<env-dependent>` | `AGENT_HOST` | Agent service host |
+| `agent_port` | `int` | `8004` | `AGENT_PORT` | Agent service port |
+| `agent_base_url_override` | `Optional[str]` | **required** | `AGENT_BASE_URL_OVERRIDE` | Agent base URL override (AGENT_BASE_URL) |
+| `use_https` | `bool` | `False` | `USE_HTTPS` | Use HTTPS for service communication |
+| `ssl_cert_path` | `str` | `./ssl/common/server.crt` | `SSL_CERT_PATH` | SSL certificate path |
+| `ssl_key_path` | `str` | `./ssl/common/server.key` | `SSL_KEY_PATH` | SSL private key path |
+| `ssl_ca_path` | `str` | `./ssl/ca.crt` | `SSL_CA_PATH` | SSL CA certificate path |
+| `verify_ssl` | `bool` | `False` | `VERIFY_SSL` | Verify SSL certificates |
+| `cors_enabled` | `bool` | `True` | `CORS_ENABLED` | Enable CORS |
+| `cors_origins` | `str` | `` | `CORS_ORIGINS` | CORS allowed origins (JSON array string; CORS_ORIGINS). When unset, defaults apply. |
+| `enable_debug_endpoints` | `bool` | `False` | `ENABLE_DEBUG_ENDPOINTS` | Enable opt-in debug endpoints (ENABLE_DEBUG_ENDPOINTS) |
+| `funnel_excel_timeout_seconds` | `float` | `120.0` | `FUNNEL_EXCEL_TIMEOUT_SECONDS` | Funnel excel timeout seconds (FUNNEL_EXCEL_TIMEOUT_SECONDS; fallback FUNNEL_CLIENT_TIMEOUT_SECONDS) |
+| `funnel_infer_timeout_seconds` | `float` | `8.0` | `FUNNEL_INFER_TIMEOUT_SECONDS` | Funnel dataset analysis timeout seconds (FUNNEL_INFER_TIMEOUT_SECONDS; fallback FUNNEL_CLIENT_TIMEOUT_SECONDS) |
+
+## LLMSettings
+
+> LLM gateway settings (shared across services).
+
+**26 settings**
+
+| Setting | Type | Default | Env Variable | Description |
+|---------|------|---------|-------------|-------------|
+| `provider` | `str` | `disabled` | `PROVIDER` | LLM provider (LLM_PROVIDER) |
+| `base_url` | `Optional[str]` | **required** | `BASE_URL` | OpenAI-compatible base URL (LLM_BASE_URL) |
+| `api_key` | `Optional[str]` | **required** | `API_KEY` | OpenAI-compatible API key (LLM_API_KEY) |
+| `model` | `Optional[str]` | **required** | `MODEL` | Default model id (LLM_MODEL) |
+| `anthropic_base_url` | `str` | `https://api.anthropic.com` | `ANTHROPIC_BASE_URL` | Anthropic base URL (LLM_ANTHROPIC_BASE_URL) |
+| `anthropic_api_key` | `Optional[str]` | **required** | `ANTHROPIC_API_KEY` | Anthropic API key (LLM_ANTHROPIC_API_KEY; fallback ANTHROPIC_API_KEY/LLM_API_KEY) |
+| `anthropic_version` | `str` | `2023-06-01` | `ANTHROPIC_VERSION` | Anthropic API version header (LLM_ANTHROPIC_VERSION) |
+| `google_base_url` | `str` | `https://generativelanguage.googleapi...` | `GOOGLE_BASE_URL` | Google Generative Language base URL (LLM_GOOGLE_BASE_URL) |
+| `google_api_key` | `Optional[str]` | **required** | `GOOGLE_API_KEY` | Google API key (LLM_GOOGLE_API_KEY; fallback GOOGLE_API_KEY/LLM_API_KEY) |
+| `timeout_seconds` | `float` | `60.0` | `TIMEOUT_SECONDS` | LLM timeout seconds (LLM_TIMEOUT_SECONDS) |
+| `temperature` | `float` | `0.0` | `TEMPERATURE` | LLM temperature (LLM_TEMPERATURE) |
+| `max_tokens` | `int` | `800` | `MAX_TOKENS` | LLM max tokens (LLM_MAX_TOKENS) |
+| `enable_json_mode` | `bool` | `True` | `ENABLE_JSON_MODE` | Enable JSON mode (LLM_ENABLE_JSON_MODE) |
+| `native_tool_calling` | `bool` | `False` | `NATIVE_TOOL_CALLING` | Enable native tool calling (LLM_NATIVE_TOOL_CALLING) |
+| `provider_policies_json` | `Optional[str]` | **required** | `PROVIDER_POLICIES_JSON` | Provider send policies JSON (LLM_PROVIDER_POLICIES_JSON) |
+| `cache_enabled` | `bool` | `True` | `CACHE_ENABLED` | Enable Redis cache (LLM_CACHE_ENABLED) |
+| `cache_ttl_seconds` | `int` | `3600` | `CACHE_TTL_SECONDS` | Cache TTL seconds (LLM_CACHE_TTL_SECONDS) |
+| `max_prompt_chars` | `int` | `0` | `MAX_PROMPT_CHARS` | Prompt size cap chars; 0=auto-detect from model context window (LLM_MAX_PROMPT_CHARS) |
+| `retry_max_attempts` | `int` | `2` | `RETRY_MAX_ATTEMPTS` | Max retry attempts (LLM_RETRY_MAX_ATTEMPTS) |
+| `retry_base_delay_seconds` | `float` | `0.5` | `RETRY_BASE_DELAY_SECONDS` | Retry base delay seconds (LLM_RETRY_BASE_DELAY_SECONDS) |
+| `retry_max_delay_seconds` | `float` | `4.0` | `RETRY_MAX_DELAY_SECONDS` | Retry max delay seconds (LLM_RETRY_MAX_DELAY_SECONDS) |
+| `circuit_failure_threshold` | `int` | `5` | `CIRCUIT_FAILURE_THRESHOLD` | Circuit breaker threshold (LLM_CIRCUIT_FAILURE_THRESHOLD) |
+| `circuit_open_seconds` | `float` | `30.0` | `CIRCUIT_OPEN_SECONDS` | Circuit breaker open seconds (LLM_CIRCUIT_OPEN_SECONDS) |
+| `pricing_json` | `Optional[str]` | **required** | `PRICING_JSON` | Pricing table JSON (LLM_PRICING_JSON) |
+| `mock_json` | `Optional[str]` | **required** | `MOCK_JSON` | Mock provider JSON payload (LLM_MOCK_JSON) |
+| `mock_dir` | `Optional[str]` | **required** | `MOCK_DIR` | Directory containing mock JSON files like agent_plan_compile_v1.json (LLM_MOCK_DIR) |
+
+## ObservabilitySettings
+
+> Logging/observability settings (shared across services/workers).
+
+**24 settings**
+
+| Setting | Type | Default | Env Variable | Description |
+|---------|------|---------|-------------|-------------|
+| `log_level` | `str` | `INFO` | `LOG_LEVEL` | Python logging level (LOG_LEVEL) |
+| `service_name` | `Optional[str]` | **required** | `SERVICE_NAME` | Service name override (SERVICE_NAME) |
+| `hostname` | `Optional[str]` | **required** | `HOSTNAME` | Hostname override (HOSTNAME) |
+| `enable_lineage` | `bool` | `True` | `ENABLE_LINEAGE` | Enable lineage store integration (ENABLE_LINEAGE) |
+| `lineage_fail_closed` | `bool` | `True` | `LINEAGE_FAIL_CLOSED` | Fail closed when lineage is unavailable/recording fails (LINEAGE_FAIL_CLOSED) |
+| `lineage_fail_open_override` | `bool` | `False` | `LINEAGE_FAIL_OPEN_OVERRIDE` | Emergency override to disable lineage fail-closed behavior (LINEAGE_FAIL_OPEN_OVERRIDE) |
+| `enable_audit_logs` | `bool` | `True` | `ENABLE_AUDIT_LOGS` | Enable audit log store integration (ENABLE_AUDIT_LOGS) |
+| `run_id` | `Optional[str]` | **required** | `RUN_ID` | Execution/run id (RUN_ID; fallback PIPELINE_RUN_ID/EXECUTION_ID) |
+| `code_sha` | `Optional[str]` | **required** | `CODE_SHA` | Code SHA for audit/tracing (CODE_SHA; fallback GIT_SHA/COMMIT_SHA) |
+| `source_version` | `Optional[str]` | **required** | `SOURCE_VERSION` | Build/source version identifier (SOURCE_VERSION) |
+| `enterprise_catalog_ref` | `Optional[str]` | **required** | `ENTERPRISE_CATALOG_REF` | Enterprise error catalog ref (ENTERPRISE_CATALOG_REF) |
+| `otel_service_name` | `Optional[str]` | **required** | `OTEL_SERVICE_NAME` | OpenTelemetry service name (OTEL_SERVICE_NAME) |
+| `otel_service_version` | `str` | `1.0.0` | `OTEL_SERVICE_VERSION` | OpenTelemetry service version (OTEL_SERVICE_VERSION) |
+| `otel_environment` | `Optional[str]` | **required** | `OTEL_ENVIRONMENT` | OpenTelemetry environment override (OTEL_ENVIRONMENT) |
+| `otel_exporter_otlp_endpoint` | `Optional[str]` | **required** | `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP exporter endpoint (OTEL_EXPORTER_OTLP_ENDPOINT) |
+| `jaeger_endpoint` | `str` | `localhost:14250` | `JAEGER_ENDPOINT` | Jaeger exporter endpoint (JAEGER_ENDPOINT) |
+| `otel_trace_sample_rate` | `float` | `1.0` | `OTEL_TRACE_SAMPLE_RATE` | Trace sample rate 0.0-1.0 (OTEL_TRACE_SAMPLE_RATE) |
+| `otel_export_console` | `bool` | `False` | `OTEL_EXPORT_CONSOLE` | Export spans to console (OTEL_EXPORT_CONSOLE) |
+| `otel_export_otlp` | `Optional[bool]` | **required** | `OTEL_EXPORT_OTLP` | Export spans via OTLP (OTEL_EXPORT_OTLP). If unset, enabled when OTEL_EXPORTER_OTLP_ENDPOINT is set. |
+| `otel_export_jaeger` | `bool` | `False` | `OTEL_EXPORT_JAEGER` | Export spans via Jaeger (OTEL_EXPORT_JAEGER) |
+| `otel_enable_tracing` | `bool` | `True` | `OTEL_ENABLE_TRACING` | Enable tracing (OTEL_ENABLE_TRACING) |
+| `otel_instrument_asyncio` | `bool` | `False` | `OTEL_INSTRUMENT_ASYNCIO` | Enable asyncio instrumentation (OTEL_INSTRUMENT_ASYNCIO) |
+| `otel_enable_metrics` | `bool` | `False` | `OTEL_ENABLE_METRICS` | Enable metrics (OTEL_ENABLE_METRICS) |
+| `otel_metric_export_interval_seconds` | `float` | `10.0` | `OTEL_METRIC_EXPORT_INTERVAL_SECONDS` | Metrics export interval seconds (OTEL_METRIC_EXPORT_INTERVAL_SECONDS) |
+
+## GraphQuerySettings
+
+> Graph query guardrails (graph federation).
+
+**4 settings**
+
+| Setting | Type | Default | Env Variable | Description |
+|---------|------|---------|-------------|-------------|
+| `max_hops` | `int` | `10` | `MAX_HOPS` | Max hops allowed (GRAPH_QUERY_MAX_HOPS) |
+| `max_limit` | `int` | `1000` | `MAX_LIMIT` | Max limit allowed (GRAPH_QUERY_MAX_LIMIT) |
+| `max_paths` | `int` | `2000` | `MAX_PATHS` | Max paths cap (GRAPH_QUERY_MAX_PATHS) |
+| `enforce_semantics` | `bool` | `True` | `ENFORCE_SEMANTICS` | Enforce semantics (GRAPH_QUERY_ENFORCE_SEMANTICS) |
+
+## FeatureFlagsSettings
+
+> Feature flags / opt-in endpoints.
+
+**4 settings**
+
+| Setting | Type | Default | Env Variable | Description |
+|---------|------|---------|-------------|-------------|
+| `enable_pull_requests` | `bool` | `False` | `ENABLE_PULL_REQUESTS` | Enable pull request endpoints (ENABLE_PULL_REQUESTS) |
+| `enable_pipeline_control_plane_events` | `bool` | `True` | `ENABLE_PIPELINE_CONTROL_PLANE_EVENTS` | Enable pipeline control-plane events (ENABLE_PIPELINE_CONTROL_PLANE_EVENTS) |
+| `enable_sync_database_create_fallback` | `bool` | `True` | `ENABLE_SYNC_DATABASE_CREATE_FALLBACK` | Enable synchronous database-create fallback (ENABLE_SYNC_DATABASE_CREATE_FALLBACK) |
+| `enable_oms_rollback` | `bool` | `False` | `ENABLE_OMS_ROLLBACK` | Enable OMS rollback endpoints (ENABLE_OMS_ROLLBACK) |
+
+## PipelineSettings
+
+> Pipeline Builder + pipeline worker settings.
+
+**37 settings**
+
+| Setting | Type | Default | Env Variable | Description |
+|---------|------|---------|-------------|-------------|
+| `require_proposals` | `bool` | `False` | `REQUIRE_PROPOSALS` | Require proposals on protected branches (PIPELINE_REQUIRE_PROPOSALS) |
+| `protected_branches` | `str` | `main` | `PROTECTED_BRANCHES` | Comma-separated protected branches (PIPELINE_PROTECTED_BRANCHES) |
+| `fallback_branches` | `str` | `main` | `FALLBACK_BRANCHES` | Comma-separated fallback branches for dataset resolution (PIPELINE_FALLBACK_BRANCHES) |
+| `locks_enabled` | `bool` | `True` | `LOCKS_ENABLED` | Enable pipeline locks (PIPELINE_LOCKS_ENABLED) |
+| `locks_required` | `bool` | `True` | `LOCKS_REQUIRED` | Require lock acquisition (PIPELINE_LOCKS_REQUIRED) |
+| `lock_ttl_seconds` | `int` | `3600` | `LOCK_TTL_SECONDS` | Lock TTL seconds (PIPELINE_LOCK_TTL_SECONDS) |
+| `lock_renew_seconds` | `int` | `300` | `LOCK_RENEW_SECONDS` | Lock renew interval seconds (PIPELINE_LOCK_RENEW_SECONDS) |
+| `lock_retry_seconds` | `int` | `5` | `LOCK_RETRY_SECONDS` | Lock acquire retry sleep seconds (PIPELINE_LOCK_RETRY_SECONDS) |
+| `lock_acquire_timeout_seconds` | `int` | `3600` | `LOCK_ACQUIRE_TIMEOUT_SECONDS` | Worker lock acquire timeout seconds (PIPELINE_LOCK_ACQUIRE_TIMEOUT_SECONDS) |
+| `publish_lock_acquire_timeout_seconds` | `int` | `30` | `PUBLISH_LOCK_ACQUIRE_TIMEOUT_SECONDS` | BFF publish lock acquire timeout seconds (PIPELINE_PUBLISH_LOCK_ACQUIRE_TIMEOUT_SECONDS; fallback PIPELINE_LOCK_ACQUIRE_TIMEOUT_SECONDS) |
+| `lakefs_diff_enabled` | `bool` | `True` | `LAKEFS_DIFF_ENABLED` | Enable lakeFS diff during pipeline execution (PIPELINE_LAKEFS_DIFF_ENABLED) |
+| `spark_ansi_enabled` | `bool` | `True` | `SPARK_ANSI_ENABLED` | Enable Spark ANSI mode (PIPELINE_SPARK_ANSI_ENABLED) |
+| `spark_adaptive_enabled` | `bool` | `True` | `SPARK_ADAPTIVE_ENABLED` | Enable Spark Adaptive Query Execution (PIPELINE_SPARK_ADAPTIVE_ENABLED) |
+| `spark_shuffle_partitions` | `int` | `16` | `SPARK_SHUFFLE_PARTITIONS` | Default Spark shuffle partitions (PIPELINE_SPARK_SHUFFLE_PARTITIONS) |
+| `spark_console_progress` | `bool` | `False` | `SPARK_CONSOLE_PROGRESS` | Show Spark console progress bars (PIPELINE_SPARK_CONSOLE_PROGRESS) |
+| `spark_executor_threads` | `int` | `1` | `SPARK_EXECUTOR_THREADS` | Spark executor thread pool size (PIPELINE_SPARK_EXECUTOR_THREADS) |
+| `spark_streaming_enabled` | `bool` | `True` | `SPARK_STREAMING_ENABLED` | Enable Spark Structured Streaming input mode (PIPELINE_SPARK_STREAMING_ENABLED) |
+| `spark_streaming_default_trigger` | `str` | `available_now` | `SPARK_STREAMING_DEFAULT_TRIGGER` | Default trigger for streaming external inputs: available_now\|once (PIPELINE_SPARK_STREAMING_DEFAULT_TRIGGER) |
+| `spark_streaming_await_timeout_seconds` | `int` | `120` | `SPARK_STREAMING_AWAIT_TIMEOUT_SECONDS` | Streaming query await timeout seconds for external inputs (PIPELINE_SPARK_STREAMING_AWAIT_TIMEOUT_SECONDS) |
+| `kafka_schema_registry_timeout_seconds` | `int` | `10` | `KAFKA_SCHEMA_REGISTRY_TIMEOUT_SECONDS` | HTTP timeout seconds for kafka AVRO schema-registry resolution (PIPELINE_KAFKA_SCHEMA_REGISTRY_TIMEOUT_SECONDS) |
+| `cast_mode` | `str` | `SAFE_NULL` | `CAST_MODE` | Casting policy: SAFE_NULL or STRICT (PIPELINE_CAST_MODE) |
+| `udf_require_reference` | `bool` | `True` | `UDF_REQUIRE_REFERENCE` | Require UDF metadata to use udfId(+udfVersion) without inline udfCode (PIPELINE_UDF_REQUIRE_REFERENCE) |
+| `udf_require_version_pinning` | `bool` | `True` | `UDF_REQUIRE_VERSION_PINNING` | Require udfVersion pinning for UDF transforms during validation/preflight (PIPELINE_UDF_REQUIRE_VERSION_PINNING) |
+| `udf_preflight_require_existence` | `bool` | `True` | `UDF_PREFLIGHT_REQUIRE_EXISTENCE` | Require preflight to verify UDF reference existence/version in registry (PIPELINE_UDF_PREFLIGHT_REQUIRE_EXISTENCE) |
+| `udf_spark_parity_enabled` | `bool` | `True` | `UDF_SPARK_PARITY_ENABLED` | Enable Spark execution parity for UDF transforms (PIPELINE_UDF_SPARK_PARITY_ENABLED) |
+| `preflight_fail_closed` | `bool` | `True` | `PREFLIGHT_FAIL_CLOSED` | Fail closed when pipeline preflight throws internal errors (PIPELINE_PREFLIGHT_FAIL_CLOSED) |
+| `artifact_path` | `str` | `data/pipeline_artifacts` | `ARTIFACT_PATH` | Local pipeline artifact path root (PIPELINE_ARTIFACT_PATH) |
+| `jobs_group` | `str` | `pipeline-worker-group` | `JOBS_GROUP` | Kafka consumer group id (PIPELINE_JOBS_GROUP) |
+| `job_queue_flush_timeout_seconds` | `float` | `5.0` | `JOB_QUEUE_FLUSH_TIMEOUT_SECONDS` | Kafka producer flush timeout seconds (PIPELINE_JOB_QUEUE_FLUSH_TIMEOUT_SECONDS) |
+| `worker_handler` | `str` | `pipeline_worker` | `WORKER_HANDLER` | Worker handler label (PIPELINE_WORKER_HANDLER) |
+| `worker_name` | `str` | `pipeline_worker` | `WORKER_NAME` | Worker service name label (PIPELINE_WORKER_NAME) |
+| `jobs_max_retries` | `int` | `5` | `JOBS_MAX_RETRIES` | Pipeline job max retries (PIPELINE_JOBS_MAX_RETRIES) |
+| `jobs_backoff_base_seconds` | `int` | `2` | `JOBS_BACKOFF_BASE_SECONDS` | Pipeline job retry backoff base seconds (PIPELINE_JOBS_BACKOFF_BASE_SECONDS) |
+| `jobs_backoff_max_seconds` | `int` | `60` | `JOBS_BACKOFF_MAX_SECONDS` | Pipeline job retry backoff max seconds (PIPELINE_JOBS_BACKOFF_MAX_SECONDS) |
+| `jobs_max_poll_interval_ms` | `int` | `3600000` | `JOBS_MAX_POLL_INTERVAL_MS` | Kafka max.poll.interval.ms for pipeline worker jobs (PIPELINE_JOBS_MAX_POLL_INTERVAL_MS) |
+| `processed_event_lease_timeout_seconds` | `int` | `120` | `PROCESSED_EVENT_LEASE_TIMEOUT_SECONDS` | Processed-event lease timeout seconds for pipeline worker idempotency (PIPELINE_PROCESSED_EVENT_LEASE_TIMEOUT_SECONDS) |
+| `scheduler_poll_seconds` | `int` | `30` | `SCHEDULER_POLL_SECONDS` | Pipeline scheduler poll interval seconds (PIPELINE_SCHEDULER_POLL_SECONDS) |
+
+## OntologySettings
+
+> Ontology API + linter governance settings.
+
+**12 settings**
+
+| Setting | Type | Default | Env Variable | Description |
+|---------|------|---------|-------------|-------------|
+| `protected_branches` | `str` | `main,master,production,prod` | `PROTECTED_BRANCHES` | Protected branches (ONTOLOGY_PROTECTED_BRANCHES) |
+| `require_proposals` | `bool` | `True` | `REQUIRE_PROPOSALS` | Require proposals on protected branches (ONTOLOGY_REQUIRE_PROPOSALS) |
+| `validate_relationships` | `bool` | `True` | `VALIDATE_RELATIONSHIPS` | Validate relationship structure (ONTOLOGY_VALIDATE_RELATIONSHIPS) |
+| `resource_strict` | `bool` | `True` | `RESOURCE_STRICT` | Strict resource checks (ONTOLOGY_RESOURCE_STRICT) |
+| `require_health_gate` | `bool` | `True` | `REQUIRE_HEALTH_GATE` | Require health gate for destructive ops (ONTOLOGY_REQUIRE_HEALTH_GATE) |
+| `resource_storage_backend` | `str` | `postgres` | `RESOURCE_STORAGE_BACKEND` | Ontology resource storage backend (ONTOLOGY_RESOURCE_STORAGE_BACKEND: postgres) |
+| `require_primary_key` | `bool` | `True` | `REQUIRE_PRIMARY_KEY` | Require primary key (ONTOLOGY_REQUIRE_PRIMARY_KEY) |
+| `allow_implicit_primary_key` | `Optional[bool]` | **required** | `ALLOW_IMPLICIT_PRIMARY_KEY` | Allow implicit primary key (ONTOLOGY_ALLOW_IMPLICIT_PRIMARY_KEY). When unset, defaults to false in production and on protected branches requiring proposals. |
+| `require_title_key` | `bool` | `True` | `REQUIRE_TITLE_KEY` | Require title key (ONTOLOGY_REQUIRE_TITLE_KEY) |
+| `allow_implicit_title_key` | `Optional[bool]` | **required** | `ALLOW_IMPLICIT_TITLE_KEY` | Allow implicit title key (ONTOLOGY_ALLOW_IMPLICIT_TITLE_KEY). When unset, defaults to false in production and on protected branches requiring proposals. |
+| `block_event_like_class_names` | `bool` | `False` | `BLOCK_EVENT_LIKE_CLASS_NAMES` | Block event-like class names (ONTOLOGY_BLOCK_EVENT_LIKE_CLASS) |
+| `enforce_snake_case_fields` | `bool` | `False` | `ENFORCE_SNAKE_CASE_FIELDS` | Enforce snake_case field names (ONTOLOGY_ENFORCE_SNAKE_CASE_FIELDS) |
+
+## AgentRuntimeSettings
+
+> Agent runtime settings (agent service tool runner).
+
+**26 settings**
+
+| Setting | Type | Default | Env Variable | Description |
+|---------|------|---------|-------------|-------------|
+| `bff_base_url` | `Optional[str]` | **required** | `BFF_BASE_URL` | Override BFF base URL for tool calls (AGENT_BFF_BASE_URL) |
+| `bff_token` | `Optional[str]` | **required** | `BFF_TOKEN` | Bearer token for BFF tool calls (AGENT_BFF_TOKEN; fallback BFF_AGENT_TOKEN) |
+| `service_name` | `str` | `agent` | `SERVICE_NAME` | Service name for audit/events (AGENT_SERVICE_NAME) |
+| `run_max_steps` | `int` | `50` | `RUN_MAX_STEPS` | Max steps per agent run (AGENT_RUN_MAX_STEPS) |
+| `require_event_store` | `bool` | `True` | `REQUIRE_EVENT_STORE` | Require event store availability (AGENT_REQUIRE_EVENT_STORE) |
+| `tool_timeout_seconds` | `float` | `180.0` | `TOOL_TIMEOUT_SECONDS` | HTTP timeout for tool calls (AGENT_TOOL_TIMEOUT_SECONDS) |
+| `tool_max_payload_bytes` | `int` | `200000` | `TOOL_MAX_PAYLOAD_BYTES` | Max tool payload bytes (AGENT_TOOL_MAX_PAYLOAD_BYTES) |
+| `audit_max_preview_chars` | `int` | `2000` | `AUDIT_MAX_PREVIEW_CHARS` | Max chars stored in audit previews (AGENT_AUDIT_MAX_PREVIEW_CHARS) |
+| `context_upload_max_bytes` | `int` | **required** | `CONTEXT_UPLOAD_MAX_BYTES` | Max bytes for agent session context uploads (AGENT_CONTEXT_UPLOAD_MAX_BYTES) |
+| `context_upload_max_text_chars` | `int` | `20000` | `CONTEXT_UPLOAD_MAX_TEXT_CHARS` | Max chars extracted from uploaded context files (AGENT_CONTEXT_UPLOAD_MAX_TEXT_CHARS) |
+| `context_upload_clamav_host` | `Optional[str]` | **required** | `CONTEXT_UPLOAD_CLAMAV_HOST` | ClamAV daemon host for context upload scanning (AGENT_CONTEXT_UPLOAD_CLAMAV_HOST) |
+| `context_upload_clamav_port` | `int` | `3310` | `CONTEXT_UPLOAD_CLAMAV_PORT` | ClamAV daemon port for context upload scanning (AGENT_CONTEXT_UPLOAD_CLAMAV_PORT) |
+| `context_upload_clamav_timeout_seconds` | `float` | `2.0` | `CONTEXT_UPLOAD_CLAMAV_TIMEOUT_SECONDS` | ClamAV scan timeout seconds (AGENT_CONTEXT_UPLOAD_CLAMAV_TIMEOUT_SECONDS) |
+| `context_upload_clamav_required` | `bool` | `False` | `CONTEXT_UPLOAD_CLAMAV_REQUIRED` | Reject uploads when ClamAV unavailable (AGENT_CONTEXT_UPLOAD_CLAMAV_REQUIRED) |
+| `command_timeout_seconds` | `float` | `600.0` | `COMMAND_TIMEOUT_SECONDS` | Wait timeout for async commands/pipeline jobs (AGENT_COMMAND_TIMEOUT_SECONDS; fallback PIPELINE_RUN_TIMEOUT_SECONDS/PIPELINE_RUN_TIMEOUT) |
+| `command_poll_interval_seconds` | `float` | `2.0` | `COMMAND_POLL_INTERVAL_SECONDS` | Poll interval seconds for command status (AGENT_COMMAND_POLL_INTERVAL_SECONDS) |
+| `command_ws_idle_seconds` | `float` | `5.0` | `COMMAND_WS_IDLE_SECONDS` | WebSocket idle poll seconds (AGENT_COMMAND_WS_IDLE_SECONDS) |
+| `command_ws_enabled` | `bool` | `True` | `COMMAND_WS_ENABLED` | Enable command WebSocket progress (AGENT_COMMAND_WS_ENABLED) |
+| `pipeline_wait_enabled` | `bool` | `True` | `PIPELINE_WAIT_ENABLED` | Wait for pipeline build/deploy job completion (AGENT_PIPELINE_WAIT_ENABLED) |
+| `block_writes_on_overlay_degraded` | `bool` | `True` | `BLOCK_WRITES_ON_OVERLAY_DEGRADED` | Block writes when overlay is degraded (AGENT_BLOCK_WRITES_ON_OVERLAY_DEGRADED) |
+| `allow_degraded_writes` | `bool` | `False` | `ALLOW_DEGRADED_WRITES` | Allow writes even if overlay degraded (AGENT_ALLOW_DEGRADED_WRITES) |
+| `auto_retry_enabled` | `bool` | `True` | `AUTO_RETRY_ENABLED` | Enable auto retries for tool calls (AGENT_AUTO_RETRY_ENABLED) |
+| `auto_retry_max_attempts` | `int` | `3` | `AUTO_RETRY_MAX_ATTEMPTS` | Auto retry max attempts (AGENT_AUTO_RETRY_MAX_ATTEMPTS) |
+| `auto_retry_base_delay_seconds` | `float` | `0.5` | `AUTO_RETRY_BASE_DELAY_SECONDS` | Auto retry base delay seconds (AGENT_AUTO_RETRY_BASE_DELAY_SECONDS) |
+| `auto_retry_max_delay_seconds` | `float` | `8.0` | `AUTO_RETRY_MAX_DELAY_SECONDS` | Auto retry max delay seconds (AGENT_AUTO_RETRY_MAX_DELAY_SECONDS) |
+| `auto_retry_allow_writes` | `bool` | `False` | `AUTO_RETRY_ALLOW_WRITES` | Allow auto retries on write methods (AGENT_AUTO_RETRY_ALLOW_WRITES) |
+
+## AgentPlanSettings
+
+> LLM-native control plane settings (planner + allowlist bootstrap).
+
+**3 settings**
+
+| Setting | Type | Default | Env Variable | Description |
+|---------|------|---------|-------------|-------------|
+| `allowlist_bundle_path` | `Optional[str]` | **required** | `ALLOWLIST_BUNDLE_PATH` | Path to agent tool allowlist bundle JSON (AGENT_PLAN_ALLOWLIST_BUNDLE_PATH) |
+| `allowlist_bootstrap_enabled` | `bool` | `False` | `ALLOWLIST_BOOTSTRAP_ENABLED` | Bootstrap allowlist bundle into Postgres on startup (AGENT_PLAN_ALLOWLIST_BOOTSTRAP_ENABLED) |
+| `allowlist_bootstrap_only_if_empty` | `bool` | `True` | `ALLOWLIST_BOOTSTRAP_ONLY_IF_EMPTY` | Only bootstrap if DB table is empty (AGENT_PLAN_ALLOWLIST_BOOTSTRAP_ONLY_IF_EMPTY) |
+
+## PipelinePlanSettings
+
+> Pipeline plan planner settings (LLM-backed pipeline definition proposals).
+
+**1 settings**
+
+| Setting | Type | Default | Env Variable | Description |
+|---------|------|---------|-------------|-------------|
+| `llm_enabled` | `bool` | `False` | `LLM_ENABLED` | Enable pipeline planner LLM (PIPELINE_PLAN_LLM_ENABLED) |
+
+## ClientSettings
+
+> Internal service-to-service client settings (BFF/OMS/etc).
+
+**5 settings**
+
+| Setting | Type | Default | Env Variable | Description |
+|---------|------|---------|-------------|-------------|
+| `oms_client_timeout_seconds` | `float` | `60.0` | `OMS_CLIENT_TIMEOUT_SECONDS` | OMS client timeout seconds (OMS_CLIENT_TIMEOUT_SECONDS) |
+| `oms_client_token` | `Optional[str]` | **required** | `OMS_CLIENT_TOKEN` | OMS client admin token (OMS_CLIENT_TOKEN; fallback OMS_ADMIN_TOKEN/ADMIN_API_KEY/ADMIN_TOKEN) |
+| `oms_client_debug_payload` | `bool` | `False` | `OMS_CLIENT_DEBUG_PAYLOAD` | Log OMS request payloads (OMS_CLIENT_DEBUG_PAYLOAD) |
+| `agent_proxy_timeout_seconds` | `float` | `30.0` | `AGENT_PROXY_TIMEOUT_SECONDS` | BFF -> Agent proxy timeout seconds (AGENT_PROXY_TIMEOUT_SECONDS) |
+| `bff_admin_token` | `Optional[str]` | **required** | `BFF_ADMIN_TOKEN` | BFF admin token for internal calls (BFF_ADMIN_TOKEN; fallback BFF_WRITE_TOKEN/ADMIN_API_KEY/ADMIN_TOKEN) |
+
+## MCPSettings
+
+> MCP integration settings (BFF/agent).
+
+**1 settings**
+
+| Setting | Type | Default | Env Variable | Description |
+|---------|------|---------|-------------|-------------|
+| `config_path` | `Optional[str]` | **required** | `CONFIG_PATH` | Path to MCP config JSON (MCP_CONFIG_PATH) |
+
+## AuthSettings
+
+> Service auth configuration (BFF/OMS).
+
+**27 settings**
+
+| Setting | Type | Default | Env Variable | Description |
+|---------|------|---------|-------------|-------------|
+| `bff_admin_token` | `Optional[str]` | **required** | `BFF_ADMIN_TOKEN` | BFF admin token(s), comma-separated for rotation (BFF_ADMIN_TOKEN) |
+| `bff_write_token` | `Optional[str]` | **required** | `BFF_WRITE_TOKEN` | BFF write token(s), comma-separated for rotation (BFF_WRITE_TOKEN) |
+| `bff_agent_token` | `Optional[str]` | **required** | `BFF_AGENT_TOKEN` | BFF internal agent token(s), comma-separated for rotation (BFF_AGENT_TOKEN) |
+| `oms_admin_token` | `Optional[str]` | **required** | `OMS_ADMIN_TOKEN` | OMS admin token(s), comma-separated for rotation (OMS_ADMIN_TOKEN) |
+| `oms_write_token` | `Optional[str]` | **required** | `OMS_WRITE_TOKEN` | OMS write token(s), comma-separated for rotation (OMS_WRITE_TOKEN) |
+| `admin_api_key` | `Optional[str]` | **required** | `ADMIN_API_KEY` | Unified admin API key(s), comma-separated for rotation (ADMIN_API_KEY) |
+| `admin_token` | `Optional[str]` | **required** | `ADMIN_TOKEN` | Unified admin token(s), comma-separated for rotation (ADMIN_TOKEN) |
+| `user_jwt_enabled` | `bool` | `False` | `USER_JWT_ENABLED` | Enable end-user JWT auth (USER_JWT_ENABLED) |
+| `user_jwt_issuer` | `Optional[str]` | **required** | `USER_JWT_ISSUER` | Expected JWT issuer (USER_JWT_ISSUER) |
+| `user_jwt_audience` | `Optional[str]` | **required** | `USER_JWT_AUDIENCE` | Expected JWT audience (USER_JWT_AUDIENCE) |
+| `user_jwt_jwks_url` | `Optional[str]` | **required** | `USER_JWT_JWKS_URL` | JWKS URL for JWT verification (USER_JWT_JWKS_URL) |
+| `user_jwt_public_key` | `Optional[str]` | **required** | `USER_JWT_PUBLIC_KEY` | PEM public key for JWT verification (USER_JWT_PUBLIC_KEY) |
+| `user_jwt_hs256_secret` | `Optional[str]` | **required** | `USER_JWT_HS256_SECRET` | HS256 shared secret(s), comma-separated for rotation (USER_JWT_HS256_SECRET) |
+| `user_jwt_algorithms` | `Optional[str]` | **required** | `USER_JWT_ALGORITHMS` | Comma-separated accepted JWT algorithms (USER_JWT_ALGORITHMS) |
+| `bff_require_auth` | `Optional[bool]` | **required** | `BFF_REQUIRE_AUTH` | Require auth for BFF (BFF_REQUIRE_AUTH) |
+| `oms_require_auth` | `Optional[bool]` | **required** | `OMS_REQUIRE_AUTH` | Require auth for OMS (OMS_REQUIRE_AUTH) |
+| `bff_require_db_scope` | `bool` | `False` | `BFF_REQUIRE_DB_SCOPE` | Require db scope headers for BFF writes (BFF_REQUIRE_DB_SCOPE) |
+| `bff_require_db_access` | `Optional[bool]` | **required** | `BFF_REQUIRE_DB_ACCESS` | Require database access roles for BFF writes (BFF_REQUIRE_DB_ACCESS) |
+| `allow_insecure_bff_auth_disable` | `bool` | `False` | `ALLOW_INSECURE_BFF_AUTH_DISABLE` | Allow disabling BFF auth (ALLOW_INSECURE_BFF_AUTH_DISABLE) |
+| `allow_insecure_oms_auth_disable` | `bool` | `False` | `ALLOW_INSECURE_OMS_AUTH_DISABLE` | Allow disabling OMS auth (ALLOW_INSECURE_OMS_AUTH_DISABLE) |
+| `allow_insecure_auth_disable` | `bool` | `False` | `ALLOW_INSECURE_AUTH_DISABLE` | Allow disabling auth globally (ALLOW_INSECURE_AUTH_DISABLE) |
+| `dev_master_auth_enabled` | `bool` | `False` | `DEV_MASTER_AUTH_ENABLED` | Development-only: allow bypassing auth failures by attaching a master principal (DEV_MASTER_AUTH_ENABLED) |
+| `dev_master_user_id` | `str` | `dev-admin` | `DEV_MASTER_USER_ID` | Development-only: master principal user id (DEV_MASTER_USER_ID) |
+| `dev_master_user_type` | `str` | `user` | `DEV_MASTER_USER_TYPE` | Development-only: master principal type (DEV_MASTER_USER_TYPE) |
+| `dev_master_roles` | `Optional[str]` | `admin,platform_admin` | `DEV_MASTER_ROLES` | Development-only: comma-separated roles for the master principal (DEV_MASTER_ROLES) |
+| `bff_auth_exempt_paths` | `Optional[str]` | **required** | `BFF_AUTH_EXEMPT_PATHS` | Comma-separated exempt paths for BFF (BFF_AUTH_EXEMPT_PATHS) |
+| `oms_auth_exempt_paths` | `Optional[str]` | **required** | `OMS_AUTH_EXEMPT_PATHS` | Comma-separated exempt paths for OMS (OMS_AUTH_EXEMPT_PATHS) |
+
+## RateLimitSettings
+
+> Rate limiter runtime configuration.
+
+**2 settings**
+
+| Setting | Type | Default | Env Variable | Description |
+|---------|------|---------|-------------|-------------|
+| `fail_open` | `bool` | `False` | `FAIL_OPEN` | Fail-open when Redis is unavailable (RATE_LIMIT_FAIL_OPEN) |
+| `local_max_entries` | `int` | `10000` | `LOCAL_MAX_ENTRIES` | Local fallback cache max entries (RATE_LIMIT_LOCAL_MAX_ENTRIES) |
+
+## MessagingSettings
+
+> Kafka topic/group configuration settings
+
+**25 settings**
+
+| Setting | Type | Default | Env Variable | Description |
+|---------|------|---------|-------------|-------------|
+| `instance_events_topic` | `str` | `instance_events` | `INSTANCE_EVENTS_TOPIC` | Kafka topic for instance domain events (INSTANCE_EVENTS_TOPIC) |
+| `ontology_events_topic` | `str` | `ontology_events` | `ONTOLOGY_EVENTS_TOPIC` | Kafka topic for ontology domain events (ONTOLOGY_EVENTS_TOPIC) |
+| `action_events_topic` | `str` | `action_events` | `ACTION_EVENTS_TOPIC` | Kafka topic for action events (ACTION_EVENTS_TOPIC) |
+| `projection_dlq_topic` | `str` | `projection_failures_dlq` | `PROJECTION_DLQ_TOPIC` | Kafka DLQ topic for projection failures (PROJECTION_DLQ_TOPIC) |
+| `connector_updates_topic` | `str` | `connector-updates` | `CONNECTOR_UPDATES_TOPIC` | Kafka topic for connector updates (CONNECTOR_UPDATES_TOPIC) |
+| `connector_updates_dlq_topic` | `str` | `connector-updates-dlq` | `CONNECTOR_UPDATES_DLQ_TOPIC` | Kafka DLQ topic for connector updates (CONNECTOR_UPDATES_DLQ_TOPIC) |
+| `pipeline_jobs_topic` | `str` | `pipeline-jobs` | `PIPELINE_JOBS_TOPIC` | Kafka topic for pipeline jobs (PIPELINE_JOBS_TOPIC) |
+| `pipeline_jobs_dlq_topic` | `str` | `pipeline-jobs-dlq` | `PIPELINE_JOBS_DLQ_TOPIC` | Kafka DLQ topic for pipeline jobs (PIPELINE_JOBS_DLQ_TOPIC) |
+| `pipeline_events_topic` | `str` | `pipeline-events` | `PIPELINE_EVENTS_TOPIC` | Kafka topic for pipeline control-plane events (PIPELINE_EVENTS_TOPIC) |
+| `dataset_ingest_outbox_dlq_topic` | `str` | `dataset-ingest-outbox-dlq` | `DATASET_INGEST_OUTBOX_DLQ_TOPIC` | Kafka DLQ topic for dataset ingest outbox (DATASET_INGEST_OUTBOX_DLQ_TOPIC) |
+| `objectify_jobs_topic` | `str` | `objectify-jobs` | `OBJECTIFY_JOBS_TOPIC` | Kafka topic for objectify jobs (OBJECTIFY_JOBS_TOPIC) |
+| `objectify_jobs_dlq_topic` | `str` | `objectify-jobs-dlq` | `OBJECTIFY_JOBS_DLQ_TOPIC` | Kafka DLQ topic for objectify jobs (OBJECTIFY_JOBS_DLQ_TOPIC) |
+| `instance_commands_topic` | `str` | `instance_commands` | `INSTANCE_COMMANDS_TOPIC` | Kafka topic for instance commands (INSTANCE_COMMANDS_TOPIC) |
+| `ontology_commands_topic` | `str` | `ontology_commands` | `ONTOLOGY_COMMANDS_TOPIC` | Kafka topic for ontology commands (ONTOLOGY_COMMANDS_TOPIC) |
+| `database_commands_topic` | `str` | `database_commands` | `DATABASE_COMMANDS_TOPIC` | Kafka topic for database commands (DATABASE_COMMANDS_TOPIC) |
+| `action_commands_topic` | `str` | `action_commands` | `ACTION_COMMANDS_TOPIC` | Kafka topic for action commands (ACTION_COMMANDS_TOPIC) |
+| `instance_commands_dlq_topic` | `str` | `instance-commands-dlq` | `INSTANCE_COMMANDS_DLQ_TOPIC` | Kafka DLQ topic for instance commands (INSTANCE_COMMANDS_DLQ_TOPIC) |
+| `ontology_commands_dlq_topic` | `str` | `ontology-commands-dlq` | `ONTOLOGY_COMMANDS_DLQ_TOPIC` | Kafka DLQ topic for ontology commands (ONTOLOGY_COMMANDS_DLQ_TOPIC) |
+| `action_commands_dlq_topic` | `str` | `action-commands-dlq` | `ACTION_COMMANDS_DLQ_TOPIC` | Kafka DLQ topic for action commands (ACTION_COMMANDS_DLQ_TOPIC) |
+| `projection_worker_group` | `str` | `projection-worker-group` | `PROJECTION_WORKER_GROUP` | Kafka consumer group for projection worker (PROJECTION_WORKER_GROUP) |
+| `message_relay_group` | `str` | `message-relay-group` | `MESSAGE_RELAY_GROUP` | Kafka consumer group for message relay (MESSAGE_RELAY_GROUP) |
+| `instance_worker_group` | `str` | `instance-worker-group` | `INSTANCE_WORKER_GROUP` | Kafka consumer group for instance worker (INSTANCE_WORKER_GROUP) |
+| `ontology_worker_group` | `str` | `ontology-worker-group` | `ONTOLOGY_WORKER_GROUP` | Kafka consumer group for ontology worker (ONTOLOGY_WORKER_GROUP) |
+| `action_worker_group` | `str` | `action-worker-group` | `ACTION_WORKER_GROUP` | Kafka consumer group for action worker (ACTION_WORKER_GROUP) |
+| `objectify_jobs_group` | `str` | `objectify-worker-group` | `OBJECTIFY_JOBS_GROUP` | Kafka consumer group for objectify jobs (OBJECTIFY_JOBS_GROUP) |
+
+## StorageSettings
+
+> Storage configuration settings
+
+**21 settings**
+
+| Setting | Type | Default | Env Variable | Description |
+|---------|------|---------|-------------|-------------|
+| `minio_endpoint_url` | `str` | `<env-dependent>` | `MINIO_ENDPOINT_URL`, `MINIO_PORT_HOST` | MinIO/S3 endpoint URL |
+| `minio_access_key` | `str` | `minioadmin` | `MINIO_ACCESS_KEY` | MinIO/S3 access key |
+| `minio_secret_key` | `str` | `minioadmin123` | `MINIO_SECRET_KEY` | MinIO/S3 secret key |
+| `minio_ssl_verify` | `Optional[bool]` | **required** | `MINIO_SSL_VERIFY` | Verify SSL certificates for MinIO/S3 when using https (MINIO_SSL_VERIFY). When unset, botocore defaults apply. |
+| `minio_ssl_ca_bundle` | `Optional[str]` | **required** | `MINIO_SSL_CA_BUNDLE` | CA bundle path for MinIO/S3 TLS verification (MINIO_SSL_CA_BUNDLE). |
+| `lakefs_api_url` | `Optional[str]` | **required** | `LAKEFS_API_URL` | lakeFS API base URL (e.g. http://localhost:48080) |
+| `lakefs_s3_endpoint_url` | `Optional[str]` | **required** | `LAKEFS_S3_ENDPOINT_URL` | lakeFS S3 gateway endpoint URL (e.g. http://localhost:8000) |
+| `lakefs_api_port` | `int` | `<env-dependent>` | `LAKEFS_API_PORT`, `LAKEFS_PORT_HOST` | lakeFS API port (used when LAKEFS_API_URL is unset) |
+| `lakefs_access_key_id` | `Optional[str]` | **required** | `LAKEFS_ACCESS_KEY_ID` | lakeFS access key id |
+| `lakefs_secret_access_key` | `Optional[str]` | **required** | `LAKEFS_SECRET_ACCESS_KEY` | lakeFS secret access key |
+| `lakefs_s3_ssl_verify` | `Optional[bool]` | **required** | `LAKEFS_S3_SSL_VERIFY` | Verify SSL certificates for lakeFS S3 gateway when using https (LAKEFS_S3_SSL_VERIFY). |
+| `lakefs_s3_ssl_ca_bundle` | `Optional[str]` | **required** | `LAKEFS_S3_SSL_CA_BUNDLE` | CA bundle path for lakeFS S3 gateway TLS verification (LAKEFS_S3_SSL_CA_BUNDLE). |
+| `lakefs_client_timeout_seconds` | `float` | `120.0` | `LAKEFS_CLIENT_TIMEOUT_SECONDS` | lakeFS REST client timeout seconds (LAKEFS_CLIENT_TIMEOUT_SECONDS; fallback LAKEFS_TIMEOUT_SECONDS) |
+| `lakefs_credentials_source` | `Optional[str]` | **required** | `LAKEFS_CREDENTIALS_SOURCE` | Where to load lakeFS credentials from (LAKEFS_CREDENTIALS_SOURCE: env\|db) |
+| `lakefs_service_principal` | `Optional[str]` | **required** | `LAKEFS_SERVICE_PRINCIPAL` | Service principal identifier for lakeFS credentials (LAKEFS_SERVICE_PRINCIPAL) |
+| `lakefs_credentials_encryption_key` | `Optional[str]` | **required** | `LAKEFS_CREDENTIALS_ENCRYPTION_KEY` | Fernet key for encrypting lakeFS secrets in Postgres (LAKEFS_CREDENTIALS_ENCRYPTION_KEY) |
+| `lakefs_raw_repository` | `str` | `raw-datasets` | `LAKEFS_RAW_REPOSITORY` | lakeFS repository for raw datasets (LAKEFS_RAW_REPOSITORY) |
+| `lakefs_artifacts_repository` | `str` | `pipeline-artifacts` | `LAKEFS_ARTIFACTS_REPOSITORY` | lakeFS repository for pipeline artifacts (LAKEFS_ARTIFACTS_REPOSITORY) |
+| `event_store_bucket` | `str` | `spice-event-store` | `EVENT_STORE_BUCKET` | S3 bucket for immutable event store (EVENT_STORE_BUCKET) |
+| `instance_bucket` | `str` | `instance-events` | `INSTANCE_BUCKET` | S3 bucket for instance events |
+| `label_mappings_db_path` | `str` | `data/label_mappings.db` | `LABEL_MAPPINGS_DB_PATH` | SQLite path for label mappings (LABEL_MAPPINGS_DB_PATH) |
+
+## CacheSettings
+
+> Cache and TTL configuration settings
+
+**6 settings**
+
+| Setting | Type | Default | Env Variable | Description |
+|---------|------|---------|-------------|-------------|
+| `class_label_cache_ttl` | `int` | `3600` | `CLASS_LABEL_CACHE_TTL` | Class label cache TTL in seconds |
+| `command_status_cache_ttl` | `int` | `86400` | `COMMAND_STATUS_CACHE_TTL` | Command status cache TTL in seconds |
+| `command_status_ttl_seconds` | `int` | `0` | `COMMAND_STATUS_TTL_SECONDS` | TTL seconds for command status entries (COMMAND_STATUS_TTL_SECONDS; 0=never expire) |
+| `user_session_cache_ttl` | `int` | `7200` | `USER_SESSION_CACHE_TTL` | User session cache TTL in seconds |
+| `websocket_connection_ttl` | `int` | `3600` | `WEBSOCKET_CONNECTION_TTL` | WebSocket connection TTL in seconds |
+| `mapping_cache_ttl` | `int` | `1800` | `MAPPING_CACHE_TTL` | Mapping cache TTL in seconds |
+
+## SecuritySettings
+
+> Security configuration settings
+
+**12 settings**
+
+| Setting | Type | Default | Env Variable | Description |
+|---------|------|---------|-------------|-------------|
+| `secret_key` | `str` | `your-secret-key-change-this-in-produ...` | `SECRET_KEY` | JWT secret key |
+| `algorithm` | `str` | `HS256` | `ALGORITHM` | JWT algorithm |
+| `access_token_expire_minutes` | `int` | `30` | `ACCESS_TOKEN_EXPIRE_MINUTES` | JWT access token expiry in minutes |
+| `data_encryption_keys` | `str` | `` | `DATA_ENCRYPTION_KEYS` | Comma-separated base64/hex keys for encrypting stored data at rest (DATA_ENCRYPTION_KEYS) |
+| `input_sanitizer_max_dict_keys` | `int` | `100` | `INPUT_SANITIZER_MAX_DICT_KEYS` | Max dict keys to sanitize (INPUT_SANITIZER_MAX_DICT_KEYS) |
+| `input_sanitizer_max_list_items` | `int` | `1000` | `INPUT_SANITIZER_MAX_LIST_ITEMS` | Max list items to sanitize (INPUT_SANITIZER_MAX_LIST_ITEMS) |
+| `max_search_query_length` | `int` | `100` | `MAX_SEARCH_QUERY_LENGTH` | Maximum search query length (MAX_SEARCH_QUERY_LENGTH) |
+| `max_db_name_length` | `int` | `50` | `MAX_DB_NAME_LENGTH` | Maximum database name length (MAX_DB_NAME_LENGTH) |
+| `max_class_id_length` | `int` | `100` | `MAX_CLASS_ID_LENGTH` | Maximum class id length (MAX_CLASS_ID_LENGTH) |
+| `max_instance_id_length` | `int` | `255` | `MAX_INSTANCE_ID_LENGTH` | Maximum instance id length (MAX_INSTANCE_ID_LENGTH) |
+| `max_client_id_length` | `int` | `50` | `MAX_CLIENT_ID_LENGTH` | Maximum websocket client id length (MAX_CLIENT_ID_LENGTH) |
+| `max_user_id_length` | `int` | `50` | `MAX_USER_ID_LENGTH` | Maximum user id length (MAX_USER_ID_LENGTH) |
+
+## PerformanceSettings
+
+> Performance and optimization settings
+
+**33 settings**
+
+| Setting | Type | Default | Env Variable | Description |
+|---------|------|---------|-------------|-------------|
+| `database_pool_size` | `int` | `20` | `DATABASE_POOL_SIZE` | Database connection pool size |
+| `database_max_overflow` | `int` | `30` | `DATABASE_MAX_OVERFLOW` | Database max overflow connections |
+| `enable_rate_limiting` | `bool` | `True` | `ENABLE_RATE_LIMITING` | Enable API rate limiting |
+| `requests_per_minute` | `int` | `60` | `REQUESTS_PER_MINUTE` | Requests per minute limit |
+| `max_concurrent_commands` | `int` | `100` | `MAX_CONCURRENT_COMMANDS` | Max concurrent commands (MAX_CONCURRENT_COMMANDS) |
+| `max_websocket_connections` | `int` | `1000` | `MAX_WEBSOCKET_CONNECTIONS` | Max websocket connections (MAX_WEBSOCKET_CONNECTIONS) |
+| `max_ontology_size` | `int` | `10485760` | `MAX_ONTOLOGY_SIZE` | Max ontology payload size in bytes (MAX_ONTOLOGY_SIZE) |
+| `max_instance_size` | `int` | `1048576` | `MAX_INSTANCE_SIZE` | Max instance payload size in bytes (MAX_INSTANCE_SIZE) |
+| `action_log_pg_pool_min` | `int` | `1` | `ACTION_LOG_PG_POOL_MIN` | ACTION_LOG_PG_POOL_MIN |
+| `action_log_pg_pool_max` | `int` | `5` | `ACTION_LOG_PG_POOL_MAX` | ACTION_LOG_PG_POOL_MAX |
+| `action_log_pg_command_timeout_seconds` | `int` | `30` | `ACTION_LOG_PG_COMMAND_TIMEOUT_SECONDS`, `ACTION_LOG_PG_COMMAND_TIMEOUT` | ACTION_LOG_PG_COMMAND_TIMEOUT |
+| `connector_registry_pg_pool_min` | `int` | `1` | `CONNECTOR_REGISTRY_PG_POOL_MIN` | CONNECTOR_REGISTRY_PG_POOL_MIN |
+| `connector_registry_pg_pool_max` | `int` | `5` | `CONNECTOR_REGISTRY_PG_POOL_MAX` | CONNECTOR_REGISTRY_PG_POOL_MAX |
+| `connector_registry_pg_command_timeout_seconds` | `int` | `30` | `CONNECTOR_REGISTRY_PG_COMMAND_TIMEOUT_SECONDS`, `CONNECTOR_REGISTRY_PG_COMMAND_TIMEOUT` | CONNECTOR_REGISTRY_PG_COMMAND_TIMEOUT |
+| `dataset_registry_pg_pool_min` | `int` | `1` | `DATASET_REGISTRY_PG_POOL_MIN` | DATASET_REGISTRY_PG_POOL_MIN |
+| `dataset_registry_pg_pool_max` | `int` | `5` | `DATASET_REGISTRY_PG_POOL_MAX` | DATASET_REGISTRY_PG_POOL_MAX |
+| `dataset_registry_pg_command_timeout_seconds` | `int` | `30` | `DATASET_REGISTRY_PG_COMMAND_TIMEOUT_SECONDS`, `DATASET_REGISTRY_PG_COMMAND_TIMEOUT` | DATASET_REGISTRY_PG_COMMAND_TIMEOUT |
+| `pipeline_registry_pg_pool_min` | `int` | `1` | `PIPELINE_REGISTRY_PG_POOL_MIN` | PIPELINE_REGISTRY_PG_POOL_MIN |
+| `pipeline_registry_pg_pool_max` | `int` | `5` | `PIPELINE_REGISTRY_PG_POOL_MAX` | PIPELINE_REGISTRY_PG_POOL_MAX |
+| `pipeline_registry_pg_command_timeout_seconds` | `int` | `30` | `PIPELINE_REGISTRY_PG_COMMAND_TIMEOUT_SECONDS`, `PIPELINE_REGISTRY_PG_COMMAND_TIMEOUT` | PIPELINE_REGISTRY_PG_COMMAND_TIMEOUT |
+| `objectify_pg_pool_min` | `int` | `1` | `OBJECTIFY_PG_POOL_MIN` | OBJECTIFY_PG_POOL_MIN |
+| `objectify_pg_pool_max` | `int` | `5` | `OBJECTIFY_PG_POOL_MAX` | OBJECTIFY_PG_POOL_MAX |
+| `objectify_pg_command_timeout_seconds` | `int` | `30` | `OBJECTIFY_PG_COMMAND_TIMEOUT_SECONDS`, `OBJECTIFY_PG_COMMAND_TIMEOUT` | OBJECTIFY_PG_COMMAND_TIMEOUT |
+| `audit_pg_pool_min` | `int` | `1` | `AUDIT_PG_POOL_MIN` | AUDIT_PG_POOL_MIN |
+| `audit_pg_pool_max` | `int` | `5` | `AUDIT_PG_POOL_MAX` | AUDIT_PG_POOL_MAX |
+| `audit_pg_command_timeout_seconds` | `int` | `30` | `AUDIT_PG_COMMAND_TIMEOUT_SECONDS`, `AUDIT_PG_COMMAND_TIMEOUT` | AUDIT_PG_COMMAND_TIMEOUT |
+| `lineage_pg_pool_min` | `int` | `1` | `LINEAGE_PG_POOL_MIN` | LINEAGE_PG_POOL_MIN |
+| `lineage_pg_pool_max` | `int` | `5` | `LINEAGE_PG_POOL_MAX` | LINEAGE_PG_POOL_MAX |
+| `lineage_pg_command_timeout_seconds` | `int` | `30` | `LINEAGE_PG_COMMAND_TIMEOUT_SECONDS`, `LINEAGE_PG_COMMAND_TIMEOUT` | LINEAGE_PG_COMMAND_TIMEOUT |
+| `lineage_latest_edges_max_ids` | `int` | `5000` | `LINEAGE_LATEST_EDGES_MAX_IDS` | LINEAGE_LATEST_EDGES_MAX_IDS |
+| `agg_seq_pg_pool_min` | `int` | `1` | `AGG_SEQ_PG_POOL_MIN` | AGG_SEQ_PG_POOL_MIN |
+| `agg_seq_pg_pool_max` | `int` | `5` | `AGG_SEQ_PG_POOL_MAX` | AGG_SEQ_PG_POOL_MAX |
+| `agg_seq_pg_command_timeout_seconds` | `int` | `30` | `AGG_SEQ_PG_COMMAND_TIMEOUT_SECONDS`, `AGG_SEQ_PG_COMMAND_TIMEOUT` | AGG_SEQ_PG_COMMAND_TIMEOUT |
+
+## EventSourcingSettings
+
+> Event sourcing / CQRS tuning settings
+
+**20 settings**
+
+| Setting | Type | Default | Env Variable | Description |
+|---------|------|---------|-------------|-------------|
+| `event_store_retention_days` | `int` | `365` | `EVENT_STORE_RETENTION_DAYS` | Event store retention in days (EVENT_STORE_RETENTION_DAYS) |
+| `projection_batch_size` | `int` | `1000` | `PROJECTION_BATCH_SIZE` | Projection worker batch size (PROJECTION_BATCH_SIZE) |
+| `projection_scroll_timeout` | `str` | `5m` | `PROJECTION_SCROLL_TIMEOUT` | Elasticsearch scroll timeout for projections (PROJECTION_SCROLL_TIMEOUT) |
+| `command_timeout_seconds` | `int` | `300` | `COMMAND_TIMEOUT_SECONDS` | Command processing timeout in seconds (COMMAND_TIMEOUT_SECONDS) |
+| `command_retry_count` | `int` | `3` | `COMMAND_RETRY_COUNT` | Command retry count (COMMAND_RETRY_COUNT) |
+| `enable_event_sourcing` | `bool` | `True` | `ENABLE_EVENT_SOURCING` | Enable event sourcing (ENABLE_EVENT_SOURCING) |
+| `enable_processed_event_registry` | `bool` | `True` | `ENABLE_PROCESSED_EVENT_REGISTRY` | Enable durable processed-event registry (ENABLE_PROCESSED_EVENT_REGISTRY) |
+| `processed_event_lease_timeout_seconds` | `int` | `900` | `PROCESSED_EVENT_LEASE_TIMEOUT_SECONDS` | Processed-event lease timeout seconds (PROCESSED_EVENT_LEASE_TIMEOUT_SECONDS) |
+| `processed_event_heartbeat_interval_seconds` | `int` | `30` | `PROCESSED_EVENT_HEARTBEAT_INTERVAL_SECONDS` | Processed-event heartbeat interval seconds (PROCESSED_EVENT_HEARTBEAT_INTERVAL_SECONDS) |
+| `processed_event_pg_pool_min` | `int` | `1` | `PROCESSED_EVENT_PG_POOL_MIN` | Processed-event Postgres pool min size (PROCESSED_EVENT_PG_POOL_MIN) |
+| `processed_event_pg_pool_max` | `int` | `5` | `PROCESSED_EVENT_PG_POOL_MAX` | Processed-event Postgres pool max size (PROCESSED_EVENT_PG_POOL_MAX) |
+| `processed_event_pg_command_timeout` | `int` | `30` | `PROCESSED_EVENT_PG_COMMAND_TIMEOUT` | Processed-event Postgres command timeout seconds (PROCESSED_EVENT_PG_COMMAND_TIMEOUT) |
+| `processed_event_owner` | `Optional[str]` | **required** | `PROCESSED_EVENT_OWNER` | Override processed-event registry owner id (PROCESSED_EVENT_OWNER) |
+| `event_store_sequence_allocator_mode` | `str` | `postgres` | `EVENT_STORE_SEQUENCE_ALLOCATOR_MODE` | Sequence allocator mode (EVENT_STORE_SEQUENCE_ALLOCATOR_MODE) |
+| `event_store_sequence_schema` | `str` | `spice_event_registry` | `EVENT_STORE_SEQUENCE_SCHEMA` | Sequence schema name (EVENT_STORE_SEQUENCE_SCHEMA) |
+| `event_store_sequence_handler_prefix` | `str` | `write_side` | `EVENT_STORE_SEQUENCE_HANDLER_PREFIX` | Sequence handler prefix (EVENT_STORE_SEQUENCE_HANDLER_PREFIX) |
+| `event_store_idempotency_mismatch_mode` | `str` | `error` | `EVENT_STORE_IDEMPOTENCY_MISMATCH_MODE` | Idempotency mismatch handling (EVENT_STORE_IDEMPOTENCY_MISMATCH_MODE) |
+| `event_store_require_tls` | `bool` | `False` | `EVENT_STORE_REQUIRE_TLS` | Require TLS for event store endpoint (EVENT_STORE_REQUIRE_TLS) |
+| `event_store_ssl_verify` | `bool` | `True` | `EVENT_STORE_SSL_VERIFY` | Verify TLS certs for event store (EVENT_STORE_SSL_VERIFY) |
+| `event_store_s3_addressing_style` | `Optional[str]` | **required** | `EVENT_STORE_S3_ADDRESSING_STYLE` | Force S3 addressing style (EVENT_STORE_S3_ADDRESSING_STYLE) |
+
+## BranchVirtualizationSettings
+
+> Branch virtualization defaults (OCC seeding).
+
+**1 settings**
+
+| Setting | Type | Default | Env Variable | Description |
+|---------|------|---------|-------------|-------------|
+| `base_branch` | `str` | `main` | `BASE_BRANCH` | Base branch to seed OCC when branch has no local events (BRANCH_VIRTUALIZATION_BASE_BRANCH) |
+
+## InstanceWorkerSettings
+
+> Instance worker runtime settings.
+
+**6 settings**
+
+| Setting | Type | Default | Env Variable | Description |
+|---------|------|---------|-------------|-------------|
+| `dlq_flush_timeout_seconds` | `float` | `10.0` | `DLQ_FLUSH_TIMEOUT_SECONDS` | DLQ flush timeout seconds (INSTANCE_WORKER_DLQ_FLUSH_TIMEOUT_SECONDS) |
+| `max_retry_attempts` | `int` | `5` | `MAX_RETRY_ATTEMPTS` | Max retry attempts for command processing (INSTANCE_WORKER_MAX_RETRY_ATTEMPTS) |
+| `allow_pk_generation` | `bool` | `False` | `ALLOW_PK_GENERATION` | Allow generating missing PKs (INSTANCE_ALLOW_PK_GENERATION) |
+| `relationship_strict` | `bool` | `True` | `RELATIONSHIP_STRICT` | Strict relationship schema enforcement (INSTANCE_RELATIONSHIP_STRICT) |
+| `untyped_ref_max_retry_attempts` | `int` | `30` | `UNTYPED_REF_MAX_RETRY_ATTEMPTS` | Max retry attempts for untyped ref witness errors (INSTANCE_WORKER_UNTYPED_REF_MAX_RETRY_ATTEMPTS) |
+| `untyped_ref_backoff_max_seconds` | `float` | `15.0` | `UNTYPED_REF_BACKOFF_MAX_SECONDS` | Max backoff seconds for untyped ref witness errors (INSTANCE_WORKER_UNTYPED_REF_BACKOFF_MAX_SECONDS) |
+
+## OntologyWorkerSettings
+
+> Ontology worker runtime settings.
+
+**3 settings**
+
+| Setting | Type | Default | Env Variable | Description |
+|---------|------|---------|-------------|-------------|
+| `dlq_flush_timeout_seconds` | `float` | `10.0` | `DLQ_FLUSH_TIMEOUT_SECONDS` | DLQ flush timeout seconds (ONTOLOGY_WORKER_DLQ_FLUSH_TIMEOUT_SECONDS) |
+| `db_ready_poll_seconds` | `float` | `0.5` | `DB_READY_POLL_SECONDS` | DB readiness poll seconds (ONTOLOGY_WORKER_DB_READY_POLL_SECONDS) |
+| `max_retry_attempts` | `int` | `5` | `MAX_RETRY_ATTEMPTS` | Max retry attempts (ONTOLOGY_WORKER_MAX_RETRY_ATTEMPTS) |
+
+## ProjectionWorkerSettings
+
+> Projection worker runtime settings.
+
+**2 settings**
+
+| Setting | Type | Default | Env Variable | Description |
+|---------|------|---------|-------------|-------------|
+| `dlq_flush_timeout_seconds` | `float` | `10.0` | `DLQ_FLUSH_TIMEOUT_SECONDS` | DLQ flush timeout seconds (PROJECTION_WORKER_DLQ_FLUSH_TIMEOUT_SECONDS) |
+| `max_retries` | `int` | `5` | `MAX_RETRIES` | Max retries for projection worker (PROJECTION_WORKER_MAX_RETRIES) |
+
+## ActionWorkerSettings
+
+> Action worker runtime settings.
+
+**3 settings**
+
+| Setting | Type | Default | Env Variable | Description |
+|---------|------|---------|-------------|-------------|
+| `dlq_flush_timeout_seconds` | `float` | `10.0` | `DLQ_FLUSH_TIMEOUT_SECONDS` | DLQ flush timeout seconds (ACTION_WORKER_DLQ_FLUSH_TIMEOUT_SECONDS) |
+| `dlq_retries` | `int` | `10` | `DLQ_RETRIES` | DLQ producer retries (ACTION_WORKER_DLQ_RETRIES) |
+| `max_retry_attempts` | `int` | `5` | `MAX_RETRY_ATTEMPTS` | Max retry attempts (ACTION_WORKER_MAX_RETRY_ATTEMPTS) |
+
+## ActionOutboxSettings
+
+> Action outbox worker settings.
+
+**2 settings**
+
+| Setting | Type | Default | Env Variable | Description |
+|---------|------|---------|-------------|-------------|
+| `poll_seconds` | `float` | `2.0` | `POLL_SECONDS` | Poll interval seconds (ACTION_OUTBOX_POLL_SECONDS) |
+| `batch_size` | `int` | `100` | `BATCH_SIZE` | Batch size for each scan (ACTION_OUTBOX_BATCH_SIZE) |
+
+## OntologyDeployOutboxSettings
+
+> Ontology deployment outbox worker settings (OMS embedded worker).
+
+**11 settings**
+
+| Setting | Type | Default | Env Variable | Description |
+|---------|------|---------|-------------|-------------|
+| `enabled` | `bool` | `True` | `ENABLED`, `ENABLE_ONTOLOGY_DEPLOY_OUTBOX_WORKER` | Enable ontology deploy outbox worker (ENABLE_ONTOLOGY_DEPLOY_OUTBOX_WORKER) |
+| `use_deployments_v2` | `bool` | `True` | `USE_DEPLOYMENTS_V2`, `ONTOLOGY_DEPLOYMENTS_V2` | Use deployments registry v2 (ONTOLOGY_DEPLOYMENTS_V2) |
+| `poll_seconds` | `int` | `5` | `POLL_SECONDS`, `ONTOLOGY_DEPLOY_OUTBOX_POLL_SECONDS` | Poll interval seconds (ONTOLOGY_DEPLOY_OUTBOX_POLL_SECONDS) |
+| `batch_size` | `int` | `50` | `BATCH_SIZE`, `ONTOLOGY_DEPLOY_OUTBOX_BATCH` | Batch size (ONTOLOGY_DEPLOY_OUTBOX_BATCH) |
+| `claim_timeout_seconds` | `int` | `300` | `CLAIM_TIMEOUT_SECONDS`, `ONTOLOGY_DEPLOY_OUTBOX_CLAIM_TIMEOUT_SECONDS` | Claim timeout seconds (ONTOLOGY_DEPLOY_OUTBOX_CLAIM_TIMEOUT_SECONDS) |
+| `backoff_base_seconds` | `int` | `2` | `BACKOFF_BASE_SECONDS`, `ONTOLOGY_DEPLOY_OUTBOX_BACKOFF_BASE_SECONDS` | Backoff base seconds (ONTOLOGY_DEPLOY_OUTBOX_BACKOFF_BASE_SECONDS) |
+| `backoff_max_seconds` | `int` | `60` | `BACKOFF_MAX_SECONDS`, `ONTOLOGY_DEPLOY_OUTBOX_BACKOFF_MAX_SECONDS` | Backoff max seconds (ONTOLOGY_DEPLOY_OUTBOX_BACKOFF_MAX_SECONDS) |
+| `retention_days` | `int` | `7` | `RETENTION_DAYS`, `ONTOLOGY_DEPLOY_OUTBOX_RETENTION_DAYS` | Retention days (ONTOLOGY_DEPLOY_OUTBOX_RETENTION_DAYS) |
+| `purge_interval_seconds` | `int` | `3600` | `PURGE_INTERVAL_SECONDS`, `ONTOLOGY_DEPLOY_OUTBOX_PURGE_INTERVAL_SECONDS` | Purge interval seconds (ONTOLOGY_DEPLOY_OUTBOX_PURGE_INTERVAL_SECONDS) |
+| `purge_limit` | `int` | `10000` | `PURGE_LIMIT`, `ONTOLOGY_DEPLOY_OUTBOX_PURGE_LIMIT` | Purge batch limit (ONTOLOGY_DEPLOY_OUTBOX_PURGE_LIMIT) |
+| `worker_id` | `Optional[str]` | **required** | `WORKER_ID`, `ONTOLOGY_DEPLOY_OUTBOX_WORKER_ID` | Worker id override (ONTOLOGY_DEPLOY_OUTBOX_WORKER_ID) |
+
+## ConnectorSyncSettings
+
+> Connector sync worker settings.
+
+**5 settings**
+
+| Setting | Type | Default | Env Variable | Description |
+|---------|------|---------|-------------|-------------|
+| `group` | `str` | `connector-sync-worker-group` | `GROUP` | Kafka consumer group id (CONNECTOR_SYNC_GROUP) |
+| `handler` | `str` | `connector_sync_worker` | `HANDLER` | Handler label (CONNECTOR_SYNC_HANDLER) |
+| `max_retries` | `int` | `5` | `MAX_RETRIES` | Max retries (CONNECTOR_SYNC_MAX_RETRIES) |
+| `backoff_base_seconds` | `int` | `2` | `BACKOFF_BASE_SECONDS` | Backoff base seconds (CONNECTOR_SYNC_BACKOFF_BASE_SECONDS) |
+| `backoff_max_seconds` | `int` | `60` | `BACKOFF_MAX_SECONDS` | Backoff max seconds (CONNECTOR_SYNC_BACKOFF_MAX_SECONDS) |
+
+## ConnectorTriggerSettings
+
+> Connector trigger service settings.
+
+**4 settings**
+
+| Setting | Type | Default | Env Variable | Description |
+|---------|------|---------|-------------|-------------|
+| `source_type` | `str` | `google_sheets` | `SOURCE_TYPE` | Connector trigger source type (CONNECTOR_TRIGGER_SOURCE_TYPE) |
+| `tick_seconds` | `int` | `5` | `TICK_SECONDS` | Tick interval seconds (CONNECTOR_TRIGGER_TICK_SECONDS) |
+| `poll_concurrency` | `int` | `5` | `POLL_CONCURRENCY` | Poll concurrency (CONNECTOR_TRIGGER_POLL_CONCURRENCY) |
+| `outbox_batch` | `int` | `50` | `OUTBOX_BATCH` | Outbox batch size (CONNECTOR_TRIGGER_OUTBOX_BATCH) |
+
+## ObjectifySettings
+
+> Objectify worker settings.
+
+**14 settings**
+
+| Setting | Type | Default | Env Variable | Description |
+|---------|------|---------|-------------|-------------|
+| `worker_handler` | `str` | `objectify_worker` | `WORKER_HANDLER` | Worker handler label (OBJECTIFY_WORKER_HANDLER) |
+| `batch_size` | `int` | `500` | `BATCH_SIZE` | Default batch size (OBJECTIFY_BATCH_SIZE) |
+| `row_batch_size` | `int` | `1000` | `ROW_BATCH_SIZE` | Row batch size (OBJECTIFY_ROW_BATCH_SIZE) |
+| `bulk_update_batch_size` | `Optional[int]` | **required** | `BULK_UPDATE_BATCH_SIZE` | Bulk update batch size (OBJECTIFY_BULK_UPDATE_BATCH_SIZE; default OBJECTIFY_BATCH_SIZE) |
+| `list_page_size` | `int` | `1000` | `LIST_PAGE_SIZE` | Pagination page size (OBJECTIFY_LIST_PAGE_SIZE) |
+| `max_rows` | `int` | `0` | `MAX_ROWS` | Max rows limit (0=unlimited) (OBJECTIFY_MAX_ROWS) |
+| `lineage_max_links` | `int` | `1000` | `LINEAGE_MAX_LINKS` | Max lineage links emitted (OBJECTIFY_LINEAGE_MAX_LINKS) |
+| `max_retries` | `int` | `5` | `MAX_RETRIES` | Max retries (OBJECTIFY_MAX_RETRIES) |
+| `backoff_base_seconds` | `int` | `2` | `BACKOFF_BASE_SECONDS` | Backoff base seconds (OBJECTIFY_BACKOFF_BASE_SECONDS) |
+| `backoff_max_seconds` | `int` | `60` | `BACKOFF_MAX_SECONDS` | Backoff max seconds (OBJECTIFY_BACKOFF_MAX_SECONDS) |
+| `ontology_pk_validation_mode` | `str` | `warn` | `ONTOLOGY_PK_VALIDATION_MODE` | When ontology schema declares primaryKey, validate object_type pk_spec matches (fields + order). Modes: off\|warn\|fail (OBJECTIFY_ONTOLOGY_PK_VALIDATION_MODE). |
+| `dataset_primary_index_chunk_size` | `int` | `500` | `DATASET_PRIMARY_INDEX_CHUNK_SIZE` | Chunk size for dataset-primary ES bulk indexing (OBJECTIFY_DATASET_PRIMARY_INDEX_CHUNK_SIZE). |
+| `dataset_primary_refresh` | `bool` | `False` | `DATASET_PRIMARY_REFRESH` | Refresh ES index after dataset-primary writes (OBJECTIFY_DATASET_PRIMARY_REFRESH). |
+| `dataset_primary_prune_stale_on_full` | `bool` | `True` | `DATASET_PRIMARY_PRUNE_STALE_ON_FULL` | When execution_mode=full, delete stale class instances not present in current dataset snapshot (OBJECTIFY_DATASET_PRIMARY_PRUNE_STALE_ON_FULL). |
+
+## IngestReconcilerSettings
+
+> Dataset ingest reconciler worker settings.
+
+**11 settings**
+
+| Setting | Type | Default | Env Variable | Description |
+|---------|------|---------|-------------|-------------|
+| `enabled` | `bool` | `True` | `ENABLED`, `ENABLE_DATASET_INGEST_RECONCILER` | Enable ingest reconciler (ENABLE_DATASET_INGEST_RECONCILER) |
+| `poll_seconds` | `int` | `60` | `POLL_SECONDS`, `DATASET_INGEST_RECONCILER_POLL_SECONDS` | Poll interval seconds (DATASET_INGEST_RECONCILER_POLL_SECONDS) |
+| `stale_seconds` | `int` | `3600` | `STALE_SECONDS`, `DATASET_INGEST_RECONCILER_STALE_SECONDS` | Stale cutoff seconds (DATASET_INGEST_RECONCILER_STALE_SECONDS) |
+| `limit` | `int` | `200` | `LIMIT`, `DATASET_INGEST_RECONCILER_LIMIT` | Max ingest rows per run (DATASET_INGEST_RECONCILER_LIMIT) |
+| `lock_key` | `int` | `910214` | `LOCK_KEY`, `DATASET_INGEST_RECONCILER_LOCK_KEY` | Postgres advisory lock key (DATASET_INGEST_RECONCILER_LOCK_KEY) |
+| `alert_published_threshold` | `int` | `1` | `ALERT_PUBLISHED_THRESHOLD` | Alert threshold for published count (INGEST_RECONCILER_ALERT_PUBLISHED_THRESHOLD) |
+| `alert_aborted_threshold` | `int` | `1` | `ALERT_ABORTED_THRESHOLD` | Alert threshold for aborted count (INGEST_RECONCILER_ALERT_ABORTED_THRESHOLD) |
+| `alert_on_error` | `bool` | `True` | `ALERT_ON_ERROR` | Alert on exceptions (INGEST_RECONCILER_ALERT_ON_ERROR) |
+| `alert_cooldown_seconds` | `int` | `300` | `ALERT_COOLDOWN_SECONDS` | Alert cooldown seconds (INGEST_RECONCILER_ALERT_COOLDOWN_SECONDS) |
+| `alert_webhook_url` | `Optional[str]` | **required** | `ALERT_WEBHOOK_URL` | Webhook URL (INGEST_RECONCILER_ALERT_WEBHOOK_URL; fallback ALERT_WEBHOOK_URL) |
+| `port` | `int` | `8012` | `PORT`, `INGEST_RECONCILER_PORT` | Worker port (INGEST_RECONCILER_PORT) |
+
+## DatasetIngestOutboxSettings
+
+> Dataset ingest outbox worker settings (BFF embedded worker).
+
+**16 settings**
+
+| Setting | Type | Default | Env Variable | Description |
+|---------|------|---------|-------------|-------------|
+| `enabled` | `bool` | `True` | `ENABLED`, `ENABLE_DATASET_INGEST_OUTBOX_WORKER` | Enable dataset ingest outbox worker (ENABLE_DATASET_INGEST_OUTBOX_WORKER) |
+| `poll_seconds` | `int` | `5` | `POLL_SECONDS`, `DATASET_INGEST_OUTBOX_POLL_SECONDS` | Poll interval seconds (DATASET_INGEST_OUTBOX_POLL_SECONDS) |
+| `flush_timeout_seconds` | `float` | `10.0` | `FLUSH_TIMEOUT_SECONDS`, `DATASET_INGEST_OUTBOX_FLUSH_TIMEOUT_SECONDS` | Kafka flush timeout seconds (DATASET_INGEST_OUTBOX_FLUSH_TIMEOUT_SECONDS) |
+| `backoff_base_seconds` | `int` | `2` | `BACKOFF_BASE_SECONDS`, `DATASET_INGEST_OUTBOX_BACKOFF_BASE_SECONDS` | Retry backoff base seconds (DATASET_INGEST_OUTBOX_BACKOFF_BASE_SECONDS) |
+| `backoff_max_seconds` | `int` | `60` | `BACKOFF_MAX_SECONDS`, `DATASET_INGEST_OUTBOX_BACKOFF_MAX_SECONDS` | Retry backoff max seconds (DATASET_INGEST_OUTBOX_BACKOFF_MAX_SECONDS) |
+| `max_retries` | `int` | `5` | `MAX_RETRIES`, `DATASET_INGEST_OUTBOX_MAX_RETRIES` | Max retries before DLQ (DATASET_INGEST_OUTBOX_MAX_RETRIES) |
+| `claim_timeout_seconds` | `int` | `300` | `CLAIM_TIMEOUT_SECONDS`, `DATASET_INGEST_OUTBOX_CLAIM_TIMEOUT_SECONDS` | Claim timeout seconds (DATASET_INGEST_OUTBOX_CLAIM_TIMEOUT_SECONDS) |
+| `worker_id` | `Optional[str]` | **required** | `WORKER_ID`, `DATASET_INGEST_OUTBOX_WORKER_ID` | Worker id override (DATASET_INGEST_OUTBOX_WORKER_ID) |
+| `purge_interval_seconds` | `int` | `3600` | `PURGE_INTERVAL_SECONDS`, `DATASET_INGEST_OUTBOX_PURGE_INTERVAL_SECONDS` | Purge interval seconds (DATASET_INGEST_OUTBOX_PURGE_INTERVAL_SECONDS) |
+| `retention_days` | `int` | `7` | `RETENTION_DAYS`, `DATASET_INGEST_OUTBOX_RETENTION_DAYS` | Retention days (DATASET_INGEST_OUTBOX_RETENTION_DAYS) |
+| `purge_limit` | `int` | `10000` | `PURGE_LIMIT`, `DATASET_INGEST_OUTBOX_PURGE_LIMIT` | Purge batch limit (DATASET_INGEST_OUTBOX_PURGE_LIMIT) |
+| `enable_dlq` | `bool` | `True` | `ENABLE_DLQ`, `ENABLE_DATASET_INGEST_OUTBOX_DLQ` | Enable DLQ publishing (ENABLE_DATASET_INGEST_OUTBOX_DLQ) |
+| `dlq_max_in_flight` | `int` | `5` | `DLQ_MAX_IN_FLIGHT`, `DATASET_INGEST_OUTBOX_MAX_IN_FLIGHT` | DLQ producer max in-flight requests (DATASET_INGEST_OUTBOX_MAX_IN_FLIGHT) |
+| `dlq_delivery_timeout_ms` | `int` | `120000` | `DLQ_DELIVERY_TIMEOUT_MS`, `DATASET_INGEST_OUTBOX_DELIVERY_TIMEOUT_MS` | DLQ producer delivery.timeout.ms (DATASET_INGEST_OUTBOX_DELIVERY_TIMEOUT_MS) |
+| `dlq_request_timeout_ms` | `int` | `30000` | `DLQ_REQUEST_TIMEOUT_MS`, `DATASET_INGEST_OUTBOX_REQUEST_TIMEOUT_MS` | DLQ producer request.timeout.ms (DATASET_INGEST_OUTBOX_REQUEST_TIMEOUT_MS) |
+| `dlq_retries` | `int` | `5` | `DLQ_RETRIES`, `DATASET_INGEST_OUTBOX_RETRIES` | DLQ producer retries (DATASET_INGEST_OUTBOX_RETRIES) |
+
+## ObjectifyOutboxWorkerSettings
+
+> Objectify outbox worker settings (BFF embedded worker).
+
+**15 settings**
+
+| Setting | Type | Default | Env Variable | Description |
+|---------|------|---------|-------------|-------------|
+| `enabled` | `bool` | `True` | `ENABLED`, `ENABLE_OBJECTIFY_OUTBOX_WORKER` | Enable objectify outbox worker (ENABLE_OBJECTIFY_OUTBOX_WORKER) |
+| `poll_seconds` | `int` | `5` | `POLL_SECONDS`, `OBJECTIFY_OUTBOX_POLL_SECONDS` | Poll interval seconds (OBJECTIFY_OUTBOX_POLL_SECONDS) |
+| `batch_size` | `int` | `50` | `BATCH_SIZE`, `OBJECTIFY_OUTBOX_BATCH` | Batch size per scan (OBJECTIFY_OUTBOX_BATCH) |
+| `flush_timeout_seconds` | `float` | `10.0` | `FLUSH_TIMEOUT_SECONDS`, `OBJECTIFY_OUTBOX_FLUSH_TIMEOUT_SECONDS` | Kafka flush timeout seconds (OBJECTIFY_OUTBOX_FLUSH_TIMEOUT_SECONDS) |
+| `backoff_base_seconds` | `int` | `2` | `BACKOFF_BASE_SECONDS`, `OBJECTIFY_OUTBOX_BACKOFF_BASE_SECONDS` | Retry backoff base seconds (OBJECTIFY_OUTBOX_BACKOFF_BASE_SECONDS) |
+| `backoff_max_seconds` | `int` | `60` | `BACKOFF_MAX_SECONDS`, `OBJECTIFY_OUTBOX_BACKOFF_MAX_SECONDS` | Retry backoff max seconds (OBJECTIFY_OUTBOX_BACKOFF_MAX_SECONDS) |
+| `claim_timeout_seconds` | `int` | `300` | `CLAIM_TIMEOUT_SECONDS`, `OBJECTIFY_OUTBOX_CLAIM_TIMEOUT_SECONDS` | Claim timeout seconds (OBJECTIFY_OUTBOX_CLAIM_TIMEOUT_SECONDS) |
+| `worker_id` | `Optional[str]` | **required** | `WORKER_ID`, `OBJECTIFY_OUTBOX_WORKER_ID` | Worker id override (OBJECTIFY_OUTBOX_WORKER_ID) |
+| `purge_interval_seconds` | `int` | `3600` | `PURGE_INTERVAL_SECONDS`, `OBJECTIFY_OUTBOX_PURGE_INTERVAL_SECONDS` | Purge interval seconds (OBJECTIFY_OUTBOX_PURGE_INTERVAL_SECONDS) |
+| `retention_days` | `int` | `7` | `RETENTION_DAYS`, `OBJECTIFY_OUTBOX_RETENTION_DAYS` | Retention days (OBJECTIFY_OUTBOX_RETENTION_DAYS) |
+| `purge_limit` | `int` | `10000` | `PURGE_LIMIT`, `OBJECTIFY_OUTBOX_PURGE_LIMIT` | Purge batch limit (OBJECTIFY_OUTBOX_PURGE_LIMIT) |
+| `producer_max_in_flight` | `int` | `5` | `PRODUCER_MAX_IN_FLIGHT`, `OBJECTIFY_OUTBOX_MAX_IN_FLIGHT` | Kafka producer max in-flight requests (OBJECTIFY_OUTBOX_MAX_IN_FLIGHT) |
+| `producer_delivery_timeout_ms` | `int` | `120000` | `PRODUCER_DELIVERY_TIMEOUT_MS`, `OBJECTIFY_OUTBOX_DELIVERY_TIMEOUT_MS` | Kafka producer delivery.timeout.ms (OBJECTIFY_OUTBOX_DELIVERY_TIMEOUT_MS) |
+| `producer_request_timeout_ms` | `int` | `30000` | `PRODUCER_REQUEST_TIMEOUT_MS`, `OBJECTIFY_OUTBOX_REQUEST_TIMEOUT_MS` | Kafka producer request.timeout.ms (OBJECTIFY_OUTBOX_REQUEST_TIMEOUT_MS) |
+| `producer_retries` | `int` | `5` | `PRODUCER_RETRIES`, `OBJECTIFY_OUTBOX_RETRIES` | Kafka producer retries (OBJECTIFY_OUTBOX_RETRIES) |
+
+## ObjectifyReconcilerSettings
+
+> Objectify reconciler worker settings (BFF embedded worker).
+
+**5 settings**
+
+| Setting | Type | Default | Env Variable | Description |
+|---------|------|---------|-------------|-------------|
+| `enabled` | `bool` | `True` | `ENABLED`, `ENABLE_OBJECTIFY_RECONCILER` | Enable objectify reconciler (ENABLE_OBJECTIFY_RECONCILER) |
+| `poll_seconds` | `int` | `60` | `POLL_SECONDS`, `OBJECTIFY_RECONCILER_POLL_SECONDS` | Poll interval seconds (OBJECTIFY_RECONCILER_POLL_SECONDS) |
+| `stale_after_seconds` | `int` | `600` | `STALE_AFTER_SECONDS`, `OBJECTIFY_RECONCILER_STALE_SECONDS` | Stale cutoff seconds (OBJECTIFY_RECONCILER_STALE_SECONDS) |
+| `enqueued_stale_seconds` | `int` | `900` | `ENQUEUED_STALE_SECONDS`, `OBJECTIFY_RECONCILER_ENQUEUED_STALE_SECONDS` | Stale cutoff seconds for QUEUED runs (OBJECTIFY_RECONCILER_ENQUEUED_STALE_SECONDS; 0=disabled) |
+| `lock_key` | `int` | `910215` | `LOCK_KEY`, `OBJECTIFY_RECONCILER_LOCK_KEY` | Postgres advisory lock key (OBJECTIFY_RECONCILER_LOCK_KEY) |
+
+## WritebackMaterializerSettings
+
+> Writeback materializer worker settings.
+
+**4 settings**
+
+| Setting | Type | Default | Env Variable | Description |
+|---------|------|---------|-------------|-------------|
+| `base_branch` | `str` | `main` | `BASE_BRANCH` | Base branch (WRITEBACK_MATERIALIZER_BASE_BRANCH) |
+| `interval_seconds` | `float` | **required** | `INTERVAL_SECONDS` | Run interval seconds (WRITEBACK_MATERIALIZER_INTERVAL_SECONDS) |
+| `run_once` | `bool` | `False` | `RUN_ONCE` | Run once and exit (WRITEBACK_MATERIALIZER_RUN_ONCE) |
+| `db_names` | `Optional[str]` | **required** | `DB_NAMES` | Comma-separated db names to materialize (WRITEBACK_MATERIALIZER_DB_NAMES) |
+
+## EventPublisherSettings
+
+> Event publisher (message relay) settings.
+
+**12 settings**
+
+| Setting | Type | Default | Env Variable | Description |
+|---------|------|---------|-------------|-------------|
+| `checkpoint_key` | `str` | `checkpoints/event_publisher.json` | `CHECKPOINT_KEY` | Checkpoint S3 key (EVENT_PUBLISHER_CHECKPOINT_KEY) |
+| `poll_interval` | `int` | `3` | `POLL_INTERVAL` | Poll interval seconds (EVENT_PUBLISHER_POLL_INTERVAL; compatibility MESSAGE_RELAY_POLL_INTERVAL) |
+| `batch_size` | `int` | `200` | `BATCH_SIZE` | Batch size (EVENT_PUBLISHER_BATCH_SIZE; compatibility MESSAGE_RELAY_BATCH_SIZE) |
+| `kafka_flush_batch_size` | `Optional[int]` | **required** | `KAFKA_FLUSH_BATCH_SIZE` | Kafka flush batch size (EVENT_PUBLISHER_KAFKA_FLUSH_BATCH_SIZE; default batch_size) |
+| `kafka_flush_timeout_seconds` | `float` | `10.0` | `KAFKA_FLUSH_TIMEOUT_SECONDS` | Kafka flush timeout seconds (EVENT_PUBLISHER_KAFKA_FLUSH_TIMEOUT_SECONDS) |
+| `metrics_log_interval_seconds` | `int` | `30` | `METRICS_LOG_INTERVAL_SECONDS` | Metrics log interval seconds (EVENT_PUBLISHER_METRICS_LOG_INTERVAL_SECONDS) |
+| `lookback_seconds` | `int` | `600` | `LOOKBACK_SECONDS` | Lookback seconds (EVENT_PUBLISHER_LOOKBACK_SECONDS) |
+| `lookback_max_keys` | `int` | `2000` | `LOOKBACK_MAX_KEYS` | Lookback max keys (EVENT_PUBLISHER_LOOKBACK_MAX_KEYS) |
+| `dedup_max_events` | `int` | `10000` | `DEDUP_MAX_EVENTS` | Dedup max events (EVENT_PUBLISHER_DEDUP_MAX_EVENTS) |
+| `dedup_checkpoint_max_events` | `int` | `2000` | `DEDUP_CHECKPOINT_MAX_EVENTS` | Dedup checkpoint max events (EVENT_PUBLISHER_DEDUP_CHECKPOINT_MAX_EVENTS) |
+| `start_timestamp` | `Optional[str]` | **required** | `START_TIMESTAMP` | Optional start timestamp ISO8601 (EVENT_PUBLISHER_START_TIMESTAMP) |
+| `kafka_topic_bootstrap_timeout_seconds` | `int` | `120` | `KAFKA_TOPIC_BOOTSTRAP_TIMEOUT_SECONDS` | Kafka topic bootstrap timeout seconds (KAFKA_TOPIC_BOOTSTRAP_TIMEOUT_SECONDS) |
+
+## AgentRetentionWorkerSettings
+
+> Agent session retention worker settings (SEC-005).
+
+**5 settings**
+
+| Setting | Type | Default | Env Variable | Description |
+|---------|------|---------|-------------|-------------|
+| `enabled` | `bool` | `False` | `ENABLED` | Enable agent retention worker (AGENT_RETENTION_ENABLED) |
+| `poll_seconds` | `int` | `3600` | `POLL_SECONDS` | Retention worker poll seconds (AGENT_RETENTION_POLL_SECONDS) |
+| `retention_days` | `int` | `30` | `RETENTION_DAYS` | Retention days for agent session data (AGENT_RETENTION_DAYS) |
+| `action` | `str` | `redact` | `ACTION` | Retention action redact\|delete (AGENT_RETENTION_ACTION) |
+| `policy_json` | `Optional[str]` | **required** | `POLICY_JSON` | Retention policy JSON per object type (AGENT_RETENTION_POLICY_JSON) |
+
+## SchemaChangeMonitorSettings
+
+> Schema change monitor settings for proactive drift detection.
+
+**3 settings**
+
+| Setting | Type | Default | Env Variable | Description |
+|---------|------|---------|-------------|-------------|
+| `enabled` | `bool` | `False` | `ENABLED` | Enable schema change monitor (SCHEMA_MONITOR_ENABLED) |
+| `check_interval_seconds` | `int` | `300` | `CHECK_INTERVAL_SECONDS` | Schema check interval in seconds (SCHEMA_MONITOR_CHECK_INTERVAL_SECONDS) |
+| `cooldown_seconds` | `int` | `3600` | `COOLDOWN_SECONDS` | Notification cooldown in seconds (SCHEMA_MONITOR_COOLDOWN_SECONDS) |
+
+## ChaosSettings
+
+> Chaos/fault injection settings (test-only).
+
+**4 settings**
+
+| Setting | Type | Default | Env Variable | Description |
+|---------|------|---------|-------------|-------------|
+| `enabled` | `bool` | `False` | `ENABLED`, `ENABLE_CHAOS_INJECTION` | Enable chaos injection (ENABLE_CHAOS_INJECTION) |
+| `crash_point` | `Optional[str]` | **required** | `CRASH_POINT` | Crash point selector (CHAOS_CRASH_POINT) |
+| `crash_once` | `bool` | `True` | `CRASH_ONCE` | Crash only once per container (CHAOS_CRASH_ONCE) |
+| `crash_exit_code` | `int` | `42` | `CRASH_EXIT_CODE` | Process exit code when crashing (CHAOS_CRASH_EXIT_CODE) |
+
+## WorkersSettings
+
+> Workers/services runtime settings.
+
+**17 settings**
+
+| Setting | Type | Default | Env Variable | Description |
+|---------|------|---------|-------------|-------------|
+| `instance` | `InstanceWorkerSettings` | `InstanceWorkerSettings` | `INSTANCE` | - |
+| `ontology` | `OntologyWorkerSettings` | `OntologyWorkerSettings` | `ONTOLOGY` | - |
+| `ontology_deploy_outbox` | `OntologyDeployOutboxSettings` | `OntologyDeployOutboxSettings` | `ONTOLOGY_DEPLOY_OUTBOX` | - |
+| `projection` | `ProjectionWorkerSettings` | `ProjectionWorkerSettings` | `PROJECTION` | - |
+| `action` | `ActionWorkerSettings` | `ActionWorkerSettings` | `ACTION` | - |
+| `action_outbox` | `ActionOutboxSettings` | `ActionOutboxSettings` | `ACTION_OUTBOX` | - |
+| `connector_sync` | `ConnectorSyncSettings` | `ConnectorSyncSettings` | `CONNECTOR_SYNC` | - |
+| `connector_trigger` | `ConnectorTriggerSettings` | `ConnectorTriggerSettings` | `CONNECTOR_TRIGGER` | - |
+| `objectify` | `ObjectifySettings` | `ObjectifySettings` | `OBJECTIFY` | - |
+| `dataset_ingest_outbox` | `DatasetIngestOutboxSettings` | `DatasetIngestOutboxSettings` | `DATASET_INGEST_OUTBOX` | - |
+| `ingest_reconciler` | `IngestReconcilerSettings` | `IngestReconcilerSettings` | `INGEST_RECONCILER` | - |
+| `objectify_outbox` | `ObjectifyOutboxWorkerSettings` | `ObjectifyOutboxWorkerSettings` | `OBJECTIFY_OUTBOX` | - |
+| `objectify_reconciler` | `ObjectifyReconcilerSettings` | `ObjectifyReconcilerSettings` | `OBJECTIFY_RECONCILER` | - |
+| `writeback_materializer` | `WritebackMaterializerSettings` | `WritebackMaterializerSettings` | `WRITEBACK_MATERIALIZER` | - |
+| `event_publisher` | `EventPublisherSettings` | `EventPublisherSettings` | `EVENT_PUBLISHER` | - |
+| `agent_retention` | `AgentRetentionWorkerSettings` | `AgentRetentionWorkerSettings` | `AGENT_RETENTION` | - |
+| `schema_change_monitor` | `SchemaChangeMonitorSettings` | `SchemaChangeMonitorSettings` | `SCHEMA_CHANGE_MONITOR` | - |
+
+## WritebackSettings
+
+> Ontology writeback + read overlay settings
+
+**10 settings**
+
+| Setting | Type | Default | Env Variable | Description |
+|---------|------|---------|-------------|-------------|
+| `ontology_writeback_repo` | `str` | `ontology-writeback` | `ONTOLOGY_WRITEBACK_REPO` | lakeFS repository for writeback (ONTOLOGY_WRITEBACK_REPO) |
+| `ontology_writeback_branch_prefix` | `str` | `writeback` | `ONTOLOGY_WRITEBACK_BRANCH_PREFIX` | Branch prefix for writeback branches (ONTOLOGY_WRITEBACK_BRANCH_PREFIX) |
+| `ontology_writeback_dataset_id` | `Optional[str]` | **required** | `ONTOLOGY_WRITEBACK_DATASET_ID` | Optional dataset id for writeback scope (ONTOLOGY_WRITEBACK_DATASET_ID) |
+| `writeback_enforce` | `bool` | `False` | `WRITEBACK_ENFORCE` | Enforce writeback policy checks (WRITEBACK_ENFORCE) |
+| `writeback_enforce_governance` | `bool` | `False` | `WRITEBACK_ENFORCE_GOVERNANCE` | Enforce governance checks for writeback (WRITEBACK_ENFORCE_GOVERNANCE) |
+| `writeback_enforce_action_data_access` | `bool` | `True` | `WRITEBACK_ENFORCE_ACTION_DATA_ACCESS` | Enforce action target data_access policy checks on submit/simulate/worker (WRITEBACK_ENFORCE_ACTION_DATA_ACCESS) |
+| `writeback_read_overlay` | `bool` | `False` | `WRITEBACK_READ_OVERLAY` | Enable overlay reads from lakeFS branches (WRITEBACK_READ_OVERLAY) |
+| `writeback_enabled_object_types` | `str` | `` | `WRITEBACK_ENABLED_OBJECT_TYPES` | Comma-separated allowed object types for writeback/overlay (WRITEBACK_ENABLED_OBJECT_TYPES) |
+| `writeback_dataset_acl_scope` | `str` | `dataset_acl` | `WRITEBACK_DATASET_ACL_SCOPE` | ACL scope name for writeback dataset access (WRITEBACK_DATASET_ACL_SCOPE) |
+| `writeback_submission_snapshot_max_targets` | `int` | `200` | `WRITEBACK_SUBMISSION_SNAPSHOT_MAX_TARGETS` | Max targets to snapshot during writeback submission (WRITEBACK_SUBMISSION_SNAPSHOT_MAX_TARGETS) |
+
+## TestSettings
+
+> Test environment configuration
+
+**3 settings**
+
+| Setting | Type | Default | Env Variable | Description |
+|---------|------|---------|-------------|-------------|
+| `test_database_url` | `str` | `sqlite:///./test.db` | `TEST_DATABASE_URL` | Test database URL |
+| `test_timeout` | `int` | `30` | `TEST_TIMEOUT` | Test timeout in seconds |
+| `oms_query_wait_seconds` | `float` | `60.0` | `OMS_QUERY_WAIT_SECONDS` | OMS query wait seconds (OMS_QUERY_WAIT_SECONDS) |
+
+## GoogleSheetsSettings
+
+> Google Sheets integration settings
+
+**5 settings**
+
+| Setting | Type | Default | Env Variable | Description |
+|---------|------|---------|-------------|-------------|
+| `google_sheets_api_key` | `Optional[str]` | **required** | `GOOGLE_SHEETS_API_KEY` | Google Sheets API key |
+| `google_sheets_credentials_path` | `Optional[str]` | **required** | `GOOGLE_SHEETS_CREDENTIALS_PATH` | Google Sheets service account credentials path |
+| `oauth_client_id` | `Optional[str]` | **required** | `OAUTH_CLIENT_ID`, `GOOGLE_CLIENT_ID` | Google OAuth client id (GOOGLE_CLIENT_ID) |
+| `oauth_client_secret` | `Optional[str]` | **required** | `OAUTH_CLIENT_SECRET`, `GOOGLE_CLIENT_SECRET` | Google OAuth client secret (GOOGLE_CLIENT_SECRET) |
+| `oauth_redirect_uri` | `str` | `http://localhost:8002/api/v1/data-co...` | `OAUTH_REDIRECT_URI`, `GOOGLE_REDIRECT_URI` | Google OAuth redirect URI (GOOGLE_REDIRECT_URI) |
+
+## ApplicationSettings
+
+> Main application settings - aggregates all other settings
+
+**29 settings**
+
+| Setting | Type | Default | Env Variable | Description |
+|---------|------|---------|-------------|-------------|
+| `environment` | `Environment` | **required** | `ENVIRONMENT`, `SPICE_ENV` | Application environment |
+| `debug` | `bool` | `True` | `DEBUG` | Enable debug mode |
+| `database` | `DatabaseSettings` | `DatabaseSettings` | `DATABASE` | - |
+| `services` | `ServiceSettings` | `ServiceSettings` | `SERVICES` | - |
+| `llm` | `LLMSettings` | `LLMSettings` | `LLM` | - |
+| `observability` | `ObservabilitySettings` | `ObservabilitySettings` | `OBSERVABILITY` | - |
+| `graph_query` | `GraphQuerySettings` | `GraphQuerySettings` | `GRAPH_QUERY` | - |
+| `features` | `FeatureFlagsSettings` | `FeatureFlagsSettings` | `FEATURES` | - |
+| `pipeline` | `PipelineSettings` | `PipelineSettings` | `PIPELINE` | - |
+| `pipeline_plan` | `PipelinePlanSettings` | `PipelinePlanSettings` | `PIPELINE_PLAN` | - |
+| `ontology` | `OntologySettings` | `OntologySettings` | `ONTOLOGY` | - |
+| `agent` | `AgentRuntimeSettings` | `AgentRuntimeSettings` | `AGENT` | - |
+| `agent_plan` | `AgentPlanSettings` | `AgentPlanSettings` | `AGENT_PLAN` | - |
+| `clients` | `ClientSettings` | `ClientSettings` | `CLIENTS` | - |
+| `mcp` | `MCPSettings` | `MCPSettings` | `MCP` | - |
+| `auth` | `AuthSettings` | `AuthSettings` | `AUTH` | - |
+| `rate_limit` | `RateLimitSettings` | `RateLimitSettings` | `RATE_LIMIT` | - |
+| `messaging` | `MessagingSettings` | `MessagingSettings` | `MESSAGING` | - |
+| `event_sourcing` | `EventSourcingSettings` | `EventSourcingSettings` | `EVENT_SOURCING` | - |
+| `branch_virtualization` | `BranchVirtualizationSettings` | `BranchVirtualizationSettings` | `BRANCH_VIRTUALIZATION` | - |
+| `storage` | `StorageSettings` | `StorageSettings` | `STORAGE` | - |
+| `workers` | `WorkersSettings` | `WorkersSettings` | `WORKERS` | - |
+| `chaos` | `ChaosSettings` | `ChaosSettings` | `CHAOS` | - |
+| `cache` | `CacheSettings` | `CacheSettings` | `CACHE` | - |
+| `writeback` | `WritebackSettings` | `WritebackSettings` | `WRITEBACK` | - |
+| `security` | `SecuritySettings` | `SecuritySettings` | `SECURITY` | - |
+| `performance` | `PerformanceSettings` | `PerformanceSettings` | `PERFORMANCE` | - |
+| `test` | `TestSettings` | `TestSettings` | `TEST` | - |
+| `google_sheets` | `GoogleSheetsSettings` | `GoogleSheetsSettings` | `GOOGLE_SHEETS` | - |

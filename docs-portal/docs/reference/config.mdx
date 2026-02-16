@@ -1,0 +1,158 @@
+---
+title: Configuration Reference
+sidebar_position: 2
+---
+
+# Configuration Reference
+
+SPICE Harvester uses 36+ configuration classes to control the behavior of all platform services. Configuration values are resolved from environment variables, `.env` files, and Docker-specific defaults.
+
+{/* The interactive ConfigLandscape visualization will be embedded here */}
+
+## Configuration Resolution Order
+
+Configuration values are resolved in the following precedence order (highest to lowest):
+
+1. **Environment variables** -- set in the shell or Docker Compose `environment` block
+2. **`.env` file** -- project-level defaults
+3. **Docker-specific defaults** -- hardcoded defaults optimized for Docker Compose
+4. **Application defaults** -- fallback values in the configuration classes
+
+## Configuration Categories
+
+### Core Service Configuration
+
+| Class | Env Prefix | Description |
+|-------|-----------|-------------|
+| `OmsConfig` | `OMS_` | OMS server settings (host, port, workers, timeouts) |
+| `BffConfig` | `BFF_` | BFF gateway settings (host, port, CORS, rate limits) |
+| `FunnelConfig` | `FUNNEL_` | Funnel ingestion settings (host, port, upload limits) |
+| `AdminConfig` | `ADMIN_` | Admin service settings |
+| `AuthConfig` | `AUTH_` | Authentication settings (secret key, token expiry, issuer) |
+
+### Data Store Configuration
+
+| Class | Env Prefix | Description |
+|-------|-----------|-------------|
+| `PostgresConfig` | `POSTGRES_` | PostgreSQL connection (host, port, database, pool size) |
+| `ElasticsearchConfig` | `ELASTICSEARCH_` | Elasticsearch connection (host, port, index prefix, shards) |
+| `RedisConfig` | `REDIS_` | Redis connection (host, port, password, database, TTL) |
+| `KafkaConfig` | `KAFKA_` | Kafka connection (bootstrap servers, consumer group, partitions) |
+| `MinioConfig` | `MINIO_` | MinIO/S3 connection (endpoint, access key, bucket) |
+| `SchemaRegistryConfig` | `SCHEMA_REGISTRY_` | Schema Registry connection |
+
+### Worker Configuration
+
+| Class | Env Prefix | Description |
+|-------|-----------|-------------|
+| `EventProcessorConfig` | `EVENT_PROCESSOR_` | Event processing settings (batch size, concurrency) |
+| `ProjectionBuilderConfig` | `PROJECTION_BUILDER_` | Projection build settings (rebuild interval, batch size) |
+| `PipelineRunnerConfig` | `PIPELINE_RUNNER_` | Pipeline execution settings (max concurrent, timeout) |
+| `LineageWorkerConfig` | `LINEAGE_WORKER_` | Lineage capture settings |
+| `RetryConfig` | `RETRY_` | Retry policies (max attempts, backoff, dead letter) |
+| `SnapshotConfig` | `SNAPSHOT_` | Snapshot creation settings (interval, retention) |
+| `CacheWarmerConfig` | `CACHE_WARMER_` | Cache warming settings (schedule, batch size) |
+| `IndexSyncerConfig` | `INDEX_SYNCER_` | Index sync settings (batch size, consistency check interval) |
+
+### Observability Configuration
+
+| Class | Env Prefix | Description |
+|-------|-----------|-------------|
+| `OtelConfig` | `OTEL_` | OpenTelemetry settings (exporter, endpoint, sampling) |
+| `LoggingConfig` | `LOG_` | Logging settings (level, format, output) |
+| `MetricsConfig` | `METRICS_` | Prometheus metrics settings (port, namespace) |
+| `TracingConfig` | `TRACING_` | Distributed tracing settings (Jaeger endpoint, sampling rate) |
+| `AlertConfig` | `ALERT_` | AlertManager settings (webhook, email, Slack) |
+
+### Feature Configuration
+
+| Class | Env Prefix | Description |
+|-------|-----------|-------------|
+| `SearchConfig` | `SEARCH_` | Search behavior (default page size, max results, timeout) |
+| `ActionConfig` | `ACTION_` | Action behavior (max batch size, undo retention, conflict mode) |
+| `PipelineConfig` | `PIPELINE_` | Pipeline behavior (max transforms, timeout, retry policy) |
+| `LineageConfig` | `LINEAGE_` | Lineage behavior (edge types, retention, query depth) |
+| `ProjectionConfig` | `PROJECTION_` | Projection behavior (consistency target, rebuild threshold) |
+
+## Key Environment Variables
+
+### Essential Variables
+
+These must be set for production deployments:
+
+```bash
+# ─── Secrets (generate with: openssl rand -hex 32) ────────
+AUTH_SECRET_KEY=<your-secret-key>
+POSTGRES_PASSWORD=<your-db-password>
+MINIO_SECRET_KEY=<your-minio-secret>
+
+# ─── External URLs ────────────────────────────────────────
+BFF_PUBLIC_URL=https://api.your-domain.com
+CORS_ORIGINS=https://app.your-domain.com
+
+# ─── Performance ──────────────────────────────────────────
+OMS_WORKERS=4
+BFF_WORKERS=4
+POSTGRES_MAX_CONNECTIONS=100
+```
+
+### Commonly Tuned Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OMS_WORKERS` | `2` | Number of OMS uvicorn workers |
+| `BFF_WORKERS` | `2` | Number of BFF uvicorn workers |
+| `POSTGRES_MAX_CONNECTIONS` | `20` | PostgreSQL connection pool size |
+| `POSTGRES_POOL_TIMEOUT` | `30` | Connection pool acquire timeout (seconds) |
+| `ELASTICSEARCH_SHARDS` | `1` | Number of primary shards per index |
+| `ELASTICSEARCH_REPLICAS` | `0` | Number of replica shards per index |
+| `ELASTICSEARCH_REFRESH_INTERVAL` | `1s` | Index refresh interval |
+| `KAFKA_PARTITIONS` | `12` | Default partitions per topic |
+| `KAFKA_REPLICATION_FACTOR` | `1` | Topic replication factor |
+| `REDIS_MAX_CONNECTIONS` | `10` | Redis connection pool size |
+| `REDIS_DEFAULT_TTL` | `300` | Default cache TTL (seconds) |
+| `SEARCH_DEFAULT_PAGE_SIZE` | `100` | Default search results per page |
+| `SEARCH_MAX_PAGE_SIZE` | `1000` | Maximum search results per page |
+| `SEARCH_TIMEOUT` | `30` | Search query timeout (seconds) |
+| `ACTION_MAX_BATCH_SIZE` | `100` | Maximum actions in a single batch |
+| `ACTION_UNDO_RETENTION_DAYS` | `30` | Days to retain undo history |
+| `PIPELINE_MAX_CONCURRENT` | `5` | Maximum concurrent pipeline executions |
+| `PIPELINE_TRANSFORM_TIMEOUT` | `300` | Per-transform timeout (seconds) |
+| `LOG_LEVEL` | `INFO` | Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL) |
+| `LOG_FORMAT` | `json` | Log output format (`json` or `text`) |
+| `OTEL_SAMPLING_RATE` | `0.1` | Trace sampling rate (0.0 to 1.0) |
+| `SNAPSHOT_INTERVAL` | `100` | Events between snapshots per aggregate |
+
+### Docker-Specific Defaults
+
+When running in Docker Compose, these defaults are applied automatically:
+
+| Variable | Docker Default | Standalone Default |
+|----------|---------------|-------------------|
+| `POSTGRES_HOST` | `postgres` | `localhost` |
+| `ELASTICSEARCH_HOST` | `elasticsearch` | `localhost` |
+| `REDIS_HOST` | `redis` | `localhost` |
+| `KAFKA_BOOTSTRAP_SERVERS` | `kafka:9092` | `localhost:9092` |
+| `MINIO_ENDPOINT` | `minio:9000` | `localhost:9000` |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | `otel-collector:4317` | `localhost:4317` |
+
+## Configuration Validation
+
+On startup, each service validates its configuration and logs warnings for:
+
+- Missing required values
+- Values outside acceptable ranges
+- Deprecated configuration keys
+- Conflicting settings
+
+Check service logs for configuration issues:
+
+```bash
+docker compose logs oms | grep "CONFIG"
+```
+
+## Next Steps
+
+- **[Installation Guide](/docs/getting-started/installation)** -- Environment setup
+- **[Monitoring](/docs/operations/monitoring)** -- Observability configuration
+- **[Troubleshooting](/docs/operations/troubleshooting)** -- Common configuration problems

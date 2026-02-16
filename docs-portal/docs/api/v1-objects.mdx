@@ -1,0 +1,92 @@
+---
+title: "v1: Objects (Legacy)"
+sidebar_position: 7
+---
+
+# Legacy v1 Objects API
+
+:::warning Deprecated
+The v1 API is deprecated and will be removed in a future release. All new integrations should use the [v2 Objects API](./v2-objects). See the [Foundry Migration Guide](/docs/guides/platform-admin/foundry-migration) for migration instructions.
+:::
+
+## Overview
+
+The v1 Objects API provides CRUD operations for object instances using numeric identifiers and a flat response format.
+
+## Endpoints
+
+### List Objects
+
+```
+GET /api/v1/ontology/{ontologyId}/object-types/{objectTypeId}/objects
+```
+
+Query parameters: `offset` (default: 0), `limit` (default: 100, max: 1000), `sortBy`, `sortOrder`.
+
+### Get Object
+
+```
+GET /api/v1/ontology/{ontologyId}/object-types/{objectTypeId}/objects/{objectId}
+```
+
+### Create Object
+
+```
+POST /api/v1/ontology/{ontologyId}/object-types/{objectTypeId}/objects
+```
+
+### Update Object
+
+```
+PUT /api/v1/ontology/{ontologyId}/object-types/{objectTypeId}/objects/{objectId}
+```
+
+### Delete Object
+
+```
+DELETE /api/v1/ontology/{ontologyId}/object-types/{objectTypeId}/objects/{objectId}
+```
+
+### Batch Get
+
+```
+POST /api/v1/ontology/{ontologyId}/object-types/{objectTypeId}/objects/batch
+```
+
+## Key Differences from v2
+
+| Aspect | v1 | v2 |
+|--------|----|----|
+| Path style | `/api/v1/ontology/{id}/object-types/{id}/objects/{id}` | `/api/v2/ontologies/{apiName}/objects/{apiName}/{primaryKey}` |
+| Object identifier | Numeric `objectId` | String `primaryKey` |
+| Response format | `{id, type, data: {field: value}}` | `{__rid, __primaryKey, __apiName, properties: {field: value}}` |
+| Mutations | Direct PUT/DELETE on object endpoints | Through the Actions API (`/actions/apply`) |
+| Pagination | `offset` + `limit` | Opaque `pageToken` |
+
+## v1 Response Example
+
+```json
+{
+  "id": 42,
+  "type": "Employee",
+  "typeId": 1,
+  "data": {
+    "employeeId": "EMP-042",
+    "fullName": "Jane Doe",
+    "department": "Engineering",
+    "startDate": "2023-06-15"
+  },
+  "createdAt": "2023-06-15T00:00:00Z",
+  "updatedAt": "2024-01-15T09:30:00Z",
+  "version": 5
+}
+```
+
+## Migration Path
+
+1. Replace numeric object IDs with primary key values in URL paths.
+2. Update response parsing to use `__rid`, `__primaryKey`, `__apiName`, and `properties`.
+3. Move all write operations (create, update, delete) to the [v2 Actions API](./v2-actions).
+4. Switch from `offset`/`limit` to `pageToken` pagination.
+
+See the [Foundry Migration Guide](/docs/guides/platform-admin/foundry-migration) for complete details.

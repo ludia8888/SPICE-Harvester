@@ -1,0 +1,162 @@
+---
+title: Service Topology
+sidebar_position: 3
+---
+
+# Service Topology
+
+SPICE Harvester consists of 33+ Docker services organized into four categories. This page catalogs every service with its port, dependencies, and purpose.
+
+{/* The interactive D3 topology visualization will be embedded here */}
+
+## Core API Servers
+
+These are the externally accessible services that handle client requests.
+
+| Service | Port | Protocol | Description |
+|---------|------|----------|-------------|
+| **OMS** (Ontology Management Service) | 8000 | HTTP/REST | Primary API for ontology CRUD, object management, search, actions, and lineage |
+| **BFF** (Backend-for-Frontend) | 8002 | HTTP/REST | API gateway handling authentication, routing, rate limiting, and response transformation |
+| **Funnel** | 8003 | HTTP/REST | Bulk data ingestion, file uploads, streaming imports, and pipeline management |
+| **Admin** | 8004 | HTTP/REST | Platform administration, user management, configuration, and health monitoring |
+
+### Dependencies
+
+```
+BFF  ──▶  OMS  ──▶  PostgreSQL, Elasticsearch, Redis, Kafka
+     ──▶  Funnel ──▶  Kafka, MinIO
+     ──▶  Admin  ──▶  PostgreSQL, Redis
+     ──▶  Auth (internal)
+```
+
+## Workers
+
+Workers are background services that consume events from Kafka and maintain the platform's read models and processing pipelines.
+
+| Service | Kafka Consumer Group | Description |
+|---------|---------------------|-------------|
+| **Event Processor** | `spice-event-processor` | Core event handler; updates PostgreSQL and dispatches to downstream workers |
+| **Projection Builder** | `spice-projection-builder` | Builds and maintains denormalized projection views |
+| **Pipeline Runner** | `spice-pipeline-runner` | Executes data transformation pipelines |
+| **Lineage Worker** | `spice-lineage-worker` | Captures and stores data lineage edges |
+| **Schema Validator** | `spice-schema-validator` | Validates incoming data against ontology schema definitions |
+| **Action Executor** | `spice-action-executor` | Processes deferred and scheduled actions |
+| **Notification Worker** | `spice-notification-worker` | Sends notifications (webhooks, email) on events |
+| **Retry Handler** | `spice-retry-handler` | Manages retry logic for failed event processing |
+| **Dead Letter Processor** | `spice-dlp` | Handles events that have exhausted retry attempts |
+| **Metric Aggregator** | `spice-metric-aggregator` | Computes and publishes platform metrics |
+| **Cache Warmer** | `spice-cache-warmer` | Pre-populates Redis caches for frequently accessed data |
+| **Index Syncer** | `spice-index-syncer` | Keeps Elasticsearch indices synchronized with PostgreSQL |
+| **Snapshot Worker** | `spice-snapshot-worker` | Creates periodic snapshots of event store state for faster replay |
+
+### Worker Scaling
+
+Workers are horizontally scalable. Kafka consumer group rebalancing ensures that partitions are distributed evenly across worker instances:
+
+```bash
+# Scale the event processor to 3 replicas
+docker compose up -d --scale event-processor=3
+```
+
+:::note
+When scaling workers, ensure the number of Kafka partitions for each topic is at least equal to the number of worker replicas. The default partition count is 12.
+:::
+
+## Data Stores
+
+| Service | Port | Version | Purpose |
+|---------|------|---------|---------|
+| **PostgreSQL** | 5432 | 15+ | Source of truth for ontology schema, object instances, action history, and user data |
+| **Elasticsearch** | 9200 | 8.x | Full-text search, analytics, and object indexing |
+| **Redis** | 6379 | 7.x | Caching, session storage, rate limiting, distributed locks |
+| **Kafka** | 9092 | 3.x | Event streaming, inter-service messaging |
+| **ZooKeeper** | 2181 | 3.x | Kafka cluster coordination (will migrate to KRaft in future) |
+| **MinIO** | 9000 (API) / 9001 (Console) | Latest | S3-compatible object store for event persistence and file storage |
+| **Schema Registry** | 8081 | 7.x | Avro/JSON schema management for Kafka topics |
+| **Kafka Connect** | 8083 | 3.x | Connector framework for external data source integration |
+
+### Data Store Dependencies
+
+```
+PostgreSQL    ──  standalone (no external deps)
+Elasticsearch ──  standalone
+Redis         ──  standalone
+Kafka         ──▶ ZooKeeper
+MinIO         ──  standalone
+Schema Registry ──▶ Kafka
+Kafka Connect   ──▶ Kafka, Schema Registry
+```
+
+### Storage Volumes
+
+Each data store uses a named Docker volume for persistence:
+
+| Service | Volume | Default Size |
+|---------|--------|-------------|
+| PostgreSQL | `spice_postgres_data` | 10 GB |
+| Elasticsearch | `spice_es_data` | 20 GB |
+| Redis | `spice_redis_data` | 1 GB |
+| Kafka | `spice_kafka_data` | 10 GB |
+| ZooKeeper | `spice_zk_data` | 1 GB |
+| MinIO | `spice_minio_data` | 50 GB |
+
+## Observability Stack
+
+| Service | Port | Description |
+|---------|------|-------------|
+| **Grafana** | 13000 | Dashboards and visualization. Pre-configured with SPICE Harvester dashboards |
+| **Prometheus** | 19090 | Metrics collection and alerting rules |
+| **Jaeger** | 16686 (UI) / 14268 (collector) | Distributed tracing with full request trace visualization |
+| **OTEL Collector** | 4317 (gRPC) / 4318 (HTTP) | OpenTelemetry collector aggregating traces, metrics, and logs |
+| **AlertManager** | 9093 | Alert routing and notification (email, Slack, PagerDuty) |
+| **Loki** | 3100 | Log aggregation and querying |
+
+### Observability Data Flow
+
+```
+Services ──(OTLP)──▶ OTEL Collector ──▶ Prometheus (metrics)
+                                    ──▶ Jaeger (traces)
+                                    ──▶ Loki (logs)
+
+Grafana ──▶ Prometheus (metrics datasource)
+        ──▶ Jaeger (traces datasource)
+        ──▶ Loki (logs datasource)
+
+Prometheus ──▶ AlertManager ──▶ Slack / PagerDuty / Email
+```
+
+## Network Architecture
+
+All services communicate over a shared Docker network (`spice-network`). External access is only through the BFF gateway on port 8002.
+
+### Port Summary
+
+| Port Range | Category |
+|-----------|----------|
+| 8000-8004 | API Servers |
+| 5432, 9200, 6379, 9092, 2181, 9000 | Data Stores |
+| 8081, 8083 | Kafka Ecosystem |
+| 13000, 19090, 16686, 4317-4318, 9093, 3100 | Observability |
+
+### Security Boundaries
+
+- **External**: Only port 8002 (BFF) is exposed to the public network
+- **Internal**: All inter-service communication happens on the Docker bridge network
+- **Data stores**: Not exposed externally by default; access only from within the Docker network
+
+## Startup Order
+
+Services must start in a specific order due to dependencies. Docker Compose handles this through `depends_on` with health checks:
+
+1. **Data stores**: PostgreSQL, Elasticsearch, Redis, ZooKeeper, MinIO
+2. **Kafka ecosystem**: Kafka (depends on ZooKeeper), Schema Registry, Kafka Connect
+3. **Core services**: OMS (depends on PostgreSQL, Elasticsearch, Redis, Kafka), Funnel, Admin
+4. **Gateway**: BFF (depends on OMS, Funnel, Admin)
+5. **Workers**: All workers (depend on Kafka and relevant data stores)
+6. **Observability**: OTEL Collector, Prometheus, Jaeger, Loki, AlertManager, Grafana
+
+## Next Steps
+
+- **[Architecture Overview](./overview)** -- High-level system design
+- **[Event Sourcing](./event-sourcing)** -- How events flow through workers
+- **[Monitoring](/docs/operations/monitoring)** -- Grafana dashboards and alerts

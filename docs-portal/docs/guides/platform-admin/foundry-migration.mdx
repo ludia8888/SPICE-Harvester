@@ -1,0 +1,37 @@
+---
+title: Foundry Migration
+sidebar_position: 3
+---
+
+# Foundry v2 Migration Guide
+
+:::info Coming Soon
+This guide is under development. Check back for the full walkthrough.
+:::
+
+## What This Guide Covers
+
+This guide will walk platform administrators through migrating from the v1 API to the Foundry v2-aligned API, including:
+
+- **Migration Overview** -- Why migrate, what changes, and the timeline for v1 deprecation
+- **URL Path Changes** -- Mapping v1 paths to v2 paths (e.g., `/api/v1/ontology/{id}` to `/api/v2/ontologies/{apiName}`)
+- **Identifier Migration** -- Moving from numeric IDs to string API names
+- **Response Format Changes** -- Adapting to the Foundry v2 object format (`__rid`, `__primaryKey`, `__apiName`, `properties`)
+- **Pagination Migration** -- Switching from offset/limit to opaque `pageToken` pagination
+- **Search Migration** -- Converting v1 filter syntax to `SearchJsonQueryV2` operators
+- **Write Operation Migration** -- Moving from direct PUT/DELETE to the Actions API
+- **Client SDK Updates** -- Updating Python and TypeScript SDK usage
+- **Dual-Running Period** -- Running v1 and v2 simultaneously during migration
+- **Validation and Testing** -- Verifying that migrated integrations produce correct results
+- **Rollback Plan** -- Steps to revert if issues are discovered
+
+## Prerequisites
+
+- [API Overview](/docs/api/overview) -- Understanding of both v1 and v2 conventions
+- [v2 Object Types API](/docs/api/v2-object-types) -- v2 endpoint documentation
+
+## Related Resources
+
+- [v1 Object Types](/docs/api/v1-object-types) -- Legacy v1 reference
+- [v1 Objects](/docs/api/v1-objects) -- Legacy v1 reference
+- [v1 Search](/docs/api/v1-search) -- Legacy v1 reference

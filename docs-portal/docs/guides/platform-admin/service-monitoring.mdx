@@ -1,0 +1,34 @@
+---
+title: Service Monitoring
+sidebar_position: 1
+---
+
+# Service Monitoring
+
+:::info Coming Soon
+This guide is under development. Check back for the full walkthrough.
+:::
+
+## What This Guide Covers
+
+This guide will walk platform administrators through monitoring SPICE Harvester services, including:
+
+- **Grafana Dashboards** -- Navigating pre-built dashboards for service health, request latency, and throughput
+- **Prometheus Metrics** -- Understanding the key metrics exposed by each service (request rate, error rate, latency percentiles)
+- **Jaeger Tracing** -- Using distributed tracing to debug slow requests and cross-service issues
+- **Log Aggregation** -- Querying logs in Loki/Grafana for troubleshooting
+- **Alert Configuration** -- Setting up AlertManager rules for critical conditions (service down, high error rate, disk full)
+- **Health Check Endpoints** -- Monitoring service health via HTTP endpoints and Docker health checks
+- **Capacity Planning** -- Using metrics to plan scaling decisions
+- **Custom Dashboards** -- Building Grafana dashboards for your specific monitoring needs
+
+## Prerequisites
+
+- [Installation Guide](/docs/getting-started/installation) -- Platform must be running with the observability profile
+- [Service Topology](/docs/architecture/service-topology) -- Understanding of the service inventory
+
+## Related Resources
+
+- [Monitoring Operations](/docs/operations/monitoring) -- Operational monitoring reference
+- [Troubleshooting](/docs/operations/troubleshooting) -- Common issues and resolutions
+- [Configuration Reference](/docs/reference/config) -- Observability-related settings

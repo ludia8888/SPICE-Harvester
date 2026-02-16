@@ -1,0 +1,299 @@
+/* Landing page — SPICE Harvester documentation portal */
+
+/* ------------------------------------------------------------------ */
+/* Page wrapper                                                        */
+/* ------------------------------------------------------------------ */
+.landing {
+  overflow-x: hidden;
+}
+
+/* ------------------------------------------------------------------ */
+/* Stats Bar                                                           */
+/* ------------------------------------------------------------------ */
+.statsBar {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 0;
+  padding: 2.5rem 2rem;
+  background: var(--portal-surface);
+  border-bottom: 1px solid var(--portal-border-subtle);
+}
+
+.stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 0 2.5rem;
+  position: relative;
+}
+
+.stat + .stat::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 1px;
+  height: 40px;
+  background: var(--portal-border);
+}
+
+.statValue {
+  font-size: 1.75rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  color: var(--ifm-color-primary);
+  line-height: 1.2;
+}
+
+.statLabel {
+  font-size: 0.8rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ifm-font-color-secondary, #5c7080);
+  margin-top: 0.25rem;
+}
+
+/* ------------------------------------------------------------------ */
+/* Section layout                                                      */
+/* ------------------------------------------------------------------ */
+.section {
+  padding: 5rem 2rem;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.sectionAlt {
+  padding: 5rem 2rem;
+  background: var(--portal-surface-overlay);
+  border-top: 1px solid var(--portal-border-subtle);
+  border-bottom: 1px solid var(--portal-border-subtle);
+}
+
+.sectionInner {
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.sectionHeader {
+  text-align: center;
+  margin-bottom: 3rem;
+}
+
+.sectionTitle {
+  font-size: 2.25rem;
+  font-weight: 750;
+  letter-spacing: -0.025em;
+  margin: 0 0 0.75rem;
+  color: var(--ifm-heading-color);
+}
+
+.sectionSubtitle {
+  font-size: 1.1rem;
+  color: var(--ifm-font-color-secondary, #5c7080);
+  max-width: 640px;
+  margin: 0 auto;
+  line-height: 1.65;
+}
+
+/* ------------------------------------------------------------------ */
+/* Architecture section                                                */
+/* ------------------------------------------------------------------ */
+.architectureContent {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2.5rem;
+}
+
+.architectureDiagram {
+  width: 100%;
+  max-width: 900px;
+  padding: 2rem;
+  background: var(--portal-surface-elevated);
+  border: 1px solid var(--portal-border-subtle);
+  border-radius: var(--portal-radius-lg);
+  box-shadow: var(--portal-shadow-md);
+  overflow-x: auto;
+}
+
+.architectureDiagram pre {
+  margin: 0;
+  font-size: 0.85rem;
+  line-height: 1.6;
+  color: var(--ifm-font-color-base);
+}
+
+/* ------------------------------------------------------------------ */
+/* Getting Started steps                                               */
+/* ------------------------------------------------------------------ */
+.stepsContainer {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 2rem;
+  position: relative;
+}
+
+/* Connecting line behind the steps */
+.stepsContainer::before {
+  content: "";
+  position: absolute;
+  top: 36px;
+  left: calc(16.67% + 24px);
+  right: calc(16.67% + 24px);
+  height: 2px;
+  background: linear-gradient(
+    90deg,
+    var(--portal-border) 0%,
+    var(--ifm-color-primary) 50%,
+    var(--portal-border) 100%
+  );
+  z-index: 0;
+}
+
+.step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  position: relative;
+  z-index: 1;
+}
+
+.stepNumber {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--ifm-color-primary);
+  color: #ffffff;
+  font-size: 1.125rem;
+  font-weight: 700;
+  margin-bottom: 1.25rem;
+  box-shadow: 0 2px 8px rgba(33, 93, 176, 0.25);
+}
+
+.stepTitle {
+  font-size: 1.125rem;
+  font-weight: 650;
+  margin: 0 0 0.5rem;
+  color: var(--ifm-heading-color);
+}
+
+.stepDescription {
+  font-size: 0.9rem;
+  color: var(--ifm-font-color-secondary, #5c7080);
+  margin: 0 0 1rem;
+  line-height: 1.5;
+}
+
+.stepCode {
+  width: 100%;
+  background: #1c2127;
+  border-radius: var(--portal-radius-md);
+  padding: 1rem 1.25rem;
+  text-align: left;
+  overflow-x: auto;
+  box-shadow: var(--portal-shadow-sm);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.stepCode code {
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 0.8rem;
+  color: #c9dfff;
+  white-space: pre;
+  line-height: 1.6;
+}
+
+.stepCode .codeComment {
+  color: #6b7a8d;
+}
+
+.stepCode .codeKeyword {
+  color: #8abbff;
+}
+
+.stepCode .codeString {
+  color: #72ca9b;
+}
+
+/* ------------------------------------------------------------------ */
+/* Responsive                                                          */
+/* ------------------------------------------------------------------ */
+@media (max-width: 768px) {
+  .statsBar {
+    flex-wrap: wrap;
+    gap: 1.5rem;
+    padding: 2rem 1.5rem;
+  }
+
+  .stat {
+    padding: 0 1.5rem;
+    flex: 0 0 auto;
+  }
+
+  .stat + .stat::before {
+    display: none;
+  }
+
+  .statValue {
+    font-size: 1.5rem;
+  }
+
+  .section,
+  .sectionAlt {
+    padding: 3.5rem 1.5rem;
+  }
+
+  .sectionTitle {
+    font-size: 1.75rem;
+  }
+
+  .stepsContainer {
+    grid-template-columns: 1fr;
+    gap: 2.5rem;
+  }
+
+  .stepsContainer::before {
+    display: none;
+  }
+}
+
+@media (min-width: 769px) and (max-width: 1024px) {
+  .section,
+  .sectionAlt {
+    padding: 4rem 2rem;
+  }
+
+  .stepsContainer {
+    gap: 1.5rem;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Entrance animations                                                 */
+/* ------------------------------------------------------------------ */
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.statsBar {
+  animation: fadeInUp 0.5s ease-out 0.1s both;
+}
+
+.section,
+.sectionAlt {
+  animation: fadeInUp 0.5s ease-out 0.2s both;
+}

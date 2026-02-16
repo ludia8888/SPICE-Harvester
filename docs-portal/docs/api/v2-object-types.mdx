@@ -1,0 +1,230 @@
+---
+title: "v2: Object Types"
+sidebar_position: 2
+---
+
+# Foundry v2 Object Types API
+
+Object types define the schema for entities in your ontology. Use these endpoints to list and inspect object type definitions.
+
+## List Object Types
+
+Retrieve all object types defined in a given ontology.
+
+```
+GET /api/v2/ontologies/{ontologyApiName}/objectTypes
+```
+
+### Path Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `ontologyApiName` | string | Yes | The API name of the ontology (e.g., `acme`) |
+
+### Query Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `pageSize` | integer | No | Number of results per page (default: 100, max: 1000) |
+| `pageToken` | string | No | Opaque token for the next page of results |
+
+### Request Example
+
+```bash
+curl -X GET "http://localhost:8002/api/v2/ontologies/acme/objectTypes?pageSize=25" \
+  -H "Authorization: Bearer <token>"
+```
+
+### Response Example
+
+```json
+{
+  "data": [
+    {
+      "apiName": "Employee",
+      "displayName": "Employee",
+      "pluralDisplayName": "Employees",
+      "description": "Represents an employee in the organization",
+      "primaryKey": "employeeId",
+      "properties": {
+        "employeeId": {
+          "dataType": { "type": "string" },
+          "displayName": "Employee ID",
+          "description": "Unique identifier for the employee",
+          "required": true
+        },
+        "fullName": {
+          "dataType": { "type": "string" },
+          "displayName": "Full Name",
+          "description": "Employee full name",
+          "required": true
+        },
+        "department": {
+          "dataType": { "type": "string" },
+          "displayName": "Department",
+          "description": "Department the employee belongs to",
+          "required": false
+        },
+        "startDate": {
+          "dataType": { "type": "date" },
+          "displayName": "Start Date",
+          "description": "Date the employee started",
+          "required": false
+        },
+        "salary": {
+          "dataType": { "type": "double" },
+          "displayName": "Salary",
+          "description": "Annual salary",
+          "required": false
+        },
+        "isActive": {
+          "dataType": { "type": "boolean" },
+          "displayName": "Active",
+          "description": "Whether the employee is currently active",
+          "required": false
+        }
+      },
+      "rid": "ri.ontology.main.object-type.employee-001"
+    },
+    {
+      "apiName": "Project",
+      "displayName": "Project",
+      "pluralDisplayName": "Projects",
+      "description": "Represents a project in the organization",
+      "primaryKey": "projectId",
+      "properties": {
+        "projectId": {
+          "dataType": { "type": "string" },
+          "displayName": "Project ID",
+          "required": true
+        },
+        "name": {
+          "dataType": { "type": "string" },
+          "displayName": "Name",
+          "required": true
+        },
+        "status": {
+          "dataType": { "type": "string" },
+          "displayName": "Status",
+          "required": false
+        },
+        "budget": {
+          "dataType": { "type": "double" },
+          "displayName": "Budget",
+          "required": false
+        }
+      },
+      "rid": "ri.ontology.main.object-type.project-001"
+    }
+  ],
+  "nextPageToken": null
+}
+```
+
+### Response Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `data` | array | List of object type definitions |
+| `data[].apiName` | string | Unique identifier for the object type |
+| `data[].displayName` | string | Human-readable name |
+| `data[].pluralDisplayName` | string | Plural form of the display name |
+| `data[].description` | string | Description of the object type |
+| `data[].primaryKey` | string | Name of the primary key property |
+| `data[].properties` | object | Map of property name to property definition |
+| `data[].rid` | string | Resource identifier |
+| `nextPageToken` | string or null | Token for fetching the next page |
+
+---
+
+## Get Object Type
+
+Retrieve a single object type by its API name.
+
+```
+GET /api/v2/ontologies/{ontologyApiName}/objectTypes/{objectTypeApiName}
+```
+
+### Path Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `ontologyApiName` | string | Yes | The API name of the ontology |
+| `objectTypeApiName` | string | Yes | The API name of the object type (e.g., `Employee`) |
+
+### Request Example
+
+```bash
+curl -X GET "http://localhost:8002/api/v2/ontologies/acme/objectTypes/Employee" \
+  -H "Authorization: Bearer <token>"
+```
+
+### Response Example
+
+```json
+{
+  "apiName": "Employee",
+  "displayName": "Employee",
+  "pluralDisplayName": "Employees",
+  "description": "Represents an employee in the organization",
+  "primaryKey": "employeeId",
+  "properties": {
+    "employeeId": {
+      "dataType": { "type": "string" },
+      "displayName": "Employee ID",
+      "description": "Unique identifier for the employee",
+      "required": true
+    },
+    "fullName": {
+      "dataType": { "type": "string" },
+      "displayName": "Full Name",
+      "description": "Employee full name",
+      "required": true
+    },
+    "department": {
+      "dataType": { "type": "string" },
+      "displayName": "Department",
+      "description": "Department the employee belongs to",
+      "required": false
+    },
+    "startDate": {
+      "dataType": { "type": "date" },
+      "displayName": "Start Date",
+      "description": "Date the employee started",
+      "required": false
+    }
+  },
+  "rid": "ri.ontology.main.object-type.employee-001"
+}
+```
+
+### Error Responses
+
+| Status | Error Code | Description |
+|--------|-----------|-------------|
+| `404` | `ObjectTypeNotFound` | The specified object type does not exist in the ontology |
+| `404` | `OntologyNotFound` | The specified ontology does not exist |
+| `401` | `Unauthorized` | Missing or invalid authentication token |
+| `403` | `Forbidden` | User does not have read access to this ontology |
+
+### Property Data Types
+
+Each property in the `properties` map includes a `dataType` object describing the value type:
+
+| DataType | JSON Representation | Example Value |
+|----------|-------------------|---------------|
+| String | `{"type": "string"}` | `"Jane Doe"` |
+| Integer | `{"type": "integer"}` | `42` |
+| Long | `{"type": "long"}` | `9876543210` |
+| Double | `{"type": "double"}` | `99999.99` |
+| Boolean | `{"type": "boolean"}` | `true` |
+| Date | `{"type": "date"}` | `"2024-01-15"` |
+| Timestamp | `{"type": "timestamp"}` | `"2024-01-15T09:30:00Z"` |
+| GeoPoint | `{"type": "geopoint"}` | `{"lat": 37.77, "lon": -122.42}` |
+| Array | `{"type": "array", "itemType": {"type": "string"}}` | `["a", "b"]` |
+
+## Next Steps
+
+- **[v2 Objects API](./v2-objects)** -- Work with instances of these object types
+- **[v2 Search API](./v2-search)** -- Search across objects
+- **[API Overview](./overview)** -- Authentication and general conventions

@@ -1,0 +1,121 @@
+/* FeatureGrid — reusable card grid component */
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1.5rem;
+  width: 100%;
+}
+
+.card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  padding: 2rem;
+  background: var(--portal-gradient-card);
+  border: 1px solid var(--portal-border-subtle);
+  border-radius: var(--portal-radius-lg);
+  text-decoration: none;
+  color: inherit;
+  transition: all 0.25s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  overflow: hidden;
+}
+
+.card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: var(--portal-gradient-accent);
+  opacity: 0;
+  transition: opacity 0.25s ease;
+}
+
+.card:hover {
+  text-decoration: none;
+  color: inherit;
+  transform: translateY(-4px);
+  box-shadow: var(--portal-shadow-lg);
+  border-color: var(--portal-border);
+}
+
+.card:hover::before {
+  opacity: 1;
+}
+
+.iconWrapper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  margin-bottom: 1.25rem;
+  border-radius: var(--portal-radius-md);
+  background: var(--portal-surface-overlay);
+  font-size: 1.5rem;
+  line-height: 1;
+  transition: background 0.2s ease;
+}
+
+.card:hover .iconWrapper {
+  background: rgba(45, 114, 210, 0.1);
+}
+
+[data-theme="dark"] .card:hover .iconWrapper {
+  background: rgba(76, 144, 240, 0.15);
+}
+
+.cardTitle {
+  font-size: 1.125rem;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  margin: 0 0 0.625rem;
+  color: var(--ifm-heading-color);
+}
+
+.cardDescription {
+  font-size: 0.9rem;
+  line-height: 1.6;
+  color: var(--ifm-font-color-secondary, #5c7080);
+  margin: 0;
+  flex: 1;
+}
+
+.cardArrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  margin-top: 1.25rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--ifm-color-primary);
+  opacity: 0;
+  transform: translateX(-4px);
+  transition: all 0.25s ease;
+}
+
+.card:hover .cardArrow {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+/* ---- Responsive ---- */
+
+@media (max-width: 768px) {
+  .grid {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
+
+  .card {
+    padding: 1.5rem;
+  }
+}
+
+@media (min-width: 769px) and (max-width: 1024px) {
+  .grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}

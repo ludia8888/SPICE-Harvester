@@ -1,0 +1,79 @@
+---
+title: "Service Interactions"
+sidebar_label: "Service Interactions"
+sidebar_position: 3
+---
+
+# Service Interactions
+
+:::info Auto-Generated
+This diagram is auto-generated from `docs/architecture/` Mermaid sources.
+Do not edit manually. Run `python scripts/generate_portal_mermaid.py`.
+:::
+
+Sequence diagram showing request flows between services: client → BFF → OMS/Funnel → data stores, including caching and error handling paths.
+
+```mermaid
+sequenceDiagram
+    %% Service Interaction Flow
+    %% Last Updated: 2026-02-15
+    
+    participant Client
+    participant BFF as Backend for Frontend (8002)
+    participant OMS as Ontology Management Service (8000)
+    participant Funnel as Funnel Service (8003)
+    participant PG as Ontology Registry (Postgres)
+    participant Search as Object Read Model (Elasticsearch)
+    participant Cache as Cache Layer
+    participant ExtData as External Data Source
+    
+    %% Standard Request Flow
+    Client->>BFF: HTTP Request
+    BFF->>BFF: Validate Request
+    BFF->>BFF: Check Permissions
+    BFF->>BFF: CORS Validation
+    
+    alt Cached Response Available
+        BFF->>Cache: Get Cached Data
+        Cache-->>BFF: Return Data
+        BFF-->>Client: Return Response
+    else Fresh Data Needed
+        alt Ontology Operation
+            BFF->>OMS: Forward Request
+            OMS->>OMS: Business Logic
+            OMS->>PG: Read/Write ontology resources
+            PG-->>OMS: Result
+            OMS->>Search: Read object projections
+            Search-->>OMS: Result
+            OMS-->>BFF: Response
+        else Type Inference Operation
+            BFF->>Funnel: Request Schema Inference
+            Funnel->>ExtData: Fetch Sample Data
+            ExtData-->>Funnel: Raw Data
+            Funnel->>Funnel: Analyze & Infer Types
+            Funnel->>Funnel: Detect Complex Types
+            Funnel-->>BFF: Suggested Schema
+        end
+        BFF->>Cache: Update Cache
+        BFF->>BFF: Label Mapping
+        BFF-->>Client: Formatted Response
+    end
+    
+    %% Error Handling
+    alt Error Occurs
+        OMS-->>BFF: Error Response
+        BFF->>BFF: Format Error
+        BFF-->>Client: Error Details
+    end
+    
+    %% Schema Suggestion Flow
+    note over Client,ExtData: Schema Suggestion from Google Sheets
+    Client->>BFF: Request Schema from Sheet URL
+    BFF->>Funnel: Forward to Type Inference
+    Funnel->>ExtData: Fetch Google Sheet Data
+    ExtData-->>Funnel: Sheet Data
+    Funnel->>Funnel: Analyze Column Types
+    Funnel->>Funnel: Detect Patterns (EMAIL, PHONE, etc.)
+    Funnel-->>BFF: Schema with Complex Types
+    BFF-->>Client: Schema Suggestion
+```

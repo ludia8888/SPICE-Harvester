@@ -1,0 +1,23 @@
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 10px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  font-family: var(--ifm-font-family-monospace);
+  background: var(--ifm-color-primary);
+  color: #fff;
+}
+
+.deprecated {
+  background: var(--portal-warning);
+}
+
+.deprecatedLabel {
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  opacity: 0.9;
+}

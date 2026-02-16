@@ -1,0 +1,307 @@
+---
+title: Installation
+sidebar_position: 2
+---
+
+# Installation
+
+This guide covers a complete SPICE Harvester installation, including system requirements, service configuration, database setup, and production hardening.
+
+## System Requirements
+
+### Hardware
+
+| Environment | CPU | RAM | Disk | Network |
+|-------------|-----|-----|------|---------|
+| Development | 4 cores | 16 GB | 20 GB SSD | localhost only |
+| Staging | 8 cores | 32 GB | 100 GB SSD | Private network |
+| Production | 16+ cores | 64+ GB | 500+ GB NVMe | Load-balanced |
+
+### Software
+
+| Component | Required Version | Notes |
+|-----------|-----------------|-------|
+| Docker Engine | 24.0+ | Docker Desktop or standalone |
+| Docker Compose | 2.20+ | V2 plugin format |
+| Python | 3.11+ | For CLI tools and scripts |
+| Node.js | 20+ LTS | For BFF and frontend tooling |
+| PostgreSQL client | 15+ | Optional, for direct DB access |
+
+### Operating Systems
+
+- **macOS**: 13 Ventura or later (Apple Silicon and Intel)
+- **Linux**: Ubuntu 22.04+, Debian 12+, RHEL 9+, Amazon Linux 2023
+- **Windows**: Windows 11 with WSL2 (native Windows is not supported)
+
+## Docker Compose Setup
+
+### Full Stack
+
+The default Docker Compose configuration starts all 33+ services:
+
+```bash
+docker compose up -d
+```
+
+### Service Profiles
+
+Use Docker Compose profiles to start subsets of services:
+
+```bash
+# Core only: API servers + data stores (no observability)
+docker compose --profile core up -d
+
+# Core + observability
+docker compose --profile core --profile observability up -d
+
+# Core + workers (for event processing)
+docker compose --profile core --profile workers up -d
+```
+
+Available profiles:
+
+| Profile | Services | Ports |
+|---------|----------|-------|
+| `core` | OMS, BFF, Funnel, Admin, PostgreSQL, Elasticsearch, Redis, Kafka, MinIO | 8000-8003, 5432, 9200, 6379, 9092, 9000 |
+| `workers` | Event Processor, Projection Builder, Pipeline Runner, Lineage Worker, and 9 more | Internal only |
+| `observability` | Grafana, Prometheus, Jaeger, OTEL Collector, AlertManager, Loki | 13000, 19090, 16686 |
+
+## Environment Variables
+
+### Core Configuration
+
+Create a `.env` file in the project root. The following variables control essential behavior:
+
+```bash
+# ─── Service Ports ───────────────────────────────────────
+OMS_PORT=8000
+BFF_PORT=8002
+FUNNEL_PORT=8003
+ADMIN_PORT=8004
+
+# ─── PostgreSQL ──────────────────────────────────────────
+POSTGRES_HOST=postgres
+POSTGRES_PORT=5432
+POSTGRES_DB=spice_harvester
+POSTGRES_USER=spice
+POSTGRES_PASSWORD=changeme_in_production
+
+# ─── Elasticsearch ───────────────────────────────────────
+ELASTICSEARCH_HOST=elasticsearch
+ELASTICSEARCH_PORT=9200
+ELASTICSEARCH_INDEX_PREFIX=spice_
+
+# ─── Redis ───────────────────────────────────────────────
+REDIS_HOST=redis
+REDIS_PORT=6379
+REDIS_PASSWORD=
+REDIS_DB=0
+
+# ─── Kafka ───────────────────────────────────────────────
+KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+KAFKA_CONSUMER_GROUP=spice-harvester
+KAFKA_AUTO_OFFSET_RESET=earliest
+
+# ─── MinIO (S3-compatible Event Store) ───────────────────
+MINIO_ENDPOINT=minio:9000
+MINIO_ACCESS_KEY=minioadmin
+MINIO_SECRET_KEY=minioadmin
+MINIO_BUCKET=spice-events
+
+# ─── Authentication ─────────────────────────────────────
+AUTH_SECRET_KEY=generate-a-strong-secret-here
+AUTH_TOKEN_EXPIRY=3600
+AUTH_ISSUER=spice-harvester
+
+# ─── Logging ─────────────────────────────────────────────
+LOG_LEVEL=INFO
+LOG_FORMAT=json
+LOG_OUTPUT=stdout
+```
+
+### Production Overrides
+
+For production deployments, override the following:
+
+```bash
+# Strong secrets (generate with: openssl rand -hex 32)
+POSTGRES_PASSWORD=<generated-secret>
+AUTH_SECRET_KEY=<generated-secret>
+MINIO_SECRET_KEY=<generated-secret>
+
+# External URLs
+BFF_PUBLIC_URL=https://api.your-domain.com
+CORS_ORIGINS=https://app.your-domain.com
+
+# Performance tuning
+OMS_WORKERS=4
+BFF_WORKERS=4
+FUNNEL_WORKERS=2
+POSTGRES_MAX_CONNECTIONS=100
+ELASTICSEARCH_SHARDS=3
+ELASTICSEARCH_REPLICAS=1
+KAFKA_PARTITIONS=12
+```
+
+## Database Migrations
+
+### Initial Setup
+
+Run Alembic migrations to create the database schema:
+
+```bash
+docker compose exec oms python -m alembic upgrade head
+```
+
+### Seed Data
+
+Load demo data for development and testing:
+
+```bash
+# Full demo dataset with sample ontology
+docker compose exec oms python -m spice.cli seed --demo
+
+# Minimal seed (ontology schema only, no instances)
+docker compose exec oms python -m spice.cli seed --minimal
+```
+
+### Migration Management
+
+```bash
+# Check current migration version
+docker compose exec oms python -m alembic current
+
+# View migration history
+docker compose exec oms python -m alembic history
+
+# Create a new migration
+docker compose exec oms python -m alembic revision --autogenerate -m "description"
+
+# Downgrade one step
+docker compose exec oms python -m alembic downgrade -1
+```
+
+### Elasticsearch Index Setup
+
+Elasticsearch indices are created automatically on first boot. To manually recreate them:
+
+```bash
+docker compose exec oms python -m spice.cli reindex --all
+```
+
+## Health Checks
+
+Every service exposes a `/health` endpoint. Use the CLI to verify all services:
+
+```bash
+docker compose exec oms python -m spice.cli health --all
+```
+
+Individual service health checks:
+
+| Service | URL | Expected Status |
+|---------|-----|----------------|
+| OMS | `http://localhost:8000/health` | `{"status": "healthy"}` |
+| BFF | `http://localhost:8002/health` | `{"status": "healthy"}` |
+| Funnel | `http://localhost:8003/health` | `{"status": "healthy"}` |
+| Admin | `http://localhost:8004/health` | `{"status": "healthy"}` |
+| PostgreSQL | `docker compose exec postgres pg_isready` | `accepting connections` |
+| Elasticsearch | `http://localhost:9200/_cluster/health` | `"status": "green"` |
+| Redis | `docker compose exec redis redis-cli ping` | `PONG` |
+| Kafka | `docker compose exec kafka kafka-broker-api-versions.sh --bootstrap-server localhost:9092` | Version list |
+
+## Common Issues
+
+### Port Conflicts
+
+If a port is already in use, override it in your `.env` file:
+
+```bash
+# Example: move BFF to port 8082
+BFF_PORT=8082
+```
+
+Then restart the affected service:
+
+```bash
+docker compose up -d bff
+```
+
+### Elasticsearch Startup Failure
+
+Elasticsearch requires `vm.max_map_count` to be at least 262144 on Linux:
+
+```bash
+# Check current value
+sysctl vm.max_map_count
+
+# Set temporarily
+sudo sysctl -w vm.max_map_count=262144
+
+# Set permanently (add to /etc/sysctl.conf)
+echo "vm.max_map_count=262144" | sudo tee -a /etc/sysctl.conf
+```
+
+On macOS with Docker Desktop, this is handled automatically.
+
+### Kafka Connection Issues
+
+If workers cannot connect to Kafka, verify the advertised listeners:
+
+```bash
+docker compose logs kafka | grep "advertised.listeners"
+```
+
+Ensure `KAFKA_ADVERTISED_LISTENERS` matches your network configuration.
+
+### Database Migration Failures
+
+If migrations fail, check the current state and resolve conflicts:
+
+```bash
+# Check for pending migrations
+docker compose exec oms python -m alembic current
+
+# Stamp the database to a known state (use with caution)
+docker compose exec oms python -m alembic stamp head
+```
+
+### Memory Pressure
+
+If services are being OOM-killed, adjust Docker resource limits:
+
+```yaml
+# docker-compose.override.yml
+services:
+  elasticsearch:
+    deploy:
+      resources:
+        limits:
+          memory: 4g
+  postgres:
+    deploy:
+      resources:
+        limits:
+          memory: 2g
+```
+
+### Resetting Everything
+
+To completely reset the platform and start fresh:
+
+```bash
+docker compose down -v    # Stop services and remove volumes
+docker compose up -d      # Start fresh
+docker compose exec oms python -m alembic upgrade head
+docker compose exec oms python -m spice.cli seed --demo
+```
+
+:::caution
+The `-v` flag deletes all persistent data including database contents, Elasticsearch indices, and Kafka topics. Use only in development.
+:::
+
+## Next Steps
+
+- **[Core Concepts](./concepts)** -- Learn about the ontology model
+- **[Architecture Overview](/docs/architecture/overview)** -- Understand the system design
+- **[Monitoring](/docs/operations/monitoring)** -- Set up dashboards and alerts

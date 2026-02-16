@@ -1,0 +1,272 @@
+---
+title: "v2: Objects"
+sidebar_position: 3
+---
+
+# Foundry v2 Objects API
+
+Objects are concrete instances of object types. Use these endpoints to load, list, and manage object instances within an ontology.
+
+## Object Response Format
+
+All object responses use the Foundry v2 format:
+
+```json
+{
+  "__rid": "ri.ontology.main.object.emp-042",
+  "__primaryKey": "EMP-042",
+  "__apiName": "Employee",
+  "properties": {
+    "employeeId": "EMP-042",
+    "fullName": "Jane Doe",
+    "department": "Engineering",
+    "startDate": "2023-06-15"
+  }
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `__rid` | string | Resource identifier, globally unique across the platform |
+| `__primaryKey` | string | Value of the primary key property |
+| `__apiName` | string | API name of the object type |
+| `properties` | object | Map of property names to their values |
+
+---
+
+## Get Object by Primary Key
+
+Load a single object by its primary key value.
+
+```
+GET /api/v2/ontologies/{ontologyApiName}/objects/{objectTypeApiName}/{primaryKey}
+```
+
+### Path Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `ontologyApiName` | string | Yes | The API name of the ontology |
+| `objectTypeApiName` | string | Yes | The API name of the object type |
+| `primaryKey` | string | Yes | The primary key value of the object |
+
+### Query Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `select` | string[] | No | Comma-separated list of property names to include. If omitted, all properties are returned. |
+
+### Request Example
+
+```bash
+curl -X GET \
+  "http://localhost:8002/api/v2/ontologies/acme/objects/Employee/EMP-042" \
+  -H "Authorization: Bearer <token>"
+```
+
+### Response Example
+
+```json
+{
+  "__rid": "ri.ontology.main.object.emp-042",
+  "__primaryKey": "EMP-042",
+  "__apiName": "Employee",
+  "properties": {
+    "employeeId": "EMP-042",
+    "fullName": "Jane Doe",
+    "department": "Engineering",
+    "startDate": "2023-06-15",
+    "isActive": true,
+    "salary": 145000.00
+  }
+}
+```
+
+### Selective Property Loading
+
+Use the `select` parameter to return only specific properties:
+
+```bash
+curl -X GET \
+  "http://localhost:8002/api/v2/ontologies/acme/objects/Employee/EMP-042?select=fullName,department" \
+  -H "Authorization: Bearer <token>"
+```
+
+Response:
+
+```json
+{
+  "__rid": "ri.ontology.main.object.emp-042",
+  "__primaryKey": "EMP-042",
+  "__apiName": "Employee",
+  "properties": {
+    "fullName": "Jane Doe",
+    "department": "Engineering"
+  }
+}
+```
+
+### Error Responses
+
+| Status | Error Code | Description |
+|--------|-----------|-------------|
+| `404` | `ObjectNotFound` | No object exists with the given primary key |
+| `404` | `ObjectTypeNotFound` | The object type does not exist |
+| `404` | `OntologyNotFound` | The ontology does not exist |
+
+---
+
+## List Objects
+
+Retrieve a paginated list of all objects of a given type.
+
+```
+GET /api/v2/ontologies/{ontologyApiName}/objects/{objectTypeApiName}
+```
+
+### Path Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `ontologyApiName` | string | Yes | The API name of the ontology |
+| `objectTypeApiName` | string | Yes | The API name of the object type |
+
+### Query Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `pageSize` | integer | No | Number of results per page (default: 100, max: 1000) |
+| `pageToken` | string | No | Opaque token for the next page |
+| `orderBy` | string | No | Property name to sort by. Prefix with `-` for descending (e.g., `-startDate`) |
+| `select` | string[] | No | Comma-separated list of property names to include |
+
+### Request Example
+
+```bash
+curl -X GET \
+  "http://localhost:8002/api/v2/ontologies/acme/objects/Employee?pageSize=2&orderBy=-startDate" \
+  -H "Authorization: Bearer <token>"
+```
+
+### Response Example
+
+```json
+{
+  "data": [
+    {
+      "__rid": "ri.ontology.main.object.emp-100",
+      "__primaryKey": "EMP-100",
+      "__apiName": "Employee",
+      "properties": {
+        "employeeId": "EMP-100",
+        "fullName": "Alex Rivera",
+        "department": "Product",
+        "startDate": "2024-01-10",
+        "isActive": true
+      }
+    },
+    {
+      "__rid": "ri.ontology.main.object.emp-099",
+      "__primaryKey": "EMP-099",
+      "__apiName": "Employee",
+      "properties": {
+        "employeeId": "EMP-099",
+        "fullName": "Sam Park",
+        "department": "Engineering",
+        "startDate": "2024-01-05",
+        "isActive": true
+      }
+    }
+  ],
+  "nextPageToken": "eyJvZmZzZXQiOjJ9"
+}
+```
+
+---
+
+## Load Objects (Batch)
+
+Load multiple objects by their primary keys in a single request.
+
+```
+POST /api/v2/ontologies/{ontologyApiName}/objects/{objectTypeApiName}/loadObjects
+```
+
+### Request Body
+
+```json
+{
+  "primaryKeys": ["EMP-042", "EMP-043", "EMP-044"],
+  "select": ["fullName", "department"]
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `primaryKeys` | string[] | Yes | Array of primary key values to load (max 200) |
+| `select` | string[] | No | Properties to include in the response |
+
+### Request Example
+
+```bash
+curl -X POST \
+  "http://localhost:8002/api/v2/ontologies/acme/objects/Employee/loadObjects" \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "primaryKeys": ["EMP-042", "EMP-043"],
+    "select": ["fullName", "department"]
+  }'
+```
+
+### Response Example
+
+```json
+{
+  "data": [
+    {
+      "__rid": "ri.ontology.main.object.emp-042",
+      "__primaryKey": "EMP-042",
+      "__apiName": "Employee",
+      "properties": {
+        "fullName": "Jane Doe",
+        "department": "Engineering"
+      }
+    },
+    {
+      "__rid": "ri.ontology.main.object.emp-043",
+      "__primaryKey": "EMP-043",
+      "__apiName": "Employee",
+      "properties": {
+        "fullName": "John Smith",
+        "department": "Marketing"
+      }
+    }
+  ]
+}
+```
+
+Objects that do not exist are silently omitted from the response. Check the response `data` array length against your input to detect missing objects.
+
+---
+
+## Consistency Options
+
+By default, list and get operations read from the Elasticsearch index for performance. To force read-after-write consistency (reading from PostgreSQL), include the consistency header:
+
+```bash
+curl -X GET \
+  "http://localhost:8002/api/v2/ontologies/acme/objects/Employee/EMP-042" \
+  -H "Authorization: Bearer <token>" \
+  -H "X-Consistency: strong"
+```
+
+:::note
+Strong consistency reads bypass the Elasticsearch index and query PostgreSQL directly. This is slower but guarantees you see the latest written state. Use sparingly.
+:::
+
+## Next Steps
+
+- **[v2 Search API](./v2-search)** -- Query objects using SearchJsonQueryV2
+- **[v2 Actions API](./v2-actions)** -- Create, update, and delete objects
+- **[v2 Object Types API](./v2-object-types)** -- Inspect object type schemas

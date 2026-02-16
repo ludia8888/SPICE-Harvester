@@ -102,3 +102,28 @@ jobs:
       python-version: "3.11"
       script-args: "--full"
       timeout-seconds: 300
+
+  docs-portal-build:
+    name: Docs Portal Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: |
+            docs-portal/package-lock.json
+
+      - name: Install
+        working-directory: docs-portal
+        run: npm ci
+
+      - name: Build
+        working-directory: docs-portal
+        run: npm run build

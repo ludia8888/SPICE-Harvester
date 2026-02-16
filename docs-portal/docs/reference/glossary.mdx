@@ -1,0 +1,119 @@
+---
+title: Glossary
+sidebar_position: 4
+---
+
+# Glossary
+
+A reference of key terms and concepts used throughout the SPICE Harvester platform.
+
+---
+
+**Action**
+A write operation that mutates the ontology. Actions include creating, editing, and deleting objects and links. All actions are validated before execution, recorded as events, and support undo. See [Actions API](/docs/api/v2-actions).
+
+**Action Template**
+A reusable, parameterized action definition that uses dynamic expressions (`$ref`, `$now`, `$if`, `$switch`, `$call`) to generate actions at execution time. Templates are evaluated in the context of the current user and target object.
+
+**Aggregate**
+In event sourcing, an aggregate is a cluster of domain objects treated as a single unit for consistency. In SPICE Harvester, each object instance is an aggregate, identified by its RID.
+
+**BFF (Backend-for-Frontend)**
+The API gateway service that handles all external client traffic. The BFF runs on port 8002 and performs authentication, routing, rate limiting, and response transformation. It is the only service exposed to external networks.
+
+**CQRS (Command Query Responsibility Segregation)**
+An architectural pattern that separates read and write operations into distinct paths. SPICE Harvester uses CQRS to allow independent scaling and optimization of the read side (Elasticsearch, Redis) and write side (PostgreSQL, Kafka).
+
+**Data Type**
+The type of a property value. Supported types include `string`, `integer`, `long`, `double`, `boolean`, `date`, `timestamp`, `geopoint`, `geoshape`, and `array`.
+
+**Dead Letter Queue (DLQ)**
+A Kafka topic (`spice.events.dlq`) where events are sent after exhausting all retry attempts. Events in the DLQ require manual inspection and resolution.
+
+**Event**
+An immutable record of a state change. Events are the atomic unit of persistence in the event-sourced architecture. Each event has a type, aggregate ID, sequence number, timestamp, payload, and metadata.
+
+**Event Sourcing**
+A persistence pattern where state is derived from a sequence of immutable events rather than stored as a mutable snapshot. SPICE Harvester stores all events in the S3/MinIO event store and derives read models from them.
+
+**Event Store**
+The durable, append-only log of all events, stored in S3/MinIO. The event store is the canonical source of truth; all other data stores are projections of it.
+
+**Funnel**
+The ingestion service that handles bulk data imports, file uploads, and streaming data. Runs on port 8003. Named for its role in funneling external data into the platform.
+
+**Instance**
+A concrete record (row) of a particular object type. Each instance has a globally unique RID, a primary key, and a set of property values conforming to the object type schema.
+
+**Kafka**
+The distributed event streaming platform used for inter-service messaging. Kafka serves as the backbone for event distribution, ensuring at-least-once delivery to all consumer workers.
+
+**Lineage**
+A record of how data flows through the system. Lineage tracks 15 edge types (e.g., `DERIVED_FROM`, `IMPORTED_BY`, `TRANSFORMED_BY`) to provide full data provenance. See [Core Concepts](/docs/getting-started/concepts).
+
+**Link Type**
+A definition of a directed relationship between two object types. Link types specify source and target object types and a cardinality (`ONE_TO_ONE`, `ONE_TO_MANY`, `MANY_TO_ONE`, `MANY_TO_MANY`).
+
+**MinIO**
+An S3-compatible object storage service used for the event store, file storage, and pipeline artifacts. Runs on port 9000 (API) and port 9001 (console).
+
+**Object Type**
+A schema definition for a category of entities in the ontology. Object types define the properties (name, type, required, indexed) and primary key that instances must conform to. Analogous to a table in a relational database.
+
+**OMS (Ontology Management Service)**
+The primary backend service for ontology management, object CRUD, search, actions, and lineage. Runs on port 8000. The OMS is the core service that implements the business logic.
+
+**Ontology**
+The top-level container that defines the data model. An ontology contains object types, link types, and their relationships. Each ontology is identified by a unique API name.
+
+**Outbox Pattern**
+A technique for reliably publishing events to Kafka. Events are written to an outbox table within the same database transaction as the mutation. A relay process reads committed events from the outbox and publishes them to Kafka.
+
+**Page Token**
+An opaque, base64-encoded string used for cursor-based pagination in the v2 API. Page tokens are returned in the `nextPageToken` field and should be passed back to retrieve subsequent pages.
+
+**Pipeline**
+A declarative data transformation workflow that reads from a source, applies a series of transforms, and writes results to the ontology. Pipelines support 22+ transform types and are executed by Pipeline Runner workers.
+
+**Primary Key**
+The property that uniquely identifies instances within an object type. The primary key value is used in API URLs and is returned as `__primaryKey` in v2 responses.
+
+**Projection**
+A precomputed, denormalized view of data optimized for specific query patterns. Projections are built by the Projection Builder workers from the event stream and are eventually consistent.
+
+**Property**
+A named, typed attribute on an object type. Each property has an API name, display name, data type, and flags for required and indexed.
+
+**Read Model**
+A data store optimized for query performance. In CQRS, read models are derived from the write side (events) and can be rebuilt at any time. SPICE Harvester uses PostgreSQL, Elasticsearch, and Redis as read models.
+
+**RID (Resource Identifier)**
+A globally unique identifier for any resource in the platform, following the format `ri.{service}.{namespace}.{type}.{id}`. Example: `ri.ontology.main.object.emp-042`.
+
+**SearchJsonQueryV2**
+The query format used by the v2 Search API. Queries are JSON objects with a `type` field identifying the operator (`eq`, `gt`, `gte`, `lt`, `lte`, `isNull`, `containsAnyTerm`, `containsAllTerms`, `containsAllTermsInOrder`, `containsAllTermsInOrderPrefixLastTerm`, `startsWith`, `and`, `or`, `not`).
+
+**Snapshot**
+A point-in-time capture of an aggregate's state at a specific sequence number. Snapshots accelerate event replay by allowing the system to skip events prior to the snapshot.
+
+**Transform**
+A single step in a pipeline that processes data. Each transform has a type (e.g., `map`, `filter`, `lookup`) and configuration parameters. Transforms are executed sequentially.
+
+---
+
+## Service Port Quick Reference
+
+| Service | Port |
+|---------|------|
+| OMS | 8000 |
+| BFF | 8002 |
+| Funnel | 8003 |
+| Admin | 8004 |
+| PostgreSQL | 5432 |
+| Elasticsearch | 9200 |
+| Redis | 6379 |
+| Kafka | 9092 |
+| MinIO | 9000 |
+| Grafana | 13000 |
+| Prometheus | 19090 |
+| Jaeger | 16686 |

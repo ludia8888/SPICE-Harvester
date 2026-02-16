@@ -1,0 +1,572 @@
+{
+  "nodes": [
+    {
+      "id": "action-outbox-worker",
+      "label": "action-outbox-worker",
+      "category": "worker",
+      "port": null
+    },
+    {
+      "id": "action-worker",
+      "label": "action-worker",
+      "category": "worker",
+      "port": null
+    },
+    {
+      "id": "agent",
+      "label": "agent",
+      "category": "api",
+      "port": null
+    },
+    {
+      "id": "alertmanager",
+      "label": "alertmanager",
+      "category": "observability",
+      "port": 19093
+    },
+    {
+      "id": "bff",
+      "label": "bff",
+      "category": "api",
+      "port": 8002
+    },
+    {
+      "id": "connector-sync-worker",
+      "label": "connector-sync-worker",
+      "category": "worker",
+      "port": null
+    },
+    {
+      "id": "connector-trigger-service",
+      "label": "connector-trigger-service",
+      "category": "worker",
+      "port": null
+    },
+    {
+      "id": "db-migrations",
+      "label": "db-migrations",
+      "category": "bootstrap",
+      "port": null
+    },
+    {
+      "id": "elasticsearch",
+      "label": "elasticsearch",
+      "category": "data",
+      "port": null
+    },
+    {
+      "id": "funnel",
+      "label": "funnel",
+      "category": "api",
+      "port": null
+    },
+    {
+      "id": "grafana",
+      "label": "grafana",
+      "category": "observability",
+      "port": 13000
+    },
+    {
+      "id": "ingest-reconciler-worker",
+      "label": "ingest-reconciler-worker",
+      "category": "worker",
+      "port": null
+    },
+    {
+      "id": "instance-worker",
+      "label": "instance-worker",
+      "category": "worker",
+      "port": null
+    },
+    {
+      "id": "jaeger",
+      "label": "jaeger",
+      "category": "observability",
+      "port": 16686
+    },
+    {
+      "id": "kafka",
+      "label": "kafka",
+      "category": "data",
+      "port": null
+    },
+    {
+      "id": "kafka-ui",
+      "label": "kafka-ui",
+      "category": "observability",
+      "port": null
+    },
+    {
+      "id": "lakefs",
+      "label": "lakefs",
+      "category": "data",
+      "port": null
+    },
+    {
+      "id": "lakefs-init",
+      "label": "lakefs-init",
+      "category": "bootstrap",
+      "port": null
+    },
+    {
+      "id": "message-relay",
+      "label": "message-relay",
+      "category": "bootstrap",
+      "port": null
+    },
+    {
+      "id": "minio",
+      "label": "minio",
+      "category": "data",
+      "port": null
+    },
+    {
+      "id": "minio-init",
+      "label": "minio-init",
+      "category": "bootstrap",
+      "port": null
+    },
+    {
+      "id": "objectify-worker",
+      "label": "objectify-worker",
+      "category": "worker",
+      "port": null
+    },
+    {
+      "id": "oms",
+      "label": "oms",
+      "category": "api",
+      "port": null
+    },
+    {
+      "id": "ontology-worker",
+      "label": "ontology-worker",
+      "category": "worker",
+      "port": null
+    },
+    {
+      "id": "otel-collector",
+      "label": "otel-collector",
+      "category": "observability",
+      "port": 4317
+    },
+    {
+      "id": "pipeline-scheduler",
+      "label": "pipeline-scheduler",
+      "category": "worker",
+      "port": null
+    },
+    {
+      "id": "pipeline-worker",
+      "label": "pipeline-worker",
+      "category": "worker",
+      "port": null
+    },
+    {
+      "id": "postgres",
+      "label": "postgres",
+      "category": "data",
+      "port": null
+    },
+    {
+      "id": "projection-worker",
+      "label": "projection-worker",
+      "category": "worker",
+      "port": null
+    },
+    {
+      "id": "prometheus",
+      "label": "prometheus",
+      "category": "observability",
+      "port": 19090
+    },
+    {
+      "id": "redis",
+      "label": "redis",
+      "category": "data",
+      "port": null
+    },
+    {
+      "id": "writeback-materializer-worker",
+      "label": "writeback-materializer-worker",
+      "category": "worker",
+      "port": null
+    },
+    {
+      "id": "zookeeper",
+      "label": "zookeeper",
+      "category": "data",
+      "port": null
+    }
+  ],
+  "edges": [
+    {
+      "source": "action-outbox-worker",
+      "target": "kafka"
+    },
+    {
+      "source": "action-outbox-worker",
+      "target": "postgres"
+    },
+    {
+      "source": "action-outbox-worker",
+      "target": "minio"
+    },
+    {
+      "source": "action-outbox-worker",
+      "target": "lakefs"
+    },
+    {
+      "source": "action-outbox-worker",
+      "target": "otel-collector"
+    },
+    {
+      "source": "action-worker",
+      "target": "kafka"
+    },
+    {
+      "source": "action-worker",
+      "target": "postgres"
+    },
+    {
+      "source": "action-worker",
+      "target": "minio"
+    },
+    {
+      "source": "action-worker",
+      "target": "lakefs"
+    },
+    {
+      "source": "action-worker",
+      "target": "message-relay"
+    },
+    {
+      "source": "action-worker",
+      "target": "otel-collector"
+    },
+    {
+      "source": "agent",
+      "target": "bff"
+    },
+    {
+      "source": "agent",
+      "target": "postgres"
+    },
+    {
+      "source": "agent",
+      "target": "minio"
+    },
+    {
+      "source": "agent",
+      "target": "otel-collector"
+    },
+    {
+      "source": "bff",
+      "target": "db-migrations"
+    },
+    {
+      "source": "bff",
+      "target": "oms"
+    },
+    {
+      "source": "bff",
+      "target": "postgres"
+    },
+    {
+      "source": "bff",
+      "target": "redis"
+    },
+    {
+      "source": "bff",
+      "target": "elasticsearch"
+    },
+    {
+      "source": "bff",
+      "target": "kafka"
+    },
+    {
+      "source": "bff",
+      "target": "minio"
+    },
+    {
+      "source": "bff",
+      "target": "lakefs"
+    },
+    {
+      "source": "bff",
+      "target": "funnel"
+    },
+    {
+      "source": "bff",
+      "target": "otel-collector"
+    },
+    {
+      "source": "connector-sync-worker",
+      "target": "bff"
+    },
+    {
+      "source": "connector-sync-worker",
+      "target": "kafka"
+    },
+    {
+      "source": "connector-sync-worker",
+      "target": "postgres"
+    },
+    {
+      "source": "connector-sync-worker",
+      "target": "otel-collector"
+    },
+    {
+      "source": "connector-trigger-service",
+      "target": "kafka"
+    },
+    {
+      "source": "connector-trigger-service",
+      "target": "postgres"
+    },
+    {
+      "source": "connector-trigger-service",
+      "target": "otel-collector"
+    },
+    {
+      "source": "db-migrations",
+      "target": "postgres"
+    },
+    {
+      "source": "funnel",
+      "target": "otel-collector"
+    },
+    {
+      "source": "grafana",
+      "target": "prometheus"
+    },
+    {
+      "source": "ingest-reconciler-worker",
+      "target": "postgres"
+    },
+    {
+      "source": "ingest-reconciler-worker",
+      "target": "otel-collector"
+    },
+    {
+      "source": "instance-worker",
+      "target": "kafka"
+    },
+    {
+      "source": "instance-worker",
+      "target": "elasticsearch"
+    },
+    {
+      "source": "instance-worker",
+      "target": "minio"
+    },
+    {
+      "source": "instance-worker",
+      "target": "message-relay"
+    },
+    {
+      "source": "instance-worker",
+      "target": "postgres"
+    },
+    {
+      "source": "instance-worker",
+      "target": "otel-collector"
+    },
+    {
+      "source": "kafka",
+      "target": "zookeeper"
+    },
+    {
+      "source": "kafka-ui",
+      "target": "kafka"
+    },
+    {
+      "source": "kafka-ui",
+      "target": "zookeeper"
+    },
+    {
+      "source": "lakefs",
+      "target": "postgres"
+    },
+    {
+      "source": "lakefs",
+      "target": "minio"
+    },
+    {
+      "source": "lakefs-init",
+      "target": "lakefs"
+    },
+    {
+      "source": "lakefs-init",
+      "target": "minio-init"
+    },
+    {
+      "source": "message-relay",
+      "target": "kafka"
+    },
+    {
+      "source": "message-relay",
+      "target": "postgres"
+    },
+    {
+      "source": "message-relay",
+      "target": "minio"
+    },
+    {
+      "source": "message-relay",
+      "target": "otel-collector"
+    },
+    {
+      "source": "minio-init",
+      "target": "minio"
+    },
+    {
+      "source": "objectify-worker",
+      "target": "kafka"
+    },
+    {
+      "source": "objectify-worker",
+      "target": "postgres"
+    },
+    {
+      "source": "objectify-worker",
+      "target": "lakefs"
+    },
+    {
+      "source": "objectify-worker",
+      "target": "oms"
+    },
+    {
+      "source": "objectify-worker",
+      "target": "otel-collector"
+    },
+    {
+      "source": "oms",
+      "target": "db-migrations"
+    },
+    {
+      "source": "oms",
+      "target": "postgres"
+    },
+    {
+      "source": "oms",
+      "target": "redis"
+    },
+    {
+      "source": "oms",
+      "target": "elasticsearch"
+    },
+    {
+      "source": "oms",
+      "target": "minio"
+    },
+    {
+      "source": "oms",
+      "target": "otel-collector"
+    },
+    {
+      "source": "ontology-worker",
+      "target": "kafka"
+    },
+    {
+      "source": "ontology-worker",
+      "target": "redis"
+    },
+    {
+      "source": "ontology-worker",
+      "target": "message-relay"
+    },
+    {
+      "source": "ontology-worker",
+      "target": "postgres"
+    },
+    {
+      "source": "ontology-worker",
+      "target": "otel-collector"
+    },
+    {
+      "source": "otel-collector",
+      "target": "jaeger"
+    },
+    {
+      "source": "pipeline-scheduler",
+      "target": "kafka"
+    },
+    {
+      "source": "pipeline-scheduler",
+      "target": "postgres"
+    },
+    {
+      "source": "pipeline-scheduler",
+      "target": "lakefs"
+    },
+    {
+      "source": "pipeline-scheduler",
+      "target": "otel-collector"
+    },
+    {
+      "source": "pipeline-worker",
+      "target": "kafka"
+    },
+    {
+      "source": "pipeline-worker",
+      "target": "postgres"
+    },
+    {
+      "source": "pipeline-worker",
+      "target": "minio"
+    },
+    {
+      "source": "pipeline-worker",
+      "target": "lakefs"
+    },
+    {
+      "source": "pipeline-worker",
+      "target": "otel-collector"
+    },
+    {
+      "source": "projection-worker",
+      "target": "kafka"
+    },
+    {
+      "source": "projection-worker",
+      "target": "elasticsearch"
+    },
+    {
+      "source": "projection-worker",
+      "target": "redis"
+    },
+    {
+      "source": "projection-worker",
+      "target": "message-relay"
+    },
+    {
+      "source": "projection-worker",
+      "target": "postgres"
+    },
+    {
+      "source": "projection-worker",
+      "target": "otel-collector"
+    },
+    {
+      "source": "prometheus",
+      "target": "otel-collector"
+    },
+    {
+      "source": "prometheus",
+      "target": "alertmanager"
+    },
+    {
+      "source": "writeback-materializer-worker",
+      "target": "minio"
+    },
+    {
+      "source": "writeback-materializer-worker",
+      "target": "lakefs"
+    },
+    {
+      "source": "writeback-materializer-worker",
+      "target": "otel-collector"
+    }
+  ]
+}

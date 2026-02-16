@@ -1,0 +1,35 @@
+---
+title: Pipeline Builder
+sidebar_position: 2
+---
+
+# Pipeline Builder
+
+:::info Coming Soon
+This guide is under development. Check back for the full walkthrough.
+:::
+
+## What This Guide Covers
+
+This guide will walk data engineers through building and managing data pipelines in SPICE Harvester, including:
+
+- **Pipeline Concepts** -- Sources, transforms, sinks, and execution models
+- **Creating a Pipeline** -- Step-by-step pipeline definition in JSON/YAML
+- **Source Configuration** -- Connecting to files (CSV, JSON, Parquet), APIs, databases, and Kafka topics
+- **Transform Chains** -- Combining the 22+ transform types (map, filter, join, validate, deduplicate, etc.)
+- **Output Transforms** -- Writing results to object types with `upsertObjects` and `createLinks`
+- **Pipeline Execution** -- Running pipelines, monitoring progress, and handling failures
+- **Scheduling** -- Setting up recurring pipeline executions
+- **Error Handling** -- Dealing with bad records, partial failures, and retry logic
+- **Performance Tuning** -- Optimizing pipeline throughput and resource usage
+- **Pipeline Testing** -- Using `preview` and `validate` modes before production runs
+
+## Prerequisites
+
+- [Core Concepts](/docs/getting-started/concepts) -- Pipelines and transforms
+- [Schema Configuration](./schema-config) -- Target object types must exist before running pipelines
+
+## Related Resources
+
+- [Pipeline Tools Reference](/docs/reference/pipeline-tools) -- Complete transform type listing
+- [Configuration Reference](/docs/reference/config) -- Pipeline-related environment variables

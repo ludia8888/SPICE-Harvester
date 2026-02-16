@@ -1,0 +1,94 @@
+---
+title: "v1: Object Types (Legacy)"
+sidebar_position: 6
+---
+
+# Legacy v1 Object Types API
+
+:::warning Deprecated
+The v1 API is deprecated and will be removed in a future release. All new integrations should use the [v2 Object Types API](./v2-object-types). See the [Foundry Migration Guide](/docs/guides/platform-admin/foundry-migration) for migration instructions.
+:::
+
+## Overview
+
+The v1 Object Types API uses numeric identifiers and a different URL structure than v2.
+
+## Endpoints
+
+### List Object Types
+
+```
+GET /api/v1/ontology/{ontologyId}/object-types
+```
+
+### Get Object Type
+
+```
+GET /api/v1/ontology/{ontologyId}/object-types/{objectTypeId}
+```
+
+### Create Object Type
+
+```
+POST /api/v1/ontology/{ontologyId}/object-types
+```
+
+### Update Object Type
+
+```
+PUT /api/v1/ontology/{ontologyId}/object-types/{objectTypeId}
+```
+
+### Delete Object Type
+
+```
+DELETE /api/v1/ontology/{ontologyId}/object-types/{objectTypeId}
+```
+
+## Key Differences from v2
+
+| Aspect | v1 | v2 |
+|--------|----|----|
+| Path style | `/api/v1/ontology/{id}/object-types` | `/api/v2/ontologies/{apiName}/objectTypes` |
+| Identifiers | Numeric IDs (e.g., `42`) | String API names (e.g., `Employee`) |
+| Response format | `{id, name, fields: [...]}` | `{apiName, displayName, properties: {...}, rid}` |
+| Pagination | `offset` + `limit` | Opaque `pageToken` |
+| Mutability | Full CRUD | Read-only (mutations through Actions API) |
+
+## v1 Response Example
+
+```json
+{
+  "id": 1,
+  "name": "Employee",
+  "displayName": "Employee",
+  "primaryKeyField": "employeeId",
+  "fields": [
+    {
+      "id": 1,
+      "name": "employeeId",
+      "type": "STRING",
+      "required": true
+    },
+    {
+      "id": 2,
+      "name": "fullName",
+      "type": "STRING",
+      "required": true
+    }
+  ],
+  "createdAt": "2024-01-01T00:00:00Z",
+  "updatedAt": "2024-01-15T09:30:00Z"
+}
+```
+
+## Migration Path
+
+To migrate from v1 to v2:
+
+1. Replace numeric IDs with API names in your URL paths.
+2. Update response parsing to use the `properties` map format instead of the `fields` array format.
+3. Switch from `offset`/`limit` pagination to `pageToken` pagination.
+4. Use the Actions API for write operations instead of direct PUT/DELETE.
+
+See the [Foundry Migration Guide](/docs/guides/platform-admin/foundry-migration) for a complete walkthrough.

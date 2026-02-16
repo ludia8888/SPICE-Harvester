@@ -1,0 +1,262 @@
+---
+title: API Overview
+sidebar_position: 1
+---
+
+# API Overview
+
+SPICE Harvester exposes 275 REST API endpoints across two API versions. This page covers authentication, base URLs, versioning, pagination, and error handling conventions.
+
+## Base URL
+
+All API requests are routed through the BFF gateway:
+
+```
+https://your-domain.com/api/{version}/
+```
+
+For local development:
+
+```
+http://localhost:8002/api/{version}/
+```
+
+## Authentication
+
+All API requests require a Bearer token in the `Authorization` header:
+
+```bash
+curl -H "Authorization: Bearer <access_token>" \
+  https://your-domain.com/api/v2/ontologies
+```
+
+### Obtaining a Token
+
+Request a token from the authentication endpoint:
+
+```bash
+curl -X POST https://your-domain.com/api/v2/auth/token \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "your-username",
+    "password": "your-password"
+  }'
+```
+
+Response:
+
+```json
+{
+  "access_token": "eyJhbGciOiJIUzI1NiIs...",
+  "token_type": "Bearer",
+  "expires_in": 3600
+}
+```
+
+Tokens expire after 1 hour by default. Use a refresh flow or re-authenticate before expiry.
+
+### Token Refresh
+
+```bash
+curl -X POST https://your-domain.com/api/v2/auth/refresh \
+  -H "Content-Type: application/json" \
+  -d '{
+    "refresh_token": "your-refresh-token"
+  }'
+```
+
+## API Versioning
+
+SPICE Harvester maintains two API versions:
+
+| Version | Endpoints | Status | Description |
+|---------|-----------|--------|-------------|
+| **v2** | 24 | **Active** | Foundry-aligned API. Use this for all new integrations. |
+| **v1** | 251 | **Deprecated** | Legacy API. Functional but no new features. Migrate to v2. |
+
+### Version Selection
+
+Include the version in the URL path:
+
+```
+/api/v2/ontologies/...    # Foundry v2 (recommended)
+/api/v1/ontology/...      # Legacy v1 (deprecated)
+```
+
+### v1 to v2 Migration
+
+The v2 API is a superset of v1 functionality with a Foundry-compatible interface. Key differences:
+
+| Aspect | v1 | v2 |
+|--------|----|----|
+| URL structure | `/api/v1/ontology/{id}/...` | `/api/v2/ontologies/{apiName}/...` |
+| Identifiers | Numeric IDs | String `apiName` values |
+| Object format | `{id, type, data: {...}}` | `{__rid, __primaryKey, __apiName, properties: {...}}` |
+| Search | Custom filter syntax | `SearchJsonQueryV2` with 13 operators |
+| Pagination | `offset` + `limit` | Opaque `pageToken` |
+| Error format | `{error, message}` | `{errorCode, errorName, errorInstanceId, parameters}` |
+
+See the [Foundry Migration Guide](/docs/guides/platform-admin/foundry-migration) for step-by-step migration instructions.
+
+## Pagination
+
+The v2 API uses **opaque page tokens** for pagination. This provides stable pagination even when the underlying data changes.
+
+### Request
+
+```bash
+# First page
+curl "https://your-domain.com/api/v2/ontologies/acme/objects/Employee?pageSize=25"
+
+# Subsequent pages
+curl "https://your-domain.com/api/v2/ontologies/acme/objects/Employee?pageSize=25&pageToken=eyJvZmZzZXQi..."
+```
+
+### Response
+
+```json
+{
+  "data": [ ... ],
+  "nextPageToken": "eyJvZmZzZXQiOjI1fQ=="
+}
+```
+
+- `nextPageToken` is `null` when there are no more results.
+- Page tokens are opaque strings. Do not parse or construct them.
+- Default `pageSize` is 100. Maximum is 1000.
+- Tokens expire after 10 minutes of inactivity.
+
+## Request Format
+
+### Headers
+
+| Header | Required | Description |
+|--------|----------|-------------|
+| `Authorization` | Yes | `Bearer <access_token>` |
+| `Content-Type` | For POST/PUT | `application/json` |
+| `Accept` | No | `application/json` (default) |
+| `X-Request-Id` | No | Client-provided request ID for tracing |
+| `X-Consistency` | No | `strong` to force read-after-write consistency |
+
+### Content Types
+
+- Request bodies must be JSON (`application/json`).
+- File uploads use `multipart/form-data`.
+- Responses are always JSON.
+
+## Response Format
+
+### Success Responses
+
+Single object:
+
+```json
+{
+  "__rid": "ri.ontology.main.object.emp-042",
+  "__primaryKey": "EMP-042",
+  "__apiName": "Employee",
+  "properties": {
+    "employeeId": "EMP-042",
+    "fullName": "Jane Doe"
+  }
+}
+```
+
+Collection:
+
+```json
+{
+  "data": [
+    { "__rid": "...", "__primaryKey": "...", ... },
+    { "__rid": "...", "__primaryKey": "...", ... }
+  ],
+  "nextPageToken": "eyJvZmZzZXQi..."
+}
+```
+
+### Error Responses
+
+All errors follow a structured format:
+
+```json
+{
+  "errorCode": "NOT_FOUND",
+  "errorName": "ObjectNotFound",
+  "errorInstanceId": "err-2024-01-15-a1b2c3",
+  "parameters": {
+    "objectType": "Employee",
+    "primaryKey": "EMP-999"
+  }
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `errorCode` | string | Machine-readable error code (e.g., `NOT_FOUND`, `INVALID_ARGUMENT`) |
+| `errorName` | string | Human-readable error name |
+| `errorInstanceId` | string | Unique identifier for this specific error occurrence |
+| `parameters` | object | Context-specific parameters for debugging |
+
+### HTTP Status Codes
+
+| Code | Meaning | When Used |
+|------|---------|-----------|
+| `200` | OK | Successful read or mutation |
+| `201` | Created | Object successfully created |
+| `204` | No Content | Successful delete |
+| `400` | Bad Request | Invalid request body or parameters |
+| `401` | Unauthorized | Missing or invalid Bearer token |
+| `403` | Forbidden | Insufficient permissions |
+| `404` | Not Found | Resource does not exist |
+| `409` | Conflict | Concurrent modification detected |
+| `422` | Unprocessable Entity | Validation failure |
+| `429` | Too Many Requests | Rate limit exceeded |
+| `500` | Internal Server Error | Unexpected server error |
+
+## Rate Limiting
+
+The BFF gateway enforces rate limits per authenticated user:
+
+| Tier | Requests/Minute | Burst |
+|------|-----------------|-------|
+| Standard | 600 | 100 |
+| Premium | 3000 | 500 |
+| Admin | Unlimited | Unlimited |
+
+When rate-limited, the response includes:
+
+```
+HTTP/1.1 429 Too Many Requests
+Retry-After: 30
+X-RateLimit-Limit: 600
+X-RateLimit-Remaining: 0
+X-RateLimit-Reset: 1705312200
+```
+
+## Endpoint Summary
+
+### v2 Endpoints (24)
+
+| Category | Endpoints | Base Path |
+|----------|-----------|-----------|
+| Object Types | 2 | `/api/v2/ontologies/{ontologyApiName}/objectTypes` |
+| Objects | 3 | `/api/v2/ontologies/{ontologyApiName}/objects/{objectTypeApiName}` |
+| Search | 1 | `/api/v2/ontologies/{ontologyApiName}/objects/{objectTypeApiName}/search` |
+| Actions | 3 | `/api/v2/ontologies/{ontologyApiName}/actions` |
+| Link Types | 2 | `/api/v2/ontologies/{ontologyApiName}/linkTypes` |
+| Links | 3 | `/api/v2/ontologies/{ontologyApiName}/objects/{objectTypeApiName}/links` |
+| Ontologies | 2 | `/api/v2/ontologies` |
+| Auth | 3 | `/api/v2/auth` |
+| Health | 1 | `/api/v2/health` |
+| Lineage | 4 | `/api/v2/ontologies/{ontologyApiName}/lineage` |
+
+### v1 Endpoints (251)
+
+The v1 API covers the same functional areas with a legacy URL structure. See the [v1 reference pages](./v1-object-types) for details.
+
+## Next Steps
+
+- **[v2 Object Types API](./v2-object-types)** -- Manage ontology schema
+- **[v2 Objects API](./v2-objects)** -- Work with object instances
+- **[v2 Search API](./v2-search)** -- Query objects with 13 operators
+- **[Error Codes](./error-codes)** -- Complete error reference

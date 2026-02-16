@@ -1,0 +1,235 @@
+---
+title: Error Codes
+sidebar_position: 9
+---
+
+# Error Codes Reference
+
+SPICE Harvester defines 290+ structured error codes across all subsystems. This page documents the error format, naming conventions, severity levels, retry policies, and common error codes.
+
+{/* The interactive ErrorTaxonomyHeatmap visualization will be embedded here */}
+
+## Error Response Format
+
+All API errors return a structured JSON response:
+
+```json
+{
+  "errorCode": "NOT_FOUND",
+  "errorName": "ObjectNotFound",
+  "errorInstanceId": "err-2024-01-15-a1b2c3d4",
+  "parameters": {
+    "objectType": "Employee",
+    "primaryKey": "EMP-999"
+  }
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `errorCode` | string | Machine-readable code following the taxonomy structure |
+| `errorName` | string | Human-readable error name in PascalCase |
+| `errorInstanceId` | string | Unique identifier for this error occurrence. Use this when contacting support. |
+| `parameters` | object | Context-specific details for debugging. Contents vary by error type. |
+
+## Error Code Structure
+
+Error codes follow the pattern:
+
+```
+SHV-{SUBSYSTEM}-{DOMAIN}-{CLASS}-{NUMBER}
+```
+
+| Segment | Description | Examples |
+|---------|-------------|---------|
+| `SHV` | Platform prefix (SPICE Harvester) | Always `SHV` |
+| `SUBSYSTEM` | Service subsystem | `ONT`, `ACT`, `SRH`, `PIP`, `LIN`, `AUTH`, `SYS` |
+| `DOMAIN` | Functional domain | `OBJ`, `SCH`, `QRY`, `IDX`, `EVT`, `CFG` |
+| `CLASS` | Error classification | `VAL`, `NFD`, `CON`, `PRM`, `INT`, `TMO` |
+| `NUMBER` | Sequential number | `001`-`999` |
+
+**Example:** `SHV-ONT-OBJ-NFD-001` = SPICE Harvester, Ontology subsystem, Object domain, Not Found class, error #001.
+
+## Subsystems
+
+| Code | Subsystem | Description |
+|------|-----------|-------------|
+| `ONT` | Ontology | Object types, properties, link types, instances |
+| `ACT` | Actions | Action validation, execution, undo, templates |
+| `SRH` | Search | Query parsing, Elasticsearch, result formatting |
+| `PIP` | Pipeline | Pipeline definition, execution, transforms |
+| `LIN` | Lineage | Data lineage tracking and querying |
+| `AUTH` | Authentication | Token management, authorization, RBAC |
+| `SYS` | System | Infrastructure, configuration, health |
+| `EVT` | Events | Event store, Kafka, event processing |
+| `PRJ` | Projections | Projection building and consistency |
+| `ING` | Ingestion | Funnel service, file uploads, bulk imports |
+
+## Domains
+
+| Code | Domain | Description |
+|------|--------|-------------|
+| `OBJ` | Object | Object instance operations |
+| `SCH` | Schema | Object type and property definitions |
+| `QRY` | Query | Search and filter operations |
+| `IDX` | Index | Elasticsearch indexing |
+| `EVT` | Event | Event creation and processing |
+| `CFG` | Config | Configuration and settings |
+| `NET` | Network | Inter-service communication |
+| `STR` | Storage | Database and file storage |
+| `TRN` | Transform | Pipeline transform execution |
+| `TPL` | Template | Action template evaluation |
+
+## Error Classes
+
+| Code | Class | HTTP Status | Retryable | Description |
+|------|-------|-------------|-----------|-------------|
+| `VAL` | Validation | 400 / 422 | No | Input validation failure |
+| `NFD` | Not Found | 404 | No | Resource does not exist |
+| `CON` | Conflict | 409 | Yes (with re-read) | Concurrent modification detected |
+| `PRM` | Permission | 403 | No | Insufficient permissions |
+| `INT` | Internal | 500 | Yes | Unexpected internal error |
+| `TMO` | Timeout | 504 | Yes | Operation timed out |
+| `LIM` | Rate Limit | 429 | Yes (after delay) | Rate limit exceeded |
+| `UNV` | Unavailable | 503 | Yes | Service temporarily unavailable |
+| `DUP` | Duplicate | 409 | No | Duplicate resource |
+| `DEP` | Dependency | 424 | Yes | Downstream dependency failure |
+
+## Severity Levels
+
+Each error carries a severity level that determines logging and alerting behavior:
+
+| Level | Description | Alerting |
+|-------|-------------|----------|
+| `INFO` | Expected error from normal usage (e.g., object not found) | None |
+| `WARNING` | Unusual condition that may indicate a problem (e.g., approaching rate limit) | Log warning |
+| `ERROR` | Failure that prevents the request from completing | Alert on sustained rate |
+| `CRITICAL` | System-level failure requiring immediate attention | Immediate page |
+
+## Retry Policies
+
+### General Retry Strategy
+
+For retryable errors, use exponential backoff with jitter:
+
+```
+delay = min(base_delay * 2^attempt + random_jitter, max_delay)
+```
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `base_delay` | 100 ms | Initial retry delay |
+| `max_delay` | 30 s | Maximum delay between retries |
+| `max_attempts` | 3 | Maximum number of retry attempts |
+| `jitter` | 0-100 ms | Random jitter to prevent thundering herd |
+
+### Per-Class Retry Policies
+
+| Error Class | Retryable | Strategy | Notes |
+|-------------|-----------|----------|-------|
+| `VAL` | No | -- | Fix the request payload |
+| `NFD` | No | -- | Verify the resource identifier |
+| `CON` | Yes | Re-read + retry | Read the latest version, then resubmit |
+| `PRM` | No | -- | Check user permissions |
+| `INT` | Yes | Exponential backoff | Wait and retry |
+| `TMO` | Yes | Exponential backoff | Consider reducing request scope |
+| `LIM` | Yes | Respect `Retry-After` header | Wait for the specified duration |
+| `UNV` | Yes | Exponential backoff | Service is temporarily down |
+| `DUP` | No | -- | Resource already exists |
+| `DEP` | Yes | Exponential backoff | Downstream service issue |
+
+## Common Error Codes
+
+### Ontology Errors
+
+| Code | Name | HTTP | Description |
+|------|------|------|-------------|
+| `SHV-ONT-OBJ-NFD-001` | `ObjectNotFound` | 404 | Object with the given primary key does not exist |
+| `SHV-ONT-OBJ-VAL-001` | `InvalidObjectProperties` | 422 | Object properties fail schema validation |
+| `SHV-ONT-OBJ-CON-001` | `ConcurrentModification` | 409 | Object was modified by another request |
+| `SHV-ONT-OBJ-DUP-001` | `DuplicatePrimaryKey` | 409 | An object with this primary key already exists |
+| `SHV-ONT-SCH-NFD-001` | `ObjectTypeNotFound` | 404 | Object type does not exist in the ontology |
+| `SHV-ONT-SCH-NFD-002` | `OntologyNotFound` | 404 | Ontology does not exist |
+| `SHV-ONT-SCH-VAL-001` | `InvalidPropertyDefinition` | 422 | Property definition is invalid |
+| `SHV-ONT-SCH-VAL-002` | `InvalidPrimaryKey` | 422 | Primary key property is missing or invalid |
+
+### Action Errors
+
+| Code | Name | HTTP | Description |
+|------|------|------|-------------|
+| `SHV-ACT-OBJ-VAL-001` | `InvalidAction` | 400 | Action payload is malformed |
+| `SHV-ACT-OBJ-VAL-002` | `ValidationFailed` | 422 | Action fails business rule validation |
+| `SHV-ACT-OBJ-VAL-003` | `UndoNotSupported` | 400 | Action cannot be undone |
+| `SHV-ACT-TPL-VAL-001` | `InvalidTemplate` | 400 | Action template expression is invalid |
+| `SHV-ACT-TPL-INT-001` | `TemplateEvaluationError` | 500 | Template failed to evaluate at runtime |
+
+### Search Errors
+
+| Code | Name | HTTP | Description |
+|------|------|------|-------------|
+| `SHV-SRH-QRY-VAL-001` | `InvalidQuery` | 400 | Search query is malformed |
+| `SHV-SRH-QRY-VAL-002` | `InvalidField` | 400 | Referenced field does not exist |
+| `SHV-SRH-QRY-VAL-003` | `InvalidOperator` | 400 | Operator not supported for this field type |
+| `SHV-SRH-IDX-UNV-001` | `SearchUnavailable` | 503 | Elasticsearch cluster is unavailable |
+| `SHV-SRH-IDX-TMO-001` | `SearchTimeout` | 504 | Search query exceeded the timeout |
+
+### Authentication Errors
+
+| Code | Name | HTTP | Description |
+|------|------|------|-------------|
+| `SHV-AUTH-CFG-VAL-001` | `InvalidCredentials` | 401 | Username or password is incorrect |
+| `SHV-AUTH-CFG-VAL-002` | `TokenExpired` | 401 | Bearer token has expired |
+| `SHV-AUTH-CFG-VAL-003` | `InvalidToken` | 401 | Bearer token is malformed or invalid |
+| `SHV-AUTH-CFG-PRM-001` | `InsufficientPermissions` | 403 | User lacks required permissions |
+
+### System Errors
+
+| Code | Name | HTTP | Description |
+|------|------|------|-------------|
+| `SHV-SYS-NET-INT-001` | `InternalServerError` | 500 | Unhandled server error |
+| `SHV-SYS-NET-TMO-001` | `GatewayTimeout` | 504 | Upstream service did not respond in time |
+| `SHV-SYS-NET-UNV-001` | `ServiceUnavailable` | 503 | Service is temporarily unavailable |
+| `SHV-SYS-NET-LIM-001` | `RateLimitExceeded` | 429 | Request rate limit exceeded |
+| `SHV-SYS-STR-DEP-001` | `DatabaseUnavailable` | 503 | PostgreSQL is unreachable |
+| `SHV-SYS-STR-DEP-002` | `CacheUnavailable` | 503 | Redis is unreachable |
+
+## Handling Errors in Client Code
+
+### Python Example
+
+```python
+import requests
+import time
+
+def call_api_with_retry(url, headers, max_retries=3):
+    for attempt in range(max_retries):
+        response = requests.get(url, headers=headers)
+
+        if response.status_code == 200:
+            return response.json()
+
+        error = response.json()
+        error_class = error["errorCode"].split("-")[4] if "-" in error["errorCode"] else ""
+
+        # Non-retryable errors
+        if error_class in ("VAL", "NFD", "PRM", "DUP"):
+            raise ApiError(error)
+
+        # Rate limited - respect Retry-After header
+        if response.status_code == 429:
+            wait = int(response.headers.get("Retry-After", 30))
+            time.sleep(wait)
+            continue
+
+        # Retryable errors - exponential backoff
+        delay = min(0.1 * (2 ** attempt), 30)
+        time.sleep(delay)
+
+    raise ApiError({"errorCode": "MAX_RETRIES", "errorName": "MaxRetriesExceeded"})
+```
+
+## Next Steps
+
+- **[API Overview](./overview)** -- General API conventions
+- **[Troubleshooting](/docs/operations/troubleshooting)** -- Debugging common issues
+- **[Monitoring](/docs/operations/monitoring)** -- Track error rates in Grafana
