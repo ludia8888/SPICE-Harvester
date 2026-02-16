@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 from statistics import median
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
+import asyncpg
 from fastapi import APIRouter, Depends, Query, status
 from shared.config.settings import get_settings
 from shared.errors.error_types import ErrorCode, classified_http_exception
@@ -1597,7 +1598,7 @@ async def get_lineage_column_lineage(
             expected_version = _coerce_int(usage.get("mapping_spec_version"))
             try:
                 mapping_spec = await objectify_registry.get_mapping_spec(mapping_spec_id=mapping_spec_id)
-            except Exception as exc:
+            except (RuntimeError, ValueError, asyncpg.PostgresError) as exc:
                 resolution_by_key[key] = {"status": "unresolved", "reason": f"lookup_error:{exc}"}
                 continue
 

@@ -199,7 +199,33 @@ async def test_search_objects_v2_accepts_scope_matched_page_token(mock_es):
 
 
 @pytest.mark.asyncio
-async def test_search_objects_v2_accepts_deprecated_startswith_alias(mock_es):
+async def test_search_objects_v2_rejects_page_token_when_page_size_changes():
+    initial_payload = {
+        "where": {"type": "eq", "field": "status", "value": "ACTIVE"},
+        "pageSize": 1,
+    }
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        first = await client.post("/objects/test_db/Customer/search", json=initial_payload)
+        assert first.status_code == 200
+        token = first.json().get("nextPageToken")
+        assert isinstance(token, str) and token
+
+        changed_page_size_payload = {
+            "where": {"type": "eq", "field": "status", "value": "ACTIVE"},
+            "pageSize": 2,
+            "pageToken": token,
+        }
+        second = await client.post("/objects/test_db/Customer/search", json=changed_page_size_payload)
+
+    assert second.status_code == 400
+    body = second.json()
+    assert body["errorCode"] == "INVALID_ARGUMENT"
+    assert body["errorName"] == "InvalidArgument"
+
+
+@pytest.mark.asyncio
+async def test_search_objects_v2_rejects_deprecated_startswith_alias(mock_es):
     payload = {
         "where": {"type": "startsWith", "field": "customer_name", "value": "Kim"},
         "pageSize": 10,
@@ -208,11 +234,10 @@ async def test_search_objects_v2_accepts_deprecated_startswith_alias(mock_es):
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         resp = await client.post("/objects/test_db/Customer/search", json=payload)
 
-    assert resp.status_code == 200
-    search_call = mock_es.search.call_args
-    search_query = search_call.kwargs["query"]
-    must = search_query["bool"]["must"]
-    assert {"match_phrase_prefix": {"data.customer_name": "Kim"}} in must
+    assert resp.status_code == 400
+    body = resp.json()
+    assert body["errorCode"] == "INVALID_ARGUMENT"
+    assert body["errorName"] == "InvalidArgument"
 
 
 @pytest.mark.asyncio

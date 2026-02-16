@@ -22,7 +22,7 @@ def test_extract_action_simulation_signals_rejected_includes_reason() -> None:
                         "error": "submission_criteria_failed",
                         "message": "submission_criteria evaluated to false",
                         "reason": "state_mismatch",
-                        "enterprise": {"legacy_code": "submission_criteria_failed", "human_required": True},
+                        "enterprise": {"external_code": "submission_criteria_failed", "human_required": True},
                     },
                 }
             ],
@@ -49,7 +49,7 @@ def test_extract_action_simulation_rejection_returns_enterprise() -> None:
                     "error": {
                         "error": "data_access_denied",
                         "message": "Actor cannot access one or more target rows",
-                        "enterprise": {"legacy_code": "data_access_denied", "human_required": True},
+                        "enterprise": {"external_code": "data_access_denied", "human_required": True},
                     },
                 }
             ],
@@ -58,7 +58,7 @@ def test_extract_action_simulation_rejection_returns_enterprise() -> None:
 
     error_key, enterprise, message = _extract_action_simulation_rejection(payload)
     assert error_key == "data_access_denied"
-    assert enterprise and enterprise.get("legacy_code") == "data_access_denied"
+    assert enterprise and enterprise.get("external_code") == "data_access_denied"
     assert "cannot access" in (message or "")
 
 

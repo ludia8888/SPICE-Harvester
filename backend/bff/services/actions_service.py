@@ -15,7 +15,12 @@ import httpx
 from fastapi import Request, status
 
 from shared.errors.error_types import ErrorCode, classified_http_exception
-from bff.schemas.actions_requests import ActionSimulateRequest, ActionSubmitRequest
+from bff.schemas.actions_requests import (
+    ActionSimulateRequest,
+    ActionSubmitBatchRequest,
+    ActionSubmitRequest,
+    ActionUndoRequest,
+)
 from bff.services.input_validation_service import sanitized_payload, validated_db_name
 from bff.services.oms_client import OMSClient
 from bff.utils.action_log_serialization import dt_iso, serialize_action_log_record
@@ -155,6 +160,88 @@ async def submit_action(
     return await _oms_post(
         oms_client=oms_client,
         path=f"/api/v1/actions/{db_name}/async/{action_type_id}/submit",
+        payload=oms_payload,
+    )
+
+
+@trace_external_call("bff.actions.submit_action_batch")
+async def submit_action_batch(
+    *,
+    db_name: str,
+    action_type_id: str,
+    body: ActionSubmitBatchRequest,
+    http_request: Request,
+    oms_client: OMSClient,
+    enforce_role: EnforceDatabaseRoleFn,
+) -> Dict[str, Any]:
+    db_name = validated_db_name(db_name)
+    action_type_id = _require_action_type_id(action_type_id)
+
+    await _enforce_domain_model_role(http_request=http_request, db_name=db_name, enforce_role=enforce_role)
+    principal_type, principal_id = resolve_database_actor(http_request.headers)
+
+    item_payloads: List[Dict[str, Any]] = []
+    for item in body.items:
+        item_payloads.append(
+            {
+                "request_id": item.request_id,
+                "input": sanitized_payload(item.input),
+                "correlation_id": item.correlation_id,
+                "metadata": _oms_metadata(
+                    request_metadata=item.metadata,
+                    principal_type=principal_type,
+                    principal_id=principal_id,
+                ),
+                "base_branch": item.base_branch,
+                "overlay_branch": item.overlay_branch,
+                "depends_on": list(item.depends_on or []),
+                "trigger_on": item.trigger_on,
+                "dependencies": [dep.model_dump(exclude_none=True) for dep in (item.dependencies or [])],
+            }
+        )
+
+    oms_payload = {
+        "items": item_payloads,
+        "base_branch": body.base_branch,
+        "overlay_branch": body.overlay_branch,
+    }
+    return await _oms_post(
+        oms_client=oms_client,
+        path=f"/api/v1/actions/{db_name}/async/{action_type_id}/submit-batch",
+        payload=oms_payload,
+    )
+
+
+@trace_external_call("bff.actions.undo_action")
+async def undo_action(
+    *,
+    db_name: str,
+    action_log_id: str,
+    body: ActionUndoRequest,
+    http_request: Request,
+    oms_client: OMSClient,
+    enforce_role: EnforceDatabaseRoleFn,
+) -> Dict[str, Any]:
+    db_name = validated_db_name(db_name)
+    _parse_uuid(action_log_id)
+
+    await _enforce_domain_model_role(http_request=http_request, db_name=db_name, enforce_role=enforce_role)
+    principal_type, principal_id = resolve_database_actor(http_request.headers)
+
+    oms_payload = {
+        "reason": body.reason,
+        "correlation_id": body.correlation_id,
+        "metadata": _oms_metadata(
+            request_metadata=body.metadata,
+            principal_type=principal_type,
+            principal_id=principal_id,
+        ),
+        "base_branch": body.base_branch,
+        "overlay_branch": body.overlay_branch,
+    }
+    return await _oms_post(
+        oms_client=oms_client,
+        path=f"/api/v1/actions/{db_name}/async/logs/{action_log_id}/undo",
         payload=oms_payload,
     )
 

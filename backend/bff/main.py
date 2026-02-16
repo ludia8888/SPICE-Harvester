@@ -44,6 +44,7 @@ from shared.services.registries.lineage_store import LineageStore
 
 # Service factory import
 from shared.services.core.service_factory import create_fastapi_service, get_bff_service_info, run_service
+from shared.services.core.service_container_common import initialize_rate_limiter_service
 from shared.services.registries.connector_registry import ConnectorRegistry
 from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.services.registries.dataset_profile_registry import DatasetProfileRegistry
@@ -64,9 +65,6 @@ from shared.services.storage.redis_service import create_redis_service
 from shared.services.core.websocket_service import get_notification_service
 from shared.services.core.schema_change_monitor import SchemaChangeMonitor, MonitorConfig
 from shared.services.core.schema_drift_detector import SchemaDriftDetector
-
-# Rate limiting middleware
-from shared.middleware.rate_limiter import RateLimiter
 
 # Auth middleware
 from bff.middleware.auth import install_bff_auth_middleware, ensure_bff_auth_configured
@@ -264,19 +262,7 @@ class BFFServiceContainer:
     
     async def _initialize_rate_limiter(self) -> None:
         """Initialize rate limiting service"""
-        try:
-            logger.info("Initializing rate limiter...")
-            
-            # Create rate limiter instance
-            rate_limiter = RateLimiter()
-            await rate_limiter.initialize()
-            
-            self._bff_services['rate_limiter'] = rate_limiter
-            logger.info("Rate limiter initialized successfully")
-            
-        except Exception as e:
-            logger.error(f"Failed to initialize rate limiter: {e}")
-            # Continue without rate limiting - service can still work
+        await initialize_rate_limiter_service(services=self._bff_services, logger=logger)
 
     async def _initialize_connector_registry(self) -> None:
         """Initialize Postgres-backed connector registry."""

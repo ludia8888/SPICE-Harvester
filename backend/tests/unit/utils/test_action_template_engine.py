@@ -4,6 +4,8 @@ import pytest
 
 from shared.utils.action_template_engine import (
     ActionImplementationError,
+    compile_action_change_shape,
+    compile_action_implementation,
     compile_template_v1,
     compile_template_v1_change_shape,
 )
@@ -112,3 +114,91 @@ def test_compile_template_v1_supports_bulk_targets_from_list():
     target_docs = {("Ticket", "t1"): {}, ("Ticket", "t2"): {}}
     compiled = compile_template_v1(impl, input_payload=input_payload, user=user, target_docs=target_docs)
     assert [(t.class_id, t.instance_id) for t in compiled] == [("Ticket", "t1"), ("Ticket", "t2")]
+
+
+def test_compile_template_v2_resolves_if_switch_and_calls():
+    impl = {
+        "type": "template_v2",
+        "targets": [
+            {
+                "target": {"from": "input.ticket"},
+                "changes": {
+                    "set": {
+                        "status": {
+                            "$if": {
+                                "cond": {"$gt": [{"$ref": "input.amount"}, 1000000]},
+                                "then": "APPROVED",
+                                "else": "PENDING",
+                            }
+                        },
+                        "risk_bucket": {
+                            "$switch": {
+                                "cases": [
+                                    {"when": {"$gte": [{"$ref": "input.score"}, 90]}, "then": "A"},
+                                    {"when": {"$gte": [{"$ref": "input.score"}, 70]}, "then": "B"},
+                                ],
+                                "default": "C",
+                            }
+                        },
+                        "reviewer": {"$call": {"fn": "upper", "args": [{"$ref": "user.id"}]}},
+                    }
+                },
+            }
+        ],
+    }
+    input_payload = {"ticket": {"class_id": "Ticket", "instance_id": "t1"}, "amount": 1200000, "score": 75}
+    user = {"id": "alice"}
+    target_docs = {("Ticket", "t1"): {"status": "OPEN"}}
+    compiled = compile_action_implementation(impl, input_payload=input_payload, user=user, target_docs=target_docs)
+    assert len(compiled) == 1
+    changes = compiled[0].changes
+    assert changes["set"]["status"] == "APPROVED"
+    assert changes["set"]["risk_bucket"] == "B"
+    assert changes["set"]["reviewer"] == "ALICE"
+
+
+def test_compile_function_v1_change_shape_and_builtin_math():
+    impl = {
+        "type": "function_v1",
+        "targets": [
+            {
+                "target": {"from": "input.ticket"},
+                "changes": {
+                    "set": {
+                        "total_cost": {"$call": {"fn": "add", "args": [{"$ref": "input.base_cost"}, {"$ref": "input.tax"}]}},
+                        "note": {"$call": {"fn": "concat", "args": ["LOT-", {"$ref": "input.lot"}]}},
+                    }
+                },
+            }
+        ],
+    }
+    input_payload = {
+        "ticket": {"class_id": "Ticket", "instance_id": "t1"},
+        "base_cost": 100.5,
+        "tax": 9.5,
+        "lot": "A12",
+    }
+    shape = compile_action_change_shape(impl, input_payload=input_payload)
+    assert len(shape) == 1
+    assert set(shape[0].changes["set"].keys()) == {"total_cost", "note"}
+
+    user = {"id": "alice"}
+    target_docs = {("Ticket", "t1"): {}}
+    compiled = compile_action_implementation(impl, input_payload=input_payload, user=user, target_docs=target_docs)
+    assert compiled[0].changes["set"]["total_cost"] == pytest.approx(110.0)
+    assert compiled[0].changes["set"]["note"] == "LOT-A12"
+
+
+def test_template_v1_rejects_v2_directive():
+    impl = {
+        "type": "template_v1",
+        "targets": [
+            {
+                "target": {"from": "input.ticket"},
+                "changes": {"set": {"status": {"$if": {"cond": True, "then": "A", "else": "B"}}}},
+            }
+        ],
+    }
+    input_payload = {"ticket": {"class_id": "Ticket", "instance_id": "t1"}}
+    with pytest.raises(ActionImplementationError):
+        compile_template_v1_change_shape(impl, input_payload=input_payload)

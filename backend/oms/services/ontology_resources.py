@@ -115,9 +115,9 @@ def _json_like_to_dict(value: Any, *, default: Optional[Dict[str, Any]] = None) 
             return default
         try:
             parsed = json.loads(raw)
-        except Exception:
+        except json.JSONDecodeError:
             logging.getLogger(__name__).warning(
-                "Exception fallback at oms/services/ontology_resources.py:117",
+                "Failed to decode JSON-like ontology resource field",
                 exc_info=True,
             )
             return default
@@ -146,9 +146,9 @@ def _to_datetime(value: Any) -> datetime:
         return datetime.fromtimestamp(0, tz=timezone.utc)
     try:
         return datetime.fromisoformat(raw.replace("Z", "+00:00"))
-    except Exception:
+    except ValueError:
         logging.getLogger(__name__).warning(
-            "Exception fallback at oms/services/ontology_resources.py:148",
+            "Failed to parse datetime for ontology resource",
             exc_info=True,
         )
         return datetime.fromtimestamp(0, tz=timezone.utc)
@@ -965,7 +965,7 @@ class OntologyResourceService:
         raw_version = None
         try:
             raw_version = row["version"]
-        except Exception:
+        except (KeyError, TypeError):
             raw_version = None
         version = int(raw_version or 0)
         if version <= 0:

@@ -46,7 +46,7 @@ def test_policy_timeout_retry_for_reads() -> None:
             "enterprise": {
                 "code": "SHV-BFF-UPS-TMO-0001",
                 "class": "timeout",
-                "legacy_code": "UPSTREAM_TIMEOUT",
+                "external_code": "UPSTREAM_TIMEOUT",
                 "retryable": True,
                 "default_retry_policy": "backoff",
                 "max_attempts": 3,
@@ -77,7 +77,7 @@ def test_policy_validation_no_retry() -> None:
             "enterprise": {
                 "code": "SHV-OMS-INP-VAL-3001",
                 "class": "validation",
-                "legacy_code": "action_input_invalid",
+                "external_code": "action_input_invalid",
                 "retryable": False,
                 "default_retry_policy": "none",
                 "max_attempts": 1,
@@ -109,7 +109,7 @@ def test_policy_submission_criteria_failed_includes_reason() -> None:
             "enterprise": {
                 "code": "SHV-ACT-ACC-PER-3004",
                 "class": "permission",
-                "legacy_code": "submission_criteria_failed",
+                "external_code": "submission_criteria_failed",
                 "retryable": False,
                 "default_retry_policy": "none",
                 "max_attempts": 1,
@@ -141,7 +141,7 @@ def test_policy_submission_criteria_failed_state_mismatch_proposes_check_state()
             "enterprise": {
                 "code": "SHV-ACT-ACC-PER-3004",
                 "class": "permission",
-                "legacy_code": "submission_criteria_failed",
+                "external_code": "submission_criteria_failed",
                 "retryable": False,
                 "default_retry_policy": "none",
                 "max_attempts": 1,

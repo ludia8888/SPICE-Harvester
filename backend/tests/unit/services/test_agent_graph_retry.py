@@ -61,7 +61,7 @@ async def test_agent_graph_retries_transient_read_failure() -> None:
                 "enterprise": {
                     "code": "SHV-BFF-UPS-TMO-0001",
                     "class": "timeout",
-                    "legacy_code": "UPSTREAM_TIMEOUT",
+                    "external_code": "UPSTREAM_TIMEOUT",
                     "retryable": True,
                     "default_retry_policy": "backoff",
                     "max_attempts": 2,
@@ -120,7 +120,7 @@ async def test_agent_graph_does_not_retry_writes_by_default() -> None:
                 "http_status": 503,
                 "error_key": "UPSTREAM_UNAVAILABLE",
                 "api_code": "UPSTREAM_UNAVAILABLE",
-                "enterprise": {"code": "SHV-BFF-UPS-UNA-0001", "class": "unavailable", "legacy_code": "UPSTREAM_UNAVAILABLE"},
+                "enterprise": {"code": "SHV-BFF-UPS-UNA-0001", "class": "unavailable", "external_code": "UPSTREAM_UNAVAILABLE"},
                 "output_digest": "d1",
             },
         ]
@@ -167,7 +167,7 @@ async def test_agent_graph_respects_enterprise_max_attempts() -> None:
                 "enterprise": {
                     "code": "SHV-BFF-UPS-TMO-0001",
                     "class": "timeout",
-                    "legacy_code": "UPSTREAM_TIMEOUT",
+                    "external_code": "UPSTREAM_TIMEOUT",
                     "retryable": True,
                     "default_retry_policy": "backoff",
                     "max_attempts": 1,
@@ -230,7 +230,7 @@ async def test_agent_graph_uses_retry_after_when_allowed() -> None:
                 "enterprise": {
                     "code": "SHV-BFF-RAT-LIM-0001",
                     "class": "limit",
-                    "legacy_code": "RATE_LIMITED",
+                    "external_code": "RATE_LIMITED",
                     "retryable": True,
                     "default_retry_policy": "backoff",
                     "max_attempts": 2,

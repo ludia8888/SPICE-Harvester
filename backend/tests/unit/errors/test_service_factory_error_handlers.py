@@ -32,7 +32,7 @@ def test_service_factory_installs_error_handlers_by_default() -> None:
     payload = resp.json()
     assert payload["status"] == "error"
     assert payload["code"] == "HTTP_ERROR"
-    assert payload["enterprise"]["legacy_code"] == "MAPPING_SPEC_TARGET_UNKNOWN"
+    assert payload["enterprise"]["external_code"] == "MAPPING_SPEC_TARGET_UNKNOWN"
     assert payload["enterprise"]["code"].startswith("SHV-")
     assert payload["diagnostics"]["schema"] == "error_diagnostics.v1"
     assert payload["diagnostics"]["group_fingerprint"].startswith("sha256:")

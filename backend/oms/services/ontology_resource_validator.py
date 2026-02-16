@@ -16,7 +16,7 @@ from shared.utils.action_permission_profile import (
     ActionPermissionProfileError,
     resolve_action_permission_profile,
 )
-from shared.utils.action_template_engine import ActionImplementationError, validate_template_v1_definition
+from shared.utils.action_template_engine import ActionImplementationError, validate_action_implementation_definition
 from shared.utils.key_spec import normalize_key_spec
 from shared.utils.safe_bool_expression import BoolExpressionError, validate_bool_expression_syntax
 
@@ -709,12 +709,12 @@ def _collect_required_field_issues(resource_type: str, spec: Dict[str, Any]) -> 
         if not isinstance(implementation, dict) or not implementation:
             _append_spec_issue(
                 issues,
-                message="action_type requires executable implementation (template_v1)",
+                message="action_type requires executable implementation (template_v1|template_v2|function_v1)",
                 missing_fields=["implementation"],
             )
         else:
             try:
-                validate_template_v1_definition(implementation)
+                validate_action_implementation_definition(implementation)
             except ActionImplementationError as exc:
                 _append_spec_issue(
                     issues,

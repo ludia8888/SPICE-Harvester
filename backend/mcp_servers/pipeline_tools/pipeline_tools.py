@@ -300,8 +300,8 @@ async def _pipeline_create_from_plan(_server: Any, arguments: Dict[str, Any]) ->
             detail = resp_body.get("detail") if isinstance(resp_body.get("detail"), dict) else {}
             detail_code = str(detail.get("code") or "").strip().upper()
             enterprise = resp_body.get("enterprise") if isinstance(resp_body.get("enterprise"), dict) else {}
-            legacy_code = str(enterprise.get("legacy_code") or "").strip().upper()
-            if detail_code == "PIPELINE_ALREADY_EXISTS" or legacy_code == "PIPELINE_ALREADY_EXISTS":
+            external_code = str(enterprise.get("external_code") or "").strip().upper()
+            if detail_code == "PIPELINE_ALREADY_EXISTS" or external_code == "PIPELINE_ALREADY_EXISTS":
                 branch = str(payload.get("branch") or "main").strip() or "main"
                 list_resp = await bff_json(
                     "GET",

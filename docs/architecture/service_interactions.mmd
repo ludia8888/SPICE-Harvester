@@ -8,7 +8,6 @@ sequenceDiagram
     participant Funnel as Funnel Service (8003)
     participant PG as Ontology Registry (Postgres)
     participant Search as Object Read Model (Elasticsearch)
-    participant Legacy as TerminusDB (legacy profile only)
     participant Cache as Cache Layer
     participant ExtData as External Data Source
     
@@ -30,10 +29,6 @@ sequenceDiagram
             PG-->>OMS: Result
             OMS->>Search: Read object projections
             Search-->>OMS: Result
-            opt Legacy branching compatibility (terminus|hybrid)
-                OMS->>Legacy: Branch/version operations
-                Legacy-->>OMS: Result
-            end
             OMS-->>BFF: Response
         else Type Inference Operation
             BFF->>Funnel: Request Schema Inference

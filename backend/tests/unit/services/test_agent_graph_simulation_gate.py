@@ -60,7 +60,7 @@ async def test_simulation_rejection_stops_before_submit() -> None:
                 "enterprise": {
                     "code": "SHV-ACT-ACC-PER-3004",
                     "class": "permission",
-                    "legacy_code": "submission_criteria_failed",
+                    "external_code": "submission_criteria_failed",
                     "retryable": False,
                     "default_retry_policy": "none",
                     "human_required": True,

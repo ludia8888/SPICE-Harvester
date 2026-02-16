@@ -76,7 +76,7 @@ def _build_diagnostics(
         "category": category.value,
         "http_status": int(http_status),
         "enterprise_code": enterprise.code,
-        "legacy_code": enterprise.legacy_code,
+        "external_code": enterprise.external_code,
         "domain": enterprise.domain.value,
         "class": enterprise.error_class.value,
         "subsystem": enterprise.subsystem,

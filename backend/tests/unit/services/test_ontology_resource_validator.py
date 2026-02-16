@@ -83,6 +83,30 @@ def test_action_type_rejects_invalid_validation_rules():
     assert "validation_rules[0].expr" in invalid
 
 
+def test_action_type_accepts_template_v2_implementation():
+    spec = {
+        "input_schema": {"fields": [{"name": "ticket", "type": "object_ref", "required": True}]},
+        "permission_policy": {"effect": "ALLOW", "principals": ["role:DomainModeler"]},
+        "writeback_target": {"repo": "ontology-writeback", "branch": "writeback-{db_name}"},
+        "implementation": {
+            "type": "template_v2",
+            "targets": [
+                {
+                    "target": {"from": "input.ticket"},
+                    "changes": {
+                        "set": {
+                            "status": {"$if": {"cond": {"$eq": [1, 1]}, "then": "APPROVED", "else": "PENDING"}},
+                            "bucket": {"$call": {"fn": "upper", "args": ["a"]}},
+                        }
+                    },
+                }
+            ],
+        },
+    }
+    issues = check_required_fields("action_type", spec)
+    assert not [issue for issue in issues if issue["severity"] == "error"]
+
+
 def test_link_type_invalid_predicate_is_reported():
     issues = _collect_link_type_issues({"predicate": "HasOrder", "cardinality": "1:n"})
     assert issues

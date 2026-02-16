@@ -6,7 +6,7 @@ Checks:
    against `_ERROR_CODE_SPECS` in `enterprise_catalog.py`.
 2. Optional reporting/failing for raw `HTTPException(...)` usage.
 3. Optional reporting/failing for raw string payload codes
-   (`"code": "..."` / `"error_code": "..."` / `"api_code": "..."` / `"legacy_code": "..."` / `"external_code": "..."`).
+   (`"code": "..."` / `"error_code": "..."` / `"api_code": "..."` / `"external_code": "..."`).
 """
 
 from __future__ import annotations
@@ -423,7 +423,7 @@ def _find_doc_only_modules(
             continue
 
         # Import-only modules are legitimate facades/re-export modules and should not be
-        # treated as garbage legacy code. This guard targets modules that are effectively
+        # treated as stale compatibility code. This guard targets modules that are effectively
         # empty (docstring/comments only).
         if all(isinstance(node, (ast.Import, ast.ImportFrom)) for node in non_doc_nodes):
             continue
@@ -886,7 +886,7 @@ def _audit_raw_http_status_codes(
 
 
 def _count_raw_string_codes(root: Path) -> List[Tuple[str, int, str]]:
-    pattern = re.compile(r'"(?:code|error_code|api_code|legacy_code|external_code)"\s*:\s*"([A-Z][A-Z0-9_]+)"')
+    pattern = re.compile(r'"(?:code|error_code|api_code|external_code)"\s*:\s*"([A-Z][A-Z0-9_]+)"')
     hits: List[Tuple[str, int, str]] = []
     for path in _iter_python_files(root):
         try:
@@ -922,7 +922,7 @@ def main() -> int:
     parser.add_argument(
         "--fail-on-raw-code",
         action="store_true",
-        help='Fail when raw code-like payload strings are found (`code/error_code/api_code/legacy_code/external_code`)',
+        help='Fail when raw code-like payload strings are found (`code/error_code/api_code/external_code`)',
     )
     parser.add_argument(
         "--fail-on-bare-except",
@@ -1003,7 +1003,7 @@ def main() -> int:
     parser.add_argument(
         "--fail-on-doc-only-module",
         action="store_true",
-        help="Fail when runtime modules contain only docstrings/imports (potential legacy garbage modules)",
+        help="Fail when runtime modules contain only docstrings/imports (potential stale compatibility modules)",
     )
     parser.add_argument(
         "--fail-on-route-collision",
@@ -1123,7 +1123,7 @@ def main() -> int:
     _print_counter("Raw HTTPException usages (all)", [(row.path, row.line) for row in raw_http])
     _print_counter("Raw HTTPException usages (with embedded detail.code)", raw_http_with_code)
     _print_counter("Raw HTTPException usages (without detail.code)", raw_http_without_code)
-    print(f"Raw string payload codes (code/error_code/api_code/legacy_code/external_code): {len(raw_codes)}")
+    print(f"Raw string payload codes (code/error_code/api_code/external_code): {len(raw_codes)}")
     for path, line, code in raw_codes[:120]:
         print(f"  {path}:{line} code={code}")
     if runtime_issues["return_in_finally"]:

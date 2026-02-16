@@ -144,8 +144,8 @@ class EnterpriseError:
     safe_next_actions: Tuple[EnterpriseSafeNextAction, ...]
     action: EnterpriseAction
     owner: EnterpriseOwner
-    legacy_code: Optional[str] = None
-    legacy_category: Optional[str] = None
+    external_code: Optional[str] = None
+    external_category: Optional[str] = None
 
     def to_dict(self) -> Dict[str, object]:
         payload: Dict[str, object] = {
@@ -173,10 +173,10 @@ class EnterpriseError:
             "action": self.action.value,
             "owner": self.owner.value,
         }
-        if self.legacy_code is not None:
-            payload["legacy_code"] = self.legacy_code
-        if self.legacy_category is not None:
-            payload["legacy_category"] = self.legacy_category
+        if self.external_code is not None:
+            payload["external_code"] = self.external_code
+        if self.external_category is not None:
+            payload["external_category"] = self.external_category
         return payload
 
 
@@ -2535,16 +2535,16 @@ def enterprise_catalog_fingerprint() -> str:
     _CATALOG_FINGERPRINT_CACHE = sha256_canonical_json_prefixed(payload)
     return _CATALOG_FINGERPRINT_CACHE
 
-def _resolve_runbook_ref(spec: EnterpriseErrorSpec, *, legacy_code: Optional[str]) -> str:
+def _resolve_runbook_ref(spec: EnterpriseErrorSpec, *, source_code: Optional[str]) -> str:
     if spec.runbook_ref is not None and str(spec.runbook_ref).strip():
         return str(spec.runbook_ref).strip()
-    return str(legacy_code or "unknown_error").strip() or "unknown_error"
+    return str(source_code or "unknown_error").strip() or "unknown_error"
 
 
 def _resolve_safe_next_actions(
     spec: EnterpriseErrorSpec,
     *,
-    legacy_code: Optional[str],
+    external_code: Optional[str],
     retry_policy: EnterpriseRetryPolicy,
     human_required: bool,
 ) -> Tuple[EnterpriseSafeNextAction, ...]:
@@ -2562,7 +2562,7 @@ def _resolve_safe_next_actions(
     if human_required:
         actions.append(EnterpriseSafeNextAction.REQUEST_HUMAN)
 
-    if legacy_code == "overlay_degraded" and EnterpriseSafeNextAction.SAFE_MODE not in actions:
+    if external_code == "overlay_degraded" and EnterpriseSafeNextAction.SAFE_MODE not in actions:
         actions.insert(0, EnterpriseSafeNextAction.SAFE_MODE)
 
     if not actions:
@@ -2597,8 +2597,8 @@ def resolve_enterprise_error(
         spec = _CATEGORY_SPECS.get(ErrorCategory.INTERNAL)
 
     subsystem = _normalize_subsystem(service_name).value
-    legacy_code = external_code or (code.value if isinstance(code, ErrorCode) else None)
-    legacy_category = category.value if isinstance(category, ErrorCategory) else None
+    normalized_external_code = external_code or (code.value if isinstance(code, ErrorCode) else None)
+    external_category = category.value if isinstance(category, ErrorCategory) else None
 
     resolved_status = _resolve_http_status(spec, status_code, prefer_status_code=prefer_status_code)
     http_status_hint = _resolve_http_status_hint(spec, status_code)
@@ -2610,10 +2610,10 @@ def resolve_enterprise_error(
     jitter_strategy = _resolve_jitter_strategy(spec, retry_policy=retry_policy)
     retry_after_header_respect = _resolve_retry_after_header_respect(spec)
     human_required = _resolve_human_required(spec)
-    runbook_ref = _resolve_runbook_ref(spec, legacy_code=legacy_code)
+    runbook_ref = _resolve_runbook_ref(spec, source_code=normalized_external_code)
     safe_next_actions = _resolve_safe_next_actions(
         spec,
-        legacy_code=legacy_code,
+        external_code=normalized_external_code,
         retry_policy=retry_policy,
         human_required=human_required,
     )
@@ -2640,8 +2640,8 @@ def resolve_enterprise_error(
         safe_next_actions=safe_next_actions,
         action=action,
         owner=owner,
-        legacy_code=legacy_code,
-        legacy_category=legacy_category,
+        external_code=normalized_external_code,
+        external_category=external_category,
     )
 
 
@@ -2663,10 +2663,10 @@ def resolve_objectify_error(error: str) -> Optional[EnterpriseError]:
     jitter_strategy = _resolve_jitter_strategy(spec, retry_policy=retry_policy)
     retry_after_header_respect = _resolve_retry_after_header_respect(spec)
     human_required = _resolve_human_required(spec)
-    runbook_ref = _resolve_runbook_ref(spec, legacy_code=error)
+    runbook_ref = _resolve_runbook_ref(spec, source_code=error)
     safe_next_actions = _resolve_safe_next_actions(
         spec,
-        legacy_code=error,
+        external_code=error,
         retry_policy=retry_policy,
         human_required=human_required,
     )
@@ -2693,8 +2693,8 @@ def resolve_objectify_error(error: str) -> Optional[EnterpriseError]:
         safe_next_actions=safe_next_actions,
         action=action,
         owner=owner,
-        legacy_code=error,
-        legacy_category="objectify",
+        external_code=error,
+        external_category="objectify",
     )
 
 

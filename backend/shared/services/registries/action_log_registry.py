@@ -32,6 +32,14 @@ class ActionLogStatus(str, Enum):
 
 
 @dataclass(frozen=True)
+class ActionDependencyRecord:
+    child_action_log_id: str
+    parent_action_log_id: str
+    trigger_on: str
+    parent_status: Optional[str]
+
+
+@dataclass(frozen=True)
 class ActionLogRecord:
     action_log_id: str
     db_name: str
@@ -131,6 +139,8 @@ class ActionLogRegistry(PostgresSchemaRegistry):
     - Updates are intentionally simple (no multi-step saga engine).
     """
 
+    _DEPENDENCY_TRIGGER_VALUES = {"SUCCEEDED", "FAILED", "COMPLETED"}
+
     def __init__(
         self,
         *,
@@ -200,6 +210,31 @@ class ActionLogRegistry(PostgresSchemaRegistry):
         await conn.execute(
             f"CREATE INDEX IF NOT EXISTS idx_action_logs_status_updated ON {self._schema}.ontology_action_logs(status, updated_at DESC)"
         )
+        await conn.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS {self._schema}.ontology_action_dependencies (
+                child_action_log_id UUID NOT NULL,
+                parent_action_log_id UUID NOT NULL,
+                trigger_on TEXT NOT NULL CHECK (trigger_on IN ('SUCCEEDED', 'FAILED', 'COMPLETED')),
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                PRIMARY KEY (child_action_log_id, parent_action_log_id),
+                CONSTRAINT fk_action_dependency_child
+                    FOREIGN KEY (child_action_log_id)
+                    REFERENCES {self._schema}.ontology_action_logs(action_log_id)
+                    ON DELETE CASCADE,
+                CONSTRAINT fk_action_dependency_parent
+                    FOREIGN KEY (parent_action_log_id)
+                    REFERENCES {self._schema}.ontology_action_logs(action_log_id)
+                    ON DELETE CASCADE
+            )
+            """
+        )
+        await conn.execute(
+            f"CREATE INDEX IF NOT EXISTS idx_action_dependencies_parent ON {self._schema}.ontology_action_dependencies(parent_action_log_id, created_at DESC)"
+        )
+        await conn.execute(
+            f"CREATE INDEX IF NOT EXISTS idx_action_dependencies_child ON {self._schema}.ontology_action_dependencies(child_action_log_id, created_at DESC)"
+        )
 
         # Forward-compatible schema evolution
         await conn.execute(
@@ -230,6 +265,15 @@ class ActionLogRegistry(PostgresSchemaRegistry):
         await conn.execute(
             f"ALTER TABLE {self._schema}.ontology_action_logs ALTER COLUMN updated_at SET NOT NULL"
         )
+
+    @classmethod
+    def _normalize_dependency_trigger(cls, value: str) -> str:
+        trigger = str(value or "").strip().upper() or "SUCCEEDED"
+        if trigger not in cls._DEPENDENCY_TRIGGER_VALUES:
+            raise ValueError(
+                f"trigger_on must be one of {sorted(cls._DEPENDENCY_TRIGGER_VALUES)}"
+            )
+        return trigger
 
     async def create_log(
         self,
@@ -286,6 +330,99 @@ class ActionLogRegistry(PostgresSchemaRegistry):
         if not record:
             raise RuntimeError("Failed to create action log")
         return record
+
+    async def add_dependency(
+        self,
+        *,
+        child_action_log_id: str,
+        parent_action_log_id: str,
+        trigger_on: str = "SUCCEEDED",
+    ) -> None:
+        if not self._pool:
+            await self.connect()
+        child_id = str(child_action_log_id or "").strip()
+        parent_id = str(parent_action_log_id or "").strip()
+        if not child_id:
+            raise ValueError("child_action_log_id is required")
+        if not parent_id:
+            raise ValueError("parent_action_log_id is required")
+        if child_id == parent_id:
+            raise ValueError("child_action_log_id cannot depend on itself")
+        normalized_trigger = self._normalize_dependency_trigger(trigger_on)
+
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                f"""
+                INSERT INTO {self._schema}.ontology_action_dependencies (
+                    child_action_log_id,
+                    parent_action_log_id,
+                    trigger_on
+                )
+                VALUES ($1::uuid, $2::uuid, $3)
+                ON CONFLICT (child_action_log_id, parent_action_log_id) DO UPDATE
+                SET trigger_on = EXCLUDED.trigger_on
+                """,
+                child_id,
+                parent_id,
+                normalized_trigger,
+            )
+
+    async def list_dependent_children(self, *, parent_action_log_id: str) -> List[str]:
+        if not self._pool:
+            await self.connect()
+        parent_id = str(parent_action_log_id or "").strip()
+        if not parent_id:
+            return []
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"""
+                SELECT DISTINCT child_action_log_id
+                FROM {self._schema}.ontology_action_dependencies
+                WHERE parent_action_log_id = $1::uuid
+                ORDER BY child_action_log_id
+                """,
+                parent_id,
+            )
+        return [str(row["child_action_log_id"]) for row in rows if row.get("child_action_log_id")]
+
+    async def list_dependency_status_for_child(
+        self,
+        *,
+        child_action_log_id: str,
+    ) -> List[ActionDependencyRecord]:
+        if not self._pool:
+            await self.connect()
+        child_id = str(child_action_log_id or "").strip()
+        if not child_id:
+            return []
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"""
+                SELECT
+                    d.child_action_log_id,
+                    d.parent_action_log_id,
+                    d.trigger_on,
+                    p.status AS parent_status
+                FROM {self._schema}.ontology_action_dependencies d
+                LEFT JOIN {self._schema}.ontology_action_logs p
+                    ON p.action_log_id = d.parent_action_log_id
+                WHERE d.child_action_log_id = $1::uuid
+                ORDER BY d.created_at ASC
+                """,
+                child_id,
+            )
+
+        records: List[ActionDependencyRecord] = []
+        for row in rows:
+            records.append(
+                ActionDependencyRecord(
+                    child_action_log_id=str(row["child_action_log_id"]),
+                    parent_action_log_id=str(row["parent_action_log_id"]),
+                    trigger_on=str(row["trigger_on"]),
+                    parent_status=str(row["parent_status"]) if row.get("parent_status") is not None else None,
+                )
+            )
+        return records
 
     async def get_log(self, *, action_log_id: str) -> Optional[ActionLogRecord]:
         if not self._pool:

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
@@ -26,7 +26,7 @@ from shared.models.event_envelope import EventEnvelope
 from shared.observability.context_propagation import enrich_metadata_with_current_trace
 from shared.observability.request_context import get_correlation_id
 from shared.security.input_sanitizer import SecurityViolationError, sanitize_input
-from shared.services.registries.action_log_registry import ActionLogRegistry
+from shared.services.registries.action_log_registry import ActionLogRegistry, ActionLogStatus
 from shared.services.registries.action_simulation_registry import ActionSimulationRegistry
 from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.services.storage.lakefs_storage_service import create_lakefs_storage_service
@@ -40,7 +40,7 @@ from shared.utils.action_input_schema import (
 )
 from shared.utils.action_template_engine import (
     ActionImplementationError,
-    compile_template_v1_change_shape,
+    compile_action_change_shape,
 )
 from shared.utils.action_simulation_utils import reject_simulation_delete_flag
 from shared.utils.resource_rid import format_resource_rid, parse_metadata_rev
@@ -61,6 +61,7 @@ from shared.utils.action_permission_profile import (
     resolve_action_permission_profile,
 )
 from shared.utils.writeback_lifecycle import derive_lifecycle_id
+from shared.utils.writeback_paths import ref_key, writeback_patchset_key
 from shared.observability.tracing import trace_endpoint
 
 from oms.services.action_simulation_service import (
@@ -96,6 +97,63 @@ class ActionSubmitResponse(BaseModel):
     base_branch: str
     overlay_branch: str
     writeback_target: Dict[str, Any]
+
+
+class ActionSubmitBatchDependencyRequest(BaseModel):
+    on: str = Field(..., description="Dependency reference (request_id from same batch)")
+    trigger_on: str = Field(default="SUCCEEDED", description="SUCCEEDED|FAILED|COMPLETED")
+
+    @field_validator("trigger_on")
+    @classmethod
+    def _normalize_trigger_on(cls, value: str) -> str:
+        normalized = str(value or "").strip().upper() or "SUCCEEDED"
+        if normalized not in {"SUCCEEDED", "FAILED", "COMPLETED"}:
+            raise ValueError("trigger_on must be one of SUCCEEDED|FAILED|COMPLETED")
+        return normalized
+
+
+class ActionSubmitBatchItemRequest(BaseModel):
+    request_id: Optional[str] = Field(default=None, description="Client item id for dependency references")
+    input: Dict[str, Any] = Field(default_factory=dict, description="Intent-only action input payload")
+    correlation_id: Optional[str] = Field(default=None, description="Correlation id for trace/audit")
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Optional metadata")
+    base_branch: Optional[str] = Field(default=None, description="Optional per-item base branch override")
+    overlay_branch: Optional[str] = Field(default=None, description="Optional per-item overlay branch override")
+    depends_on: List[str] = Field(default_factory=list, description="Legacy alias for dependencies[].on")
+    trigger_on: str = Field(default="SUCCEEDED", description="Legacy alias for dependencies[].trigger_on")
+    dependencies: List[ActionSubmitBatchDependencyRequest] = Field(
+        default_factory=list,
+        description="Dependency list. Item runs only when all dependencies are satisfied.",
+    )
+
+
+class ActionSubmitBatchRequest(BaseModel):
+    items: List[ActionSubmitBatchItemRequest] = Field(default_factory=list, min_length=1, max_length=500)
+    base_branch: str = Field(default="main", description="Default base branch for items")
+    overlay_branch: Optional[str] = Field(default=None, description="Default overlay branch for items")
+
+
+class ActionSubmitBatchItemResponse(BaseModel):
+    index: int
+    request_id: str
+    action_log_id: str
+    status: str
+    depends_on: List[str] = Field(default_factory=list)
+
+
+class ActionSubmitBatchResponse(BaseModel):
+    batch_id: str
+    db_name: str
+    action_type_id: str
+    items: List[ActionSubmitBatchItemResponse]
+
+
+class ActionUndoRequest(BaseModel):
+    reason: Optional[str] = Field(default=None, max_length=2000, description="Optional undo reason")
+    correlation_id: Optional[str] = Field(default=None, description="Correlation id for trace/audit")
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Optional metadata")
+    base_branch: str = Field("main", description="Base branch for authoritative reads (default: main)")
+    overlay_branch: Optional[str] = Field(default=None, description="Optional overlay branch override")
 
 
 class ActionSimulateScenarioRequest(BaseModel):
@@ -178,6 +236,108 @@ def _resolve_writeback_target(
     branch = branch_tmpl.replace("{db_name}", db_name).replace("{db}", db_name)
     branch = AppConfig.sanitize_lakefs_branch_id(branch)
     return {"repo": repo, "branch": branch}
+
+
+def _normalize_batch_dependency_entries(item: ActionSubmitBatchItemRequest) -> List[ActionSubmitBatchDependencyRequest]:
+    deps: List[ActionSubmitBatchDependencyRequest] = []
+    if item.dependencies:
+        deps.extend(item.dependencies)
+    elif item.depends_on:
+        for ref in item.depends_on:
+            deps.append(ActionSubmitBatchDependencyRequest(on=ref, trigger_on=item.trigger_on))
+    return deps
+
+
+def _validate_batch_dependency_graph(
+    *,
+    request_ids: List[str],
+    dependencies_by_request_id: Dict[str, List[ActionSubmitBatchDependencyRequest]],
+) -> None:
+    request_id_set = set(request_ids)
+    for req_id, deps in dependencies_by_request_id.items():
+        for dep in deps:
+            dep_id = str(dep.on or "").strip()
+            if not dep_id:
+                raise classified_http_exception(
+                    status.HTTP_400_BAD_REQUEST,
+                    f"Batch dependency is missing reference for request_id={req_id}",
+                    code=ErrorCode.REQUEST_VALIDATION_FAILED,
+                )
+            if dep_id not in request_id_set:
+                raise classified_http_exception(
+                    status.HTTP_400_BAD_REQUEST,
+                    f"Batch dependency target not found: {dep_id}",
+                    code=ErrorCode.REQUEST_VALIDATION_FAILED,
+                )
+            if dep_id == req_id:
+                raise classified_http_exception(
+                    status.HTTP_400_BAD_REQUEST,
+                    f"Batch dependency cannot reference itself: {req_id}",
+                    code=ErrorCode.REQUEST_VALIDATION_FAILED,
+                )
+
+    visiting: Set[str] = set()
+    visited: Set[str] = set()
+
+    def _dfs(node: str) -> None:
+        if node in visited:
+            return
+        if node in visiting:
+            raise classified_http_exception(
+                status.HTTP_400_BAD_REQUEST,
+                "Batch dependency cycle detected",
+                code=ErrorCode.REQUEST_VALIDATION_FAILED,
+            )
+        visiting.add(node)
+        for dep in dependencies_by_request_id.get(node, []):
+            _dfs(str(dep.on))
+        visiting.remove(node)
+        visited.add(node)
+
+    for req_id in request_ids:
+        _dfs(req_id)
+
+
+def _build_undo_inverse_changes(target: Dict[str, Any]) -> Dict[str, Any]:
+    observed = target.get("observed_base") if isinstance(target.get("observed_base"), dict) else {}
+    observed_fields = observed.get("fields") if isinstance(observed.get("fields"), dict) else {}
+    observed_links = observed.get("links") if isinstance(observed.get("links"), dict) else {}
+    applied = target.get("applied_changes") if isinstance(target.get("applied_changes"), dict) else {}
+    if bool(applied.get("delete")):
+        raise classified_http_exception(
+            status.HTTP_409_CONFLICT,
+            "Undo is not supported for delete actions",
+            code=ErrorCode.CONFLICT,
+        )
+
+    inverse_set: Dict[str, Any] = {}
+    inverse_unset: List[str] = []
+
+    touched_fields = set()
+    touched_fields.update((applied.get("set") or {}).keys() if isinstance(applied.get("set"), dict) else [])
+    touched_fields.update(applied.get("unset") or [] if isinstance(applied.get("unset"), list) else [])
+    for field in touched_fields:
+        field_key = str(field or "").strip()
+        if not field_key:
+            continue
+        if field_key in observed_fields and observed_fields.get(field_key) is not None:
+            inverse_set[field_key] = observed_fields.get(field_key)
+        else:
+            inverse_unset.append(field_key)
+
+    for link_field, link_value in observed_links.items():
+        field_key = str(link_field or "").strip()
+        if not field_key:
+            continue
+        inverse_set[field_key] = link_value if isinstance(link_value, list) else [str(link_value)]
+
+    return {
+        "set": inverse_set,
+        "unset": sorted(set(inverse_unset) - set(inverse_set.keys())),
+        "link_add": [],
+        "link_remove": [],
+        "delete": False,
+    }
 
 
 @router.post(
@@ -324,7 +484,7 @@ async def submit_action_async(
         access_targets: list[dict[str, Any]] = []
         implementation = spec.get("implementation")
         try:
-            compiled_shape = compile_template_v1_change_shape(implementation, input_payload=validated_input)
+            compiled_shape = compile_action_change_shape(implementation, input_payload=validated_input)
         except ActionImplementationError as exc:
             raise classified_http_exception(
                 status.HTTP_409_CONFLICT,
@@ -464,6 +624,10 @@ async def submit_action_async(
         # Create ActionLog (audit SSoT).
         action_log_id = uuid4()
         log_metadata = dict(request.metadata or {})
+        log_metadata["__submit_context"] = {
+            "base_branch": resolved_base_branch,
+            "overlay_branch": overlay_branch_resolved,
+        }
         # Durable trace correlation: persist W3C context on the ActionLog (ontology object)
         # so outbox/reconciler workers can attach original traces even when running later.
         enrich_metadata_with_current_trace(log_metadata)
@@ -544,6 +708,355 @@ async def submit_action_async(
     finally:
         if dataset_registry:
             await dataset_registry.close()
+
+
+@router.post(
+    "/{action_type_id}/submit-batch",
+    response_model=ActionSubmitBatchResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+@trace_endpoint("oms.action.submit_batch")
+async def submit_action_batch_async(
+    db_name: str = Depends(ensure_database_exists),
+    action_type_id: str = Path(..., description="Action type identifier"),
+    *,
+    request: ActionSubmitBatchRequest,
+    event_store=EventStoreDep,
+) -> ActionSubmitBatchResponse:
+    action_type_id = str(action_type_id or "").strip()
+    if not action_type_id:
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            "action_type_id is required",
+            code=ErrorCode.REQUEST_VALIDATION_FAILED,
+        )
+    if not request.items:
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            "items must not be empty",
+            code=ErrorCode.REQUEST_VALIDATION_FAILED,
+        )
+
+    batch_id = uuid4().hex
+    request_ids: List[str] = []
+    dependencies_by_request_id: Dict[str, List[ActionSubmitBatchDependencyRequest]] = {}
+    normalized_items: List[tuple[str, ActionSubmitBatchItemRequest]] = []
+
+    for idx, item in enumerate(request.items):
+        request_id = str(item.request_id or "").strip() or f"item-{idx}"
+        if request_id in dependencies_by_request_id:
+            raise classified_http_exception(
+                status.HTTP_400_BAD_REQUEST,
+                f"Duplicate request_id in batch: {request_id}",
+                code=ErrorCode.REQUEST_VALIDATION_FAILED,
+            )
+        request_ids.append(request_id)
+        dependencies_by_request_id[request_id] = _normalize_batch_dependency_entries(item)
+        normalized_items.append((request_id, item))
+
+    _validate_batch_dependency_graph(
+        request_ids=request_ids,
+        dependencies_by_request_id=dependencies_by_request_id,
+    )
+
+    class _NoopEventStore:
+        async def append_event(self, _envelope: Any) -> None:  # noqa: ANN401
+            return None
+
+    noop_event_store = _NoopEventStore()
+    submit_results: Dict[str, ActionSubmitResponse] = {}
+
+    for request_id, item in normalized_items:
+        item_base_branch = str(item.base_branch or request.base_branch or "main").strip() or "main"
+        item_overlay_branch = str(item.overlay_branch or request.overlay_branch or "").strip() or None
+        item_metadata = dict(item.metadata or {})
+        item_metadata["__batch"] = {"batch_id": batch_id, "request_id": request_id}
+        item_metadata["__batch_payload"] = sanitize_input(item.input)
+        deps = dependencies_by_request_id.get(request_id) or []
+        if deps:
+            item_metadata["__dependency"] = {
+                "depends_on": [str(dep.on) for dep in deps],
+                "trigger_on": [str(dep.trigger_on) for dep in deps],
+            }
+
+        submit_req = ActionSubmitRequest(
+            input=item.input,
+            correlation_id=item.correlation_id,
+            metadata=item_metadata,
+            base_branch=item_base_branch,
+            overlay_branch=item_overlay_branch,
+        )
+        submit_resp = await submit_action_async(
+            db_name=db_name,
+            action_type_id=action_type_id,
+            request=submit_req,
+            base_branch=None,
+            event_store=noop_event_store,
+        )
+        submit_results[request_id] = submit_resp
+
+    dependency_registry = ActionLogRegistry()
+    await dependency_registry.connect()
+    try:
+        for child_request_id, deps in dependencies_by_request_id.items():
+            if not deps:
+                continue
+            child_log_id = submit_results[child_request_id].action_log_id
+            for dep in deps:
+                parent_request_id = str(dep.on)
+                parent_log_id = submit_results[parent_request_id].action_log_id
+                await dependency_registry.add_dependency(
+                    child_action_log_id=child_log_id,
+                    parent_action_log_id=parent_log_id,
+                    trigger_on=str(dep.trigger_on),
+                )
+    finally:
+        await dependency_registry.close()
+
+    # Emit root commands only after dependencies are fully registered.
+    for request_id, item in normalized_items:
+        if dependencies_by_request_id.get(request_id):
+            continue
+        submit_resp = submit_results[request_id]
+        correlation_id = (item.correlation_id or get_correlation_id() or "").strip() or None
+        payload = sanitize_input(item.input)
+        metadata_payload = {
+            **(item.metadata or {}),
+            "__batch": {"batch_id": batch_id, "request_id": request_id},
+            "correlation_id": correlation_id,
+            "submitted_at": datetime.now(timezone.utc).isoformat(),
+            "ontology": {"ref": f"branch:{submit_resp.base_branch}", "commit": submit_resp.ontology_commit_id},
+        }
+        command = ActionCommand(
+            command_id=UUID(submit_resp.action_log_id),
+            db_name=db_name,
+            action_log_id=UUID(submit_resp.action_log_id),
+            action_type_id=action_type_id,
+            ontology_commit_id=submit_resp.ontology_commit_id,
+            base_branch=submit_resp.base_branch,
+            overlay_branch=submit_resp.overlay_branch,
+            correlation_id=correlation_id,
+            payload=payload,
+            metadata=metadata_payload,
+        )
+        envelope = EventEnvelope.from_command(
+            command,
+            actor=str((item.metadata or {}).get("user_id") or ""),
+            kafka_topic=AppConfig.ACTION_COMMANDS_TOPIC,
+            metadata={"service": "oms", "mode": "action_writeback_batch"},
+        )
+        await event_store.append_event(envelope)
+
+    response_items: List[ActionSubmitBatchItemResponse] = []
+    for idx, (request_id, _item) in enumerate(normalized_items):
+        submit_resp = submit_results[request_id]
+        deps = [str(dep.on) for dep in dependencies_by_request_id.get(request_id, [])]
+        response_items.append(
+            ActionSubmitBatchItemResponse(
+                index=idx,
+                request_id=request_id,
+                action_log_id=submit_resp.action_log_id,
+                status="WAITING_DEPENDENCY" if deps else submit_resp.status,
+                depends_on=deps,
+            )
+        )
+
+    return ActionSubmitBatchResponse(
+        batch_id=batch_id,
+        db_name=db_name,
+        action_type_id=action_type_id,
+        items=response_items,
+    )
+
+
+@router.post(
+    "/logs/{action_log_id}/undo",
+    response_model=ActionSubmitResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+@trace_endpoint("oms.action.undo")
+async def undo_action_async(
+    db_name: str = Depends(ensure_database_exists),
+    action_log_id: str = Path(..., description="Action log id to undo"),
+    *,
+    request: ActionUndoRequest,
+    event_store=EventStoreDep,
+) -> ActionSubmitResponse:
+    try:
+        source_action_log_id = str(UUID(str(action_log_id)))
+    except Exception as exc:
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            "action_log_id must be a UUID",
+            code=ErrorCode.REQUEST_VALIDATION_FAILED,
+        ) from exc
+
+    action_logs = ActionLogRegistry()
+    await action_logs.connect()
+    try:
+        source = await action_logs.get_log(action_log_id=source_action_log_id)
+        if not source or source.db_name != db_name:
+            raise classified_http_exception(
+                status.HTTP_404_NOT_FOUND,
+                "ActionLog not found",
+                code=ErrorCode.RESOURCE_NOT_FOUND,
+            )
+        if source.status != ActionLogStatus.SUCCEEDED.value:
+            raise classified_http_exception(
+                status.HTTP_409_CONFLICT,
+                "Undo requires a SUCCEEDED ActionLog",
+                code=ErrorCode.CONFLICT,
+            )
+        if not source.writeback_commit_id:
+            raise classified_http_exception(
+                status.HTTP_409_CONFLICT,
+                "Undo requires writeback_commit_id",
+                code=ErrorCode.CONFLICT,
+            )
+        writeback_target = source.writeback_target or {}
+        repo = str(writeback_target.get("repo") or "").strip()
+        branch = str(writeback_target.get("branch") or "").strip()
+        if not repo or not branch:
+            raise classified_http_exception(
+                status.HTTP_409_CONFLICT,
+                "Undo requires writeback_target repo/branch",
+                code=ErrorCode.CONFLICT,
+            )
+
+        storage = create_lakefs_storage_service(get_settings())
+        if not storage:
+            raise classified_http_exception(
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                "LakeFSStorageService unavailable",
+                code=ErrorCode.STORAGE_UNAVAILABLE,
+            )
+
+        patchset_key = ref_key(source.writeback_commit_id, writeback_patchset_key(source_action_log_id))
+        patchset = await storage.load_json(bucket=repo, key=patchset_key)
+        targets = patchset.get("targets") if isinstance(patchset, dict) else None
+        if not isinstance(targets, list) or not targets:
+            raise classified_http_exception(
+                status.HTTP_409_CONFLICT,
+                "Undo source patchset targets not found",
+                code=ErrorCode.CONFLICT,
+            )
+
+        undo_targets: List[Dict[str, Any]] = []
+        for target in targets:
+            if not isinstance(target, dict):
+                continue
+            resource_rid = str(target.get("resource_rid") or "").strip()
+            class_id = resource_rid.split("@", 1)[0].split(":", 1)[-1] if resource_rid else ""
+            instance_id = str(target.get("instance_id") or "").strip()
+            if not class_id or not instance_id:
+                continue
+            undo_targets.append(
+                {
+                    "class_id": class_id,
+                    "instance_id": instance_id,
+                    "changes": _build_undo_inverse_changes(target),
+                }
+            )
+        if not undo_targets:
+            raise classified_http_exception(
+                status.HTTP_409_CONFLICT,
+                "Undo has no applicable targets",
+                code=ErrorCode.CONFLICT,
+            )
+
+        submit_context = source.metadata.get("__submit_context") if isinstance(source.metadata, dict) else None
+        resolved_base_branch = str(request.base_branch or "").strip() or (
+            str(submit_context.get("base_branch") or "").strip() if isinstance(submit_context, dict) else ""
+        )
+        if not resolved_base_branch:
+            resolved_base_branch = "main"
+        overlay_branch_resolved = str(request.overlay_branch or "").strip() or (
+            str(submit_context.get("overlay_branch") or "").strip() if isinstance(submit_context, dict) else ""
+        )
+        if not overlay_branch_resolved:
+            overlay_branch_resolved = branch
+
+        submitted_by = str((request.metadata or {}).get("user_id") or source.submitted_by or "").strip()
+        submitted_by_type = str((request.metadata or {}).get("user_type") or "user").strip().lower() or "user"
+        if not submitted_by:
+            raise classified_http_exception(
+                status.HTTP_400_BAD_REQUEST,
+                "request.metadata.user_id is required for action undo",
+                code=ErrorCode.REQUEST_VALIDATION_FAILED,
+            )
+
+        undo_input = {"targets": undo_targets, "source_action_log_id": source_action_log_id}
+        action_log_id = uuid4()
+        effective_correlation_id = (request.correlation_id or get_correlation_id() or "").strip() or None
+        undo_metadata = dict(request.metadata or {})
+        undo_metadata["undo_of_action_log_id"] = source_action_log_id
+        undo_metadata["undo_reason"] = request.reason
+        undo_metadata["undo_contract"] = {
+            "mode": "object-storage-v2-revert",
+            "supports_partial_delete_recovery": False,
+        }
+        undo_metadata["__submit_context"] = {
+            "base_branch": resolved_base_branch,
+            "overlay_branch": overlay_branch_resolved,
+        }
+        enrich_metadata_with_current_trace(undo_metadata)
+
+        await action_logs.create_log(
+            action_log_id=action_log_id,
+            db_name=db_name,
+            action_type_id=source.action_type_id,
+            action_type_rid=source.action_type_rid,
+            resource_rid=None,
+            ontology_commit_id=source.ontology_commit_id,
+            input_payload=undo_input,
+            correlation_id=effective_correlation_id,
+            submitted_by=submitted_by,
+            writeback_target={"repo": repo, "branch": branch},
+            metadata=undo_metadata,
+        )
+
+        command = ActionCommand(
+            command_id=action_log_id,
+            db_name=db_name,
+            action_log_id=action_log_id,
+            action_type_id=source.action_type_id,
+            ontology_commit_id=str(source.ontology_commit_id or ""),
+            base_branch=resolved_base_branch,
+            overlay_branch=overlay_branch_resolved,
+            correlation_id=effective_correlation_id,
+            payload=undo_input,
+            metadata={
+                **(request.metadata or {}),
+                "user_id": submitted_by,
+                "user_type": submitted_by_type,
+                "correlation_id": effective_correlation_id,
+                "submitted_at": datetime.now(timezone.utc).isoformat(),
+                "ontology": {"ref": f"branch:{resolved_base_branch}", "commit": source.ontology_commit_id},
+                "direct_undo": True,
+                "undo_of_action_log_id": source_action_log_id,
+            },
+        )
+
+        envelope = EventEnvelope.from_command(
+            command,
+            actor=submitted_by,
+            kafka_topic=AppConfig.ACTION_COMMANDS_TOPIC,
+            metadata={"service": "oms", "mode": "action_undo"},
+        )
+        await event_store.append_event(envelope)
+
+        return ActionSubmitResponse(
+            action_log_id=str(action_log_id),
+            status="PENDING",
+            db_name=db_name,
+            action_type_id=source.action_type_id,
+            ontology_commit_id=str(source.ontology_commit_id or ""),
+            base_branch=resolved_base_branch,
+            overlay_branch=overlay_branch_resolved,
+            writeback_target={"repo": repo, "branch": branch},
+        )
+    finally:
+        await action_logs.close()
 
 
 @router.post(
@@ -1071,4 +1584,6 @@ async def simulate_action_async(
 # FastAPI + postponed annotations safety:
 # Keep request parameter annotations concrete so they are always treated as body models.
 submit_action_async.__annotations__["request"] = ActionSubmitRequest
+submit_action_batch_async.__annotations__["request"] = ActionSubmitBatchRequest
+undo_action_async.__annotations__["request"] = ActionUndoRequest
 simulate_action_async.__annotations__["request"] = ActionSimulateRequest

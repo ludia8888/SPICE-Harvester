@@ -50,7 +50,7 @@ def _extract_resources(payload):
 def _decode_page_token(page_token: str | None, *, scope: str | None = None) -> int:
     try:
         return decode_offset_page_token(page_token, ttl_seconds=60, expected_scope=scope)
-    except Exception as exc:
+    except ValueError as exc:
         raise classified_http_exception(
             status.HTTP_400_BAD_REQUEST,
             str(exc),
@@ -219,7 +219,7 @@ async def list_outgoing_link_types(
                 code=ErrorCode.REQUEST_VALIDATION_FAILED,
             )
 
-        page_scope = _pagination_scope("v1/outgoing-link-types", db_name, branch, object_type_api_name)
+        page_scope = _pagination_scope("v1/outgoing-link-types", db_name, branch, object_type_api_name, page_size)
         offset = _decode_page_token(page_token, scope=page_scope)
         scan_limit = min(max(page_size, 500), 1000)
         scan_offset = 0

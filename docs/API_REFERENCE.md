@@ -14,12 +14,14 @@
 ### Actions
 - `GET /api/v1/databases/{db_name}/actions/logs`
 - `GET /api/v1/databases/{db_name}/actions/logs/{action_log_id}`
+- `POST /api/v1/databases/{db_name}/actions/logs/{action_log_id}/undo`
 - `GET /api/v1/databases/{db_name}/actions/simulations`
 - `GET /api/v1/databases/{db_name}/actions/simulations/{simulation_id}`
 - `GET /api/v1/databases/{db_name}/actions/simulations/{simulation_id}/versions`
 - `GET /api/v1/databases/{db_name}/actions/simulations/{simulation_id}/versions/{version}`
 - `POST /api/v1/databases/{db_name}/actions/{action_type_id}/simulate`
 - `POST /api/v1/databases/{db_name}/actions/{action_type_id}/submit`
+- `POST /api/v1/databases/{db_name}/actions/{action_type_id}/submit-batch`
 
 ### Admin
 - `POST /api/v1/admin/ci/ci-results`
@@ -122,6 +124,12 @@
 ### Foundry Ontologies v2
 - `GET /api/v2/ontologies`
 - `GET /api/v2/ontologies/{ontology}`
+- `GET /api/v2/ontologies/{ontology}/actionTypes`
+- `GET /api/v2/ontologies/{ontology}/actionTypes/byRid/{actionTypeRid}`
+- `GET /api/v2/ontologies/{ontology}/actionTypes/{actionType}`
+- `GET /api/v2/ontologies/{ontology}/fullMetadata`
+- `GET /api/v2/ontologies/{ontology}/interfaceTypes`
+- `GET /api/v2/ontologies/{ontology}/interfaceTypes/{interfaceType}`
 - `GET /api/v2/ontologies/{ontology}/objectTypes`
 - `GET /api/v2/ontologies/{ontology}/objectTypes/{objectType}`
 - `GET /api/v2/ontologies/{ontology}/objectTypes/{objectType}/outgoingLinkTypes`
@@ -131,6 +139,12 @@
 - `GET /api/v2/ontologies/{ontology}/objects/{objectType}/{primaryKey}`
 - `GET /api/v2/ontologies/{ontology}/objects/{objectType}/{primaryKey}/links/{linkType}`
 - `GET /api/v2/ontologies/{ontology}/objects/{objectType}/{primaryKey}/links/{linkType}/{linkedObjectPrimaryKey}`
+- `GET /api/v2/ontologies/{ontology}/queryTypes`
+- `GET /api/v2/ontologies/{ontology}/queryTypes/{queryApiName}`
+- `GET /api/v2/ontologies/{ontology}/sharedPropertyTypes`
+- `GET /api/v2/ontologies/{ontology}/sharedPropertyTypes/{sharedPropertyType}`
+- `GET /api/v2/ontologies/{ontology}/valueTypes`
+- `GET /api/v2/ontologies/{ontology}/valueTypes/{valueType}`
 
 ### Governance
 - `GET /api/v1/access-policies`

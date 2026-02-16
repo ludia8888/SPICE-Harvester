@@ -317,6 +317,39 @@ async def test_list_object_types_page_token_scope_mismatch_rejected():
 
 
 @pytest.mark.asyncio
+async def test_list_object_types_page_token_rejected_when_page_size_changes():
+    request = Request({"type": "http", "headers": []})
+    original_require = object_types_router._require_domain_role
+    object_types_router._require_domain_role = _noop_require_domain_role
+    try:
+        first = await object_types_router.list_object_type_contracts(
+            db_name="test_db",
+            request=request,
+            branch="main",
+            page_size=1,
+            page_token=None,
+            oms_client=_FakeObjectTypeOMSClient(),
+        )
+        assert first.data is not None
+        token = first.data["nextPageToken"]
+        assert token is not None
+
+        with pytest.raises(HTTPException) as exc_info:
+            await object_types_router.list_object_type_contracts(
+                db_name="test_db",
+                request=request,
+                branch="main",
+                page_size=2,
+                page_token=token,
+                oms_client=_FakeObjectTypeOMSClient(),
+            )
+    finally:
+        object_types_router._require_domain_role = original_require
+
+    assert exc_info.value.status_code == 400
+
+
+@pytest.mark.asyncio
 async def test_get_object_type_foundry_shape():
     request = Request({"type": "http", "headers": []})
     headers = Response()
@@ -455,6 +488,34 @@ async def test_list_outgoing_link_types_pagination_uses_filtered_offset_semantic
 
     assert second.data is not None
     assert [row["apiName"] for row in second.data["data"]] == ["account_tag"]
+
+
+@pytest.mark.asyncio
+async def test_list_outgoing_link_types_page_token_rejected_when_page_size_changes():
+    first = await link_types_router.list_outgoing_link_types(
+        db_name="test_db",
+        object_type_api_name="Account",
+        branch="main",
+        page_size=1,
+        page_token=None,
+        oms_client=_PagedLinkTypeOMSClient(),
+    )
+
+    assert first.data is not None
+    token = first.data["nextPageToken"]
+    assert token is not None
+
+    with pytest.raises(HTTPException) as exc_info:
+        await link_types_router.list_outgoing_link_types(
+            db_name="test_db",
+            object_type_api_name="Account",
+            branch="main",
+            page_size=2,
+            page_token=token,
+            oms_client=_PagedLinkTypeOMSClient(),
+        )
+
+    assert exc_info.value.status_code == 400
 
 
 @pytest.mark.asyncio

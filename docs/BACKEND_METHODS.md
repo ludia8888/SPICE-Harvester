@@ -1,6 +1,6 @@
 # Backend Method Index
 
-> Generated: 2026-02-16T12:30:43+09:00
+> Generated: 2026-02-16T12:49:08+09:00
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 
 ## action_outbox_worker
@@ -29,35 +29,70 @@
 
 ### `backend/action_worker/main.py`
 - **Functions**
-  - `async main()` (line 1842): no docstring
+  - `async main()` (line 2773): no docstring
 - **Classes**
-  - `_ActionCommandPayload` (line 111): no docstring
-  - `_ActionCommandParseError` (line 118): no docstring
-  - `_ActionRejected` (line 122): Used to short-circuit retries when the ActionLog is already finalized with a rejection result.
-  - `ActionWorker` (line 126): no docstring
-    - `__init__(self)` (line 127): no docstring
-    - `async initialize(self)` (line 164): no docstring
-    - `async shutdown(self)` (line 209): no docstring
-    - `_parse_payload(self, payload)` (line 225): no docstring
-    - `_fallback_metadata(self, payload)` (line 278): no docstring
-    - `_registry_key(self, payload)` (line 281): no docstring
-    - `async _process_payload(self, payload)` (line 292): no docstring
-    - `_span_name(self, payload)` (line 327): no docstring
-    - `_span_attributes(self, msg, payload, registry_key)` (line 330): no docstring
-    - `_metric_event_name(self, payload)` (line 351): no docstring
-    - `async _on_parse_error(self, msg, raw_payload, error)` (line 354): no docstring
-    - `async _on_retry_scheduled(self, payload, error, attempt_count, backoff_s, retryable)` (line 385): no docstring
-    - `async _on_terminal_failure(self, payload, error, attempt_count, retryable)` (line 401): no docstring
-    - `_is_retryable_error(exc, payload)` (line 417): no docstring
-    - `async _publish_to_dlq(self, msg, stage, error, attempt_count, payload_text, payload_obj, kafka_headers, fallback_metadata)` (line 426): no docstring
-    - `async _send_to_dlq(self, msg, error, attempt_count, payload, raw_payload, stage, payload_text, payload_obj, kafka_headers, fallback_metadata)` (line 454): no docstring
-    - `async run(self)` (line 485): no docstring
-    - `async _enforce_permission(self, db_name, submitted_by, submitted_by_type, action_spec)` (line 489): no docstring
-    - `async _check_writeback_dataset_acl_alignment(self, db_name, submitted_by, submitted_by_type, actor_role, ontology_commit_id, resources, class_ids)` (line 521): no docstring
-    - `async _execute_action(self, db_name, action_log_id, command, envelope)` (line 748): no docstring
-    - `async _ensure_branch(self, repository, branch)` (line 1671): no docstring
-    - `async _write_patchset_commit(self, repository, branch, action_log_id, patchset, metadata_doc)` (line 1674): no docstring
-    - `async _append_queue_entries(self, repository, branch, patchset_commit_id, action_log_id, action_applied_seq)` (line 1727): no docstring
+  - `_ActionCommandPayload` (line 113): no docstring
+  - `_ActionCommandParseError` (line 120): no docstring
+  - `_ActionRejected` (line 124): Used to short-circuit retries when the ActionLog is already finalized with a rejection result.
+  - `ActionWorker` (line 128): no docstring
+    - `__init__(self)` (line 129): no docstring
+    - `async initialize(self)` (line 166): no docstring
+    - `async shutdown(self)` (line 211): no docstring
+    - `_parse_payload(self, payload)` (line 227): no docstring
+    - `_fallback_metadata(self, payload)` (line 280): no docstring
+    - `_registry_key(self, payload)` (line 283): no docstring
+    - `async _process_payload(self, payload)` (line 294): no docstring
+    - `_span_name(self, payload)` (line 342): no docstring
+    - `_span_attributes(self, msg, payload, registry_key)` (line 345): no docstring
+    - `_metric_event_name(self, payload)` (line 366): no docstring
+    - `async _on_parse_error(self, msg, raw_payload, error)` (line 369): no docstring
+    - `async _on_retry_scheduled(self, payload, error, attempt_count, backoff_s, retryable)` (line 400): no docstring
+    - `async _on_terminal_failure(self, payload, error, attempt_count, retryable)` (line 416): no docstring
+    - `_is_retryable_error(exc, payload)` (line 432): no docstring
+    - `async _publish_to_dlq(self, msg, stage, error, attempt_count, payload_text, payload_obj, kafka_headers, fallback_metadata)` (line 441): no docstring
+    - `async _send_to_dlq(self, msg, error, attempt_count, payload, raw_payload, stage, payload_text, payload_obj, kafka_headers, fallback_metadata)` (line 469): no docstring
+    - `async run(self)` (line 500): no docstring
+    - `async _enforce_permission(self, db_name, submitted_by, submitted_by_type, action_spec)` (line 504): no docstring
+    - `async _check_writeback_dataset_acl_alignment(self, db_name, submitted_by, submitted_by_type, actor_role, ontology_commit_id, resources, class_ids)` (line 536): no docstring
+    - `async _execute_action(self, db_name, action_log_id, command, envelope)` (line 763): no docstring
+    - `_audit_result(self, audit_policy, payload)` (line 916): no docstring
+    - `async _execute_direct_undo(self, db_name, action_log_id, command, log_rec, repo, branch)` (line 944): no docstring
+    - `async _prepare_pending_input(self, action_log_id, command, log_rec, spec, audit_policy)` (line 1116): no docstring
+    - `_is_public_identifier(value)` (line 1193): no docstring
+    - `async _execute_action_pending(self, db_name, action_log_id, command, log_rec, spec, resources, action_type_id, action_type_rid, ontology_commit_id, submitted_by, submitted_by_type, actor_role, permission_profile, audit_policy, repo, branch)` (line 1197): no docstring
+    - `_extract_submission_targets(self, log_rec)` (line 1311): no docstring
+    - `async _build_pending_loaded_targets(self, db_name, action_log_id, audit_policy, resources, ontology_commit_id, spec, compiled_shape, implementation, input_payload, submitted_by, actor_role, base_branch, get_object_type_meta, submission_targets)` (line 1326): no docstring
+    - `async _enforce_pending_target_access(self, db_name, action_log_id, audit_policy, permission_profile, submitted_by, submitted_by_type, actor_role, loaded_targets)` (line 1493): no docstring
+    - `async _reject_action(self, action_log_id, audit_policy, error_key, message, extra, cause)` (line 1600): no docstring
+    - `_build_target_meta(loaded_targets)` (line 1624): no docstring
+    - `_build_rule_base_vars(submitted_by, actor_role, input_payload, target_docs_list, target_meta, db_name, base_branch)` (line 1635): no docstring
+    - `_resolve_input_ref_target(value, loaded_targets)` (line 1656): no docstring
+    - `_inject_submission_input_vars(self, criteria_vars, input_payload, loaded_targets)` (line 1676): no docstring
+    - `_inject_submission_class_vars(self, criteria_vars, loaded_targets)` (line 1689): no docstring
+    - `_build_submission_criteria_vars(self, submitted_by, actor_role, input_payload, loaded_targets, db_name, base_branch, target_meta)` (line 1710): no docstring
+    - `async _ensure_submission_actor_for_criteria(self, action_log_id, audit_policy, submission_criteria, submitted_by, target_meta)` (line 1739): no docstring
+    - `async _evaluate_submission_criteria(self, action_log_id, audit_policy, submission_criteria, criteria_vars, target_meta)` (line 1758): no docstring
+    - `async _reject_submission_criteria_failed(self, action_log_id, audit_policy, submission_criteria, actor_role, target_meta)` (line 1779): no docstring
+    - `async _prepare_submission_criteria_context(self, action_log_id, audit_policy, submission_criteria, submitted_by, actor_role, input_payload, loaded_targets, db_name, base_branch)` (line 1804): no docstring
+    - `async _enforce_submission_criteria(self, action_log_id, audit_policy, submission_criteria, submitted_by, actor_role, input_payload, loaded_targets, db_name, base_branch)` (line 1836): no docstring
+    - `async _reject_validation_rule(self, action_log_id, audit_policy, error_key, message, rule_index, scope, expr, target, cause)` (line 1881): no docstring
+    - `async _parse_validation_rule(self, action_log_id, audit_policy, rule, rule_idx)` (line 1910): no docstring
+    - `async _enforce_action_scope_validation_rule(self, action_log_id, audit_policy, base_vars, rule_idx, scope, expr, message)` (line 1948): no docstring
+    - `async _enforce_each_target_validation_rule(self, action_log_id, audit_policy, base_vars, target_docs_list, target_meta, rule_idx, scope, expr, message)` (line 1984): no docstring
+    - `async _normalize_validation_rules(self, action_log_id, audit_policy, validation_rules)` (line 2028): no docstring
+    - `_build_validation_rule_context(self, submitted_by, actor_role, input_payload, loaded_targets, db_name, base_branch)` (line 2046): no docstring
+    - `async _enforce_single_validation_rule(self, action_log_id, audit_policy, rule, rule_idx, base_vars, target_docs_list, target_meta)` (line 2069): no docstring
+    - `async _enforce_validation_rules(self, action_log_id, audit_policy, validation_rules, submitted_by, actor_role, input_payload, loaded_targets, db_name, base_branch)` (line 2119): no docstring
+    - `async _enforce_submission_and_validation_rules(self, action_log_id, audit_policy, spec, submitted_by, actor_role, input_payload, loaded_targets, db_name, base_branch)` (line 2160): no docstring
+    - `async _build_and_commit_pending_patchset(self, db_name, action_log_id, action_type_id, action_type_rid, ontology_commit_id, action_conflict_policy, get_object_type_meta, loaded_targets, log_rec, audit_policy, repo, branch)` (line 2198): no docstring
+    - `async _emit_action_applied_if_needed(self, db_name, action_log_id, command, writeback_target, patchset_commit_id, ontology_commit_id, branch)` (line 2347): no docstring
+    - `async _mark_action_succeeded(self, action_log_id, audit_policy, patchset_commit_id, action_applied_event_id, action_applied_seq)` (line 2404): no docstring
+    - `_dependency_is_satisfied(trigger_on, parent_status)` (line 2426): Returns (satisfied, impossible).
+    - `async _emit_deferred_action_command(self, log_rec, triggered_by_action_log_id)` (line 2457): no docstring
+    - `async _trigger_dependent_actions(self, db_name, parent_action_log_id)` (line 2516): no docstring
+    - `async _ensure_branch(self, repository, branch)` (line 2602): no docstring
+    - `async _write_patchset_commit(self, repository, branch, action_log_id, patchset, metadata_doc)` (line 2605): no docstring
+    - `async _append_queue_entries(self, repository, branch, patchset_commit_id, action_log_id, action_applied_seq)` (line 2658): no docstring
 
 ## agent
 
@@ -149,7 +184,7 @@
   - `_method_is_write(method)` (line 542): no docstring
   - `_tool_call_expects_pipeline_job(tool_id, path)` (line 546): no docstring
   - `_extract_overlay_status(payload)` (line 556): no docstring
-  - `_extract_enterprise_legacy_code(payload)` (line 581): no docstring
+  - `_extract_enterprise_external_code(payload)` (line 581): no docstring
   - `_iter_error_candidates(payload)` (line 593): no docstring
   - `_extract_error_key(payload)` (line 604): no docstring
   - `_extract_enterprise(payload)` (line 617): no docstring
@@ -221,56 +256,56 @@
 
 ### `backend/bff/main.py`
 - **Functions**
-  - `async lifespan(app)` (line 652): Modern application lifecycle management
-  - `async get_oms_client()` (line 897): Get OMS client from BFF container
-  - `async get_label_mapper()` (line 908): Get label mapper from BFF container
-  - `async get_google_sheets_service()` (line 919): Get Google Sheets service from BFF container
-  - `async get_connector_registry()` (line 930): Get ConnectorRegistry from BFF container
-  - `async get_dataset_registry()` (line 941): Get DatasetRegistry from BFF container
-  - `async get_dataset_profile_registry()` (line 952): Get DatasetProfileRegistry from BFF container
-  - `async get_pipeline_registry()` (line 963): Get PipelineRegistry from BFF container
-  - `async get_pipeline_plan_registry()` (line 981): Get PipelinePlanRegistry from BFF container
-  - `async get_objectify_registry()` (line 992): no docstring
-  - `async get_agent_registry()` (line 997): no docstring
-  - `async get_agent_session_registry()` (line 1003): no docstring
-  - `async get_agent_policy_registry()` (line 1009): no docstring
-  - `async get_pipeline_executor()` (line 1015): Get PipelineExecutor from BFF container
+  - `async lifespan(app)` (line 638): Modern application lifecycle management
+  - `async get_oms_client()` (line 883): Get OMS client from BFF container
+  - `async get_label_mapper()` (line 894): Get label mapper from BFF container
+  - `async get_google_sheets_service()` (line 905): Get Google Sheets service from BFF container
+  - `async get_connector_registry()` (line 916): Get ConnectorRegistry from BFF container
+  - `async get_dataset_registry()` (line 927): Get DatasetRegistry from BFF container
+  - `async get_dataset_profile_registry()` (line 938): Get DatasetProfileRegistry from BFF container
+  - `async get_pipeline_registry()` (line 949): Get PipelineRegistry from BFF container
+  - `async get_pipeline_plan_registry()` (line 967): Get PipelinePlanRegistry from BFF container
+  - `async get_objectify_registry()` (line 978): no docstring
+  - `async get_agent_registry()` (line 983): no docstring
+  - `async get_agent_session_registry()` (line 989): no docstring
+  - `async get_agent_policy_registry()` (line 995): no docstring
+  - `async get_pipeline_executor()` (line 1001): Get PipelineExecutor from BFF container
 - **Classes**
-  - `BFFServiceContainer` (line 132): BFF-specific service container to manage BFF services
-    - `__init__(self, container, settings)` (line 140): no docstring
-    - `async initialize_bff_services(self)` (line 145): Initialize BFF-specific services
-    - `async _initialize_oms_client(self)` (line 202): Initialize OMS client with health check
-    - `async _initialize_label_mapper(self)` (line 223): Initialize label mapper
-    - `async _initialize_type_inference(self)` (line 229): Initialize type inference service
-    - `async _initialize_websocket_service(self)` (line 243): Initialize WebSocket notification service
-    - `async _initialize_rate_limiter(self)` (line 265): Initialize rate limiting service
-    - `async _initialize_connector_registry(self)` (line 281): Initialize Postgres-backed connector registry.
-    - `async _initialize_dataset_registry(self)` (line 293): Initialize Postgres-backed dataset registry.
-    - `async _initialize_dataset_profile_registry(self)` (line 304): Initialize Postgres-backed dataset profile registry.
-    - `async _initialize_pipeline_registry(self)` (line 315): Initialize Postgres-backed pipeline registry.
-    - `async _initialize_pipeline_plan_registry(self)` (line 326): Initialize Postgres-backed pipeline plan registry.
-    - `async _initialize_objectify_registry(self)` (line 337): Initialize Postgres-backed objectify registry.
-    - `async _initialize_agent_registry(self)` (line 348): Initialize Postgres-backed agent registry.
-    - `async _initialize_agent_session_registry(self)` (line 359): Initialize Postgres-backed agent session registry.
-    - `async _initialize_agent_policy_registry(self)` (line 370): Initialize Postgres-backed agent policy registry.
-    - `async _initialize_agent_tool_registry(self)` (line 381): Initialize Postgres-backed agent tool registry (internal allowlist/policy).
-    - `async _initialize_pipeline_executor(self)` (line 400): Initialize pipeline executor (preview/build engine).
-    - `async _initialize_google_sheets_service(self)` (line 418): Initialize Google Sheets service (connector library)
-    - `async shutdown_bff_services(self)` (line 437): Shutdown BFF-specific services
-    - `get_oms_client(self)` (line 562): Get OMS client instance
-    - `get_label_mapper(self)` (line 568): Get label mapper instance
-    - `get_google_sheets_service(self)` (line 574): Get Google Sheets service instance
-    - `get_connector_registry(self)` (line 580): Get connector registry instance
-    - `get_dataset_registry(self)` (line 586): Get dataset registry instance
-    - `get_dataset_profile_registry(self)` (line 592): Get dataset profile registry instance
-    - `get_pipeline_registry(self)` (line 598): Get pipeline registry instance
-    - `get_pipeline_plan_registry(self)` (line 604): Get pipeline plan registry instance
-    - `get_objectify_registry(self)` (line 610): Get objectify registry instance
-    - `get_agent_registry(self)` (line 616): Get agent registry instance
-    - `get_agent_session_registry(self)` (line 622): Get agent session registry instance
-    - `get_agent_policy_registry(self)` (line 628): Get agent policy registry instance
-    - `get_agent_tool_registry(self)` (line 634): Get agent tool registry instance
-    - `get_pipeline_executor(self)` (line 640): Get pipeline executor instance
+  - `BFFServiceContainer` (line 130): BFF-specific service container to manage BFF services
+    - `__init__(self, container, settings)` (line 138): no docstring
+    - `async initialize_bff_services(self)` (line 143): Initialize BFF-specific services
+    - `async _initialize_oms_client(self)` (line 200): Initialize OMS client with health check
+    - `async _initialize_label_mapper(self)` (line 221): Initialize label mapper
+    - `async _initialize_type_inference(self)` (line 227): Initialize type inference service
+    - `async _initialize_websocket_service(self)` (line 241): Initialize WebSocket notification service
+    - `async _initialize_rate_limiter(self)` (line 263): Initialize rate limiting service
+    - `async _initialize_connector_registry(self)` (line 267): Initialize Postgres-backed connector registry.
+    - `async _initialize_dataset_registry(self)` (line 279): Initialize Postgres-backed dataset registry.
+    - `async _initialize_dataset_profile_registry(self)` (line 290): Initialize Postgres-backed dataset profile registry.
+    - `async _initialize_pipeline_registry(self)` (line 301): Initialize Postgres-backed pipeline registry.
+    - `async _initialize_pipeline_plan_registry(self)` (line 312): Initialize Postgres-backed pipeline plan registry.
+    - `async _initialize_objectify_registry(self)` (line 323): Initialize Postgres-backed objectify registry.
+    - `async _initialize_agent_registry(self)` (line 334): Initialize Postgres-backed agent registry.
+    - `async _initialize_agent_session_registry(self)` (line 345): Initialize Postgres-backed agent session registry.
+    - `async _initialize_agent_policy_registry(self)` (line 356): Initialize Postgres-backed agent policy registry.
+    - `async _initialize_agent_tool_registry(self)` (line 367): Initialize Postgres-backed agent tool registry (internal allowlist/policy).
+    - `async _initialize_pipeline_executor(self)` (line 386): Initialize pipeline executor (preview/build engine).
+    - `async _initialize_google_sheets_service(self)` (line 404): Initialize Google Sheets service (connector library)
+    - `async shutdown_bff_services(self)` (line 423): Shutdown BFF-specific services
+    - `get_oms_client(self)` (line 548): Get OMS client instance
+    - `get_label_mapper(self)` (line 554): Get label mapper instance
+    - `get_google_sheets_service(self)` (line 560): Get Google Sheets service instance
+    - `get_connector_registry(self)` (line 566): Get connector registry instance
+    - `get_dataset_registry(self)` (line 572): Get dataset registry instance
+    - `get_dataset_profile_registry(self)` (line 578): Get dataset profile registry instance
+    - `get_pipeline_registry(self)` (line 584): Get pipeline registry instance
+    - `get_pipeline_plan_registry(self)` (line 590): Get pipeline plan registry instance
+    - `get_objectify_registry(self)` (line 596): Get objectify registry instance
+    - `get_agent_registry(self)` (line 602): Get agent registry instance
+    - `get_agent_session_registry(self)` (line 608): Get agent session registry instance
+    - `get_agent_policy_registry(self)` (line 614): Get agent policy registry instance
+    - `get_agent_tool_registry(self)` (line 620): Get agent tool registry instance
+    - `get_pipeline_executor(self)` (line 626): Get pipeline executor instance
 
 ### `backend/bff/middleware/__init__.py`
 
@@ -319,14 +354,16 @@
 
 ### `backend/bff/routers/actions.py`
 - **Functions**
-  - `async submit_action(db_name, action_type_id, request, http_request, base_branch, overlay_branch, oms_client)` (line 29): no docstring
-  - `async simulate_action(db_name, action_type_id, request, http_request, oms_client)` (line 55): Action writeback simulation (dry-run) surface.
-  - `async get_action_log(db_name, action_log_id, http_request, action_logs)` (line 79): no docstring
-  - `async list_action_logs(db_name, http_request, status_filter, action_type_id, submitted_by, limit, offset, action_logs)` (line 96): no docstring
-  - `async list_action_simulations(db_name, http_request, action_type_id, limit, offset)` (line 121): no docstring
-  - `async get_action_simulation(db_name, simulation_id, http_request, include_versions, version_limit)` (line 140): no docstring
-  - `async list_action_simulation_versions(db_name, simulation_id, http_request, limit, offset)` (line 159): no docstring
-  - `async get_action_simulation_version(db_name, simulation_id, version, http_request)` (line 178): no docstring
+  - `async submit_action(db_name, action_type_id, request, http_request, base_branch, overlay_branch, oms_client)` (line 34): no docstring
+  - `async submit_action_batch(db_name, action_type_id, request, http_request, oms_client)` (line 60): no docstring
+  - `async simulate_action(db_name, action_type_id, request, http_request, oms_client)` (line 82): Action writeback simulation (dry-run) surface.
+  - `async undo_action(db_name, action_log_id, request, http_request, oms_client)` (line 109): no docstring
+  - `async get_action_log(db_name, action_log_id, http_request, action_logs)` (line 128): no docstring
+  - `async list_action_logs(db_name, http_request, status_filter, action_type_id, submitted_by, limit, offset, action_logs)` (line 145): no docstring
+  - `async list_action_simulations(db_name, http_request, action_type_id, limit, offset)` (line 170): no docstring
+  - `async get_action_simulation(db_name, simulation_id, http_request, include_versions, version_limit)` (line 189): no docstring
+  - `async list_action_simulation_versions(db_name, simulation_id, http_request, limit, offset)` (line 208): no docstring
+  - `async get_action_simulation_version(db_name, simulation_id, version, http_request)` (line 227): no docstring
 
 ### `backend/bff/routers/admin.py`
 
@@ -482,47 +519,79 @@
 
 ### `backend/bff/routers/foundry_ontology_v2.py`
 - **Functions**
-  - `_foundry_error(status_code, error_code, error_name, parameters)` (line 44): no docstring
-  - `_passthrough_upstream_error_payload(exc)` (line 62): no docstring
-  - `_named_not_found(error_name, parameters)` (line 76): no docstring
-  - `_ontology_not_found(ontology, parameters)` (line 85): no docstring
-  - `_object_type_not_found(ontology, object_type, parameters)` (line 92): no docstring
-  - `_link_type_not_found(ontology, object_type, link_type, parameters)` (line 99): no docstring
-  - `_object_not_found(ontology, object_type, primary_key, parameters)` (line 112): no docstring
-  - `_decode_page_token(page_token, scope)` (line 125): no docstring
-  - `_encode_page_token(offset, scope)` (line 129): no docstring
-  - `_parse_order_by(order_by)` (line 133): no docstring
-  - `_pagination_scope(*parts)` (line 166): no docstring
-  - `_linked_object_not_found(ontology, object_type, primary_key, link_type, linked_primary_key)` (line 171): no docstring
-  - `_linked_object_parameters(ontology, object_type, primary_key, link_type, linked_primary_key)` (line 193): no docstring
-  - `_linked_object_not_found_generic(ontology, object_type, primary_key, link_type, linked_primary_key, error_name)` (line 210): no docstring
-  - `_iter_primary_key_values(value)` (line 233): no docstring
-  - `_coerce_primary_key_values(value)` (line 254): no docstring
-  - `_extract_linked_primary_keys(source_row, link_type, foreign_key_property)` (line 258): no docstring
-  - `_iter_linked_primary_keys(source_row, link_type, foreign_key_property)` (line 278): no docstring
-  - `_extract_linked_primary_keys_page(source_row, link_type, foreign_key_property, offset, page_size)` (line 295): Extract a deduplicated page without materializing every linked PK.
-  - `_linked_primary_key_exists(source_row, link_type, foreign_key_property, linked_primary_key)` (line 335): no docstring
-  - `_build_primary_key_where(primary_key_field, primary_key_values)` (line 359): no docstring
-  - `async _resolve_object_primary_key_field(db_name, object_type, branch, oms_client)` (line 373): no docstring
-  - `async _require_domain_role(request, db_name)` (line 403): no docstring
-  - `_validate_ontology_db_name(ontology)` (line 407): no docstring
-  - `_validate_branch(branch)` (line 411): no docstring
-  - `async _resolve_ontology_db_name(ontology, oms_client)` (line 415): no docstring
-  - `_extract_databases(payload)` (line 446): no docstring
-  - `_to_foundry_ontology(row)` (line 462): no docstring
-  - `async list_ontologies_v2(request, oms_client)` (line 484): no docstring
-  - `async get_ontology_v2(ontology, request, oms_client)` (line 518): no docstring
-  - `async list_object_types_v2(ontology, request, page_size, page_token, branch, oms_client)` (line 576): no docstring
-  - `async get_object_type_v2(ontology, objectType, request, branch, oms_client)` (line 658): no docstring
-  - `async list_outgoing_link_types_v2(ontology, objectType, request, page_size, page_token, branch, oms_client)` (line 726): no docstring
-  - `async get_outgoing_link_type_v2(ontology, objectType, linkType, request, branch, oms_client)` (line 821): no docstring
-  - `async search_objects_v2(ontology, objectType, payload, request, branch, sdk_package_rid, sdk_version, oms_client)` (line 912): no docstring
-  - `async list_objects_v2(ontology, objectType, request, page_size, page_token, select, order_by, exclude_rid, snapshot, branch, sdk_package_rid, sdk_version, oms_client)` (line 986): no docstring
-  - `async get_object_v2(ontology, objectType, primaryKey, request, select, exclude_rid, branch, sdk_package_rid, sdk_version, oms_client)` (line 1078): no docstring
-  - `async list_linked_objects_v2(ontology, objectType, primaryKey, linkType, request, page_size, page_token, select, order_by, exclude_rid, snapshot, branch, sdk_package_rid, sdk_version, oms_client)` (line 1222): no docstring
-  - `async get_linked_object_v2(ontology, objectType, primaryKey, linkType, linkedObjectPrimaryKey, request, select, exclude_rid, branch, sdk_package_rid, sdk_version, oms_client)` (line 1491): no docstring
+  - `_foundry_error(status_code, error_code, error_name, parameters)` (line 50): no docstring
+  - `_passthrough_upstream_error_payload(exc)` (line 68): no docstring
+  - `_named_not_found(error_name, parameters)` (line 82): no docstring
+  - `_error_parameters(ontology, object_type, link_type, primary_key, linked_primary_key, parameters)` (line 91): no docstring
+  - `_not_found_error(error_name, ontology, object_type, link_type, primary_key, linked_primary_key, parameters)` (line 114): no docstring
+  - `_permission_denied(ontology, message, parameters)` (line 137): no docstring
+  - `_preflight_error_response(exc, ontology, parameters)` (line 154): no docstring
+  - `_decode_page_token(page_token, scope)` (line 196): no docstring
+  - `_encode_page_token(offset, scope)` (line 200): no docstring
+  - `_parse_order_by(order_by)` (line 204): no docstring
+  - `_pagination_scope(*parts)` (line 237): no docstring
+  - `_linked_object_parameters(ontology, object_type, primary_key, link_type, linked_primary_key)` (line 242): no docstring
+  - `_iter_primary_key_values(value)` (line 259): no docstring
+  - `_coerce_primary_key_values(value)` (line 280): no docstring
+  - `_extract_linked_primary_keys(source_row, link_type, foreign_key_property)` (line 284): no docstring
+  - `_iter_linked_primary_keys(source_row, link_type, foreign_key_property)` (line 304): no docstring
+  - `_extract_linked_primary_keys_page(source_row, link_type, foreign_key_property, offset, page_size)` (line 321): Extract a deduplicated page without materializing every linked PK.
+  - `_linked_primary_key_exists(source_row, link_type, foreign_key_property, linked_primary_key)` (line 361): no docstring
+  - `_build_primary_key_where(primary_key_field, primary_key_values)` (line 385): no docstring
+  - `async _resolve_object_primary_key_field(db_name, object_type, branch, oms_client)` (line 399): no docstring
+  - `async _require_domain_role(request, db_name)` (line 435): no docstring
+  - `_validate_ontology_db_name(ontology)` (line 444): no docstring
+  - `_validate_branch(branch)` (line 448): no docstring
+  - `async _resolve_ontology_db_name(ontology, oms_client)` (line 452): no docstring
+  - `_extract_databases(payload)` (line 483): no docstring
+  - `_extract_ontology_resource_rows(payload)` (line 499): no docstring
+  - `_extract_ontology_resource(payload)` (line 510): no docstring
+  - `_localized_text(value)` (line 520): no docstring
+  - `_to_foundry_named_metadata(resource)` (line 535): no docstring
+  - `_to_foundry_named_metadata_map(resources)` (line 573): no docstring
+  - `_dict_or_none(value)` (line 585): no docstring
+  - `_list_or_none(value)` (line 589): no docstring
+  - `_to_foundry_action_type(resource)` (line 593): no docstring
+  - `_to_foundry_action_type_map(resources)` (line 623): no docstring
+  - `_to_foundry_query_type(resource)` (line 635): no docstring
+  - `_to_foundry_query_type_map_key(resource)` (line 665): no docstring
+  - `_to_foundry_query_type_metadata_map(resources)` (line 678): no docstring
+  - `_scoped_error_parameters(ontology, parameters)` (line 690): no docstring
+  - `_upstream_status_error_response(exc, ontology, parameters, not_found_response, passthrough_payload)` (line 701): no docstring
+  - `_upstream_transport_error_response(ontology, parameters)` (line 724): no docstring
+  - `_internal_error_response(log_message, exc, ontology, parameters)` (line 737): no docstring
+  - `async _find_resource_by_rid(db_name, branch, resource_type, rid, oms_client, page_size)` (line 753): no docstring
+  - `_group_outgoing_link_types_by_source(resources)` (line 779): no docstring
+  - `async _list_all_resources_for_type(db_name, branch, resource_type, oms_client, page_size)` (line 795): no docstring
+  - `async _list_resources_best_effort(db_name, branch, resource_type, oms_client)` (line 824): no docstring
+  - `async _get_ontology_payload_best_effort(db_name, branch, object_type, oms_client)` (line 849): no docstring
+  - `_to_foundry_ontology(row)` (line 869): no docstring
+  - `async list_ontologies_v2(request, oms_client)` (line 891): no docstring
+  - `async get_ontology_v2(ontology, request, oms_client)` (line 925): no docstring
+  - `async get_full_metadata_v2(ontology, request, preview, branch, oms_client)` (line 969): no docstring
+  - `async list_action_types_v2(ontology, request, page_size, page_token, branch, oms_client)` (line 1121): no docstring
+  - `async get_action_type_v2(ontology, actionType, request, branch, oms_client)` (line 1172): no docstring
+  - `async get_action_type_by_rid_v2(ontology, actionTypeRid, request, branch, oms_client)` (line 1242): no docstring
+  - `async list_query_types_v2(ontology, request, page_size, page_token, oms_client)` (line 1312): no docstring
+  - `async get_query_type_v2(ontology, queryApiName, request, version, sdk_package_rid, sdk_version, oms_client)` (line 1361): no docstring
+  - `async list_interface_types_v2(ontology, request, preview, page_size, page_token, branch, oms_client)` (line 1442): no docstring
+  - `async get_interface_type_v2(ontology, interfaceType, request, preview, branch, sdk_package_rid, sdk_version, oms_client)` (line 1500): no docstring
+  - `async list_shared_property_types_v2(ontology, request, preview, page_size, page_token, branch, oms_client)` (line 1576): no docstring
+  - `async get_shared_property_type_v2(ontology, sharedPropertyType, request, preview, branch, oms_client)` (line 1634): no docstring
+  - `async list_value_types_v2(ontology, request, preview, oms_client)` (line 1707): no docstring
+  - `async get_value_type_v2(ontology, valueType, request, preview, oms_client)` (line 1756): no docstring
+  - `async list_object_types_v2(ontology, request, page_size, page_token, branch, oms_client)` (line 1827): no docstring
+  - `async get_object_type_v2(ontology, objectType, request, branch, oms_client)` (line 1895): no docstring
+  - `async list_outgoing_link_types_v2(ontology, objectType, request, page_size, page_token, branch, oms_client)` (line 1953): no docstring
+  - `async get_outgoing_link_type_v2(ontology, objectType, linkType, request, branch, oms_client)` (line 2042): no docstring
+  - `async search_objects_v2(ontology, objectType, payload, request, branch, sdk_package_rid, sdk_version, oms_client)` (line 2118): no docstring
+  - `async list_objects_v2(ontology, objectType, request, page_size, page_token, select, order_by, exclude_rid, snapshot, branch, sdk_package_rid, sdk_version, oms_client)` (line 2182): no docstring
+  - `async get_object_v2(ontology, objectType, primaryKey, request, select, exclude_rid, branch, sdk_package_rid, sdk_version, oms_client)` (line 2264): no docstring
+  - `async list_linked_objects_v2(ontology, objectType, primaryKey, linkType, request, page_size, page_token, select, order_by, exclude_rid, snapshot, branch, sdk_package_rid, sdk_version, oms_client)` (line 2400): no docstring
+  - `async get_linked_object_v2(ontology, objectType, primaryKey, linkType, linkedObjectPrimaryKey, request, select, exclude_rid, branch, sdk_package_rid, sdk_version, oms_client)` (line 2660): no docstring
 - **Classes**
-  - `OntologyNotFoundError` (line 40): no docstring
+  - `OntologyNotFoundError` (line 42): no docstring
+  - `PermissionDeniedError` (line 46): no docstring
 
 ### `backend/bff/routers/governance.py`
 - **Functions**
@@ -577,53 +646,53 @@
 
 ### `backend/bff/routers/lineage.py`
 - **Functions**
-  - `_parse_artifact_node_id(node_id)` (line 40): Parse artifact node id: artifact:<kind>:<...>
-  - `_suggest_remediation_actions(artifacts)` (line 58): Recommend safe operational actions.
-  - `_edge_projection_name(edge)` (line 110): no docstring
-  - `_edge_signature(edge)` (line 119): no docstring
-  - `_count_artifact_kinds(nodes)` (line 130): no docstring
-  - `_find_shortest_path(graph, source, target, direction)` (line 141): no docstring
-  - `_to_utc_datetime(value)` (line 192): no docstring
-  - `_bucket_start(ts, bucket_minutes)` (line 209): no docstring
-  - `_compact_edge_metadata(metadata)` (line 217): no docstring
-  - `_build_timeline_summary(edges, bucket_minutes)` (line 246): no docstring
-  - `_extract_column_lineage_refs(edges, limit)` (line 314): no docstring
-  - `_coerce_int(value)` (line 349): no docstring
-  - `_parse_objectify_mapping_spec_ref(ref)` (line 356): no docstring
-  - `_extract_column_lineage_ref_entry(metadata)` (line 372): no docstring
-  - `_normalize_mapping_pair(mapping)` (line 415): no docstring
-  - `_extract_column_lineage_pairs_from_metadata(metadata)` (line 431): no docstring
-  - `_freshness_status(last_occurred_at, as_of, freshness_slo_minutes)` (line 450): no docstring
-  - `_status_rank(status)` (line 468): no docstring
-  - `_normalize_scope(db_name, branch)` (line 473): no docstring
-  - `_normalize_window(since, until, default_hours)` (line 483): no docstring
-  - `_extract_impacted_artifacts_from_edges(edges, limit)` (line 499): no docstring
-  - `_summarize_run_rows(run_rows, as_of, freshness_slo_minutes)` (line 530): no docstring
-  - `_edge_cause_payload(edge)` (line 569): no docstring
-  - `_upstream_gap_minutes(last_occurred_at, latest_upstream_occurred_at)` (line 588): no docstring
-  - `_event_node_id_from_latest_writer(latest_writer)` (line 606): no docstring
-  - `_projection_name_from_latest_writer(latest_writer)` (line 618): no docstring
-  - `_writer_code_sha(latest_writer)` (line 627): no docstring
-  - `_out_of_date_scope(status_name, last_occurred_at, parent_latest_occurred_at, latest_upstream_occurred_at)` (line 636): Foundry-style stale scope classification.
-  - `_staleness_reason_with_scope(status_name, out_of_date_scope)` (line 661): no docstring
-  - `_update_type(status_name, out_of_date_scope, last_occurred_at, latest_projection_occurred_at, current_code_sha, latest_projection_code_sha)` (line 677): Foundry-style update type hint:
-  - `_lineage_lookup_batch_size()` (line 708): no docstring
-  - `_chunked(values, size)` (line 712): no docstring
-  - `async _get_latest_edges_to_batched(lineage_store, to_node_ids, edge_type, db_name, branch)` (line 719): no docstring
-  - `async _get_latest_edges_from_batched(lineage_store, from_node_ids, edge_type, db_name, branch)` (line 744): no docstring
-  - `async _get_latest_edges_for_projections_batched(lineage_store, projection_names, db_name, branch)` (line 769): no docstring
-  - `async _enrich_artifacts_with_latest_writer(lineage_store, artifacts, db_name, branch)` (line 792): no docstring
-  - `_artifact_latest_writer_state(run_id, latest_writer)` (line 816): no docstring
-  - `async get_lineage_graph(root, db_name, branch, as_of, direction, max_depth, max_nodes, max_edges, lineage_store)` (line 829): no docstring
-  - `async get_lineage_path(source, target, db_name, branch, as_of, direction, max_depth, max_nodes, max_edges, lineage_store)` (line 865): no docstring
-  - `async get_lineage_impact(root, db_name, branch, as_of, direction, max_depth, artifact_kind, max_nodes, max_edges, lineage_store)` (line 950): no docstring
-  - `async get_lineage_diff(root, from_as_of, to_as_of, db_name, branch, direction, max_depth, max_nodes, max_edges, lineage_store)` (line 1015): no docstring
-  - `async get_lineage_metrics(db_name, branch, window_minutes, lineage_store, audit_store)` (line 1121): Operational lineage metrics.
-  - `async get_lineage_runs(db_name, branch, since, until, edge_type, run_limit, freshness_slo_minutes, include_impact_preview, impact_preview_runs_limit, impact_preview_artifacts_limit, impact_preview_edge_limit, lineage_store)` (line 1184): Foundry-style build/run timeline:
-  - `async get_lineage_run_impact(run_id, db_name, branch, since, until, event_limit, artifact_preview_limit, lineage_store)` (line 1293): Foundry-style run/build impact diagnostics.
-  - `async get_lineage_timeline(db_name, branch, since, until, edge_type, projection_name, bucket_minutes, event_limit, event_preview_limit, lineage_store)` (line 1382): Foundry-style lineage timeline for operational debugging:
-  - `async get_lineage_column_lineage(db_name, branch, run_id, source_field, target_field, target_class_id, since, until, edge_limit, pair_limit, lineage_store, objectify_registry)` (line 1467): Resolve column-level lineage from mapping-spec references embedded in lineage edges.
-  - `async get_lineage_out_of_date(db_name, branch, artifact_kind, as_of, freshness_slo_minutes, artifact_limit, stale_preview_limit, projection_limit, projection_preview_limit, lineage_store)` (line 1814): Foundry-style out-of-date diagnostics:
+  - `_parse_artifact_node_id(node_id)` (line 41): Parse artifact node id: artifact:<kind>:<...>
+  - `_suggest_remediation_actions(artifacts)` (line 59): Recommend safe operational actions.
+  - `_edge_projection_name(edge)` (line 111): no docstring
+  - `_edge_signature(edge)` (line 120): no docstring
+  - `_count_artifact_kinds(nodes)` (line 131): no docstring
+  - `_find_shortest_path(graph, source, target, direction)` (line 142): no docstring
+  - `_to_utc_datetime(value)` (line 193): no docstring
+  - `_bucket_start(ts, bucket_minutes)` (line 210): no docstring
+  - `_compact_edge_metadata(metadata)` (line 218): no docstring
+  - `_build_timeline_summary(edges, bucket_minutes)` (line 247): no docstring
+  - `_extract_column_lineage_refs(edges, limit)` (line 315): no docstring
+  - `_coerce_int(value)` (line 350): no docstring
+  - `_parse_objectify_mapping_spec_ref(ref)` (line 357): no docstring
+  - `_extract_column_lineage_ref_entry(metadata)` (line 373): no docstring
+  - `_normalize_mapping_pair(mapping)` (line 416): no docstring
+  - `_extract_column_lineage_pairs_from_metadata(metadata)` (line 432): no docstring
+  - `_freshness_status(last_occurred_at, as_of, freshness_slo_minutes)` (line 451): no docstring
+  - `_status_rank(status)` (line 469): no docstring
+  - `_normalize_scope(db_name, branch)` (line 474): no docstring
+  - `_normalize_window(since, until, default_hours)` (line 484): no docstring
+  - `_extract_impacted_artifacts_from_edges(edges, limit)` (line 500): no docstring
+  - `_summarize_run_rows(run_rows, as_of, freshness_slo_minutes)` (line 531): no docstring
+  - `_edge_cause_payload(edge)` (line 570): no docstring
+  - `_upstream_gap_minutes(last_occurred_at, latest_upstream_occurred_at)` (line 589): no docstring
+  - `_event_node_id_from_latest_writer(latest_writer)` (line 607): no docstring
+  - `_projection_name_from_latest_writer(latest_writer)` (line 619): no docstring
+  - `_writer_code_sha(latest_writer)` (line 628): no docstring
+  - `_out_of_date_scope(status_name, last_occurred_at, parent_latest_occurred_at, latest_upstream_occurred_at)` (line 637): Foundry-style stale scope classification.
+  - `_staleness_reason_with_scope(status_name, out_of_date_scope)` (line 662): no docstring
+  - `_update_type(status_name, out_of_date_scope, last_occurred_at, latest_projection_occurred_at, current_code_sha, latest_projection_code_sha)` (line 678): Foundry-style update type hint:
+  - `_lineage_lookup_batch_size()` (line 709): no docstring
+  - `_chunked(values, size)` (line 713): no docstring
+  - `async _get_latest_edges_to_batched(lineage_store, to_node_ids, edge_type, db_name, branch)` (line 720): no docstring
+  - `async _get_latest_edges_from_batched(lineage_store, from_node_ids, edge_type, db_name, branch)` (line 745): no docstring
+  - `async _get_latest_edges_for_projections_batched(lineage_store, projection_names, db_name, branch)` (line 770): no docstring
+  - `async _enrich_artifacts_with_latest_writer(lineage_store, artifacts, db_name, branch)` (line 793): no docstring
+  - `_artifact_latest_writer_state(run_id, latest_writer)` (line 817): no docstring
+  - `async get_lineage_graph(root, db_name, branch, as_of, direction, max_depth, max_nodes, max_edges, lineage_store)` (line 830): no docstring
+  - `async get_lineage_path(source, target, db_name, branch, as_of, direction, max_depth, max_nodes, max_edges, lineage_store)` (line 866): no docstring
+  - `async get_lineage_impact(root, db_name, branch, as_of, direction, max_depth, artifact_kind, max_nodes, max_edges, lineage_store)` (line 951): no docstring
+  - `async get_lineage_diff(root, from_as_of, to_as_of, db_name, branch, direction, max_depth, max_nodes, max_edges, lineage_store)` (line 1016): no docstring
+  - `async get_lineage_metrics(db_name, branch, window_minutes, lineage_store, audit_store)` (line 1122): Operational lineage metrics.
+  - `async get_lineage_runs(db_name, branch, since, until, edge_type, run_limit, freshness_slo_minutes, include_impact_preview, impact_preview_runs_limit, impact_preview_artifacts_limit, impact_preview_edge_limit, lineage_store)` (line 1185): Foundry-style build/run timeline:
+  - `async get_lineage_run_impact(run_id, db_name, branch, since, until, event_limit, artifact_preview_limit, lineage_store)` (line 1294): Foundry-style run/build impact diagnostics.
+  - `async get_lineage_timeline(db_name, branch, since, until, edge_type, projection_name, bucket_minutes, event_limit, event_preview_limit, lineage_store)` (line 1383): Foundry-style lineage timeline for operational debugging:
+  - `async get_lineage_column_lineage(db_name, branch, run_id, source_field, target_field, target_class_id, since, until, edge_limit, pair_limit, lineage_store, objectify_registry)` (line 1468): Resolve column-level lineage from mapping-spec references embedded in lineage edges.
+  - `async get_lineage_out_of_date(db_name, branch, artifact_kind, as_of, freshness_slo_minutes, artifact_limit, stale_preview_limit, projection_limit, projection_preview_limit, lineage_store)` (line 1815): Foundry-style out-of-date diagnostics:
 
 ### `backend/bff/routers/link_types.py`
 
@@ -1050,12 +1119,17 @@
 ### `backend/bff/schemas/actions_requests.py`
 - **Classes**
   - `ActionSubmitRequest` (line 16): no docstring
-  - `ActionSimulateScenarioRequest` (line 22): no docstring
-  - `ActionSimulateStatePatch` (line 30): Patch-like state override for decision simulation (what-if).
-  - `ActionSimulateObservedBaseOverrides` (line 41): Override observed_base snapshot fields/links to simulate stale reads.
-  - `ActionSimulateTargetAssumption` (line 48): no docstring
-  - `ActionSimulateAssumptions` (line 55): no docstring
-  - `ActionSimulateRequest` (line 62): no docstring
+  - `ActionSubmitBatchDependencyRequest` (line 22): no docstring
+    - `_normalize_trigger_on(cls, value)` (line 28): no docstring
+  - `ActionSubmitBatchItemRequest` (line 35): no docstring
+  - `ActionSubmitBatchRequest` (line 47): no docstring
+  - `ActionUndoRequest` (line 53): no docstring
+  - `ActionSimulateScenarioRequest` (line 61): no docstring
+  - `ActionSimulateStatePatch` (line 69): Patch-like state override for decision simulation (what-if).
+  - `ActionSimulateObservedBaseOverrides` (line 80): Override observed_base snapshot fields/links to simulate stale reads.
+  - `ActionSimulateTargetAssumption` (line 87): no docstring
+  - `ActionSimulateAssumptions` (line 94): no docstring
+  - `ActionSimulateRequest` (line 101): no docstring
 
 ### `backend/bff/schemas/admin_projection_requests.py`
 - **Classes**
@@ -1160,22 +1234,24 @@
 
 ### `backend/bff/services/actions_service.py`
 - **Functions**
-  - `_require_action_type_id(action_type_id)` (line 31): no docstring
-  - `async _enforce_domain_model_role(http_request, db_name, enforce_role)` (line 38): no docstring
-  - `_parse_uuid(value)` (line 50): no docstring
-  - `_oms_metadata(request_metadata, principal_type, principal_id)` (line 57): no docstring
-  - `async _oms_post(oms_client, path, payload)` (line 70): no docstring
-  - `async _action_simulation_registry()` (line 81): no docstring
-  - `_serialize_action_simulation(record)` (line 90): no docstring
-  - `_serialize_action_simulation_version(record)` (line 104): no docstring
-  - `async submit_action(db_name, action_type_id, body, http_request, base_branch, overlay_branch, oms_client, enforce_role)` (line 126): no docstring
-  - `async simulate_action(db_name, action_type_id, body, http_request, oms_client, enforce_role)` (line 163): no docstring
-  - `async get_action_log(db_name, action_log_id, http_request, action_logs, enforce_role)` (line 205): no docstring
-  - `async list_action_logs(db_name, http_request, status_filter, action_type_id, submitted_by, limit, offset, action_logs, enforce_role)` (line 226): no docstring
-  - `async list_action_simulations(db_name, http_request, action_type_id, limit, offset, enforce_role)` (line 254): no docstring
-  - `async get_action_simulation(db_name, simulation_id, http_request, include_versions, version_limit, enforce_role)` (line 277): no docstring
-  - `async list_action_simulation_versions(db_name, simulation_id, http_request, limit, offset, enforce_role)` (line 303): no docstring
-  - `async get_action_simulation_version(db_name, simulation_id, version, http_request, enforce_role)` (line 330): no docstring
+  - `_require_action_type_id(action_type_id)` (line 36): no docstring
+  - `async _enforce_domain_model_role(http_request, db_name, enforce_role)` (line 43): no docstring
+  - `_parse_uuid(value)` (line 55): no docstring
+  - `_oms_metadata(request_metadata, principal_type, principal_id)` (line 62): no docstring
+  - `async _oms_post(oms_client, path, payload)` (line 75): no docstring
+  - `async _action_simulation_registry()` (line 86): no docstring
+  - `_serialize_action_simulation(record)` (line 95): no docstring
+  - `_serialize_action_simulation_version(record)` (line 109): no docstring
+  - `async submit_action(db_name, action_type_id, body, http_request, base_branch, overlay_branch, oms_client, enforce_role)` (line 131): no docstring
+  - `async submit_action_batch(db_name, action_type_id, body, http_request, oms_client, enforce_role)` (line 168): no docstring
+  - `async undo_action(db_name, action_log_id, body, http_request, oms_client, enforce_role)` (line 216): no docstring
+  - `async simulate_action(db_name, action_type_id, body, http_request, oms_client, enforce_role)` (line 250): no docstring
+  - `async get_action_log(db_name, action_log_id, http_request, action_logs, enforce_role)` (line 292): no docstring
+  - `async list_action_logs(db_name, http_request, status_filter, action_type_id, submitted_by, limit, offset, action_logs, enforce_role)` (line 313): no docstring
+  - `async list_action_simulations(db_name, http_request, action_type_id, limit, offset, enforce_role)` (line 341): no docstring
+  - `async get_action_simulation(db_name, simulation_id, http_request, include_versions, version_limit, enforce_role)` (line 364): no docstring
+  - `async list_action_simulation_versions(db_name, simulation_id, http_request, limit, offset, enforce_role)` (line 390): no docstring
+  - `async get_action_simulation_version(db_name, simulation_id, version, http_request, enforce_role)` (line 417): no docstring
 
 ### `backend/bff/services/admin_recompute_projection_service.py`
 - **Functions**
@@ -1492,35 +1568,42 @@
 
 ### `backend/bff/services/lineage_out_of_date_service.py`
 - **Functions**
-  - `_parse_artifact_node_id(node_id)` (line 10): no docstring
-  - `_suggest_remediation_actions(artifacts)` (line 23): no docstring
-  - `_to_utc_datetime(value)` (line 69): no docstring
-  - `_freshness_status(last_occurred_at, as_of, freshness_slo_minutes)` (line 86): no docstring
-  - `_status_rank(status)` (line 104): no docstring
-  - `_staleness_reason_with_scope(status_name, out_of_date_scope)` (line 109): no docstring
-  - `_update_type(status_name, out_of_date_scope, last_occurred_at, latest_projection_occurred_at, current_code_sha, latest_projection_code_sha)` (line 125): no docstring
-  - `_lineage_lookup_batch_size()` (line 150): no docstring
-  - `_chunked(values, size)` (line 154): no docstring
-  - `async _get_latest_edges_to_batched(lineage_store, to_node_ids, edge_type, db_name, branch)` (line 161): no docstring
-  - `async _get_latest_edges_from_batched(lineage_store, from_node_ids, edge_type, db_name, branch)` (line 186): no docstring
-  - `async _get_latest_edges_for_projections_batched(lineage_store, projection_names, db_name, branch)` (line 211): no docstring
-  - `_edge_cause_payload(edge)` (line 234): no docstring
-  - `async _enrich_artifacts_with_latest_writer(lineage_store, artifacts, db_name, branch)` (line 253): no docstring
-  - `_upstream_gap_minutes(last_occurred_at, latest_upstream_occurred_at)` (line 277): no docstring
-  - `_event_node_id_from_latest_writer(latest_writer)` (line 295): no docstring
-  - `_projection_name_from_latest_writer(latest_writer)` (line 307): no docstring
-  - `_writer_code_sha(latest_writer)` (line 316): no docstring
-  - `_out_of_date_scope(status_name, last_occurred_at, parent_latest_occurred_at, latest_upstream_occurred_at)` (line 325): no docstring
+  - `_parse_artifact_node_id(node_id)` (line 72): no docstring
+  - `_suggest_remediation_actions(artifacts)` (line 85): no docstring
+  - `_to_utc_datetime(value)` (line 131): no docstring
+  - `_freshness_status(last_occurred_at, as_of, freshness_slo_minutes)` (line 148): no docstring
+  - `_status_rank(status)` (line 166): no docstring
+  - `_staleness_reason_with_scope(status_name, out_of_date_scope)` (line 171): no docstring
+  - `_update_type(status_name, out_of_date_scope, last_occurred_at, latest_projection_occurred_at, current_code_sha, latest_projection_code_sha)` (line 187): no docstring
+  - `_lineage_lookup_batch_size()` (line 212): no docstring
+  - `_chunked(values, size)` (line 216): no docstring
+  - `async _get_latest_edges_to_batched(lineage_store, to_node_ids, edge_type, db_name, branch)` (line 223): no docstring
+  - `async _get_latest_edges_from_batched(lineage_store, from_node_ids, edge_type, db_name, branch)` (line 248): no docstring
+  - `async _get_latest_edges_for_projections_batched(lineage_store, projection_names, db_name, branch)` (line 273): no docstring
+  - `_edge_cause_payload(edge)` (line 296): no docstring
+  - `async _enrich_artifacts_with_latest_writer(lineage_store, artifacts, db_name, branch)` (line 315): no docstring
+  - `_upstream_gap_minutes(last_occurred_at, latest_upstream_occurred_at)` (line 339): no docstring
+  - `_event_node_id_from_latest_writer(latest_writer)` (line 357): no docstring
+  - `_projection_name_from_latest_writer(latest_writer)` (line 369): no docstring
+  - `_writer_code_sha(latest_writer)` (line 378): no docstring
+  - `_out_of_date_scope(status_name, last_occurred_at, parent_latest_occurred_at, latest_upstream_occurred_at)` (line 387): no docstring
 - **Classes**
-  - `LineageOutOfDateService` (line 343): Service class for `/lineage/out-of-date` diagnostics.
-    - `__init__(self, lineage_store)` (line 346): no docstring
-    - `async analyze(self, db_name, branch, artifact_kind, as_of, freshness_slo_minutes, artifact_limit, stale_preview_limit, projection_limit, projection_preview_limit)` (line 349): no docstring
-    - `async _latest_upstream_occurred_at(self, db_name, branch, as_of)` (line 456): no docstring
-    - `async _collect_artifacts(self, db_name, branch, artifact_kind, as_of, freshness_slo_minutes, artifact_limit, latest_upstream_occurred_at)` (line 474): no docstring
-    - `async _collect_projections(self, db_name, branch, as_of, freshness_slo_minutes, projection_limit, latest_upstream_occurred_at)` (line 531): no docstring
-    - `async _annotate_scope_and_update_type(self, stale_artifacts_all, stale_projections_all, latest_upstream_occurred_at, db_name, branch)` (line 583): no docstring
-    - `_staleness_reason_counts(artifacts, projections)` (line 714): no docstring
-    - `_warnings(artifact_rows_count, artifact_limit, projection_rows_count, projection_limit, stale_artifact_count, stale_preview_limit, stale_projection_count, projection_preview_limit)` (line 728): no docstring
+  - `LineageOutOfDateStore` (line 10): no docstring
+    - `async list_edges(self, edge_type, projection_name, db_name, branch, run_id, since, until, limit)` (line 11): no docstring
+    - `async list_artifact_latest_writes(self, db_name, branch, artifact_kind, as_of, limit)` (line 24): no docstring
+    - `async list_projection_latest_writes(self, db_name, branch, as_of, limit)` (line 34): no docstring
+    - `async get_latest_edges_to(self, to_node_ids, edge_type, projection_name, db_name, branch)` (line 43): no docstring
+    - `async get_latest_edges_from(self, from_node_ids, edge_type, projection_name, db_name, branch)` (line 53): no docstring
+    - `async get_latest_edges_for_projections(self, projection_names, db_name, branch)` (line 63): no docstring
+  - `LineageOutOfDateService` (line 405): Service class for `/lineage/out-of-date` diagnostics.
+    - `__init__(self, lineage_store)` (line 408): no docstring
+    - `async analyze(self, db_name, branch, artifact_kind, as_of, freshness_slo_minutes, artifact_limit, stale_preview_limit, projection_limit, projection_preview_limit)` (line 411): no docstring
+    - `async _latest_upstream_occurred_at(self, db_name, branch, as_of)` (line 518): no docstring
+    - `async _collect_artifacts(self, db_name, branch, artifact_kind, as_of, freshness_slo_minutes, artifact_limit, latest_upstream_occurred_at)` (line 536): no docstring
+    - `async _collect_projections(self, db_name, branch, as_of, freshness_slo_minutes, projection_limit, latest_upstream_occurred_at)` (line 593): no docstring
+    - `async _annotate_scope_and_update_type(self, stale_artifacts_all, stale_projections_all, latest_upstream_occurred_at, db_name, branch)` (line 645): no docstring
+    - `_staleness_reason_counts(artifacts, projections)` (line 776): no docstring
+    - `_warnings(artifact_rows_count, artifact_limit, projection_rows_count, projection_limit, stale_artifact_count, stale_preview_limit, stale_projection_count, projection_preview_limit)` (line 790): no docstring
 
 ### `backend/bff/services/link_types_mapping_service.py`
 - **Functions**
@@ -2036,6 +2119,11 @@
   - `async run_command_updates(websocket, command_id, client_id, user_id, token, manager)` (line 201): no docstring
   - `async run_user_updates(websocket, user_id, client_id, token, manager)` (line 233): no docstring
 
+### `backend/bff/tests/test_actions_batch_and_undo_proxy.py`
+- **Functions**
+  - `test_action_submit_batch_forwards_actor_identity()` (line 9): no docstring
+  - `test_action_undo_forwards_actor_identity()` (line 42): no docstring
+
 ### `backend/bff/tests/test_actions_submit_actor_metadata.py`
 - **Functions**
   - `test_action_submit_forwards_actor_identity_from_headers()` (line 9): no docstring
@@ -2155,13 +2243,15 @@
   - `async test_list_object_types_foundry_shape()` (line 245): no docstring
   - `async test_list_object_types_invalid_page_token_rejected()` (line 278): no docstring
   - `async test_list_object_types_page_token_scope_mismatch_rejected()` (line 299): no docstring
-  - `async test_get_object_type_foundry_shape()` (line 320): no docstring
-  - `async test_get_object_type_infers_primary_key_without_pk_spec()` (line 354): no docstring
-  - `async test_list_outgoing_link_types_foundry_shape_and_filtering()` (line 376): no docstring
-  - `async test_list_outgoing_link_types_invalid_page_token_rejected()` (line 400): no docstring
-  - `async test_list_outgoing_link_types_page_token_scope_mismatch_rejected()` (line 415): no docstring
-  - `async test_list_outgoing_link_types_pagination_uses_filtered_offset_semantics()` (line 433): no docstring
-  - `async test_get_outgoing_link_type_foundry_shape()` (line 461): no docstring
+  - `async test_list_object_types_page_token_rejected_when_page_size_changes()` (line 320): no docstring
+  - `async test_get_object_type_foundry_shape()` (line 353): no docstring
+  - `async test_get_object_type_infers_primary_key_without_pk_spec()` (line 387): no docstring
+  - `async test_list_outgoing_link_types_foundry_shape_and_filtering()` (line 409): no docstring
+  - `async test_list_outgoing_link_types_invalid_page_token_rejected()` (line 433): no docstring
+  - `async test_list_outgoing_link_types_page_token_scope_mismatch_rejected()` (line 448): no docstring
+  - `async test_list_outgoing_link_types_pagination_uses_filtered_offset_semantics()` (line 466): no docstring
+  - `async test_list_outgoing_link_types_page_token_rejected_when_page_size_changes()` (line 494): no docstring
+  - `async test_get_outgoing_link_type_foundry_shape()` (line 522): no docstring
 - **Classes**
   - `_FakeObjectTypeOMSClient` (line 12): no docstring
     - `async list_ontology_resources(self, db_name, resource_type, branch, limit, offset)` (line 13): no docstring
@@ -2181,51 +2271,81 @@
 
 ### `backend/bff/tests/test_foundry_ontology_v2_router.py`
 - **Functions**
-  - `async _noop_require_domain_role(request, db_name)` (line 334): no docstring
-  - `async test_list_object_types_v2_returns_foundry_raw_shape()` (line 340): no docstring
-  - `async test_list_ontologies_v2_returns_foundry_raw_shape()` (line 364): no docstring
-  - `async test_list_ontologies_v2_accepts_apiname_source_rows()` (line 378): no docstring
-  - `async test_get_ontology_v2_returns_foundry_raw_shape()` (line 390): no docstring
-  - `async test_get_ontology_v2_resolves_rid_identifier()` (line 410): no docstring
-  - `async test_get_ontology_v2_unknown_returns_ontology_not_found()` (line 428): no docstring
-  - `async test_get_object_type_v2_returns_foundry_raw_shape()` (line 449): no docstring
-  - `async test_get_object_type_v2_missing_returns_object_type_not_found()` (line 471): no docstring
-  - `async test_list_outgoing_link_types_v2_returns_foundry_raw_shape()` (line 494): no docstring
-  - `async test_list_outgoing_link_types_v2_filters_before_pagination()` (line 518): no docstring
-  - `async test_get_outgoing_link_type_v2_returns_foundry_raw_shape()` (line 552): no docstring
-  - `async test_get_outgoing_link_type_v2_missing_returns_link_type_not_found()` (line 575): no docstring
-  - `async test_search_objects_v2_passthrough_foundry_shape()` (line 599): no docstring
-  - `async test_list_objects_v2_passthrough_foundry_shape_and_orderby_parse()` (line 621): no docstring
-  - `async test_get_object_v2_returns_foundry_raw_shape()` (line 664): no docstring
-  - `async test_get_object_v2_not_found_returns_foundry_error()` (line 688): no docstring
-  - `async test_list_linked_objects_v2_returns_foundry_raw_shape()` (line 715): no docstring
-  - `async test_list_linked_objects_v2_paginates_after_dedup_link_filter()` (line 748): no docstring
-  - `async test_list_linked_objects_v2_missing_link_type_returns_link_type_not_found()` (line 811): no docstring
-  - `async test_get_linked_object_v2_returns_foundry_raw_shape()` (line 842): no docstring
-  - `async test_get_linked_object_v2_not_found_returns_foundry_error()` (line 868): no docstring
-  - `async test_v2_invalid_ontology_returns_foundry_error_envelope()` (line 900): no docstring
-  - `async test_list_objects_v2_rejects_invalid_orderby_expression()` (line 921): no docstring
-  - `async test_list_objects_v2_rejects_invalid_branch()` (line 949): no docstring
-  - `async test_list_object_types_v2_rejects_expired_page_token()` (line 979): no docstring
-  - `async test_list_object_types_v2_rejects_page_token_scope_mismatch()` (line 1000): no docstring
+  - `async _noop_require_domain_role(request, db_name)` (line 503): no docstring
+  - `async test_list_object_types_v2_returns_foundry_raw_shape()` (line 509): no docstring
+  - `async test_list_ontologies_v2_returns_foundry_raw_shape()` (line 533): no docstring
+  - `async test_list_ontologies_v2_accepts_apiname_source_rows()` (line 547): no docstring
+  - `async test_get_ontology_v2_returns_foundry_raw_shape()` (line 559): no docstring
+  - `async test_get_ontology_v2_resolves_rid_identifier()` (line 579): no docstring
+  - `async test_get_ontology_v2_unknown_returns_ontology_not_found()` (line 597): no docstring
+  - `async test_get_ontology_v2_permission_denied_returns_foundry_403()` (line 618): no docstring
+  - `async test_get_ontology_v2_non_permission_role_error_returns_invalid_argument()` (line 644): no docstring
+  - `async test_get_ontology_v2_preflight_upstream_error_returns_upstream_contract()` (line 670): no docstring
+  - `async test_get_full_metadata_v2_returns_foundry_full_metadata_shape()` (line 686): no docstring
+  - `async test_get_full_metadata_v2_requires_preview_true()` (line 718): no docstring
+  - `async test_get_full_metadata_v2_omits_partial_entities_when_upstream_unavailable()` (line 737): no docstring
+  - `async test_list_action_types_v2_returns_foundry_raw_shape()` (line 759): no docstring
+  - `async test_get_action_type_v2_returns_foundry_raw_shape()` (line 782): no docstring
+  - `async test_get_action_type_by_rid_v2_returns_foundry_raw_shape()` (line 803): no docstring
+  - `async test_list_query_types_v2_returns_foundry_raw_shape()` (line 824): no docstring
+  - `async test_get_query_type_v2_returns_foundry_raw_shape()` (line 846): no docstring
+  - `async test_get_query_type_v2_mismatched_version_returns_not_found()` (line 868): no docstring
+  - `async test_list_interface_types_v2_requires_preview_true()` (line 891): no docstring
+  - `async test_list_interface_types_v2_returns_foundry_raw_shape_with_preview()` (line 911): no docstring
+  - `async test_list_shared_property_types_v2_requires_preview_true()` (line 934): no docstring
+  - `async test_list_shared_property_types_v2_returns_foundry_raw_shape_with_preview()` (line 954): no docstring
+  - `async test_get_shared_property_type_v2_returns_foundry_raw_shape_with_preview()` (line 978): no docstring
+  - `async test_get_shared_property_type_v2_missing_returns_not_found()` (line 1000): no docstring
+  - `async test_list_value_types_v2_requires_preview_true()` (line 1024): no docstring
+  - `async test_get_value_type_v2_returns_foundry_raw_shape_with_preview()` (line 1041): no docstring
+  - `async test_list_value_types_v2_returns_foundry_raw_shape_without_pagination_token()` (line 1062): no docstring
+  - `async test_get_object_type_v2_returns_foundry_raw_shape()` (line 1082): no docstring
+  - `async test_get_object_type_v2_missing_returns_object_type_not_found()` (line 1104): no docstring
+  - `async test_list_outgoing_link_types_v2_returns_foundry_raw_shape()` (line 1127): no docstring
+  - `async test_list_outgoing_link_types_v2_filters_before_pagination()` (line 1151): no docstring
+  - `async test_list_outgoing_link_types_v2_rejects_page_token_when_page_size_changes()` (line 1185): no docstring
+  - `async test_get_outgoing_link_type_v2_returns_foundry_raw_shape()` (line 1219): no docstring
+  - `async test_get_outgoing_link_type_v2_missing_returns_link_type_not_found()` (line 1242): no docstring
+  - `async test_search_objects_v2_passthrough_foundry_shape()` (line 1266): no docstring
+  - `async test_list_objects_v2_passthrough_foundry_shape_and_orderby_parse()` (line 1288): no docstring
+  - `async test_get_object_v2_returns_foundry_raw_shape()` (line 1331): no docstring
+  - `async test_get_object_v2_not_found_returns_foundry_error()` (line 1355): no docstring
+  - `async test_list_linked_objects_v2_returns_foundry_raw_shape()` (line 1382): no docstring
+  - `async test_list_linked_objects_v2_paginates_after_dedup_link_filter()` (line 1415): no docstring
+  - `async test_list_linked_objects_v2_rejects_page_token_when_page_size_changes()` (line 1478): no docstring
+  - `async test_list_linked_objects_v2_missing_link_type_returns_link_type_not_found()` (line 1524): no docstring
+  - `async test_get_linked_object_v2_returns_foundry_raw_shape()` (line 1555): no docstring
+  - `async test_get_linked_object_v2_not_found_returns_foundry_error()` (line 1581): no docstring
+  - `async test_v2_invalid_ontology_returns_foundry_error_envelope()` (line 1613): no docstring
+  - `async test_list_objects_v2_rejects_invalid_orderby_expression()` (line 1634): no docstring
+  - `async test_list_objects_v2_rejects_invalid_branch()` (line 1662): no docstring
+  - `async test_list_object_types_v2_rejects_expired_page_token()` (line 1692): no docstring
+  - `async test_list_object_types_v2_rejects_page_token_scope_mismatch()` (line 1713): no docstring
+  - `async test_list_object_types_v2_rejects_page_token_when_page_size_changes()` (line 1733): no docstring
 - **Classes**
-  - `_FakeOMSClient` (line 13): no docstring
-    - `__init__(self)` (line 14): no docstring
-    - `async list_databases(self)` (line 17): no docstring
-    - `async get_database(self, db_name)` (line 27): no docstring
-    - `async post(self, path, **kwargs)` (line 32): no docstring
-    - `async list_ontology_resources(self, db_name, resource_type, branch, limit, offset)` (line 82): no docstring
-    - `async get_ontology_resource(self, db_name, resource_type, resource_id, branch)` (line 133): no docstring
-    - `async get_ontology(self, db_name, class_id, branch)` (line 182): no docstring
-  - `_ApiNameOnlyOMSClient` (line 211): no docstring
-    - `async list_databases(self)` (line 212): no docstring
-  - `_MissingObjectTypeOMSClient` (line 216): no docstring
-    - `async get_ontology_resource(self, db_name, resource_type, resource_id, branch)` (line 217): no docstring
-  - `_PagedLinkTypesOMSClient` (line 236): no docstring
-    - `__init__(self)` (line 237): no docstring
-    - `async list_ontology_resources(self, db_name, resource_type, branch, limit, offset)` (line 265): no docstring
-  - `_LinkedPaginationOMSClient` (line 287): no docstring
-    - `async post(self, path, **kwargs)` (line 288): no docstring
+  - `_FakeOMSClient` (line 14): no docstring
+    - `__init__(self)` (line 15): no docstring
+    - `async list_databases(self)` (line 18): no docstring
+    - `async get_database(self, db_name)` (line 28): no docstring
+    - `async post(self, path, **kwargs)` (line 33): no docstring
+    - `async list_ontology_resources(self, db_name, resource_type, branch, limit, offset)` (line 83): no docstring
+    - `async get_ontology_resource(self, db_name, resource_type, resource_id, branch)` (line 203): no docstring
+    - `async get_ontology(self, db_name, class_id, branch)` (line 298): no docstring
+  - `_ApiNameOnlyOMSClient` (line 327): no docstring
+    - `async list_databases(self)` (line 328): no docstring
+  - `_MissingObjectTypeOMSClient` (line 332): no docstring
+    - `async get_ontology_resource(self, db_name, resource_type, resource_id, branch)` (line 333): no docstring
+  - `_MissingSharedPropertyOMSClient` (line 352): no docstring
+    - `async get_ontology_resource(self, db_name, resource_type, resource_id, branch)` (line 353): no docstring
+  - `_ListDatabasesStatusErrorOMSClient` (line 372): no docstring
+    - `async list_databases(self)` (line 373): no docstring
+  - `_FullMetadataPartialFailureOMSClient` (line 383): no docstring
+    - `async list_ontology_resources(self, db_name, resource_type, branch, limit, offset)` (line 384): no docstring
+  - `_PagedLinkTypesOMSClient` (line 405): no docstring
+    - `__init__(self)` (line 406): no docstring
+    - `async list_ontology_resources(self, db_name, resource_type, branch, limit, offset)` (line 434): no docstring
+  - `_LinkedPaginationOMSClient` (line 456): no docstring
+    - `async post(self, path, **kwargs)` (line 457): no docstring
 
 ### `backend/bff/tests/test_funnel_client_structure_selection.py`
 - **Classes**
@@ -2730,6 +2850,10 @@
     - `async __aenter__(self)` (line 349): no docstring
     - `async __aexit__(self, exc_type, exc, tb)` (line 352): no docstring
     - `async analyze_dataset(self, payload, timeout_seconds)` (line 355): no docstring
+
+### `backend/bff/tests/test_query_builder_info.py`
+- **Functions**
+  - `async test_query_builder_info_exposes_canonical_text_operators_only()` (line 9): no docstring
 
 ### `backend/bff/tests/test_query_foundry_adapter.py`
 - **Functions**
@@ -3806,29 +3930,29 @@
 
 ### `backend/oms/main.py`
 - **Functions**
-  - `_resource_storage_backend()` (line 80): no docstring
-  - `async lifespan(app)` (line 299): Modern application lifecycle management
-  - `async _oms_domain_exception_handler(request, exc)` (line 416): Map OMS domain exceptions to enterprise error envelope responses.
-  - `async root()` (line 449): 루트 엔드포인트 - Modernized version
-  - `async health_check()` (line 472): 헬스 체크 - Modernized version
-  - `async container_health_check()` (line 532): Health check for the modernized container system
+  - `_resource_storage_backend()` (line 81): no docstring
+  - `async lifespan(app)` (line 277): Modern application lifecycle management
+  - `async _oms_domain_exception_handler(request, exc)` (line 394): Map OMS domain exceptions to enterprise error envelope responses.
+  - `async root()` (line 427): 루트 엔드포인트 - Modernized version
+  - `async health_check()` (line 450): 헬스 체크 - Modernized version
+  - `async container_health_check()` (line 510): Health check for the modernized container system
 - **Classes**
-  - `OMSServiceContainer` (line 84): OMS-specific service container to manage OMS services
-    - `__init__(self, container, settings)` (line 92): no docstring
-    - `async initialize_oms_services(self)` (line 97): Initialize OMS-specific services
-    - `async _initialize_event_store(self)` (line 124): Initialize S3/MinIO Event Store - The Single Source of Truth.
-    - `async _initialize_postgres(self)` (line 144): Initialize Postgres MVCC pool (required for pull requests/proposals).
-    - `async _initialize_jsonld_converter(self)` (line 154): Initialize JSON-LD converter
-    - `async _initialize_label_mapper(self)` (line 160): Initialize label mapper
-    - `async _initialize_redis_and_command_status(self)` (line 166): Initialize Redis service and Command Status service
-    - `async _initialize_elasticsearch(self)` (line 191): Initialize Elasticsearch service
-    - `async _initialize_rate_limiter(self)` (line 210): Initialize rate limiting service
-    - `async shutdown_oms_services(self)` (line 226): Shutdown OMS-specific services
-    - `get_jsonld_converter(self)` (line 269): Get JSON-LD converter instance
-    - `get_label_mapper(self)` (line 275): Get label mapper instance
-    - `get_redis_service(self)` (line 281): Get Redis service instance (can be None)
-    - `get_command_status_service(self)` (line 285): Get command status service instance (can be None)
-    - `get_elasticsearch_service(self)` (line 289): Get Elasticsearch service instance (can be None)
+  - `OMSServiceContainer` (line 85): OMS-specific service container to manage OMS services
+    - `__init__(self, container, settings)` (line 93): no docstring
+    - `async initialize_oms_services(self)` (line 98): Initialize OMS-specific services
+    - `async _initialize_event_store(self)` (line 125): Initialize S3/MinIO Event Store - The Single Source of Truth.
+    - `async _initialize_postgres(self)` (line 145): Initialize Postgres MVCC pool (required for pull requests/proposals).
+    - `async _initialize_jsonld_converter(self)` (line 155): Initialize JSON-LD converter
+    - `async _initialize_label_mapper(self)` (line 161): Initialize label mapper
+    - `async _initialize_redis_and_command_status(self)` (line 167): Initialize Redis service and Command Status service
+    - `async _initialize_elasticsearch(self)` (line 192): Initialize Elasticsearch service
+    - `async _initialize_rate_limiter(self)` (line 200): Initialize rate limiting service
+    - `async shutdown_oms_services(self)` (line 204): Shutdown OMS-specific services
+    - `get_jsonld_converter(self)` (line 247): Get JSON-LD converter instance
+    - `get_label_mapper(self)` (line 253): Get label mapper instance
+    - `get_redis_service(self)` (line 259): Get Redis service instance (can be None)
+    - `get_command_status_service(self)` (line 263): Get command status service instance (can be None)
+    - `get_elasticsearch_service(self)` (line 267): Get Elasticsearch service instance (can be None)
 
 ### `backend/oms/middleware/__init__.py`
 
@@ -3846,18 +3970,30 @@
 
 ### `backend/oms/routers/action_async.py`
 - **Functions**
-  - `_resolve_writeback_target(db_name, raw_target)` (line 167): no docstring
-  - `async submit_action_async(db_name, action_type_id, request, base_branch, event_store)` (line 189): Submit an Action for async execution.
-  - `async simulate_action_async(db_name, action_type_id, request)` (line 554): Simulate an Action writeback (dry-run).
+  - `_resolve_writeback_target(db_name, raw_target)` (line 225): no docstring
+  - `_normalize_batch_dependency_entries(item)` (line 241): no docstring
+  - `_validate_batch_dependency_graph(request_ids, dependencies_by_request_id)` (line 251): no docstring
+  - `_build_undo_inverse_changes(target)` (line 301): no docstring
+  - `async submit_action_async(db_name, action_type_id, request, base_branch, event_store)` (line 349): Submit an Action for async execution.
+  - `async submit_action_batch_async(db_name, action_type_id, request, event_store)` (line 719): no docstring
+  - `async undo_action_async(db_name, action_log_id, request, event_store)` (line 878): no docstring
+  - `async simulate_action_async(db_name, action_type_id, request)` (line 1067): Simulate an Action writeback (dry-run).
 - **Classes**
-  - `ActionSubmitRequest` (line 79): no docstring
-  - `ActionSubmitResponse` (line 90): no docstring
-  - `ActionSimulateScenarioRequest` (line 101): no docstring
-  - `ActionSimulateStatePatch` (line 109): Patch-like state override for decision simulation (what-if).
-  - `ActionSimulateObservedBaseOverrides` (line 120): Override observed_base snapshot fields/links to simulate stale reads.
-  - `ActionSimulateTargetAssumption` (line 127): no docstring
-  - `ActionSimulateAssumptions` (line 134): no docstring
-  - `ActionSimulateRequest` (line 141): no docstring
+  - `ActionSubmitRequest` (line 80): no docstring
+  - `ActionSubmitResponse` (line 91): no docstring
+  - `ActionSubmitBatchDependencyRequest` (line 102): no docstring
+    - `_normalize_trigger_on(cls, value)` (line 108): no docstring
+  - `ActionSubmitBatchItemRequest` (line 115): no docstring
+  - `ActionSubmitBatchRequest` (line 130): no docstring
+  - `ActionSubmitBatchItemResponse` (line 136): no docstring
+  - `ActionSubmitBatchResponse` (line 144): no docstring
+  - `ActionUndoRequest` (line 151): no docstring
+  - `ActionSimulateScenarioRequest` (line 159): no docstring
+  - `ActionSimulateStatePatch` (line 167): Patch-like state override for decision simulation (what-if).
+  - `ActionSimulateObservedBaseOverrides` (line 178): Override observed_base snapshot fields/links to simulate stale reads.
+  - `ActionSimulateTargetAssumption` (line 185): no docstring
+  - `ActionSimulateAssumptions` (line 192): no docstring
+  - `ActionSimulateRequest` (line 199): no docstring
 
 ### `backend/oms/routers/command_status.py`
 - **Functions**
@@ -3978,27 +4114,27 @@
 
 ### `backend/oms/routers/query.py`
 - **Functions**
-  - `_foundry_error(status_code, error_code, error_name, parameters)` (line 166): no docstring
-  - `_validate_field_name(field)` (line 182): no docstring
-  - `_resolve_field_path(field)` (line 194): no docstring
-  - `_decode_page_token(page_token, scope)` (line 203): no docstring
-  - `_encode_page_token(offset, scope)` (line 207): no docstring
-  - `_pagination_scope_for_search(db_name, object_type, branch, request)` (line 211): no docstring
-  - `_coerce_query(value)` (line 235): no docstring
-  - `_default_match_all_where()` (line 241): no docstring
-  - `_normalize_sort_direction(value)` (line 246): no docstring
-  - `_resolve_select_fields(request)` (line 253): no docstring
-  - `_build_sort_clause(request)` (line 287): no docstring
-  - `_to_es_query(query, depth)` (line 321): no docstring
-  - `_flatten_source(source)` (line 375): no docstring
-  - `async search_objects_v2(payload, db_name, object_type, branch, es)` (line 411): Foundry Search Objects API v2-compatible object search.
+  - `_foundry_error(status_code, error_code, error_name, parameters)` (line 164): no docstring
+  - `_validate_field_name(field)` (line 180): no docstring
+  - `_resolve_field_path(field)` (line 192): no docstring
+  - `_decode_page_token(page_token, scope)` (line 201): no docstring
+  - `_encode_page_token(offset, scope)` (line 205): no docstring
+  - `_pagination_scope_for_search(db_name, object_type, branch, request)` (line 209): no docstring
+  - `_coerce_query(value)` (line 234): no docstring
+  - `_default_match_all_where()` (line 240): no docstring
+  - `_normalize_sort_direction(value)` (line 245): no docstring
+  - `_resolve_select_fields(request)` (line 252): no docstring
+  - `_build_sort_clause(request)` (line 286): no docstring
+  - `_to_es_query(query, depth)` (line 320): no docstring
+  - `_flatten_source(source)` (line 371): no docstring
+  - `async search_objects_v2(payload, db_name, object_type, branch, es)` (line 407): Foundry Search Objects API v2-compatible object search.
 - **Classes**
   - `SearchJsonQueryV2` (line 69): Foundry SearchJsonQueryV2-compatible DSL (subset used by this service).
-    - `_validate_shape(self)` (line 95): no docstring
-  - `SearchObjectsRequestV2` (line 130): no docstring
-    - `_validate_select(cls, value)` (line 142): no docstring
-    - `_validate_select_compat(self)` (line 154): no docstring
-  - `SearchObjectsResponseV2` (line 160): no docstring
+    - `_validate_shape(self)` (line 94): no docstring
+  - `SearchObjectsRequestV2` (line 128): no docstring
+    - `_validate_select(cls, value)` (line 140): no docstring
+    - `_validate_select_compat(self)` (line 152): no docstring
+  - `SearchObjectsResponseV2` (line 158): no docstring
 
 ### `backend/oms/routers/tasks.py`
 - **Functions**
@@ -5247,8 +5383,8 @@
   - `_resolve_jitter_strategy(spec, retry_policy)` (line 2483): no docstring
   - `_resolve_retry_after_header_respect(spec)` (line 2489): no docstring
   - `enterprise_catalog_fingerprint()` (line 2498): no docstring
-  - `_resolve_runbook_ref(spec, legacy_code)` (line 2538): no docstring
-  - `_resolve_safe_next_actions(spec, legacy_code, retry_policy, human_required)` (line 2544): no docstring
+  - `_resolve_runbook_ref(spec, source_code)` (line 2538): no docstring
+  - `_resolve_safe_next_actions(spec, external_code, retry_policy, human_required)` (line 2544): no docstring
   - `_resolve_action(spec)` (line 2573): no docstring
   - `_resolve_owner(spec)` (line 2577): no docstring
   - `resolve_enterprise_error(service_name, code, category, status_code, external_code, retryable_hint, prefer_status_code)` (line 2581): no docstring
@@ -5284,17 +5420,17 @@
   - `_normalize_message(detail)` (line 80): no docstring
   - `_extract_upstream_metadata(body)` (line 92): no docstring
   - `_extract_external_code(detail)` (line 107): no docstring
-  - `_classify_upstream_url(url, status_code)` (line 130): no docstring
-  - `_classify_db_error(exc)` (line 143): no docstring
-  - `_build_payload(request, service_name, code, category, status_code, message, detail, errors, context, external_code)` (line 164): no docstring
-  - `_sanitize_header_value(value, max_len)` (line 194): no docstring
-  - `_build_error_headers(payload)` (line 207): no docstring
-  - `_get_error_metrics_collector(service_name)` (line 230): no docstring
-  - `_record_error_observability(service_name, payload)` (line 236): no docstring
-  - `_emit_error_log(payload)` (line 246): no docstring
-  - `_build_response(request, service_name, code, category, status_code, message, detail, errors, context, external_code)` (line 284): no docstring
-  - `_resolve_validation_error(exc)` (line 319): no docstring
-  - `install_error_handlers(app, service_name, validation_status)` (line 326): no docstring
+  - `_classify_upstream_url(url, status_code)` (line 129): no docstring
+  - `_classify_db_error(exc)` (line 142): no docstring
+  - `_build_payload(request, service_name, code, category, status_code, message, detail, errors, context, external_code)` (line 163): no docstring
+  - `_sanitize_header_value(value, max_len)` (line 193): no docstring
+  - `_build_error_headers(payload)` (line 206): no docstring
+  - `_get_error_metrics_collector(service_name)` (line 229): no docstring
+  - `_record_error_observability(service_name, payload)` (line 235): no docstring
+  - `_emit_error_log(payload)` (line 245): no docstring
+  - `_build_response(request, service_name, code, category, status_code, message, detail, errors, context, external_code)` (line 283): no docstring
+  - `_resolve_validation_error(exc)` (line 318): no docstring
+  - `install_error_handlers(app, service_name, validation_status)` (line 325): no docstring
 
 ### `backend/shared/errors/error_types.py`
 - **Functions**
@@ -5306,8 +5442,6 @@
 ### `backend/shared/errors/external_codes.py`
 - **Classes**
   - `ExternalErrorCode` (line 6): no docstring
-
-### `backend/shared/errors/legacy_codes.py`
 
 ### `backend/shared/errors/runtime_exception_policy.py`
 - **Functions**
@@ -6422,6 +6556,11 @@
     - `async validate_sequence(self, aggregate_id, sequence, allow_gaps)` (line 245): Validate sequence number for aggregate.
     - `reset_expectations(self)` (line 281): Reset local sequence expectations
 
+### `backend/shared/services/core/service_container_common.py`
+- **Functions**
+  - `async initialize_rate_limiter_service(services, logger)` (line 11): Shared initialization routine for rate limiting.
+  - `async initialize_elasticsearch_service(services, settings, logger)` (line 23): Shared initialization routine for Elasticsearch.
+
 ### `backend/shared/services/core/service_factory.py`
 - **Functions**
   - `create_fastapi_service(service_info, custom_lifespan, include_health_check, include_logging_middleware, custom_tags, include_error_handlers, validation_error_status)` (line 61): Create a standardized FastAPI application with common configurations.
@@ -7505,26 +7644,31 @@
 
 ### `backend/shared/services/registries/action_log_registry.py`
 - **Functions**
-  - `_coerce_dt(value)` (line 57): no docstring
-  - `_jsonb_to_dict(value)` (line 65): no docstring
-  - `_jsonb_to_optional_dict(value)` (line 82): no docstring
-  - `_row_to_record(row)` (line 99): no docstring
+  - `_coerce_dt(value)` (line 65): no docstring
+  - `_jsonb_to_dict(value)` (line 73): no docstring
+  - `_jsonb_to_optional_dict(value)` (line 90): no docstring
+  - `_row_to_record(row)` (line 107): no docstring
 - **Classes**
   - `ActionLogStatus` (line 26): no docstring
-  - `ActionLogRecord` (line 35): no docstring
-  - `ActionLogRegistry` (line 125): Postgres-backed Action log registry.
-    - `__init__(self, dsn, schema, pool_min, pool_max)` (line 134): no docstring
-    - `_jsonb_param(value)` (line 154): asyncpg expects JSON/JSONB bind params as strings by default.
-    - `async _ensure_tables(self, conn)` (line 170): no docstring
-    - `async create_log(self, action_log_id, db_name, action_type_id, action_type_rid, resource_rid, ontology_commit_id, input_payload, correlation_id, submitted_by, writeback_target, metadata)` (line 234): no docstring
-    - `async get_log(self, action_log_id)` (line 290): no docstring
-    - `async list_logs(self, db_name, statuses, action_type_id, submitted_by, limit, offset)` (line 300): no docstring
-    - `async list_outbox_candidates(self, limit, statuses, skip_locked)` (line 348): List action log records that need outbox processing.
-    - `async release_outbox_lock(self, action_log_id)` (line 401): Release the advisory lock for a given action_log_id after processing.
-    - `async mark_commit_written(self, action_log_id, writeback_commit_id, result)` (line 411): no docstring
-    - `async mark_event_emitted(self, action_log_id, action_applied_event_id, action_applied_seq)` (line 438): no docstring
-    - `async mark_succeeded(self, action_log_id, result, finished_at)` (line 465): no docstring
-    - `async mark_failed(self, action_log_id, result, finished_at)` (line 495): no docstring
+  - `ActionDependencyRecord` (line 35): no docstring
+  - `ActionLogRecord` (line 43): no docstring
+  - `ActionLogRegistry` (line 133): Postgres-backed Action log registry.
+    - `__init__(self, dsn, schema, pool_min, pool_max)` (line 144): no docstring
+    - `_jsonb_param(value)` (line 164): asyncpg expects JSON/JSONB bind params as strings by default.
+    - `async _ensure_tables(self, conn)` (line 180): no docstring
+    - `_normalize_dependency_trigger(cls, value)` (line 270): no docstring
+    - `async create_log(self, action_log_id, db_name, action_type_id, action_type_rid, resource_rid, ontology_commit_id, input_payload, correlation_id, submitted_by, writeback_target, metadata)` (line 278): no docstring
+    - `async add_dependency(self, child_action_log_id, parent_action_log_id, trigger_on)` (line 334): no docstring
+    - `async list_dependent_children(self, parent_action_log_id)` (line 370): no docstring
+    - `async list_dependency_status_for_child(self, child_action_log_id)` (line 388): no docstring
+    - `async get_log(self, action_log_id)` (line 427): no docstring
+    - `async list_logs(self, db_name, statuses, action_type_id, submitted_by, limit, offset)` (line 437): no docstring
+    - `async list_outbox_candidates(self, limit, statuses, skip_locked)` (line 485): List action log records that need outbox processing.
+    - `async release_outbox_lock(self, action_log_id)` (line 538): Release the advisory lock for a given action_log_id after processing.
+    - `async mark_commit_written(self, action_log_id, writeback_commit_id, result)` (line 548): no docstring
+    - `async mark_event_emitted(self, action_log_id, action_applied_event_id, action_applied_seq)` (line 575): no docstring
+    - `async mark_succeeded(self, action_log_id, result, finished_at)` (line 602): no docstring
+    - `async mark_failed(self, action_log_id, result, finished_at)` (line 632): no docstring
 
 ### `backend/shared/services/registries/action_simulation_registry.py`
 - **Classes**
@@ -8107,7 +8251,7 @@
 
 ### `backend/shared/services/storage/event_store.py`
 - **Functions**
-  - `async get_event_store()` (line 1245): Dependency to get the Event Store instance
+  - `async get_event_store()` (line 1251): Dependency to get the Event Store instance
 - **Classes**
   - `EventStore` (line 54): The REAL Event Store using S3/MinIO as Single Source of Truth.
     - `__init__(self)` (line 69): no docstring
@@ -8122,25 +8266,25 @@
     - `async _record_audit_failure(self, envelope, error)` (line 320): no docstring
     - `async _get_sequence_allocator(self)` (line 357): no docstring
     - `async _ensure_sequence_number(self, event)` (line 370): Ensure `event.sequence_number` is set using an atomic write-side allocator.
-    - `async append_event(self, event)` (line 508): Append an immutable event to S3/MinIO.
-    - `_enforce_idempotency_contract(self, existing, incoming, source)` (line 689): Detect event_id reuse with conflicting contents.
-    - `_is_command_envelope(env)` (line 724): no docstring
-    - `_normalize_for_idempotency_compare(env)` (line 730): no docstring
-    - `_stable_hash(payload)` (line 745): no docstring
-    - `async _get_existing_key_by_event_id(self, s3, event_id)` (line 749): no docstring
-    - `async _get_existing_key_by_aggregate_index(self, s3, aggregate_type, aggregate_id, event_id)` (line 762): no docstring
-    - `async _read_event_object(self, s3, key)` (line 784): no docstring
-    - `async get_event_object_key(self, event_id)` (line 790): Resolve an event_id to its S3 object key using the by-event-id index.
-    - `async read_event_by_key(self, key)` (line 803): Read an event envelope from S3/MinIO by object key.
-    - `async get_events(self, aggregate_type, aggregate_id, from_version, to_version)` (line 812): Retrieve all events for an aggregate from S3/MinIO.
-    - `_dedup_events(events)` (line 902): Best-effort dedup to hide historical duplicates during migration.
-    - `_dedup_key(event)` (line 915): no docstring
-    - `async replay_events(self, from_timestamp, to_timestamp, event_types)` (line 927): Replay events from S3/MinIO for a time range.
-    - `async get_aggregate_version(self, aggregate_type, aggregate_id, allow_full_scan)` (line 1020): Get the current version of an aggregate (max sequence_number).
-    - `async _update_indexes(self, event, key, s3)` (line 1064): Update various indexes for efficient querying.
-    - `async _write_index_entries(self, s3, aggregate_index_key, date_index_key, event_id_index_key, payload)` (line 1132): no docstring
-    - `async get_snapshot(self, aggregate_type, aggregate_id, version)` (line 1162): Get a snapshot of an aggregate at a specific version.
-    - `async save_snapshot(self, aggregate_type, aggregate_id, version, state)` (line 1191): Save a snapshot for performance optimization.
+    - `async append_event(self, event)` (line 514): Append an immutable event to S3/MinIO.
+    - `_enforce_idempotency_contract(self, existing, incoming, source)` (line 695): Detect event_id reuse with conflicting contents.
+    - `_is_command_envelope(env)` (line 730): no docstring
+    - `_normalize_for_idempotency_compare(env)` (line 736): no docstring
+    - `_stable_hash(payload)` (line 751): no docstring
+    - `async _get_existing_key_by_event_id(self, s3, event_id)` (line 755): no docstring
+    - `async _get_existing_key_by_aggregate_index(self, s3, aggregate_type, aggregate_id, event_id)` (line 768): no docstring
+    - `async _read_event_object(self, s3, key)` (line 790): no docstring
+    - `async get_event_object_key(self, event_id)` (line 796): Resolve an event_id to its S3 object key using the by-event-id index.
+    - `async read_event_by_key(self, key)` (line 809): Read an event envelope from S3/MinIO by object key.
+    - `async get_events(self, aggregate_type, aggregate_id, from_version, to_version)` (line 818): Retrieve all events for an aggregate from S3/MinIO.
+    - `_dedup_events(events)` (line 908): Best-effort dedup to hide historical duplicates during migration.
+    - `_dedup_key(event)` (line 921): no docstring
+    - `async replay_events(self, from_timestamp, to_timestamp, event_types)` (line 933): Replay events from S3/MinIO for a time range.
+    - `async get_aggregate_version(self, aggregate_type, aggregate_id, allow_full_scan)` (line 1026): Get the current version of an aggregate (max sequence_number).
+    - `async _update_indexes(self, event, key, s3)` (line 1070): Update various indexes for efficient querying.
+    - `async _write_index_entries(self, s3, aggregate_index_key, date_index_key, event_id_index_key, payload)` (line 1138): no docstring
+    - `async get_snapshot(self, aggregate_type, aggregate_id, version)` (line 1168): Get a snapshot of an aggregate at a specific version.
+    - `async save_snapshot(self, aggregate_type, aggregate_id, version, state)` (line 1197): Save a snapshot for performance optimization.
 
 ### `backend/shared/services/storage/lakefs_branch_utils.py`
 - **Functions**
@@ -8416,29 +8560,53 @@
 
 ### `backend/shared/utils/action_template_engine.py`
 - **Functions**
-  - `_detect_mustache_syntax(value, label)` (line 28): Reject mustache/handlebars syntax in template values.
-  - `_is_non_empty_str(value)` (line 51): no docstring
-  - `_require_public_identifier(value, label)` (line 55): no docstring
-  - `_split_dotted_path(path, label)` (line 66): no docstring
-  - `_get_by_path(obj, path, label)` (line 81): no docstring
-  - `_normalize_object_ref(value, label)` (line 92): no docstring
-  - `_coerce_link_value(value, label)` (line 103): no docstring
-  - `_is_ref_object(value)` (line 112): no docstring
-  - `_resolve_ref_object(value, input_payload, user, target, now)` (line 116): no docstring
-  - `_resolve_value(value, input_payload, user, target, now)` (line 141): no docstring
-  - `_extract_link_field_names(raw_ops)` (line 175): no docstring
-  - `_compile_link_ops(raw_ops, input_payload, user, target, now, label)` (line 195): no docstring
-  - `_normalize_unset_list(value, label)` (line 231): no docstring
-  - `_normalize_set_ops(value, label)` (line 243): no docstring
-  - `_is_noop_change_spec(changes)` (line 256): no docstring
-  - `_merge_change_specs(existing, incoming)` (line 267): no docstring
-  - `_validate_template_v1(implementation)` (line 292): no docstring
-  - `validate_template_v1_definition(implementation)` (line 315): Validate that an ActionType.implementation is executable (P0).
-  - `compile_template_v1_change_shape(implementation, input_payload)` (line 359): Compile a template_v1 into a per-target "change shape" (keys only) for submission-time observed_base snapshots.
-  - `compile_template_v1(implementation, input_payload, user, target_docs, now)` (line 434): Compile a template_v1 into concrete per-target changes.
+  - `_detect_mustache_syntax(value, label)` (line 32): Reject mustache/handlebars syntax in template values.
+  - `_is_non_empty_str(value)` (line 55): no docstring
+  - `_require_public_identifier(value, label)` (line 59): no docstring
+  - `_split_dotted_path(path, label)` (line 70): no docstring
+  - `_get_by_path(obj, path, label)` (line 85): no docstring
+  - `_normalize_object_ref(value, label)` (line 96): no docstring
+  - `_coerce_link_value(value, label)` (line 107): no docstring
+  - `_is_ref_object(value)` (line 116): no docstring
+  - `_is_expression_object(value)` (line 120): no docstring
+  - `_fn_concat(*args)` (line 129): no docstring
+  - `_fn_coalesce(*args)` (line 133): no docstring
+  - `_fn_upper(value)` (line 140): no docstring
+  - `_fn_lower(value)` (line 144): no docstring
+  - `_fn_trim(value)` (line 148): no docstring
+  - `_coerce_number(value, label)` (line 152): no docstring
+  - `_fn_add(*args)` (line 163): no docstring
+  - `_fn_sub(*args)` (line 167): no docstring
+  - `_fn_mul(*args)` (line 178): no docstring
+  - `_fn_div(*args)` (line 185): no docstring
+  - `_resolve_ref_object(value, input_payload, user, target, now)` (line 210): no docstring
+  - `_resolve_expr_operand(value, input_payload, user, target, now)` (line 235): no docstring
+  - `_resolve_comparison_expression(op, payload, input_payload, user, target, now)` (line 253): no docstring
+  - `_resolve_function_call(payload, input_payload, user, target, now)` (line 301): no docstring
+  - `_resolve_expression_object(value, input_payload, user, target, now)` (line 334): no docstring
+  - `_resolve_value(value, input_payload, user, target, now, allow_v2)` (line 407): no docstring
+  - `_extract_link_field_names(raw_ops)` (line 464): no docstring
+  - `_compile_link_ops(raw_ops, input_payload, user, target, now, label, allow_v2)` (line 484): no docstring
+  - `_normalize_unset_list(value, label)` (line 528): no docstring
+  - `_validate_expression_object_shape(value, label)` (line 540): no docstring
+  - `_validate_template_value(value, label, allow_v2)` (line 607): no docstring
+  - `_normalize_set_ops(value, label, allow_v2)` (line 631): no docstring
+  - `_is_noop_change_spec(changes)` (line 644): no docstring
+  - `_merge_change_specs(existing, incoming)` (line 655): no docstring
+  - `_validate_implementation(implementation, allowed_types)` (line 680): no docstring
+  - `_validate_template_v1(implementation)` (line 702): no docstring
+  - `validate_template_v1_definition(implementation)` (line 714): Validate that an ActionType.implementation is executable (P0).
+  - `validate_action_implementation_definition(implementation)` (line 724): Validate executable ActionType implementation definitions.
+  - `_validate_targets_definition(impl, allow_v2)` (line 737): no docstring
+  - `_compile_change_shape(impl, input_payload, allow_v2)` (line 783): no docstring
+  - `compile_action_change_shape(implementation, input_payload)` (line 851): Compile any executable implementation type into per-target "change shape".
+  - `compile_template_v1_change_shape(implementation, input_payload)` (line 869): Backward-compatible template_v1-only compiler.
+  - `_compile_concrete_changes(impl, input_payload, user, target_docs, now, allow_v2)` (line 880): no docstring
+  - `compile_action_implementation(implementation, input_payload, user, target_docs, now)` (line 980): Compile any executable action implementation into concrete per-target changes.
+  - `compile_template_v1(implementation, input_payload, user, target_docs, now)` (line 1014): Backward-compatible template_v1-only compiler.
 - **Classes**
   - `ActionImplementationError` (line 17): no docstring
-  - `CompiledTarget` (line 309): no docstring
+  - `CompiledTarget` (line 708): no docstring
 
 ### `backend/shared/utils/action_writeback.py`
 - **Functions**
@@ -9205,26 +9373,28 @@
   - `async _wait_for_action_log(session, db_name, action_log_id, headers, timeout_seconds, poll_interval_seconds)` (line 188): no docstring
   - `_pick_first_lifecycle_id(action_log_payload)` (line 216): no docstring
   - `async _wait_for_es_overlay_doc(es_base_url, index_name, doc_id, timeout_seconds, poll_interval_seconds)` (line 230): no docstring
-  - `async _start_action_worker(env, backend_dir)` (line 266): no docstring
-  - `async _run_subprocess(*args, cwd, env, timeout_seconds)` (line 283): no docstring
-  - `async _docker_container_running(container_name)` (line 307): no docstring
-  - `_smoke_worker_mode()` (line 319): no docstring
-  - `async _ensure_action_worker_docker_running(repo_root, build)` (line 329): Ensure action-worker is running in Docker and return whether the test started it.
-  - `async _docker_container_health(container_name)` (line 357): no docstring
-  - `async _wait_for_container_healthy(container_name, timeout_seconds, poll_interval_seconds)` (line 372): no docstring
-  - `async _ensure_kafka_docker_running(repo_root)` (line 388): Ensure Kafka is running before submitting commands.
-  - `async _stop_action_worker_docker(repo_root)` (line 425): no docstring
-  - `async _stop_process(proc, timeout_seconds)` (line 442): no docstring
-  - `_es_base_url_from_dotenv(env)` (line 460): no docstring
-  - `_action_worker_env_from_dotenv(dotenv)` (line 466): no docstring
-  - `_apply_postgres_env_for_registry(dotenv)` (line 496): no docstring
-  - `_apply_event_store_env(dotenv)` (line 505): no docstring
-  - `_apply_lakefs_env(dotenv)` (line 512): no docstring
-  - `_pick_first_lifecycle_id_any(action_log_payload)` (line 522): no docstring
-  - `async _update_instance_ingest(session, db_name, base_branch, class_id, instance_id, expected_seq, patch, headers)` (line 548): no docstring
-  - `async _assert_action_applied_event_in_event_store(action_applied_event_id)` (line 580): no docstring
-  - `async test_action_writeback_e2e_smoke()` (line 594): no docstring
-  - `async test_action_writeback_e2e_verification_suite()` (line 839): Verification suite for Action writeback behavior (ACTION_WRITEBACK_DESIGN.md):
+  - `async _wait_for_es_overlay_doc_by_action_log(es_base_url, index_name, doc_id, action_log_id, timeout_seconds, poll_interval_seconds)` (line 266): no docstring
+  - `async _start_action_worker(env, backend_dir)` (line 303): no docstring
+  - `async _run_subprocess(*args, cwd, env, timeout_seconds)` (line 320): no docstring
+  - `async _docker_container_running(container_name)` (line 344): no docstring
+  - `_smoke_worker_mode()` (line 356): no docstring
+  - `async _ensure_action_worker_docker_running(repo_root, build)` (line 366): Ensure action-worker is running in Docker and return whether the test started it.
+  - `async _docker_container_health(container_name)` (line 394): no docstring
+  - `async _wait_for_container_healthy(container_name, timeout_seconds, poll_interval_seconds)` (line 409): no docstring
+  - `async _ensure_kafka_docker_running(repo_root)` (line 425): Ensure Kafka is running before submitting commands.
+  - `async _stop_action_worker_docker(repo_root)` (line 462): no docstring
+  - `async _stop_process(proc, timeout_seconds)` (line 479): no docstring
+  - `_es_base_url_from_dotenv(env)` (line 497): no docstring
+  - `_action_worker_env_from_dotenv(dotenv)` (line 503): no docstring
+  - `_apply_postgres_env_for_registry(dotenv)` (line 533): no docstring
+  - `_apply_event_store_env(dotenv)` (line 542): no docstring
+  - `_apply_lakefs_env(dotenv)` (line 549): no docstring
+  - `_pick_first_lifecycle_id_any(action_log_payload)` (line 559): no docstring
+  - `async _update_instance_ingest(session, db_name, base_branch, class_id, instance_id, expected_seq, patch, headers)` (line 585): no docstring
+  - `async _assert_action_applied_event_in_event_store(action_applied_event_id)` (line 617): no docstring
+  - `async test_action_writeback_e2e_smoke()` (line 631): no docstring
+  - `async test_action_writeback_e2e_verification_suite()` (line 876): Verification suite for Action writeback behavior (ACTION_WRITEBACK_DESIGN.md):
+  - `async test_action_batch_dependency_undo_e2e()` (line 1388): End-to-end verification for:
 
 ### `backend/tests/test_auth_hardening_e2e.py`
 - **Functions**
@@ -9613,16 +9783,10 @@
   - `_collect_code_like_literals(backend_dir)` (line 57): no docstring
   - `test_error_taxonomy_covers_all_code_like_literals()` (line 91): no docstring
 
-### `backend/tests/unit/errors/test_legacy_error_code_sync.py`
+### `backend/tests/unit/errors/test_external_error_code_sync.py`
 - **Functions**
-  - `_extract_enum_values(path, class_name)` (line 9): no docstring
-  - `_extract_dict_literal_keys(path, var_name)` (line 29): no docstring
-  - `test_external_error_code_enum_is_registered_in_catalog()` (line 54): no docstring
-
-### `backend/tests/unit/errors/test_no_runtime_legacy_error_code_imports.py`
-- **Functions**
-  - `_iter_python_files(root)` (line 25): no docstring
-  - `test_runtime_modules_do_not_import_legacy_error_codes_directly()` (line 32): no docstring
+  - `_extract_enum_values(path, class_name)` (line 8): no docstring
+  - `test_external_error_code_enum_is_registered_in_catalog()` (line 31): no docstring
 
 ### `backend/tests/unit/errors/test_policy_drift_guards.py`
 - **Functions**
@@ -10057,6 +10221,17 @@
   - `test_span_omits_kind_when_none()` (line 36): no docstring
   - `test_span_passes_kind_when_set()` (line 74): no docstring
 
+### `backend/tests/unit/oms/test_action_async_batch_and_undo.py`
+- **Functions**
+  - `app_with_router()` (line 26): no docstring
+  - `async test_submit_batch_registers_dependencies_and_defers_children(app_with_router, monkeypatch)` (line 46): no docstring
+  - `_source_log(action_log_id, status_value)` (line 116): no docstring
+  - `async test_undo_action_creates_pending_undo_command(app_with_router, monkeypatch)` (line 143): no docstring
+- **Classes**
+  - `_FakeEventStore` (line 17): no docstring
+    - `__init__(self)` (line 18): no docstring
+    - `async append_event(self, event)` (line 21): no docstring
+
 ### `backend/tests/unit/oms/test_action_async_permission_profile_api.py`
 - **Functions**
   - `_build_action_spec()` (line 15): no docstring
@@ -10120,15 +10295,16 @@
   - `async test_search_objects_v2_expired_page_token_returns_foundry_error()` (line 148): no docstring
   - `async test_search_objects_v2_rejects_page_token_scope_mismatch()` (line 164): no docstring
   - `async test_search_objects_v2_accepts_scope_matched_page_token(mock_es)` (line 180): no docstring
-  - `async test_search_objects_v2_accepts_deprecated_startswith_alias(mock_es)` (line 202): no docstring
-  - `async test_search_objects_v2_accepts_contains_any_term_operator(mock_es)` (line 219): no docstring
-  - `async test_search_objects_v2_rejects_non_foundry_in_operator()` (line 243): no docstring
-  - `async test_search_objects_v2_is_null_false_maps_to_exists_clause(mock_es)` (line 257): no docstring
-  - `async test_search_objects_v2_rejects_is_null_with_non_boolean_value()` (line 274): no docstring
-  - `async test_search_objects_v2_accepts_non_deprecated_operator(mock_es)` (line 288): no docstring
-  - `async test_search_objects_v2_rejects_non_foundry_anyterm_alias()` (line 309): no docstring
-  - `async test_search_objects_v2_rejects_excessive_nesting_depth()` (line 324): no docstring
-  - `async test_search_objects_v2_accepts_foundry_branch_rid(mock_es)` (line 356): no docstring
+  - `async test_search_objects_v2_rejects_page_token_when_page_size_changes()` (line 202): no docstring
+  - `async test_search_objects_v2_rejects_deprecated_startswith_alias(mock_es)` (line 228): no docstring
+  - `async test_search_objects_v2_accepts_contains_any_term_operator(mock_es)` (line 244): no docstring
+  - `async test_search_objects_v2_rejects_non_foundry_in_operator()` (line 268): no docstring
+  - `async test_search_objects_v2_is_null_false_maps_to_exists_clause(mock_es)` (line 282): no docstring
+  - `async test_search_objects_v2_rejects_is_null_with_non_boolean_value()` (line 299): no docstring
+  - `async test_search_objects_v2_accepts_non_deprecated_operator(mock_es)` (line 313): no docstring
+  - `async test_search_objects_v2_rejects_non_foundry_anyterm_alias()` (line 334): no docstring
+  - `async test_search_objects_v2_rejects_excessive_nesting_depth()` (line 349): no docstring
+  - `async test_search_objects_v2_accepts_foundry_branch_rid(mock_es)` (line 381): no docstring
 
 ### `backend/tests/unit/oms/test_ontology_extensions_health.py`
 - **Functions**
@@ -11024,18 +11200,19 @@
   - `test_function_requires_expression_and_return_type_ref()` (line 47): no docstring
   - `test_action_type_rejects_unsafe_submission_criteria_expression()` (line 54): no docstring
   - `test_action_type_rejects_invalid_validation_rules()` (line 70): no docstring
-  - `test_link_type_invalid_predicate_is_reported()` (line 86): no docstring
-  - `test_relationship_spec_missing_is_reported()` (line 93): no docstring
-  - `test_relationship_spec_invalid_type_is_reported()` (line 99): no docstring
-  - `test_relationship_spec_object_backed_requires_object_type()` (line 105): no docstring
-  - `test_relationship_spec_join_table_requires_dataset_or_auto_create()` (line 120): no docstring
-  - `async test_link_type_missing_refs_are_reported()` (line 137): no docstring
-  - `test_permission_policy_rejects_legacy_roles_alias()` (line 149): no docstring
-  - `test_permission_policy_rejects_legacy_users_alias()` (line 161): no docstring
-  - `test_permission_policy_rejects_unsupported_legacy_fields()` (line 173): no docstring
-  - `test_action_type_datasource_derived_allows_missing_permission_policy()` (line 186): no docstring
-  - `test_action_type_rejects_invalid_permission_model()` (line 202): no docstring
-  - `test_action_type_rejects_non_boolean_edits_beyond_actions()` (line 218): no docstring
+  - `test_action_type_accepts_template_v2_implementation()` (line 86): no docstring
+  - `test_link_type_invalid_predicate_is_reported()` (line 110): no docstring
+  - `test_relationship_spec_missing_is_reported()` (line 117): no docstring
+  - `test_relationship_spec_invalid_type_is_reported()` (line 123): no docstring
+  - `test_relationship_spec_object_backed_requires_object_type()` (line 129): no docstring
+  - `test_relationship_spec_join_table_requires_dataset_or_auto_create()` (line 144): no docstring
+  - `async test_link_type_missing_refs_are_reported()` (line 161): no docstring
+  - `test_permission_policy_rejects_legacy_roles_alias()` (line 173): no docstring
+  - `test_permission_policy_rejects_legacy_users_alias()` (line 185): no docstring
+  - `test_permission_policy_rejects_unsupported_legacy_fields()` (line 197): no docstring
+  - `test_action_type_datasource_derived_allows_missing_permission_policy()` (line 210): no docstring
+  - `test_action_type_rejects_invalid_permission_model()` (line 226): no docstring
+  - `test_action_type_rejects_non_boolean_edits_beyond_actions()` (line 242): no docstring
 - **Classes**
   - `_FakeResourceService` (line 12): no docstring
     - `__init__(self, existing)` (line 13): no docstring
@@ -11752,10 +11929,13 @@
 
 ### `backend/tests/unit/utils/test_action_template_engine.py`
 - **Functions**
-  - `test_compile_template_v1_change_shape_merges_and_tracks_touched_fields()` (line 12): no docstring
-  - `test_compile_template_v1_resolves_refs_and_now()` (line 47): no docstring
-  - `test_compile_template_v1_rejects_delete_plus_edits_for_same_target()` (line 81): no docstring
-  - `test_compile_template_v1_supports_bulk_targets_from_list()` (line 95): no docstring
+  - `test_compile_template_v1_change_shape_merges_and_tracks_touched_fields()` (line 14): no docstring
+  - `test_compile_template_v1_resolves_refs_and_now()` (line 49): no docstring
+  - `test_compile_template_v1_rejects_delete_plus_edits_for_same_target()` (line 83): no docstring
+  - `test_compile_template_v1_supports_bulk_targets_from_list()` (line 97): no docstring
+  - `test_compile_template_v2_resolves_if_switch_and_calls()` (line 119): no docstring
+  - `test_compile_function_v1_change_shape_and_builtin_math()` (line 160): no docstring
+  - `test_template_v1_rejects_v2_directive()` (line 192): no docstring
 
 ### `backend/tests/unit/utils/test_blank_utils.py`
 - **Functions**
@@ -12018,12 +12198,44 @@
 
 ### `backend/tests/unit/workers/__init__.py`
 
+### `backend/tests/unit/workers/test_action_worker_dependency_triggers.py`
+- **Functions**
+  - `_log(action_log_id, db_name, status, action_type_id)` (line 17): no docstring
+  - `_worker(fake_logs)` (line 84): no docstring
+  - `async test_trigger_dependent_actions_emits_child_command(monkeypatch)` (line 92): no docstring
+  - `async test_trigger_dependent_actions_marks_failed_when_dependency_impossible(monkeypatch)` (line 126): no docstring
+  - `async test_trigger_dependent_actions_waits_until_all_parents_terminal(monkeypatch)` (line 160): no docstring
+- **Classes**
+  - `_FakeActionLogs` (line 48): no docstring
+    - `__init__(self, logs, children_by_parent, dependencies_by_child)` (line 49): no docstring
+    - `async get_log(self, action_log_id)` (line 61): no docstring
+    - `async list_dependent_children(self, parent_action_log_id)` (line 64): no docstring
+    - `async list_dependency_status_for_child(self, child_action_log_id)` (line 67): no docstring
+    - `async mark_failed(self, action_log_id, result, finished_at)` (line 70): no docstring
+  - `_FakeEventStore` (line 75): no docstring
+    - `__init__(self)` (line 76): no docstring
+    - `async append_event(self, envelope)` (line 79): no docstring
+
 ### `backend/tests/unit/workers/test_action_worker_permission_profile.py`
 - **Functions**
   - `_worker_without_init()` (line 10): no docstring
   - `async test_action_worker_enforce_permission_allows_datasource_derived_without_policy(monkeypatch)` (line 16): no docstring
   - `async test_action_worker_enforce_permission_rejects_edits_beyond_actions_without_engineer_role(monkeypatch)` (line 40): no docstring
   - `async test_action_worker_enforce_permission_rejects_invalid_permission_profile(monkeypatch)` (line 64): no docstring
+
+### `backend/tests/unit/workers/test_action_worker_submission_validation_rules.py`
+- **Functions**
+  - `_build_worker()` (line 18): no docstring
+  - `_loaded_target(status)` (line 26): no docstring
+  - `async test_enforce_submission_rules_requires_user_for_submission_criteria()` (line 37): no docstring
+  - `async test_enforce_submission_rules_rejects_false_submission_criteria()` (line 61): no docstring
+  - `async test_enforce_validation_rules_requires_list_type()` (line 86): no docstring
+  - `async test_enforce_each_target_validation_rule_includes_target_context()` (line 110): no docstring
+  - `async test_enforce_submission_and_validation_rules_passes_for_valid_inputs()` (line 145): no docstring
+- **Classes**
+  - `_FakeActionLogs` (line 10): no docstring
+    - `__init__(self)` (line 11): no docstring
+    - `async mark_failed(self, action_log_id, result)` (line 14): no docstring
 
 ### `backend/tests/unit/workers/test_connector_sync_worker.py`
 - **Functions**

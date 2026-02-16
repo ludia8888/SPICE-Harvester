@@ -584,7 +584,7 @@ class DatasetRegistry(PostgresSchemaRegistry):
                         END,
                         ''
                     ),
-                    'legacy-' || version_id::text
+                    'compat-' || version_id::text
                 )
                 WHERE lakefs_commit_id IS NULL OR lakefs_commit_id = ''
                 """

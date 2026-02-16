@@ -36,6 +36,10 @@ from shared.dependencies import (
 
 # Service factory import
 from shared.services.core.service_factory import create_fastapi_service, get_oms_service_info, run_service
+from shared.services.core.service_container_common import (
+    initialize_elasticsearch_service,
+    initialize_rate_limiter_service,
+)
 from oms.middleware.auth import install_oms_auth_middleware, ensure_oms_auth_configured
 
 # OMS specific imports  
@@ -52,9 +56,6 @@ from oms.services.ontology_deploy_outbox import run_ontology_deploy_outbox_worke
 from oms.services.ontology_deployment_registry import OntologyDeploymentRegistry
 from oms.services.ontology_deployment_registry_v2 import OntologyDeploymentRegistryV2
 from oms.database.postgres import db as postgres_db
-
-# Rate limiting middleware
-from shared.middleware.rate_limiter import RateLimiter
 
 # Router imports
 from oms.routers import (
@@ -190,38 +191,15 @@ class OMSServiceContainer:
     
     async def _initialize_elasticsearch(self) -> None:
         """Initialize Elasticsearch service"""
-        try:
-            elasticsearch_service = ElasticsearchService(
-                host=self.settings.database.elasticsearch_host,
-                port=self.settings.database.elasticsearch_port,
-                username=self.settings.database.elasticsearch_username,
-                password=self.settings.database.elasticsearch_password
-            )
-            await elasticsearch_service.connect()
-            
-            self._oms_services['elasticsearch_service'] = elasticsearch_service
-            logger.info("Elasticsearch 연결 성공")
-            
-        except Exception as e:
-            logger.error(f"Elasticsearch 연결 실패: {e}")
-            # Elasticsearch failure is non-fatal - basic functionality can work
-            self._oms_services['elasticsearch_service'] = None
+        await initialize_elasticsearch_service(
+            services=self._oms_services,
+            settings=self.settings,
+            logger=logger,
+        )
     
     async def _initialize_rate_limiter(self) -> None:
         """Initialize rate limiting service"""
-        try:
-            logger.info("Initializing rate limiter...")
-            
-            # Create rate limiter instance
-            rate_limiter = RateLimiter()
-            await rate_limiter.initialize()
-            
-            self._oms_services['rate_limiter'] = rate_limiter
-            logger.info("Rate limiter initialized successfully")
-            
-        except Exception as e:
-            logger.error(f"Failed to initialize rate limiter: {e}")
-            # Continue without rate limiting - service can still work
+        await initialize_rate_limiter_service(services=self._oms_services, logger=logger)
     
     async def shutdown_oms_services(self) -> None:
         """Shutdown OMS-specific services"""

@@ -129,7 +129,7 @@ def test_classified_http_exception_preserves_enterprise_and_external_codes() -> 
 
     assert resp.status_code == 400
     assert payload["code"] == "OBJECTIFY_MAPPING_ERROR"
-    assert payload["enterprise"]["legacy_code"] == "MAPPING_SPEC_SOURCE_MISSING"
+    assert payload["enterprise"]["external_code"] == "MAPPING_SPEC_SOURCE_MISSING"
     assert payload["message"] == "mapping invalid"
     detail = payload["detail"] if isinstance(payload.get("detail"), dict) else {}
     assert detail.get("missing_sources") == ["missing"]

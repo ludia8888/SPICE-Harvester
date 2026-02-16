@@ -146,9 +146,9 @@ def _extract_error_detail(payload: dict[str, Any]) -> dict[str, Any]:
             return context_detail
     enterprise = payload.get("enterprise")
     if isinstance(enterprise, dict):
-        legacy_code = enterprise.get("legacy_code") or enterprise.get("code")
-        if legacy_code:
-            return {"code": legacy_code}
+        external_code = enterprise.get("external_code") or enterprise.get("code")
+        if external_code:
+            return {"code": external_code}
     return {}
 
 

@@ -141,7 +141,6 @@ async def query_builder_info():
             "lte",
             "isNull",
             "contains",
-            "startsWith",
             "containsAnyTerm",
             "containsAllTerms",
             "containsAllTermsInOrder",
@@ -150,15 +149,12 @@ async def query_builder_info():
             "or",
             "not",
         ],
-        "aliases": {
-            "startsWith": "containsAllTermsInOrderPrefixLastTerm",
-        },
-        "notes": [
-            "startsWith is a Foundry-deprecated alias; prefer containsAllTermsInOrderPrefixLastTerm",
-        ],
+        "aliases": {},
+        "notes": [],
         "pagination": {
             "pageSize": "1..1000",
             "pageToken": "opaque token from previous response (expires)",
+            "invariants": "Reuse pageToken only with identical pageSize and request parameters",
         },
         "request_fields": [
             "where",

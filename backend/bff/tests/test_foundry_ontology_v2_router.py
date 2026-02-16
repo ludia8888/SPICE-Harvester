@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 
+import httpx
 import pytest
 from fastapi.responses import JSONResponse
 from starlette.requests import Request
@@ -128,6 +129,75 @@ class _FakeOMSClient:
                     ]
                 }
             }
+        if resource_type == "action_type":
+            return {
+                "data": {
+                    "resources": [
+                        {
+                            "id": "ApproveAccount",
+                            "rid": "ri.action-type.approve-account",
+                            "label": {"en": "Approve Account"},
+                            "spec": {
+                                "status": "ACTIVE",
+                                "target_object_type": "Account",
+                            },
+                        }
+                    ]
+                }
+            }
+        if resource_type == "function":
+            return {
+                "data": {
+                    "resources": [
+                        {
+                            "id": "findAccounts",
+                            "label": {"en": "Find Accounts"},
+                            "spec": {
+                                "status": "ACTIVE",
+                                "version": "1.0.0",
+                                "parameters": {"status": {"type": "string"}},
+                                "output": {"type": "array", "items": {"type": "object"}},
+                            },
+                        }
+                    ]
+                }
+            }
+        if resource_type == "interface":
+            return {
+                "data": {
+                    "resources": [
+                        {
+                            "id": "Auditable",
+                            "label": {"en": "Auditable"},
+                            "spec": {"status": "ACTIVE"},
+                        }
+                    ]
+                }
+            }
+        if resource_type == "shared_property":
+            return {
+                "data": {
+                    "resources": [
+                        {
+                            "id": "TenantScope",
+                            "label": {"en": "Tenant Scope"},
+                            "spec": {"status": "ACTIVE"},
+                        }
+                    ]
+                }
+            }
+        if resource_type == "value_type":
+            return {
+                "data": {
+                    "resources": [
+                        {
+                            "id": "Money",
+                            "label": {"en": "Money"},
+                            "spec": {"status": "ACTIVE"},
+                        }
+                    ]
+                }
+            }
         return {"data": {"resources": []}}
 
     async def get_ontology_resource(
@@ -175,6 +245,52 @@ class _FakeOMSClient:
                         "status": "ACTIVE",
                         "relationship_spec": {"fk_column": "owner_id"},
                     },
+                }
+            }
+        if resource_type == "action_type" and resource_id == "ApproveAccount":
+            return {
+                "data": {
+                    "id": "ApproveAccount",
+                    "rid": "ri.action-type.approve-account",
+                    "label": {"en": "Approve Account"},
+                    "spec": {"status": "ACTIVE", "target_object_type": "Account"},
+                }
+            }
+        if resource_type == "function" and resource_id == "findAccounts":
+            return {
+                "data": {
+                    "id": "findAccounts",
+                    "label": {"en": "Find Accounts"},
+                    "spec": {
+                        "status": "ACTIVE",
+                        "version": "1.0.0",
+                        "parameters": {"status": {"type": "string"}},
+                        "output": {"type": "array", "items": {"type": "object"}},
+                    },
+                }
+            }
+        if resource_type == "interface" and resource_id == "Auditable":
+            return {
+                "data": {
+                    "id": "Auditable",
+                    "label": {"en": "Auditable"},
+                    "spec": {"status": "ACTIVE"},
+                }
+            }
+        if resource_type == "shared_property" and resource_id == "TenantScope":
+            return {
+                "data": {
+                    "id": "TenantScope",
+                    "label": {"en": "Tenant Scope"},
+                    "spec": {"status": "ACTIVE"},
+                }
+            }
+        if resource_type == "value_type" and resource_id == "Money":
+            return {
+                "data": {
+                    "id": "Money",
+                    "label": {"en": "Money"},
+                    "spec": {"status": "ACTIVE"},
                 }
             }
         return {"data": {"id": resource_id, "spec": {"from": "Order", "to": "Product"}}}
@@ -230,6 +346,59 @@ class _MissingObjectTypeOMSClient(_FakeOMSClient):
             resource_type=resource_type,
             resource_id=resource_id,
             branch=branch,
+        )
+
+
+class _MissingSharedPropertyOMSClient(_FakeOMSClient):
+    async def get_ontology_resource(  # noqa: ANN001, ANN003
+        self,
+        db_name,
+        *,
+        resource_type,
+        resource_id,
+        branch="main",
+    ):
+        if resource_type == "shared_property" and resource_id == "MissingShared":
+            _ = db_name, branch
+            return None
+        return await super().get_ontology_resource(
+            db_name,
+            resource_type=resource_type,
+            resource_id=resource_id,
+            branch=branch,
+        )
+
+
+class _ListDatabasesStatusErrorOMSClient(_FakeOMSClient):
+    async def list_databases(self):  # noqa: ANN201
+        request = httpx.Request("GET", "http://oms/api/v1/database/list")
+        response = httpx.Response(
+            status_code=503,
+            request=request,
+            json={"errorCode": "UPSTREAM_UNAVAILABLE"},
+        )
+        raise httpx.HTTPStatusError("Service unavailable", request=request, response=response)
+
+
+class _FullMetadataPartialFailureOMSClient(_FakeOMSClient):
+    async def list_ontology_resources(
+        self,
+        db_name,
+        *,
+        resource_type,
+        branch="main",
+        limit=200,
+        offset=0,
+    ):  # noqa: ANN001, ANN003
+        if resource_type == "action_type":
+            _ = db_name, branch, limit, offset
+            raise httpx.ConnectError("action type registry unavailable")
+        return await super().list_ontology_resources(
+            db_name,
+            resource_type=resource_type,
+            branch=branch,
+            limit=limit,
+            offset=offset,
         )
 
 
@@ -446,6 +615,470 @@ async def test_get_ontology_v2_unknown_returns_ontology_not_found():
 
 
 @pytest.mark.asyncio
+async def test_get_ontology_v2_permission_denied_returns_foundry_403():
+    request = Request({"type": "http", "headers": []})
+    original_enforce = router_v2.enforce_database_role
+
+    async def _deny_permission(*args, **kwargs):  # noqa: ANN002, ANN003
+        _ = args, kwargs
+        raise ValueError("Permission denied")
+
+    router_v2.enforce_database_role = _deny_permission
+    try:
+        response = await router_v2.get_ontology_v2(
+            ontology="test_db",
+            request=request,
+            oms_client=_FakeOMSClient(),
+        )
+    finally:
+        router_v2.enforce_database_role = original_enforce
+
+    assert isinstance(response, JSONResponse)
+    assert response.status_code == 403
+    payload = json.loads(response.body.decode("utf-8"))
+    assert payload["errorCode"] == "PERMISSION_DENIED"
+    assert payload["errorName"] == "PermissionDenied"
+
+
+@pytest.mark.asyncio
+async def test_get_ontology_v2_non_permission_role_error_returns_invalid_argument():
+    request = Request({"type": "http", "headers": []})
+    original_enforce = router_v2.enforce_database_role
+
+    async def _invalid_role(*args, **kwargs):  # noqa: ANN002, ANN003
+        _ = args, kwargs
+        raise ValueError("invalid role policy")
+
+    router_v2.enforce_database_role = _invalid_role
+    try:
+        response = await router_v2.get_ontology_v2(
+            ontology="test_db",
+            request=request,
+            oms_client=_FakeOMSClient(),
+        )
+    finally:
+        router_v2.enforce_database_role = original_enforce
+
+    assert isinstance(response, JSONResponse)
+    assert response.status_code == 400
+    payload = json.loads(response.body.decode("utf-8"))
+    assert payload["errorCode"] == "INVALID_ARGUMENT"
+    assert payload["errorName"] == "InvalidArgument"
+
+
+@pytest.mark.asyncio
+async def test_get_ontology_v2_preflight_upstream_error_returns_upstream_contract():
+    request = Request({"type": "http", "headers": []})
+    response = await router_v2.get_ontology_v2(
+        ontology="test_db",
+        request=request,
+        oms_client=_ListDatabasesStatusErrorOMSClient(),
+    )
+
+    assert isinstance(response, JSONResponse)
+    assert response.status_code == 503
+    payload = json.loads(response.body.decode("utf-8"))
+    assert payload["errorCode"] == "UPSTREAM_ERROR"
+    assert payload["errorName"] == "UpstreamError"
+
+
+@pytest.mark.asyncio
+async def test_get_full_metadata_v2_returns_foundry_full_metadata_shape():
+    request = Request({"type": "http", "headers": []})
+    original_require = router_v2._require_domain_role
+    router_v2._require_domain_role = _noop_require_domain_role
+    try:
+        response = await router_v2.get_full_metadata_v2(
+            ontology="test_db",
+            request=request,
+            preview=True,
+            branch="main",
+            oms_client=_FakeOMSClient(),
+        )
+    finally:
+        router_v2._require_domain_role = original_require
+
+    assert isinstance(response, dict)
+    assert response["ontology"]["apiName"] == "test_db"
+    assert response["branch"]["name"] == "main"
+
+    assert "Account" in response["objectTypes"]
+    assert response["objectTypes"]["Account"]["apiName"] == "Account"
+    assert response["objectTypes"]["Account"]["linkTypes"][0]["apiName"] == "owned_by"
+
+    assert "ApproveAccount" in response["actionTypes"]
+    assert "findAccounts:1.0.0" in response["queryTypes"]
+    assert response["queryTypes"]["findAccounts:1.0.0"]["version"] == "1.0.0"
+    assert "Auditable" in response["interfaceTypes"]
+    assert "TenantScope" in response["sharedPropertyTypes"]
+    assert "Money" in response["valueTypes"]
+
+
+@pytest.mark.asyncio
+async def test_get_full_metadata_v2_requires_preview_true():
+    request = Request({"type": "http", "headers": []})
+    response = await router_v2.get_full_metadata_v2(
+        ontology="test_db",
+        request=request,
+        preview=False,
+        branch="main",
+        oms_client=_FakeOMSClient(),
+    )
+
+    assert isinstance(response, JSONResponse)
+    assert response.status_code == 400
+    payload = json.loads(response.body.decode("utf-8"))
+    assert payload["errorCode"] == "INVALID_ARGUMENT"
+    assert payload["errorName"] == "InvalidArgument"
+    assert payload["parameters"]["message"] == "preview=true is required"
+
+
+@pytest.mark.asyncio
+async def test_get_full_metadata_v2_omits_partial_entities_when_upstream_unavailable():
+    request = Request({"type": "http", "headers": []})
+    original_require = router_v2._require_domain_role
+    router_v2._require_domain_role = _noop_require_domain_role
+    try:
+        response = await router_v2.get_full_metadata_v2(
+            ontology="test_db",
+            request=request,
+            preview=True,
+            branch="main",
+            oms_client=_FullMetadataPartialFailureOMSClient(),
+        )
+    finally:
+        router_v2._require_domain_role = original_require
+
+    assert isinstance(response, dict)
+    assert "Account" in response["objectTypes"]
+    assert response["actionTypes"] == {}
+    assert "findAccounts:1.0.0" in response["queryTypes"]
+
+
+@pytest.mark.asyncio
+async def test_list_action_types_v2_returns_foundry_raw_shape():
+    request = Request({"type": "http", "headers": []})
+    original_require = router_v2._require_domain_role
+    router_v2._require_domain_role = _noop_require_domain_role
+    try:
+        response = await router_v2.list_action_types_v2(
+            ontology="test_db",
+            request=request,
+            page_size=10,
+            page_token=None,
+            branch="main",
+            oms_client=_FakeOMSClient(),
+        )
+    finally:
+        router_v2._require_domain_role = original_require
+
+    assert isinstance(response, dict)
+    assert response["data"][0]["apiName"] == "ApproveAccount"
+    assert response["data"][0]["displayName"] == "Approve Account"
+    assert "nextPageToken" in response
+
+
+@pytest.mark.asyncio
+async def test_get_action_type_v2_returns_foundry_raw_shape():
+    request = Request({"type": "http", "headers": []})
+    original_require = router_v2._require_domain_role
+    router_v2._require_domain_role = _noop_require_domain_role
+    try:
+        response = await router_v2.get_action_type_v2(
+            ontology="test_db",
+            actionType="ApproveAccount",
+            request=request,
+            branch="main",
+            oms_client=_FakeOMSClient(),
+        )
+    finally:
+        router_v2._require_domain_role = original_require
+
+    assert isinstance(response, dict)
+    assert response["apiName"] == "ApproveAccount"
+    assert response["displayName"] == "Approve Account"
+
+
+@pytest.mark.asyncio
+async def test_get_action_type_by_rid_v2_returns_foundry_raw_shape():
+    request = Request({"type": "http", "headers": []})
+    original_require = router_v2._require_domain_role
+    router_v2._require_domain_role = _noop_require_domain_role
+    try:
+        response = await router_v2.get_action_type_by_rid_v2(
+            ontology="test_db",
+            actionTypeRid="ri.action-type.approve-account",
+            request=request,
+            branch="main",
+            oms_client=_FakeOMSClient(),
+        )
+    finally:
+        router_v2._require_domain_role = original_require
+
+    assert isinstance(response, dict)
+    assert response["apiName"] == "ApproveAccount"
+    assert response["displayName"] == "Approve Account"
+
+
+@pytest.mark.asyncio
+async def test_list_query_types_v2_returns_foundry_raw_shape():
+    request = Request({"type": "http", "headers": []})
+    original_require = router_v2._require_domain_role
+    router_v2._require_domain_role = _noop_require_domain_role
+    try:
+        response = await router_v2.list_query_types_v2(
+            ontology="test_db",
+            request=request,
+            page_size=10,
+            page_token=None,
+            oms_client=_FakeOMSClient(),
+        )
+    finally:
+        router_v2._require_domain_role = original_require
+
+    assert isinstance(response, dict)
+    assert response["data"][0]["apiName"] == "findAccounts"
+    assert response["data"][0]["displayName"] == "Find Accounts"
+    assert response["data"][0]["version"] == "1.0.0"
+
+
+@pytest.mark.asyncio
+async def test_get_query_type_v2_returns_foundry_raw_shape():
+    request = Request({"type": "http", "headers": []})
+    original_require = router_v2._require_domain_role
+    router_v2._require_domain_role = _noop_require_domain_role
+    try:
+        response = await router_v2.get_query_type_v2(
+            ontology="test_db",
+            queryApiName="findAccounts",
+            request=request,
+            version="1.0.0",
+            oms_client=_FakeOMSClient(),
+        )
+    finally:
+        router_v2._require_domain_role = original_require
+
+    assert isinstance(response, dict)
+    assert response["apiName"] == "findAccounts"
+    assert response["displayName"] == "Find Accounts"
+    assert response["version"] == "1.0.0"
+
+
+@pytest.mark.asyncio
+async def test_get_query_type_v2_mismatched_version_returns_not_found():
+    request = Request({"type": "http", "headers": []})
+    original_require = router_v2._require_domain_role
+    router_v2._require_domain_role = _noop_require_domain_role
+    try:
+        response = await router_v2.get_query_type_v2(
+            ontology="test_db",
+            queryApiName="findAccounts",
+            request=request,
+            version="9.9.9",
+            oms_client=_FakeOMSClient(),
+        )
+    finally:
+        router_v2._require_domain_role = original_require
+
+    assert isinstance(response, JSONResponse)
+    assert response.status_code == 404
+    payload = json.loads(response.body.decode("utf-8"))
+    assert payload["errorCode"] == "NOT_FOUND"
+    assert payload["errorName"] == "QueryTypeNotFound"
+
+
+@pytest.mark.asyncio
+async def test_list_interface_types_v2_requires_preview_true():
+    request = Request({"type": "http", "headers": []})
+    response = await router_v2.list_interface_types_v2(
+        ontology="test_db",
+        request=request,
+        preview=False,
+        page_size=10,
+        page_token=None,
+        branch="main",
+        oms_client=_FakeOMSClient(),
+    )
+
+    assert isinstance(response, JSONResponse)
+    assert response.status_code == 400
+    payload = json.loads(response.body.decode("utf-8"))
+    assert payload["errorCode"] == "INVALID_ARGUMENT"
+    assert payload["parameters"]["message"] == "preview=true is required"
+
+
+@pytest.mark.asyncio
+async def test_list_interface_types_v2_returns_foundry_raw_shape_with_preview():
+    request = Request({"type": "http", "headers": []})
+    original_require = router_v2._require_domain_role
+    router_v2._require_domain_role = _noop_require_domain_role
+    try:
+        response = await router_v2.list_interface_types_v2(
+            ontology="test_db",
+            request=request,
+            preview=True,
+            page_size=10,
+            page_token=None,
+            branch="main",
+            oms_client=_FakeOMSClient(),
+        )
+    finally:
+        router_v2._require_domain_role = original_require
+
+    assert isinstance(response, dict)
+    assert response["data"][0]["apiName"] == "Auditable"
+    assert response["data"][0]["displayName"] == "Auditable"
+
+
+@pytest.mark.asyncio
+async def test_list_shared_property_types_v2_requires_preview_true():
+    request = Request({"type": "http", "headers": []})
+    response = await router_v2.list_shared_property_types_v2(
+        ontology="test_db",
+        request=request,
+        preview=False,
+        page_size=10,
+        page_token=None,
+        branch="main",
+        oms_client=_FakeOMSClient(),
+    )
+
+    assert isinstance(response, JSONResponse)
+    assert response.status_code == 400
+    payload = json.loads(response.body.decode("utf-8"))
+    assert payload["errorCode"] == "INVALID_ARGUMENT"
+    assert payload["parameters"]["message"] == "preview=true is required"
+
+
+@pytest.mark.asyncio
+async def test_list_shared_property_types_v2_returns_foundry_raw_shape_with_preview():
+    request = Request({"type": "http", "headers": []})
+    original_require = router_v2._require_domain_role
+    router_v2._require_domain_role = _noop_require_domain_role
+    try:
+        response = await router_v2.list_shared_property_types_v2(
+            ontology="test_db",
+            request=request,
+            preview=True,
+            page_size=10,
+            page_token=None,
+            branch="main",
+            oms_client=_FakeOMSClient(),
+        )
+    finally:
+        router_v2._require_domain_role = original_require
+
+    assert isinstance(response, dict)
+    assert response["data"][0]["apiName"] == "TenantScope"
+    assert response["data"][0]["displayName"] == "Tenant Scope"
+    assert "nextPageToken" in response
+
+
+@pytest.mark.asyncio
+async def test_get_shared_property_type_v2_returns_foundry_raw_shape_with_preview():
+    request = Request({"type": "http", "headers": []})
+    original_require = router_v2._require_domain_role
+    router_v2._require_domain_role = _noop_require_domain_role
+    try:
+        response = await router_v2.get_shared_property_type_v2(
+            ontology="test_db",
+            sharedPropertyType="TenantScope",
+            request=request,
+            preview=True,
+            branch="main",
+            oms_client=_FakeOMSClient(),
+        )
+    finally:
+        router_v2._require_domain_role = original_require
+
+    assert isinstance(response, dict)
+    assert response["apiName"] == "TenantScope"
+    assert response["displayName"] == "Tenant Scope"
+
+
+@pytest.mark.asyncio
+async def test_get_shared_property_type_v2_missing_returns_not_found():
+    request = Request({"type": "http", "headers": []})
+    original_require = router_v2._require_domain_role
+    router_v2._require_domain_role = _noop_require_domain_role
+    try:
+        response = await router_v2.get_shared_property_type_v2(
+            ontology="test_db",
+            sharedPropertyType="MissingShared",
+            request=request,
+            preview=True,
+            branch="main",
+            oms_client=_MissingSharedPropertyOMSClient(),
+        )
+    finally:
+        router_v2._require_domain_role = original_require
+
+    assert isinstance(response, JSONResponse)
+    assert response.status_code == 404
+    payload = json.loads(response.body.decode("utf-8"))
+    assert payload["errorCode"] == "NOT_FOUND"
+    assert payload["errorName"] == "SharedPropertyTypeNotFound"
+
+
+@pytest.mark.asyncio
+async def test_list_value_types_v2_requires_preview_true():
+    request = Request({"type": "http", "headers": []})
+    response = await router_v2.list_value_types_v2(
+        ontology="test_db",
+        request=request,
+        preview=False,
+        oms_client=_FakeOMSClient(),
+    )
+
+    assert isinstance(response, JSONResponse)
+    assert response.status_code == 400
+    payload = json.loads(response.body.decode("utf-8"))
+    assert payload["errorCode"] == "INVALID_ARGUMENT"
+    assert payload["parameters"]["message"] == "preview=true is required"
+
+
+@pytest.mark.asyncio
+async def test_get_value_type_v2_returns_foundry_raw_shape_with_preview():
+    request = Request({"type": "http", "headers": []})
+    original_require = router_v2._require_domain_role
+    router_v2._require_domain_role = _noop_require_domain_role
+    try:
+        response = await router_v2.get_value_type_v2(
+            ontology="test_db",
+            valueType="Money",
+            request=request,
+            preview=True,
+            oms_client=_FakeOMSClient(),
+        )
+    finally:
+        router_v2._require_domain_role = original_require
+
+    assert isinstance(response, dict)
+    assert response["apiName"] == "Money"
+    assert response["displayName"] == "Money"
+
+
+@pytest.mark.asyncio
+async def test_list_value_types_v2_returns_foundry_raw_shape_without_pagination_token():
+    request = Request({"type": "http", "headers": []})
+    original_require = router_v2._require_domain_role
+    router_v2._require_domain_role = _noop_require_domain_role
+    try:
+        response = await router_v2.list_value_types_v2(
+            ontology="test_db",
+            request=request,
+            preview=True,
+            oms_client=_FakeOMSClient(),
+        )
+    finally:
+        router_v2._require_domain_role = original_require
+
+    assert isinstance(response, dict)
+    assert response["data"][0]["apiName"] == "Money"
+    assert "nextPageToken" not in response
+
+
+@pytest.mark.asyncio
 async def test_get_object_type_v2_returns_foundry_raw_shape():
     request = Request({"type": "http", "headers": []})
     original_require = router_v2._require_domain_role
@@ -546,6 +1179,40 @@ async def test_list_outgoing_link_types_v2_filters_before_pagination():
     assert first.get("nextPageToken")
     assert [row["apiName"] for row in second["data"]] == ["rel_504"]
     assert second.get("nextPageToken") is None
+
+
+@pytest.mark.asyncio
+async def test_list_outgoing_link_types_v2_rejects_page_token_when_page_size_changes():
+    request = Request({"type": "http", "headers": []})
+    original_require = router_v2._require_domain_role
+    client = _PagedLinkTypesOMSClient()
+    router_v2._require_domain_role = _noop_require_domain_role
+    try:
+        first = await router_v2.list_outgoing_link_types_v2(
+            ontology="test_db",
+            objectType="Account",
+            request=request,
+            page_size=1,
+            page_token=None,
+            branch="main",
+            oms_client=client,
+        )
+        second = await router_v2.list_outgoing_link_types_v2(
+            ontology="test_db",
+            objectType="Account",
+            request=request,
+            page_size=2,
+            page_token=first.get("nextPageToken"),
+            branch="main",
+            oms_client=client,
+        )
+    finally:
+        router_v2._require_domain_role = original_require
+
+    assert isinstance(second, JSONResponse)
+    assert second.status_code == 400
+    payload = json.loads(second.body.decode("utf-8"))
+    assert payload["errorCode"] == "INVALID_ARGUMENT"
 
 
 @pytest.mark.asyncio
@@ -808,6 +1475,52 @@ async def test_list_linked_objects_v2_paginates_after_dedup_link_filter():
 
 
 @pytest.mark.asyncio
+async def test_list_linked_objects_v2_rejects_page_token_when_page_size_changes():
+    request = Request({"type": "http", "headers": []})
+    original_require = router_v2._require_domain_role
+    fake = _LinkedPaginationOMSClient()
+    router_v2._require_domain_role = _noop_require_domain_role
+    try:
+        first = await router_v2.list_linked_objects_v2(
+            ontology="test_db",
+            objectType="Account",
+            primaryKey="acc-1",
+            linkType="owned_by",
+            request=request,
+            page_size=2,
+            page_token=None,
+            select=None,
+            order_by=None,
+            exclude_rid=None,
+            snapshot=None,
+            branch="main",
+            oms_client=fake,
+        )
+        second = await router_v2.list_linked_objects_v2(
+            ontology="test_db",
+            objectType="Account",
+            primaryKey="acc-1",
+            linkType="owned_by",
+            request=request,
+            page_size=3,
+            page_token=first.get("nextPageToken"),
+            select=None,
+            order_by=None,
+            exclude_rid=None,
+            snapshot=None,
+            branch="main",
+            oms_client=fake,
+        )
+    finally:
+        router_v2._require_domain_role = original_require
+
+    assert isinstance(second, JSONResponse)
+    assert second.status_code == 400
+    payload = json.loads(second.body.decode("utf-8"))
+    assert payload["errorCode"] == "INVALID_ARGUMENT"
+
+
+@pytest.mark.asyncio
 async def test_list_linked_objects_v2_missing_link_type_returns_link_type_not_found():
     request = Request({"type": "http", "headers": []})
     original_require = router_v2._require_domain_role
@@ -1013,4 +1726,35 @@ async def test_list_object_types_v2_rejects_page_token_scope_mismatch():
     assert isinstance(response, JSONResponse)
     assert response.status_code == 400
     payload = json.loads(response.body.decode("utf-8"))
+    assert payload["errorCode"] == "INVALID_ARGUMENT"
+
+
+@pytest.mark.asyncio
+async def test_list_object_types_v2_rejects_page_token_when_page_size_changes():
+    request = Request({"type": "http", "headers": []})
+    original_require = router_v2._require_domain_role
+    router_v2._require_domain_role = _noop_require_domain_role
+    try:
+        first = await router_v2.list_object_types_v2(
+            ontology="test_db",
+            request=request,
+            page_size=1,
+            page_token=None,
+            branch="main",
+            oms_client=_FakeOMSClient(),
+        )
+        second = await router_v2.list_object_types_v2(
+            ontology="test_db",
+            request=request,
+            page_size=2,
+            page_token=first.get("nextPageToken"),
+            branch="main",
+            oms_client=_FakeOMSClient(),
+        )
+    finally:
+        router_v2._require_domain_role = original_require
+
+    assert isinstance(second, JSONResponse)
+    assert second.status_code == 400
+    payload = json.loads(second.body.decode("utf-8"))
     assert payload["errorCode"] == "INVALID_ARGUMENT"

@@ -16,6 +16,7 @@ import logging
 from collections import Counter
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
+from uuid import UUID
 
 from shared.services.kafka.producer_factory import create_kafka_dlq_producer
 from shared.services.kafka.producer_ops import close_kafka_producer
@@ -27,6 +28,7 @@ from shared.errors.enterprise_catalog import is_external_code, resolve_enterpris
 from shared.errors.error_types import ErrorCode
 from shared.models.event_envelope import EventEnvelope
 from shared.models.events import ActionAppliedEvent
+from shared.models.commands import ActionCommand
 from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
 from shared.security.database_access import DATA_ENGINEER_ROLES, DOMAIN_MODEL_ROLES, get_database_access_role
@@ -35,7 +37,7 @@ from shared.services.kafka.retry_classifier import (
     ACTION_COMMAND_RETRY_PROFILE,
     classify_retryable_with_profile,
 )
-from shared.services.registries.action_log_registry import ActionLogRegistry, ActionLogStatus
+from shared.services.registries.action_log_registry import ActionLogRecord, ActionLogRegistry, ActionLogStatus
 from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.services.storage.event_store import event_store
 from shared.services.storage.lakefs_client import LakeFSClient, LakeFSConflictError, LakeFSError
@@ -85,8 +87,8 @@ from shared.utils.writeback_conflicts import (
 )
 from shared.utils.action_template_engine import (
     ActionImplementationError,
-    compile_template_v1,
-    compile_template_v1_change_shape,
+    compile_action_change_shape,
+    compile_action_implementation,
 )
 from shared.utils.safe_bool_expression import BoolExpressionError, safe_eval_bool_expression
 from shared.utils.submission_criteria_diagnostics import infer_submission_criteria_failure_reason
@@ -322,7 +324,20 @@ class ActionWorker(StrictHeartbeatKafkaWorker[_ActionCommandPayload, None]):
                 envelope=envelope,
             )
         except _ActionRejected:
-            return
+            pass
+        finally:
+            try:
+                await self._trigger_dependent_actions(
+                    db_name=db_name,
+                    parent_action_log_id=action_log_id,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Failed to evaluate dependent actions for parent=%s: %s",
+                    action_log_id,
+                    exc,
+                    exc_info=True,
+                )
 
     def _span_name(self, *, payload: _ActionCommandPayload) -> str:  # type: ignore[override]
         return "action_worker.process_message"
@@ -771,6 +786,26 @@ class ActionWorker(StrictHeartbeatKafkaWorker[_ActionCommandPayload, None]):
             )
             raise _ActionRejected("submitted_by_required")
 
+        command_metadata = command.get("metadata") if isinstance(command.get("metadata"), dict) else {}
+        if bool(command_metadata.get("direct_undo")):
+            writeback_target = log_rec.writeback_target or {
+                "repo": AppConfig.ONTOLOGY_WRITEBACK_REPO,
+                "branch": AppConfig.get_ontology_writeback_branch(db_name),
+            }
+            repo = str(writeback_target.get("repo") or "").strip()
+            branch = str(writeback_target.get("branch") or "").strip()
+            if not repo or not branch:
+                raise RuntimeError("writeback_target.repo and writeback_target.branch are required")
+            await self._execute_direct_undo(
+                db_name=db_name,
+                action_log_id=action_log_id,
+                command=command,
+                log_rec=log_rec,
+                repo=repo,
+                branch=branch,
+            )
+            return
+
         # Load action definition at the deployed commit.
         action_type_id = log_rec.action_type_id
         ontology_commit_id = log_rec.ontology_commit_id or safe_str(command.get("ontology_commit_id"))
@@ -811,35 +846,6 @@ class ActionWorker(StrictHeartbeatKafkaWorker[_ActionCommandPayload, None]):
                 },
             )
             raise _ActionRejected("action_permission_profile_invalid") from exc
-        audit_policy = spec.get("audit_policy")
-
-        def _audit_result(payload: Dict[str, Any]) -> Dict[str, Any]:
-            enriched = dict(payload or {})
-            error_key = str(enriched.get("error") or "").strip()
-            if error_key and "enterprise" not in enriched:
-                enterprise = None
-                if is_external_code(error_key):
-                    enterprise = resolve_enterprise_error(
-                        service_name="action-worker",
-                        code=None,
-                        category=None,
-                        status_code=400,
-                        external_code=error_key,
-                    ).to_dict()
-                else:
-                    try:
-                        enterprise = resolve_enterprise_error(
-                            service_name="action-worker",
-                            code=ErrorCode(error_key),
-                            category=None,
-                            status_code=400,
-                            external_code=None,
-                        ).to_dict()
-                    except Exception as exc:
-                        logger.warning("Failed to resolve enterprise error for key=%s: %s", error_key, exc, exc_info=True)
-                if enterprise is not None:
-                    enriched["enterprise"] = enterprise
-            return audit_action_log_result(enriched, audit_policy=audit_policy)
 
         writeback_target = log_rec.writeback_target or {
             "repo": AppConfig.ONTOLOGY_WRITEBACK_REPO,
@@ -850,749 +856,27 @@ class ActionWorker(StrictHeartbeatKafkaWorker[_ActionCommandPayload, None]):
         if not repo or not branch:
             raise RuntimeError("writeback_target.repo and writeback_target.branch are required")
 
+        audit_policy = spec.get("audit_policy")
         patchset_commit_id = log_rec.writeback_commit_id
         if log_rec.status == ActionLogStatus.PENDING.value:
-            try:
-                # Compute patchset from intent-only input.
-                raw_payload = command.get("payload") if isinstance(command, dict) else None
-                if not isinstance(raw_payload, dict):
-                    raw_payload = dict(log_rec.input or {})
-                input_payload = dict(raw_payload or {})
-                try:
-                    input_payload = validate_action_input(input_schema=spec.get("input_schema"), payload=input_payload)
-                except ActionInputValidationError as exc:
-                    await self.action_logs.mark_failed(
-                        action_log_id=action_log_id,
-                        result=_audit_result(
-                            {
-                            "error": "action_input_invalid",
-                            "message": str(exc),
-                            }
-                        ),
-                    )
-                    raise _ActionRejected("action_input_invalid") from exc
-                except ActionInputSchemaError as exc:
-                    await self.action_logs.mark_failed(
-                        action_log_id=action_log_id,
-                        result=_audit_result(
-                            {
-                            "error": "action_type_input_schema_invalid",
-                            "message": str(exc),
-                            }
-                        ),
-                    )
-                    raise _ActionRejected("action_type_input_schema_invalid") from exc
-
-                implementation = spec.get("implementation")
-                try:
-                    compiled_shape = compile_template_v1_change_shape(
-                        implementation,
-                        input_payload=input_payload,
-                    )
-                except ActionImplementationError as exc:
-                    await self.action_logs.mark_failed(
-                        action_log_id=action_log_id,
-                        result=_audit_result(
-                            {
-                            "error": "action_implementation_invalid",
-                            "message": str(exc),
-                            }
-                        ),
-                    )
-                    raise _ActionRejected("action_implementation_invalid") from exc
-
-                if not compiled_shape:
-                    await self.action_logs.mark_failed(
-                        action_log_id=action_log_id,
-                        result=_audit_result(
-                            {
-                            "error": "action_no_targets",
-                            "message": "template_v1 resolved to zero targets",
-                            }
-                        ),
-                    )
-                    raise _ActionRejected("action_no_targets")
-                base_branch = safe_str(command.get("base_branch") or "main") or "main"
-
-                governance_error = await self._check_writeback_dataset_acl_alignment(
-                    db_name=db_name,
-                    submitted_by=submitted_by,
-                    submitted_by_type=submitted_by_type,
-                    actor_role=actor_role,
-                    ontology_commit_id=ontology_commit_id,
-                    resources=resources,
-                    class_ids={t.class_id for t in compiled_shape if t.class_id},
-                )
-                if governance_error:
-                    await self.action_logs.mark_failed(action_log_id=action_log_id, result=_audit_result(governance_error))
-                    raise _ActionRejected("writeback_governance_rejected")
-
-                submission_snapshot = log_rec.metadata.get("__writeback_submission")
-                submission_targets: Dict[Tuple[str, str, str], Dict[str, Any]] = {}
-                if isinstance(submission_snapshot, dict):
-                    for item in submission_snapshot.get("targets") or []:
-                        if not isinstance(item, dict):
-                            continue
-                        sid_class = safe_str(item.get("class_id"))
-                        sid_instance = safe_str(item.get("instance_id"))
-                        sid_lifecycle = safe_str(item.get("lifecycle_id") or "lc-0") or "lc-0"
-                        if not sid_class or not sid_instance:
-                            continue
-                        submission_targets[(sid_class, sid_instance, sid_lifecycle)] = item
-
-                action_conflict_policy = parse_conflict_policy(spec.get("conflict_policy"))
-                get_object_type_meta = build_object_type_meta_resolver(
-                    resources=resources,
-                    db_name=db_name,
-                    branch=ontology_commit_id,
-                )
-                required_interfaces = set(extract_required_action_interfaces(spec))
-                class_interface_refs: Dict[str, List[str]] = {}
-                class_field_types: Dict[str, Dict[str, str]] = {}
-
-                async def _ensure_class_contract(class_id: str) -> None:
-                    if class_id in class_interface_refs:
-                        return
-                    contract = await load_action_target_runtime_contract(
-                        db_name=db_name,
-                        class_id=class_id,
-                        branch=ontology_commit_id,
-                        resources=resources,
-                    )
-                    if contract is None:
-                        raise RuntimeError(f"Target class not found at ontology commit (class_id={class_id})")
-                    class_interface_refs[class_id] = contract.interfaces
-                    class_field_types[class_id] = contract.field_types
-
-                def _is_public_identifier(value: Any) -> bool:
-                    text = str(value or "").strip()
-                    return bool(text) and text.isidentifier() and not text.startswith("_")
-
-                loaded_targets: List[Dict[str, Any]] = []
-                target_docs: Dict[Tuple[str, str], Dict[str, Any]] = {}
-                for item in compiled_shape:
-                    class_id = safe_str(item.class_id)
-                    instance_id = safe_str(item.instance_id)
-                    if not class_id or not instance_id:
-                        raise ValueError("each compiled target requires class_id and instance_id")
-                    await _ensure_class_contract(class_id)
-
-                    prefix = f"{db_name}/{base_branch}/{class_id}/{instance_id}/"
-                    command_files = await self.base_storage.list_command_files(
-                        bucket=AppConfig.INSTANCE_BUCKET,
-                        prefix=prefix,
-                    )
-                    base_state = await self.base_storage.replay_instance_state(
-                        bucket=AppConfig.INSTANCE_BUCKET,
-                        command_files=command_files,
-                    )
-                    if not base_state:
-                        raise RuntimeError(f"Base instance state not found (prefix={prefix})")
-
-                    target_docs[(class_id, instance_id)] = base_state
-
-                user_ctx: Dict[str, Any] = {"id": submitted_by, "role": actor_role, "is_system": submitted_by == "system"}
-                try:
-                    compiled_targets = compile_template_v1(
-                        implementation,
-                        input_payload=input_payload,
-                        user=user_ctx,
-                        target_docs=target_docs,
-                        now=utcnow(),
-                    )
-                except ActionImplementationError as exc:
-                    await self.action_logs.mark_failed(
-                        action_log_id=action_log_id,
-                        result=_audit_result(
-                            {
-                            "error": "action_implementation_compile_error",
-                            "message": str(exc),
-                            }
-                        ),
-                    )
-                    raise _ActionRejected("action_implementation_compile_error") from exc
-
-                changes_by_key: Dict[Tuple[str, str], Dict[str, Any]] = {
-                    (t.class_id, t.instance_id): dict(t.changes or {}) for t in compiled_targets
-                }
-
-                for item in compiled_shape:
-                    class_id = safe_str(item.class_id)
-                    instance_id = safe_str(item.instance_id)
-                    base_state = target_docs.get((class_id, instance_id))
-                    if not isinstance(base_state, dict) or not base_state:
-                        raise RuntimeError("base_state missing for compiled target")
-                    changes = changes_by_key.get((class_id, instance_id))
-                    if not isinstance(changes, dict):
-                        raise RuntimeError("compiled changes missing for target")
-
-                    lifecycle_id = derive_lifecycle_id(base_state)
-                    obj_meta = await get_object_type_meta(class_id)
-                    object_type_rid = format_resource_rid(
-                        resource_type="object_type",
-                        resource_id=class_id,
-                        rev=obj_meta.get("rev") if isinstance(obj_meta, dict) else None,
-                    )
-
-                    submission_key = (class_id, instance_id, lifecycle_id)
-                    submission_item = submission_targets.get(submission_key)
-                    observed_base = None
-                    base_token = None
-                    if isinstance(submission_item, dict):
-                        candidate_observed = submission_item.get("observed_base")
-                        candidate_token = submission_item.get("base_token")
-                        if isinstance(candidate_observed, dict):
-                            observed_base = candidate_observed
-                        if isinstance(candidate_token, dict):
-                            base_token = candidate_token
-
-                    if not isinstance(observed_base, dict):
-                        observed_base = compute_observed_base(base=base_state, changes=changes)
-                    if not isinstance(base_token, dict):
-                        base_token = compute_base_token(
-                            db_name=db_name,
-                            class_id=class_id,
-                            instance_id=instance_id,
-                            lifecycle_id=lifecycle_id,
-                            base_doc=base_state,
-                            object_type_version_id=object_type_rid,
-                        )
-                    else:
-                        base_token["object_type_version_id"] = object_type_rid
-
-                    loaded_targets.append(
-                        {
-                            "resource_rid": object_type_rid,
-                            "class_id": class_id,
-                            "instance_id": instance_id,
-                            "lifecycle_id": lifecycle_id,
-                            "base_state": base_state,
-                            "changes": changes,
-                            "field_types": class_field_types.get(class_id, {}),
-                            "observed_base": observed_base,
-                            "base_token": base_token,
-                        }
-                    )
-
-                if required_interfaces:
-                    for tgt in loaded_targets:
-                        class_id = safe_str(tgt.get("class_id"))
-                        implemented = set(class_interface_refs.get(class_id, []))
-                        missing = sorted(required_interfaces - implemented)
-                        if missing:
-                            await self.action_logs.mark_failed(
-                                action_log_id=action_log_id,
-                                result=_audit_result(
-                                    {
-                                        "error": "action_interface_not_implemented",
-                                        "message": "Action target class does not satisfy required interfaces",
-                                        "class_id": class_id,
-                                        "required_interfaces": sorted(required_interfaces),
-                                        "implemented_interfaces": sorted(implemented),
-                                        "missing_interfaces": missing,
-                                    }
-                                ),
-                            )
-                            raise _ActionRejected("action_interface_not_implemented")
-
-                enforce_data_access = requires_action_data_access_enforcement(
-                    profile=permission_profile,
-                    global_enforcement=AppConfig.WRITEBACK_ENFORCE_ACTION_DATA_ACCESS,
-                )
-                principal_tags = None
-                if submitted_by and submitted_by != "system":
-                    principal_tags = build_principal_tags(
-                        principal_type=submitted_by_type,
-                        principal_id=submitted_by,
-                        role=actor_role,
-                    )
-                enforce_edit_access = bool(principal_tags)
-                if enforce_data_access or enforce_edit_access:
-                    if self.dataset_registry is None:
-                        self.dataset_registry = DatasetRegistry()
-                        await self.dataset_registry.connect()
-                    if not self.dataset_registry:
-                        error_key = "data_access_unverifiable" if enforce_data_access else "edit_access_unverifiable"
-                        await self.action_logs.mark_failed(
-                            action_log_id=action_log_id,
-                            result=_audit_result(
-                                {
-                                    "error": error_key,
-                                    "message": "DatasetRegistry not initialized for action target access checks",
-                                }
-                            ),
-                        )
-                        raise _ActionRejected(error_key)
-
-                    access_report = await evaluate_action_target_data_access(
-                        dataset_registry=self.dataset_registry,
-                        db_name=db_name,
-                        targets=loaded_targets,
-                        enforce_data_access_policy=enforce_data_access,
-                        principal_tags=principal_tags,
-                        enforce_object_edit_policy=enforce_edit_access,
-                        enforce_attachment_edit_policy=enforce_edit_access,
-                        enforce_object_set_edit_policy=enforce_edit_access,
-                    )
-                    if enforce_data_access and access_report.unverifiable:
-                        await self.action_logs.mark_failed(
-                            action_log_id=action_log_id,
-                            result=_audit_result(
-                                {
-                                "error": "data_access_unverifiable",
-                                "message": "Unable to verify one or more target rows under data_access policy",
-                                "unverifiable": access_report.unverifiable,
-                                }
-                            ),
-                        )
-                        raise _ActionRejected("data_access_unverifiable")
-                    if enforce_data_access and access_report.denied:
-                        await self.action_logs.mark_failed(
-                            action_log_id=action_log_id,
-                            result=_audit_result(
-                                {
-                                "error": "data_access_denied",
-                                "message": "Actor cannot access one or more target rows under data_access policy",
-                                "denied": access_report.denied,
-                                }
-                            ),
-                        )
-                        raise _ActionRejected("data_access_denied")
-                    if enforce_edit_access and access_report.edit_unverifiable:
-                        await self.action_logs.mark_failed(
-                            action_log_id=action_log_id,
-                            result=_audit_result(
-                                {
-                                    "error": "edit_access_unverifiable",
-                                    "message": "Unable to verify one or more target edit permissions",
-                                    "unverifiable": access_report.edit_unverifiable,
-                                }
-                            ),
-                        )
-                        raise _ActionRejected("edit_access_unverifiable")
-                    if enforce_edit_access and access_report.edit_denied:
-                        await self.action_logs.mark_failed(
-                            action_log_id=action_log_id,
-                            result=_audit_result(
-                                {
-                                    "error": "edit_access_denied",
-                                    "message": "Actor cannot edit one or more target object types/fields",
-                                    "denied": access_report.edit_denied,
-                                }
-                            ),
-                        )
-                        raise _ActionRejected("edit_access_denied")
-
-                submission_criteria = str(spec.get("submission_criteria") or "").strip()
-                if submission_criteria:
-                    if not submitted_by:
-                        await self.action_logs.mark_failed(
-                            action_log_id=action_log_id,
-                            result=_audit_result(
-                                {
-                                "error": "submission_criteria_missing_user",
-                                "message": "submitted_by is required to evaluate submission_criteria",
-                                "submission_criteria": submission_criteria,
-                                "targets": [
-                                    {
-                                        "class_id": t.get("class_id"),
-                                        "instance_id": t.get("instance_id"),
-                                        "lifecycle_id": t.get("lifecycle_id"),
-                                    }
-                                    for t in loaded_targets
-                                ],
-                                }
-                            ),
-                        )
-                        raise _ActionRejected("submission_criteria_missing_user")
-
-                    target_docs = [t.get("base_state") for t in loaded_targets]
-                    target_meta = [
-                        {
-                            "class_id": t.get("class_id"),
-                            "instance_id": t.get("instance_id"),
-                            "lifecycle_id": t.get("lifecycle_id"),
-                        }
-                        for t in loaded_targets
-                    ]
-                    criteria_vars: Dict[str, Any] = {
-                        "user": {"id": submitted_by, "role": actor_role, "is_system": submitted_by == "system"},
-                        "input": input_payload,
-                        "targets": target_docs,
-                        "target": target_docs[0] if len(target_docs) == 1 else None,
-                        "db_name": db_name,
-                        "base_branch": base_branch,
-                        "targets_meta": target_meta,
-                    }
-
-                    for key, value in input_payload.items():
-                        if not _is_public_identifier(key) or key in criteria_vars:
-                            continue
-                        if isinstance(value, dict):
-                            ref_class = safe_str(value.get("class_id"))
-                            ref_instance = safe_str(value.get("instance_id"))
-                            if ref_class and ref_instance:
-                                match = next(
-                                    (
-                                        t.get("base_state")
-                                        for t in loaded_targets
-                                        if t.get("class_id") == ref_class and t.get("instance_id") == ref_instance
-                                    ),
-                                    None,
-                                )
-                                if match is not None:
-                                    criteria_vars[key] = match
-                                    continue
-                        criteria_vars[key] = value
-
-                    counts = Counter(
-                        [
-                            str(t.get("class_id") or "").strip().lower()
-                            for t in loaded_targets
-                            if str(t.get("class_id") or "").strip()
-                        ]
-                    )
-                    for t in loaded_targets:
-                        class_id = str(t.get("class_id") or "").strip()
-                        class_var = class_id.lower()
-                        if not class_id or not _is_public_identifier(class_var) or class_var in criteria_vars:
-                            continue
-                        if counts.get(class_var) == 1:
-                            criteria_vars[class_var] = t.get("base_state")
-
-                    try:
-                        criteria_ok = safe_eval_bool_expression(submission_criteria, variables=criteria_vars)
-                    except BoolExpressionError as exc:
-                        await self.action_logs.mark_failed(
-                            action_log_id=action_log_id,
-                            result=_audit_result(
-                                {
-                                "error": "submission_criteria_error",
-                                "message": str(exc),
-                                "submission_criteria": submission_criteria,
-                                "targets": target_meta,
-                                }
-                            ),
-                        )
-                        raise _ActionRejected("submission_criteria_error") from exc
-
-                    if not criteria_ok:
-                        failure_info = infer_submission_criteria_failure_reason(submission_criteria)
-                        await self.action_logs.mark_failed(
-                            action_log_id=action_log_id,
-                            result=_audit_result(
-                                {
-                                "error": "submission_criteria_failed",
-                                "message": "submission_criteria evaluated to false",
-                                "reason": failure_info.get("reason"),
-                                "reasons": failure_info.get("reasons"),
-                                "criteria_identifiers": failure_info.get("identifiers"),
-                                "actor_role": actor_role,
-                                "submission_criteria": submission_criteria,
-                                "targets": target_meta,
-                                }
-                            ),
-                        )
-                        raise _ActionRejected("submission_criteria_failed")
-
-                validation_rules = spec.get("validation_rules")
-                if validation_rules is not None and not isinstance(validation_rules, list):
-                    await self.action_logs.mark_failed(
-                        action_log_id=action_log_id,
-                        result=_audit_result(
-                            {
-                                "error": "validation_rules_invalid",
-                                "message": "validation_rules must be a list",
-                            }
-                        ),
-                    )
-                    raise _ActionRejected("validation_rules_invalid")
-
-                if isinstance(validation_rules, list) and validation_rules:
-                    target_docs = [t.get("base_state") for t in loaded_targets]
-                    target_meta = [
-                        {
-                            "class_id": t.get("class_id"),
-                            "instance_id": t.get("instance_id"),
-                            "lifecycle_id": t.get("lifecycle_id"),
-                        }
-                        for t in loaded_targets
-                    ]
-                    base_vars: Dict[str, Any] = {
-                        "user": {"id": submitted_by, "role": actor_role, "is_system": submitted_by == "system"},
-                        "input": input_payload,
-                        "targets": target_docs,
-                        "target": target_docs[0] if len(target_docs) == 1 else None,
-                        "db_name": db_name,
-                        "base_branch": base_branch,
-                        "targets_meta": target_meta,
-                    }
-
-                    for rule_idx, rule in enumerate(validation_rules):
-                        if not isinstance(rule, dict):
-                            await self.action_logs.mark_failed(
-                                action_log_id=action_log_id,
-                                result=_audit_result(
-                                    {
-                                        "error": "validation_rule_invalid",
-                                        "message": "validation_rules entries must be objects",
-                                        "rule_index": rule_idx,
-                                    }
-                                ),
-                            )
-                            raise _ActionRejected("validation_rule_invalid")
-
-                        rule_type = str(rule.get("type") or "").strip().lower()
-                        if rule_type != "assert":
-                            await self.action_logs.mark_failed(
-                                action_log_id=action_log_id,
-                                result=_audit_result(
-                                    {
-                                        "error": "validation_rule_invalid",
-                                        "message": "only validation_rules.type=assert is supported in P0",
-                                        "rule_index": rule_idx,
-                                    }
-                                ),
-                            )
-                            raise _ActionRejected("validation_rule_invalid")
-
-                        scope = str(rule.get("scope") or "each_target").strip().lower()
-                        expr = str(rule.get("expr") or rule.get("expression") or "").strip()
-                        msg = str(rule.get("message") or "").strip() or None
-                        if not expr:
-                            await self.action_logs.mark_failed(
-                                action_log_id=action_log_id,
-                                result=_audit_result(
-                                    {
-                                        "error": "validation_rule_invalid",
-                                        "message": "validation_rules.assert requires expr",
-                                        "rule_index": rule_idx,
-                                    }
-                                ),
-                            )
-                            raise _ActionRejected("validation_rule_invalid")
-
-                        if scope == "action":
-                            try:
-                                ok = safe_eval_bool_expression(expr, variables=base_vars)
-                            except BoolExpressionError as exc:
-                                await self.action_logs.mark_failed(
-                                    action_log_id=action_log_id,
-                                    result=_audit_result(
-                                        {
-                                            "error": "validation_rule_error",
-                                            "message": str(exc),
-                                            "rule_index": rule_idx,
-                                            "scope": scope,
-                                            "expr": expr,
-                                        }
-                                    ),
-                                )
-                                raise _ActionRejected("validation_rule_error") from exc
-                            if not ok:
-                                await self.action_logs.mark_failed(
-                                    action_log_id=action_log_id,
-                                    result=_audit_result(
-                                        {
-                                            "error": "validation_rule_failed",
-                                            "message": msg or "validation rule evaluated to false",
-                                            "rule_index": rule_idx,
-                                            "scope": scope,
-                                            "expr": expr,
-                                        }
-                                    ),
-                                )
-                                raise _ActionRejected("validation_rule_failed")
-                            continue
-
-                        if scope == "each_target":
-                            for target_idx, target_doc in enumerate(target_docs):
-                                each_vars = dict(base_vars)
-                                each_vars["target"] = target_doc
-                                try:
-                                    ok = safe_eval_bool_expression(expr, variables=each_vars)
-                                except BoolExpressionError as exc:
-                                    await self.action_logs.mark_failed(
-                                        action_log_id=action_log_id,
-                                        result=_audit_result(
-                                            {
-                                                "error": "validation_rule_error",
-                                                "message": str(exc),
-                                                "rule_index": rule_idx,
-                                                "scope": scope,
-                                                "expr": expr,
-                                                "target": target_meta[target_idx] if target_idx < len(target_meta) else None,
-                                            }
-                                        ),
-                                    )
-                                    raise _ActionRejected("validation_rule_error") from exc
-                                if not ok:
-                                    await self.action_logs.mark_failed(
-                                        action_log_id=action_log_id,
-                                        result=_audit_result(
-                                            {
-                                                "error": "validation_rule_failed",
-                                                "message": msg or "validation rule evaluated to false",
-                                                "rule_index": rule_idx,
-                                                "scope": scope,
-                                                "expr": expr,
-                                                "target": target_meta[target_idx] if target_idx < len(target_meta) else None,
-                                            }
-                                        ),
-                                    )
-                                    raise _ActionRejected("validation_rule_failed")
-                            continue
-
-                        await self.action_logs.mark_failed(
-                            action_log_id=action_log_id,
-                            result=_audit_result(
-                                {
-                                    "error": "validation_rule_invalid",
-                                    "message": "validation_rules.assert scope must be action or each_target",
-                                    "rule_index": rule_idx,
-                                    "scope": scope,
-                                }
-                            ),
-                        )
-                        raise _ActionRejected("validation_rule_invalid")
-
-                targets: List[Dict[str, Any]] = []
-                conflicts: List[Dict[str, Any]] = []
-                policies_used: set[str] = set()
-                for loaded in loaded_targets:
-                    class_id = safe_str(loaded.get("class_id"))
-                    instance_id = safe_str(loaded.get("instance_id"))
-                    lifecycle_id = safe_str(loaded.get("lifecycle_id") or "lc-0") or "lc-0"
-                    resource_rid = safe_str(loaded.get("resource_rid")) or f"object_type:{class_id}@1"
-                    base_state = loaded.get("base_state") if isinstance(loaded.get("base_state"), dict) else None
-                    changes = loaded.get("changes") if isinstance(loaded.get("changes"), dict) else None
-                    observed_base = loaded.get("observed_base") if isinstance(loaded.get("observed_base"), dict) else None
-                    base_token = loaded.get("base_token") if isinstance(loaded.get("base_token"), dict) else None
-
-                    if not class_id or not instance_id or not base_state or not changes or not observed_base or not base_token:
-                        raise RuntimeError("target state missing after load")
-
-                    conflict_fields = detect_overlap_fields(observed_base=observed_base, current_base=base_state)
-                    conflict_links = detect_overlap_links(
-                        observed_base=observed_base,
-                        current_base=base_state,
-                        changes=changes,
-                    )
-
-                    obj_meta = await get_object_type_meta(class_id)
-                    conflict_policy = action_conflict_policy or (
-                        obj_meta.get("conflict_policy") if isinstance(obj_meta, dict) else None
-                    ) or "FAIL"
-                    policies_used.add(conflict_policy)
-                    applied_changes, resolution = resolve_applied_changes(
-                        conflict_policy=conflict_policy,
-                        changes=changes,
-                        conflict_fields=conflict_fields,
-                        conflict_links=conflict_links,
-                    )
-                    has_conflict = bool(conflict_fields) or bool(conflict_links)
-
-                    if has_conflict:
-                        conflicts.append(
-                            {
-                                "class_id": class_id,
-                                "instance_id": instance_id,
-                                "lifecycle_id": lifecycle_id,
-                                "fields": conflict_fields,
-                                "links": conflict_links,
-                                "policy": conflict_policy,
-                                "resolution": resolution,
-                            }
-                        )
-
-                    targets.append(
-                        {
-                            "resource_rid": resource_rid,
-                            "instance_id": instance_id,
-                            "lifecycle_id": lifecycle_id,
-                            "base_token": base_token,
-                            "observed_base": observed_base,
-                            "changes": changes,
-                            "applied_changes": applied_changes,
-                            "conflict": {
-                                "status": "OVERLAP" if has_conflict else "NONE",
-                                "fields": conflict_fields,
-                                "links": conflict_links,
-                                "policy": conflict_policy,
-                                "resolution": resolution,
-                            },
-                        }
-                    )
-
-                should_reject = any(str(c.get("resolution") or "").strip().upper() == "REJECTED" for c in conflicts)
-                if should_reject:
-                    await self.action_logs.mark_failed(
-                        action_log_id=action_log_id,
-                        result=_audit_result(
-                            {
-                                "error": "conflict_detected",
-                                "conflict_policy": action_conflict_policy,
-                                "conflict_policies_used": sorted(policies_used),
-                                "conflicts": conflicts,
-                                "attempted_changes": targets,
-                            }
-                        ),
-                    )
-                    raise _ActionRejected("conflict_detected")
-
-                patchset = {
-                    "action_log_id": action_log_id,
-                    "action_type_rid": action_type_rid,
-                    "ontology_commit_id": ontology_commit_id,
-                    "targets": targets,
-                    "metadata": {
-                        "submitted_by": log_rec.submitted_by,
-                        "submitted_at": (log_rec.submitted_at or utcnow()).isoformat(),
-                        "correlation_id": log_rec.correlation_id,
-                        "conflict_policy": action_conflict_policy,
-                        "conflict_policies_used": sorted(policies_used),
-                    },
-                }
-                metadata_doc = {
-                    "action_log_id": action_log_id,
-                    "db_name": db_name,
-                    "action_type_id": action_type_id,
-                    "ontology_commit_id": ontology_commit_id,
-                    "created_at": utcnow().isoformat(),
-                    "patchset_sha256": sha256_canonical_json_prefixed(patchset),
-                }
-
-                patchset_commit_id = await self._write_patchset_commit(
-                    repository=repo,
-                    branch=branch,
-                    action_log_id=action_log_id,
-                    patchset=patchset,
-                    metadata_doc=metadata_doc,
-                )
-                await self.action_logs.mark_commit_written(
-                    action_log_id=action_log_id,
-                    writeback_commit_id=patchset_commit_id,
-                    result=_audit_result(
-                        {
-                            "attempted_changes": patchset.get("targets", []),
-                            "applied_changes": [
-                                t for t in patchset.get("targets", [])
-                                if isinstance(t, dict) and not is_noop_changes(t.get("applied_changes", t.get("changes")))
-                            ],
-                            "conflict_policy": action_conflict_policy,
-                            "conflict_policies_used": sorted(policies_used),
-                            "conflicts": conflicts,
-                        }
-                    ),
-                )
-            except _ActionRejected:
-                raise
-            except Exception as exc:
-                await self.action_logs.mark_failed(
-                    action_log_id=action_log_id,
-                    result=_audit_result({"error": str(exc)}),
-                )
-                raise
+            patchset_commit_id = await self._execute_action_pending(
+                db_name=db_name,
+                action_log_id=action_log_id,
+                command=command,
+                log_rec=log_rec,
+                spec=spec,
+                resources=resources,
+                action_type_id=action_type_id,
+                action_type_rid=action_type_rid,
+                ontology_commit_id=ontology_commit_id,
+                submitted_by=submitted_by,
+                submitted_by_type=submitted_by_type,
+                actor_role=actor_role,
+                permission_profile=permission_profile,
+                audit_policy=audit_policy,
+                repo=repo,
+                branch=branch,
+            )
 
         if not patchset_commit_id:
             # COMMIT_WRITTEN should always have it.
@@ -1601,51 +885,15 @@ class ActionWorker(StrictHeartbeatKafkaWorker[_ActionCommandPayload, None]):
         if not patchset_commit_id:
             raise RuntimeError("writeback_commit_id missing after commit")
 
-        # Emit ActionApplied if needed.
-        log_rec = await self.action_logs.get_log(action_log_id=action_log_id)
-        if not log_rec:
-            raise RuntimeError("ActionLog missing after commit")
-
-        if log_rec.action_applied_event_id:
-            action_applied_seq = log_rec.action_applied_seq
-            action_applied_event_id = log_rec.action_applied_event_id
-        else:
-            overlay_branch = safe_str(command.get("overlay_branch") or branch) or branch
-            evt = ActionAppliedEvent(
-                event_id=generate_action_applied_event_id(action_log_id),
-                db_name=db_name,
-                action_log_id=action_log_id,
-                patchset_commit_id=patchset_commit_id,
-                writeback_target=writeback_target,
-                overlay_branch=overlay_branch,
-                data={
-                    "db_name": db_name,
-                    "action_log_id": action_log_id,
-                    "patchset_commit_id": patchset_commit_id,
-                    "writeback_target": writeback_target,
-                    "overlay_branch": overlay_branch,
-                },
-                metadata={
-                    "correlation_id": log_rec.correlation_id,
-                    "ontology": {"ref": f"branch:{safe_str(command.get('base_branch') or 'main')}", "commit": ontology_commit_id},
-                },
-                occurred_at=utcnow(),
-                occurred_by=log_rec.submitted_by,
-            )
-            action_env = EventEnvelope.from_base_event(
-                evt,
-                kafka_topic=AppConfig.ACTION_EVENTS_TOPIC,
-                metadata={"service": "action_worker", "mode": "action_writeback"},
-            )
-            await event_store.append_event(action_env)
-            action_applied_seq = action_env.sequence_number
-            action_applied_event_id = str(action_env.event_id)
-
-            await self.action_logs.mark_event_emitted(
-                action_log_id=action_log_id,
-                action_applied_event_id=action_applied_event_id,
-                action_applied_seq=action_applied_seq,
-            )
+        action_applied_seq, action_applied_event_id = await self._emit_action_applied_if_needed(
+            db_name=db_name,
+            action_log_id=action_log_id,
+            command=command,
+            writeback_target=writeback_target,
+            patchset_commit_id=patchset_commit_id,
+            ontology_commit_id=ontology_commit_id,
+            branch=branch,
+        )
 
         # Append per-object queue entries (best-effort; idempotent by key).
         if action_applied_seq is not None:
@@ -1657,16 +905,1699 @@ class ActionWorker(StrictHeartbeatKafkaWorker[_ActionCommandPayload, None]):
                 action_applied_seq=int(action_applied_seq),
             )
 
+        await self._mark_action_succeeded(
+            action_log_id=action_log_id,
+            audit_policy=audit_policy,
+            patchset_commit_id=patchset_commit_id,
+            action_applied_event_id=action_applied_event_id,
+            action_applied_seq=action_applied_seq,
+        )
+
+    def _audit_result(self, *, audit_policy: Any, payload: Dict[str, Any]) -> Dict[str, Any]:
+        enriched = dict(payload or {})
+        error_key = str(enriched.get("error") or "").strip()
+        if error_key and "enterprise" not in enriched:
+            enterprise = None
+            if is_external_code(error_key):
+                enterprise = resolve_enterprise_error(
+                    service_name="action-worker",
+                    code=None,
+                    category=None,
+                    status_code=400,
+                    external_code=error_key,
+                ).to_dict()
+            else:
+                try:
+                    enterprise = resolve_enterprise_error(
+                        service_name="action-worker",
+                        code=ErrorCode(error_key),
+                        category=None,
+                        status_code=400,
+                        external_code=None,
+                    ).to_dict()
+                except Exception as exc:
+                    logger.warning("Failed to resolve enterprise error for key=%s: %s", error_key, exc, exc_info=True)
+            if enterprise is not None:
+                enriched["enterprise"] = enterprise
+        return audit_action_log_result(enriched, audit_policy=audit_policy)
+
+    async def _execute_direct_undo(
+        self,
+        *,
+        db_name: str,
+        action_log_id: str,
+        command: Dict[str, Any],
+        log_rec: ActionLogRecord,
+        repo: str,
+        branch: str,
+    ) -> None:
+        payload = command.get("payload") if isinstance(command.get("payload"), dict) else {}
+        if not isinstance(payload, dict):
+            payload = {}
+        targets_raw = payload.get("targets")
+        if not isinstance(targets_raw, list) or not targets_raw:
+            await self.action_logs.mark_failed(
+                action_log_id=action_log_id,
+                result=self._audit_result(
+                    audit_policy=None,
+                    payload={
+                        "error": "undo_targets_missing",
+                        "message": "direct undo payload requires targets[]",
+                    },
+                ),
+            )
+            raise _ActionRejected("undo_targets_missing")
+
+        base_branch = safe_str(command.get("base_branch") or "main") or "main"
+        patch_targets: List[Dict[str, Any]] = []
+        for idx, raw_target in enumerate(targets_raw):
+            if not isinstance(raw_target, dict):
+                await self.action_logs.mark_failed(
+                    action_log_id=action_log_id,
+                    result=self._audit_result(
+                        audit_policy=None,
+                        payload={
+                            "error": "undo_target_invalid",
+                            "message": f"targets[{idx}] must be an object",
+                        },
+                    ),
+                )
+                raise _ActionRejected("undo_target_invalid")
+
+            class_id = safe_str(raw_target.get("class_id"))
+            instance_id = safe_str(raw_target.get("instance_id"))
+            changes = raw_target.get("changes") if isinstance(raw_target.get("changes"), dict) else {}
+            if not class_id or not instance_id or not isinstance(changes, dict):
+                await self.action_logs.mark_failed(
+                    action_log_id=action_log_id,
+                    result=self._audit_result(
+                        audit_policy=None,
+                        payload={
+                            "error": "undo_target_invalid",
+                            "message": f"targets[{idx}] requires class_id, instance_id, and changes",
+                        },
+                    ),
+                )
+                raise _ActionRejected("undo_target_invalid")
+
+            prefix = f"{db_name}/{base_branch}/{class_id}/{instance_id}/"
+            command_files = await self.base_storage.list_command_files(
+                bucket=AppConfig.INSTANCE_BUCKET,
+                prefix=prefix,
+            )
+            base_state = await self.base_storage.replay_instance_state(
+                bucket=AppConfig.INSTANCE_BUCKET,
+                command_files=command_files,
+            )
+            if not isinstance(base_state, dict):
+                base_state = {}
+            lifecycle_id = derive_lifecycle_id(base_state)
+            object_type_rid = format_resource_rid(
+                resource_type="object_type",
+                resource_id=class_id,
+                rev=None,
+            )
+            observed_base = compute_observed_base(base=base_state, changes=changes)
+            base_token = compute_base_token(
+                db_name=db_name,
+                class_id=class_id,
+                instance_id=instance_id,
+                lifecycle_id=lifecycle_id,
+                base_doc=base_state,
+                object_type_version_id=object_type_rid,
+            )
+            patch_targets.append(
+                {
+                    "resource_rid": object_type_rid,
+                    "instance_id": instance_id,
+                    "lifecycle_id": lifecycle_id,
+                    "base_token": base_token,
+                    "observed_base": observed_base,
+                    "changes": changes,
+                    "applied_changes": changes,
+                    "conflict": {
+                        "status": "NONE",
+                        "fields": [],
+                        "links": [],
+                        "policy": "WRITEBACK_WINS",
+                        "resolution": "APPLIED",
+                    },
+                }
+            )
+
+        metadata_doc = {
+            "action_log_id": action_log_id,
+            "db_name": db_name,
+            "action_type_id": log_rec.action_type_id,
+            "ontology_commit_id": log_rec.ontology_commit_id,
+            "created_at": utcnow().isoformat(),
+            "patchset_sha256": sha256_canonical_json_prefixed({"targets": patch_targets}),
+            "undo_of_action_log_id": command.get("payload", {}).get("source_action_log_id"),
+        }
+        patchset = {
+            "action_log_id": action_log_id,
+            "action_type_rid": log_rec.action_type_rid,
+            "ontology_commit_id": log_rec.ontology_commit_id,
+            "targets": patch_targets,
+            "metadata": {
+                "submitted_by": log_rec.submitted_by,
+                "submitted_at": utcnow().isoformat(),
+                "correlation_id": log_rec.correlation_id,
+                "direct_undo": True,
+                "undo_of_action_log_id": command.get("payload", {}).get("source_action_log_id"),
+            },
+        }
+
+        patchset_commit_id = await self._write_patchset_commit(
+            repository=repo,
+            branch=branch,
+            action_log_id=action_log_id,
+            patchset=patchset,
+            metadata_doc=metadata_doc,
+        )
+        await self.action_logs.mark_commit_written(
+            action_log_id=action_log_id,
+            writeback_commit_id=patchset_commit_id,
+            result=self._audit_result(
+                audit_policy=None,
+                payload={
+                    "attempted_changes": patch_targets,
+                    "applied_changes": patch_targets,
+                    "direct_undo": True,
+                },
+            ),
+        )
+
+        action_applied_seq, action_applied_event_id = await self._emit_action_applied_if_needed(
+            db_name=db_name,
+            action_log_id=action_log_id,
+            command=command,
+            writeback_target={"repo": repo, "branch": branch},
+            patchset_commit_id=patchset_commit_id,
+            ontology_commit_id=safe_str(log_rec.ontology_commit_id),
+            branch=branch,
+        )
+        if action_applied_seq is not None:
+            await self._append_queue_entries(
+                repository=repo,
+                branch=branch,
+                patchset_commit_id=patchset_commit_id,
+                action_log_id=action_log_id,
+                action_applied_seq=int(action_applied_seq),
+            )
+        await self._mark_action_succeeded(
+            action_log_id=action_log_id,
+            audit_policy=None,
+            patchset_commit_id=patchset_commit_id,
+            action_applied_event_id=action_applied_event_id,
+            action_applied_seq=action_applied_seq,
+        )
+
+    async def _prepare_pending_input(
+        self,
+        *,
+        action_log_id: str,
+        command: Dict[str, Any],
+        log_rec: ActionLogRecord,
+        spec: Dict[str, Any],
+        audit_policy: Any,
+    ) -> tuple[Dict[str, Any], Any, List[Any], str]:
+        # Compute patchset from intent-only input.
+        raw_payload = command.get("payload") if isinstance(command, dict) else None
+        if not isinstance(raw_payload, dict):
+            raw_payload = dict(log_rec.input or {})
+        input_payload = dict(raw_payload or {})
+        try:
+            input_payload = validate_action_input(input_schema=spec.get("input_schema"), payload=input_payload)
+        except ActionInputValidationError as exc:
+            await self.action_logs.mark_failed(
+                action_log_id=action_log_id,
+                result=self._audit_result(
+                    audit_policy=audit_policy,
+                    payload={
+                        "error": "action_input_invalid",
+                        "message": str(exc),
+                    },
+                ),
+            )
+            raise _ActionRejected("action_input_invalid") from exc
+        except ActionInputSchemaError as exc:
+            await self.action_logs.mark_failed(
+                action_log_id=action_log_id,
+                result=self._audit_result(
+                    audit_policy=audit_policy,
+                    payload={
+                        "error": "action_type_input_schema_invalid",
+                        "message": str(exc),
+                    },
+                ),
+            )
+            raise _ActionRejected("action_type_input_schema_invalid") from exc
+
+        implementation = spec.get("implementation")
+        try:
+            compiled_shape = compile_action_change_shape(
+                implementation,
+                input_payload=input_payload,
+            )
+        except ActionImplementationError as exc:
+            await self.action_logs.mark_failed(
+                action_log_id=action_log_id,
+                result=self._audit_result(
+                    audit_policy=audit_policy,
+                    payload={
+                        "error": "action_implementation_invalid",
+                        "message": str(exc),
+                    },
+                ),
+            )
+            raise _ActionRejected("action_implementation_invalid") from exc
+
+        if not compiled_shape:
+            await self.action_logs.mark_failed(
+                action_log_id=action_log_id,
+                result=self._audit_result(
+                    audit_policy=audit_policy,
+                    payload={
+                        "error": "action_no_targets",
+                        "message": "implementation resolved to zero targets",
+                    },
+                ),
+            )
+            raise _ActionRejected("action_no_targets")
+
+        base_branch = safe_str(command.get("base_branch") or "main") or "main"
+        return input_payload, implementation, compiled_shape, base_branch
+
+    @staticmethod
+    def _is_public_identifier(value: Any) -> bool:
+        text = str(value or "").strip()
+        return bool(text) and text.isidentifier() and not text.startswith("_")
+
+    async def _execute_action_pending(
+        self,
+        *,
+        db_name: str,
+        action_log_id: str,
+        command: Dict[str, Any],
+        log_rec: ActionLogRecord,
+        spec: Dict[str, Any],
+        resources: OntologyResourceService,
+        action_type_id: str,
+        action_type_rid: str,
+        ontology_commit_id: str,
+        submitted_by: str,
+        submitted_by_type: str,
+        actor_role: Optional[str],
+        permission_profile: ActionPermissionProfile,
+        audit_policy: Any,
+        repo: str,
+        branch: str,
+    ) -> str:
+        try:
+            input_payload, implementation, compiled_shape, base_branch = await self._prepare_pending_input(
+                action_log_id=action_log_id,
+                command=command,
+                log_rec=log_rec,
+                spec=spec,
+                audit_policy=audit_policy,
+            )
+
+            governance_error = await self._check_writeback_dataset_acl_alignment(
+                db_name=db_name,
+                submitted_by=submitted_by,
+                submitted_by_type=submitted_by_type,
+                actor_role=actor_role,
+                ontology_commit_id=ontology_commit_id,
+                resources=resources,
+                class_ids={t.class_id for t in compiled_shape if t.class_id},
+            )
+            if governance_error:
+                await self.action_logs.mark_failed(
+                    action_log_id=action_log_id,
+                    result=self._audit_result(audit_policy=audit_policy, payload=governance_error),
+                )
+                raise _ActionRejected("writeback_governance_rejected")
+
+            action_conflict_policy = parse_conflict_policy(spec.get("conflict_policy"))
+            get_object_type_meta = build_object_type_meta_resolver(
+                resources=resources,
+                db_name=db_name,
+                branch=ontology_commit_id,
+            )
+            submission_targets = self._extract_submission_targets(log_rec=log_rec)
+            loaded_targets = await self._build_pending_loaded_targets(
+                db_name=db_name,
+                action_log_id=action_log_id,
+                audit_policy=audit_policy,
+                resources=resources,
+                ontology_commit_id=ontology_commit_id,
+                spec=spec,
+                compiled_shape=compiled_shape,
+                implementation=implementation,
+                input_payload=input_payload,
+                submitted_by=submitted_by,
+                actor_role=actor_role,
+                base_branch=base_branch,
+                get_object_type_meta=get_object_type_meta,
+                submission_targets=submission_targets,
+            )
+            await self._enforce_pending_target_access(
+                db_name=db_name,
+                action_log_id=action_log_id,
+                audit_policy=audit_policy,
+                permission_profile=permission_profile,
+                submitted_by=submitted_by,
+                submitted_by_type=submitted_by_type,
+                actor_role=actor_role,
+                loaded_targets=loaded_targets,
+            )
+
+            await self._enforce_submission_and_validation_rules(
+                action_log_id=action_log_id,
+                audit_policy=audit_policy,
+                spec=spec,
+                submitted_by=submitted_by,
+                actor_role=actor_role,
+                input_payload=input_payload,
+                loaded_targets=loaded_targets,
+                db_name=db_name,
+                base_branch=base_branch,
+            )
+
+            return await self._build_and_commit_pending_patchset(
+                db_name=db_name,
+                action_log_id=action_log_id,
+                action_type_id=action_type_id,
+                action_type_rid=action_type_rid,
+                ontology_commit_id=ontology_commit_id,
+                action_conflict_policy=action_conflict_policy,
+                get_object_type_meta=get_object_type_meta,
+                loaded_targets=loaded_targets,
+                log_rec=log_rec,
+                audit_policy=audit_policy,
+                repo=repo,
+                branch=branch,
+            )
+        except _ActionRejected:
+            raise
+        except Exception as exc:
+            await self.action_logs.mark_failed(
+                action_log_id=action_log_id,
+                result=self._audit_result(audit_policy=audit_policy, payload={"error": str(exc)}),
+            )
+            raise
+
+    def _extract_submission_targets(self, *, log_rec: ActionLogRecord) -> Dict[Tuple[str, str, str], Dict[str, Any]]:
+        submission_snapshot = log_rec.metadata.get("__writeback_submission")
+        submission_targets: Dict[Tuple[str, str, str], Dict[str, Any]] = {}
+        if isinstance(submission_snapshot, dict):
+            for item in submission_snapshot.get("targets") or []:
+                if not isinstance(item, dict):
+                    continue
+                sid_class = safe_str(item.get("class_id"))
+                sid_instance = safe_str(item.get("instance_id"))
+                sid_lifecycle = safe_str(item.get("lifecycle_id") or "lc-0") or "lc-0"
+                if not sid_class or not sid_instance:
+                    continue
+                submission_targets[(sid_class, sid_instance, sid_lifecycle)] = item
+        return submission_targets
+
+    async def _build_pending_loaded_targets(
+        self,
+        *,
+        db_name: str,
+        action_log_id: str,
+        audit_policy: Any,
+        resources: OntologyResourceService,
+        ontology_commit_id: str,
+        spec: Dict[str, Any],
+        compiled_shape: List[Any],
+        implementation: Any,
+        input_payload: Dict[str, Any],
+        submitted_by: str,
+        actor_role: Optional[str],
+        base_branch: str,
+        get_object_type_meta: Any,
+        submission_targets: Dict[Tuple[str, str, str], Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        required_interfaces = set(extract_required_action_interfaces(spec))
+        class_interface_refs: Dict[str, List[str]] = {}
+        class_field_types: Dict[str, Dict[str, str]] = {}
+
+        async def _ensure_class_contract(class_id: str) -> None:
+            if class_id in class_interface_refs:
+                return
+            contract = await load_action_target_runtime_contract(
+                db_name=db_name,
+                class_id=class_id,
+                branch=ontology_commit_id,
+                resources=resources,
+            )
+            if contract is None:
+                raise RuntimeError(f"Target class not found at ontology commit (class_id={class_id})")
+            class_interface_refs[class_id] = contract.interfaces
+            class_field_types[class_id] = contract.field_types
+
+        loaded_targets: List[Dict[str, Any]] = []
+        target_docs: Dict[Tuple[str, str], Dict[str, Any]] = {}
+        for item in compiled_shape:
+            class_id = safe_str(item.class_id)
+            instance_id = safe_str(item.instance_id)
+            if not class_id or not instance_id:
+                raise ValueError("each compiled target requires class_id and instance_id")
+            await _ensure_class_contract(class_id)
+
+            prefix = f"{db_name}/{base_branch}/{class_id}/{instance_id}/"
+            command_files = await self.base_storage.list_command_files(
+                bucket=AppConfig.INSTANCE_BUCKET,
+                prefix=prefix,
+            )
+            base_state = await self.base_storage.replay_instance_state(
+                bucket=AppConfig.INSTANCE_BUCKET,
+                command_files=command_files,
+            )
+            if not base_state:
+                raise RuntimeError(f"Base instance state not found (prefix={prefix})")
+
+            target_docs[(class_id, instance_id)] = base_state
+
+        user_ctx: Dict[str, Any] = {"id": submitted_by, "role": actor_role, "is_system": submitted_by == "system"}
+        try:
+            compiled_targets = compile_action_implementation(
+                implementation,
+                input_payload=input_payload,
+                user=user_ctx,
+                target_docs=target_docs,
+                now=utcnow(),
+            )
+        except ActionImplementationError as exc:
+            await self.action_logs.mark_failed(
+                action_log_id=action_log_id,
+                result=self._audit_result(
+                    audit_policy=audit_policy,
+                    payload={
+                        "error": "action_implementation_compile_error",
+                        "message": str(exc),
+                    },
+                ),
+            )
+            raise _ActionRejected("action_implementation_compile_error") from exc
+
+        changes_by_key: Dict[Tuple[str, str], Dict[str, Any]] = {
+            (t.class_id, t.instance_id): dict(t.changes or {}) for t in compiled_targets
+        }
+
+        for item in compiled_shape:
+            class_id = safe_str(item.class_id)
+            instance_id = safe_str(item.instance_id)
+            base_state = target_docs.get((class_id, instance_id))
+            if not isinstance(base_state, dict) or not base_state:
+                raise RuntimeError("base_state missing for compiled target")
+            changes = changes_by_key.get((class_id, instance_id))
+            if not isinstance(changes, dict):
+                raise RuntimeError("compiled changes missing for target")
+
+            lifecycle_id = derive_lifecycle_id(base_state)
+            obj_meta = await get_object_type_meta(class_id)
+            object_type_rid = format_resource_rid(
+                resource_type="object_type",
+                resource_id=class_id,
+                rev=obj_meta.get("rev") if isinstance(obj_meta, dict) else None,
+            )
+
+            submission_key = (class_id, instance_id, lifecycle_id)
+            submission_item = submission_targets.get(submission_key)
+            observed_base = None
+            base_token = None
+            if isinstance(submission_item, dict):
+                candidate_observed = submission_item.get("observed_base")
+                candidate_token = submission_item.get("base_token")
+                if isinstance(candidate_observed, dict):
+                    observed_base = candidate_observed
+                if isinstance(candidate_token, dict):
+                    base_token = candidate_token
+
+            if not isinstance(observed_base, dict):
+                observed_base = compute_observed_base(base=base_state, changes=changes)
+            if not isinstance(base_token, dict):
+                base_token = compute_base_token(
+                    db_name=db_name,
+                    class_id=class_id,
+                    instance_id=instance_id,
+                    lifecycle_id=lifecycle_id,
+                    base_doc=base_state,
+                    object_type_version_id=object_type_rid,
+                )
+            else:
+                base_token["object_type_version_id"] = object_type_rid
+
+            loaded_targets.append(
+                {
+                    "resource_rid": object_type_rid,
+                    "class_id": class_id,
+                    "instance_id": instance_id,
+                    "lifecycle_id": lifecycle_id,
+                    "base_state": base_state,
+                    "changes": changes,
+                    "field_types": class_field_types.get(class_id, {}),
+                    "observed_base": observed_base,
+                    "base_token": base_token,
+                }
+            )
+
+        if required_interfaces:
+            for tgt in loaded_targets:
+                class_id = safe_str(tgt.get("class_id"))
+                implemented = set(class_interface_refs.get(class_id, []))
+                missing = sorted(required_interfaces - implemented)
+                if missing:
+                    await self.action_logs.mark_failed(
+                        action_log_id=action_log_id,
+                        result=self._audit_result(
+                            audit_policy=audit_policy,
+                            payload={
+                                "error": "action_interface_not_implemented",
+                                "message": "Action target class does not satisfy required interfaces",
+                                "class_id": class_id,
+                                "required_interfaces": sorted(required_interfaces),
+                                "implemented_interfaces": sorted(implemented),
+                                "missing_interfaces": missing,
+                            },
+                        ),
+                    )
+                    raise _ActionRejected("action_interface_not_implemented")
+
+        return loaded_targets
+
+    async def _enforce_pending_target_access(
+        self,
+        *,
+        db_name: str,
+        action_log_id: str,
+        audit_policy: Any,
+        permission_profile: ActionPermissionProfile,
+        submitted_by: str,
+        submitted_by_type: str,
+        actor_role: Optional[str],
+        loaded_targets: List[Dict[str, Any]],
+    ) -> None:
+        enforce_data_access = requires_action_data_access_enforcement(
+            profile=permission_profile,
+            global_enforcement=AppConfig.WRITEBACK_ENFORCE_ACTION_DATA_ACCESS,
+        )
+        principal_tags = None
+        if submitted_by and submitted_by != "system":
+            principal_tags = build_principal_tags(
+                principal_type=submitted_by_type,
+                principal_id=submitted_by,
+                role=actor_role,
+            )
+        enforce_edit_access = bool(principal_tags)
+        if not (enforce_data_access or enforce_edit_access):
+            return
+
+        if self.dataset_registry is None:
+            self.dataset_registry = DatasetRegistry()
+            await self.dataset_registry.connect()
+        if not self.dataset_registry:
+            error_key = "data_access_unverifiable" if enforce_data_access else "edit_access_unverifiable"
+            await self.action_logs.mark_failed(
+                action_log_id=action_log_id,
+                result=self._audit_result(
+                    audit_policy=audit_policy,
+                    payload={
+                        "error": error_key,
+                        "message": "DatasetRegistry not initialized for action target access checks",
+                    },
+                ),
+            )
+            raise _ActionRejected(error_key)
+
+        access_report = await evaluate_action_target_data_access(
+            dataset_registry=self.dataset_registry,
+            db_name=db_name,
+            targets=loaded_targets,
+            enforce_data_access_policy=enforce_data_access,
+            principal_tags=principal_tags,
+            enforce_object_edit_policy=enforce_edit_access,
+            enforce_attachment_edit_policy=enforce_edit_access,
+            enforce_object_set_edit_policy=enforce_edit_access,
+        )
+        if enforce_data_access and access_report.unverifiable:
+            await self.action_logs.mark_failed(
+                action_log_id=action_log_id,
+                result=self._audit_result(
+                    audit_policy=audit_policy,
+                    payload={
+                        "error": "data_access_unverifiable",
+                        "message": "Unable to verify one or more target rows under data_access policy",
+                        "unverifiable": access_report.unverifiable,
+                    },
+                ),
+            )
+            raise _ActionRejected("data_access_unverifiable")
+        if enforce_data_access and access_report.denied:
+            await self.action_logs.mark_failed(
+                action_log_id=action_log_id,
+                result=self._audit_result(
+                    audit_policy=audit_policy,
+                    payload={
+                        "error": "data_access_denied",
+                        "message": "Actor cannot access one or more target rows under data_access policy",
+                        "denied": access_report.denied,
+                    },
+                ),
+            )
+            raise _ActionRejected("data_access_denied")
+        if enforce_edit_access and access_report.edit_unverifiable:
+            await self.action_logs.mark_failed(
+                action_log_id=action_log_id,
+                result=self._audit_result(
+                    audit_policy=audit_policy,
+                    payload={
+                        "error": "edit_access_unverifiable",
+                        "message": "Unable to verify one or more target edit permissions",
+                        "unverifiable": access_report.edit_unverifiable,
+                    },
+                ),
+            )
+            raise _ActionRejected("edit_access_unverifiable")
+        if enforce_edit_access and access_report.edit_denied:
+            await self.action_logs.mark_failed(
+                action_log_id=action_log_id,
+                result=self._audit_result(
+                    audit_policy=audit_policy,
+                    payload={
+                        "error": "edit_access_denied",
+                        "message": "Actor cannot edit one or more target object types/fields",
+                        "denied": access_report.edit_denied,
+                    },
+                ),
+            )
+            raise _ActionRejected("edit_access_denied")
+
+    async def _reject_action(
+        self,
+        *,
+        action_log_id: str,
+        audit_policy: Any,
+        error_key: str,
+        message: Optional[str] = None,
+        extra: Optional[Dict[str, Any]] = None,
+        cause: Optional[Exception] = None,
+    ) -> None:
+        payload: Dict[str, Any] = {"error": error_key}
+        if message is not None:
+            payload["message"] = message
+        if extra:
+            payload.update(extra)
+        await self.action_logs.mark_failed(
+            action_log_id=action_log_id,
+            result=self._audit_result(audit_policy=audit_policy, payload=payload),
+        )
+        if cause is None:
+            raise _ActionRejected(error_key)
+        raise _ActionRejected(error_key) from cause
+
+    @staticmethod
+    def _build_target_meta(loaded_targets: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        return [
+            {
+                "class_id": target.get("class_id"),
+                "instance_id": target.get("instance_id"),
+                "lifecycle_id": target.get("lifecycle_id"),
+            }
+            for target in loaded_targets
+        ]
+
+    @staticmethod
+    def _build_rule_base_vars(
+        *,
+        submitted_by: str,
+        actor_role: Optional[str],
+        input_payload: Dict[str, Any],
+        target_docs_list: List[Any],
+        target_meta: List[Dict[str, Any]],
+        db_name: str,
+        base_branch: str,
+    ) -> Dict[str, Any]:
+        return {
+            "user": {"id": submitted_by, "role": actor_role, "is_system": submitted_by == "system"},
+            "input": input_payload,
+            "targets": target_docs_list,
+            "target": target_docs_list[0] if len(target_docs_list) == 1 else None,
+            "db_name": db_name,
+            "base_branch": base_branch,
+            "targets_meta": target_meta,
+        }
+
+    @staticmethod
+    def _resolve_input_ref_target(
+        *,
+        value: Any,
+        loaded_targets: List[Dict[str, Any]],
+    ) -> Any:
+        if not isinstance(value, dict):
+            return None
+        ref_class = safe_str(value.get("class_id"))
+        ref_instance = safe_str(value.get("instance_id"))
+        if not ref_class or not ref_instance:
+            return None
+        return next(
+            (
+                target.get("base_state")
+                for target in loaded_targets
+                if target.get("class_id") == ref_class and target.get("instance_id") == ref_instance
+            ),
+            None,
+        )
+
+    def _inject_submission_input_vars(
+        self,
+        *,
+        criteria_vars: Dict[str, Any],
+        input_payload: Dict[str, Any],
+        loaded_targets: List[Dict[str, Any]],
+    ) -> None:
+        for key, value in input_payload.items():
+            if not self._is_public_identifier(key) or key in criteria_vars:
+                continue
+            match = self._resolve_input_ref_target(value=value, loaded_targets=loaded_targets)
+            criteria_vars[key] = value if match is None else match
+
+    def _inject_submission_class_vars(
+        self,
+        *,
+        criteria_vars: Dict[str, Any],
+        loaded_targets: List[Dict[str, Any]],
+    ) -> None:
+        counts = Counter(
+            [
+                str(target.get("class_id") or "").strip().lower()
+                for target in loaded_targets
+                if str(target.get("class_id") or "").strip()
+            ]
+        )
+        for target in loaded_targets:
+            class_id = str(target.get("class_id") or "").strip()
+            class_var = class_id.lower()
+            if not class_id or not self._is_public_identifier(class_var) or class_var in criteria_vars:
+                continue
+            if counts.get(class_var) == 1:
+                criteria_vars[class_var] = target.get("base_state")
+
+    def _build_submission_criteria_vars(
+        self,
+        *,
+        submitted_by: str,
+        actor_role: Optional[str],
+        input_payload: Dict[str, Any],
+        loaded_targets: List[Dict[str, Any]],
+        db_name: str,
+        base_branch: str,
+        target_meta: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        target_docs_list = [target.get("base_state") for target in loaded_targets]
+        criteria_vars = self._build_rule_base_vars(
+            submitted_by=submitted_by,
+            actor_role=actor_role,
+            input_payload=input_payload,
+            target_docs_list=target_docs_list,
+            target_meta=target_meta,
+            db_name=db_name,
+            base_branch=base_branch,
+        )
+        self._inject_submission_input_vars(
+            criteria_vars=criteria_vars,
+            input_payload=input_payload,
+            loaded_targets=loaded_targets,
+        )
+        self._inject_submission_class_vars(criteria_vars=criteria_vars, loaded_targets=loaded_targets)
+        return criteria_vars
+
+    async def _ensure_submission_actor_for_criteria(
+        self,
+        *,
+        action_log_id: str,
+        audit_policy: Any,
+        submission_criteria: str,
+        submitted_by: str,
+        target_meta: List[Dict[str, Any]],
+    ) -> None:
+        if submitted_by:
+            return
+        await self._reject_action(
+            action_log_id=action_log_id,
+            audit_policy=audit_policy,
+            error_key="submission_criteria_missing_user",
+            message="submitted_by is required to evaluate submission_criteria",
+            extra={"submission_criteria": submission_criteria, "targets": target_meta},
+        )
+
+    async def _evaluate_submission_criteria(
+        self,
+        *,
+        action_log_id: str,
+        audit_policy: Any,
+        submission_criteria: str,
+        criteria_vars: Dict[str, Any],
+        target_meta: List[Dict[str, Any]],
+    ) -> bool:
+        try:
+            return safe_eval_bool_expression(submission_criteria, variables=criteria_vars)
+        except BoolExpressionError as exc:
+            await self._reject_action(
+                action_log_id=action_log_id,
+                audit_policy=audit_policy,
+                error_key="submission_criteria_error",
+                message=str(exc),
+                extra={"submission_criteria": submission_criteria, "targets": target_meta},
+                cause=exc,
+            )
+
+    async def _reject_submission_criteria_failed(
+        self,
+        *,
+        action_log_id: str,
+        audit_policy: Any,
+        submission_criteria: str,
+        actor_role: Optional[str],
+        target_meta: List[Dict[str, Any]],
+    ) -> None:
+        failure_info = infer_submission_criteria_failure_reason(submission_criteria)
+        await self._reject_action(
+            action_log_id=action_log_id,
+            audit_policy=audit_policy,
+            error_key="submission_criteria_failed",
+            message="submission_criteria evaluated to false",
+            extra={
+                "reason": failure_info.get("reason"),
+                "reasons": failure_info.get("reasons"),
+                "criteria_identifiers": failure_info.get("identifiers"),
+                "actor_role": actor_role,
+                "submission_criteria": submission_criteria,
+                "targets": target_meta,
+            },
+        )
+
+    async def _prepare_submission_criteria_context(
+        self,
+        *,
+        action_log_id: str,
+        audit_policy: Any,
+        submission_criteria: str,
+        submitted_by: str,
+        actor_role: Optional[str],
+        input_payload: Dict[str, Any],
+        loaded_targets: List[Dict[str, Any]],
+        db_name: str,
+        base_branch: str,
+    ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+        target_meta = self._build_target_meta(loaded_targets)
+        await self._ensure_submission_actor_for_criteria(
+            action_log_id=action_log_id,
+            audit_policy=audit_policy,
+            submission_criteria=submission_criteria,
+            submitted_by=submitted_by,
+            target_meta=target_meta,
+        )
+        criteria_vars = self._build_submission_criteria_vars(
+            submitted_by=submitted_by,
+            actor_role=actor_role,
+            input_payload=input_payload,
+            loaded_targets=loaded_targets,
+            db_name=db_name,
+            base_branch=base_branch,
+            target_meta=target_meta,
+        )
+        return target_meta, criteria_vars
+
+    async def _enforce_submission_criteria(
+        self,
+        *,
+        action_log_id: str,
+        audit_policy: Any,
+        submission_criteria: str,
+        submitted_by: str,
+        actor_role: Optional[str],
+        input_payload: Dict[str, Any],
+        loaded_targets: List[Dict[str, Any]],
+        db_name: str,
+        base_branch: str,
+    ) -> None:
+        if not submission_criteria:
+            return
+
+        target_meta, criteria_vars = await self._prepare_submission_criteria_context(
+            action_log_id=action_log_id,
+            audit_policy=audit_policy,
+            submission_criteria=submission_criteria,
+            submitted_by=submitted_by,
+            actor_role=actor_role,
+            input_payload=input_payload,
+            loaded_targets=loaded_targets,
+            db_name=db_name,
+            base_branch=base_branch,
+        )
+
+        if await self._evaluate_submission_criteria(
+            action_log_id=action_log_id,
+            audit_policy=audit_policy,
+            submission_criteria=submission_criteria,
+            criteria_vars=criteria_vars,
+            target_meta=target_meta,
+        ):
+            return
+
+        await self._reject_submission_criteria_failed(
+            action_log_id=action_log_id,
+            audit_policy=audit_policy,
+            submission_criteria=submission_criteria,
+            actor_role=actor_role,
+            target_meta=target_meta,
+        )
+
+    async def _reject_validation_rule(
+        self,
+        *,
+        action_log_id: str,
+        audit_policy: Any,
+        error_key: str,
+        message: str,
+        rule_index: int,
+        scope: Optional[str] = None,
+        expr: Optional[str] = None,
+        target: Optional[Dict[str, Any]] = None,
+        cause: Optional[Exception] = None,
+    ) -> None:
+        extra: Dict[str, Any] = {"rule_index": rule_index}
+        if scope is not None:
+            extra["scope"] = scope
+        if expr is not None:
+            extra["expr"] = expr
+        if target is not None:
+            extra["target"] = target
+        await self._reject_action(
+            action_log_id=action_log_id,
+            audit_policy=audit_policy,
+            error_key=error_key,
+            message=message,
+            extra=extra,
+            cause=cause,
+        )
+
+    async def _parse_validation_rule(
+        self,
+        *,
+        action_log_id: str,
+        audit_policy: Any,
+        rule: Any,
+        rule_idx: int,
+    ) -> Tuple[str, str, Optional[str]]:
+        if not isinstance(rule, dict):
+            await self._reject_validation_rule(
+                action_log_id=action_log_id,
+                audit_policy=audit_policy,
+                error_key="validation_rule_invalid",
+                message="validation_rules entries must be objects",
+                rule_index=rule_idx,
+            )
+        rule_type = str(rule.get("type") or "").strip().lower()
+        if rule_type != "assert":
+            await self._reject_validation_rule(
+                action_log_id=action_log_id,
+                audit_policy=audit_policy,
+                error_key="validation_rule_invalid",
+                message="only validation_rules.type=assert is supported in P0",
+                rule_index=rule_idx,
+            )
+        scope = str(rule.get("scope") or "each_target").strip().lower()
+        expr = str(rule.get("expr") or rule.get("expression") or "").strip()
+        message = str(rule.get("message") or "").strip() or None
+        if not expr:
+            await self._reject_validation_rule(
+                action_log_id=action_log_id,
+                audit_policy=audit_policy,
+                error_key="validation_rule_invalid",
+                message="validation_rules.assert requires expr",
+                rule_index=rule_idx,
+            )
+        return scope, expr, message
+
+    async def _enforce_action_scope_validation_rule(
+        self,
+        *,
+        action_log_id: str,
+        audit_policy: Any,
+        base_vars: Dict[str, Any],
+        rule_idx: int,
+        scope: str,
+        expr: str,
+        message: Optional[str],
+    ) -> None:
+        try:
+            ok = safe_eval_bool_expression(expr, variables=base_vars)
+        except BoolExpressionError as exc:
+            await self._reject_validation_rule(
+                action_log_id=action_log_id,
+                audit_policy=audit_policy,
+                error_key="validation_rule_error",
+                message=str(exc),
+                rule_index=rule_idx,
+                scope=scope,
+                expr=expr,
+                cause=exc,
+            )
+        if ok:
+            return
+        await self._reject_validation_rule(
+            action_log_id=action_log_id,
+            audit_policy=audit_policy,
+            error_key="validation_rule_failed",
+            message=message or "validation rule evaluated to false",
+            rule_index=rule_idx,
+            scope=scope,
+            expr=expr,
+        )
+
+    async def _enforce_each_target_validation_rule(
+        self,
+        *,
+        action_log_id: str,
+        audit_policy: Any,
+        base_vars: Dict[str, Any],
+        target_docs_list: List[Any],
+        target_meta: List[Dict[str, Any]],
+        rule_idx: int,
+        scope: str,
+        expr: str,
+        message: Optional[str],
+    ) -> None:
+        for target_idx, target_doc in enumerate(target_docs_list):
+            each_vars = dict(base_vars)
+            each_vars["target"] = target_doc
+            target_info = target_meta[target_idx] if target_idx < len(target_meta) else None
+            try:
+                ok = safe_eval_bool_expression(expr, variables=each_vars)
+            except BoolExpressionError as exc:
+                await self._reject_validation_rule(
+                    action_log_id=action_log_id,
+                    audit_policy=audit_policy,
+                    error_key="validation_rule_error",
+                    message=str(exc),
+                    rule_index=rule_idx,
+                    scope=scope,
+                    expr=expr,
+                    target=target_info,
+                    cause=exc,
+                )
+            if ok:
+                continue
+            await self._reject_validation_rule(
+                action_log_id=action_log_id,
+                audit_policy=audit_policy,
+                error_key="validation_rule_failed",
+                message=message or "validation rule evaluated to false",
+                rule_index=rule_idx,
+                scope=scope,
+                expr=expr,
+                target=target_info,
+            )
+
+    async def _normalize_validation_rules(
+        self,
+        *,
+        action_log_id: str,
+        audit_policy: Any,
+        validation_rules: Any,
+    ) -> List[Any]:
+        if validation_rules is None:
+            return []
+        if isinstance(validation_rules, list):
+            return validation_rules
+        await self._reject_action(
+            action_log_id=action_log_id,
+            audit_policy=audit_policy,
+            error_key="validation_rules_invalid",
+            message="validation_rules must be a list",
+        )
+
+    def _build_validation_rule_context(
+        self,
+        *,
+        submitted_by: str,
+        actor_role: Optional[str],
+        input_payload: Dict[str, Any],
+        loaded_targets: List[Dict[str, Any]],
+        db_name: str,
+        base_branch: str,
+    ) -> Tuple[List[Any], List[Dict[str, Any]], Dict[str, Any]]:
+        target_docs_list = [target.get("base_state") for target in loaded_targets]
+        target_meta = self._build_target_meta(loaded_targets)
+        base_vars = self._build_rule_base_vars(
+            submitted_by=submitted_by,
+            actor_role=actor_role,
+            input_payload=input_payload,
+            target_docs_list=target_docs_list,
+            target_meta=target_meta,
+            db_name=db_name,
+            base_branch=base_branch,
+        )
+        return target_docs_list, target_meta, base_vars
+
+    async def _enforce_single_validation_rule(
+        self,
+        *,
+        action_log_id: str,
+        audit_policy: Any,
+        rule: Any,
+        rule_idx: int,
+        base_vars: Dict[str, Any],
+        target_docs_list: List[Any],
+        target_meta: List[Dict[str, Any]],
+    ) -> None:
+        scope, expr, message = await self._parse_validation_rule(
+            action_log_id=action_log_id,
+            audit_policy=audit_policy,
+            rule=rule,
+            rule_idx=rule_idx,
+        )
+        if scope == "action":
+            await self._enforce_action_scope_validation_rule(
+                action_log_id=action_log_id,
+                audit_policy=audit_policy,
+                base_vars=base_vars,
+                rule_idx=rule_idx,
+                scope=scope,
+                expr=expr,
+                message=message,
+            )
+            return
+        if scope == "each_target":
+            await self._enforce_each_target_validation_rule(
+                action_log_id=action_log_id,
+                audit_policy=audit_policy,
+                base_vars=base_vars,
+                target_docs_list=target_docs_list,
+                target_meta=target_meta,
+                rule_idx=rule_idx,
+                scope=scope,
+                expr=expr,
+                message=message,
+            )
+            return
+        await self._reject_validation_rule(
+            action_log_id=action_log_id,
+            audit_policy=audit_policy,
+            error_key="validation_rule_invalid",
+            message="validation_rules.assert scope must be action or each_target",
+            rule_index=rule_idx,
+            scope=scope,
+        )
+
+    async def _enforce_validation_rules(
+        self,
+        *,
+        action_log_id: str,
+        audit_policy: Any,
+        validation_rules: Any,
+        submitted_by: str,
+        actor_role: Optional[str],
+        input_payload: Dict[str, Any],
+        loaded_targets: List[Dict[str, Any]],
+        db_name: str,
+        base_branch: str,
+    ) -> None:
+        rules = await self._normalize_validation_rules(
+            action_log_id=action_log_id,
+            audit_policy=audit_policy,
+            validation_rules=validation_rules,
+        )
+        if not rules:
+            return
+
+        target_docs_list, target_meta, base_vars = self._build_validation_rule_context(
+            submitted_by=submitted_by,
+            actor_role=actor_role,
+            input_payload=input_payload,
+            loaded_targets=loaded_targets,
+            db_name=db_name,
+            base_branch=base_branch,
+        )
+
+        for rule_idx, rule in enumerate(rules):
+            await self._enforce_single_validation_rule(
+                action_log_id=action_log_id,
+                audit_policy=audit_policy,
+                rule=rule,
+                rule_idx=rule_idx,
+                base_vars=base_vars,
+                target_docs_list=target_docs_list,
+                target_meta=target_meta,
+            )
+
+    async def _enforce_submission_and_validation_rules(
+        self,
+        *,
+        action_log_id: str,
+        audit_policy: Any,
+        spec: Dict[str, Any],
+        submitted_by: str,
+        actor_role: Optional[str],
+        input_payload: Dict[str, Any],
+        loaded_targets: List[Dict[str, Any]],
+        db_name: str,
+        base_branch: str,
+    ) -> None:
+        submission_criteria = str(spec.get("submission_criteria") or "").strip()
+        await self._enforce_submission_criteria(
+            action_log_id=action_log_id,
+            audit_policy=audit_policy,
+            submission_criteria=submission_criteria,
+            submitted_by=submitted_by,
+            actor_role=actor_role,
+            input_payload=input_payload,
+            loaded_targets=loaded_targets,
+            db_name=db_name,
+            base_branch=base_branch,
+        )
+
+        await self._enforce_validation_rules(
+            action_log_id=action_log_id,
+            audit_policy=audit_policy,
+            validation_rules=spec.get("validation_rules"),
+            submitted_by=submitted_by,
+            actor_role=actor_role,
+            input_payload=input_payload,
+            loaded_targets=loaded_targets,
+            db_name=db_name,
+            base_branch=base_branch,
+        )
+
+    async def _build_and_commit_pending_patchset(
+        self,
+        *,
+        db_name: str,
+        action_log_id: str,
+        action_type_id: str,
+        action_type_rid: str,
+        ontology_commit_id: str,
+        action_conflict_policy: Optional[str],
+        get_object_type_meta: Any,
+        loaded_targets: List[Dict[str, Any]],
+        log_rec: ActionLogRecord,
+        audit_policy: Any,
+        repo: str,
+        branch: str,
+    ) -> str:
+        targets: List[Dict[str, Any]] = []
+        conflicts: List[Dict[str, Any]] = []
+        policies_used: set[str] = set()
+        for loaded in loaded_targets:
+            class_id = safe_str(loaded.get("class_id"))
+            instance_id = safe_str(loaded.get("instance_id"))
+            lifecycle_id = safe_str(loaded.get("lifecycle_id") or "lc-0") or "lc-0"
+            resource_rid = safe_str(loaded.get("resource_rid")) or f"object_type:{class_id}@1"
+            base_state = loaded.get("base_state") if isinstance(loaded.get("base_state"), dict) else None
+            changes = loaded.get("changes") if isinstance(loaded.get("changes"), dict) else None
+            observed_base = loaded.get("observed_base") if isinstance(loaded.get("observed_base"), dict) else None
+            base_token = loaded.get("base_token") if isinstance(loaded.get("base_token"), dict) else None
+
+            if not class_id or not instance_id or not base_state or not changes or not observed_base or not base_token:
+                raise RuntimeError("target state missing after load")
+
+            conflict_fields = detect_overlap_fields(observed_base=observed_base, current_base=base_state)
+            conflict_links = detect_overlap_links(
+                observed_base=observed_base,
+                current_base=base_state,
+                changes=changes,
+            )
+
+            obj_meta = await get_object_type_meta(class_id)
+            conflict_policy = action_conflict_policy or (
+                obj_meta.get("conflict_policy") if isinstance(obj_meta, dict) else None
+            ) or "FAIL"
+            policies_used.add(conflict_policy)
+            applied_changes, resolution = resolve_applied_changes(
+                conflict_policy=conflict_policy,
+                changes=changes,
+                conflict_fields=conflict_fields,
+                conflict_links=conflict_links,
+            )
+            has_conflict = bool(conflict_fields) or bool(conflict_links)
+
+            if has_conflict:
+                conflicts.append(
+                    {
+                        "class_id": class_id,
+                        "instance_id": instance_id,
+                        "lifecycle_id": lifecycle_id,
+                        "fields": conflict_fields,
+                        "links": conflict_links,
+                        "policy": conflict_policy,
+                        "resolution": resolution,
+                    }
+                )
+
+            targets.append(
+                {
+                    "resource_rid": resource_rid,
+                    "instance_id": instance_id,
+                    "lifecycle_id": lifecycle_id,
+                    "base_token": base_token,
+                    "observed_base": observed_base,
+                    "changes": changes,
+                    "applied_changes": applied_changes,
+                    "conflict": {
+                        "status": "OVERLAP" if has_conflict else "NONE",
+                        "fields": conflict_fields,
+                        "links": conflict_links,
+                        "policy": conflict_policy,
+                        "resolution": resolution,
+                    },
+                }
+            )
+
+        should_reject = any(str(c.get("resolution") or "").strip().upper() == "REJECTED" for c in conflicts)
+        if should_reject:
+            await self.action_logs.mark_failed(
+                action_log_id=action_log_id,
+                result=self._audit_result(
+                    audit_policy=audit_policy,
+                    payload={
+                        "error": "conflict_detected",
+                        "conflict_policy": action_conflict_policy,
+                        "conflict_policies_used": sorted(policies_used),
+                        "conflicts": conflicts,
+                        "attempted_changes": targets,
+                    },
+                ),
+            )
+            raise _ActionRejected("conflict_detected")
+
+        patchset = {
+            "action_log_id": action_log_id,
+            "action_type_rid": action_type_rid,
+            "ontology_commit_id": ontology_commit_id,
+            "targets": targets,
+            "metadata": {
+                "submitted_by": log_rec.submitted_by,
+                "submitted_at": (log_rec.submitted_at or utcnow()).isoformat(),
+                "correlation_id": log_rec.correlation_id,
+                "conflict_policy": action_conflict_policy,
+                "conflict_policies_used": sorted(policies_used),
+            },
+        }
+        metadata_doc = {
+            "action_log_id": action_log_id,
+            "db_name": db_name,
+            "action_type_id": action_type_id,
+            "ontology_commit_id": ontology_commit_id,
+            "created_at": utcnow().isoformat(),
+            "patchset_sha256": sha256_canonical_json_prefixed(patchset),
+        }
+
+        patchset_commit_id = await self._write_patchset_commit(
+            repository=repo,
+            branch=branch,
+            action_log_id=action_log_id,
+            patchset=patchset,
+            metadata_doc=metadata_doc,
+        )
+        await self.action_logs.mark_commit_written(
+            action_log_id=action_log_id,
+            writeback_commit_id=patchset_commit_id,
+            result=self._audit_result(
+                audit_policy=audit_policy,
+                payload={
+                    "attempted_changes": patchset.get("targets", []),
+                    "applied_changes": [
+                        t for t in patchset.get("targets", [])
+                        if isinstance(t, dict) and not is_noop_changes(t.get("applied_changes", t.get("changes")))
+                    ],
+                    "conflict_policy": action_conflict_policy,
+                    "conflict_policies_used": sorted(policies_used),
+                    "conflicts": conflicts,
+                },
+            ),
+        )
+        return patchset_commit_id
+
+    async def _emit_action_applied_if_needed(
+        self,
+        *,
+        db_name: str,
+        action_log_id: str,
+        command: Dict[str, Any],
+        writeback_target: Dict[str, Any],
+        patchset_commit_id: str,
+        ontology_commit_id: str,
+        branch: str,
+    ) -> tuple[Optional[int], Optional[str]]:
+        # Emit ActionApplied if needed.
+        log_rec = await self.action_logs.get_log(action_log_id=action_log_id)
+        if not log_rec:
+            raise RuntimeError("ActionLog missing after commit")
+
+        if log_rec.action_applied_event_id:
+            return log_rec.action_applied_seq, log_rec.action_applied_event_id
+
+        overlay_branch = safe_str(command.get("overlay_branch") or branch) or branch
+        evt = ActionAppliedEvent(
+            event_id=generate_action_applied_event_id(action_log_id),
+            db_name=db_name,
+            action_log_id=action_log_id,
+            patchset_commit_id=patchset_commit_id,
+            writeback_target=writeback_target,
+            overlay_branch=overlay_branch,
+            data={
+                "db_name": db_name,
+                "action_log_id": action_log_id,
+                "patchset_commit_id": patchset_commit_id,
+                "writeback_target": writeback_target,
+                "overlay_branch": overlay_branch,
+            },
+            metadata={
+                "correlation_id": log_rec.correlation_id,
+                "ontology": {"ref": f"branch:{safe_str(command.get('base_branch') or 'main')}", "commit": ontology_commit_id},
+            },
+            occurred_at=utcnow(),
+            occurred_by=log_rec.submitted_by,
+        )
+        action_env = EventEnvelope.from_base_event(
+            evt,
+            kafka_topic=AppConfig.ACTION_EVENTS_TOPIC,
+            metadata={"service": "action_worker", "mode": "action_writeback"},
+        )
+        await event_store.append_event(action_env)
+        action_applied_seq = action_env.sequence_number
+        action_applied_event_id = str(action_env.event_id)
+
+        await self.action_logs.mark_event_emitted(
+            action_log_id=action_log_id,
+            action_applied_event_id=action_applied_event_id,
+            action_applied_seq=action_applied_seq,
+        )
+        return action_applied_seq, action_applied_event_id
+
+    async def _mark_action_succeeded(
+        self,
+        *,
+        action_log_id: str,
+        audit_policy: Any,
+        patchset_commit_id: str,
+        action_applied_event_id: Optional[str],
+        action_applied_seq: Optional[int],
+    ) -> None:
         await self.action_logs.mark_succeeded(
             action_log_id=action_log_id,
-            result=_audit_result(
-                {
+            result=self._audit_result(
+                audit_policy=audit_policy,
+                payload={
                     "writeback_commit_id": patchset_commit_id,
                     "action_applied_event_id": action_applied_event_id,
                     "action_applied_seq": action_applied_seq,
-                }
+                },
             ),
         )
+
+    @staticmethod
+    def _dependency_is_satisfied(*, trigger_on: str, parent_status: Optional[str]) -> tuple[bool, bool]:
+        """
+        Returns (satisfied, impossible).
+
+        - satisfied=True means dependency condition is met.
+        - impossible=True means parent reached terminal state that can never satisfy this dependency.
+        """
+        trigger = str(trigger_on or "").strip().upper() or "SUCCEEDED"
+        status_value = str(parent_status or "").strip().upper()
+        terminal = {
+            ActionLogStatus.SUCCEEDED.value,
+            ActionLogStatus.FAILED.value,
+        }
+        if trigger == "SUCCEEDED":
+            if status_value == ActionLogStatus.SUCCEEDED.value:
+                return True, False
+            if status_value in terminal:
+                return False, True
+            return False, False
+        if trigger == "FAILED":
+            if status_value == ActionLogStatus.FAILED.value:
+                return True, False
+            if status_value in terminal:
+                return False, True
+            return False, False
+        if trigger == "COMPLETED":
+            if status_value in terminal:
+                return True, False
+            return False, False
+        return False, True
+
+    async def _emit_deferred_action_command(
+        self,
+        *,
+        log_rec: ActionLogRecord,
+        triggered_by_action_log_id: str,
+    ) -> None:
+        base_ctx = (
+            log_rec.metadata.get("__submit_context")
+            if isinstance(log_rec.metadata, dict)
+            else None
+        )
+        base_branch = safe_str(base_ctx.get("base_branch")) if isinstance(base_ctx, dict) else ""
+        if not base_branch:
+            base_branch = "main"
+        overlay_branch = safe_str(base_ctx.get("overlay_branch")) if isinstance(base_ctx, dict) else ""
+        if not overlay_branch:
+            overlay_branch = safe_str(
+                (log_rec.writeback_target or {}).get("branch") or AppConfig.get_ontology_writeback_branch(log_rec.db_name)
+            )
+
+        ontology_commit_id = safe_str(log_rec.ontology_commit_id)
+        if not ontology_commit_id:
+            raise RuntimeError("Deferred action log missing ontology_commit_id")
+
+        action_log_uuid = UUID(str(log_rec.action_log_id))
+        submitted_at = log_rec.submitted_at
+        submitted_at_iso = submitted_at.isoformat() if hasattr(submitted_at, "isoformat") else utcnow().isoformat()
+        payload = log_rec.input if isinstance(log_rec.input, dict) else {}
+        if isinstance(log_rec.metadata, dict):
+            batch_payload = log_rec.metadata.get("__batch_payload")
+            if isinstance(batch_payload, dict):
+                payload = batch_payload
+        command = ActionCommand(
+            command_id=action_log_uuid,
+            db_name=log_rec.db_name,
+            action_log_id=action_log_uuid,
+            action_type_id=log_rec.action_type_id,
+            ontology_commit_id=ontology_commit_id,
+            base_branch=base_branch,
+            overlay_branch=overlay_branch,
+            correlation_id=log_rec.correlation_id,
+            payload=dict(payload or {}),
+            metadata={
+                **(log_rec.metadata or {}),
+                "correlation_id": log_rec.correlation_id,
+                "submitted_at": submitted_at_iso,
+                "ontology": {"ref": f"branch:{base_branch}", "commit": ontology_commit_id},
+                "dependency_triggered_by": triggered_by_action_log_id,
+            },
+        )
+
+        envelope = EventEnvelope.from_command(
+            command,
+            actor=log_rec.submitted_by,
+            kafka_topic=AppConfig.ACTION_COMMANDS_TOPIC,
+            metadata={"service": "action_worker", "mode": "action_writeback_dependency"},
+        )
+        await event_store.append_event(envelope)
+
+    async def _trigger_dependent_actions(
+        self,
+        *,
+        db_name: str,
+        parent_action_log_id: str,
+    ) -> None:
+        parent = await self.action_logs.get_log(action_log_id=parent_action_log_id)
+        if not parent:
+            return
+        parent_status = str(parent.status or "").strip().upper()
+        if parent_status not in {ActionLogStatus.SUCCEEDED.value, ActionLogStatus.FAILED.value}:
+            return
+
+        child_ids = await self.action_logs.list_dependent_children(parent_action_log_id=parent_action_log_id)
+        if not child_ids:
+            return
+
+        for child_id in child_ids:
+            child = await self.action_logs.get_log(action_log_id=child_id)
+            if not child:
+                continue
+            if str(child.db_name or "").strip() != str(db_name or "").strip():
+                continue
+            child_status = str(child.status or "").strip().upper()
+            if child_status in {ActionLogStatus.SUCCEEDED.value, ActionLogStatus.FAILED.value}:
+                continue
+
+            dependencies = await self.action_logs.list_dependency_status_for_child(child_action_log_id=child_id)
+            if not dependencies:
+                continue
+
+            waiting = False
+            impossible_reasons: List[Dict[str, Any]] = []
+            for dep in dependencies:
+                satisfied, impossible = self._dependency_is_satisfied(
+                    trigger_on=dep.trigger_on,
+                    parent_status=dep.parent_status,
+                )
+                if satisfied:
+                    continue
+                if impossible:
+                    impossible_reasons.append(
+                        {
+                            "parent_action_log_id": dep.parent_action_log_id,
+                            "trigger_on": dep.trigger_on,
+                            "parent_status": dep.parent_status,
+                        }
+                    )
+                else:
+                    waiting = True
+
+            if impossible_reasons:
+                await self.action_logs.mark_failed(
+                    action_log_id=child_id,
+                    result=self._audit_result(
+                        audit_policy=None,
+                        payload={
+                            "error": "action_dependency_not_satisfied",
+                            "message": "Dependency condition cannot be satisfied",
+                            "dependencies": impossible_reasons,
+                        },
+                    ),
+                )
+                continue
+            if waiting:
+                continue
+
+            try:
+                await self._emit_deferred_action_command(
+                    log_rec=child,
+                    triggered_by_action_log_id=parent_action_log_id,
+                )
+            except Exception as exc:
+                await self.action_logs.mark_failed(
+                    action_log_id=child_id,
+                    result=self._audit_result(
+                        audit_policy=None,
+                        payload={
+                            "error": "action_dependency_dispatch_failed",
+                            "message": str(exc),
+                            "triggered_by": parent_action_log_id,
+                        },
+                    ),
+                )
+                continue
 
     async def _ensure_branch(self, *, repository: str, branch: str) -> None:
         await ensure_lakefs_branch(lakefs_client=self.lakefs_client, repository=repository, branch=branch, source="main")

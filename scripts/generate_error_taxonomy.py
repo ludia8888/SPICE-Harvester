@@ -96,8 +96,8 @@ def _render() -> str:
     lines.append("## Core API Errors (ErrorCode)")
     lines.append("")
     core_rows: List[List[str]] = []
-    for legacy, spec in sorted(catalog._ERROR_CODE_SPECS.items(), key=lambda item: item[0].value):  # type: ignore[attr-defined]
-        legacy_code = legacy.value
+    for code_key, spec in sorted(catalog._ERROR_CODE_SPECS.items(), key=lambda item: item[0].value):  # type: ignore[attr-defined]
+        external_code = code_key.value
         retry_policy = catalog._resolve_default_retry_policy(spec)  # type: ignore[attr-defined]
         max_attempts = catalog._resolve_max_attempts(spec, retry_policy=retry_policy)  # type: ignore[attr-defined]
         base_delay_ms = catalog._resolve_base_delay_ms(spec, retry_policy=retry_policy)  # type: ignore[attr-defined]
@@ -107,13 +107,13 @@ def _render() -> str:
         human_required = catalog._resolve_human_required(spec)  # type: ignore[attr-defined]
         safe_next_actions = catalog._resolve_safe_next_actions(  # type: ignore[attr-defined]
             spec,
-            legacy_code=legacy_code,
+            external_code=external_code,
             retry_policy=retry_policy,
             human_required=human_required,
         )
         core_rows.append(
             [
-                legacy_code,
+                external_code,
                 spec.code_template.replace("{subsystem}", "{SUBSYS}"),
                 spec.domain.value,
                 spec.error_class.value,
@@ -127,7 +127,7 @@ def _render() -> str:
                 jitter_strategy.value,
                 str(bool(retry_after_header_respect)).lower(),
                 str(human_required).lower(),
-                catalog._resolve_runbook_ref(spec, legacy_code=legacy_code),  # type: ignore[attr-defined]
+                catalog._resolve_runbook_ref(spec, source_code=external_code),  # type: ignore[attr-defined]
                 ",".join(action.value for action in safe_next_actions),
                 str(catalog._resolve_http_status_hint(spec, status_hint_fallback)),  # type: ignore[attr-defined]
             ]
@@ -135,7 +135,7 @@ def _render() -> str:
     lines.append(
         _md_table(
             [
-                "Legacy code",
+                "Error key",
                 "Enterprise code",
                 "Domain",
                 "Class",
@@ -161,8 +161,8 @@ def _render() -> str:
     lines.append("## Objectify Job Errors")
     lines.append("")
     obj_rows: List[List[str]] = []
-    for legacy, spec in sorted(catalog._OBJECTIFY_ERROR_SPECS.items(), key=lambda item: item[0]):  # type: ignore[attr-defined]
-        legacy_code = legacy
+    for code_key, spec in sorted(catalog._OBJECTIFY_ERROR_SPECS.items(), key=lambda item: item[0]):  # type: ignore[attr-defined]
+        external_code = code_key
         retry_policy = catalog._resolve_default_retry_policy(spec)  # type: ignore[attr-defined]
         max_attempts = catalog._resolve_max_attempts(spec, retry_policy=retry_policy)  # type: ignore[attr-defined]
         base_delay_ms = catalog._resolve_base_delay_ms(spec, retry_policy=retry_policy)  # type: ignore[attr-defined]
@@ -172,13 +172,13 @@ def _render() -> str:
         human_required = catalog._resolve_human_required(spec)  # type: ignore[attr-defined]
         safe_next_actions = catalog._resolve_safe_next_actions(  # type: ignore[attr-defined]
             spec,
-            legacy_code=legacy_code,
+            external_code=external_code,
             retry_policy=retry_policy,
             human_required=human_required,
         )
         obj_rows.append(
             [
-                legacy_code,
+                external_code,
                 spec.code_template.format(subsystem="OBJ"),
                 spec.domain.value,
                 spec.error_class.value,
@@ -192,7 +192,7 @@ def _render() -> str:
                 jitter_strategy.value,
                 str(bool(retry_after_header_respect)).lower(),
                 str(human_required).lower(),
-                catalog._resolve_runbook_ref(spec, legacy_code=legacy_code),  # type: ignore[attr-defined]
+                catalog._resolve_runbook_ref(spec, source_code=external_code),  # type: ignore[attr-defined]
                 ",".join(action.value for action in safe_next_actions),
                 str(catalog._resolve_http_status_hint(spec, status_hint_fallback)),  # type: ignore[attr-defined]
             ]
@@ -200,7 +200,7 @@ def _render() -> str:
     lines.append(
         _md_table(
             [
-                "Legacy code",
+                "External code",
                 "Enterprise code",
                 "Domain",
                 "Class",
@@ -226,8 +226,8 @@ def _render() -> str:
     lines.append("## External Codes")
     lines.append("")
     ext_rows: List[List[str]] = []
-    for legacy, spec in sorted(catalog._EXTERNAL_CODE_SPECS.items(), key=lambda item: item[0]):  # type: ignore[attr-defined]
-        legacy_code = legacy
+    for code_key, spec in sorted(catalog._EXTERNAL_CODE_SPECS.items(), key=lambda item: item[0]):  # type: ignore[attr-defined]
+        external_code = code_key
         retry_policy = catalog._resolve_default_retry_policy(spec)  # type: ignore[attr-defined]
         max_attempts = catalog._resolve_max_attempts(spec, retry_policy=retry_policy)  # type: ignore[attr-defined]
         base_delay_ms = catalog._resolve_base_delay_ms(spec, retry_policy=retry_policy)  # type: ignore[attr-defined]
@@ -237,13 +237,13 @@ def _render() -> str:
         human_required = catalog._resolve_human_required(spec)  # type: ignore[attr-defined]
         safe_next_actions = catalog._resolve_safe_next_actions(  # type: ignore[attr-defined]
             spec,
-            legacy_code=legacy_code,
+            external_code=external_code,
             retry_policy=retry_policy,
             human_required=human_required,
         )
         ext_rows.append(
             [
-                legacy_code,
+                external_code,
                 spec.code_template.replace("{subsystem}", "{SUBSYS}"),
                 spec.domain.value,
                 spec.error_class.value,
@@ -257,7 +257,7 @@ def _render() -> str:
                 jitter_strategy.value,
                 str(bool(retry_after_header_respect)).lower(),
                 str(human_required).lower(),
-                catalog._resolve_runbook_ref(spec, legacy_code=legacy_code),  # type: ignore[attr-defined]
+                catalog._resolve_runbook_ref(spec, source_code=external_code),  # type: ignore[attr-defined]
                 ",".join(action.value for action in safe_next_actions),
                 str(catalog._resolve_http_status_hint(spec, status_hint_fallback)),  # type: ignore[attr-defined]
             ]
@@ -265,7 +265,7 @@ def _render() -> str:
     lines.append(
         _md_table(
             [
-                "Legacy code",
+                "External code",
                 "Enterprise code",
                 "Domain",
                 "Class",

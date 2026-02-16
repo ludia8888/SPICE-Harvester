@@ -28,7 +28,6 @@ graph TB
         Cache[Redis Cache]
         Search["Object Read Model<br/>(Elasticsearch)"]
         LabelDB[Label Mapping DB]
-        LegacyTerminus["TerminusDB<br/>(Legacy Profile)"]
     end
     
     subgraph "External Sources"
@@ -64,9 +63,6 @@ graph TB
     Funnel --> GoogleSheets
     Funnel --> CSV
     Funnel --> ExtAPI
-    
-    Query -.-> LegacyTerminus
-    OMS -.-> LegacyTerminus
     
     %% Type Inference Flow
     BFF -.-> Funnel

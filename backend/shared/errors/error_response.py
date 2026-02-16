@@ -110,7 +110,6 @@ def _extract_external_code(detail: Any) -> Optional[str]:
     candidates: list[Any] = [
         detail.get("error_code"),
         detail.get("external_code"),
-        detail.get("legacy_code"),
         detail.get("code"),
         detail.get("error"),
     ]
@@ -254,7 +253,7 @@ def _emit_error_log(payload: Dict[str, Any]) -> None:
         "enterprise_code": enterprise.get("code"),
         "enterprise_class": enterprise.get("class"),
         "enterprise_domain": enterprise.get("domain"),
-        "legacy_code": enterprise.get("legacy_code"),
+        "external_code": enterprise.get("external_code"),
         "runbook_ref": enterprise.get("runbook_ref"),
         "request_id": payload.get("request_id"),
         "correlation_id": payload.get("correlation_id"),

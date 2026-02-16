@@ -1,10 +1,72 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Protocol, Sequence, Tuple
 
 from shared.config.settings import get_settings
 from shared.models.lineage_edge_types import EDGE_AGGREGATE_EMITTED_EVENT
+
+
+class LineageOutOfDateStore(Protocol):
+    async def list_edges(
+        self,
+        *,
+        edge_type: Optional[str] = None,
+        projection_name: Optional[str] = None,
+        db_name: Optional[str] = None,
+        branch: Optional[str] = None,
+        run_id: Optional[str] = None,
+        since: Optional[datetime] = None,
+        until: Optional[datetime] = None,
+        limit: int = 5000,
+    ) -> List[Dict[str, Any]]: ...
+
+    async def list_artifact_latest_writes(
+        self,
+        *,
+        db_name: Optional[str] = None,
+        branch: Optional[str] = None,
+        artifact_kind: Optional[str] = None,
+        as_of: Optional[datetime] = None,
+        limit: int = 5000,
+    ) -> List[Dict[str, Any]]: ...
+
+    async def list_projection_latest_writes(
+        self,
+        *,
+        db_name: Optional[str] = None,
+        branch: Optional[str] = None,
+        as_of: Optional[datetime] = None,
+        limit: int = 1000,
+    ) -> List[Dict[str, Any]]: ...
+
+    async def get_latest_edges_to(
+        self,
+        *,
+        to_node_ids: Sequence[str],
+        edge_type: Optional[str] = None,
+        projection_name: Optional[str] = None,
+        db_name: Optional[str] = None,
+        branch: Optional[str] = None,
+    ) -> Dict[str, Dict[str, Any]]: ...
+
+    async def get_latest_edges_from(
+        self,
+        *,
+        from_node_ids: Sequence[str],
+        edge_type: Optional[str] = None,
+        projection_name: Optional[str] = None,
+        db_name: Optional[str] = None,
+        branch: Optional[str] = None,
+    ) -> Dict[str, Dict[str, Any]]: ...
+
+    async def get_latest_edges_for_projections(
+        self,
+        *,
+        projection_names: Sequence[str],
+        db_name: Optional[str] = None,
+        branch: Optional[str] = None,
+    ) -> Dict[str, Dict[str, Any]]: ...
 
 
 def _parse_artifact_node_id(node_id: str) -> Tuple[Optional[str], str]:
@@ -160,7 +222,7 @@ def _chunked(values: Sequence[str], size: int) -> Iterable[List[str]]:
 
 async def _get_latest_edges_to_batched(
     *,
-    lineage_store: Any,
+    lineage_store: LineageOutOfDateStore,
     to_node_ids: Sequence[str],
     edge_type: Optional[str] = None,
     db_name: Optional[str] = None,
@@ -185,7 +247,7 @@ async def _get_latest_edges_to_batched(
 
 async def _get_latest_edges_from_batched(
     *,
-    lineage_store: Any,
+    lineage_store: LineageOutOfDateStore,
     from_node_ids: Sequence[str],
     edge_type: Optional[str] = None,
     db_name: Optional[str] = None,
@@ -210,7 +272,7 @@ async def _get_latest_edges_from_batched(
 
 async def _get_latest_edges_for_projections_batched(
     *,
-    lineage_store: Any,
+    lineage_store: LineageOutOfDateStore,
     projection_names: Sequence[str],
     db_name: Optional[str] = None,
     branch: Optional[str] = None,
@@ -252,7 +314,7 @@ def _edge_cause_payload(edge: Optional[Dict[str, Any]]) -> Optional[Dict[str, An
 
 async def _enrich_artifacts_with_latest_writer(
     *,
-    lineage_store: Any,
+    lineage_store: LineageOutOfDateStore,
     artifacts: Sequence[Dict[str, Any]],
     db_name: Optional[str] = None,
     branch: Optional[str] = None,
@@ -343,7 +405,7 @@ def _out_of_date_scope(
 class LineageOutOfDateService:
     """Service class for `/lineage/out-of-date` diagnostics."""
 
-    def __init__(self, *, lineage_store: Any) -> None:
+    def __init__(self, *, lineage_store: LineageOutOfDateStore) -> None:
         self._lineage_store = lineage_store
 
     async def analyze(

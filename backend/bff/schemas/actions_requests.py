@@ -19,6 +19,45 @@ class ActionSubmitRequest(BaseModel):
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Optional metadata")
 
 
+class ActionSubmitBatchDependencyRequest(BaseModel):
+    on: str = Field(..., description="Dependency request_id in the same batch")
+    trigger_on: str = Field(default="SUCCEEDED", description="SUCCEEDED|FAILED|COMPLETED")
+
+    @field_validator("trigger_on")
+    @classmethod
+    def _normalize_trigger_on(cls, value: str) -> str:
+        normalized = str(value or "").strip().upper() or "SUCCEEDED"
+        if normalized not in {"SUCCEEDED", "FAILED", "COMPLETED"}:
+            raise ValueError("trigger_on must be one of SUCCEEDED|FAILED|COMPLETED")
+        return normalized
+
+
+class ActionSubmitBatchItemRequest(BaseModel):
+    request_id: Optional[str] = Field(default=None)
+    input: Dict[str, Any] = Field(default_factory=dict)
+    correlation_id: Optional[str] = Field(default=None)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    base_branch: Optional[str] = Field(default=None)
+    overlay_branch: Optional[str] = Field(default=None)
+    depends_on: List[str] = Field(default_factory=list)
+    trigger_on: str = Field(default="SUCCEEDED")
+    dependencies: List[ActionSubmitBatchDependencyRequest] = Field(default_factory=list)
+
+
+class ActionSubmitBatchRequest(BaseModel):
+    items: List[ActionSubmitBatchItemRequest] = Field(default_factory=list, min_length=1, max_length=500)
+    base_branch: str = Field(default="main")
+    overlay_branch: Optional[str] = Field(default=None)
+
+
+class ActionUndoRequest(BaseModel):
+    reason: Optional[str] = Field(default=None, max_length=2000)
+    correlation_id: Optional[str] = Field(default=None)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    base_branch: str = Field(default="main")
+    overlay_branch: Optional[str] = Field(default=None)
+
+
 class ActionSimulateScenarioRequest(BaseModel):
     scenario_id: Optional[str] = Field(default=None, description="Optional client-provided scenario identifier")
     conflict_policy: Optional[str] = Field(

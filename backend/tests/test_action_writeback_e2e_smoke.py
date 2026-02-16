@@ -263,6 +263,43 @@ async def _wait_for_es_overlay_doc(
     )
 
 
+async def _wait_for_es_overlay_doc_by_action_log(
+    *,
+    es_base_url: str,
+    index_name: str,
+    doc_id: str,
+    action_log_id: str,
+    timeout_seconds: int = 120,
+    poll_interval_seconds: float = 1.0,
+) -> Dict[str, Any]:
+    deadline = time.monotonic() + timeout_seconds
+    last_doc: Optional[Dict[str, Any]] = None
+
+    async with aiohttp.ClientSession() as session:
+        while time.monotonic() < deadline:
+            try:
+                async with session.get(f"{es_base_url}/{index_name}/_doc/{doc_id}") as resp:
+                    if resp.status == 200:
+                        raw = await resp.text()
+                        try:
+                            payload = json.loads(raw) if raw else None
+                        except Exception:
+                            payload = None
+                        if isinstance(payload, dict) and isinstance(payload.get("_source"), dict):
+                            doc = payload["_source"]
+                            last_doc = doc
+                            if str(doc.get("action_log_id") or "").strip() == str(action_log_id).strip():
+                                return doc
+            except aiohttp.ClientError:
+                pass
+            await asyncio.sleep(poll_interval_seconds)
+
+    raise AssertionError(
+        "Timed out waiting for ES overlay doc by action_log_id "
+        f"(index={index_name}, doc_id={doc_id}, action_log_id={action_log_id}, last_doc={last_doc})"
+    )
+
+
 async def _start_action_worker(
     *,
     env: Dict[str, str],
@@ -1342,3 +1379,416 @@ async def test_action_writeback_e2e_verification_suite() -> None:
                     if cmd:
                         with contextlib.suppress(Exception):
                             await _wait_for_command_completed(session, command_id=cmd, timeout_seconds=240)
+
+
+@pytest.mark.integration
+@pytest.mark.requires_infra
+@pytest.mark.workflow
+@pytest.mark.asyncio
+async def test_action_batch_dependency_undo_e2e() -> None:
+    """
+    End-to-end verification for:
+    - batch submit contract
+    - dependency-triggered dispatch in action-worker
+    - direct undo flow (OMS undo -> action-worker direct_undo)
+    with real Event Store + lakeFS + ES overlay updates.
+    """
+
+    dotenv = _load_repo_dotenv()
+    backend_dir = Path(__file__).resolve().parents[1]
+    repo_root = backend_dir.parent
+
+    owner_id = f"batch_owner_{uuid.uuid4().hex[:8]}"
+    db_name = f"e2e_batch_undo_{uuid.uuid4().hex[:10]}"
+    base_branch = "main"
+    class_id = "Ticket"
+    action_type_id = f"approve_ticket_batch_{uuid.uuid4().hex[:8]}"
+    root_instance_id = f"ticket_root_{uuid.uuid4().hex[:8]}"
+    child_instance_id = f"ticket_child_{uuid.uuid4().hex[:8]}"
+    es_base_url = _es_base_url_from_dotenv(dotenv)
+
+    _apply_postgres_env_for_registry(dotenv)
+    _apply_event_store_env(dotenv)
+    _apply_lakefs_env(dotenv)
+
+    from shared.config.settings import get_settings
+    from shared.services.registries.action_log_registry import ActionLogRegistry
+    from shared.services.storage.lakefs_storage_service import create_lakefs_storage_service
+    from shared.utils.writeback_paths import ref_key, writeback_patchset_key
+
+    action_worker_proc: Optional[asyncio.subprocess.Process] = None
+    started_action_worker_docker = False
+    created_db = False
+
+    headers = _base_headers(db_name=None, actor_id=owner_id)
+
+    await _ensure_kafka_docker_running(repo_root=repo_root)
+
+    async with aiohttp.ClientSession(headers=headers) as session:
+        async def _start_worker() -> None:
+            nonlocal action_worker_proc, started_action_worker_docker
+            worker_mode = _smoke_worker_mode()
+            if worker_mode == "docker":
+                build_worker = _truthy(os.getenv("ACTION_WRITEBACK_SMOKE_DOCKER_BUILD", "true"))
+                started_action_worker_docker = await _ensure_action_worker_docker_running(
+                    repo_root=repo_root,
+                    build=build_worker,
+                )
+                return
+
+            action_worker_env = _action_worker_env_from_dotenv(dotenv)
+            action_worker_env["ACTION_WORKER_GROUP"] = f"action-worker-batch-undo-{uuid.uuid4().hex[:8]}"
+            action_worker_proc = await _start_action_worker(env=action_worker_env, backend_dir=backend_dir)
+            await asyncio.sleep(2.0)
+
+        async def _stop_worker() -> None:
+            nonlocal action_worker_proc
+            worker_mode = _smoke_worker_mode()
+            if worker_mode == "docker":
+                await _stop_action_worker_docker(repo_root=repo_root)
+                return
+            if action_worker_proc is not None:
+                await _stop_process(action_worker_proc)
+                action_worker_proc = None
+
+        async def _create_ticket(*, db_headers: Dict[str, str], instance_id: str, status: str) -> None:
+            resp = await session.post(
+                f"{BFF_URL}/api/v1/databases/{db_name}/instances/{class_id}/create",
+                headers=db_headers,
+                params={"branch": base_branch},
+                json={
+                    "data": {
+                        "ticket_id": instance_id,
+                        "name": f"Ticket-{instance_id}",
+                        "status": status,
+                    },
+                    "metadata": {"kind": "ingest", "source": "test_action_batch_dependency_undo_e2e"},
+                },
+            )
+            payload = await resp.json()
+            assert resp.status == 202, payload
+            command_id = str(payload.get("command_id") or "").strip()
+            assert command_id, payload
+            await _wait_for_command_completed(session, command_id=command_id)
+
+        try:
+            # Keep worker paused while building deterministic batch/dependency state.
+            await _stop_worker()
+
+            resp = await session.post(
+                f"{BFF_URL}/api/v1/databases",
+                json={"name": db_name, "description": "Action batch/dependency/undo E2E"},
+            )
+            payload = await resp.json()
+            assert resp.status in {201, 202}, payload
+            created_db = True
+            if resp.status == 202:
+                command_id = _extract_command_id(payload)
+                assert command_id, payload
+                await _wait_for_command_completed(session, command_id=command_id)
+
+            db_headers = _base_headers(db_name=db_name, actor_id=owner_id)
+
+            ontology_payload = {
+                "id": class_id,
+                "label": {"en": "Ticket", "ko": "티켓"},
+                "description": {"en": "Ticket class (batch/dependency/undo)", "ko": "티켓 (batch/dependency/undo)"},
+                "properties": [
+                    {
+                        "name": "ticket_id",
+                        "type": "xsd:string",
+                        "label": {"en": "Ticket ID", "ko": "티켓 ID"},
+                        "required": True,
+                        "primaryKey": True,
+                    },
+                    {
+                        "name": "name",
+                        "type": "xsd:string",
+                        "label": {"en": "Name", "ko": "이름"},
+                        "required": True,
+                        "titleKey": True,
+                    },
+                    {
+                        "name": "status",
+                        "type": "xsd:string",
+                        "label": {"en": "Status", "ko": "상태"},
+                        "required": True,
+                    },
+                    {
+                        "name": "approved_by",
+                        "type": "xsd:string",
+                        "label": {"en": "Approved By", "ko": "승인자"},
+                        "required": False,
+                    },
+                ],
+                "relationships": [],
+                "metadata": {"source": "test_action_batch_dependency_undo_e2e"},
+            }
+            resp = await session.post(
+                f"{BFF_URL}/api/v1/databases/{db_name}/ontology",
+                headers=db_headers,
+                params={"branch": base_branch},
+                json=ontology_payload,
+            )
+            ontology_resp = await resp.json()
+            assert resp.status in {200, 202}, ontology_resp
+            if resp.status == 202:
+                command_id = _extract_command_id(ontology_resp)
+                assert command_id, ontology_resp
+                await _wait_for_command_completed(session, command_id=command_id)
+
+            action_type_payload = {
+                "id": action_type_id,
+                "label": {"en": "Approve Ticket Batch", "ko": "티켓 일괄 승인"},
+                "description": {"en": "Approve ticket for batch/dependency/undo e2e", "ko": "batch/dependency/undo 검증"},
+                "spec": {
+                    "input_schema": {
+                        "fields": [{"name": "ticket", "type": "object_ref", "required": True, "object_type": class_id}]
+                    },
+                    "permission_policy": {
+                        "effect": "ALLOW",
+                        "principals": ["role:Owner", "role:Editor", "role:DomainModeler"],
+                    },
+                    "writeback_target": {"repo": "ontology-writeback", "branch": "writeback-{db_name}"},
+                    "conflict_policy": "WRITEBACK_WINS",
+                    "implementation": {
+                        "type": "template_v1",
+                        "targets": [
+                            {
+                                "target": {"from": "input.ticket"},
+                                "changes": {"set": {"status": "APPROVED", "approved_by": {"$ref": "user.id"}}},
+                            }
+                        ],
+                    },
+                },
+                "metadata": {"source": "test_action_batch_dependency_undo_e2e"},
+            }
+            resp = await session.post(
+                f"{BFF_URL}/api/v1/databases/{db_name}/ontology/action-types",
+                headers=db_headers,
+                params={"branch": base_branch, "expected_head_commit": ""},
+                json=action_type_payload,
+            )
+            created_action_type = await resp.json()
+            assert resp.status == 201, created_action_type
+
+            head_commit = await _get_branch_head_commit(session, db_name=db_name, branch=base_branch, headers=db_headers)
+            await _record_deployed_commit(db_name=db_name, target_branch=base_branch, ontology_commit_id=head_commit)
+
+            await _create_ticket(db_headers=db_headers, instance_id=root_instance_id, status="OPEN")
+            await _create_ticket(db_headers=db_headers, instance_id=child_instance_id, status="OPEN")
+
+            resp = await session.post(
+                f"{BFF_URL}/api/v1/databases/{db_name}/actions/{action_type_id}/submit-batch",
+                headers=db_headers,
+                json={
+                    "base_branch": base_branch,
+                    "items": [
+                        {
+                            "request_id": "root",
+                            "input": {"ticket": {"class_id": class_id, "instance_id": root_instance_id}},
+                            "correlation_id": f"batch-root-{uuid.uuid4()}",
+                            "metadata": {"source": "test_action_batch_dependency_undo_e2e", "item": "root"},
+                        },
+                        {
+                            "request_id": "child",
+                            "input": {"ticket": {"class_id": class_id, "instance_id": child_instance_id}},
+                            "correlation_id": f"batch-child-{uuid.uuid4()}",
+                            "metadata": {"source": "test_action_batch_dependency_undo_e2e", "item": "child"},
+                            "dependencies": [{"on": "root", "trigger_on": "SUCCEEDED"}],
+                        },
+                    ],
+                },
+            )
+            batch_resp = await resp.json()
+            assert resp.status == 202, batch_resp
+            items = batch_resp.get("items") if isinstance(batch_resp, dict) else None
+            assert isinstance(items, list) and len(items) == 2, batch_resp
+
+            by_request_id = {str(item.get("request_id")): item for item in items if isinstance(item, dict)}
+            assert set(by_request_id.keys()) == {"root", "child"}, batch_resp
+            assert str(by_request_id["root"].get("status") or "").upper() == "PENDING", batch_resp
+            assert str(by_request_id["child"].get("status") or "").upper() == "WAITING_DEPENDENCY", batch_resp
+
+            root_action_log_id = str(by_request_id["root"].get("action_log_id") or "").strip()
+            child_action_log_id = str(by_request_id["child"].get("action_log_id") or "").strip()
+            assert root_action_log_id and child_action_log_id, batch_resp
+
+            dependency_registry = ActionLogRegistry()
+            await dependency_registry.connect()
+            try:
+                deps = await dependency_registry.list_dependency_status_for_child(child_action_log_id=child_action_log_id)
+            finally:
+                await dependency_registry.close()
+            assert len(deps) == 1
+            assert str(deps[0].parent_action_log_id) == root_action_log_id
+            assert str(deps[0].trigger_on) == "SUCCEEDED"
+            assert str(deps[0].parent_status or "").upper() == "PENDING"
+
+            await _start_worker()
+
+            root_log_payload = await _wait_for_action_log(
+                session,
+                db_name=db_name,
+                action_log_id=root_action_log_id,
+                headers=db_headers,
+            )
+            child_log_payload = await _wait_for_action_log(
+                session,
+                db_name=db_name,
+                action_log_id=child_action_log_id,
+                headers=db_headers,
+            )
+
+            root_rec = root_log_payload.get("data") if isinstance(root_log_payload.get("data"), dict) else {}
+            child_rec = child_log_payload.get("data") if isinstance(child_log_payload.get("data"), dict) else {}
+            assert str(root_rec.get("status") or "").upper() == "SUCCEEDED", root_log_payload
+            assert str(child_rec.get("status") or "").upper() == "SUCCEEDED", child_log_payload
+
+            for rec in (root_rec, child_rec):
+                event_id = str(rec.get("action_applied_event_id") or "").strip()
+                assert event_id, rec
+                await _assert_action_applied_event_in_event_store(event_id)
+                assert str(rec.get("writeback_commit_id") or "").strip(), rec
+
+            dependency_registry = ActionLogRegistry()
+            await dependency_registry.connect()
+            try:
+                deps = await dependency_registry.list_dependency_status_for_child(child_action_log_id=child_action_log_id)
+            finally:
+                await dependency_registry.close()
+            assert len(deps) == 1
+            assert str(deps[0].parent_action_log_id) == root_action_log_id
+            assert str(deps[0].parent_status or "").upper() == "SUCCEEDED"
+
+            settings = get_settings()
+            lakefs_storage = create_lakefs_storage_service(settings)
+            assert lakefs_storage is not None
+
+            for action_log_payload in (root_log_payload, child_log_payload):
+                rec = action_log_payload.get("data") if isinstance(action_log_payload.get("data"), dict) else {}
+                writeback_commit_id = str(rec.get("writeback_commit_id") or "").strip()
+                writeback_target = rec.get("writeback_target") if isinstance(rec.get("writeback_target"), dict) else {}
+                repo = str(writeback_target.get("repo") or "").strip() or "ontology-writeback"
+                action_log_id = str(rec.get("action_log_id") or "").strip()
+                patchset = await lakefs_storage.load_json(
+                    bucket=repo,
+                    key=ref_key(writeback_commit_id, writeback_patchset_key(action_log_id)),
+                )
+                assert str(patchset.get("action_log_id") or "").strip() == action_log_id
+                targets = patchset.get("targets")
+                assert isinstance(targets, list) and targets
+
+            root_lifecycle_id = _pick_first_lifecycle_id_any(root_log_payload)
+            child_lifecycle_id = _pick_first_lifecycle_id_any(child_log_payload)
+            overlay_branch = str((child_rec.get("writeback_target") or {}).get("branch") or "").strip()
+            assert overlay_branch, child_log_payload
+            overlay_index = get_instances_index_name(db_name, branch=overlay_branch)
+
+            root_overlay_doc = await _wait_for_es_overlay_doc_by_action_log(
+                es_base_url=es_base_url,
+                index_name=overlay_index,
+                doc_id=overlay_doc_id(instance_id=root_instance_id, lifecycle_id=root_lifecycle_id),
+                action_log_id=root_action_log_id,
+            )
+            assert root_overlay_doc.get("status") == "APPROVED"
+            assert root_overlay_doc.get("approved_by") == owner_id
+
+            child_overlay_doc = await _wait_for_es_overlay_doc_by_action_log(
+                es_base_url=es_base_url,
+                index_name=overlay_index,
+                doc_id=overlay_doc_id(instance_id=child_instance_id, lifecycle_id=child_lifecycle_id),
+                action_log_id=child_action_log_id,
+            )
+            assert child_overlay_doc.get("status") == "APPROVED"
+            assert child_overlay_doc.get("approved_by") == owner_id
+
+            resp = await session.post(
+                f"{BFF_URL}/api/v1/databases/{db_name}/actions/logs/{child_action_log_id}/undo",
+                headers=db_headers,
+                json={
+                    "reason": "batch-child-undo",
+                    "base_branch": base_branch,
+                    "metadata": {"source": "test_action_batch_dependency_undo_e2e"},
+                },
+            )
+            undo_submit = await resp.json()
+            assert resp.status == 202, undo_submit
+            undo_action_log_id = str(undo_submit.get("action_log_id") or "").strip()
+            assert undo_action_log_id, undo_submit
+
+            undo_log_payload = await _wait_for_action_log(
+                session,
+                db_name=db_name,
+                action_log_id=undo_action_log_id,
+                headers=db_headers,
+            )
+            undo_rec = undo_log_payload.get("data") if isinstance(undo_log_payload.get("data"), dict) else {}
+            assert str(undo_rec.get("status") or "").upper() == "SUCCEEDED", undo_log_payload
+            assert str(undo_rec.get("writeback_commit_id") or "").strip(), undo_log_payload
+            assert str(undo_rec.get("action_applied_event_id") or "").strip(), undo_log_payload
+            await _assert_action_applied_event_in_event_store(str(undo_rec.get("action_applied_event_id")))
+
+            undo_metadata = undo_rec.get("metadata") if isinstance(undo_rec.get("metadata"), dict) else {}
+            assert str(undo_metadata.get("undo_of_action_log_id") or "").strip() == child_action_log_id
+            undo_result = undo_rec.get("result") if isinstance(undo_rec.get("result"), dict) else {}
+            assert bool(undo_result.get("direct_undo")) is True
+
+            undo_writeback_target = (
+                undo_rec.get("writeback_target") if isinstance(undo_rec.get("writeback_target"), dict) else {}
+            )
+            undo_repo = str(undo_writeback_target.get("repo") or "").strip() or "ontology-writeback"
+            undo_branch = str(undo_writeback_target.get("branch") or "").strip()
+            undo_commit_id = str(undo_rec.get("writeback_commit_id") or "").strip()
+            undo_patchset = await lakefs_storage.load_json(
+                bucket=undo_repo,
+                key=ref_key(undo_commit_id, writeback_patchset_key(undo_action_log_id)),
+            )
+            undo_targets = undo_patchset.get("targets")
+            assert isinstance(undo_targets, list) and undo_targets
+            assert any(
+                str(target.get("instance_id") or "").strip() == child_instance_id
+                for target in undo_targets
+                if isinstance(target, dict)
+            )
+
+            undo_lifecycle_id = _pick_first_lifecycle_id_any(undo_log_payload)
+            undo_overlay_doc = await _wait_for_es_overlay_doc_by_action_log(
+                es_base_url=es_base_url,
+                index_name=get_instances_index_name(db_name, branch=undo_branch),
+                doc_id=overlay_doc_id(instance_id=child_instance_id, lifecycle_id=undo_lifecycle_id),
+                action_log_id=undo_action_log_id,
+            )
+            assert undo_overlay_doc.get("status") == "OPEN"
+            assert undo_overlay_doc.get("approved_by") in {None, ""}
+
+            resp = await session.get(
+                f"{BFF_URL}/api/v1/databases/{db_name}/class/{class_id}/instance/{child_instance_id}",
+                headers=db_headers,
+                params={"base_branch": base_branch, "overlay_branch": undo_branch},
+            )
+            read_payload = await resp.json()
+            assert resp.status == 200, read_payload
+            read_data = read_payload.get("data") if isinstance(read_payload, dict) else None
+            assert isinstance(read_data, dict), read_payload
+            doc_data = read_data.get("data") if isinstance(read_data.get("data"), dict) else {}
+            assert doc_data.get("status") == "OPEN"
+            assert doc_data.get("approved_by") in {None, ""}
+
+        finally:
+            await _stop_worker()
+
+            if _smoke_worker_mode() == "docker" and started_action_worker_docker and not _truthy(
+                os.getenv("ACTION_WRITEBACK_SMOKE_KEEP_WORKER")
+            ):
+                await _stop_action_worker_docker(repo_root=repo_root)
+
+            if created_db and _truthy(os.getenv("ACTION_WRITEBACK_SMOKE_CLEANUP", "true")):
+                db_headers = _base_headers(db_name=db_name, actor_id=owner_id)
+                resp = await session.delete(f"{BFF_URL}/api/v1/databases/{db_name}", headers=db_headers)
+                if resp.status == 202:
+                    payload = await resp.json()
+                    command_id = _extract_command_id(payload)
+                    if command_id:
+                        with contextlib.suppress(Exception):
+                            await _wait_for_command_completed(session, command_id=command_id, timeout_seconds=240)

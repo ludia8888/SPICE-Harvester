@@ -66,7 +66,7 @@ def _extract_resource(payload: Any) -> Dict[str, Any]:
 def _decode_page_token(page_token: Optional[str], *, scope: Optional[str] = None) -> int:
     try:
         return decode_offset_page_token(page_token, ttl_seconds=60, expected_scope=scope)
-    except Exception as exc:
+    except ValueError as exc:
         raise classified_http_exception(
             status.HTTP_400_BAD_REQUEST,
             str(exc),
@@ -292,7 +292,7 @@ async def list_object_type_contracts(
         )
     await _require_domain_role(request, db_name=db_name)
 
-    page_scope = _pagination_scope("v1/object-types", db_name, branch)
+    page_scope = _pagination_scope("v1/object-types", db_name, branch, page_size)
     offset = _decode_page_token(page_token, scope=page_scope)
     resources_payload = await oms_client.list_ontology_resources(
         db_name,

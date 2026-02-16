@@ -9,7 +9,7 @@ Run: `python scripts/generate_error_taxonomy.py`.
 
 ## Core API Errors (ErrorCode)
 
-| Legacy code | Enterprise code | Domain | Class | Severity | Title | Retryable | Default retry policy | Max attempts | Base delay ms | Max delay ms | Jitter strategy | Retry-After respect | Human required | Runbook ref | Safe next actions | HTTP status hint |
+| Error key | Enterprise code | Domain | Class | Severity | Title | Retryable | Default retry policy | Max attempts | Base delay ms | Max delay ms | Jitter strategy | Retry-After respect | Human required | Runbook ref | Safe next actions | HTTP status hint |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | ACTION_BASE_STATE_NOT_FOUND | SHV-{SUBSYS}-ACT-NOT-0002 | data | not_found | error | Action base instance state not found | false | none | 1 | 0 | 0 | none | false | true | ACTION_BASE_STATE_NOT_FOUND | request_human | 404 |
 | ACTION_CONFLICT_POLICY_FAILED | SHV-{SUBSYS}-ACT-CON-0001 | conflict | conflict | error | Action conflict policy rejected change | false | none | 1 | 0 | 0 | none | false | true | ACTION_CONFLICT_POLICY_FAILED | request_human | 409 |
@@ -72,7 +72,7 @@ Run: `python scripts/generate_error_taxonomy.py`.
 
 ## Objectify Job Errors
 
-| Legacy code | Enterprise code | Domain | Class | Severity | Title | Retryable | Default retry policy | Max attempts | Base delay ms | Max delay ms | Jitter strategy | Retry-After respect | Human required | Runbook ref | Safe next actions | HTTP status hint |
+| External code | Enterprise code | Domain | Class | Severity | Title | Retryable | Default retry policy | Max attempts | Base delay ms | Max delay ms | Jitter strategy | Retry-After respect | Human required | Runbook ref | Safe next actions | HTTP status hint |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | artifact_key_mismatch | SHV-OBJ-PIP-CON-0001 | pipeline | conflict | error | Artifact key mismatch | false | none | 1 | 0 | 0 | none | false | true | artifact_key_mismatch | request_human | 409 |
 | artifact_key_missing | SHV-OBJ-PIP-VAL-0001 | pipeline | validation | error | Artifact key missing | false | none | 1 | 0 | 0 | none | false | true | artifact_key_missing | request_human | 400 |
@@ -98,7 +98,7 @@ Run: `python scripts/generate_error_taxonomy.py`.
 
 ## External Codes
 
-| Legacy code | Enterprise code | Domain | Class | Severity | Title | Retryable | Default retry policy | Max attempts | Base delay ms | Max delay ms | Jitter strategy | Retry-After respect | Human required | Runbook ref | Safe next actions | HTTP status hint |
+| External code | Enterprise code | Domain | Class | Severity | Title | Retryable | Default retry policy | Max attempts | Base delay ms | Max delay ms | Jitter strategy | Retry-After respect | Human required | Runbook ref | Safe next actions | HTTP status hint |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | BUILD_NOT_SUCCESS | SHV-{SUBSYS}-PIP-STA-1001 | pipeline | state | error | Build not successful | false | none | 1 | 0 | 0 | none | false | true | BUILD_NOT_SUCCESS | request_human | 409 |
 | CARDINALITY_RECOMMENDATION | SHV-{SUBSYS}-ONT-VAL-1107 | ontology | validation | info | Cardinality recommendation | false | none | 1 | 0 | 0 | none | false | true | CARDINALITY_RECOMMENDATION | request_human | 400 |

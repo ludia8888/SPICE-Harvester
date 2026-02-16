@@ -578,15 +578,15 @@ def _extract_overlay_status(payload: Any) -> Optional[str]:
     return None
 
 
-def _extract_enterprise_legacy_code(payload: Any) -> Optional[str]:
+def _extract_enterprise_external_code(payload: Any) -> Optional[str]:
     if not isinstance(payload, dict):
         return None
     enterprise = payload.get("enterprise")
     if not isinstance(enterprise, dict):
         return None
-    legacy_code = enterprise.get("legacy_code")
-    if isinstance(legacy_code, str) and legacy_code.strip():
-        return legacy_code.strip()
+    external_code = enterprise.get("external_code")
+    if isinstance(external_code, str) and external_code.strip():
+        return external_code.strip()
     return None
 
 
@@ -604,9 +604,9 @@ def _iter_error_candidates(payload: Any) -> list[dict[str, Any]]:
 def _extract_error_key(payload: Any) -> Optional[str]:
     enterprise = _extract_enterprise(payload)
     if enterprise:
-        legacy_code = enterprise.get("legacy_code")
-        if isinstance(legacy_code, str) and legacy_code.strip():
-            return legacy_code.strip()
+        external_code = enterprise.get("external_code")
+        if isinstance(external_code, str) and external_code.strip():
+            return external_code.strip()
     for candidate in _iter_error_candidates(payload):
         value = candidate.get("error")
         if isinstance(value, str) and value.strip():
@@ -1736,8 +1736,8 @@ class AgentRuntime:
                     retryable = _extract_retryable({"enterprise": enterprise})
                 error = simulation_message or "simulation rejected"
 
-            legacy_code = _extract_enterprise_legacy_code(response_payload)
-            if legacy_code == "overlay_degraded" and isinstance(context, dict):
+            external_code = _extract_enterprise_external_code(response_payload)
+            if external_code == "overlay_degraded" and isinstance(context, dict):
                 context["overlay_status"] = "DEGRADED"
                 context["overlay_degraded"] = True
             if response.status_code >= 400:

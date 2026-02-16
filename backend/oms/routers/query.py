@@ -79,7 +79,6 @@ class SearchJsonQueryV2(BaseModel):
         "lte",
         "isNull",
         "contains",
-        "startsWith",
         "containsAnyTerm",
         "containsAllTerms",
         "containsAllTermsInOrder",
@@ -115,7 +114,6 @@ class SearchJsonQueryV2(BaseModel):
             raise ValueError(f"{self.type} query requires value")
 
         if self.type in {
-            "startsWith",
             "containsAnyTerm",
             "containsAllTerms",
             "containsAllTermsInOrder",
@@ -220,6 +218,7 @@ def _pagination_scope_for_search(
         "db": db_name,
         "objectType": object_type,
         "branch": branch,
+        "pageSize": int(request.pageSize),
         "where": request.where.model_dump(mode="json") if request.where is not None else None,
         "orderBy": request.orderBy,
         "select": request.select,
@@ -357,9 +356,6 @@ def _to_es_query(query: Any, *, depth: int = 0) -> Dict[str, Any]:
     if q.type == "contains":
         # Foundry semantics: array contains the provided value.
         return {"term": {field_path: q.value}}
-    if q.type == "startsWith":
-        # Foundry docs: deprecated alias for containsAllTermsInOrderPrefixLastTerm.
-        return {"match_phrase_prefix": {field_path: str(q.value).strip()}}
     if q.type == "containsAnyTerm":
         return {"match": {field_path: {"query": str(q.value).strip(), "operator": "or"}}}
     if q.type == "containsAllTerms":

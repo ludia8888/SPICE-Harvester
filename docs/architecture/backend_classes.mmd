@@ -52,7 +52,8 @@ classDiagram
     
     %% Service Layer
     class OntologyManagementService {
-        +AsyncTerminusClient terminus_client
+        +OntologyRegistryService registry_service
+        +SearchService search_service
         +RelationshipManager relationship_manager
         +create_ontology() Ontology
         +update_ontology() Ontology
@@ -74,15 +75,15 @@ classDiagram
         +suggest_schema() SchemaResponse
     }
     
-    class AsyncTerminusService {
-        +String terminus_url
+    class OntologyRegistryService {
+        +String postgres_url
         +HTTPXClient http_client
         +ConnectionPool pool
-        +execute_woql() Result
-        +create_database() bool
-        +get_document() Document
-        +update_document() bool
-        +delete_document() bool
+        +create_resource() bool
+        +update_resource() bool
+        +delete_resource() bool
+        +get_resource() Document
+        +list_resources() List
     }
     
     class FunnelService {
@@ -184,7 +185,7 @@ classDiagram
     FastAPIApplication --> BackendForFrontend : uses (Port 8002)
     FastAPIApplication --> FunnelService : uses (Port 8003)
     FastAPIApplication --> OntologyManagementService : uses (Port 8000)
-    OntologyManagementService --> AsyncTerminusService : uses
+    OntologyManagementService --> OntologyRegistryService : uses
     OntologyManagementService --> RelationshipManager : uses
     BackendForFrontend --> ComplexTypeSerializer : uses
     BackendForFrontend --> ComplexTypeValidator : uses

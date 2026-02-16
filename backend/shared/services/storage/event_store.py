@@ -373,7 +373,8 @@ class EventStore:
 
         Default mode is Postgres (`EVENT_STORE_SEQUENCE_ALLOCATOR_MODE=postgres`).
         Emergency/compatibility modes:
-        - `legacy`/`s3`: best-effort `get_aggregate_version()+1` (non-atomic, not recommended)
+        - `s3`: best-effort `get_aggregate_version()+1` (non-atomic, not recommended)
+        - `best_effort`: alias for `s3`
         - `off`: require caller to provide `sequence_number`
         """
         if not event.aggregate_type or not event.aggregate_id:
@@ -387,7 +388,12 @@ class EventStore:
                 )
             return
 
-        if mode in {"legacy", "s3", "best_effort"}:
+        if mode == "legacy":
+            raise RuntimeError(
+                "EVENT_STORE_SEQUENCE_ALLOCATOR_MODE=legacy is removed; use 'best_effort' or 's3'"
+            )
+
+        if mode in {"s3", "best_effort"}:
             if event.sequence_number is not None:
                 return
             current = await self.get_aggregate_version(event.aggregate_type, event.aggregate_id)

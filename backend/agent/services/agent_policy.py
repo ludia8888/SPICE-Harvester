@@ -94,7 +94,7 @@ def decide_policy(
     enterprise_class = _normalize_code(_enterprise_field(enterprise, "class")).lower() or None
     catalog_ref = _enterprise_field(enterprise, "catalog_ref")
     catalog_fingerprint = _enterprise_field(enterprise, "catalog_fingerprint")
-    legacy_code = _enterprise_field(enterprise, "legacy_code") or _normalize_code(result.get("error_key") or "")
+    external_code = _enterprise_field(enterprise, "external_code") or _normalize_code(result.get("error_key") or "")
     api_code = _normalize_code(result.get("api_code") or "")
     retryable = _enterprise_bool(enterprise, "retryable")
     default_retry_policy = _normalize_code(_enterprise_field(enterprise, "default_retry_policy")).lower()
@@ -117,29 +117,29 @@ def decide_policy(
 
     enterprise_present = enterprise is not None
 
-    if legacy_code == "overlay_degraded":
+    if external_code == "overlay_degraded":
         return AgentPolicyDecision(
             family="overlay_degraded",
             recommended_action="safe_mode",
             safe_to_auto_retry=False,
             reason="Overlay is DEGRADED; block unsafe automation",
-            details={"legacy_code": legacy_code, "enterprise_code": enterprise_code, "api_code": api_code},
+            details={"external_code": external_code, "enterprise_code": enterprise_code, "api_code": api_code},
         )
 
-    if legacy_code == "idempotency_in_progress":
+    if external_code == "idempotency_in_progress":
         return AgentPolicyDecision(
             family="idempotency_in_progress",
             recommended_action="retry",
             safe_to_auto_retry=True,
             reason="Idempotency key already in progress; safe to retry without duplicating side effects",
-            details={"legacy_code": legacy_code, "enterprise_code": enterprise_code, "api_code": api_code},
+            details={"external_code": external_code, "enterprise_code": enterprise_code, "api_code": api_code},
         )
 
     if human_required is True:
         family = enterprise_class or "human_required"
         recommended_action = enterprise_action or "human_required"
         details: Dict[str, Any] = {
-            "legacy_code": legacy_code,
+            "external_code": external_code,
             "enterprise_code": enterprise_code,
             "enterprise_class": enterprise_class,
             "api_code": api_code,
@@ -154,7 +154,7 @@ def decide_policy(
             "catalog_ref": catalog_ref,
             "catalog_fingerprint": catalog_fingerprint,
         }
-        if legacy_code == "submission_criteria_failed" and criteria_reason:
+        if external_code == "submission_criteria_failed" and criteria_reason:
             details["submission_criteria_reason"] = criteria_reason
             if criteria_reason in {"missing_role", "state_mismatch", "mixed"}:
                 family = criteria_reason
@@ -177,7 +177,7 @@ def decide_policy(
             safe_to_auto_retry=_method_is_safe_to_retry(tool_call.method),
             reason=f"Retryable ({default_retry_policy})",
             details={
-                "legacy_code": legacy_code,
+                "external_code": external_code,
                 "enterprise_code": enterprise_code,
                 "enterprise_class": enterprise_class,
                 "api_code": api_code,
@@ -200,7 +200,7 @@ def decide_policy(
             safe_to_auto_retry=False,
             reason="Retry requires refresh step first",
             details={
-                "legacy_code": legacy_code,
+                "external_code": external_code,
                 "enterprise_code": enterprise_code,
                 "enterprise_class": enterprise_class,
                 "api_code": api_code,
@@ -220,7 +220,7 @@ def decide_policy(
             recommended_action="retry",
             safe_to_auto_retry=_method_is_safe_to_retry(tool_call.method),
             reason="Transient timeout",
-            details={"legacy_code": legacy_code, "enterprise_code": enterprise_code, "api_code": api_code},
+            details={"external_code": external_code, "enterprise_code": enterprise_code, "api_code": api_code},
         )
 
     if enterprise_class in {"unavailable"} or (enterprise_code and "-UNA-" in enterprise_code) or api_code in {
@@ -233,50 +233,50 @@ def decide_policy(
             recommended_action="retry",
             safe_to_auto_retry=_method_is_safe_to_retry(tool_call.method),
             reason="Upstream unavailable",
-            details={"legacy_code": legacy_code, "enterprise_code": enterprise_code, "api_code": api_code},
+            details={"external_code": external_code, "enterprise_code": enterprise_code, "api_code": api_code},
         )
 
     if (
         enterprise_class in {"limit"}
         or (enterprise_code and "-RAT-LIM-" in enterprise_code)
         or api_code == "RATE_LIMITED"
-        or legacy_code == "rate_limiter_unavailable"
+        or external_code == "rate_limiter_unavailable"
     ):
         return AgentPolicyDecision(
             family="rate_limit",
             recommended_action="retry",
             safe_to_auto_retry=_method_is_safe_to_retry(tool_call.method),
             reason="Rate limited / limiter unavailable",
-            details={"legacy_code": legacy_code, "enterprise_code": enterprise_code, "api_code": api_code},
+            details={"external_code": external_code, "enterprise_code": enterprise_code, "api_code": api_code},
         )
 
     if (
         enterprise_class in {"validation", "security"}
         or api_code in {"REQUEST_VALIDATION_FAILED", "JSON_DECODE_ERROR"}
-        or legacy_code in {"action_input_invalid", "validation_failed", "VALUE_CONSTRAINT_FAILED"}
-        or legacy_code.endswith("_invalid")
-        or legacy_code in {"submission_criteria_error", "validation_rules_invalid", "PIPELINE_SCHEMA_CONTRACT_FAILED"}
+        or external_code in {"action_input_invalid", "validation_failed", "VALUE_CONSTRAINT_FAILED"}
+        or external_code.endswith("_invalid")
+        or external_code in {"submission_criteria_error", "validation_rules_invalid", "PIPELINE_SCHEMA_CONTRACT_FAILED"}
     ):
         return AgentPolicyDecision(
             family="validation",
             recommended_action="no_retry",
             safe_to_auto_retry=False,
             reason="Input/schema/contract error (retry will not converge)",
-            details={"legacy_code": legacy_code, "enterprise_code": enterprise_code, "api_code": api_code},
+            details={"external_code": external_code, "enterprise_code": enterprise_code, "api_code": api_code},
         )
 
     if (
         enterprise_class in {"auth", "permission"}
         or api_code in {"PERMISSION_DENIED", "AUTH_REQUIRED", "AUTH_INVALID", "AUTH_EXPIRED"}
-        or legacy_code.startswith("writeback_acl_")
-        or legacy_code in {"data_access_denied", "writeback_enforced", "submission_criteria_failed"}
+        or external_code.startswith("writeback_acl_")
+        or external_code in {"data_access_denied", "writeback_enforced", "submission_criteria_failed"}
     ):
         details: Dict[str, Any] = {
-            "legacy_code": legacy_code,
+            "external_code": external_code,
             "enterprise_code": enterprise_code,
             "api_code": api_code,
         }
-        if legacy_code == "submission_criteria_failed" and criteria_reason:
+        if external_code == "submission_criteria_failed" and criteria_reason:
             details["submission_criteria_reason"] = criteria_reason
         return AgentPolicyDecision(
             family="permission",
@@ -291,5 +291,5 @@ def decide_policy(
         recommended_action="escalate",
         safe_to_auto_retry=False,
         reason="Unknown failure family; require human triage",
-        details={"legacy_code": legacy_code, "enterprise_code": enterprise_code, "api_code": api_code},
+        details={"external_code": external_code, "enterprise_code": enterprise_code, "api_code": api_code},
     )

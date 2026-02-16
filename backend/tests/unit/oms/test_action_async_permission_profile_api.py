@@ -96,7 +96,7 @@ async def test_submit_returns_403_for_datasource_derived_without_data_engineer_r
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _install_deployment_and_resource_mocks(monkeypatch, action_spec=_build_action_spec())
-    monkeypatch.setattr(action_async, "compile_template_v1_change_shape", lambda _impl, input_payload: [])
+    monkeypatch.setattr(action_async, "compile_action_change_shape", lambda _impl, input_payload: [])
 
     async def _fake_role(*, db_name: str, principal_type: str, principal_id: str) -> str:  # noqa: ARG001
         return "DomainModeler"
@@ -199,7 +199,7 @@ async def test_submit_returns_403_when_target_class_misses_required_interface(
 
     monkeypatch.setattr(
         action_async,
-        "compile_template_v1_change_shape",
+        "compile_action_change_shape",
         lambda _impl, input_payload: [
             SimpleNamespace(
                 class_id="Ticket",
@@ -239,7 +239,7 @@ async def test_submit_returns_503_when_target_edit_access_is_unverifiable(
 
     monkeypatch.setattr(
         action_async,
-        "compile_template_v1_change_shape",
+        "compile_action_change_shape",
         lambda _impl, input_payload: [
             SimpleNamespace(
                 class_id="Ticket",

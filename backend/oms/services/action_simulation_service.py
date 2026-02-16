@@ -28,8 +28,8 @@ from shared.utils.action_input_schema import (
 )
 from shared.utils.action_template_engine import (
     ActionImplementationError,
-    compile_template_v1,
-    compile_template_v1_change_shape,
+    compile_action_change_shape,
+    compile_action_implementation,
 )
 from shared.utils.principal_policy import build_principal_tags, policy_allows
 from shared.utils.resource_rid import format_resource_rid, strip_rid_revision
@@ -706,7 +706,7 @@ async def preflight_action_writeback(
 
     implementation = action_spec.get("implementation")
     try:
-        compiled_shape = compile_template_v1_change_shape(implementation, input_payload=validated_input)
+        compiled_shape = compile_action_change_shape(implementation, input_payload=validated_input)
     except ActionImplementationError as exc:
         raise ActionSimulationRejected(
             _attach_enterprise({"error": "action_implementation_invalid", "message": str(exc)}),
@@ -715,7 +715,7 @@ async def preflight_action_writeback(
 
     if not compiled_shape:
         raise ActionSimulationRejected(
-            _attach_enterprise({"error": "action_no_targets", "message": "template_v1 resolved to zero targets"}),
+            _attach_enterprise({"error": "action_no_targets", "message": "implementation resolved to zero targets"}),
             status_code=400,
         )
 
@@ -896,7 +896,7 @@ async def preflight_action_writeback(
         "is_system": submitted_by == "system",
     }
     try:
-        compiled_targets = compile_template_v1(
+        compiled_targets = compile_action_implementation(
             implementation,
             input_payload=validated_input,
             user=user_ctx,
